@@ -35,6 +35,7 @@ celery_app = Celery(
         "app.workers.tasks.research_browse",
         "app.workers.tasks.discipline_expiry",
         "app.workers.tasks.auto_archive",
+        "app.workers.tasks.newsletter_scheduler",
     ],
 )
 
@@ -187,6 +188,13 @@ def on_worker_ready(**kwargs):
         run_auto_archive.delay()
     else:
         print("[Worker] Auto-archive scheduler is disabled, skipping.")
+
+    from app.workers.tasks.newsletter_scheduler import run_newsletter_scheduler
+
+    if _is_scheduler_enabled("newsletter_scheduler"):
+        run_newsletter_scheduler.delay()
+    else:
+        print("[Worker] Newsletter scheduler is disabled, skipping.")
 
 
 # ── Server error reporter integration ───────────────────────────────────────

@@ -107,6 +107,11 @@ class Settings:
     # Shared secret expected in X-Bounce-Secret header on /newsletter/bounce.
     # Empty string disables the webhook entirely (safer default than open).
     newsletter_bounce_secret: str = ""
+    # Physical mailing address rendered in every newsletter footer. CAN-SPAM
+    # requires a real postal address on every commercial email. Override via
+    # NEWSLETTER_MAILING_ADDRESS env var. Newlines (`\n`) become <br> in the
+    # rendered footer.
+    newsletter_mailing_address: str = "Matcha · 2261 Market Street #4419 · San Francisco, CA 94114"
 
 
 # Global settings instance
@@ -213,6 +218,10 @@ def load_settings() -> Settings:
         ),
         matcha_ir_price_cents=int(os.getenv("MATCHA_IR_PRICE_CENTS", "4900")),
         newsletter_bounce_secret=os.getenv("NEWSLETTER_BOUNCE_SECRET", ""),
+        newsletter_mailing_address=os.getenv(
+            "NEWSLETTER_MAILING_ADDRESS",
+            "Matcha · 2261 Market Street #4419 · San Francisco, CA 94114",
+        ),
     )
     return _settings
 

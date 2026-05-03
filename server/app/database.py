@@ -5471,4 +5471,58 @@ async def init_db():
             )
         """)
 
+        # P0 — newsletter compliance + ops columns added incrementally so
+        # fresh setups + already-deployed DBs converge on the same shape.
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'newsletter_subscribers' AND column_name = 'soft_bounce_count'
+                ) THEN
+                    ALTER TABLE newsletter_subscribers
+                        ADD COLUMN soft_bounce_count INT NOT NULL DEFAULT 0;
+                END IF;
+            END $$;
+        """)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'newsletters' AND column_name = 'preheader'
+                ) THEN
+                    ALTER TABLE newsletters ADD COLUMN preheader VARCHAR(255);
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'newsletters' AND column_name = 'scheduled_send_started_at'
+                ) THEN
+                    ALTER TABLE newsletters ADD COLUMN scheduled_send_started_at TIMESTAMPTZ;
+                END IF;
+            END $$;
+        """)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'newsletter_sends' AND column_name = 'bounced_at'
+                ) THEN
+                    ALTER TABLE newsletter_sends ADD COLUMN bounced_at TIMESTAMPTZ;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'newsletter_sends' AND column_name = 'bounce_kind'
+                ) THEN
+                    ALTER TABLE newsletter_sends ADD COLUMN bounce_kind VARCHAR(20);
+                END IF;
+            END $$;
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_newsletters_scheduled
+                ON newsletters(status, scheduled_at)
+                WHERE status = 'scheduled' AND scheduled_at IS NOT NULL
+        """)
+
         print("[DB] Tables initialized")

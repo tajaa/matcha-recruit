@@ -9,6 +9,9 @@ Hardened for compliance + ops per the audit:
 - Bounce handling marks rows + auto-unsubscribes on hard bounces
 - Soft-delete for newsletters
 - Admin audit log helper
+- P0: open + click tracking (per-send pixel and link rewrite), CAN-SPAM
+  postal address footer, soft-bounce counter (3 strikes → suppressed),
+  preheader.
 """
 
 import asyncio
@@ -16,9 +19,11 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import secrets
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import quote
 from uuid import UUID
 
 import bleach
@@ -30,6 +35,10 @@ logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 50
 BATCH_DELAY = 1.0  # seconds between batches
+
+# Soft bounces above this count flip a subscriber to status='bounced' so
+# we stop attempting to deliver to a chronically flaky inbox.
+SOFT_BOUNCE_LIMIT = 3
 
 # bleach allowlist for newsletter content_html. Permits the rich-text features
 # the admin TipTap editor produces (lists, code, links, images, basic styling)
@@ -242,6 +251,131 @@ async def unsubscribe(token: str) -> bool:
         return "UPDATE 1" in result
 
 
+async def record_soft_bounce(email_or_id: str | UUID, reason: Optional[str] = None) -> dict:
+    """Record a soft bounce. Returns {subscriber_id, count, suppressed}.
+
+    Each soft bounce increments `soft_bounce_count`. At SOFT_BOUNCE_LIMIT the
+    subscriber is flipped to status='bounced' so the next send loop skips
+    them — same downstream effect as a hard bounce.
+    """
+    async with get_connection() as conn:
+        if isinstance(email_or_id, UUID):
+            row = await conn.fetchrow(
+                """UPDATE newsletter_subscribers
+                   SET soft_bounce_count = soft_bounce_count + 1,
+                       bounce_reason = COALESCE($2, bounce_reason)
+                   WHERE id = $1 AND status IN ('active','pending')
+                   RETURNING id, soft_bounce_count""",
+                email_or_id, reason,
+            )
+        else:
+            email = str(email_or_id).strip().lower()
+            row = await conn.fetchrow(
+                """UPDATE newsletter_subscribers
+                   SET soft_bounce_count = soft_bounce_count + 1,
+                       bounce_reason = COALESCE($2, bounce_reason)
+                   WHERE email = $1 AND status IN ('active','pending')
+                   RETURNING id, soft_bounce_count""",
+                email, reason,
+            )
+
+        if not row:
+            return {"subscriber_id": None, "count": 0, "suppressed": False}
+
+        suppressed = False
+        if row["soft_bounce_count"] >= SOFT_BOUNCE_LIMIT:
+            await conn.execute(
+                """UPDATE newsletter_subscribers
+                   SET status = 'bounced', bounced_at = NOW()
+                   WHERE id = $1 AND status IN ('active','pending')""",
+                row["id"],
+            )
+            suppressed = True
+
+    return {"subscriber_id": str(row["id"]), "count": row["soft_bounce_count"], "suppressed": suppressed}
+
+
+async def reset_soft_bounce_count(subscriber_id: UUID) -> None:
+    """A confirmed open/click means the inbox accepted our last delivery.
+    Reset the soft-bounce counter so transient flakiness doesn't accumulate
+    indefinitely."""
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE newsletter_subscribers SET soft_bounce_count = 0 WHERE id = $1 AND soft_bounce_count > 0",
+            subscriber_id,
+        )
+
+
+async def record_open(send_id: UUID) -> Optional[UUID]:
+    """Mark a send as opened (idempotent). Returns the subscriber_id so the
+    caller can reset their soft-bounce counter."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """UPDATE newsletter_sends
+               SET opened_at = COALESCE(opened_at, NOW())
+               WHERE id = $1
+               RETURNING subscriber_id""",
+            send_id,
+        )
+    return row["subscriber_id"] if row else None
+
+
+async def record_click(send_id: UUID) -> Optional[UUID]:
+    """Mark a send as clicked. Counts the FIRST click only — subsequent
+    clicks update opened_at as a side effect since a click implies an open."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """UPDATE newsletter_sends
+               SET clicked_at = COALESCE(clicked_at, NOW()),
+                   opened_at  = COALESCE(opened_at,  NOW())
+               WHERE id = $1
+               RETURNING subscriber_id""",
+            send_id,
+        )
+    return row["subscriber_id"] if row else None
+
+
+async def claim_scheduled_newsletter(newsletter_id: UUID) -> Optional[dict]:
+    """Atomically claim a scheduled newsletter for sending.
+
+    Used by the scheduled-send worker. Flips status from 'scheduled' →
+    'sending' and stamps scheduled_send_started_at so a second beat that
+    wakes up before the first has finished can tell the difference between
+    "ready to send" and "already in flight." Returns the row or None."""
+    async with get_connection() as conn:
+        return await conn.fetchrow(
+            """UPDATE newsletters
+               SET status = 'sending',
+                   scheduled_send_started_at = NOW(),
+                   updated_at = NOW()
+               WHERE id = $1
+                 AND status = 'scheduled'
+                 AND scheduled_at IS NOT NULL
+                 AND scheduled_at <= NOW()
+                 AND is_deleted = FALSE
+               RETURNING *""",
+            newsletter_id,
+        )
+
+
+async def list_due_scheduled_newsletters(limit: int = 25) -> list[dict]:
+    """Return newsletters whose scheduled_at has passed and are still in
+    'scheduled' status. The scheduler beat picks each up and calls
+    claim_scheduled_newsletter for the actual atomic flip."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT id FROM newsletters
+               WHERE status = 'scheduled'
+                 AND scheduled_at IS NOT NULL
+                 AND scheduled_at <= NOW()
+                 AND is_deleted = FALSE
+               ORDER BY scheduled_at ASC
+               LIMIT $1""",
+            limit,
+        )
+    return [dict(r) for r in rows]
+
+
 async def mark_bounced(email_or_id: str | UUID, reason: Optional[str] = None) -> bool:
     """Bounce-webhook entry point. Hard bounce → status='bounced' and
     auto-unsubscribed. Idempotent — already-bounced or unknown emails return
@@ -417,7 +551,7 @@ async def create_newsletter(title: str, subject: str, created_by: UUID) -> dict:
 
 
 async def update_newsletter(newsletter_id: UUID, updates: dict) -> dict:
-    allowed = {"title", "subject", "content_html", "curated_article_ids", "scheduled_at"}
+    allowed = {"title", "subject", "content_html", "curated_article_ids", "scheduled_at", "preheader"}
     sets = []
     params: list = []
     idx = 1
@@ -590,15 +724,34 @@ async def _send_emails(newsletter_id: UUID, nl: dict, subscribers: list[dict]) -
     sent_count = 0
     failed_count = 0
 
+    # Resolve send_id per subscriber up-front so the rendered HTML can carry
+    # a per-recipient open pixel + click-rewrite token. The earlier design
+    # did one bulk INSERT then a bulk UPDATE — that left no way to address
+    # a specific send row for tracking.
+    send_id_by_subscriber: dict[UUID, UUID] = {}
+    async with get_connection() as conn:
+        for sub in subscribers:
+            row = await conn.fetchrow(
+                """INSERT INTO newsletter_sends (newsletter_id, subscriber_id)
+                   VALUES ($1, $2)
+                   ON CONFLICT (newsletter_id, subscriber_id) DO UPDATE
+                       SET subscriber_id = EXCLUDED.subscriber_id
+                   RETURNING id""",
+                newsletter_id, sub["id"],
+            )
+            if row:
+                send_id_by_subscriber[sub["id"]] = row["id"]
+
     for i in range(0, len(subscribers), BATCH_SIZE):
         batch = subscribers[i:i + BATCH_SIZE]
         sent_ids: list[UUID] = []
         failed_ids: list[UUID] = []
 
         for sub in batch:
+            send_id = send_id_by_subscriber.get(sub["id"])
             unsub_token = generate_unsubscribe_token(sub["id"])
             unsub_url = f"{base_url}/api/newsletter/unsubscribe?token={unsub_token}"
-            html = _render_email(nl, sub, unsub_url)
+            html = _render_email(nl, sub, unsub_url, base_url=base_url, send_id=send_id)
 
             # RFC 8058 List-Unsubscribe + List-Unsubscribe-Post enable Gmail's
             # one-click unsubscribe button — required for CAN-SPAM and to keep
@@ -662,11 +815,97 @@ async def _send_emails(newsletter_id: UUID, nl: dict, subscribers: list[dict]) -
     )
 
 
-def _render_email(newsletter: dict, subscriber: dict, unsubscribe_url: str) -> str:
-    """Render newsletter HTML with branded template and unsubscribe footer.
-    content_html is already sanitized at write time."""
+# A href value is "external" (and therefore eligible for click rewriting) if
+# it points to a real http(s) URL. mailto:/tel:/anchor links are skipped.
+_HREF_RE = re.compile(r'href=(["\'])(https?://[^"\']+)\1', re.IGNORECASE)
+
+
+def _rewrite_links_for_tracking(
+    html: str,
+    *,
+    base_url: str,
+    send_id: UUID,
+    skip_urls: set[str],
+) -> str:
+    """Wrap external <a href="..."> values with the click-tracking endpoint.
+
+    Skips the unsubscribe URL (RFC 8058 requires direct unsubscribe) and any
+    other skip_urls passed in.
+    """
+    if not html or not send_id:
+        return html
+
+    def _replace(match: re.Match) -> str:
+        quote_char = match.group(1)
+        target = match.group(2)
+        if target in skip_urls or target.startswith(f"{base_url}/api/newsletter/track/"):
+            return match.group(0)
+        wrapped = f"{base_url}/api/newsletter/track/click/{send_id}?to={quote(target, safe='')}"
+        return f"href={quote_char}{wrapped}{quote_char}"
+
+    return _HREF_RE.sub(_replace, html)
+
+
+def _render_email(
+    newsletter: dict,
+    subscriber: dict,
+    unsubscribe_url: str,
+    *,
+    base_url: str = "",
+    send_id: Optional[UUID] = None,
+) -> str:
+    """Render newsletter HTML with branded template, tracking, and CAN-SPAM
+    footer. content_html is already sanitized at write time.
+
+    `send_id` is the newsletter_sends row id — used to build the open-pixel
+    URL and click-tracking redirect targets. When omitted (test send) tracking
+    is skipped so we don't pollute the analytics with previews.
+    """
+    settings = get_settings()
+    if not base_url:
+        base_url = (settings.app_base_url or "https://hey-matcha.com").rstrip("/")
+
     content = newsletter.get("content_html") or ""
+    preheader = (newsletter.get("preheader") or "").strip()
+
+    # Click-tracking — wrap external links once, before any tracking pixels
+    # are spliced in (the pixel src must NOT be wrapped).
+    if send_id:
+        content = _rewrite_links_for_tracking(
+            content,
+            base_url=base_url,
+            send_id=send_id,
+            skip_urls={unsubscribe_url},
+        )
+
+    # CAN-SPAM postal address. Newlines in the env-configured value become
+    # <br> so admins can format multi-line addresses.
+    mailing_address = (settings.newsletter_mailing_address or "").strip()
+    address_html = mailing_address.replace("\n", "<br>") if mailing_address else ""
+
+    # Preheader — hidden text right after <body> open. Email clients show
+    # this as the inbox preview snippet alongside the subject. Hidden via
+    # a stack of CSS tricks to defeat both Gmail and Outlook preview scrapers.
+    preheader_html = ""
+    if preheader:
+        preheader_html = (
+            f'<div style="display:none;max-height:0;overflow:hidden;'
+            f'mso-hide:all;visibility:hidden;opacity:0;color:transparent;'
+            f'height:0;width:0;">{preheader}</div>'
+        )
+
+    # Open-tracking pixel — placed at the end of content so most clients
+    # have already rendered the rest before fetching it.
+    pixel_html = ""
+    if send_id:
+        pixel_url = f"{base_url}/api/newsletter/track/open/{send_id}.gif"
+        pixel_html = (
+            f'<img src="{pixel_url}" width="1" height="1" alt="" '
+            f'style="display:none;border:0;" />'
+        )
+
     return f"""
+    {preheader_html}
     <div style="max-width:600px;margin:0 auto;font-family:-apple-system,system-ui,sans-serif;background:#1e1e1e;color:#d4d4d4;padding:32px 24px;">
         <div style="text-align:center;margin-bottom:24px;">
             <span style="font-size:20px;font-weight:700;color:#ce9178;">Matcha</span>
@@ -676,10 +915,14 @@ def _render_email(newsletter: dict, subscriber: dict, unsubscribe_url: str) -> s
             {content}
         </div>
         <hr style="border:none;border-top:1px solid #333;margin:32px 0;" />
-        <div style="text-align:center;font-size:12px;color:#6a737d;">
-            <p>You received this because you subscribed to Matcha updates.</p>
-            <a href="{unsubscribe_url}" style="color:#569cd6;text-decoration:underline;">Unsubscribe</a>
+        <div style="text-align:center;font-size:12px;color:#6a737d;line-height:1.6;">
+            <p style="margin:0 0 8px 0;">You received this because you subscribed to Matcha updates.</p>
+            <p style="margin:0 0 12px 0;">
+                <a href="{unsubscribe_url}" style="color:#569cd6;text-decoration:underline;">Unsubscribe</a>
+            </p>
+            {f'<p style="margin:0;color:#6a737d;">{address_html}</p>' if address_html else ''}
         </div>
+        {pixel_html}
     </div>
     """
 

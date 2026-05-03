@@ -1,14 +1,16 @@
 """Newsletter routes — public subscribe/confirm/unsubscribe + admin management."""
 
+import base64
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, PlainTextResponse
-from pydantic import BaseModel, EmailStr
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from pydantic import BaseModel, EmailStr, Field
 
 from ..dependencies import get_current_user, require_admin
 from ..models.auth import CurrentUser
@@ -225,15 +227,86 @@ async def bounce_webhook(body: BounceEvent, request: Request):
     if not _hmac.compare_digest(received.encode(), expected.encode()):
         raise HTTPException(status_code=401, detail="Bad secret")
 
-    if body.type == "soft":
-        logger.info("Soft bounce: %s (%s)", body.email or body.subscriber_id, body.reason)
-        return {"ok": True, "action": "logged"}
-
     target = body.subscriber_id or body.email
+    if body.type == "soft":
+        if not target:
+            raise HTTPException(status_code=400, detail="email or subscriber_id required")
+        result = await svc.record_soft_bounce(target, reason=body.reason)
+        action = "suppressed" if result["suppressed"] else "counted"
+        logger.info(
+            "Soft bounce: %s count=%s suppressed=%s",
+            body.email or body.subscriber_id, result["count"], result["suppressed"],
+        )
+        return {"ok": True, "action": action, "count": result["count"]}
+
     if not target:
         raise HTTPException(status_code=400, detail="email or subscriber_id required")
     flipped = await svc.mark_bounced(target, reason=body.reason)
     return {"ok": True, "action": "bounced" if flipped else "no_match"}
+
+
+# ---------------------------------------------------------------------------
+# Open + click tracking
+# ---------------------------------------------------------------------------
+
+# 1×1 transparent GIF — bytes are fixed, embedded so we don't need to ship
+# a separate asset. Returned for every open-pixel hit; clients that don't
+# load images simply never count, which is the natural behavior.
+_TRANSPARENT_GIF = base64.b64decode(
+    "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+)
+_TRACKING_NO_CACHE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+
+def _gif_response() -> Response:
+    return Response(
+        content=_TRANSPARENT_GIF,
+        media_type="image/gif",
+        headers=_TRACKING_NO_CACHE_HEADERS,
+    )
+
+
+@public_router.get("/track/open/{send_id}.gif")
+async def track_open(send_id: UUID):
+    """Open-tracking pixel.
+
+    Always returns a 1×1 transparent GIF — even on unknown send_id — so a
+    badly stored / forwarded email can't surface as a broken image. The DB
+    write is idempotent (`opened_at = COALESCE(opened_at, NOW())`), so
+    multiple clients prefetching the pixel still count as a single open.
+    """
+    try:
+        subscriber_id = await svc.record_open(send_id)
+        if subscriber_id:
+            # An open is positive proof the inbox accepted our delivery, so
+            # any past soft-bounce streak should reset.
+            await svc.reset_soft_bounce_count(subscriber_id)
+    except Exception:
+        logger.exception("Failed to record newsletter open send_id=%s", send_id)
+    return _gif_response()
+
+
+@public_router.get("/track/click/{send_id}")
+async def track_click(send_id: UUID, to: str = Query(..., description="Destination URL")):
+    """Click-tracking redirect.
+
+    Records the click then 302s to the original target. If the click record
+    fails for any reason we still redirect — better to lose the metric than
+    to break the user's link.
+    """
+    if not to.startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="Invalid redirect target")
+    try:
+        subscriber_id = await svc.record_click(send_id)
+        if subscriber_id:
+            await svc.reset_soft_bounce_count(subscriber_id)
+    except Exception:
+        logger.exception("Failed to record newsletter click send_id=%s", send_id)
+    return RedirectResponse(url=to, status_code=302)
 
 
 @public_router.get("/view/{newsletter_id}")
@@ -394,6 +467,8 @@ class UpdateNewsletterRequest(BaseModel):
     subject: Optional[str] = None
     content_html: Optional[str] = None
     curated_article_ids: Optional[list[str]] = None
+    preheader: Optional[str] = Field(default=None, max_length=255)
+    scheduled_at: Optional[datetime] = None
 
 
 @admin_router.get("/newsletters")
@@ -476,6 +551,86 @@ async def send_newsletter(
         return result
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+
+class ScheduleNewsletterRequest(BaseModel):
+    scheduled_at: datetime
+
+
+@admin_router.post("/newsletters/{newsletter_id}/schedule")
+async def schedule_newsletter(
+    newsletter_id: UUID,
+    body: ScheduleNewsletterRequest,
+    request: Request,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Move a draft to status='scheduled' with a future send time.
+
+    The newsletter scheduler beat picks it up at scheduled_at and dispatches
+    the send. Re-scheduling a draft that's already scheduled is allowed
+    (admin can shift the time); reschedule of a sent / sending newsletter
+    is refused.
+    """
+    if body.scheduled_at.tzinfo is None:
+        # Treat naive datetimes as UTC so admins from any TZ get predictable
+        # behavior — JSON dates without offsets land as UTC by convention.
+        scheduled = body.scheduled_at.replace(tzinfo=timezone.utc)
+    else:
+        scheduled = body.scheduled_at
+    if scheduled <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="scheduled_at must be in the future")
+
+    from ...database import get_connection
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """UPDATE newsletters
+               SET status = 'scheduled',
+                   scheduled_at = $2,
+                   scheduled_send_started_at = NULL,
+                   updated_at = NOW()
+               WHERE id = $1
+                 AND is_deleted = FALSE
+                 AND status IN ('draft', 'scheduled')
+               RETURNING id, scheduled_at""",
+            newsletter_id, scheduled,
+        )
+    if not row:
+        raise HTTPException(status_code=409, detail="Newsletter not found or already sent")
+
+    await svc.log_admin_action(
+        current_user.id, "newsletter_scheduled", "newsletter", str(newsletter_id),
+        {"scheduled_at": scheduled.isoformat()}, _client_ip(request),
+    )
+    return {"ok": True, "scheduled_at": row["scheduled_at"].isoformat()}
+
+
+@admin_router.post("/newsletters/{newsletter_id}/unschedule")
+async def unschedule_newsletter(
+    newsletter_id: UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Cancel a scheduled send and return the newsletter to draft."""
+    from ...database import get_connection
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """UPDATE newsletters
+               SET status = 'draft',
+                   scheduled_at = NULL,
+                   scheduled_send_started_at = NULL,
+                   updated_at = NOW()
+               WHERE id = $1 AND status = 'scheduled' AND is_deleted = FALSE
+               RETURNING id""",
+            newsletter_id,
+        )
+    if not row:
+        raise HTTPException(status_code=409, detail="Newsletter not in scheduled state")
+
+    await svc.log_admin_action(
+        current_user.id, "newsletter_unscheduled", "newsletter", str(newsletter_id),
+        None, _client_ip(request),
+    )
+    return {"ok": True}
 
 
 _ALLOWED_MEDIA_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".mp4", ".mov", ".pdf"}
