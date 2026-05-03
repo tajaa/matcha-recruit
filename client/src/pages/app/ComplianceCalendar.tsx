@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Badge, Card, Select } from '../../components/ui'
-import { CalendarDays, List, MapPin, AlertTriangle, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
+import { CalendarDays, List, MapPin, AlertTriangle, ChevronLeft, ChevronRight, Loader2, Info, HelpCircle } from 'lucide-react'
 import { fetchComplianceCalendar, fetchLocations, markAlertRead, dismissAlert } from '../../api/compliance'
 import type { ComplianceCalendarItem } from '../../api/compliance'
 import type { BusinessLocation } from '../../types/compliance'
@@ -13,6 +13,13 @@ const STATUS_LABEL: Record<ComplianceCalendarItem['derived_status'], string> = {
   due_soon: 'Due in 30 days',
   upcoming: 'Due in 90 days',
   future: 'Future',
+}
+
+const STATUS_HINT: Record<ComplianceCalendarItem['derived_status'], string> = {
+  overdue: 'Past their deadline. Action needed.',
+  due_soon: 'Deadline within 30 days. Schedule action this month.',
+  upcoming: 'Deadline 31–90 days out. Plan ahead.',
+  future: 'Deadline more than 90 days out. Awareness only.',
 }
 
 const STATUS_VARIANT: Record<
@@ -124,7 +131,10 @@ export default function ComplianceCalendar() {
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Compliance Calendar</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-semibold text-zinc-100">Compliance Calendar</h1>
+            <HowItWorks />
+          </div>
           <p className="text-sm text-zinc-500 mt-1">
             Filings, postings, and renewals across your locations.
           </p>
@@ -199,11 +209,14 @@ export default function ComplianceCalendar() {
         </div>
       ) : filtered.length === 0 ? (
         <Card>
-          <div className="text-center py-10">
+          <div className="text-center py-10 max-w-md mx-auto">
             <CalendarDays className="mx-auto text-zinc-600 mb-2" size={32} />
             <p className="text-sm text-zinc-400">No upcoming compliance deadlines.</p>
-            <p className="text-xs text-zinc-600 mt-1">
-              Run a compliance check on a location to populate this calendar.
+            <p className="text-xs text-zinc-600 mt-2 leading-relaxed">
+              The calendar is populated from compliance alerts that include a deadline.
+              Open <a href="/app/locations" className="text-emerald-400 hover:underline">Locations</a> and
+              run a compliance check on a location — any rule changes or filings with a deadline
+              will land here.
             </p>
           </div>
         </Card>
@@ -218,6 +231,71 @@ export default function ComplianceCalendar() {
         <MonthView items={filtered} onClick={(item) => navigate(`/app/compliance?alert=${item.id}`)} />
       )}
     </div>
+  )
+}
+
+function HowItWorks() {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="text-zinc-500 hover:text-zinc-300 p-1 rounded hover:bg-zinc-800"
+        title="How this works"
+      >
+        <Info size={14} />
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" onClick={() => setOpen(false)}>
+          <div
+            className="bg-zinc-900 border border-zinc-700 rounded-xl max-w-md w-full p-5 space-y-4 text-sm text-zinc-300"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-zinc-100">How the calendar works</h3>
+              <button onClick={() => setOpen(false)} className="text-zinc-500 hover:text-zinc-300">×</button>
+            </div>
+            <div className="space-y-3 text-xs leading-relaxed text-zinc-400">
+              <div>
+                <p className="text-zinc-300 font-medium mb-1">Where deadlines come from</p>
+                Each row is a compliance alert with a deadline date. Alerts are
+                generated when you run a compliance check on a location
+                (Locations page → Run check). The system picks up rule changes
+                from federal + state sources and turns any with a deadline into
+                a calendar entry.
+              </div>
+              <div>
+                <p className="text-zinc-300 font-medium mb-1">Status buckets</p>
+                <ul className="space-y-1 list-disc list-inside">
+                  <li><span className="text-red-400">Overdue</span> — past their deadline</li>
+                  <li><span className="text-amber-400">Due in 30 days</span> — schedule action this month</li>
+                  <li><span className="text-zinc-300">Due in 90 days</span> — plan ahead</li>
+                  <li><span className="text-emerald-400">Future</span> — awareness only</li>
+                </ul>
+              </div>
+              <div>
+                <p className="text-zinc-300 font-medium mb-1">Per-row actions</p>
+                <span className="text-zinc-300">Click a row</span> to mark it
+                read. <span className="text-zinc-300">View</span> opens the
+                full alert detail. <span className="text-zinc-300">Dismiss</span> removes
+                it from the calendar (use this for false-positives or things
+                you've already handled outside the system).
+              </div>
+              <div>
+                <p className="text-zinc-300 font-medium mb-1">Filters</p>
+                Location and category filters persist in the URL — bookmark a
+                filtered view if you only care about, say, California payroll
+                deadlines.
+              </div>
+              <div>
+                <p className="text-zinc-300 font-medium mb-1">Coming soon</p>
+                Email reminders 7 days before each deadline + iCal export.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -242,6 +320,9 @@ function ListView({ grouped, onView, onMarkRead, onDismiss }: ListViewProps) {
                 {STATUS_LABEL[bucket]}
               </h2>
               <span className="text-xs text-zinc-600">({rows.length})</span>
+              <span className="text-xs text-zinc-600" title={STATUS_HINT[bucket]}>
+                <HelpCircle size={11} className="inline opacity-60" />
+              </span>
             </div>
             <div className="space-y-2">
               {rows.map((item) => (
