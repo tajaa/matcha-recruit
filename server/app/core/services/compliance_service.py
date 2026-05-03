@@ -6027,6 +6027,80 @@ async def get_company_alerts(
         ]
 
 
+async def get_calendar_items(
+    company_id: UUID,
+    location_id: Optional[UUID] = None,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
+) -> List["CalendarItem"]:
+    """Compliance-calendar feed: non-dismissed alerts with a deadline,
+    plus location context and a derived status bucket the UI groups by.
+    """
+    from ...database import get_connection
+    from ..models.compliance import CalendarItem
+
+    async with get_connection() as conn:
+        params: list = [company_id]
+        clauses = ["a.company_id = $1", "a.deadline IS NOT NULL", "a.status != 'dismissed'"]
+
+        if location_id is not None:
+            params.append(location_id)
+            clauses.append(f"a.location_id = ${len(params)}")
+        if from_date is not None:
+            params.append(from_date)
+            clauses.append(f"a.deadline >= ${len(params)}")
+        if to_date is not None:
+            params.append(to_date)
+            clauses.append(f"a.deadline <= ${len(params)}")
+
+        rows = await conn.fetch(
+            f"""
+            SELECT a.id, a.location_id, a.requirement_id, a.title, a.category,
+                   a.severity, a.deadline, a.action_required, a.status,
+                   a.created_at,
+                   bl.name AS location_name, bl.state AS location_state,
+                   COALESCE(r.jurisdiction_name, bl.state) AS jurisdiction_name,
+                   (a.deadline - CURRENT_DATE) AS days_until_due
+            FROM compliance_alerts a
+            LEFT JOIN business_locations bl ON bl.id = a.location_id
+            LEFT JOIN compliance_requirements r ON r.id = a.requirement_id
+            WHERE {' AND '.join(clauses)}
+            ORDER BY a.deadline ASC
+            """,
+            *params,
+        )
+
+        out = []
+        for r in rows:
+            d = int(r["days_until_due"])
+            if d < 0:
+                bucket = "overdue"
+            elif d <= 30:
+                bucket = "due_soon"
+            elif d <= 90:
+                bucket = "upcoming"
+            else:
+                bucket = "future"
+            out.append(CalendarItem(
+                id=str(r["id"]),
+                location_id=str(r["location_id"]),
+                location_name=r["location_name"],
+                location_state=r["location_state"],
+                jurisdiction_name=r["jurisdiction_name"],
+                requirement_id=str(r["requirement_id"]) if r["requirement_id"] else None,
+                title=r["title"],
+                category=r["category"],
+                severity=r["severity"],
+                deadline=r["deadline"].isoformat(),
+                derived_status=bucket,
+                days_until_due=d,
+                action_required=r["action_required"],
+                alert_status=r["status"],
+                created_at=r["created_at"].isoformat(),
+            ))
+        return out
+
+
 async def mark_alert_read(alert_id: UUID, company_id: UUID) -> bool:
     from ...database import get_connection
     from datetime import datetime

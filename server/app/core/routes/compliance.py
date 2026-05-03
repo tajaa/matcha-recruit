@@ -25,6 +25,7 @@ from ..models.compliance import (
     FacilityAttributesUpdate,
     RequirementResponse,
     AlertResponse,
+    CalendarItem,
     CheckLogEntry,
     UpcomingLegislationResponse,
     ComplianceSummary,
@@ -39,6 +40,7 @@ from ..services.compliance_service import (
     delete_location,
     get_location_requirements,
     get_company_alerts,
+    get_calendar_items,
     mark_alert_read,
     dismiss_alert,
     get_compliance_summary,
@@ -542,6 +544,40 @@ async def get_wage_violations_endpoint(
         "violations": all_violations,
         "violations_by_rate_type": impact["violations_by_rate_type"],
     }
+
+
+@router.get("/calendar", response_model=List[CalendarItem])
+async def get_compliance_calendar(
+    from_date: Optional[date] = Query(None, alias="from"),
+    to_date: Optional[date] = Query(None, alias="to"),
+    location_id: Optional[str] = Query(None),
+    company_id: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Compliance-deadline calendar feed.
+
+    Returns non-dismissed alerts with a deadline, sorted ascending,
+    enriched with location + jurisdiction context and a status bucket
+    (overdue / due_soon / upcoming / future). No new feature flag —
+    accessible to any client tenant including matcha-lite.
+    """
+    company_id = await resolve_company_id(current_user, company_id)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    loc_uuid = None
+    if location_id:
+        try:
+            loc_uuid = UUID(location_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid location_id")
+
+    return await get_calendar_items(
+        company_id=company_id,
+        location_id=loc_uuid,
+        from_date=from_date,
+        to_date=to_date,
+    )
 
 
 @router.get("/alerts", response_model=List[AlertResponse])

@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Users, Shield, FileText, ClipboardCheck, Scale,
   AlertTriangle, BookOpen, BarChart2, Sparkles, Building2, Accessibility,
-  BadgeCheck, MessageSquareWarning, Mail, Bell, Gavel, MapPin,
+  BadgeCheck, MessageSquareWarning, Mail, Bell, Gavel, MapPin, CalendarDays,
 } from 'lucide-react'
 import SidebarShell from './SidebarShell'
 import type { NavGroup, NavItem } from './SidebarShell'
@@ -24,6 +24,7 @@ const nav: (NavItem | NavGroup)[] = [
     label: 'Compliance',
     items: [
       { to: '/app/compliance', icon: Shield, label: 'Compliance' },
+      { to: '/app/compliance-calendar', icon: CalendarDays, label: 'Calendar' },
       { to: '/app/policies', icon: FileText, label: 'Policies' },
       { to: '/app/handbooks', icon: BookOpen, label: 'Handbooks' },
       { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credentialing' },

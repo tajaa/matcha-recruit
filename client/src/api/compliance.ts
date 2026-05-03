@@ -23,6 +23,41 @@ export function fetchJurisdictions() {
   return api.get<JurisdictionOption[]>('/compliance/jurisdictions')
 }
 
+// ── Compliance Calendar ──
+
+export interface ComplianceCalendarItem {
+  id: string
+  location_id: string
+  location_name: string | null
+  location_state: string | null
+  jurisdiction_name: string | null
+  requirement_id: string | null
+  title: string
+  category: string | null
+  severity: string
+  deadline: string  // ISO date
+  derived_status: 'overdue' | 'due_soon' | 'upcoming' | 'future'
+  days_until_due: number
+  action_required: string | null
+  alert_status: string
+  created_at: string
+}
+
+export function fetchComplianceCalendar(params?: {
+  from?: string
+  to?: string
+  location_id?: string
+}) {
+  const qs = new URLSearchParams()
+  if (params?.from) qs.set('from', params.from)
+  if (params?.to) qs.set('to', params.to)
+  if (params?.location_id) qs.set('location_id', params.location_id)
+  const query = qs.toString()
+  return api.get<ComplianceCalendarItem[]>(
+    `/compliance/calendar${query ? '?' + query : ''}`
+  )
+}
+
 // ── Locations ──
 
 export function fetchLocations() {

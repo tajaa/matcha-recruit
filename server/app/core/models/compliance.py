@@ -266,6 +266,27 @@ class AlertResponse(BaseModel):
     read_at: Optional[str] = None
 
 
+class CalendarItem(BaseModel):
+    """Compliance calendar row — a non-dismissed alert with a deadline,
+    enriched with location context and a status bucket the UI can group by.
+    """
+    id: str
+    location_id: str
+    location_name: Optional[str] = None
+    location_state: Optional[str] = None
+    jurisdiction_name: Optional[str] = None
+    requirement_id: Optional[str] = None
+    title: str
+    category: Optional[str] = None
+    severity: str
+    deadline: str  # ISO date — calendar items always have one
+    derived_status: str  # 'overdue' | 'due_soon' | 'upcoming' | 'future'
+    days_until_due: int
+    action_required: Optional[str] = None
+    alert_status: str  # underlying alert status (unread / read / actioned)
+    created_at: str
+
+
 class PayerPolicyResponse(BaseModel):
     id: str
     payer_name: str
