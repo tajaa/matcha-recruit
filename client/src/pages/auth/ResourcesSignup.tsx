@@ -1,7 +1,6 @@
 import { useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Loader2 } from 'lucide-react'
-import { invalidateMeCache } from '../../hooks/useMe'
+import { Link, useSearchParams } from 'react-router-dom'
+import { Loader2, MailCheck } from 'lucide-react'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -20,7 +19,6 @@ const DEFAULT_NEXT = '/app/resources'
  * for post-signup redirect.
  */
 export default function ResourcesSignup() {
-  const navigate = useNavigate()
   const [params] = useSearchParams()
   const next = params.get('next') || DEFAULT_NEXT
 
@@ -30,6 +28,7 @@ export default function ResourcesSignup() {
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [sentTo, setSentTo] = useState<string | null>(null)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -54,10 +53,8 @@ export default function ResourcesSignup() {
         setError(data.detail ?? 'Registration failed')
         return
       }
-      localStorage.setItem('matcha_access_token', data.access_token)
-      localStorage.setItem('matcha_refresh_token', data.refresh_token)
-      invalidateMeCache()
-      navigate(next)
+      // Deferred-create flow: backend sent a verification email, no tokens yet.
+      setSentTo(data.email ?? email.trim().toLowerCase())
     } catch {
       setError('Something went wrong. Please try again.')
     } finally {
@@ -66,6 +63,56 @@ export default function ResourcesSignup() {
   }
 
   const loginHref = `/login?next=${encodeURIComponent(next)}`
+
+  if (sentTo) {
+    return (
+      <div
+        className="min-h-screen flex items-center justify-center px-4 py-12"
+        style={{ backgroundColor: BG, color: INK }}
+      >
+        <div className="w-full max-w-md">
+          <Link to="/" className="block text-center mb-10">
+            <span
+              className="text-3xl tracking-tight"
+              style={{ fontFamily: DISPLAY, fontWeight: 500, color: INK }}
+            >
+              Matcha
+            </span>
+          </Link>
+          <div
+            className="rounded-2xl p-8 text-center"
+            style={{ backgroundColor: 'rgba(255,255,255,0.5)', border: `1px solid ${LINE}` }}
+          >
+            <MailCheck className="w-10 h-10 mx-auto mb-4" style={{ color: INK }} />
+            <h1
+              className="tracking-tight mb-2"
+              style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: '1.75rem', color: INK }}
+            >
+              Check your inbox.
+            </h1>
+            <p className="text-sm mb-4" style={{ color: MUTED }}>
+              We sent a confirmation link to <strong style={{ color: INK }}>{sentTo}</strong>.
+              Click it to finish creating your account.
+            </p>
+            <p className="text-xs" style={{ color: MUTED }}>
+              The link expires in 1 hour. No account is created until you confirm.
+            </p>
+          </div>
+          <p className="mt-6 text-xs text-center" style={{ color: MUTED }}>
+            Wrong email?{' '}
+            <button
+              type="button"
+              className="underline"
+              style={{ color: INK }}
+              onClick={() => setSentTo(null)}
+            >
+              Start over
+            </button>
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div

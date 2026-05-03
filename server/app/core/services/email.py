@@ -2317,6 +2317,74 @@ You can upgrade to Matcha Lite anytime from inside your account.
         _subject = f"Your Matcha Resources account is ready"
         return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
 
+    async def send_email_verification_email(
+        self,
+        to_email: str,
+        to_name: str,
+        verification_url: str,
+    ) -> bool:
+        """Single-click email verification for resources_free signups.
+
+        Sent BEFORE the user/company row exists. The link carries a JWT that
+        the verify endpoint exchanges for the actual account. If the user
+        never clicks, nothing is persisted.
+        """
+        if not self.is_configured():
+            logger.warning("Gmail not configured, skipping email send")
+            return False
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: 600; margin: 20px 0; font-size: 15px; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+        .small {{ color: #6b7280; font-size: 13px; word-break: break-all; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {to_name},</p>
+            <p>Confirm your email to finish creating your free Matcha Resources account.</p>
+            <p style="text-align: center;">
+                <a href="{verification_url}" class="btn">Confirm email →</a>
+            </p>
+            <p class="small">Or paste this link into your browser:<br>{verification_url}</p>
+            <p class="small">This link expires in 1 hour. If you didn't request this, you can ignore this email — no account is created until you click.</p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {to_name},
+
+Confirm your email to finish creating your free Matcha Resources account.
+
+Confirm email: {verification_url}
+
+This link expires in 1 hour. If you didn't request this, ignore this email — no account is created until you click.
+
+- Matcha
+"""
+
+        _subject = "Confirm your email — Matcha Resources"
+        return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
+
     async def send_business_approved_email(
         self,
         to_email: str,

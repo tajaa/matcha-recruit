@@ -109,6 +109,43 @@ def decode_interview_ws_token(token: str) -> tuple[Optional[UUID], bool]:
         return None, False
 
 
+def create_email_verify_token(
+    payload: dict,
+    expires_delta: Optional[timedelta] = None,
+) -> str:
+    """Sign a short-lived email-verification token carrying pending signup data.
+
+    The verification flow uses these to defer user/company creation until the
+    user clicks the link in their inbox — there is NO database row until then.
+    Whatever fields are placed in `payload` are signed into the JWT verbatim
+    (e.g. email, name, company_name, password_hash, tier, headcount). Anyone
+    who can decode this token can complete the signup, so keep TTL short.
+    """
+    settings = get_settings()
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(hours=1))
+    body = {**payload, "exp": expire, "type": "email_verify"}
+    return jwt.encode(body, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def decode_email_verify_token(token: str) -> Optional[dict]:
+    """Decode an email_verify token. Returns the payload dict (sans exp/type)
+    on success, or None if invalid/expired/wrong type.
+    """
+    settings = get_settings()
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+        if payload.get("type") != "email_verify":
+            return None
+        # Strip JWT-managed fields before handing back to caller
+        return {k: v for k, v in payload.items() if k not in ("exp", "type")}
+    except (JWTError, KeyError, TypeError):
+        return None
+
+
 def decode_token(token: str, expected_type: Optional[str] = None) -> Optional[TokenPayload]:
     """Decode and validate a JWT token.
 

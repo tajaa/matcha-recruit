@@ -11,6 +11,7 @@ import IrSignup from './pages/auth/IrSignup'
 import MatchaLiteSignup from './pages/auth/MatchaLiteSignup'
 import SignupPicker from './pages/auth/SignupPicker'
 import ResourcesSignup from './pages/auth/ResourcesSignup'
+import VerifyEmail from './pages/auth/VerifyEmail'
 import RequireBusinessAccount from './components/auth/RequireBusinessAccount'
 import IrOnboardingWizard from './features/ir-onboarding/IrOnboardingWizard'
 import AnonymousReport from './pages/shared/AnonymousReport'
@@ -126,6 +127,7 @@ export default function App() {
       <Route path="/resources/audit" element={<RequireBusinessAccount><ResourcesComplianceAudit /></RequireBusinessAccount>} />
       <Route path="/signup" element={<SignupPicker />} />
       <Route path="/auth/resources-signup" element={<ResourcesSignup />} />
+      <Route path="/auth/verify-email" element={<VerifyEmail />} />
       <Route path="/login" element={<Login />} />
       <Route path="/sso/callback" element={<SSOCallback />} />
       <Route path="/register/beta" element={<BetaRegister />} />
