@@ -95,54 +95,109 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
     <div style={embedded ? { color: t.ink } : { backgroundColor: t.bg, color: t.ink, minHeight: '100vh' }}>
       {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
-      <main className={embedded ? 'pt-0 pb-8 max-w-[1100px]' : 'pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10'}>
-        <nav className="flex items-center gap-2 text-xs mb-8" style={{ color: t.muted }}>
-          <Link to={root} className="hover:opacity-60">Resources</Link>
-          <ChevronRight className="w-3 h-3" />
-          <span style={{ color: t.ink }}>Templates</span>
-        </nav>
+      <main className={embedded ? '' : 'pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10'}>
+        {!embedded && (
+          <nav className="flex items-center gap-2 text-xs mb-8" style={{ color: t.muted }}>
+            <Link to={root} className="hover:opacity-60">Resources</Link>
+            <ChevronRight className="w-3 h-3" />
+            <span style={{ color: t.ink }}>Templates</span>
+          </nav>
+        )}
 
-        <header className="mb-14 max-w-2xl">
-          <h1
-            className="text-5xl sm:text-6xl tracking-tight"
-            style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}
-          >
-            HR Templates
-          </h1>
-          <p className="mt-4 text-base" style={{ color: t.muted }}>
-            Free, editable templates for the documents HR teams use most.
-            Drop in your details, send, file. Reviewed against current employment-law guidance.
-          </p>
-        </header>
+        {embedded ? (
+          <div className="mb-6">
+            <h1 className="text-2xl font-semibold text-zinc-100">HR Templates</h1>
+            <p className="mt-1 text-sm text-zinc-500">
+              Free, editable templates for the documents HR teams use most. Reviewed against current employment-law guidance.
+            </p>
+          </div>
+        ) : (
+          <header className="mb-14 max-w-2xl">
+            <h1
+              className="text-5xl sm:text-6xl tracking-tight"
+              style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}
+            >
+              HR Templates
+            </h1>
+            <p className="mt-4 text-base" style={{ color: t.muted }}>
+              Free, editable templates for the documents HR teams use most.
+              Drop in your details, send, file. Reviewed against current employment-law guidance.
+            </p>
+          </header>
+        )}
 
-        {/* Job Descriptions Library — separate browse page (50+ roles) */}
+        {/* Job Descriptions Library — separate browse page (62 roles) */}
         <Link
           to={`${root}/templates/job-descriptions`}
-          className="block mb-6 p-6 rounded-2xl transition-opacity hover:opacity-80"
-          style={{ border: `1px solid ${t.line}`, backgroundColor: t.cardBg }}
+          className={embedded
+            ? 'block mb-4 p-4 rounded-lg border border-zinc-800 hover:border-zinc-600 hover:bg-zinc-900/40 transition-colors'
+            : 'block mb-6 p-6 rounded-2xl transition-opacity hover:opacity-80'}
+          style={embedded ? undefined : { border: `1px solid ${t.line}`, backgroundColor: t.cardBg }}
         >
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-xs uppercase tracking-wider mb-2" style={{ color: t.muted }}>Library</p>
-              <h2 className="text-2xl mb-1" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>
+              <p className={embedded ? 'text-[11px] uppercase tracking-wider mb-1 text-zinc-500' : 'text-xs uppercase tracking-wider mb-2'} style={embedded ? undefined : { color: t.muted }}>Library</p>
+              <h2
+                className={embedded ? 'text-base font-medium text-zinc-100 mb-1' : 'text-2xl mb-1'}
+                style={embedded ? undefined : { fontFamily: t.display, color: t.ink, fontWeight: 500 }}
+              >
                 Job Descriptions Library
               </h2>
-              <p className="text-sm" style={{ color: t.muted }}>
-                Browse 50+ ready-to-edit job descriptions across hospitality,
-                healthcare, retail, corporate, and more. Pick the one you
-                need — no bulk download.
+              <p className={embedded ? 'text-xs text-zinc-500' : 'text-sm'} style={embedded ? undefined : { color: t.muted }}>
+                Browse 62 ready-to-edit job descriptions across hospitality, healthcare,
+                retail, corporate, and more.
               </p>
             </div>
-            <ArrowUpRight className="w-5 h-5 mt-1 flex-shrink-0" style={{ color: t.ink }} />
+            <ArrowUpRight className={embedded ? 'w-4 h-4 mt-1 flex-shrink-0 text-zinc-400' : 'w-5 h-5 mt-1 flex-shrink-0'} style={embedded ? undefined : { color: t.ink }} />
           </div>
         </Link>
 
         {loading ? (
           <p style={{ color: t.muted }}>Loading templates…</p>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className={embedded ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3' : 'grid grid-cols-1 sm:grid-cols-2 gap-4'}>
             {assets.map(asset => {
               const available = asset.available
+              if (embedded) {
+                return (
+                  <article
+                    key={asset.slug}
+                    className="p-4 rounded-lg border border-zinc-800 flex flex-col"
+                    style={{ opacity: available ? 1 : 0.7 }}
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="w-8 h-8 rounded-md bg-zinc-800 flex items-center justify-center">
+                        <FileText className="w-4 h-4 text-zinc-300" />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {!available && (
+                          <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-zinc-800 text-zinc-500">
+                            Soon
+                          </span>
+                        )}
+                        <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-zinc-800 text-zinc-500">
+                          {formatFor(asset.path)}
+                        </span>
+                      </div>
+                    </div>
+                    <h3 className="text-sm font-medium text-zinc-100 mb-1">{asset.name}</h3>
+                    <p className="text-xs text-zinc-500 mb-4 flex-1 line-clamp-3">
+                      {TEMPLATE_DESCRIPTIONS[asset.slug] ?? ''}
+                    </p>
+                    <button
+                      onClick={() => handleDownload(asset)}
+                      disabled={!available}
+                      className={`inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium transition-colors ${
+                        available
+                          ? 'bg-emerald-700 hover:bg-emerald-600 text-white'
+                          : 'border border-zinc-800 text-zinc-500'
+                      }`}
+                    >
+                      {available ? (<><Download className="w-3.5 h-3.5" />Download</>) : (<><Bell className="w-3.5 h-3.5" />Notify</>)}
+                    </button>
+                  </article>
+                )
+              }
               return (
                 <article
                   key={asset.slug}
@@ -188,11 +243,7 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
                     onClick={() => handleDownload(asset)}
                     disabled={!available}
                     className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-full text-sm font-medium transition-opacity hover:opacity-90 disabled:opacity-60"
-                    style={embedded ? {
-                      backgroundColor: available ? '#15803d' : 'transparent',
-                      color: available ? '#fff' : t.ink,
-                      border: available ? 'none' : `1px solid ${t.line}`,
-                    } : {
+                    style={{
                       backgroundColor: available ? INK : 'transparent',
                       color: available ? BG : INK,
                       border: available ? 'none' : `1px solid ${LINE}`,
@@ -216,27 +267,43 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
           </div>
         )}
 
-        <section
-          className="mt-20 p-8 rounded-2xl"
-          style={{ border: `1px solid ${t.line}`, backgroundColor: t.cardBg }}
-        >
-          <h2 className="text-2xl mb-3" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>
-            Need state-specific versions?
-          </h2>
-          <p className="text-sm mb-6 max-w-2xl" style={{ color: t.muted }}>
-            Matcha generates templates tailored to your state's wage, leave,
-            and termination rules — pulled from a live compliance database
-            covering all 50 states. Plus handbooks, policies, and offer letters
-            customized to your business.
-          </p>
-          <button
-            onClick={() => setShowPricing(true)}
-            className="inline-flex items-center justify-center px-5 h-10 rounded-full text-sm font-medium"
-            style={embedded ? { backgroundColor: '#15803d', color: '#fff' } : { backgroundColor: INK, color: BG }}
+        {embedded ? (
+          <section className="mt-8 p-5 rounded-lg border border-zinc-800 bg-zinc-900/30">
+            <h2 className="text-base font-medium text-zinc-100 mb-1">Need state-specific versions?</h2>
+            <p className="text-xs text-zinc-500 mb-4 max-w-2xl">
+              Matcha generates templates tailored to your state's wage, leave,
+              and termination rules — pulled from a live compliance database covering all 50 states.
+            </p>
+            <button
+              onClick={() => setShowPricing(true)}
+              className="inline-flex items-center justify-center px-4 h-8 rounded-md text-xs font-medium bg-emerald-700 hover:bg-emerald-600 text-white"
+            >
+              See how Matcha works →
+            </button>
+          </section>
+        ) : (
+          <section
+            className="mt-20 p-8 rounded-2xl"
+            style={{ border: `1px solid ${t.line}`, backgroundColor: t.cardBg }}
           >
-            See how Matcha works →
-          </button>
-        </section>
+            <h2 className="text-2xl mb-3" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>
+              Need state-specific versions?
+            </h2>
+            <p className="text-sm mb-6 max-w-2xl" style={{ color: t.muted }}>
+              Matcha generates templates tailored to your state's wage, leave,
+              and termination rules — pulled from a live compliance database
+              covering all 50 states. Plus handbooks, policies, and offer letters
+              customized to your business.
+            </p>
+            <button
+              onClick={() => setShowPricing(true)}
+              className="inline-flex items-center justify-center px-5 h-10 rounded-full text-sm font-medium"
+              style={{ backgroundColor: INK, color: BG }}
+            >
+              See how Matcha works →
+            </button>
+          </section>
+        )}
       </main>
 
       {!embedded && <MarketingFooter />}

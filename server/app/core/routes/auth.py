@@ -1726,7 +1726,14 @@ async def register_business(request: BusinessRegister):
                         company_name=request.company_name,
                         headcount=request.headcount,
                     )
-            elif is_ir_only or is_resources_free or invitation or referring_broker_id:
+            elif is_resources_free:
+                # Free-tier copy — does NOT promise the full platform.
+                await email_service.send_resources_free_welcome_email(
+                    to_email=user["email"],
+                    to_name=request.name,
+                    company_name=request.company_name
+                )
+            elif is_ir_only or invitation or referring_broker_id:
                 await email_service.send_business_approved_email(
                     to_email=user["email"],
                     to_name=request.name,
@@ -1751,7 +1758,7 @@ async def register_business(request: BusinessRegister):
                 next_route = "/ir/onboarding"
                 msg = "Welcome to Matcha IR. Let's set up your team."
             elif is_resources_free:
-                next_route = "/resources"
+                next_route = "/app/resources"
                 msg = "Account created. Resources unlocked."
             elif invitation or referring_broker_id:
                 next_route = None

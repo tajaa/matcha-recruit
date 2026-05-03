@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { Zap } from 'lucide-react'
 import { Button } from '../../components/ui'
 
 import { useMe } from '../../hooks/useMe'
+import { isResourcesFreeTier } from '../../utils/tier'
 import { fetchDashboardStats, fetchDashboardFlags, analyzeDashboardFlags } from '../../api/dashboard'
 
 import {
@@ -23,17 +24,29 @@ export default function Dashboard() {
   const [flagsRefreshing, setFlagsRefreshing] = useState(false)
   const [loading, setLoading] = useState(true)
 
+  const resourcesFree = isResourcesFreeTier(me?.profile)
+
   useEffect(() => {
     if (meLoading) return
+    if (resourcesFree) {
+      // Resources-free tenants don't have employees/policies/flags — skip the
+      // dashboard fetches and let the redirect below send them to the hub.
+      setLoading(false)
+      return
+    }
 
     Promise.allSettled([
       fetchDashboardStats().then(setStats).catch(() => setStats(null)),
       fetchDashboardFlags().then(setFlagsData).catch(() => setFlagsData(null)),
     ]).finally(() => setLoading(false))
-  }, [meLoading])
+  }, [meLoading, resourcesFree])
 
   if (meLoading || loading) {
     return <p className="text-sm text-zinc-500">Loading...</p>
+  }
+
+  if (resourcesFree) {
+    return <Navigate to="/app/resources" replace />
   }
 
   const onboarding = me?.onboarding_needed ?? {}

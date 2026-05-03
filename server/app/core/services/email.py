@@ -2227,6 +2227,96 @@ In the meantime, you can log in to see your pending status. If you have any ques
         _subject = f"Registration Pending: {company_name}"
         return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
 
+    async def send_resources_free_welcome_email(
+        self,
+        to_email: str,
+        to_name: str,
+        company_name: str,
+    ) -> bool:
+        """Welcome email for resources_free signups.
+
+        Different copy from `send_business_approved_email` — free-tier accounts
+        only unlock templates, calculators, JDs, glossary, and the compliance
+        audit. They explicitly do NOT get the full platform.
+        """
+        if not self.is_configured():
+            logger.warning("Gmail not configured, skipping email send")
+            return False
+
+        app_base_url = self.settings.app_base_url
+        resources_url = f"{app_base_url}/app/resources"
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: 600; margin: 20px 0; font-size: 15px; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+        ul {{ padding-left: 20px; }}
+        li {{ margin: 6px 0; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {to_name},</p>
+            <p>Your free Matcha Resources account for <strong>{company_name}</strong> is ready.</p>
+            <p>You now have access to:</p>
+            <ul>
+                <li>14 editable HR document templates (DOCX)</li>
+                <li>62 ready-to-use job description templates (DOCX)</li>
+                <li>HR calculators (PTO, overtime, turnover cost, total comp)</li>
+                <li>Compliance audit — emailed gap report tailored to your business</li>
+                <li>HR glossary covering FLSA, FMLA, ACA, and the rest</li>
+            </ul>
+            <p style="text-align: center;">
+                <a href="{resources_url}" class="btn">Open Resources →</a>
+            </p>
+            <p style="color: #6b7280; font-size: 13px;">
+                Need incident reporting, employee records, or progressive discipline?
+                You can upgrade to Matcha Lite anytime from inside your account.
+            </p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {to_name},
+
+Your free Matcha Resources account for {company_name} is ready.
+
+You now have access to:
+- 14 editable HR document templates (DOCX)
+- 62 ready-to-use job description templates (DOCX)
+- HR calculators (PTO, overtime, turnover cost, total comp)
+- Compliance audit — emailed gap report tailored to your business
+- HR glossary covering FLSA, FMLA, ACA, and the rest
+
+Open Resources: {resources_url}
+
+Need incident reporting, employee records, or progressive discipline?
+You can upgrade to Matcha Lite anytime from inside your account.
+
+- Matcha
+"""
+
+        _subject = f"Your Matcha Resources account is ready"
+        return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
+
     async def send_business_approved_email(
         self,
         to_email: str,

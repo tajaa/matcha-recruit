@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { LogOut, Settings, ChevronDown } from 'lucide-react'
+import { LogOut, Settings, ChevronDown, Lock } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import { Logo } from './ui'
 import Avatar from './Avatar'
@@ -15,6 +15,10 @@ export type NavItem = {
   onSeen?: () => void
   /** Optional company feature flag — item is hidden when the flag is false. */
   feature?: string
+  /** Renders the item grayed out with a lock icon. Click fires `onLockedClick`
+   *  instead of navigating. Used for upgrade-gated tabs (e.g. IR for free tier). */
+  locked?: boolean
+  onLockedClick?: () => void
 }
 
 export type NavGroup = {
@@ -53,6 +57,21 @@ function NavItemLink({ item, location }: { item: NavItem; location: ReturnType<t
     }
     if (!isActive) seenRef.current = false
   }, [isActive, item.badge])
+
+  if (item.locked) {
+    return (
+      <button
+        type="button"
+        onClick={item.onLockedClick}
+        title="Upgrade required"
+        className="group relative flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] w-full text-left text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/20 transition-colors duration-100 cursor-pointer"
+      >
+        <item.icon className="h-4 w-4 flex-shrink-0 text-zinc-500 group-hover:text-zinc-300" strokeWidth={1.6} />
+        <span className="flex-1">{item.label}</span>
+        <Lock className="h-3 w-3 text-zinc-600 group-hover:text-emerald-400 flex-shrink-0" strokeWidth={2} />
+      </button>
+    )
+  }
 
   return (
     <NavLink

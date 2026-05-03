@@ -71,7 +71,7 @@ export default function Calculators({ embedded }: { embedded?: boolean }) {
     <div style={embedded ? { color: t.ink } : { backgroundColor: t.bg, color: t.ink, minHeight: '100vh' }}>
       {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
-      <main className={embedded ? 'pt-0 pb-8 max-w-[1100px]' : 'pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10'}>
+      <main className={embedded ? '' : 'pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10'}>
         <nav className="flex items-center gap-2 text-xs mb-8" style={{ color: t.muted }}>
           <Link to={root} className="hover:opacity-60">Resources</Link>
           <ChevronRight className="w-3 h-3" />
@@ -80,8 +80,8 @@ export default function Calculators({ embedded }: { embedded?: boolean }) {
 
         <header className="mb-14 max-w-2xl">
           <h1
-            className="text-5xl sm:text-6xl tracking-tight"
-            style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}
+            className={embedded ? "text-2xl font-semibold" : "text-5xl sm:text-6xl tracking-tight"}
+            style={embedded ? { color: t.ink } : { fontFamily: t.display, fontWeight: 500, color: t.ink }}
           >
             HR Calculators
           </h1>

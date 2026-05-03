@@ -197,8 +197,8 @@ function Intro({ t, onStart }: { t: ReturnType<typeof mkT>; onStart: () => void 
     <>
       <header className="mb-10">
         <h1
-          className="text-5xl sm:text-6xl tracking-tight"
-          style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}
+          className={embedded ? "text-2xl font-semibold" : "text-5xl sm:text-6xl tracking-tight"}
+          style={embedded ? { color: t.ink } : { fontFamily: t.display, fontWeight: 500, color: t.ink }}
         >
           12-Question HR Compliance Audit
         </h1>
@@ -255,7 +255,7 @@ function Context(props: {
     <>
       <header className="mb-8">
         <p className="text-xs uppercase tracking-wider mb-2" style={{ color: t.muted }}>Step 1 of 2</p>
-        <h2 className="text-3xl" style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}>
+        <h2 className="text-3xl" style={embedded ? { color: t.ink } : { fontFamily: t.display, fontWeight: 500, color: t.ink }}>
           Tell us about your business
         </h2>
         <p className="mt-2 text-sm" style={{ color: t.muted }}>
@@ -450,8 +450,8 @@ function Results(props: {
       <header className="mb-10">
         <p className="text-xs uppercase tracking-wider mb-2" style={{ color: t.muted }}>Your Gap Report</p>
         <h2
-          className="text-4xl sm:text-5xl tracking-tight"
-          style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}
+          className={embedded ? "text-2xl font-semibold" : "text-4xl sm:text-5xl tracking-tight"}
+          style={embedded ? { color: t.ink } : { fontFamily: t.display, fontWeight: 500, color: t.ink }}
         >
           Compliance score: {props.score}/100
         </h2>

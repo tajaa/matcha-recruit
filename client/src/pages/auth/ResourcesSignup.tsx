@@ -11,7 +11,7 @@ const MUTED = 'var(--color-ivory-muted)'
 const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 
-const DEFAULT_NEXT = '/resources/templates'
+const DEFAULT_NEXT = '/app/resources'
 
 /**
  * Free business-tier signup gating the HR resources hub.

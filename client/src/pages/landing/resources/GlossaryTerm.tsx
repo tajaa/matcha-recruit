@@ -53,7 +53,7 @@ export default function GlossaryTerm({ embedded }: { embedded?: boolean }) {
     return (
       <div style={embedded ? { color: t.ink } : { backgroundColor: t.bg, color: t.ink, minHeight: '100vh' }}>
         {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
-        <main className={embedded ? 'pt-0 pb-8 max-w-[760px] text-center' : 'pt-28 pb-20 max-w-[700px] mx-auto px-6 sm:px-10 text-center'}>
+        <main className={embedded ? 'text-center' : 'pt-28 pb-20 max-w-[700px] mx-auto px-6 sm:px-10 text-center'}>
           <h1 className="text-3xl mb-4" style={{ fontFamily: t.display, color: t.ink }}>
             Term not found
           </h1>
@@ -78,7 +78,7 @@ export default function GlossaryTerm({ embedded }: { embedded?: boolean }) {
     <div style={embedded ? { color: t.ink } : { backgroundColor: t.bg, color: t.ink, minHeight: '100vh' }}>
       {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
-      <main className={embedded ? 'pt-0 pb-8 max-w-[760px]' : 'pt-28 pb-20 max-w-[760px] mx-auto px-6 sm:px-10'}>
+      <main className={embedded ? '' : 'pt-28 pb-20 max-w-[760px] mx-auto px-6 sm:px-10'}>
         <nav className="flex items-center gap-2 text-xs mb-8 flex-wrap" style={{ color: t.muted }}>
           <Link to={root} className="hover:opacity-60">Resources</Link>
           <ChevronRight className="w-3 h-3" />
@@ -95,8 +95,8 @@ export default function GlossaryTerm({ embedded }: { embedded?: boolean }) {
             {CATEGORIES_LABEL[term.category].toUpperCase()}
           </span>
           <h1
-            className="text-4xl sm:text-5xl tracking-tight mb-3"
-            style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}
+            className={embedded ? "text-2xl font-semibold mb-2" : "text-4xl sm:text-5xl tracking-tight mb-3"}
+            style={embedded ? { color: t.ink } : { fontFamily: t.display, fontWeight: 500, color: t.ink }}
           >
             {term.abbreviation ?? term.term}
           </h1>

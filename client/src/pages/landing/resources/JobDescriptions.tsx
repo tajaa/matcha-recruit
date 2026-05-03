@@ -76,54 +76,69 @@ export default function JobDescriptions({ embedded }: { embedded?: boolean }) {
     <div style={embedded ? { color: t.ink } : { backgroundColor: t.bg, color: t.ink, minHeight: '100vh' }}>
       {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
-      <main className={embedded ? 'pt-0 pb-8 max-w-[1100px]' : 'pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10'}>
-        <nav className="flex items-center gap-2 text-xs mb-8 flex-wrap" style={{ color: t.muted }}>
-          <Link to={root} className="hover:opacity-60">Resources</Link>
-          <ChevronRight className="w-3 h-3" />
-          <Link to={`${root}/templates`} className="hover:opacity-60">Templates</Link>
-          <ChevronRight className="w-3 h-3" />
-          <span style={{ color: t.ink }}>Job Descriptions Library</span>
-        </nav>
+      <main className={embedded ? '' : 'pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10'}>
+        {!embedded && (
+          <nav className="flex items-center gap-2 text-xs mb-8 flex-wrap" style={{ color: t.muted }}>
+            <Link to={root} className="hover:opacity-60">Resources</Link>
+            <ChevronRight className="w-3 h-3" />
+            <Link to={`${root}/templates`} className="hover:opacity-60">Templates</Link>
+            <ChevronRight className="w-3 h-3" />
+            <span style={{ color: t.ink }}>Job Descriptions Library</span>
+          </nav>
+        )}
 
-        <header className="mb-10 max-w-2xl">
-          <h1
-            className="text-5xl sm:text-6xl tracking-tight"
-            style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}
-          >
-            Job Descriptions Library
-          </h1>
-          <p className="mt-4 text-base" style={{ color: t.muted }}>
-            {JOB_DESCRIPTIONS.length} ready-to-edit job descriptions across
-            {' '}{INDUSTRIES.length} industries. Pick the role you need —
-            no bulk download, no fluff.
-          </p>
-        </header>
+        {embedded ? (
+          <div className="mb-5">
+            <h1 className="text-2xl font-semibold text-zinc-100">Job Descriptions</h1>
+            <p className="mt-1 text-sm text-zinc-500">
+              {JOB_DESCRIPTIONS.length} ready-to-edit job descriptions across {INDUSTRIES.length} industries.
+            </p>
+          </div>
+        ) : (
+          <header className="mb-10 max-w-2xl">
+            <h1
+              className="text-5xl sm:text-6xl tracking-tight"
+              style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}
+            >
+              Job Descriptions Library
+            </h1>
+            <p className="mt-4 text-base" style={{ color: t.muted }}>
+              {JOB_DESCRIPTIONS.length} ready-to-edit job descriptions across
+              {' '}{INDUSTRIES.length} industries. Pick the role you need —
+              no bulk download, no fluff.
+            </p>
+          </header>
+        )}
 
-        <div className="mb-6">
+        <div className={embedded ? 'mb-3' : 'mb-6'}>
           <div
-            className="flex items-center gap-3 px-4 h-12 rounded-full max-w-md"
-            style={{ border: `1px solid ${t.line}` }}
+            className={embedded
+              ? 'flex items-center gap-2 px-3 h-9 rounded-md max-w-md border border-zinc-800'
+              : 'flex items-center gap-3 px-4 h-12 rounded-full max-w-md'}
+            style={embedded ? undefined : { border: `1px solid ${t.line}` }}
           >
-            <Search className="w-4 h-4" style={{ color: t.muted }} />
+            <Search className={embedded ? 'w-3.5 h-3.5 text-zinc-500' : 'w-4 h-4'} style={embedded ? undefined : { color: t.muted }} />
             <input
               type="text"
-              placeholder="Search roles (nurse, line cook, recruiter…)"
+              placeholder="Search roles…"
               value={query}
               onChange={e => setQuery(e.target.value)}
-              className="flex-1 bg-transparent outline-none text-sm"
-              style={{ color: t.ink }}
+              className={embedded
+                ? 'flex-1 bg-transparent outline-none text-xs text-zinc-200 placeholder:text-zinc-500'
+                : 'flex-1 bg-transparent outline-none text-sm'}
+              style={embedded ? undefined : { color: t.ink }}
             />
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 mb-10">
-          <FilterChip t={t} active={filter === 'all'} onClick={() => setFilter('all')}>
+        <div className={embedded ? 'flex flex-wrap gap-1.5 mb-5' : 'flex flex-wrap gap-2 mb-10'}>
+          <FilterChip t={t} embedded={embedded}active={filter === 'all'} onClick={() => setFilter('all')}>
             All ({JOB_DESCRIPTIONS.length})
           </FilterChip>
           {INDUSTRIES.map(ind => {
             const count = JOB_DESCRIPTIONS.filter(j => j.industry === ind).length
             return (
-              <FilterChip t={t} key={ind} active={filter === ind} onClick={() => setFilter(ind)}>
+              <FilterChip t={t} embedded={embedded}key={ind} active={filter === ind} onClick={() => setFilter(ind)}>
                 {ind} ({count})
               </FilterChip>
             )
@@ -133,58 +148,96 @@ export default function JobDescriptions({ embedded }: { embedded?: boolean }) {
         {grouped.size === 0 ? (
           <p style={{ color: t.muted }}>No roles match "{query}".</p>
         ) : (
-          <div className="flex flex-col gap-10">
+          <div className={embedded ? 'flex flex-col gap-6' : 'flex flex-col gap-10'}>
             {Array.from(grouped.entries()).map(([industry, jobs]) => (
               <section key={industry}>
-                <h2
-                  className="text-2xl mb-4 pb-2"
-                  style={{
-                    fontFamily: t.display, color: t.ink, fontWeight: 500,
-                    borderBottom: `1px solid ${t.line}`,
-                  }}
-                >
-                  {industry} <span style={{ color: t.muted, fontSize: '0.875rem', fontWeight: 400 }}>({jobs.length})</span>
-                </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {embedded ? (
+                  <h2 className="text-xs uppercase tracking-wider font-medium text-zinc-400 mb-3 pb-2 border-b border-zinc-800">
+                    {industry} <span className="text-zinc-600 normal-case font-normal">({jobs.length})</span>
+                  </h2>
+                ) : (
+                  <h2
+                    className="text-2xl mb-4 pb-2"
+                    style={{
+                      fontFamily: t.display, color: t.ink, fontWeight: 500,
+                      borderBottom: `1px solid ${t.line}`,
+                    }}
+                  >
+                    {industry} <span style={{ color: t.muted, fontSize: '0.875rem', fontWeight: 400 }}>({jobs.length})</span>
+                  </h2>
+                )}
+                <div className={embedded ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2' : 'grid grid-cols-1 sm:grid-cols-2 gap-3'}>
                   {jobs.map(j => (
-                    <article
-                      key={j.slug}
-                      className="p-4 rounded-xl flex flex-col"
-                      style={{ border: `1px solid ${t.line}` }}
-                    >
-                      <div className="flex items-start gap-3 mb-2">
-                        <FileText className="w-4 h-4 mt-1 flex-shrink-0" style={{ color: t.ink }} />
-                        <Link
-                          to={`${root}/templates/job-descriptions/${j.slug}`}
-                          className="text-base flex-1 hover:opacity-70"
-                          style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}
-                        >
-                          {j.title}
-                        </Link>
-                      </div>
-                      <p className="text-xs mb-4 ml-7" style={{ color: t.muted }}>
-                        {j.description}
-                      </p>
-                      <div className="ml-7 flex items-center gap-2">
-                        <Link
-                          to={`${root}/templates/job-descriptions/${j.slug}`}
-                          className="text-xs px-3 h-7 rounded-full inline-flex items-center hover:opacity-80"
-                          style={{ border: `1px solid ${t.line}`, color: t.muted }}
-                        >
-                          View
-                        </Link>
-                        {j.downloadUrl && (
-                          <button
-                            onClick={() => handleDownload(j)}
-                            className="inline-flex items-center gap-1 text-xs px-3 h-7 rounded-full hover:opacity-80"
-                            style={t.btnPrimary}
+                    embedded ? (
+                      <article key={j.slug} className="p-3 rounded-md border border-zinc-800 hover:border-zinc-700 flex flex-col">
+                        <div className="flex items-start gap-2 mb-1.5">
+                          <FileText className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-zinc-400" />
+                          <Link
+                            to={`${root}/templates/job-descriptions/${j.slug}`}
+                            className="text-sm font-medium text-zinc-100 flex-1 hover:text-emerald-400"
                           >
-                            <Download className="w-3 h-3" />
-                            DOCX
-                          </button>
-                        )}
-                      </div>
-                    </article>
+                            {j.title}
+                          </Link>
+                        </div>
+                        <p className="text-[11px] mb-3 ml-5 text-zinc-500 line-clamp-2">{j.description}</p>
+                        <div className="ml-5 flex items-center gap-1.5">
+                          <Link
+                            to={`${root}/templates/job-descriptions/${j.slug}`}
+                            className="text-[11px] px-2 h-6 rounded-md inline-flex items-center border border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
+                          >
+                            View
+                          </Link>
+                          {j.downloadUrl && (
+                            <button
+                              onClick={() => handleDownload(j)}
+                              className="inline-flex items-center gap-1 text-[11px] px-2 h-6 rounded-md bg-emerald-700 hover:bg-emerald-600 text-white font-medium"
+                            >
+                              <Download className="w-3 h-3" />
+                              DOCX
+                            </button>
+                          )}
+                        </div>
+                      </article>
+                    ) : (
+                      <article
+                        key={j.slug}
+                        className="p-4 rounded-xl flex flex-col"
+                        style={{ border: `1px solid ${t.line}` }}
+                      >
+                        <div className="flex items-start gap-3 mb-2">
+                          <FileText className="w-4 h-4 mt-1 flex-shrink-0" style={{ color: t.ink }} />
+                          <Link
+                            to={`${root}/templates/job-descriptions/${j.slug}`}
+                            className="text-base flex-1 hover:opacity-70"
+                            style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}
+                          >
+                            {j.title}
+                          </Link>
+                        </div>
+                        <p className="text-xs mb-4 ml-7" style={{ color: t.muted }}>
+                          {j.description}
+                        </p>
+                        <div className="ml-7 flex items-center gap-2">
+                          <Link
+                            to={`${root}/templates/job-descriptions/${j.slug}`}
+                            className="text-xs px-3 h-7 rounded-full inline-flex items-center hover:opacity-80"
+                            style={{ border: `1px solid ${t.line}`, color: t.muted }}
+                          >
+                            View
+                          </Link>
+                          {j.downloadUrl && (
+                            <button
+                              onClick={() => handleDownload(j)}
+                              className="inline-flex items-center gap-1 text-xs px-3 h-7 rounded-full hover:opacity-80"
+                              style={t.btnPrimary}
+                            >
+                              <Download className="w-3 h-3" />
+                              DOCX
+                            </button>
+                          )}
+                        </div>
+                      </article>
+                    )
                   ))}
                 </div>
               </section>
@@ -192,6 +245,23 @@ export default function JobDescriptions({ embedded }: { embedded?: boolean }) {
           </div>
         )}
 
+        {embedded ? (
+          <section className="mt-8 p-5 rounded-lg border border-zinc-800 bg-zinc-900/30">
+            <h2 className="text-base font-medium text-zinc-100 mb-1">
+              Custom job descriptions for your business
+            </h2>
+            <p className="text-xs text-zinc-500 mb-4 max-w-2xl">
+              Matcha generates JDs tailored to your business — specific responsibilities,
+              comp range, BFOQ-safe requirements, and DEI-reviewed language.
+            </p>
+            <button
+              onClick={() => setShowPricing(true)}
+              className="inline-flex items-center justify-center px-4 h-8 rounded-md text-xs font-medium bg-emerald-700 hover:bg-emerald-600 text-white"
+            >
+              Talk to sales →
+            </button>
+          </section>
+        ) : (
         <section
           className="mt-20 p-8 rounded-2xl"
           style={{ border: `1px solid ${t.line}`, backgroundColor: t.cardBg }}
@@ -220,6 +290,7 @@ export default function JobDescriptions({ embedded }: { embedded?: boolean }) {
             </button>
           </div>
         </section>
+        )}
       </main>
 
       {!embedded && <MarketingFooter />}
@@ -228,7 +299,21 @@ export default function JobDescriptions({ embedded }: { embedded?: boolean }) {
   )
 }
 
-function FilterChip({ t, active, onClick, children }: { t: ReturnType<typeof mkT>; active: boolean; onClick: () => void; children: React.ReactNode }) {
+function FilterChip({ t, active, onClick, children, embedded }: { t: ReturnType<typeof mkT>; active: boolean; onClick: () => void; children: React.ReactNode; embedded?: boolean }) {
+  if (embedded) {
+    return (
+      <button
+        onClick={onClick}
+        className={`text-[11px] px-2.5 h-6 rounded-md transition-colors ${
+          active
+            ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
+            : 'bg-transparent text-zinc-400 hover:text-zinc-200 border border-zinc-800 hover:border-zinc-700'
+        }`}
+      >
+        {children}
+      </button>
+    )
+  }
   return (
     <button
       onClick={onClick}

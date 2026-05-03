@@ -63,152 +63,180 @@ export default function JobDescriptionDetail({ embedded }: { embedded?: boolean 
     <div style={embedded ? { color: t.ink } : { backgroundColor: t.bg, color: t.ink, minHeight: '100vh' }}>
       {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
-      <main className={embedded ? 'pt-0 pb-8 max-w-[900px]' : 'pt-28 pb-20 max-w-[900px] mx-auto px-6 sm:px-10'}>
-        <nav className="flex items-center gap-2 text-xs mb-8 flex-wrap" style={{ color: t.muted }}>
-          <Link to={root} className="hover:opacity-60">Resources</Link>
-          <ChevronRight className="w-3 h-3" />
-          <Link to={`${root}/templates`} className="hover:opacity-60">Templates</Link>
-          <ChevronRight className="w-3 h-3" />
-          <Link to={`${root}/templates/job-descriptions`} className="hover:opacity-60">Job Descriptions</Link>
-          <ChevronRight className="w-3 h-3" />
-          <span style={{ color: t.ink }}>{jd.title}</span>
-        </nav>
+      <main className={embedded ? 'max-w-[900px]' : 'pt-28 pb-20 max-w-[900px] mx-auto px-6 sm:px-10'}>
+        {!embedded && (
+          <nav className="flex items-center gap-2 text-xs mb-8 flex-wrap" style={{ color: t.muted }}>
+            <Link to={root} className="hover:opacity-60">Resources</Link>
+            <ChevronRight className="w-3 h-3" />
+            <Link to={`${root}/templates`} className="hover:opacity-60">Templates</Link>
+            <ChevronRight className="w-3 h-3" />
+            <Link to={`${root}/templates/job-descriptions`} className="hover:opacity-60">Job Descriptions</Link>
+            <ChevronRight className="w-3 h-3" />
+            <span style={{ color: t.ink }}>{jd.title}</span>
+          </nav>
+        )}
 
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-6 mb-10">
-          <div>
-            <span
-              className="inline-block text-[10px] tracking-wider uppercase px-2 py-1 rounded mb-3"
-              style={{ border: `1px solid ${t.line}`, color: t.muted }}
-            >
-              {jd.industry}
-            </span>
-            <h1
-              className="text-4xl sm:text-5xl tracking-tight"
-              style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}
-            >
-              {jd.title}
-            </h1>
-            <p className="mt-3 text-sm" style={{ color: t.muted }}>{jd.description}</p>
-          </div>
-          <div className="shrink-0">
+        {embedded ? (
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
+            <div className="flex-1">
+              <Link to={`${root}/templates/job-descriptions`} className="text-xs text-zinc-500 hover:text-zinc-300 mb-2 inline-flex items-center gap-1">
+                ← Back to library
+              </Link>
+              <span className="inline-block text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-zinc-800 text-zinc-500 mb-2 ml-2">
+                {jd.industry}
+              </span>
+              <h1 className="text-2xl font-semibold text-zinc-100">{jd.title}</h1>
+              <p className="mt-1 text-sm text-zinc-500">{jd.description}</p>
+            </div>
             <button
               onClick={handleDownload}
-              className="inline-flex items-center gap-2 px-5 h-11 rounded-full text-sm font-medium whitespace-nowrap"
-              style={t.btnPrimary}
+              className="inline-flex items-center gap-1.5 px-4 h-9 rounded-md text-sm font-medium whitespace-nowrap bg-emerald-700 hover:bg-emerald-600 text-white"
             >
               <Download className="w-4 h-4" />
-              {isLoggedIn ? 'Download DOCX' : 'Download DOCX (free)'}
+              Download DOCX
             </button>
-            {!isLoggedIn && (
-              <p className="text-xs mt-2 text-center" style={{ color: t.muted }}>
-                Free account required
-              </p>
-            )}
           </div>
-        </div>
+        ) : (
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-6 mb-10">
+            <div>
+              <span
+                className="inline-block text-[10px] tracking-wider uppercase px-2 py-1 rounded mb-3"
+                style={{ border: `1px solid ${t.line}`, color: t.muted }}
+              >
+                {jd.industry}
+              </span>
+              <h1
+                className="text-4xl sm:text-5xl tracking-tight"
+                style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}
+              >
+                {jd.title}
+              </h1>
+              <p className="mt-3 text-sm" style={{ color: t.muted }}>{jd.description}</p>
+            </div>
+            <div className="shrink-0">
+              <button
+                onClick={handleDownload}
+                className="inline-flex items-center gap-2 px-5 h-11 rounded-full text-sm font-medium whitespace-nowrap"
+                style={t.btnPrimary}
+              >
+                <Download className="w-4 h-4" />
+                {isLoggedIn ? 'Download DOCX' : 'Download DOCX (free)'}
+              </button>
+              {!isLoggedIn && (
+                <p className="text-xs mt-2 text-center" style={{ color: t.muted }}>
+                  Free account required
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
-        <article className="flex flex-col gap-8">
-          <JDSection t={t} heading="Job Summary">
-            <p className="text-sm leading-relaxed" style={{ color: t.ink }}>{content.summary}</p>
+        <article className={embedded ? 'flex flex-col gap-5' : 'flex flex-col gap-8'}>
+          <JDSection t={t} heading="Job Summary" embedded={embedded}>
+            <p className={embedded ? 'text-sm leading-relaxed text-zinc-300' : 'text-sm leading-relaxed'} style={embedded ? undefined : { color: t.ink }}>{content.summary}</p>
           </JDSection>
 
-          <JDSection t={t} heading="Key Responsibilities">
-            <ul className="flex flex-col gap-2">
+          <JDSection t={t} heading="Key Responsibilities" embedded={embedded}>
+            <ul className="flex flex-col gap-1.5">
               {content.responsibilities.map((r, i) => (
-                <li key={i} className="flex items-start gap-3 text-sm" style={{ color: t.ink }}>
-                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: t.ink, opacity: 0.4 }} />
+                <li key={i} className={embedded ? 'flex items-start gap-2 text-sm text-zinc-300' : 'flex items-start gap-3 text-sm'} style={embedded ? undefined : { color: t.ink }}>
+                  <span className="mt-1.5 w-1 h-1 rounded-full shrink-0 bg-zinc-500" />
                   {r}
                 </li>
               ))}
             </ul>
           </JDSection>
 
-          <JDSection t={t} heading="Requirements">
-            <ul className="flex flex-col gap-2">
+          <JDSection t={t} heading="Requirements" embedded={embedded}>
+            <ul className="flex flex-col gap-1.5">
               {content.requirements.map((r, i) => (
-                <li key={i} className="flex items-start gap-3 text-sm" style={{ color: t.ink }}>
-                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: t.ink, opacity: 0.4 }} />
+                <li key={i} className={embedded ? 'flex items-start gap-2 text-sm text-zinc-300' : 'flex items-start gap-3 text-sm'} style={embedded ? undefined : { color: t.ink }}>
+                  <span className="mt-1.5 w-1 h-1 rounded-full shrink-0 bg-zinc-500" />
                   {r}
                 </li>
               ))}
             </ul>
           </JDSection>
 
-          <JDSection t={t} heading="Preferred Qualifications">
-            <ul className="flex flex-col gap-2">
+          <JDSection t={t} heading="Preferred Qualifications" embedded={embedded}>
+            <ul className="flex flex-col gap-1.5">
               {content.preferred.map((r, i) => (
-                <li key={i} className="flex items-start gap-3 text-sm" style={{ color: t.ink }}>
-                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: t.ink, opacity: 0.4 }} />
+                <li key={i} className={embedded ? 'flex items-start gap-2 text-sm text-zinc-300' : 'flex items-start gap-3 text-sm'} style={embedded ? undefined : { color: t.ink }}>
+                  <span className="mt-1.5 w-1 h-1 rounded-full shrink-0 bg-zinc-500" />
                   {r}
                 </li>
               ))}
             </ul>
           </JDSection>
 
-          <JDSection t={t} heading="Compensation & Benefits">
-            <p className="text-sm leading-relaxed" style={{ color: t.muted }}>
+          <JDSection t={t} heading="Compensation & Benefits" embedded={embedded}>
+            <p className={embedded ? 'text-sm leading-relaxed text-zinc-500' : 'text-sm leading-relaxed'} style={embedded ? undefined : { color: t.muted }}>
               Compensation is competitive and commensurate with experience. We offer a comprehensive benefits
               package including health, dental, vision, retirement savings, paid time off, and other benefits
               as described in the Employee Handbook. [Insert specific compensation range and benefits details.]
             </p>
           </JDSection>
 
-          <JDSection t={t} heading="Equal Opportunity Employer">
-            <p className="text-sm leading-relaxed" style={{ color: t.muted }}>{EEO_STATEMENT}</p>
+          <JDSection t={t} heading="Equal Opportunity Employer" embedded={embedded}>
+            <p className={embedded ? 'text-sm leading-relaxed text-zinc-500' : 'text-sm leading-relaxed'} style={embedded ? undefined : { color: t.muted }}>{EEO_STATEMENT}</p>
           </JDSection>
         </article>
 
-        <div
-          className="mt-12 p-6 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
-          style={{ border: `1px solid ${t.line}` }}
-        >
-          <div>
-            <p className="text-sm font-medium mb-1" style={{ color: t.ink, fontFamily: t.display }}>
-              Download the editable DOCX
-            </p>
-            <p className="text-xs" style={{ color: t.muted }}>
-              Free account • No card • DOCX file ready to customize
-            </p>
-          </div>
-          <button
-            onClick={handleDownload}
-            className="inline-flex items-center gap-2 px-5 h-10 rounded-full text-sm font-medium shrink-0"
-            style={t.btnPrimary}
-          >
-            <Download className="w-4 h-4" />
-            {isLoggedIn ? 'Download DOCX' : 'Get free download'}
-          </button>
-        </div>
+        {!embedded && (
+          <>
+            <div
+              className="mt-12 p-6 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+              style={{ border: `1px solid ${t.line}` }}
+            >
+              <div>
+                <p className="text-sm font-medium mb-1" style={{ color: t.ink, fontFamily: t.display }}>
+                  Download the editable DOCX
+                </p>
+                <p className="text-xs" style={{ color: t.muted }}>
+                  Free account • No card • DOCX file ready to customize
+                </p>
+              </div>
+              <button
+                onClick={handleDownload}
+                className="inline-flex items-center gap-2 px-5 h-10 rounded-full text-sm font-medium shrink-0"
+                style={t.btnPrimary}
+              >
+                <Download className="w-4 h-4" />
+                {isLoggedIn ? 'Download DOCX' : 'Get free download'}
+              </button>
+            </div>
 
-        <section
-          className="mt-10 p-8 rounded-2xl"
-          style={{ border: `1px solid ${t.line}`, backgroundColor: t.cardBg }}
-        >
-          <h2 className="text-2xl mb-3" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>
-            Matcha keeps your HR compliant
-          </h2>
-          <p className="text-sm mb-6 max-w-2xl" style={{ color: t.muted }}>
-            Job descriptions are just the start. Matcha tracks employment law across all 50 states,
-            manages employee records, and automates incident reporting — so your HR team stays ahead
-            of what the law requires.
-          </p>
-          <div className="flex flex-wrap gap-3">
-            <Link
-              to="/signup"
-              className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
-              style={t.btnPrimary}
+            <section
+              className="mt-10 p-8 rounded-2xl"
+              style={{ border: `1px solid ${t.line}`, backgroundColor: t.cardBg }}
             >
-              Get started free →
-            </Link>
-            <button
-              onClick={() => setShowPricing(true)}
-              className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
-              style={t.btnOutline}
-            >
-              Talk to sales
-            </button>
-          </div>
-        </section>
+              <h2 className="text-2xl mb-3" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>
+                Matcha keeps your HR compliant
+              </h2>
+              <p className="text-sm mb-6 max-w-2xl" style={{ color: t.muted }}>
+                Job descriptions are just the start. Matcha tracks employment law across all 50 states,
+                manages employee records, and automates incident reporting — so your HR team stays ahead
+                of what the law requires.
+              </p>
+              <div className="flex flex-wrap gap-3">
+                <Link
+                  to="/signup"
+                  className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
+                  style={t.btnPrimary}
+                >
+                  Get started free →
+                </Link>
+                <button
+                  onClick={() => setShowPricing(true)}
+                  className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
+                  style={t.btnOutline}
+                >
+                  Talk to sales
+                </button>
+              </div>
+            </section>
+          </>
+        )}
       </main>
 
       {!embedded && <MarketingFooter />}
@@ -217,7 +245,17 @@ export default function JobDescriptionDetail({ embedded }: { embedded?: boolean 
   )
 }
 
-function JDSection({ t, heading, children }: { t: ReturnType<typeof mkT>; heading: string; children: React.ReactNode }) {
+function JDSection({ t, heading, children, embedded }: { t: ReturnType<typeof mkT>; heading: string; children: React.ReactNode; embedded?: boolean }) {
+  if (embedded) {
+    return (
+      <section>
+        <h2 className="text-xs uppercase tracking-wider font-medium text-zinc-400 mb-2 pb-1.5 border-b border-zinc-800">
+          {heading}
+        </h2>
+        {children}
+      </section>
+    )
+  }
   return (
     <section>
       <h2
