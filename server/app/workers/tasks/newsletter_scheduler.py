@@ -42,17 +42,20 @@ async def _dispatch_newsletter_scheduler() -> dict:
     sent = 0
     for row in due:
         newsletter_id: UUID = row["id"]
-        claimed = await newsletter_service.claim_scheduled_newsletter(newsletter_id)
-        if not claimed:
-            # Another beat won the race or the row was unscheduled before
-            # this beat picked it up.
-            continue
         try:
-            # Reuse the existing transactional send pipeline. send_newsletter
-            # accepts in-flight 'sending' status so the claim doesn't trip
-            # its idempotency guard.
+            # send_newsletter performs its own atomic UPDATE that flips
+            # status from 'scheduled' (or stale 'sending') to 'sending' in
+            # one statement, which is also the race-safe claim — two beats
+            # firing concurrently can't both claim the same row. We don't
+            # pre-claim here because that would set status='sending' and
+            # then send_newsletter's WHERE clause would reject the same row.
             await newsletter_service.send_newsletter(newsletter_id, actor_id=None)
             sent += 1
+        except ValueError:
+            # send_newsletter raises if the row was already claimed by
+            # another beat or the user manually un-scheduled it. Both are
+            # benign — skip silently.
+            continue
         except Exception as exc:
             print(f"[Newsletter Scheduler] Send failed for {newsletter_id}: {exc}")
             # Roll back to scheduled so the next beat retries, but bump the

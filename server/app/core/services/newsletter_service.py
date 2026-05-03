@@ -1,5 +1,7 @@
 """Newsletter service — subscriber management, newsletter composition, and sending.
 
+
+
 Hardened for compliance + ops per the audit:
 - Double opt-in: new subscribes start `pending` and require email confirmation
 - Full SHA-256 HMAC for unsubscribe and confirmation tokens (no truncation)
@@ -17,6 +19,7 @@ Hardened for compliance + ops per the audit:
 import asyncio
 import hashlib
 import hmac
+import html as html_lib
 import json
 import logging
 import re
@@ -837,10 +840,14 @@ def _rewrite_links_for_tracking(
 
     def _replace(match: re.Match) -> str:
         quote_char = match.group(1)
-        target = match.group(2)
-        if target in skip_urls or target.startswith(f"{base_url}/api/newsletter/track/"):
+        # bleach normalizes attribute values — `&` in the original URL ends
+        # up as `&amp;` in the HTML attribute. Decode entities back to the
+        # raw URL before forwarding so the click endpoint redirects to the
+        # actual target rather than a literal `&amp;`-bearing string.
+        raw_target = html_lib.unescape(match.group(2))
+        if raw_target in skip_urls or raw_target.startswith(f"{base_url}/api/newsletter/track/"):
             return match.group(0)
-        wrapped = f"{base_url}/api/newsletter/track/click/{send_id}?to={quote(target, safe='')}"
+        wrapped = f"{base_url}/api/newsletter/track/click/{send_id}?to={quote(raw_target, safe='')}"
         return f"href={quote_char}{wrapped}{quote_char}"
 
     return _HREF_RE.sub(_replace, html)
