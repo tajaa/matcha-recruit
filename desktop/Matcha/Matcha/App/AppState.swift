@@ -22,6 +22,8 @@ class AppState {
     /// macOS won't re-show the system dialog after the user denies once,
     /// so we surface our own prompt on every app activate.
     var showNotificationReprompt: Bool = false
+    var showChannelAdminWizard: Bool = false
+    var channelAdminWizardMode: ChannelAdminWizardMode = .create
 
     var mwBetaLite: Bool {
         betaFeatures["matcha_work_beta_lite"] == true || betaFeatures["matcha_work_beta_full"] == true

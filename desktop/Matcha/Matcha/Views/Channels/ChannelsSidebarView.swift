@@ -9,6 +9,7 @@ struct ChannelsSidebarView: View {
     @State private var errorMessage: String?
     @State private var channelPendingDelete: ChannelSummary?
     @State private var isDeleting = false
+    @AppStorage("channel-admin-wizard-shown-v1") private var hasSeenWizard = false
 
     var body: some View {
         content
@@ -227,10 +228,26 @@ struct ChannelsSidebarView: View {
             // API returned fresh unread counts — local overrides are now stale.
             appState.channelUnreadOverrides = [:]
             isLoading = false
+            maybeAutoShowAdminWizard(list)
         } catch {
             errorMessage = error.localizedDescription
             isLoading = false
         }
+    }
+
+    /// Show the channel admin wizard once on first launch for likely admins:
+    /// personal/individual users (creator track) OR users who already own a
+    /// channel. Single-shot — `hasSeenWizard` flips true after the user
+    /// closes the wizard.
+    private func maybeAutoShowAdminWizard(_ list: [ChannelSummary]) {
+        guard !hasSeenWizard else { return }
+        guard !appState.showChannelAdminWizard else { return }
+        let role = appState.currentUser?.role ?? ""
+        let isCreatorTrack = role == "individual" || role == "admin"
+        let ownsChannel = list.contains { ($0.myRole ?? "") == "owner" }
+        guard isCreatorTrack || ownsChannel else { return }
+        appState.channelAdminWizardMode = .create
+        appState.showChannelAdminWizard = true
     }
 }
 

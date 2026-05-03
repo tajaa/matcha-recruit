@@ -46,7 +46,24 @@ struct ContentView: View {
                             icon: "number",
                             isOpen: $channelsSectionOpen,
                             trailing: {
-                                Button { showCreateChannel = true } label: {
+                                Menu {
+                                    Button("New channel") {
+                                        appState.channelAdminWizardMode = .create
+                                        appState.showChannelAdminWizard = true
+                                    }
+                                    Button("Quick create (no guide)") {
+                                        showCreateChannel = true
+                                    }
+                                    Divider()
+                                    Button("Channel admin guide") {
+                                        if let id = appState.selectedChannelId {
+                                            appState.channelAdminWizardMode = .manage(channelId: id)
+                                        } else {
+                                            appState.channelAdminWizardMode = .create
+                                        }
+                                        appState.showChannelAdminWizard = true
+                                    }
+                                } label: {
                                     Image(systemName: "plus")
                                         .font(.system(size: 10, weight: .semibold))
                                         .foregroundColor(.secondary)
@@ -54,8 +71,10 @@ struct ContentView: View {
                                         .background(Color.zinc800)
                                         .cornerRadius(4)
                                 }
-                                .buttonStyle(.plain)
-                                .help("New channel")
+                                .menuStyle(.borderlessButton)
+                                .menuIndicator(.hidden)
+                                .frame(width: 22, height: 18)
+                                .help("New channel · admin guide")
                             }
                         ) {
                             ChannelsSidebarView(showHeader: false)
@@ -329,6 +348,14 @@ struct ContentView: View {
                 appState.channelsListGeneration &+= 1
                 NotificationCenter.default.post(name: .mwChannelCreated, object: newChannel.id)
             }
+        }
+        .sheet(isPresented: $appState.showChannelAdminWizard, onDismiss: {
+            // Latch the "seen" flag on every dismissal route — Esc, click-out,
+            // explicit Close button. Skipping this here lets the auto-show
+            // re-fire on the next channels reload.
+            UserDefaults.standard.set(true, forKey: "channel-admin-wizard-shown-v1")
+        }) {
+            ChannelAdminWizardView(mode: appState.channelAdminWizardMode)
         }
         .sheet(isPresented: $showNewConsultation) {
             NewConsultationSheet { created in

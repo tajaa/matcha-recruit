@@ -32,6 +32,12 @@ struct ChannelDetailView: View {
     @State private var showInviteSheet = false
     @State private var inviteToast: String?
 
+    private var isAdmin: Bool {
+        let role = channel?.myRole ?? ""
+        let global = appState.currentUser?.role ?? ""
+        return role == "owner" || role == "moderator" || global == "admin"
+    }
+
     private let ws = ChannelsWebSocket.shared
     private let senderColumnWidth: CGFloat = 160
     private let maxAttachments = 5
@@ -135,6 +141,18 @@ struct ChannelDetailView: View {
                     }
                     .buttonStyle(.plain)
                     .help("Invite users to this channel")
+                    if isAdmin {
+                        Button {
+                            appState.channelAdminWizardMode = .manage(channelId: channelId)
+                            appState.showChannelAdminWizard = true
+                        } label: {
+                            Image(systemName: "questionmark.circle")
+                                .font(.system(size: 11))
+                                .foregroundColor(.white.opacity(0.5))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Channel admin guide")
+                    }
                 }
             }
             if let desc = channel?.description, !desc.isEmpty {
