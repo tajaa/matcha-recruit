@@ -245,7 +245,7 @@ class BounceEvent(BaseModel):
 
 
 @public_router.post("/bounce")
-async def bounce_webhook(body: BounceEvent, request: Request):
+async def bounce_webhook(request: Request):
     """Email-provider bounce callback.
 
     Authenticated EITHER via:
@@ -259,10 +259,17 @@ async def bounce_webhook(body: BounceEvent, request: Request):
 
     Soft bounces increment the subscriber's soft_bounce_count and flip
     them to 'bounced' at SOFT_BOUNCE_LIMIT. Hard bounces flip immediately.
+
+    NOTE: Body is read directly off `request.body()` BEFORE pydantic parsing
+    so the HMAC always sees the exact bytes the provider signed. Declaring a
+    Pydantic body parameter would have FastAPI consume the stream first; the
+    cached re-read works today but breaks if a custom middleware ever wraps
+    the request body. Manual parsing is more robust.
     """
     from ...config import get_settings
     import hmac as _hmac
     import hashlib as _hashlib
+    import json as _json
 
     expected = (get_settings().newsletter_bounce_secret or "").strip()
     if not expected:
@@ -285,6 +292,15 @@ async def bounce_webhook(body: BounceEvent, request: Request):
             logger.info("Newsletter bounce webhook authed via legacy X-Bounce-Secret — migrate to X-Bounce-Signature")
     if not authed:
         raise HTTPException(status_code=401, detail="Bad secret")
+
+    try:
+        payload = _json.loads(raw_body or b"{}")
+    except _json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    try:
+        body = BounceEvent.model_validate(payload)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid bounce body: {exc}")
 
     target = body.subscriber_id or body.email
     if body.type == "soft":

@@ -31,7 +31,7 @@ type GrowthPoint = { day: string; subscribed: number; confirmed: number }
 
 type Analytics = {
   attempted: number; sent: number; failed: number
-  opened: number; clicked_unique: number; clicked_total: number
+  opened: number; clicked: number
   bounced: number; unsubscribed_window: number
   open_rate: number; click_rate: number; bounce_rate: number; unsubscribe_rate: number
 }
@@ -74,6 +74,9 @@ export default function NewsletterAdmin() {
   // Live progress for the in-flight newsletter (polled while sending).
   const [progress, setProgress] = useState<Progress | null>(null)
   const progressTargetRef = useRef<string | null>(null)
+  // Stop signal for the polling loop. Setting `.current = true` halts the
+  // active loop on its next tick. A new loop resets it.
+  const progressStopRef = useRef(false)
 
   // Per-newsletter analytics drawer
   const [analyticsOpen, setAnalyticsOpen] = useState<string | null>(null)
@@ -107,18 +110,21 @@ export default function NewsletterAdmin() {
   }
 
   // Poll send progress every 3s while a newsletter is in 'sending' state.
+  // The polling loop is keyed on a unique target id (the newsletter being
+  // sent). The previous version re-fired on every status change and could
+  // briefly run two parallel `tick()` loops; this one uses a single ref
+  // flag so only one loop is ever active.
   useEffect(() => {
     const target = progressTargetRef.current
-    if (!target) return
-    let stopped = false
+    if (!target || progress?.newsletter_status !== 'sending') return
+    progressStopRef.current = false
     async function tick() {
-      while (!stopped) {
+      while (!progressStopRef.current) {
         try {
           const p = await api.get<Progress>(`/admin/newsletter/newsletters/${target}/progress`)
           setProgress(p)
           if (p.newsletter_status !== 'sending') {
-            stopped = true
-            // Reload list so the freshly-sent row appears with final stats.
+            progressStopRef.current = true
             loadData()
             return
           }
@@ -127,7 +133,7 @@ export default function NewsletterAdmin() {
       }
     }
     tick()
-    return () => { stopped = true }
+    return () => { progressStopRef.current = true }
   }, [progress?.newsletter_status])
 
   async function handleCreate() {
@@ -632,7 +638,7 @@ export default function NewsletterAdmin() {
                 <Stat label="Sent" value={analytics.sent} />
                 <Stat label="Failed" value={analytics.failed} />
                 <Stat label="Open rate" value={`${(analytics.open_rate * 100).toFixed(1)}%`} sub={`${analytics.opened} opens`} />
-                <Stat label="Click rate" value={`${(analytics.click_rate * 100).toFixed(1)}%`} sub={`${analytics.clicked_unique} unique`} />
+                <Stat label="Click rate" value={`${(analytics.click_rate * 100).toFixed(1)}%`} sub={`${analytics.clicked} unique`} />
                 <Stat label="Bounce rate" value={`${(analytics.bounce_rate * 100).toFixed(1)}%`} sub={`${analytics.bounced} bounced`} />
                 <Stat label="Unsubscribes" value={analytics.unsubscribed_window} sub="7-day window" />
               </div>
@@ -649,6 +655,27 @@ export default function NewsletterAdmin() {
 // ── Mobile preview ──────────────────────────────────────────────────────────
 
 function MobilePreview({ title, subject, preheader, html }: { title: string; subject: string; preheader: string; html: string }) {
+  // Render the body inside a sandboxed iframe so any scripts/styles in the
+  // admin-supplied HTML can't touch the parent page. `sandbox=""` (empty)
+  // strips ALL capabilities — no JS, no top-nav, no form submit. Body comes
+  // through srcdoc; we don't need to re-bleach client-side because the
+  // backend already sanitized at write time, but the sandbox is the second
+  // line of defense.
+  const safeTitle = (title || '(title)').replace(/[<&>"]/g, (c) =>
+    ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c] ?? c),
+  )
+  const previewDoc = `<!doctype html><html><head><meta charset="utf-8"><style>
+    body{margin:0;padding:16px;background:#1e1e1e;color:#d4d4d4;font:13px -apple-system,system-ui,sans-serif;line-height:1.6}
+    h1,h2{color:#e4e4e7}
+    a{color:#569cd6}
+    img{max-width:100%;height:auto}
+    .matcha{font-weight:700;color:#ce9178;font-size:16px;margin-bottom:12px}
+  </style></head><body>
+    <div class="matcha">Matcha</div>
+    <h2>${safeTitle}</h2>
+    ${html || '<p style="color:#777">(content goes here)</p>'}
+  </body></html>`
+
   return (
     <div className="lg:sticky lg:top-4 self-start">
       <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">Mobile preview</p>
@@ -659,14 +686,13 @@ function MobilePreview({ title, subject, preheader, html }: { title: string; sub
             <p className="text-xs text-zinc-200 font-medium truncate">{subject || 'Subject…'}</p>
             {preheader && <p className="text-[10px] text-zinc-500 truncate">{preheader}</p>}
           </div>
-          <div className="px-4 py-4 max-h-[600px] overflow-auto">
-            <p className="text-amber-300 text-base font-bold mb-3">Matcha</p>
-            <h2 className="text-zinc-100 text-base font-semibold mb-3">{title || '(title)'}</h2>
-            <div
-              className="text-zinc-300 text-xs leading-relaxed prose prose-invert prose-sm max-w-none"
-              dangerouslySetInnerHTML={{ __html: html || '<p class="text-zinc-600">(content goes here)</p>' }}
-            />
-          </div>
+          <iframe
+            title="Newsletter preview"
+            sandbox=""
+            srcDoc={previewDoc}
+            className="w-full block"
+            style={{ height: 600, border: 0, background: '#1e1e1e' }}
+          />
         </div>
       </div>
     </div>
@@ -805,14 +831,42 @@ function CsvImportModal({ onClose, onDone }: { onClose: () => void; onDone: () =
   const [busy, setBusy] = useState(false)
 
   function parseCsv(): { email: string; name?: string }[] {
-    const rows = csv.trim().split(/\r?\n/).filter(Boolean)
+    // Handles quoted fields with embedded commas + escaped doubled quotes,
+    // e.g.: '"Sam, Jr.",sam@x.com' → ['Sam, Jr.', 'sam@x.com'].
+    function parseRow(row: string): string[] {
+      const out: string[] = []
+      let cur = ''
+      let inQuotes = false
+      for (let i = 0; i < row.length; i++) {
+        const ch = row[i]
+        if (inQuotes) {
+          if (ch === '"') {
+            if (row[i + 1] === '"') { cur += '"'; i++ } // escaped ""
+            else inQuotes = false
+          } else {
+            cur += ch
+          }
+        } else if (ch === '"') {
+          inQuotes = true
+        } else if (ch === ',') {
+          out.push(cur)
+          cur = ''
+        } else {
+          cur += ch
+        }
+      }
+      out.push(cur)
+      return out.map((p) => p.trim())
+    }
+
+    const rows = csv.replace(/\r\n/g, '\n').split('\n').map((r) => r.trim()).filter(Boolean)
     if (!rows.length) return []
-    // Skip header row if it looks like one.
     const start = rows[0].toLowerCase().includes('email') ? 1 : 0
-    return rows.slice(start).map((row) => {
-      const parts = row.split(',').map((p) => p.trim().replace(/^"|"$/g, ''))
-      return { email: parts[0], name: parts[1] || undefined }
-    }).filter((p) => p.email && p.email.includes('@'))
+    return rows.slice(start)
+      .map(parseRow)
+      .filter((parts) => parts.length >= 1)
+      .map((parts) => ({ email: (parts[0] || '').toLowerCase(), name: parts[1] || undefined }))
+      .filter((p) => p.email.includes('@'))
   }
 
   async function submit() {

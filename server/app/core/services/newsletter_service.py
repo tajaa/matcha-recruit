@@ -1231,7 +1231,14 @@ async def get_subscriber_growth(days: int = 90) -> list[dict]:
 
 async def get_newsletter_analytics(newsletter_id: UUID) -> dict:
     """Per-issue analytics — counts + computed rates against eligible
-    recipients (sent rows, excluding never-attempted)."""
+    recipients (sent rows, excluding never-attempted).
+
+    `clicked` here counts unique subscribers who clicked. We don't track
+    total click count because `clicked_at` only stamps the FIRST click
+    (COALESCE in record_click). To surface total clicks we'd need a
+    `click_count INT` column on newsletter_sends — deferred until anyone
+    asks.
+    """
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """SELECT
@@ -1239,8 +1246,7 @@ async def get_newsletter_analytics(newsletter_id: UUID) -> dict:
                  COUNT(*) FILTER (WHERE status = 'sent') AS sent,
                  COUNT(*) FILTER (WHERE status = 'failed') AS failed,
                  COUNT(*) FILTER (WHERE opened_at IS NOT NULL) AS opened,
-                 COUNT(DISTINCT subscriber_id) FILTER (WHERE clicked_at IS NOT NULL) AS clicked_uniq,
-                 COUNT(*) FILTER (WHERE clicked_at IS NOT NULL) AS clicked_total,
+                 COUNT(*) FILTER (WHERE clicked_at IS NOT NULL) AS clicked,
                  COUNT(*) FILTER (WHERE bounced_at IS NOT NULL OR status = 'bounced') AS bounced
                FROM newsletter_sends
               WHERE newsletter_id = $1""",
@@ -1266,15 +1272,14 @@ async def get_newsletter_analytics(newsletter_id: UUID) -> dict:
 
     sent = row["sent"] or 0
     opened = row["opened"] or 0
-    clicked = row["clicked_uniq"] or 0
+    clicked = row["clicked"] or 0
     bounced = row["bounced"] or 0
     return {
         "attempted": row["attempted"] or 0,
         "sent": sent,
         "failed": row["failed"] or 0,
         "opened": opened,
-        "clicked_unique": clicked,
-        "clicked_total": row["clicked_total"] or 0,
+        "clicked": clicked,
         "bounced": bounced,
         "unsubscribed_window": unsub_count,
         "open_rate": (opened / sent) if sent else 0.0,
