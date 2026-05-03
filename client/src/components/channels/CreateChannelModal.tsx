@@ -571,7 +571,7 @@ function StepPricing({
       <div className="flex items-start gap-2 p-3 bg-zinc-800/50 rounded-lg border border-zinc-700/50">
         <Shield size={14} className="text-zinc-400 mt-0.5 flex-shrink-0" />
         <p className="text-xs text-zinc-400 leading-relaxed">
-          Members will be charged monthly via Stripe. You'll receive payouts automatically. Pricing can be changed later but won't affect existing subscriptions.
+          Members will be charged monthly via Stripe. Subscription revenue is held by the platform — creator payouts are coming soon. Pricing can be changed later but won't affect existing subscriptions.
         </p>
       </div>
     </div>
@@ -716,7 +716,7 @@ function StepReview({
 
       {accessModel !== 'free' && (
         <p className="text-[11px] text-zinc-500 leading-relaxed">
-          Stripe will handle billing and payouts. Members can cancel anytime from their billing page.
+          Stripe handles billing. Subscription revenue is held by the platform until creator payouts ship. Members can cancel anytime from their billing page.
         </p>
       )}
     </div>
@@ -755,7 +755,7 @@ function StepManagement({ accessModel, inactivityDays }: { accessModel: AccessMo
     {
       icon: <Zap size={16} className="text-emerald-400" />,
       title: 'Tips & Gifts',
-      desc: 'Subscribers can send you one-time tips from within the channel. You\'ll get a notification and the tip amount appears in your revenue dashboard.',
+      desc: 'Subscribers can send you one-time tips from within the channel. Tip amounts appear in your revenue dashboard for visibility — funds are held by the platform until creator payouts ship.',
     },
   ]
 

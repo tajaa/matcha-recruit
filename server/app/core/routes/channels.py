@@ -1493,13 +1493,35 @@ async def leave_channel(
         if member and member["role"] == "owner":
             raise HTTPException(status_code=400, detail="Channel owners must transfer ownership before leaving")
 
-        # Cancel Stripe subscription if active
+        # Cancel Stripe subscription if active. We Stripe-cancel first so a
+        # success here means the user really stops getting charged. If Stripe
+        # is down or returns an error we still let the leave proceed (the
+        # alternative is trapping the user in a channel they want out of) but
+        # we log loudly and audit-log so ops can reconcile orphaned subs.
         if member and member["stripe_subscription_id"]:
             try:
                 from ..services.channel_payment_service import cancel_subscription
                 await cancel_subscription(member["stripe_subscription_id"])
-            except Exception:
-                pass  # Still allow leaving even if Stripe call fails
+            except Exception as exc:
+                logger.warning(
+                    "Stripe cancel failed during leave (channel=%s user=%s sub=%s): %s",
+                    channel_id, current_user.id, member["stripe_subscription_id"], exc,
+                )
+                try:
+                    import json as _json
+                    await conn.execute(
+                        """
+                        INSERT INTO channel_payment_events (channel_id, user_id, event_type, metadata)
+                        VALUES ($1, $2, 'leave_cancel_failed', $3::jsonb)
+                        """,
+                        channel_id, current_user.id,
+                        _json.dumps({
+                            "stripe_subscription_id": member["stripe_subscription_id"],
+                            "error": str(exc)[:500],
+                        }),
+                    )
+                except Exception:
+                    pass  # event-log failure shouldn't block the leave either
 
         await conn.execute(
             "DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2",
@@ -1847,13 +1869,27 @@ async def create_channel_checkout(
                 detail=f"You cannot rejoin until {eligibility['cooldown_until']}",
             )
 
-        # Check if already subscribed
-        existing_sub = await conn.fetchval(
-            "SELECT subscription_status FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+        # Check if already subscribed. `canceling` means the user clicked
+        # cancel but Stripe will still charge until `paid_through` — they
+        # already have access. Letting a new checkout through here would
+        # create a second Stripe subscription and double-charge them; the
+        # activation handler would overwrite stripe_subscription_id and
+        # orphan the old sub. Block both states until the period ends.
+        existing = await conn.fetchrow(
+            "SELECT subscription_status, paid_through FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
         )
-        if existing_sub == "active":
-            raise HTTPException(status_code=400, detail="You already have an active subscription")
+        if existing:
+            existing_status = existing["subscription_status"]
+            paid_through = existing["paid_through"]
+            now = datetime.now(timezone.utc)
+            if existing_status == "active":
+                raise HTTPException(status_code=400, detail="You already have an active subscription")
+            if existing_status == "canceling" and paid_through and paid_through > now:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Your subscription is canceling and remains active until {paid_through.strftime('%b %d, %Y')}. You can re-subscribe after that date.",
+                )
 
     from ..services.channel_payment_service import create_checkout_session, ChannelPaymentError
     try:
@@ -1898,6 +1934,64 @@ async def cancel_channel_subscription(
         )
 
     return {"ok": True, "paid_through": paid_through.isoformat()}
+
+
+class UpdateChannelPriceRequest(BaseModel):
+    price_cents: int
+
+
+@router.patch("/{channel_id}/price")
+async def update_channel_price_route(
+    channel_id: UUID,
+    body: UpdateChannelPriceRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Update the monthly subscription price for a paid channel. Owner only.
+    Existing subscribers continue paying their original price — Stripe binds
+    that amount to each subscription. Only new subscribers get the new price.
+    """
+    async with get_connection() as conn:
+        ch = await conn.fetchrow(
+            """
+            SELECT is_paid, stripe_product_id, stripe_price_id, currency,
+                   created_by, price_cents
+            FROM channels
+            WHERE id = $1
+            """,
+            channel_id,
+        )
+        if not ch:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        if not ch["is_paid"]:
+            raise HTTPException(status_code=400, detail="This channel is free; no price to update")
+        if not ch["stripe_product_id"]:
+            raise HTTPException(status_code=500, detail="Channel has no Stripe product configured")
+
+        # Owner-only (or admin)
+        if ch["created_by"] != current_user.id and current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only the channel owner can change the price")
+
+        if body.price_cents == ch["price_cents"]:
+            return {"ok": True, "price_cents": body.price_cents, "unchanged": True}
+
+    from ..services.channel_payment_service import update_channel_price, ChannelPaymentError
+    try:
+        new_price_id = await update_channel_price(
+            stripe_product_id=ch["stripe_product_id"],
+            new_price_cents=body.price_cents,
+            old_price_id=ch["stripe_price_id"],
+            currency=ch["currency"] or "usd",
+        )
+    except ChannelPaymentError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE channels SET stripe_price_id = $2, price_cents = $3, updated_at = NOW() WHERE id = $1",
+            channel_id, new_price_id, body.price_cents,
+        )
+
+    return {"ok": True, "price_cents": body.price_cents, "stripe_price_id": new_price_id}
 
 
 class UpdatePaidSettingsRequest(BaseModel):
@@ -2393,7 +2487,7 @@ async def join_by_invite(
 
         # Check if already an active member — don't consume an invite use
         existing = await conn.fetchrow(
-            "SELECT removal_cooldown_until, subscription_status, removed_for_inactivity FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            "SELECT removal_cooldown_until, subscription_status, removed_for_inactivity, paid_through FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
         )
         if existing and not existing["removed_for_inactivity"] and existing.get("subscription_status") in ("active", None):
@@ -2409,12 +2503,37 @@ async def join_by_invite(
                     detail=f"You cannot rejoin until {existing['removal_cooldown_until'].strftime('%b %d, %Y')}",
                 )
 
-        # Paid channel → redirect to checkout (DON'T consume invite use yet)
+        # Paid channel → atomically claim the invite use first, then
+        # redirect to checkout. Pre-claim is required because letting two
+        # users start checkout on the last available seat would let both
+        # of them pay and join (the activation handler can't reject the
+        # second payer cleanly — they've already been charged). Burning
+        # an invite use on an abandoned checkout is the lesser cost.
         if ch["is_paid"]:
             if ch["created_by"] == current_user.id:
                 raise HTTPException(status_code=400, detail="Channel owners cannot subscribe to their own channel")
             if existing and existing.get("subscription_status") == "active":
                 raise HTTPException(status_code=400, detail="You already have an active subscription")
+            if existing and existing.get("subscription_status") == "canceling" \
+                    and existing.get("paid_through") and existing["paid_through"] > datetime.now(timezone.utc):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Your subscription is canceling and remains active until {existing['paid_through'].strftime('%b %d, %Y')}. You can re-subscribe after that date.",
+                )
+
+            # Atomic claim — same pattern as the free-channel branch below.
+            claimed = await conn.fetchrow(
+                """
+                UPDATE channel_invites SET use_count = use_count + 1
+                WHERE code = $1 AND is_active = true
+                  AND (expires_at IS NULL OR expires_at > NOW())
+                  AND (max_uses IS NULL OR use_count < max_uses)
+                RETURNING id
+                """,
+                code,
+            )
+            if not claimed:
+                raise HTTPException(status_code=410, detail="This invite link has expired or reached its maximum uses")
 
             from ..services.channel_payment_service import create_checkout_session, ChannelPaymentError
             try:
@@ -2423,7 +2542,7 @@ async def join_by_invite(
                     channel_name=ch["name"],
                     stripe_price_id=ch["stripe_price_id"],
                     user_id=current_user.id,
-                    invite_code=code,  # Pass invite code for deferred use_count increment
+                    invite_code=code,  # Tracked in metadata for analytics; no longer increments use_count
                 )
             except ChannelPaymentError as e:
                 raise HTTPException(status_code=500, detail=str(e))

@@ -3,6 +3,7 @@ import { X, Hash } from 'lucide-react'
 import InviteManager from './InviteManager'
 import {
   updatePaidSettings,
+  updateChannelPrice,
   getMemberActivity,
   getChannelRevenue,
   getChannelPaymentInfo,
@@ -43,6 +44,10 @@ export default function ChannelSettingsPanel({
   const [threshold, setThreshold] = useState<number>(14)
   const [warningDays, setWarningDays] = useState<number>(3)
   const [, setSettingsLoaded] = useState(false)
+  const [priceCents, setPriceCents] = useState<number | null>(null)
+  const [priceDraftDollars, setPriceDraftDollars] = useState<string>('')
+  const [priceSaving, setPriceSaving] = useState(false)
+  const [priceError, setPriceError] = useState<string>('')
 
   useEffect(() => {
     if (!isPaid) return
@@ -52,9 +57,32 @@ export default function ChannelSettingsPanel({
     getChannelPaymentInfo(channelId).then((info) => {
       if (info.inactivity_threshold_days != null) setThreshold(info.inactivity_threshold_days)
       if (info.inactivity_warning_days != null) setWarningDays(info.inactivity_warning_days)
+      if (info.price_cents != null) {
+        setPriceCents(info.price_cents)
+        setPriceDraftDollars((info.price_cents / 100).toFixed(2))
+      }
       setSettingsLoaded(true)
     }).catch(() => setSettingsLoaded(true))
   }, [channelId, isPaid])
+
+  const handlePriceSave = async () => {
+    setPriceError('')
+    const cents = Math.round(parseFloat(priceDraftDollars || '0') * 100)
+    if (Number.isNaN(cents) || cents < 50 || cents > 99900) {
+      setPriceError('Price must be between $0.50 and $999.00')
+      return
+    }
+    if (cents === priceCents) return
+    setPriceSaving(true)
+    try {
+      await updateChannelPrice(channelId, cents)
+      setPriceCents(cents)
+    } catch (err) {
+      setPriceError(err instanceof Error ? err.message : 'Failed to update price')
+    } finally {
+      setPriceSaving(false)
+    }
+  }
 
   const activeCount = members.filter((m) => m.activity_status === 'active').length
   const atRiskCount = members.filter((m) => m.activity_status === 'at_risk').length
@@ -128,6 +156,41 @@ export default function ChannelSettingsPanel({
                   </div>
                 </div>
               ))}
+            </div>
+          </section>
+
+          {/* Pricing */}
+          <section className="space-y-3">
+            <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
+              Pricing
+            </h3>
+            <div className="space-y-2">
+              <label className="block">
+                <span className="text-xs text-zinc-500">Monthly subscription</span>
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="text-sm text-zinc-500">$</span>
+                  <input
+                    type="number"
+                    min="0.50"
+                    max="999"
+                    step="0.50"
+                    value={priceDraftDollars}
+                    onChange={(e) => setPriceDraftDollars(e.target.value)}
+                    className="flex-1 rounded-lg bg-zinc-800 border border-zinc-700 text-sm text-zinc-300 px-3 py-1.5 focus:outline-none focus:border-emerald-600"
+                  />
+                  <button
+                    onClick={handlePriceSave}
+                    disabled={priceSaving || !priceDraftDollars || Math.round(parseFloat(priceDraftDollars) * 100) === priceCents}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {priceSaving ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
+              </label>
+              {priceError && <p className="text-[10px] text-red-400">{priceError}</p>}
+              <p className="text-[10px] text-zinc-600 leading-relaxed">
+                Existing subscribers keep paying their original price. Only new subscribers get the new amount.
+              </p>
             </div>
           </section>
 

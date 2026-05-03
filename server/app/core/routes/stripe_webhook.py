@@ -49,6 +49,29 @@ async def _claim_event(event_id: str, event_type: str) -> bool:
         return True
 
 
+from ..services.stripe_service import extract_current_period_end as _extract_current_period_end  # noqa: E402,F401
+
+
+async def _release_event(event_id: str) -> None:
+    """Delete the dedupe row so Stripe retries can re-process this event.
+
+    Called when a handler raises after we've already claimed the event_id.
+    Without this, the next Stripe retry would hit the dedupe gate and skip
+    the handler — leaving the caller (paid customer) permanently in a
+    half-activated state.
+    """
+    if not event_id:
+        return
+    try:
+        async with get_connection() as conn:
+            await conn.execute(
+                "DELETE FROM stripe_webhook_events WHERE event_id = $1",
+                event_id,
+            )
+    except Exception as exc:
+        logger.warning("stripe_webhook_events release failed: %s", exc)
+
+
 @router.post("/webhooks/stripe")
 async def stripe_webhook(request: Request):
     payload = await request.body()
@@ -77,6 +100,32 @@ async def stripe_webhook(request: Request):
         logger.info("Stripe event %s (%s) already processed, skipping", event_id, event_type)
         return {"status": "duplicate", "event_id": event_id}
 
+    try:
+        return await _route_event(event_type, event_object)
+    except Exception:
+        # Critical path failure — release the dedupe row so Stripe's
+        # automatic retry can re-process this event. Without this, paid
+        # customers whose activation hits a transient DB error would be
+        # permanently stuck in a half-paid, no-access state.
+        await _release_event(event_id)
+        raise
+
+
+async def _route_event(event_type: str, event_object: dict) -> dict:
+    """Route a verified Stripe event to its handler. Raises on critical
+    handler failure so the outer wrapper can release the dedupe row and
+    Stripe can retry.
+
+    Per-branch try/except policy:
+      * Channel-sub / job-posting / tip activation paths re-raise on DB
+        error so Stripe retries. A paid customer must not be left without
+        access on a transient failure.
+      * IR upgrade / lite / recruiter-tier / generic-pack / renewal /
+        cancel branches log + swallow. These are either lower-stakes
+        (recoverable manually via admin tools) or intentionally idempotent
+        (cancel writes are no-ops on retry). Don't add `raise` to those
+        branches without thinking through the dedupe-release flow.
+    """
     # ── Route channel-specific events via metadata ─────────────────────────
     meta = event_object.get("metadata") or {}
     is_channel_event = meta.get("type") == "channel_subscription"
@@ -132,7 +181,10 @@ async def stripe_webhook(request: Request):
                     )
                 logger.info("Channel tip processed: %s -> %s, $%.2f", sender_id, creator_id, amount/100)
             except Exception as exc:
+                # Re-raise so Stripe retries — top-level dedupe via
+                # stripe_webhook_events still blocks duplicate side effects.
                 logger.error("Failed to process channel tip: %s", exc)
+                raise
 
         elif session_mode == "payment":
             if not stripe_session_id:
@@ -289,12 +341,13 @@ async def stripe_webhook(request: Request):
                         channel_id=UUID(channel_id_str),
                         user_id=UUID(user_id_str),
                         stripe_subscription_id=stripe_sub_id,
-                        current_period_end=sub.current_period_end,
+                        current_period_end=_extract_current_period_end(sub),
                         invite_code=invite_code,
                     )
                     logger.info("Channel subscription activated: %s for user %s", stripe_sub_id, user_id_str)
                 except Exception as exc:
                     logger.error("Failed to activate channel subscription: %s", exc)
+                    raise
 
         elif session_mode == "subscription" and meta.get("type") == "job_posting_subscription":
             # ── Job posting subscription checkout ───────────────────────
@@ -315,11 +368,12 @@ async def stripe_webhook(request: Request):
                         channel_id=UUID(channel_id_str),
                         user_id=UUID(user_id_str),
                         stripe_subscription_id=stripe_sub_id,
-                        current_period_end=sub.current_period_end,
+                        current_period_end=_extract_current_period_end(sub),
                     )
                     logger.info("Job posting subscription activated: %s for posting %s", stripe_sub_id, posting_id_str)
                 except Exception as exc:
                     logger.error("Failed to activate job posting subscription: %s", exc)
+                    raise
 
         elif session_mode == "subscription":
             meta = event_object.get("metadata") or {}

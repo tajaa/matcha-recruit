@@ -66,6 +66,45 @@ async def create_stripe_product_and_price(
         raise ChannelPaymentError(f"Failed to create Stripe product: {exc}") from exc
 
 
+async def update_channel_price(
+    stripe_product_id: str,
+    new_price_cents: int,
+    old_price_id: Optional[str] = None,
+    currency: str = "usd",
+) -> str:
+    """Create a new monthly recurring Stripe price under the existing product
+    and archive the old one. Existing subscriptions keep their old price —
+    Stripe never silently changes the amount on an active subscription.
+    Returns the new stripe_price_id for the caller to persist on the channel.
+    """
+    _ensure_stripe()
+
+    if new_price_cents < MIN_PRICE_CENTS or new_price_cents > MAX_PRICE_CENTS:
+        raise ChannelPaymentError(f"Price must be between ${MIN_PRICE_CENTS/100:.2f} and ${MAX_PRICE_CENTS/100:.2f}")
+
+    def _create_and_archive():
+        new_price = stripe.Price.create(
+            product=stripe_product_id,
+            unit_amount=new_price_cents,
+            currency=currency,
+            recurring={"interval": "month"},
+        )
+        if old_price_id:
+            try:
+                stripe.Price.modify(old_price_id, active=False)
+            except Exception as exc:
+                # Old price archive is best-effort — orphan price in Stripe
+                # is harmless (no charges) but breaks no functionality if it
+                # lingers. New price is the source of truth going forward.
+                logger.warning("Failed to archive old Stripe price %s: %s", old_price_id, exc)
+        return new_price.id
+
+    try:
+        return await asyncio.to_thread(_create_and_archive)
+    except Exception as exc:
+        raise ChannelPaymentError(f"Failed to update channel price: {exc}") from exc
+
+
 async def create_checkout_session(
     channel_id: UUID,
     channel_name: str,
@@ -79,8 +118,8 @@ async def create_checkout_session(
     _ensure_stripe()
     settings = get_settings()
 
-    resolved_success = success_url or f"{settings.app_base_url}/app/matcha/work/channels/{channel_id}?subscribed=1"
-    resolved_cancel = cancel_url or f"{settings.app_base_url}/app/matcha/work/channels/{channel_id}?canceled=1"
+    resolved_success = success_url or f"{settings.app_base_url}/work/channels/{channel_id}?subscribed=1"
+    resolved_cancel = cancel_url or f"{settings.app_base_url}/work/channels/{channel_id}?canceled=1"
 
     metadata = {
         "channel_id": str(channel_id),
@@ -111,13 +150,14 @@ async def create_checkout_session(
 async def cancel_subscription(stripe_subscription_id: str) -> datetime:
     """Cancel a channel subscription at period end. Returns paid_through date."""
     _ensure_stripe()
+    from .stripe_service import extract_current_period_end
 
     def _cancel():
         sub = stripe.Subscription.modify(
             stripe_subscription_id,
             cancel_at_period_end=True,
         )
-        return datetime.fromtimestamp(sub.current_period_end, tz=timezone.utc)
+        return datetime.fromtimestamp(extract_current_period_end(sub), tz=timezone.utc)
 
     try:
         return await asyncio.to_thread(_cancel)
@@ -222,7 +262,14 @@ async def handle_subscription_activated(
     current_period_end: int,
     invite_code: Optional[str] = None,
 ) -> None:
-    """Called when a channel subscription checkout completes successfully."""
+    """Called when a channel subscription checkout completes successfully.
+
+    For invite-based joins, the invite's use_count is claimed atomically
+    at redeem time (see channels.py redeem endpoint) — not here. Doing it
+    at redeem prevents two checkouts on the last available seat from both
+    succeeding. The `invite_code` argument is retained for event logging
+    only.
+    """
     paid_through = datetime.fromtimestamp(current_period_end, tz=timezone.utc)
 
     async with get_connection() as conn:
@@ -273,19 +320,11 @@ async def handle_subscription_activated(
             VALUES ($1, $2, 'subscription_activated', $3::jsonb)
             """,
             channel_id, user_id,
-            __import__("json").dumps({"stripe_subscription_id": stripe_subscription_id}),
+            __import__("json").dumps({
+                "stripe_subscription_id": stripe_subscription_id,
+                "invite_code": invite_code,
+            }),
         )
-
-        # Increment invite use_count if this was an invite-based join (deferred from checkout)
-        if invite_code:
-            await conn.execute(
-                """
-                UPDATE channel_invites SET use_count = use_count + 1
-                WHERE code = $1 AND is_active = true
-                  AND (max_uses IS NULL OR use_count < max_uses)
-                """,
-                invite_code,
-            )
 
 
 async def handle_subscription_renewed(
@@ -328,7 +367,10 @@ async def handle_subscription_renewed(
 
 
 async def handle_payment_failed(stripe_subscription_id: str) -> None:
-    """Called when a channel subscription payment fails."""
+    """Called when a channel subscription payment fails. Stripe retries a
+    failed invoice 3-4 times over ~3 weeks; without dedupe we'd email the
+    member on every retry. Cap to one notification per billing cycle by
+    checking for a prior payment_failed event since the last success."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
@@ -349,6 +391,32 @@ async def handle_payment_failed(stripe_subscription_id: str) -> None:
             """,
             stripe_subscription_id,
         )
+
+        # Cycle boundary = last payment_success event for this sub. If we
+        # already logged a payment_failed AFTER that boundary, this is a
+        # Stripe retry — skip the duplicate event row + notification.
+        last_success = await conn.fetchval(
+            """
+            SELECT created_at FROM channel_payment_events
+            WHERE event_type = 'payment_success'
+              AND metadata->>'stripe_subscription_id' = $1
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            stripe_subscription_id,
+        )
+        already_failed_this_cycle = await conn.fetchval(
+            """
+            SELECT EXISTS(
+                SELECT 1 FROM channel_payment_events
+                WHERE event_type = 'payment_failed'
+                  AND metadata->>'stripe_subscription_id' = $1
+                  AND ($2::timestamptz IS NULL OR created_at > $2)
+            )
+            """,
+            stripe_subscription_id, last_success,
+        )
+        if already_failed_this_cycle:
+            return
 
         await conn.execute(
             """

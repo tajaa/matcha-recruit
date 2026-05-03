@@ -18,7 +18,9 @@ from ...database import get_connection
 
 logger = logging.getLogger(__name__)
 
-JOB_POSTING_PRICE_CENTS = 20000  # $200/month
+JOB_POSTING_PRICE_CENTS = 20000  # $200/month — platform default
+MIN_JOB_POSTING_PRICE_CENTS = 50  # Stripe minimum
+MAX_JOB_POSTING_PRICE_CENTS = 99900  # $999.00
 
 
 class JobPostingPaymentError(Exception):
@@ -38,9 +40,21 @@ async def create_job_posting_product_and_price(
     channel_id: UUID,
     channel_name: str,
     posting_title: str,
+    price_cents: Optional[int] = None,
 ) -> tuple[str, str]:
-    """Create a Stripe product + recurring monthly price for a job posting."""
+    """Create a Stripe product + recurring monthly price for a job posting.
+
+    `price_cents` honors the channel-owned override (`channels.job_posting_fee_cents`).
+    NULL/None falls back to the platform default. Both the per-channel column
+    and the platform default are validated against Stripe's price floor.
+    """
     _ensure_stripe()
+
+    resolved_price = price_cents if price_cents else JOB_POSTING_PRICE_CENTS
+    if resolved_price < MIN_JOB_POSTING_PRICE_CENTS or resolved_price > MAX_JOB_POSTING_PRICE_CENTS:
+        raise JobPostingPaymentError(
+            f"Posting price must be between ${MIN_JOB_POSTING_PRICE_CENTS/100:.2f} and ${MAX_JOB_POSTING_PRICE_CENTS/100:.2f}"
+        )
 
     def _create():
         product = stripe.Product.create(
@@ -52,7 +66,7 @@ async def create_job_posting_product_and_price(
         )
         price = stripe.Price.create(
             product=product.id,
-            unit_amount=JOB_POSTING_PRICE_CENTS,
+            unit_amount=resolved_price,
             currency="usd",
             recurring={"interval": "month"},
         )
@@ -82,11 +96,11 @@ async def create_job_posting_checkout(
     }
 
     success_url = (
-        f"{settings.app_base_url}/app/matcha/work/channels/{channel_id}"
+        f"{settings.app_base_url}/work/channels/{channel_id}"
         f"?posting={posting_id}&activated=1"
     )
     cancel_url = (
-        f"{settings.app_base_url}/app/matcha/work/channels/{channel_id}"
+        f"{settings.app_base_url}/work/channels/{channel_id}"
         f"?posting={posting_id}&canceled=1"
     )
 
@@ -132,17 +146,24 @@ async def handle_job_posting_activated(
             posting_id, stripe_subscription_id, paid_through,
         )
 
+        # Record the actual fee charged (channel override or platform default)
+        # so analytics aren't off when channels customize their pricing.
+        amount_cents = await conn.fetchval(
+            "SELECT COALESCE(job_posting_fee_cents, $2) FROM channels WHERE id = $1",
+            channel_id, JOB_POSTING_PRICE_CENTS,
+        ) or JOB_POSTING_PRICE_CENTS
+
         await conn.execute(
             """
             INSERT INTO channel_payment_events
                 (channel_id, user_id, event_type, amount_cents, metadata)
             VALUES ($1, $2, 'job_posting_activated', $3, $4::jsonb)
             """,
-            channel_id, user_id, JOB_POSTING_PRICE_CENTS,
+            channel_id, user_id, amount_cents,
             __import__("json").dumps({
                 "posting_id": str(posting_id),
                 "stripe_subscription_id": stripe_subscription_id,
-                "payout_amount_cents": JOB_POSTING_PRICE_CENTS // 2,
+                "payout_amount_cents": amount_cents // 2,
             }),
         )
 
@@ -193,7 +214,9 @@ async def handle_job_posting_renewed(
 
 
 async def handle_job_posting_payment_failed(stripe_subscription_id: str) -> None:
-    """Called when a job posting subscription payment fails."""
+    """Called when a job posting subscription payment fails. Caps emails
+    to one per cycle — see handle_payment_failed in channel_payment_service
+    for the matching pattern on member subs."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
@@ -215,6 +238,31 @@ async def handle_job_posting_payment_failed(stripe_subscription_id: str) -> None
             """,
             stripe_subscription_id,
         )
+
+        # Stripe retries failed invoices 3-4× over ~3 weeks; one email per
+        # cycle is enough. Boundary = last successful renewal event.
+        last_success = await conn.fetchval(
+            """
+            SELECT created_at FROM channel_payment_events
+            WHERE event_type = 'job_posting_renewed'
+              AND metadata->>'stripe_subscription_id' = $1
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            stripe_subscription_id,
+        )
+        already_failed_this_cycle = await conn.fetchval(
+            """
+            SELECT EXISTS(
+                SELECT 1 FROM channel_payment_events
+                WHERE event_type = 'job_posting_payment_failed'
+                  AND metadata->>'stripe_subscription_id' = $1
+                  AND ($2::timestamptz IS NULL OR created_at > $2)
+            )
+            """,
+            stripe_subscription_id, last_success,
+        )
+        if already_failed_this_cycle:
+            return
 
         await conn.execute(
             """
@@ -289,13 +337,14 @@ async def cancel_job_posting_subscription(
 ) -> datetime:
     """Cancel a job posting subscription at period end. Returns paid_through date."""
     _ensure_stripe()
+    from .stripe_service import extract_current_period_end
 
     def _cancel():
         sub = stripe.Subscription.modify(
             stripe_subscription_id,
             cancel_at_period_end=True,
         )
-        return datetime.fromtimestamp(sub.current_period_end, tz=timezone.utc)
+        return datetime.fromtimestamp(extract_current_period_end(sub), tz=timezone.utc)
 
     try:
         paid_through = await asyncio.to_thread(_cancel)

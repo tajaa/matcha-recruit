@@ -54,6 +54,9 @@ export default function TipModal({ channelId, channelName, onClose }: Props) {
         <p className="text-xs text-zinc-500 mb-4">
           Show appreciation to the creator of <span className="text-zinc-300">#{channelName}</span>
         </p>
+        <p className="text-[10px] text-zinc-600 leading-relaxed mb-3">
+          Tips are held by the platform until creator payouts ship. The creator will see the amount and your message.
+        </p>
 
         {/* Preset amounts */}
         <div className="flex flex-wrap gap-2 mb-3">

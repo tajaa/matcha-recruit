@@ -185,6 +185,12 @@ export const cancelChannelSubscription = (id: string) =>
 export const updatePaidSettings = (id: string, settings: { inactivity_threshold_days?: number; inactivity_warning_days?: number }) =>
   api.patch(`/channels/${id}/paid-settings`, settings)
 
+export const updateChannelPrice = (id: string, priceCents: number) =>
+  api.patch<{ ok: boolean; price_cents: number; stripe_price_id?: string; unchanged?: boolean }>(
+    `/channels/${id}/price`,
+    { price_cents: priceCents },
+  )
+
 export const getMemberActivity = (id: string) =>
   api.get<MemberActivity[]>(`/channels/${id}/member-activity`)
 

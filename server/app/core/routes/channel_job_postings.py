@@ -93,7 +93,10 @@ async def create_job_posting(
             raise HTTPException(status_code=403, detail="Only channel owners and moderators can create job postings")
 
         # Validate channel exists and check feature flag
-        ch = await conn.fetchrow("SELECT company_id, name FROM channels WHERE id = $1", channel_id)
+        ch = await conn.fetchrow(
+            "SELECT company_id, name, job_posting_fee_cents FROM channels WHERE id = $1",
+            channel_id,
+        )
         if not ch:
             raise HTTPException(status_code=404, detail="Channel not found")
         company_id = ch["company_id"]
@@ -111,10 +114,12 @@ async def create_job_posting(
 
         # Stripe product/price are created up-front for both paths so the
         # recruiter can complete checkout as soon as the posting is approved.
+        # Channel-owned fee overrides the platform default; NULL = default.
         product_id, price_id = await create_job_posting_product_and_price(
             channel_id=channel_id,
             channel_name=ch["name"],
             posting_title=body.title,
+            price_cents=ch["job_posting_fee_cents"],
         )
 
         row = await conn.fetchrow(

@@ -10,6 +10,7 @@ Covers:
 
 import json
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -787,3 +788,635 @@ class TestMigrationSchema:
         assert "DROP TABLE IF EXISTS channel_payment_events" in source
         assert "is_paid" in source
         assert "last_contributed_at" in source
+
+
+# ============================================================
+# Webhook dedupe + retry release
+# ============================================================
+
+class TestWebhookDedupeRelease:
+    """A handler raising mid-flight must release the dedupe row so Stripe
+    retries can re-process the event. Without release, a transient DB blip
+    during activation would permanently strand a paid customer with no
+    access — the dedupe row would block every retry."""
+
+    @pytest.mark.asyncio
+    async def test_release_event_deletes_row(self):
+        from app.core.routes.stripe_webhook import _release_event
+        mock_conn = AsyncMock()
+        mock_conn.execute = AsyncMock()
+        with patch("app.core.routes.stripe_webhook.get_connection") as mock_gc:
+            mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+            mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
+            await _release_event("evt_test_123")
+        # Should DELETE FROM stripe_webhook_events
+        delete_call = str(mock_conn.execute.call_args_list[0])
+        assert "DELETE" in delete_call
+        assert "stripe_webhook_events" in delete_call
+
+    @pytest.mark.asyncio
+    async def test_release_event_with_empty_id_is_noop(self):
+        from app.core.routes.stripe_webhook import _release_event
+        # Should not raise, should not connect
+        with patch("app.core.routes.stripe_webhook.get_connection") as mock_gc:
+            await _release_event("")
+            mock_gc.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_release_swallows_db_errors(self):
+        """If the dedupe table itself is broken, release shouldn't blow up."""
+        from app.core.routes.stripe_webhook import _release_event
+        with patch("app.core.routes.stripe_webhook.get_connection") as mock_gc:
+            mock_gc.return_value.__aenter__ = AsyncMock(side_effect=RuntimeError("db down"))
+            # Should log warning but not propagate
+            await _release_event("evt_db_broken")
+
+    @pytest.mark.asyncio
+    async def test_wrapper_releases_dedupe_on_handler_failure(self):
+        """End-to-end: handler raises → outer wrapper releases the dedupe
+        row → exception propagates to FastAPI (which returns 500 → Stripe
+        retries). Without this glue, paid customers stay stranded."""
+        from app.core.routes import stripe_webhook as wh
+
+        # Fake event from verify_webhook
+        class _Data:
+            object = MagicMock(to_dict=lambda: {"id": "cs_x", "metadata": {"type": "channel_subscription"}})
+
+        class _Event:
+            type = "checkout.session.completed"
+            id = "evt_explode"
+            data = _Data()
+
+        mock_request = MagicMock()
+        mock_request.body = AsyncMock(return_value=b"{}")
+        mock_request.headers = {"stripe-signature": "sig_test"}
+
+        verify = AsyncMock(return_value=_Event())
+        with patch.object(wh, "StripeService", return_value=MagicMock(verify_webhook=verify)):
+            with patch.object(wh, "_claim_event", new_callable=AsyncMock, return_value=True):
+                with patch.object(wh, "_route_event", new_callable=AsyncMock,
+                                  side_effect=RuntimeError("boom")):
+                    with patch.object(wh, "_release_event", new_callable=AsyncMock) as mock_release:
+                        with pytest.raises(RuntimeError, match="boom"):
+                            await wh.stripe_webhook(mock_request)
+                        mock_release.assert_called_once_with("evt_explode")
+
+    def test_extract_period_end_new_api_items_schema(self):
+        """Stripe API ≥ 2025-04-30 puts current_period_end on items[0]."""
+        from app.core.routes.stripe_webhook import _extract_current_period_end
+        sub = {
+            "id": "sub_x", "object": "subscription",
+            "items": {"data": [{"current_period_end": 1780000000}]},
+        }
+        assert _extract_current_period_end(sub) == 1780000000
+
+    def test_extract_period_end_legacy_top_level(self):
+        """Stripe API ≤ 2024-04-10 keeps it on the Subscription object."""
+        from app.core.routes.stripe_webhook import _extract_current_period_end
+        sub = {
+            "id": "sub_y", "object": "subscription",
+            "current_period_end": 1779999999,
+            "items": {"data": [{}]},
+        }
+        assert _extract_current_period_end(sub) == 1779999999
+
+    def test_extract_period_end_stripe_object_via_to_dict(self):
+        """Live Stripe SDK object — the one from Subscription.retrieve —
+        no longer exposes dict.get on items, so we go through to_dict()."""
+        from app.core.routes.stripe_webhook import _extract_current_period_end
+        fake_sub = MagicMock()
+        fake_sub.to_dict = lambda: {
+            "id": "sub_live",
+            "items": {"data": [{"current_period_end": 1780100000}]},
+        }
+        assert _extract_current_period_end(fake_sub) == 1780100000
+
+    def test_extract_period_end_missing_raises(self):
+        from app.core.routes.stripe_webhook import _extract_current_period_end
+        sub = {"id": "sub_broken", "items": {"data": [{}]}}
+        with pytest.raises(ValueError, match="Cannot extract"):
+            _extract_current_period_end(sub)
+
+    @pytest.mark.asyncio
+    async def test_wrapper_does_not_release_on_duplicate(self):
+        """Duplicate event short-circuits before _route_event runs;
+        no spurious release call should happen."""
+        from app.core.routes import stripe_webhook as wh
+
+        class _Data:
+            object = MagicMock(to_dict=lambda: {})
+
+        class _Event:
+            type = "checkout.session.completed"
+            id = "evt_dup"
+            data = _Data()
+
+        mock_request = MagicMock()
+        mock_request.body = AsyncMock(return_value=b"{}")
+        mock_request.headers = {"stripe-signature": "sig_test"}
+
+        verify = AsyncMock(return_value=_Event())
+        with patch.object(wh, "StripeService", return_value=MagicMock(verify_webhook=verify)):
+            with patch.object(wh, "_claim_event", new_callable=AsyncMock, return_value=False):
+                with patch.object(wh, "_route_event", new_callable=AsyncMock) as mock_route:
+                    with patch.object(wh, "_release_event", new_callable=AsyncMock) as mock_release:
+                        result = await wh.stripe_webhook(mock_request)
+                        assert result.get("status") == "duplicate"
+                        mock_route.assert_not_called()
+                        mock_release.assert_not_called()
+
+
+# ============================================================
+# Payment-failed email dedupe per cycle
+# ============================================================
+
+class TestPaymentFailedCycleDedupe:
+    """Stripe retries a failed invoice 3-4 times over ~3 weeks. Each retry
+    is a distinct webhook event so top-level dedupe doesn't help. We must
+    cap to one email + one event row per (subscription, billing-cycle)."""
+
+    @pytest.mark.asyncio
+    async def test_first_failure_in_cycle_logs_and_notifies(self):
+        row = {"channel_id": uuid4(), "user_id": uuid4(), "company_id": uuid4()}
+        mock_conn = AsyncMock()
+        # fetchrow → membership row
+        mock_conn.fetchrow = AsyncMock(return_value=row)
+        # fetchval calls in order:
+        #   1. last_success → None (never paid before)
+        #   2. already_failed_this_cycle → False (first fail)
+        #   3. channel name lookup → "test"
+        mock_conn.fetchval = AsyncMock(side_effect=[None, False, "test-channel"])
+        mock_conn.execute = AsyncMock()
+
+        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+            mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+            mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
+            with patch("app.matcha.services.notification_service.create_notification", new_callable=AsyncMock) as mock_notif:
+                from app.core.services.channel_payment_service import handle_payment_failed
+                await handle_payment_failed("sub_failure_1")
+
+                # status update + payment_failed event row both fire
+                calls = [str(c) for c in mock_conn.execute.call_args_list]
+                assert any("past_due" in c for c in calls)
+                assert any("payment_failed" in c and "INSERT" in c for c in calls)
+                # Notification fires
+                mock_notif.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_second_failure_in_same_cycle_skipped(self):
+        """Same cycle = already_failed_this_cycle returns True → skip."""
+        row = {"channel_id": uuid4(), "user_id": uuid4(), "company_id": uuid4()}
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value=row)
+        # last_success → None, already_failed_this_cycle → True
+        mock_conn.fetchval = AsyncMock(side_effect=[None, True])
+        mock_conn.execute = AsyncMock()
+
+        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+            mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+            mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
+            with patch("app.matcha.services.notification_service.create_notification", new_callable=AsyncMock) as mock_notif:
+                from app.core.services.channel_payment_service import handle_payment_failed
+                await handle_payment_failed("sub_failure_retry")
+                # Status still updates to past_due (idempotent)
+                calls = [str(c) for c in mock_conn.execute.call_args_list]
+                assert any("past_due" in c for c in calls)
+                # No new payment_failed event row
+                assert not any("INSERT" in c and "payment_failed" in c for c in calls)
+                # No duplicate notification
+                mock_notif.assert_not_called()
+
+
+# ============================================================
+# Activation handler no longer increments invite use_count
+# ============================================================
+
+class TestActivationDoesNotIncrementInvite:
+    """Invite use_count is now claimed atomically at redeem time (channels.py)
+    to prevent race where two payers both join with max_uses=1. The
+    activation handler must NOT also increment, or invites get
+    double-counted on success."""
+
+    @pytest.mark.asyncio
+    async def test_invite_code_does_not_trigger_increment(self):
+        mock_conn = AsyncMock()
+        mock_conn.fetchval = AsyncMock(return_value=None)  # not existing
+        mock_conn.execute = AsyncMock()
+
+        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+            mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+            mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            from app.core.services.channel_payment_service import handle_subscription_activated
+            await handle_subscription_activated(
+                channel_id=uuid4(), user_id=uuid4(),
+                stripe_subscription_id="sub_with_invite",
+                current_period_end=int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp()),
+                invite_code="INVITE123",
+            )
+            # No UPDATE of channel_invites — that happened at redeem time
+            calls = [str(c) for c in mock_conn.execute.call_args_list]
+            assert not any("channel_invites" in c and "use_count" in c for c in calls)
+
+    @pytest.mark.asyncio
+    async def test_invite_code_logged_in_event_metadata(self):
+        """Invite_code is preserved in event metadata for analytics, even
+        though the increment happens elsewhere."""
+        mock_conn = AsyncMock()
+        mock_conn.fetchval = AsyncMock(return_value=None)
+        mock_conn.execute = AsyncMock()
+
+        with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:
+            mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+            mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            from app.core.services.channel_payment_service import handle_subscription_activated
+            await handle_subscription_activated(
+                channel_id=uuid4(), user_id=uuid4(),
+                stripe_subscription_id="sub_with_invite",
+                current_period_end=int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp()),
+                invite_code="INVITE123",
+            )
+            event_inserts = [c.args for c in mock_conn.execute.call_args_list if "subscription_activated" in str(c)]
+            assert len(event_inserts) == 1
+            metadata_arg = event_inserts[0][3]
+            payload = json.loads(metadata_arg)
+            assert payload["invite_code"] == "INVITE123"
+
+
+# ============================================================
+# Channel + tip + job posting URL prefix correctness
+# ============================================================
+
+class TestSuccessURLPrefix:
+    """Client routing mounts channels at /work/channels/{id} (App.tsx).
+    Stripe success_url must match — earlier code used /app/matcha/work/...
+    which 404s after Stripe redirects the paid customer back."""
+
+    @pytest.mark.asyncio
+    async def test_channel_subscription_url_uses_work_prefix(self):
+        from app.core.services import channel_payment_service
+
+        captured = {}
+
+        def fake_create(**kwargs):
+            captured.update(kwargs)
+            class S: url = "https://stripe.test/x"
+            return S()
+
+        fake_settings = MagicMock(app_base_url="https://app.matcha.test")
+        mock_session = MagicMock()
+        mock_session.create = fake_create
+        with patch.object(channel_payment_service, "_ensure_stripe"):
+            with patch.object(channel_payment_service, "get_settings", return_value=fake_settings):
+                with patch.object(channel_payment_service, "stripe", MagicMock(checkout=MagicMock(Session=mock_session))):
+                    await channel_payment_service.create_checkout_session(
+                        channel_id=uuid4(),
+                        channel_name="dev",
+                        stripe_price_id="price_abc",
+                        user_id=uuid4(),
+                    )
+        assert "/work/channels/" in captured["success_url"]
+        assert "/app/matcha/work/" not in captured["success_url"]
+        assert "/work/channels/" in captured["cancel_url"]
+        assert "/app/matcha/work/" not in captured["cancel_url"]
+
+    @pytest.mark.asyncio
+    async def test_job_posting_url_uses_work_prefix(self):
+        from app.core.services import channel_job_posting_service
+
+        captured = {}
+
+        def fake_create(**kwargs):
+            captured.update(kwargs)
+            class S: url = "https://stripe.test/jp"
+            return S()
+
+        fake_settings = MagicMock(app_base_url="https://app.matcha.test")
+        mock_session = MagicMock()
+        mock_session.create = fake_create
+        with patch.object(channel_job_posting_service, "_ensure_stripe"):
+            with patch.object(channel_job_posting_service, "get_settings", return_value=fake_settings):
+                with patch.object(channel_job_posting_service, "stripe", MagicMock(checkout=MagicMock(Session=mock_session))):
+                    await channel_job_posting_service.create_job_posting_checkout(
+                        posting_id=uuid4(),
+                        channel_id=uuid4(),
+                        user_id=uuid4(),
+                        stripe_price_id="price_jp",
+                    )
+        assert "/work/channels/" in captured["success_url"]
+        assert "/app/matcha/work/" not in captured["success_url"]
+
+
+# ============================================================
+# Job posting honors per-channel fee override
+# ============================================================
+
+class TestJobPostingCustomFee:
+    """`channels.job_posting_fee_cents` overrides the platform default.
+    Earlier code ignored the column and always charged $200."""
+
+    @pytest.mark.asyncio
+    async def test_uses_channel_override(self):
+        from app.core.services import channel_job_posting_service
+
+        captured = {}
+
+        def fake_price_create(**kwargs):
+            captured.update(kwargs)
+            class P: id = "price_x"
+            return P()
+
+        class _Prod:
+            id = "prod_x"
+
+        def fake_product_create(**kwargs):
+            return _Prod()
+
+        with patch.object(channel_job_posting_service, "_ensure_stripe"):
+            with patch.object(channel_job_posting_service, "stripe",
+                              MagicMock(Product=MagicMock(create=fake_product_create),
+                                        Price=MagicMock(create=fake_price_create))):
+                await channel_job_posting_service.create_job_posting_product_and_price(
+                    channel_id=uuid4(),
+                    channel_name="dev",
+                    posting_title="hire me",
+                    price_cents=15000,  # $150 channel override
+                )
+        assert captured["unit_amount"] == 15000
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_platform_default(self):
+        from app.core.services import channel_job_posting_service
+
+        captured = {}
+
+        def fake_price_create(**kwargs):
+            captured.update(kwargs)
+            class P: id = "price_x"
+            return P()
+
+        class _Prod:
+            id = "prod_x"
+
+        def fake_product_create(**kwargs):
+            return _Prod()
+
+        with patch.object(channel_job_posting_service, "_ensure_stripe"):
+            with patch.object(channel_job_posting_service, "stripe",
+                              MagicMock(Product=MagicMock(create=fake_product_create),
+                                        Price=MagicMock(create=fake_price_create))):
+                await channel_job_posting_service.create_job_posting_product_and_price(
+                    channel_id=uuid4(),
+                    channel_name="dev",
+                    posting_title="hire me",
+                    price_cents=None,  # No override
+                )
+        assert captured["unit_amount"] == channel_job_posting_service.JOB_POSTING_PRICE_CENTS
+
+    @pytest.mark.asyncio
+    async def test_below_minimum_rejected(self):
+        from app.core.services import channel_job_posting_service
+
+        with patch.object(channel_job_posting_service, "_ensure_stripe"):
+            with pytest.raises(channel_job_posting_service.JobPostingPaymentError, match="between"):
+                await channel_job_posting_service.create_job_posting_product_and_price(
+                    channel_id=uuid4(),
+                    channel_name="dev",
+                    posting_title="hire me",
+                    price_cents=10,  # below floor
+                )
+
+
+# ============================================================
+# Job posting handler success paths
+# ============================================================
+
+class TestJobPostingLifecycleHandlers:
+    @pytest.mark.asyncio
+    async def test_handle_activated_writes_active_status_and_event(self):
+        mock_conn = AsyncMock()
+        # fetchval used to read job_posting_fee_cents (returns None → fallback)
+        mock_conn.fetchval = AsyncMock(return_value=None)
+        mock_conn.execute = AsyncMock()
+
+        with patch("app.core.services.channel_job_posting_service.get_connection") as mock_gc:
+            mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+            mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            from app.core.services.channel_job_posting_service import handle_job_posting_activated
+            await handle_job_posting_activated(
+                posting_id=uuid4(), channel_id=uuid4(), user_id=uuid4(),
+                stripe_subscription_id="sub_jp_test",
+                current_period_end=int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp()),
+            )
+            calls = [str(c) for c in mock_conn.execute.call_args_list]
+            assert any("status = 'active'" in c for c in calls)
+            assert any("subscription_status = 'active'" in c for c in calls)
+            assert any("job_posting_activated" in c for c in calls)
+
+    @pytest.mark.asyncio
+    async def test_handle_renewed_no_match_is_noop(self):
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value=None)
+        mock_conn.execute = AsyncMock()
+
+        with patch("app.core.services.channel_job_posting_service.get_connection") as mock_gc:
+            mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+            mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            from app.core.services.channel_job_posting_service import handle_job_posting_renewed
+            await handle_job_posting_renewed(
+                stripe_subscription_id="sub_jp_unknown",
+                current_period_end=int(time.time() + 30 * 86400),
+                amount_cents=20000,
+            )
+            mock_conn.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_renewed_advances_paid_through(self):
+        row = {"id": uuid4(), "channel_id": uuid4(), "posted_by": uuid4()}
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value=row)
+        mock_conn.execute = AsyncMock()
+
+        with patch("app.core.services.channel_job_posting_service.get_connection") as mock_gc:
+            mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+            mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            from app.core.services.channel_job_posting_service import handle_job_posting_renewed
+            await handle_job_posting_renewed(
+                stripe_subscription_id="sub_jp_renew",
+                current_period_end=int(time.time() + 30 * 86400),
+                amount_cents=20000,
+            )
+            calls = [str(c) for c in mock_conn.execute.call_args_list]
+            assert any("subscription_status = 'active'" in c for c in calls)
+            assert any("job_posting_renewed" in c for c in calls)
+
+    @pytest.mark.asyncio
+    async def test_handle_payment_failed_dedupe_within_cycle(self):
+        row = {"id": uuid4(), "channel_id": uuid4(), "posted_by": uuid4(),
+               "title": "Senior Eng", "company_id": uuid4()}
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value=row)
+        # last_renewal=None, already_failed=True → second call in same cycle
+        mock_conn.fetchval = AsyncMock(side_effect=[None, True])
+        mock_conn.execute = AsyncMock()
+
+        with patch("app.core.services.channel_job_posting_service.get_connection") as mock_gc:
+            mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+            mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
+            with patch("app.matcha.services.notification_service.create_notification", new_callable=AsyncMock) as mock_notif:
+                from app.core.services.channel_job_posting_service import handle_job_posting_payment_failed
+                await handle_job_posting_payment_failed("sub_jp_fail")
+
+                calls = [str(c) for c in mock_conn.execute.call_args_list]
+                assert any("past_due" in c for c in calls)
+                # Second call in cycle: no INSERT, no notification
+                assert not any("INSERT" in c and "job_posting_payment_failed" in c for c in calls)
+                mock_notif.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_canceled_closes_posting(self):
+        row = {"id": uuid4(), "channel_id": uuid4(), "posted_by": uuid4()}
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value=row)
+        mock_conn.execute = AsyncMock()
+
+        with patch("app.core.services.channel_job_posting_service.get_connection") as mock_gc:
+            mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+            mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            from app.core.services.channel_job_posting_service import handle_job_posting_canceled
+            await handle_job_posting_canceled("sub_jp_cancel")
+            calls = [str(c) for c in mock_conn.execute.call_args_list]
+            # Status flips both subscription_status='canceled' and posting status='closed'
+            assert any("subscription_status = 'canceled'" in c for c in calls)
+            assert any("status = 'closed'" in c for c in calls)
+            assert any("closed_at = NOW()" in c for c in calls)
+
+
+# ============================================================
+# Channel price update — new PATCH route + Stripe helper
+# ============================================================
+
+class TestChannelPriceUpdate:
+    """update_channel_price creates a new Stripe price under the existing
+    product and archives the old one. Existing subscriptions keep their
+    original price (Stripe binds the amount per-subscription)."""
+
+    @pytest.mark.asyncio
+    async def test_creates_new_price_archives_old(self):
+        from app.core.services import channel_payment_service
+
+        captured = {}
+
+        def fake_create(**kwargs):
+            captured["new"] = kwargs
+            class P: id = "price_new_xyz"
+            return P()
+
+        archived = []
+        def fake_modify(price_id, **kwargs):
+            archived.append((price_id, kwargs))
+            class P: id = price_id
+            return P()
+
+        with patch.object(channel_payment_service, "_ensure_stripe"):
+            with patch.object(channel_payment_service, "stripe",
+                              MagicMock(Price=MagicMock(create=fake_create, modify=fake_modify))):
+                new_id = await channel_payment_service.update_channel_price(
+                    stripe_product_id="prod_abc",
+                    new_price_cents=1500,
+                    old_price_id="price_old_qqq",
+                )
+        assert new_id == "price_new_xyz"
+        assert captured["new"]["unit_amount"] == 1500
+        assert captured["new"]["recurring"] == {"interval": "month"}
+        assert archived == [("price_old_qqq", {"active": False})]
+
+    @pytest.mark.asyncio
+    async def test_below_minimum_rejected(self):
+        from app.core.services import channel_payment_service
+        with patch.object(channel_payment_service, "_ensure_stripe"):
+            with pytest.raises(channel_payment_service.ChannelPaymentError, match="between"):
+                await channel_payment_service.update_channel_price(
+                    stripe_product_id="prod_abc",
+                    new_price_cents=10,
+                    old_price_id=None,
+                )
+
+    @pytest.mark.asyncio
+    async def test_old_price_archive_failure_doesnt_block(self):
+        from app.core.services import channel_payment_service
+
+        def fake_create(**kwargs):
+            class P: id = "price_new_zzz"
+            return P()
+
+        def fake_modify(price_id, **kwargs):
+            raise RuntimeError("Stripe transient")
+
+        with patch.object(channel_payment_service, "_ensure_stripe"):
+            with patch.object(channel_payment_service, "stripe",
+                              MagicMock(Price=MagicMock(create=fake_create, modify=fake_modify))):
+                # Should still return new price ID — archive failure is logged + swallowed
+                new_id = await channel_payment_service.update_channel_price(
+                    stripe_product_id="prod_abc",
+                    new_price_cents=2000,
+                    old_price_id="price_old_qqq",
+                )
+        assert new_id == "price_new_zzz"
+
+
+# ============================================================
+# Tip handler success path
+# ============================================================
+
+class TestTipHandlerSuccessPath:
+    """The tip webhook handler logs two events (creator + sender) and
+    notifies the creator. Funds remain on the platform — no payout
+    until Stripe Connect ships."""
+
+    @pytest.mark.asyncio
+    async def test_tip_logs_events_and_notifies(self):
+        from app.core.routes import stripe_webhook as wh
+
+        mock_conn = AsyncMock()
+        # fetchval returns: company_id (notification), channel_name, sender_name
+        company_id = uuid4()
+        mock_conn.fetchval = AsyncMock(side_effect=[company_id, "lemonade", "alice"])
+        mock_conn.execute = AsyncMock()
+
+        # The tip branch uses a nested `from ...database import get_connection`
+        # so we patch the source module, not the route module.
+        with patch("app.database.get_connection") as mock_gc:
+            mock_gc.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+            mock_gc.return_value.__aexit__ = AsyncMock(return_value=False)
+            with patch("app.matcha.services.notification_service.create_notification", new_callable=AsyncMock) as mock_notif:
+                channel_id = uuid4()
+                creator_id = uuid4()
+                sender_id = uuid4()
+                event_object = {
+                    "id": "cs_tip_test",
+                    "mode": "payment",
+                    "metadata": {
+                        "type": "channel_tip",
+                        "channel_id": str(channel_id),
+                        "creator_id": str(creator_id),
+                        "sender_id": str(sender_id),
+                        "amount_cents": "500",
+                        "message": "thanks!",
+                    },
+                }
+                await wh._route_event("checkout.session.completed", event_object)
+
+        # Two event rows inserted (tip_received + tip_sent)
+        calls = [str(c) for c in mock_conn.execute.call_args_list]
+        assert any("tip_received" in c for c in calls)
+        assert any("tip_sent" in c for c in calls)
+        mock_notif.assert_called_once()
+        notif_kwargs = mock_notif.call_args.kwargs
+        assert notif_kwargs["type"] == "channel_tip_received"
+        assert "$5.00" in notif_kwargs["title"]

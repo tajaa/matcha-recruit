@@ -14,6 +14,33 @@ except ImportError:  # pragma: no cover - handled at runtime
 
 from ...config import get_settings
 
+def extract_current_period_end(sub) -> int:
+    """Read the active billing-period end timestamp from a Stripe Subscription.
+
+    Stripe API versions ≥ 2025-04-30 ("acacia"+) moved `current_period_end`
+    off the Subscription object onto each `items[*]` row. Read from the
+    item first (works on every version), fall back to the top-level field
+    for older API versions. Subscriptions in this codebase are always
+    single-item, so the first item's period drives access.
+
+    Operates on a plain-dict view because Stripe SDK 15.x StripeObjects no
+    longer expose dict.get on items; only attribute-style access works on
+    the live object, and that throws on missing keys.
+    """
+    sub_dict = sub.to_dict() if hasattr(sub, "to_dict") else sub
+    try:
+        item = sub_dict["items"]["data"][0]
+        period_end = item.get("current_period_end") or item.get("period", {}).get("end")
+        if period_end:
+            return int(period_end)
+    except (KeyError, IndexError, TypeError, AttributeError):
+        pass
+    legacy = sub_dict.get("current_period_end") if isinstance(sub_dict, dict) else None
+    if legacy:
+        return int(legacy)
+    raise ValueError(f"Cannot extract current_period_end from subscription {sub_dict.get('id', '?')}")
+
+
 # $2.50 processing fee added on top of each pack
 FEE_CENTS = 250
 
