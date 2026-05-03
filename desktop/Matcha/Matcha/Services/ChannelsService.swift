@@ -16,6 +16,24 @@ class ChannelsService {
         try await client.request(method: "GET", path: basePath)
     }
 
+    /// Public + paid channels from any tenant the user is not yet a member of.
+    /// Used by the cross-workspace discovery surface so personal-account users
+    /// can find each other's paid channels.
+    func discoverChannels(query: String? = nil, paidOnly: Bool = false) async throws -> [ChannelSummary] {
+        var components = URLComponents(string: "\(basePath)/discover")!
+        var items: [URLQueryItem] = []
+        if let query, !query.isEmpty {
+            items.append(URLQueryItem(name: "q", value: query))
+        }
+        if paidOnly {
+            items.append(URLQueryItem(name: "paid_only", value: "true"))
+        }
+        if !items.isEmpty {
+            components.queryItems = items
+        }
+        return try await client.request(method: "GET", path: components.url!.absoluteString)
+    }
+
     func getChannel(id: String) async throws -> ChannelDetail {
         try await client.request(method: "GET", path: "\(basePath)/\(id)")
     }
@@ -33,6 +51,16 @@ class ChannelsService {
 
     func joinChannel(id: String) async throws {
         let _: JoinResponse = try await client.request(method: "POST", path: "\(basePath)/\(id)/join")
+    }
+
+    struct CheckoutResponse: Codable {
+        let checkoutUrl: String
+        enum CodingKeys: String, CodingKey { case checkoutUrl = "checkout_url" }
+    }
+
+    func createChannelCheckout(id: String) async throws -> String {
+        let resp: CheckoutResponse = try await client.request(method: "POST", path: "\(basePath)/\(id)/checkout")
+        return resp.checkoutUrl
     }
 
     func leaveChannel(id: String) async throws {

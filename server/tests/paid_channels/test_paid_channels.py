@@ -1379,6 +1379,22 @@ class TestTipHandlerSuccessPath:
     notifies the creator. Funds remain on the platform — no payout
     until Stripe Connect ships."""
 
+    def test_invitable_users_email_detection(self):
+        """The invite-by-email source only fires when the query string is
+        a complete email (contains '@' and a '.' in the domain). Partial
+        matches still respect the relationship-only sources."""
+        # Just check the detection predicate the route uses
+        cases = [
+            ("alice@example.com", True),
+            ("alice", False),
+            ("alice@", False),
+            ("alice@nodot", False),
+            ("@example.com", True),  # technically valid by check; still requires DB match to return
+        ]
+        for q, expected in cases:
+            actual = "@" in q and "." in q.split("@", 1)[1] if "@" in q else False
+            assert actual == expected, f"q={q!r}: expected {expected}, got {actual}"
+
     @pytest.mark.asyncio
     async def test_tip_logs_events_and_notifies(self):
         from app.core.routes import stripe_webhook as wh

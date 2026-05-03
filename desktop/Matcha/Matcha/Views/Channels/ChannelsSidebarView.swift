@@ -6,6 +6,7 @@ struct ChannelsSidebarView: View {
     @State private var channels: [ChannelSummary] = []
     @State private var isLoading = true
     @State private var showCreate = false
+    @State private var showDiscover = false
     @State private var errorMessage: String?
     @State private var channelPendingDelete: ChannelSummary?
     @State private var isDeleting = false
@@ -31,6 +32,12 @@ struct ChannelsSidebarView: View {
                 CreateChannelSheet { newChannel in
                     appState.channelsListGeneration &+= 1
                     NotificationCenter.default.post(name: .mwChannelCreated, object: newChannel.id)
+                }
+            }
+            .sheet(isPresented: $showDiscover) {
+                DiscoverChannelsSheet { joinedId in
+                    appState.channelsListGeneration &+= 1
+                    appState.selectedChannelId = joinedId
                 }
             }
             .confirmationDialog(
@@ -116,11 +123,23 @@ struct ChannelsSidebarView: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 6) {
             Text("Channels")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary)
             Spacer()
+            Button {
+                showDiscover = true
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(width: 24, height: 24)
+                    .background(Color.zinc800)
+                    .cornerRadius(6)
+            }
+            .buttonStyle(.plain)
+            .help("Discover public channels")
             Button {
                 showCreate = true
             } label: {
@@ -132,6 +151,7 @@ struct ChannelsSidebarView: View {
                     .cornerRadius(6)
             }
             .buttonStyle(.plain)
+            .help("Create a channel")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)

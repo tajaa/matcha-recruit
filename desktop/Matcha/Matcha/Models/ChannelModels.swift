@@ -140,6 +140,8 @@ struct ChannelSummary: Codable, Identifiable, Hashable {
     let description: String?
     let visibility: String
     let isPaid: Bool
+    let priceCents: Int?
+    let currency: String?
     let memberCount: Int
     let unreadCount: Int
     let lastMessageAt: String?
@@ -150,6 +152,8 @@ struct ChannelSummary: Codable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, name, slug, description, visibility
         case isPaid = "is_paid"
+        case priceCents = "price_cents"
+        case currency
         case memberCount = "member_count"
         case unreadCount = "unread_count"
         case lastMessageAt = "last_message_at"
