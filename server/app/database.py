@@ -640,6 +640,20 @@ async def init_db():
             END $$;
         """)
 
+        # Admin-suspend flag — separate from is_active so we don't conflate
+        # "never activated" with "suspended by admin."
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'users' AND column_name = 'is_suspended'
+                ) THEN
+                    ALTER TABLE users ADD COLUMN is_suspended BOOLEAN NOT NULL DEFAULT FALSE;
+                END IF;
+            END $$;
+        """)
+
         # Add interview_prep_tokens column to users table (token system for interview prep)
         await conn.execute("""
             DO $$
@@ -774,6 +788,23 @@ async def init_db():
                 policy_suggestions_dismissed JSONB DEFAULT '[]'::jsonb,
                 created_at TIMESTAMP DEFAULT NOW()
             )
+        """)
+
+        # Soft-delete column for admin tenant removal.
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'companies' AND column_name = 'deleted_at'
+                ) THEN
+                    ALTER TABLE companies ADD COLUMN deleted_at TIMESTAMPTZ;
+                END IF;
+            END $$;
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_companies_deleted_at
+                ON companies(deleted_at) WHERE deleted_at IS NULL
         """)
 
         # SSO/SAML configuration per company

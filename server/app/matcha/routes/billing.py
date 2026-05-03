@@ -304,48 +304,80 @@ class IndividualUserSummary(BaseModel):
     subscription_tokens_remaining: int = 0
     has_active_subscription: bool = False
     beta_features: dict = {}
+    is_suspended: bool = False
+    subscription: Optional[dict] = None
 
 
 @admin_router.get("/admin/individuals")
 async def admin_list_individual_users(
     current_user: CurrentUser = Depends(require_platform_admin),
 ):
-    """List all individual/personal account users with token budgets."""
+    """List all individual/personal account users with token budgets + Stripe sub state."""
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
-            SELECT u.id AS user_id, u.email, u.created_at,
+            SELECT u.id AS user_id, u.email, u.created_at, u.is_suspended,
                    c.id AS company_id, c.name,
                    COALESCE(u.beta_features, '{}'::jsonb) AS beta_features,
                    COALESCE(t.free_tokens_used, 0) AS free_tokens_used,
                    COALESCE(t.free_token_limit, 0) AS free_token_limit,
                    COALESCE(t.subscription_tokens_used, 0) AS subscription_tokens_used,
-                   COALESCE(t.subscription_token_limit, 0) AS subscription_token_limit
+                   COALESCE(t.subscription_token_limit, 0) AS subscription_token_limit,
+                   sub.pack_id          AS sub_pack_id,
+                   sub.status           AS sub_status,
+                   sub.amount_cents     AS sub_amount_cents,
+                   sub.stripe_subscription_id AS sub_stripe_sub_id,
+                   sub.stripe_customer_id     AS sub_stripe_customer_id,
+                   sub.current_period_end     AS sub_current_period_end,
+                   sub.canceled_at            AS sub_canceled_at
             FROM users u
             JOIN clients cl ON cl.user_id = u.id
             JOIN companies c ON c.id = cl.company_id
             LEFT JOIN mw_token_budgets t ON t.company_id = c.id
+            LEFT JOIN LATERAL (
+                SELECT pack_id, status, amount_cents, stripe_subscription_id,
+                       stripe_customer_id, current_period_end, canceled_at
+                FROM mw_subscriptions
+                WHERE company_id = c.id
+                ORDER BY (status = 'active') DESC, created_at DESC
+                LIMIT 1
+            ) sub ON TRUE
             WHERE u.role = 'individual' AND c.is_personal = true
             ORDER BY u.created_at DESC
             """
         )
-    return [
-        IndividualUserSummary(
-            user_id=r["user_id"],
-            email=r["email"],
-            name=r["name"],
-            company_id=r["company_id"],
-            created_at=r["created_at"],
-            beta_features=json.loads(r["beta_features"]) if isinstance(r["beta_features"], str) else dict(r["beta_features"]),
-            free_tokens_used=r["free_tokens_used"],
-            free_token_limit=r["free_token_limit"],
-            free_tokens_remaining=max(0, r["free_token_limit"] - r["free_tokens_used"]),
-            subscription_token_limit=r["subscription_token_limit"],
-            subscription_tokens_remaining=max(0, r["subscription_token_limit"] - r["subscription_tokens_used"]),
-            has_active_subscription=r["subscription_token_limit"] > 0,
+    out: list[IndividualUserSummary] = []
+    for r in rows:
+        sub_payload = None
+        if r["sub_pack_id"]:
+            sub_payload = {
+                "pack_id": r["sub_pack_id"],
+                "status": r["sub_status"],
+                "amount_cents": r["sub_amount_cents"],
+                "stripe_subscription_id": r["sub_stripe_sub_id"],
+                "stripe_customer_id": r["sub_stripe_customer_id"],
+                "current_period_end": r["sub_current_period_end"].isoformat() if r["sub_current_period_end"] else None,
+                "canceled_at": r["sub_canceled_at"].isoformat() if r["sub_canceled_at"] else None,
+            }
+        out.append(
+            IndividualUserSummary(
+                user_id=r["user_id"],
+                email=r["email"],
+                name=r["name"],
+                company_id=r["company_id"],
+                created_at=r["created_at"],
+                beta_features=json.loads(r["beta_features"]) if isinstance(r["beta_features"], str) else dict(r["beta_features"]),
+                free_tokens_used=r["free_tokens_used"],
+                free_token_limit=r["free_token_limit"],
+                free_tokens_remaining=max(0, r["free_token_limit"] - r["free_tokens_used"]),
+                subscription_token_limit=r["subscription_token_limit"],
+                subscription_tokens_remaining=max(0, r["subscription_token_limit"] - r["subscription_tokens_used"]),
+                has_active_subscription=r["subscription_token_limit"] > 0,
+                is_suspended=bool(r["is_suspended"]),
+                subscription=sub_payload,
+            )
         )
-        for r in rows
-    ]
+    return out
 
 
 @admin_router.get("/admin/companies")

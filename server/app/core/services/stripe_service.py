@@ -462,20 +462,76 @@ class StripeService:
         except Exception as exc:
             raise StripeServiceError(f"Failed to create token subscription session: {exc}") from exc
 
-    async def cancel_subscription(self, stripe_subscription_id: str):
-        """Cancel a Stripe subscription at period end."""
+    async def cancel_subscription(
+        self,
+        stripe_subscription_id: str,
+        *,
+        at_period_end: bool = True,
+    ):
+        """Cancel a Stripe subscription.
+
+        Default cancels at period end (the customer keeps access until the
+        billing cycle they paid for ends). Pass `at_period_end=False` for an
+        immediate cancellation — admin uses this when issuing a refund.
+        """
         self._ensure_secret_key()
 
         def _cancel():
-            return stripe.Subscription.modify(
-                stripe_subscription_id,
-                cancel_at_period_end=True,
-            )
+            if at_period_end:
+                return stripe.Subscription.modify(
+                    stripe_subscription_id,
+                    cancel_at_period_end=True,
+                )
+            return stripe.Subscription.delete(stripe_subscription_id)
 
         try:
             return await asyncio.to_thread(_cancel)
         except Exception as exc:
             raise StripeServiceError(f"Failed to cancel Stripe subscription: {exc}") from exc
+
+    async def list_charges(self, stripe_customer_id: str, limit: int = 20):
+        """List recent Stripe charges for a customer (used by the admin refund modal)."""
+        self._ensure_secret_key()
+
+        def _list():
+            return stripe.Charge.list(customer=stripe_customer_id, limit=limit)
+
+        try:
+            return await asyncio.to_thread(_list)
+        except Exception as exc:
+            raise StripeServiceError(f"Failed to list Stripe charges: {exc}") from exc
+
+    async def create_refund(
+        self,
+        charge_id: str,
+        *,
+        amount_cents: Optional[int] = None,
+        reason: Optional[str] = None,
+    ):
+        """Refund a Stripe charge in part or in full.
+
+        Stripe supports `reason` values "duplicate", "fraudulent",
+        "requested_by_customer". Anything else is dropped to avoid an API
+        error; the admin's free-text rationale should go in `metadata`.
+        """
+        self._ensure_secret_key()
+
+        ALLOWED_REASONS = {"duplicate", "fraudulent", "requested_by_customer"}
+        kwargs: dict[str, Any] = {"charge": charge_id}
+        if amount_cents is not None:
+            kwargs["amount"] = amount_cents
+        if reason and reason in ALLOWED_REASONS:
+            kwargs["reason"] = reason
+        if reason and reason not in ALLOWED_REASONS:
+            kwargs["metadata"] = {"admin_note": reason[:500]}
+
+        def _refund():
+            return stripe.Refund.create(**kwargs)
+
+        try:
+            return await asyncio.to_thread(_refund)
+        except Exception as exc:
+            raise StripeServiceError(f"Failed to create Stripe refund: {exc}") from exc
 
     async def verify_webhook(self, payload: bytes, signature: str):
         self._ensure_secret_key()

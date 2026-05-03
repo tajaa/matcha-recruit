@@ -19,6 +19,51 @@ type Company = {
   created_at: string
   owner_email: string
   owner_name: string
+  signup_source: string | null
+  is_personal: boolean
+  is_suspended: boolean
+  deleted_at: string | null
+  subscription: {
+    pack_id: string
+    status: string
+    amount_cents: number
+    stripe_subscription_id: string
+    stripe_customer_id: string
+    current_period_end: string | null
+    canceled_at: string | null
+  } | null
+}
+
+type Tier = 'all' | 'free' | 'lite' | 'platform' | 'personal'
+
+const TIER_LABEL: Record<Exclude<Tier, 'all'>, string> = {
+  free: 'Free',
+  lite: 'Lite',
+  platform: 'Platform',
+  personal: 'Personal',
+}
+
+function tierFromCompany(c: Company): Exclude<Tier, 'all'> {
+  if (c.is_personal) return 'personal'
+  if (c.signup_source === 'resources_free') return 'free'
+  if (c.signup_source === 'matcha_lite') return 'lite'
+  return 'platform'
+}
+
+const TIER_BADGE_CLASS: Record<Exclude<Tier, 'all'>, string> = {
+  free: 'border-zinc-600 bg-zinc-700/30 text-zinc-300',
+  lite: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+  platform: 'border-violet-500/40 bg-violet-500/10 text-violet-300',
+  personal: 'border-sky-500/40 bg-sky-500/10 text-sky-300',
+}
+
+function TierBadge({ c }: { c: Company }) {
+  const tier = tierFromCompany(c)
+  return (
+    <span className={`inline-block text-[10px] px-1.5 py-0.5 rounded border ${TIER_BADGE_CLASS[tier]}`}>
+      {TIER_LABEL[tier]}
+    </span>
+  )
 }
 
 type CompanyListResponse = {
@@ -64,6 +109,7 @@ function industryLabel(value: string | null) {
 export default function Companies() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all')
+  const [tier, setTier] = useState<Tier>('all')
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
@@ -74,14 +120,17 @@ export default function Companies() {
 
   function fetchCompanies() {
     setLoading(true)
-    const params = filter !== 'all' ? `?status=${filter}` : ''
+    const qs = new URLSearchParams()
+    if (filter !== 'all') qs.set('status', filter)
+    if (tier !== 'all') qs.set('tier', tier)
+    const params = qs.toString() ? `?${qs.toString()}` : ''
     api.get<CompanyListResponse>(`/admin/business-registrations${params}`)
       .then((res) => setCompanies(res.registrations))
       .catch(() => setCompanies([]))
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { fetchCompanies() }, [filter])
+  useEffect(() => { fetchCompanies() }, [filter, tier])
 
   const filtered = companies.filter((c) =>
     c.company_name.toLowerCase().includes(search.toLowerCase())
@@ -167,23 +216,38 @@ export default function Companies() {
       </div>
 
       {/* Filters */}
-      <div className="mt-6 flex items-center gap-3">
-        <Input
-          label=""
-          placeholder="Search companies..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="max-w-xs"
-        />
-        <div className="flex gap-1 ml-auto">
-          {(['all', 'pending', 'approved', 'rejected'] as const).map((s) => (
+      <div className="mt-6 flex flex-col gap-3">
+        <div className="flex items-center gap-3">
+          <Input
+            label=""
+            placeholder="Search companies..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="max-w-xs"
+          />
+          <div className="flex gap-1 ml-auto">
+            {(['all', 'pending', 'approved', 'rejected'] as const).map((s) => (
+              <Button
+                key={s}
+                variant={filter === s ? 'primary' : 'ghost'}
+                size="sm"
+                onClick={() => setFilter(s)}
+              >
+                {s.charAt(0).toUpperCase() + s.slice(1)}
+              </Button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">Tier</span>
+          {(['all', 'free', 'lite', 'platform', 'personal'] as const).map((t) => (
             <Button
-              key={s}
-              variant={filter === s ? 'primary' : 'ghost'}
+              key={t}
+              variant={tier === t ? 'primary' : 'ghost'}
               size="sm"
-              onClick={() => setFilter(s)}
+              onClick={() => setTier(t)}
             >
-              {s.charAt(0).toUpperCase() + s.slice(1)}
+              {t === 'all' ? 'All' : TIER_LABEL[t]}
             </Button>
           ))}
         </div>
@@ -201,6 +265,7 @@ export default function Companies() {
               <thead className="bg-zinc-900/50 text-zinc-400">
                 <tr>
                   <th className="px-4 py-3 font-medium">Company</th>
+                  <th className="px-4 py-3 font-medium">Tier</th>
                   <th className="px-4 py-3 font-medium">Industry</th>
                   <th className="px-4 py-3 font-medium">Size</th>
                   <th className="px-4 py-3 font-medium">Status</th>
@@ -213,7 +278,13 @@ export default function Companies() {
                     <td className="px-4 py-3">
                       <Link to={`/admin/companies/${c.id}`} className="font-medium text-zinc-100 hover:text-emerald-400 transition-colors">{c.company_name}</Link>
                       <p className="text-xs text-zinc-500">{c.owner_email}</p>
+                      {c.is_suspended && (
+                        <span className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded border border-red-500/40 bg-red-500/10 text-red-300">
+                          Suspended
+                        </span>
+                      )}
                     </td>
+                    <td className="px-4 py-3"><TierBadge c={c} /></td>
                     <td className="px-4 py-3">
                       <span>{industryLabel(c.industry)}</span>
                       {c.healthcare_specialties && c.healthcare_specialties.length > 0 && (

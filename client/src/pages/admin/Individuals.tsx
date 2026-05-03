@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Loader2, Search, Zap, Plus, UserPlus, Copy, Check } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Loader2, Search, Zap, Plus, UserPlus, Copy, Check, Shield, KeyRound } from 'lucide-react'
 import { api } from '../../api/client'
 
 interface IndividualUser {
@@ -15,6 +16,20 @@ interface IndividualUser {
   subscription_tokens_remaining: number
   has_active_subscription: boolean
   beta_features?: Record<string, boolean>
+  is_suspended?: boolean
+  subscription?: {
+    pack_id: string
+    status: string
+    amount_cents: number
+    stripe_subscription_id: string
+    stripe_customer_id: string
+    current_period_end: string | null
+    canceled_at: string | null
+  } | null
+}
+
+function fmtUsd(cents: number) {
+  return `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 function formatTokens(n: number): string {
@@ -121,6 +136,28 @@ export default function Individuals() {
     setGranting(false)
   }
 
+  async function toggleSuspend(u: IndividualUser) {
+    const path = u.is_suspended ? 'unsuspend' : 'suspend'
+    if (u.is_suspended === false && !confirm(`Suspend ${u.email}? They will be locked out.`)) return
+    setUsers((prev) => prev.map((x) => (x.user_id === u.user_id ? { ...x, is_suspended: !u.is_suspended } : x)))
+    try {
+      await api.post(`/admin/users/${u.user_id}/${path}`, {})
+    } catch {
+      // Revert on failure
+      setUsers((prev) => prev.map((x) => (x.user_id === u.user_id ? { ...x, is_suspended: u.is_suspended } : x)))
+    }
+  }
+
+  async function issuePasswordReset(u: IndividualUser) {
+    try {
+      const res = await api.post<{ reset_url: string }>(`/admin/users/${u.user_id}/password-reset`, {})
+      try { await navigator.clipboard.writeText(res.reset_url) } catch {}
+      alert(`Reset link copied to clipboard. Valid 1 hour:\n\n${res.reset_url}`)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to issue reset link')
+    }
+  }
+
   const filtered = users.filter((u) => {
     if (!search) return true
     const q = search.toLowerCase()
@@ -172,8 +209,8 @@ export default function Individuals() {
               <th className="text-left px-4 py-2.5 font-medium text-zinc-400">Email</th>
               <th className="text-left px-4 py-2.5 font-medium text-zinc-400">Name</th>
               <th className="text-left px-4 py-2.5 font-medium text-zinc-400">Joined</th>
+              <th className="text-left px-4 py-2.5 font-medium text-zinc-400">Subscription</th>
               <th className="text-left px-4 py-2.5 font-medium text-zinc-400">Tokens Used</th>
-              <th className="text-left px-4 py-2.5 font-medium text-zinc-400">Token Limit</th>
               <th className="text-left px-4 py-2.5 font-medium text-zinc-400">Remaining</th>
               <th className="text-center px-4 py-2.5 font-medium text-zinc-400">Beta Lite</th>
               <th className="text-center px-4 py-2.5 font-medium text-zinc-400">Beta Full</th>
@@ -194,9 +231,44 @@ export default function Individuals() {
               const warn = !low && pct > 80
               return (
                 <tr key={u.user_id} className="border-b border-zinc-800/50 hover:bg-zinc-800/20">
-                  <td className="px-4 py-3 text-zinc-200">{u.email}</td>
+                  <td className="px-4 py-3 text-zinc-200">
+                    {u.email}
+                    {u.is_suspended && (
+                      <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded border border-red-500/40 bg-red-500/10 text-red-300">
+                        Suspended
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-zinc-400">{u.name || '--'}</td>
                   <td className="px-4 py-3 text-zinc-500">{relTime(u.created_at)}</td>
+                  <td className="px-4 py-3">
+                    {u.subscription ? (
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-zinc-300">
+                          {u.subscription.pack_id} <span className="text-zinc-500">·</span>{' '}
+                          <span className={u.subscription.status === 'active' ? 'text-emerald-400' : 'text-zinc-500'}>
+                            {u.subscription.status}
+                          </span>
+                        </span>
+                        <span className="text-[10px] text-zinc-500">
+                          {fmtUsd(u.subscription.amount_cents)}
+                          {u.subscription.current_period_end && (
+                            <> · renews {new Date(u.subscription.current_period_end).toLocaleDateString()}</>
+                          )}
+                        </span>
+                        <a
+                          href={`https://dashboard.stripe.com/subscriptions/${u.subscription.stripe_subscription_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] text-emerald-400 hover:text-emerald-300"
+                        >
+                          Stripe →
+                        </a>
+                      </div>
+                    ) : (
+                      <span className="text-zinc-600">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <div className="w-16 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
@@ -210,7 +282,6 @@ export default function Individuals() {
                       </span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-zinc-400">{formatTokens(u.free_token_limit)}</td>
                   <td className="px-4 py-3">
                     <span className={low ? 'text-red-400 font-medium' : 'text-zinc-400'}>
                       {formatTokens(u.free_tokens_remaining)}
@@ -233,13 +304,43 @@ export default function Individuals() {
                     />
                   </td>
                   <td className="px-4 py-3">
-                    <button
-                      onClick={() => { setGrantTarget(u); setGrantAmount('') }}
-                      className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
-                    >
-                      <Plus size={10} />
-                      Grant Tokens
-                    </button>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        onClick={() => { setGrantTarget(u); setGrantAmount('') }}
+                        className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+                        title="Grant tokens"
+                      >
+                        <Plus size={10} />
+                        Tokens
+                      </button>
+                      <button
+                        onClick={() => issuePasswordReset(u)}
+                        className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors"
+                        title="Issue 1h password reset link"
+                      >
+                        <KeyRound size={10} />
+                        Reset
+                      </button>
+                      <button
+                        onClick={() => toggleSuspend(u)}
+                        className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors ${
+                          u.is_suspended
+                            ? 'bg-emerald-900/40 text-emerald-300 hover:bg-emerald-900/60'
+                            : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                        }`}
+                        title={u.is_suspended ? 'Unsuspend' : 'Suspend'}
+                      >
+                        <Shield size={10} />
+                        {u.is_suspended ? 'Unsuspend' : 'Suspend'}
+                      </button>
+                      <Link
+                        to={`/admin/companies/${u.company_id}`}
+                        className="text-[10px] text-zinc-500 hover:text-zinc-300 underline"
+                        title="Open company detail for billing/refund/cancel"
+                      >
+                        Manage →
+                      </Link>
+                    </div>
                   </td>
                 </tr>
               )

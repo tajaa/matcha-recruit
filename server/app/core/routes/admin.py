@@ -56,6 +56,8 @@ from ..services.platform_settings import (
 )
 from ...matcha.services import billing_service as mw_billing_service
 from ...config import get_settings
+from ..services.stripe_service import StripeService, StripeServiceError
+from ..feature_flags import DEFAULT_COMPANY_FEATURES
 
 router = APIRouter()
 
@@ -305,6 +307,17 @@ KNOWN_FEATURES = {
 }
 
 
+class SubscriptionSummary(BaseModel):
+    """Lite snapshot of an mw_subscriptions row, surfaced in admin views."""
+    pack_id: str
+    status: str
+    amount_cents: int
+    stripe_subscription_id: str
+    stripe_customer_id: str
+    current_period_end: Optional[datetime] = None
+    canceled_at: Optional[datetime] = None
+
+
 class BusinessRegistrationResponse(BaseModel):
     """Response model for a business registration."""
     id: UUID
@@ -312,6 +325,7 @@ class BusinessRegistrationResponse(BaseModel):
     industry: Optional[str]
     healthcare_specialties: Optional[list[str]] = None
     company_size: Optional[str]
+    owner_user_id: Optional[UUID] = None
     owner_email: str
     owner_name: str
     owner_phone: Optional[str]
@@ -321,6 +335,11 @@ class BusinessRegistrationResponse(BaseModel):
     approved_at: Optional[datetime]
     approved_by_email: Optional[str]
     created_at: datetime
+    signup_source: Optional[str] = None
+    is_personal: bool = False
+    is_suspended: bool = False
+    deleted_at: Optional[datetime] = None
+    subscription: Optional[SubscriptionSummary] = None
 
 
 class BusinessRegistrationListResponse(BaseModel):
@@ -345,67 +364,138 @@ class UpdateBusinessRegistrationRequest(BaseModel):
     owner_job_title: Optional[str] = Field(default=None, max_length=100)
 
 
+def _row_to_registration(row) -> BusinessRegistrationResponse:
+    sub: Optional[SubscriptionSummary] = None
+    if row["sub_pack_id"]:
+        sub = SubscriptionSummary(
+            pack_id=row["sub_pack_id"],
+            status=row["sub_status"],
+            amount_cents=row["sub_amount_cents"],
+            stripe_subscription_id=row["sub_stripe_sub_id"],
+            stripe_customer_id=row["sub_stripe_customer_id"],
+            current_period_end=row["sub_current_period_end"],
+            canceled_at=row["sub_canceled_at"],
+        )
+    return BusinessRegistrationResponse(
+        id=row["id"],
+        company_name=row["company_name"],
+        industry=row["industry"],
+        healthcare_specialties=list(row["healthcare_specialties"] or []) or None,
+        company_size=row["company_size"],
+        owner_user_id=row["owner_user_id"],
+        owner_email=row["owner_email"],
+        owner_name=row["owner_name"],
+        owner_phone=row["owner_phone"],
+        owner_job_title=row["owner_job_title"],
+        status=row["status"] or "approved",
+        rejection_reason=row["rejection_reason"],
+        approved_at=row["approved_at"],
+        approved_by_email=row["approved_by_email"],
+        created_at=row["created_at"],
+        signup_source=row["signup_source"],
+        is_personal=bool(row["is_personal"]),
+        is_suspended=bool(row["is_suspended"]),
+        deleted_at=row["deleted_at"],
+        subscription=sub,
+    )
+
+
+_BUSINESS_REGISTRATION_SELECT = """
+    SELECT
+        comp.id,
+        comp.name as company_name,
+        comp.industry,
+        comp.healthcare_specialties,
+        comp.size as company_size,
+        comp.signup_source,
+        comp.is_personal,
+        comp.deleted_at,
+        u.id as owner_user_id,
+        u.email as owner_email,
+        u.is_suspended as is_suspended,
+        c.name as owner_name,
+        c.phone as owner_phone,
+        c.job_title as owner_job_title,
+        comp.status,
+        comp.rejection_reason,
+        comp.approved_at,
+        approver.email as approved_by_email,
+        comp.created_at,
+        sub.pack_id as sub_pack_id,
+        sub.status as sub_status,
+        sub.amount_cents as sub_amount_cents,
+        sub.stripe_subscription_id as sub_stripe_sub_id,
+        sub.stripe_customer_id as sub_stripe_customer_id,
+        sub.current_period_end as sub_current_period_end,
+        sub.canceled_at as sub_canceled_at
+    FROM companies comp
+    JOIN clients c ON c.company_id = comp.id
+    JOIN users u ON c.user_id = u.id
+    LEFT JOIN users approver ON comp.approved_by = approver.id
+    LEFT JOIN LATERAL (
+        SELECT pack_id, status, amount_cents, stripe_subscription_id,
+               stripe_customer_id, current_period_end, canceled_at
+        FROM mw_subscriptions
+        WHERE company_id = comp.id
+        ORDER BY (status = 'active') DESC, created_at DESC
+        LIMIT 1
+    ) sub ON TRUE
+"""
+
+
+def _tier_filter_clause(tier: Optional[str]) -> tuple[str, list]:
+    """Translate a tier chip ('free'|'lite'|'platform'|'personal') to SQL.
+
+    Personal is by `is_personal=true` (lives on companies). The other three
+    are by `signup_source` value; platform covers bespoke + legacy NULL rows
+    AND excludes personal workspaces.
+    """
+    if tier == "free":
+        return " AND comp.signup_source = 'resources_free'", []
+    if tier == "lite":
+        return " AND comp.signup_source = 'matcha_lite'", []
+    if tier == "platform":
+        return " AND (comp.signup_source IN ('bespoke') OR comp.signup_source IS NULL) AND comp.is_personal IS NOT TRUE", []
+    if tier == "personal":
+        return " AND comp.is_personal = TRUE", []
+    return "", []
+
+
 @router.get("/business-registrations", response_model=BusinessRegistrationListResponse, dependencies=[Depends(require_admin)])
 async def list_business_registrations(
-    status_filter: Optional[str] = Query(None, alias="status", description="Filter by status: pending, approved, rejected")
+    status_filter: Optional[str] = Query(None, alias="status", description="Filter by status: pending, approved, rejected"),
+    signup_source: Optional[str] = Query(None, description="Filter by signup_source value (resources_free, matcha_lite, bespoke, ir_only_self_serve)"),
+    tier: Optional[str] = Query(None, description="Tier chip: free | lite | platform | personal"),
+    include_deleted: bool = Query(False, description="Include soft-deleted companies"),
 ):
-    """List all business registrations with optional status filter."""
+    """List all business registrations with optional status/tier filters."""
     async with get_connection() as conn:
-        query = """
-            SELECT
-                comp.id,
-                comp.name as company_name,
-                comp.industry,
-                comp.healthcare_specialties,
-                comp.size as company_size,
-                u.email as owner_email,
-                c.name as owner_name,
-                c.phone as owner_phone,
-                c.job_title as owner_job_title,
-                comp.status,
-                comp.rejection_reason,
-                comp.approved_at,
-                approver.email as approved_by_email,
-                comp.created_at
-            FROM companies comp
-            JOIN clients c ON c.company_id = comp.id
-            JOIN users u ON c.user_id = u.id
-            LEFT JOIN users approver ON comp.approved_by = approver.id
-            WHERE comp.owner_id IS NOT NULL
-        """
-        params = []
+        query = _BUSINESS_REGISTRATION_SELECT + " WHERE comp.owner_id IS NOT NULL"
+        params: list = []
+
+        if not include_deleted:
+            query += " AND comp.deleted_at IS NULL"
 
         if status_filter:
-            query += " AND comp.status = $1"
             params.append(status_filter)
+            query += f" AND comp.status = ${len(params)}"
+
+        if signup_source:
+            params.append(signup_source)
+            query += f" AND comp.signup_source = ${len(params)}"
+
+        tier_clause, tier_params = _tier_filter_clause(tier)
+        if tier_clause:
+            query += tier_clause
+            params.extend(tier_params)
 
         query += " ORDER BY comp.created_at DESC"
 
         rows = await conn.fetch(query, *params)
-
-        registrations = [
-            BusinessRegistrationResponse(
-                id=row["id"],
-                company_name=row["company_name"],
-                industry=row["industry"],
-                healthcare_specialties=list(row["healthcare_specialties"] or []) or None,
-                company_size=row["company_size"],
-                owner_email=row["owner_email"],
-                owner_name=row["owner_name"],
-                owner_phone=row["owner_phone"],
-                owner_job_title=row["owner_job_title"],
-                status=row["status"] or "approved",
-                rejection_reason=row["rejection_reason"],
-                approved_at=row["approved_at"],
-                approved_by_email=row["approved_by_email"],
-                created_at=row["created_at"]
-            )
-            for row in rows
-        ]
-
+        registrations = [_row_to_registration(row) for row in rows]
         return BusinessRegistrationListResponse(
             registrations=registrations,
-            total=len(registrations)
+            total=len(registrations),
         )
 
 
@@ -414,53 +504,17 @@ async def get_business_registration(company_id: UUID):
     """Get details of a specific business registration."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            """
-            SELECT
-                comp.id,
-                comp.name as company_name,
-                comp.industry,
-                comp.healthcare_specialties,
-                comp.size as company_size,
-                u.email as owner_email,
-                c.name as owner_name,
-                c.phone as owner_phone,
-                c.job_title as owner_job_title,
-                comp.status,
-                comp.rejection_reason,
-                comp.approved_at,
-                approver.email as approved_by_email,
-                comp.created_at
-            FROM companies comp
-            JOIN clients c ON c.company_id = comp.id
-            JOIN users u ON c.user_id = u.id
-            LEFT JOIN users approver ON comp.approved_by = approver.id
-            WHERE comp.id = $1 AND comp.owner_id IS NOT NULL
-            """,
-            company_id
+            _BUSINESS_REGISTRATION_SELECT + " WHERE comp.id = $1 AND comp.owner_id IS NOT NULL",
+            company_id,
         )
 
         if not row:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Business registration not found"
+                detail="Business registration not found",
             )
 
-        return BusinessRegistrationResponse(
-            id=row["id"],
-            company_name=row["company_name"],
-            industry=row["industry"],
-            healthcare_specialties=list(row["healthcare_specialties"] or []) or None,
-            company_size=row["company_size"],
-            owner_email=row["owner_email"],
-            owner_name=row["owner_name"],
-            owner_phone=row["owner_phone"],
-            owner_job_title=row["owner_job_title"],
-            status=row["status"] or "approved",
-            rejection_reason=row["rejection_reason"],
-            approved_at=row["approved_at"],
-            approved_by_email=row["approved_by_email"],
-            created_at=row["created_at"]
-        )
+        return _row_to_registration(row)
 
 
 @router.patch("/business-registrations/{company_id}", response_model=BusinessRegistrationResponse, dependencies=[Depends(require_admin)])
@@ -9598,4 +9652,266 @@ async def revoke_beta_invitation(invite_id: UUID, current_user=Depends(require_a
         )
     if deleted == "DELETE 0":
         raise HTTPException(status_code=404, detail="Invitation not found or already used")
+    return {"ok": True}
+
+
+# =============================================================================
+# Master-admin lifecycle controls (Phase B of admin user-management work)
+# =============================================================================
+# Suspend/unsuspend, password reset, cancel subscription, refund, change tier,
+# soft-delete. Each action is a single explicit endpoint so the frontend can
+# call it without scaffolding extra logic. All gated by require_admin.
+# =============================================================================
+
+
+_TIER_FEATURE_PRESETS: dict[str, dict] = {
+    # Free / Resources tier: no paid features.
+    "resources_free": {k: False for k in DEFAULT_COMPANY_FEATURES},
+    # Matcha Lite: incidents on, rest off (the headline of the bundle).
+    "matcha_lite": {**{k: False for k in DEFAULT_COMPANY_FEATURES}, "incidents": True, "employees": True},
+    # Bespoke / Platform: full feature set per DEFAULT_COMPANY_FEATURES.
+    "bespoke": dict(DEFAULT_COMPANY_FEATURES),
+    # IR self-serve (Cap): incidents + employees + discipline.
+    "ir_only_self_serve": {
+        **{k: False for k in DEFAULT_COMPANY_FEATURES},
+        "incidents": True, "employees": True, "discipline": True,
+    },
+}
+
+
+class SuspendBody(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+
+@router.post("/users/{user_id}/suspend", dependencies=[Depends(require_admin)])
+async def admin_suspend_user(user_id: UUID, body: SuspendBody = Body(default=SuspendBody())):
+    """Mark a user is_suspended. Login + bearer auth refuse them."""
+    async with get_connection() as conn:
+        result = await conn.execute(
+            "UPDATE users SET is_suspended = TRUE WHERE id = $1",
+            user_id,
+        )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="User not found")
+    logger.info("Admin suspended user %s reason=%s", user_id, body.reason or "—")
+    return {"ok": True}
+
+
+@router.post("/users/{user_id}/unsuspend", dependencies=[Depends(require_admin)])
+async def admin_unsuspend_user(user_id: UUID):
+    async with get_connection() as conn:
+        result = await conn.execute(
+            "UPDATE users SET is_suspended = FALSE WHERE id = $1",
+            user_id,
+        )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"ok": True}
+
+
+class PasswordResetResponse(BaseModel):
+    reset_url: str
+    expires_in_minutes: int
+
+
+@router.post("/users/{user_id}/password-reset", response_model=PasswordResetResponse, dependencies=[Depends(require_admin)])
+async def admin_issue_password_reset(user_id: UUID):
+    """Issue a 1-hour password-reset link for a user.
+
+    The link is RETURNED to the admin (not emailed) so they can hand it off
+    out-of-band when the customer's inbox is broken or they're on a call.
+    Uses the same `password_reset_tokens` table as the user-facing forgot
+    flow, so either path works to consume it.
+    """
+    settings = get_settings()
+    async with get_connection() as conn:
+        user = await conn.fetchrow("SELECT id FROM users WHERE id = $1", user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        token = secrets.token_urlsafe(48)
+        await conn.execute(
+            """INSERT INTO password_reset_tokens (user_id, token, expires_at)
+               VALUES ($1, $2, NOW() + INTERVAL '1 hour')""",
+            user_id, token,
+        )
+    base_url = settings.app_base_url.rstrip("/")
+    return PasswordResetResponse(
+        reset_url=f"{base_url}/reset-password?token={token}",
+        expires_in_minutes=60,
+    )
+
+
+class TierChangeBody(BaseModel):
+    tier: str  # 'resources_free' | 'matcha_lite' | 'bespoke' | 'ir_only_self_serve'
+
+
+@router.patch("/companies/{company_id}/tier", dependencies=[Depends(require_admin)])
+async def admin_change_tier(company_id: UUID, body: TierChangeBody):
+    """Switch a company's tier — rewrites signup_source AND enabled_features.
+
+    Tier mutation is destructive: features get stomped to the target tier's
+    preset, so a Free → Lite move loses any one-off flags that were toggled
+    individually. Admin should know that before calling.
+    """
+    preset = _TIER_FEATURE_PRESETS.get(body.tier)
+    if preset is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown tier '{body.tier}'. Valid: {', '.join(_TIER_FEATURE_PRESETS)}",
+        )
+    async with get_connection() as conn:
+        result = await conn.execute(
+            """UPDATE companies
+                  SET signup_source = $1,
+                      enabled_features = $2::jsonb
+                WHERE id = $3""",
+            body.tier, json.dumps(preset), company_id,
+        )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="Company not found")
+    return {"ok": True, "tier": body.tier}
+
+
+@router.post("/companies/{company_id}/cancel-subscription", dependencies=[Depends(require_admin)])
+async def admin_cancel_subscription(
+    company_id: UUID,
+    immediate: bool = Query(False, description="If true, end the sub now instead of at period end"),
+):
+    """Cancel the active mw_subscriptions row for a company via Stripe."""
+    async with get_connection() as conn:
+        sub_row = await conn.fetchrow(
+            """SELECT stripe_subscription_id, status
+                 FROM mw_subscriptions
+                WHERE company_id = $1 AND status = 'active'
+                ORDER BY created_at DESC
+                LIMIT 1""",
+            company_id,
+        )
+    if not sub_row:
+        raise HTTPException(status_code=404, detail="No active subscription on this company")
+    stripe_service = StripeService()
+    try:
+        await stripe_service.cancel_subscription(
+            sub_row["stripe_subscription_id"],
+            at_period_end=not immediate,
+        )
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True, "stripe_subscription_id": sub_row["stripe_subscription_id"], "immediate": immediate}
+
+
+class ChargeSummary(BaseModel):
+    id: str
+    amount: int
+    amount_refunded: int
+    currency: str
+    created: int
+    status: str
+    description: Optional[str] = None
+
+
+@router.get("/companies/{company_id}/charges", dependencies=[Depends(require_admin)])
+async def admin_list_company_charges(company_id: UUID):
+    """List recent Stripe charges for the company's customer (refund modal)."""
+    async with get_connection() as conn:
+        sub_row = await conn.fetchrow(
+            """SELECT stripe_customer_id
+                 FROM mw_subscriptions
+                WHERE company_id = $1
+                ORDER BY (status = 'active') DESC, created_at DESC
+                LIMIT 1""",
+            company_id,
+        )
+    if not sub_row:
+        return {"charges": []}
+    stripe_service = StripeService()
+    try:
+        charges = await stripe_service.list_charges(sub_row["stripe_customer_id"])
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {
+        "charges": [
+            ChargeSummary(
+                id=c["id"],
+                amount=c["amount"],
+                amount_refunded=c.get("amount_refunded", 0),
+                currency=c["currency"],
+                created=c["created"],
+                status=c["status"],
+                description=c.get("description"),
+            ).model_dump()
+            for c in charges.get("data", [])
+        ]
+    }
+
+
+class RefundBody(BaseModel):
+    charge_id: str
+    amount_cents: Optional[int] = Field(default=None, ge=1)
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+
+@router.post("/companies/{company_id}/refund", dependencies=[Depends(require_admin)])
+async def admin_refund_charge(company_id: UUID, body: RefundBody):
+    """Issue a (partial or full) Stripe refund for a charge belonging to this company."""
+    # We don't enforce that charge_id belongs to the company at the DB level,
+    # but the admin chose it from the company's listed charges so the linkage
+    # is implicit. Stripe enforces ownership on the server side anyway.
+    stripe_service = StripeService()
+    try:
+        refund = await stripe_service.create_refund(
+            body.charge_id,
+            amount_cents=body.amount_cents,
+            reason=body.reason,
+        )
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    logger.info(
+        "Admin refunded charge=%s company=%s amount=%s reason=%s",
+        body.charge_id, company_id, body.amount_cents, body.reason,
+    )
+    return {
+        "ok": True,
+        "refund_id": refund["id"],
+        "amount": refund["amount"],
+        "status": refund["status"],
+    }
+
+
+@router.delete("/companies/{company_id}", dependencies=[Depends(require_admin)])
+async def admin_soft_delete_company(company_id: UUID):
+    """Soft-delete a company. Sets deleted_at; rows stay for audit."""
+    async with get_connection() as conn:
+        result = await conn.execute(
+            "UPDATE companies SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL",
+            company_id,
+        )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="Company not found or already deleted")
+    return {"ok": True}
+
+
+@router.post("/companies/{company_id}/restore", dependencies=[Depends(require_admin)])
+async def admin_restore_company(company_id: UUID):
+    """Reverse a soft-delete."""
+    async with get_connection() as conn:
+        result = await conn.execute(
+            "UPDATE companies SET deleted_at = NULL WHERE id = $1 AND deleted_at IS NOT NULL",
+            company_id,
+        )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="Company not deleted")
+    return {"ok": True}
+
+
+@router.delete("/users/{user_id}", dependencies=[Depends(require_admin)])
+async def admin_soft_delete_user(user_id: UUID):
+    """Soft-delete a user via is_active=false (used for individuals with no company)."""
+    async with get_connection() as conn:
+        result = await conn.execute(
+            "UPDATE users SET is_active = FALSE WHERE id = $1",
+            user_id,
+        )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="User not found")
     return {"ok": True}

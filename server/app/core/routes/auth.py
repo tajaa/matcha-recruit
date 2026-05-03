@@ -1001,7 +1001,7 @@ async def login(request: LoginRequest, req: Request):
 
     async with get_connection() as conn:
         user = await conn.fetchrow(
-            "SELECT id, email, password_hash, role, is_active, created_at, last_login FROM users WHERE lower(email) = lower($1)",
+            "SELECT id, email, password_hash, role, is_active, is_suspended, created_at, last_login FROM users WHERE lower(email) = lower($1)",
             request.email
         )
 
@@ -1015,6 +1015,12 @@ async def login(request: LoginRequest, req: Request):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account is disabled"
+            )
+
+        if user["is_suspended"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is suspended. Contact support@hey-matcha.com.",
             )
 
         # Non-critical analytics write; keep login response path lean.

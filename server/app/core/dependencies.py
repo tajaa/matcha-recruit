@@ -43,7 +43,7 @@ async def get_current_user(
     async with get_connection() as conn:
         # Verify user exists and is active
         user_row = await conn.fetchrow(
-            """SELECT id, email, role, is_active,
+            """SELECT id, email, role, is_active, is_suspended,
                       COALESCE(beta_features, '{}'::jsonb) as beta_features,
                       COALESCE(interview_prep_tokens, 0) as interview_prep_tokens,
                       COALESCE(allowed_interview_roles, '[]'::jsonb) as allowed_interview_roles
@@ -55,6 +55,12 @@ async def get_current_user(
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found or inactive"
+            )
+
+        if user_row["is_suspended"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is suspended"
             )
 
         beta_features = user_row["beta_features"] if user_row["beta_features"] else {}
