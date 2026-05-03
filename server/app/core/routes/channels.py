@@ -192,6 +192,8 @@ class ChannelSummary(BaseModel):
     description: Optional[str] = None
     visibility: str = "public"
     is_paid: bool = False
+    price_cents: Optional[int] = None
+    currency: Optional[str] = None
     member_count: int = 0
     unread_count: int = 0
     last_message_at: Optional[datetime] = None
@@ -329,6 +331,79 @@ async def list_channels(
                 description=r["description"],
                 visibility=r["visibility"],
                 is_paid=r["is_paid"],
+                member_count=r["member_count"],
+                unread_count=r["unread_count"],
+                last_message_at=r["last_message_at"],
+                last_message_preview=r["last_message_preview"],
+                is_member=r["is_member"],
+                my_role=r["my_role"],
+            )
+            for r in rows
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Public discovery — paid + public channels across tenants
+# ---------------------------------------------------------------------------
+
+@router.get("/discover", response_model=list[ChannelSummary])
+async def discover_public_channels(
+    q: str = Query(default="", max_length=100),
+    paid_only: bool = Query(default=False),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Surface public channels from any tenant that the user can subscribe
+    to or join. Excludes archived channels, private channels, and channels
+    where the user is already a member. Personal-account creators of paid
+    channels live here — without this, no one outside their own personal
+    workspace could find them.
+    """
+    async with get_connection() as conn:
+        params: list = [current_user.id]
+        clauses = [
+            "ch.is_archived = false",
+            "COALESCE(ch.visibility, 'public') = 'public'",
+            "cm.user_id IS NULL",  # not already a member
+        ]
+        if paid_only:
+            clauses.append("ch.is_paid = true")
+        if q and len(q) >= 2:
+            params.append(f"%{q}%")
+            search_idx = len(params)
+            clauses.append(f"(ch.name ILIKE ${search_idx} OR ch.description ILIKE ${search_idx})")
+
+        rows = await conn.fetch(
+            f"""
+            SELECT ch.id, ch.name, ch.slug, ch.description,
+                   COALESCE(ch.visibility, 'public') AS visibility,
+                   COALESCE(ch.is_paid, false) AS is_paid,
+                   ch.price_cents,
+                   COALESCE(ch.currency, 'usd') AS currency,
+                   (SELECT COUNT(*) FROM channel_members WHERE channel_id = ch.id) AS member_count,
+                   0 AS unread_count,
+                   (SELECT MAX(msg2.created_at) FROM channel_messages msg2
+                    WHERE msg2.channel_id = ch.id) AS last_message_at,
+                   NULL::text AS last_message_preview,
+                   FALSE AS is_member,
+                   NULL::text AS my_role
+            FROM channels ch
+            LEFT JOIN channel_members cm ON cm.channel_id = ch.id AND cm.user_id = $1
+            WHERE {' AND '.join(clauses)}
+            ORDER BY ch.is_paid DESC, member_count DESC, ch.created_at DESC
+            LIMIT 50
+            """,
+            *params,
+        )
+        return [
+            ChannelSummary(
+                id=r["id"],
+                name=r["name"],
+                slug=r["slug"],
+                description=r["description"],
+                visibility=r["visibility"],
+                is_paid=r["is_paid"],
+                price_cents=r["price_cents"],
+                currency=r["currency"],
                 member_count=r["member_count"],
                 unread_count=r["unread_count"],
                 last_message_at=r["last_message_at"],
@@ -595,15 +670,24 @@ async def search_invitable_users(
             company_id = scope.get("company_id")
             is_personal = False
 
-        # Build params: $1=user_id, $2=company_id (UUID or NULL), $3=search (optional)
+        # Build params: $1=user_id, $2=company_id (UUID or NULL), $3=search-like
+        # (optional, for partial name/email match), $4=exact-email (optional,
+        # only set when q looks like an email — enables cross-tenant lookup
+        # by exact address so personal users can invite each other without
+        # needing a prior connection).
         include_company = bool(company_id and not is_personal)
         params: list = [current_user.id, company_id if include_company else None]
+
+        name_filter = ""
+        exact_email_clause = "FALSE"
         if has_search:
             params.append(search)
             search_idx = len(params)
             name_filter = f"AND ({_USER_NAME_EXPR} ILIKE ${search_idx} OR u.email ILIKE ${search_idx})"
-        else:
-            name_filter = ""
+            if "@" in q and "." in q.split("@", 1)[1]:
+                params.append(q.strip().lower())
+                exact_idx = len(params)
+                exact_email_clause = f"LOWER(u.email) = ${exact_idx}"
 
         rows = await conn.fetch(
             f"""
@@ -639,6 +723,9 @@ async def search_invitable_users(
                   WHERE (uc.user_id = $1 AND uc.connected_user_id = u.id AND uc.status = 'accepted')
                   OR (uc.connected_user_id = $1 AND uc.user_id = u.id AND uc.status = 'accepted')
                 )
+                -- Source 6: Exact email match (cross-tenant lookup so personal
+                -- users can invite each other when no prior relationship exists)
+                OR {exact_email_clause}
               )
             ORDER BY {_USER_NAME_EXPR}
             LIMIT 20

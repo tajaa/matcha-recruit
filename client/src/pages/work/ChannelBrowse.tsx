@@ -1,13 +1,13 @@
 import { useState, useEffect, useMemo, lazy, Suspense } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Hash, Search, Users, Lock, Loader2, LogIn, Crown } from 'lucide-react'
-import { listChannels, joinChannel, createChannelCheckout } from '../../api/channels'
+import { listChannels, discoverChannels, joinChannel, createChannelCheckout } from '../../api/channels'
 import type { ChannelSummary } from '../../api/channels'
 import { useMe } from '../../hooks/useMe'
 
 const CreateChannelModal = lazy(() => import('../../components/channels/CreateChannelModal'))
 
-type Tab = 'all' | 'free' | 'paid' | 'mine'
+type Tab = 'all' | 'free' | 'paid' | 'mine' | 'discover'
 
 function formatPrice(cents: number | null | undefined, _currency?: string): string {
   if (!cents) return ''
@@ -18,7 +18,9 @@ export default function ChannelBrowse() {
   const navigate = useNavigate()
   const { me } = useMe()
   const [channels, setChannels] = useState<ChannelSummary[]>([])
+  const [discoverList, setDiscoverList] = useState<ChannelSummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [discoverLoading, setDiscoverLoading] = useState(false)
   const [search, setSearch] = useState('')
   const [tab, setTab] = useState<Tab>('all')
   const [showCreate, setShowCreate] = useState(false)
@@ -31,9 +33,19 @@ export default function ChannelBrowse() {
       .finally(() => setLoading(false))
   }, [])
 
+  useEffect(() => {
+    if (tab !== 'discover') return
+    setDiscoverLoading(true)
+    discoverChannels({ q: search || undefined })
+      .then(setDiscoverList)
+      .catch(() => {})
+      .finally(() => setDiscoverLoading(false))
+  }, [tab, search])
+
   const canCreate = me?.user?.role === 'client' || me?.user?.role === 'admin' || me?.user?.role === 'individual'
 
   const filtered = useMemo(() => {
+    if (tab === 'discover') return discoverList  // server-side filtered
     let list = channels
     if (tab === 'free') list = list.filter((ch) => !ch.is_paid)
     else if (tab === 'paid') list = list.filter((ch) => ch.is_paid)
@@ -48,7 +60,7 @@ export default function ChannelBrowse() {
       )
     }
     return list
-  }, [channels, tab, search])
+  }, [channels, discoverList, tab, search])
 
   async function handleJoin(ch: ChannelSummary) {
     setActionLoading(ch.id)
@@ -75,6 +87,7 @@ export default function ChannelBrowse() {
     { key: 'free', label: 'Free' },
     { key: 'paid', label: 'Paid' },
     { key: 'mine', label: 'My Channels' },
+    { key: 'discover', label: 'Discover' },
   ]
 
   return (
@@ -123,7 +136,11 @@ export default function ChannelBrowse() {
         </div>
 
         {/* Content */}
-        {loading ? (
+        {tab === 'discover' && discoverLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+          </div>
+        ) : loading ? (
           <div className="flex items-center justify-center py-20">
             <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
           </div>

@@ -69,6 +69,14 @@ export interface ChannelDetail {
 export const listChannels = () =>
   api.get<ChannelSummary[]>('/channels')
 
+export const discoverChannels = (params?: { q?: string; paid_only?: boolean }) => {
+  const qs = new URLSearchParams()
+  if (params?.q) qs.set('q', params.q)
+  if (params?.paid_only) qs.set('paid_only', 'true')
+  const query = qs.toString()
+  return api.get<ChannelSummary[]>(`/channels/discover${query ? '?' + query : ''}`)
+}
+
 export interface PaidChannelConfig {
   price_cents: number
   currency?: string
