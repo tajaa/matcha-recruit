@@ -9667,8 +9667,11 @@ async def revoke_beta_invitation(invite_id: UUID, current_user=Depends(require_a
 _TIER_FEATURE_PRESETS: dict[str, dict] = {
     # Free / Resources tier: no paid features.
     "resources_free": {k: False for k in DEFAULT_COMPANY_FEATURES},
-    # Matcha Lite: incidents on, rest off (the headline of the bundle).
-    "matcha_lite": {**{k: False for k in DEFAULT_COMPANY_FEATURES}, "incidents": True, "employees": True},
+    # Matcha Lite: incidents only (matches what stripe_webhook flips on
+    # checkout.session.completed for matcha_lite — see stripe_webhook.py
+    # line ~214). Don't add `employees` here or the post-tier-change shape
+    # diverges from a real Lite signup.
+    "matcha_lite": {**{k: False for k in DEFAULT_COMPANY_FEATURES}, "incidents": True},
     # Bespoke / Platform: full feature set per DEFAULT_COMPANY_FEATURES.
     "bespoke": dict(DEFAULT_COMPANY_FEATURES),
     # IR self-serve (Cap): incidents + employees + discipline.
@@ -9747,11 +9750,20 @@ class TierChangeBody(BaseModel):
 
 @router.patch("/companies/{company_id}/tier", dependencies=[Depends(require_admin)])
 async def admin_change_tier(company_id: UUID, body: TierChangeBody):
-    """Switch a company's tier — rewrites signup_source AND enabled_features.
+    """Switch a company's tier — rewrites signup_source + enabled_features.
 
     Tier mutation is destructive: features get stomped to the target tier's
     preset, so a Free → Lite move loses any one-off flags that were toggled
-    individually. Admin should know that before calling.
+    individually.
+
+    Stripe sub side-effects:
+    - **Lite → non-Lite**: cancels the active Stripe subscription
+      immediately. Otherwise the customer keeps getting charged for a tier
+      they no longer have.
+    - **non-Lite → Lite**: refused. Activating Lite requires a Stripe
+      checkout (or a broker-pays referral) so payment is established;
+      admin should not bypass that. Use the customer's signup link.
+    - **Bespoke ↔ IR Cap**: no Stripe coupling, just preset rewrite.
     """
     preset = _TIER_FEATURE_PRESETS.get(body.tier)
     if preset is None:
@@ -9760,6 +9772,44 @@ async def admin_change_tier(company_id: UUID, body: TierChangeBody):
             detail=f"Unknown tier '{body.tier}'. Valid: {', '.join(_TIER_FEATURE_PRESETS)}",
         )
     async with get_connection() as conn:
+        current = await conn.fetchrow(
+            "SELECT signup_source FROM companies WHERE id = $1",
+            company_id,
+        )
+        if not current:
+            raise HTTPException(status_code=404, detail="Company not found")
+        current_tier = current["signup_source"]
+
+        # Refuse upgrades into Lite — payment isn't established.
+        if body.tier == "matcha_lite" and current_tier != "matcha_lite":
+            raise HTTPException(
+                status_code=400,
+                detail="Activating Matcha Lite requires Stripe checkout. Send the customer to /lite/signup or use a broker referral token; admin cannot promote into Lite without payment.",
+            )
+
+        # Lite → anything else: cancel the active Stripe sub first.
+        if current_tier == "matcha_lite" and body.tier != "matcha_lite":
+            sub_row = await conn.fetchrow(
+                """SELECT stripe_subscription_id
+                     FROM mw_subscriptions
+                    WHERE company_id = $1 AND status = 'active'
+                    ORDER BY created_at DESC
+                    LIMIT 1""",
+                company_id,
+            )
+            if sub_row:
+                stripe_service = StripeService()
+                try:
+                    await stripe_service.cancel_subscription(
+                        sub_row["stripe_subscription_id"],
+                        at_period_end=False,
+                    )
+                except StripeServiceError as exc:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"Cannot change tier: Stripe cancellation failed: {exc}",
+                    )
+
         result = await conn.execute(
             """UPDATE companies
                   SET signup_source = $1,
@@ -9769,7 +9819,11 @@ async def admin_change_tier(company_id: UUID, body: TierChangeBody):
         )
     if result == "UPDATE 0":
         raise HTTPException(status_code=404, detail="Company not found")
-    return {"ok": True, "tier": body.tier}
+    logger.info(
+        "Admin changed tier: company=%s from=%s to=%s",
+        company_id, current_tier, body.tier,
+    )
+    return {"ok": True, "tier": body.tier, "previous_tier": current_tier}
 
 
 @router.post("/companies/{company_id}/cancel-subscription", dependencies=[Depends(require_admin)])

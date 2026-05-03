@@ -1001,7 +1001,17 @@ async def login(request: LoginRequest, req: Request):
 
     async with get_connection() as conn:
         user = await conn.fetchrow(
-            "SELECT id, email, password_hash, role, is_active, is_suspended, created_at, last_login FROM users WHERE lower(email) = lower($1)",
+            """SELECT u.id, u.email, u.password_hash, u.role, u.is_active, u.is_suspended,
+                      u.created_at, u.last_login,
+                      (
+                        SELECT MIN(c.deleted_at)
+                          FROM clients cl
+                          JOIN companies c ON c.id = cl.company_id
+                         WHERE cl.user_id = u.id
+                           AND c.deleted_at IS NOT NULL
+                      ) AS company_deleted_at
+                 FROM users u
+                WHERE lower(u.email) = lower($1)""",
             request.email
         )
 
@@ -1021,6 +1031,12 @@ async def login(request: LoginRequest, req: Request):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account is suspended. Contact support@hey-matcha.com.",
+            )
+
+        if user["company_deleted_at"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This account's company has been deactivated.",
             )
 
         # Non-critical analytics write; keep login response path lean.
@@ -2623,12 +2639,20 @@ async def reset_password(request: ResetPasswordRequest):
     """Reset password using a valid reset token."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            """SELECT user_id FROM password_reset_tokens
-               WHERE token = $1 AND expires_at > NOW() AND used_at IS NULL""",
+            """SELECT prt.user_id, u.is_suspended, u.is_active
+                 FROM password_reset_tokens prt
+                 JOIN users u ON u.id = prt.user_id
+                WHERE prt.token = $1
+                  AND prt.expires_at > NOW()
+                  AND prt.used_at IS NULL""",
             request.token,
         )
         if not row:
             raise HTTPException(status_code=400, detail="Invalid or expired reset link")
+        if row["is_suspended"] or not row["is_active"]:
+            # Defense in depth — login already blocks these accounts, but a
+            # suspended user shouldn't even be able to rotate their password.
+            raise HTTPException(status_code=403, detail="Account cannot be reset. Contact support.")
 
         new_hash = hash_password(request.new_password)
         await conn.execute(

@@ -149,8 +149,11 @@ export default function AdminCompanyDetail() {
               {co.status}
             </span>
             {registration?.is_suspended && (
-              <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-red-900/30 text-red-400 border-red-800/40">
-                Suspended
+              <span
+                className="text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-red-900/30 text-red-400 border-red-800/40"
+                title="Owner is suspended"
+              >
+                Owner suspended
               </span>
             )}
             {registration?.deleted_at && (
@@ -690,30 +693,38 @@ function LifecycleActions({
     })
   }
 
+  const isDeleted = !!registration.deleted_at
+
   return (
     <>
+      {isDeleted && (
+        <div className="rounded-lg border border-zinc-700 bg-zinc-800/40 px-3 py-2 text-xs text-zinc-400">
+          This company is soft-deleted. Lifecycle actions are disabled until you restore it.
+        </div>
+      )}
+
       <section className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-4">
         <h3 className="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">Account</h3>
         <div className="flex flex-wrap gap-2">
           <button
             onClick={suspendOrUnsuspend}
-            disabled={busy || !registration.owner_user_id}
+            disabled={busy || isDeleted || !registration.owner_user_id}
             className={`text-xs px-3 py-1.5 rounded-lg disabled:opacity-40 transition-colors ${
               registration.is_suspended
                 ? 'bg-emerald-700 hover:bg-emerald-600 text-white'
                 : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200'
             }`}
           >
-            {registration.is_suspended ? 'Unsuspend' : 'Suspend'}
+            {registration.is_suspended ? 'Unsuspend owner' : 'Suspend owner'}
           </button>
           <button
             onClick={passwordReset}
-            disabled={busy || !registration.owner_user_id}
+            disabled={busy || isDeleted || !registration.owner_user_id}
             className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 disabled:opacity-40"
           >
-            Issue password reset
+            Issue owner password reset
           </button>
-          {!registration.deleted_at ? (
+          {!isDeleted ? (
             <button
               onClick={softDelete}
               disabled={busy}
@@ -725,7 +736,7 @@ function LifecycleActions({
             <button
               onClick={restore}
               disabled={busy}
-              className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 disabled:opacity-40"
+              className="text-xs px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-40"
             >
               Restore
             </button>
@@ -751,21 +762,21 @@ function LifecycleActions({
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => cancelSub(false)}
-              disabled={busy || registration.subscription?.status !== 'active'}
+              disabled={busy || isDeleted || registration.subscription?.status !== 'active'}
               className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 disabled:opacity-40"
             >
               Cancel at period end
             </button>
             <button
               onClick={() => cancelSub(true)}
-              disabled={busy}
+              disabled={busy || isDeleted}
               className="text-xs px-3 py-1.5 rounded-lg bg-red-900/40 hover:bg-red-900/60 text-red-200 disabled:opacity-40"
             >
               Cancel immediately
             </button>
             <button
               onClick={() => setRefundOpen(true)}
-              disabled={busy}
+              disabled={busy || isDeleted}
               className="text-xs px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 disabled:opacity-40"
             >
               Issue refund…
@@ -782,7 +793,8 @@ function LifecycleActions({
           <select
             value={tierTarget}
             onChange={(e) => setTierTarget(e.target.value)}
-            className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-200 outline-none focus:border-zinc-500"
+            disabled={isDeleted}
+            className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-200 outline-none focus:border-zinc-500 disabled:opacity-40"
           >
             <option value="">Pick a tier…</option>
             {TIER_OPTIONS.filter((t) => t.value !== registration.signup_source).map((t) => (
@@ -791,7 +803,7 @@ function LifecycleActions({
           </select>
           <button
             onClick={changeTier}
-            disabled={busy || !tierTarget}
+            disabled={busy || isDeleted || !tierTarget}
             className="text-xs px-3 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-40"
           >
             Switch
@@ -799,7 +811,7 @@ function LifecycleActions({
         </div>
         <p className="text-[10px] text-zinc-600 mt-2">
           Current: <span className="font-mono text-zinc-400">{registration.signup_source ?? 'bespoke'}</span>.
-          Switching rewrites enabled_features to the target tier's preset.
+          Switching rewrites enabled_features to the target tier's preset. Activating Lite requires Stripe checkout — not allowed here.
         </p>
       </section>
 

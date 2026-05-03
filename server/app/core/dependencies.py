@@ -43,11 +43,19 @@ async def get_current_user(
     async with get_connection() as conn:
         # Verify user exists and is active
         user_row = await conn.fetchrow(
-            """SELECT id, email, role, is_active, is_suspended,
-                      COALESCE(beta_features, '{}'::jsonb) as beta_features,
-                      COALESCE(interview_prep_tokens, 0) as interview_prep_tokens,
-                      COALESCE(allowed_interview_roles, '[]'::jsonb) as allowed_interview_roles
-               FROM users WHERE id = $1""",
+            """SELECT u.id, u.email, u.role, u.is_active, u.is_suspended,
+                      COALESCE(u.beta_features, '{}'::jsonb) as beta_features,
+                      COALESCE(u.interview_prep_tokens, 0) as interview_prep_tokens,
+                      COALESCE(u.allowed_interview_roles, '[]'::jsonb) as allowed_interview_roles,
+                      (
+                        SELECT MIN(c.deleted_at)
+                          FROM clients cl
+                          JOIN companies c ON c.id = cl.company_id
+                         WHERE cl.user_id = u.id
+                           AND c.deleted_at IS NOT NULL
+                      ) AS company_deleted_at
+                 FROM users u
+                WHERE u.id = $1""",
             user_id
         )
 
@@ -61,6 +69,12 @@ async def get_current_user(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account is suspended"
+            )
+
+        if user_row["company_deleted_at"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This account's company has been deactivated"
             )
 
         beta_features = user_row["beta_features"] if user_row["beta_features"] else {}

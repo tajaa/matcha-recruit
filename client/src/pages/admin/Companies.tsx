@@ -279,8 +279,11 @@ export default function Companies() {
                       <Link to={`/admin/companies/${c.id}`} className="font-medium text-zinc-100 hover:text-emerald-400 transition-colors">{c.company_name}</Link>
                       <p className="text-xs text-zinc-500">{c.owner_email}</p>
                       {c.is_suspended && (
-                        <span className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded border border-red-500/40 bg-red-500/10 text-red-300">
-                          Suspended
+                        <span
+                          className="inline-block mt-1 text-[10px] px-1.5 py-0.5 rounded border border-red-500/40 bg-red-500/10 text-red-300"
+                          title="The company owner is suspended; other users in the company may not be."
+                        >
+                          Owner suspended
                         </span>
                       )}
                     </td>
