@@ -252,7 +252,7 @@ function FeatureGrid() {
 // Waitlist
 // ---------------------------------------------------------------------------
 
-function WaitlistSection({ waitlistRef }: { waitlistRef: React.RefObject<HTMLDivElement> }) {
+function WaitlistSection({ waitlistRef }: { waitlistRef: React.RefObject<HTMLDivElement | null> }) {
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
   const [companyName, setCompanyName] = useState('')

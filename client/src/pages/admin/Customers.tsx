@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Loader2, Search, Shield, KeyRound, Zap, Plus } from 'lucide-react'
+import { Loader2, Search, Shield, KeyRound } from 'lucide-react'
 import { api } from '../../api/client'
 
 // ── Types ────────────────────────────────────────────────────────────────────
