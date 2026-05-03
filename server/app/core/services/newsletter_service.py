@@ -932,6 +932,388 @@ def _render_email(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Tags + segmentation (P1)
+# ---------------------------------------------------------------------------
+
+
+async def list_tags() -> list[dict]:
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT t.id, t.slug, t.label, t.description, t.created_at,
+                      (SELECT COUNT(*) FROM newsletter_subscriber_tags st WHERE st.tag_id = t.id) AS subscriber_count
+                 FROM newsletter_tags t
+                ORDER BY t.label"""
+        )
+    return [dict(r) for r in rows]
+
+
+async def create_tag(slug: str, label: str, description: Optional[str] = None) -> dict:
+    slug = slug.strip().lower()
+    if not slug or " " in slug:
+        raise ValueError("Slug must be non-empty and whitespace-free")
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO newsletter_tags (slug, label, description)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (slug) DO UPDATE SET label = EXCLUDED.label, description = EXCLUDED.description
+               RETURNING *""",
+            slug, label.strip(), description,
+        )
+    return dict(row)
+
+
+async def delete_tag(tag_id: UUID) -> bool:
+    async with get_connection() as conn:
+        result = await conn.execute("DELETE FROM newsletter_tags WHERE id = $1", tag_id)
+    return "DELETE 1" in result
+
+
+async def attach_tags_to_subscriber(subscriber_id: UUID, tag_slugs: list[str]) -> None:
+    """Attach by slug. Unknown slugs are silently ignored — auto-tagging
+    paths shouldn't 500 if a slug got renamed."""
+    if not tag_slugs:
+        return
+    async with get_connection() as conn:
+        await conn.execute(
+            """INSERT INTO newsletter_subscriber_tags (subscriber_id, tag_id)
+               SELECT $1, t.id FROM newsletter_tags t
+                WHERE t.slug = ANY($2::text[])
+               ON CONFLICT DO NOTHING""",
+            subscriber_id, tag_slugs,
+        )
+
+
+async def replace_subscriber_tags(subscriber_id: UUID, tag_ids: list[UUID]) -> None:
+    """Replace the entire tag set on a subscriber. Used by admin tag editor."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "DELETE FROM newsletter_subscriber_tags WHERE subscriber_id = $1",
+                subscriber_id,
+            )
+            if tag_ids:
+                await conn.executemany(
+                    "INSERT INTO newsletter_subscriber_tags (subscriber_id, tag_id) VALUES ($1, $2)",
+                    [(subscriber_id, tag_id) for tag_id in tag_ids],
+                )
+
+
+async def get_subscriber_tags(subscriber_id: UUID) -> list[dict]:
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT t.id, t.slug, t.label
+                 FROM newsletter_tags t
+                 JOIN newsletter_subscriber_tags st ON st.tag_id = t.id
+                WHERE st.subscriber_id = $1
+                ORDER BY t.label""",
+            subscriber_id,
+        )
+    return [dict(r) for r in rows]
+
+
+async def derive_signup_tags(source: str, user_id: Optional[UUID]) -> list[str]:
+    """Auto-tag derivation. Returns a list of slugs to attach to a new
+    subscriber based on (a) the marketing surface that captured them and
+    (b) the tier of the company they belong to (if any)."""
+    slugs: list[str] = []
+
+    # Source-bucket tags. Anything starting with `blog_` collapses to
+    # 'blog'; calculator pages all collapse to 'calculators'; etc.
+    src = (source or "").lower()
+    if src.startswith("blog"):
+        slugs.append("blog")
+    elif src.startswith("calculator") or src.startswith("calc_"):
+        slugs.append("calculators")
+    elif src.startswith("jd_") or src.startswith("job_desc") or src == "job_descriptions":
+        slugs.append("job-descriptions")
+    elif src == "glossary":
+        slugs.append("glossary")
+    elif src.startswith("resources"):
+        slugs.append("resources-hub")
+    elif src.startswith("footer"):
+        slugs.append("footer")
+
+    # Tier tag — only resolvable if the subscriber is logged in.
+    if user_id is not None:
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """SELECT c.signup_source, c.is_personal
+                     FROM clients cl
+                     JOIN companies c ON c.id = cl.company_id
+                    WHERE cl.user_id = $1
+                    LIMIT 1""",
+                user_id,
+            )
+        if row:
+            if row["is_personal"]:
+                slugs.append("tier-personal")
+            elif row["signup_source"] == "resources_free":
+                slugs.append("tier-free")
+            elif row["signup_source"] == "matcha_lite":
+                slugs.append("tier-lite")
+            else:
+                slugs.append("tier-platform")
+
+    return slugs
+
+
+async def send_newsletter_to_segment(
+    newsletter_id: UUID,
+    tag_slugs: Optional[list[str]] = None,
+    actor_id: Optional[UUID] = None,
+) -> dict:
+    """Variant of send_newsletter that filters subscribers by tag.
+
+    `tag_slugs=None` or `[]` sends to everyone active (full list).
+    `tag_slugs=['tier-lite']` only sends to subscribers tagged tier-lite.
+    """
+    async with get_connection() as conn:
+        async with conn.transaction():
+            nl = await conn.fetchrow(
+                """UPDATE newsletters
+                   SET status = 'sending', updated_at = NOW()
+                   WHERE id = $1
+                     AND is_deleted = FALSE
+                     AND (
+                       status IN ('draft', 'scheduled')
+                       OR (status = 'sending' AND updated_at < NOW() - INTERVAL '1 hour')
+                     )
+                   RETURNING *""",
+                newsletter_id,
+            )
+            if not nl:
+                raise ValueError("Newsletter not found, already sent, or in flight")
+
+            if tag_slugs:
+                subscribers = await conn.fetch(
+                    """SELECT DISTINCT s.id, s.email, s.name
+                         FROM newsletter_subscribers s
+                         JOIN newsletter_subscriber_tags st ON st.subscriber_id = s.id
+                         JOIN newsletter_tags t ON t.id = st.tag_id
+                        WHERE s.status = 'active' AND t.slug = ANY($1::text[])""",
+                    tag_slugs,
+                )
+            else:
+                subscribers = await conn.fetch(
+                    "SELECT id, email, name FROM newsletter_subscribers WHERE status = 'active'"
+                )
+
+            for sub in subscribers:
+                await conn.execute(
+                    """INSERT INTO newsletter_sends (newsletter_id, subscriber_id)
+                       VALUES ($1, $2)
+                       ON CONFLICT (newsletter_id, subscriber_id) DO NOTHING""",
+                    newsletter_id, sub["id"],
+                )
+
+            await conn.execute(
+                """INSERT INTO newsletter_admin_audit
+                     (actor_id, action, target_type, target_id, metadata)
+                   VALUES ($1, 'newsletter_send', 'newsletter', $2, $3::jsonb)""",
+                actor_id, str(newsletter_id),
+                json.dumps({
+                    "recipient_count": len(subscribers),
+                    "segment_tags": tag_slugs or [],
+                }),
+            )
+
+    asyncio.create_task(_send_emails(newsletter_id, dict(nl), list(subscribers)))
+    return {"queued": len(subscribers), "status": "sending", "segment_tags": tag_slugs or []}
+
+
+# ---------------------------------------------------------------------------
+# Saved templates (P2)
+# ---------------------------------------------------------------------------
+
+
+async def list_templates() -> list[dict]:
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT id, name, description, preheader, created_at, updated_at FROM newsletter_templates ORDER BY name"
+        )
+    return [dict(r) for r in rows]
+
+
+async def create_template(
+    name: str,
+    description: Optional[str],
+    content_html: Optional[str],
+    preheader: Optional[str],
+    created_by: Optional[UUID],
+) -> dict:
+    sanitized = sanitize_html(content_html or "")
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO newsletter_templates (name, description, content_html, preheader, created_by)
+               VALUES ($1, $2, $3, $4, $5)
+               RETURNING *""",
+            name.strip(), description, sanitized, preheader, created_by,
+        )
+    return dict(row)
+
+
+async def update_template(template_id: UUID, updates: dict) -> Optional[dict]:
+    allowed = {"name", "description", "content_html", "preheader"}
+    sets = []
+    params: list = []
+    idx = 1
+    for k, v in updates.items():
+        if k not in allowed:
+            continue
+        if k == "content_html" and v:
+            v = sanitize_html(v)
+        sets.append(f"{k} = ${idx}")
+        params.append(v)
+        idx += 1
+    if not sets:
+        return None
+    sets.append("updated_at = NOW()")
+    params.append(template_id)
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            f"UPDATE newsletter_templates SET {', '.join(sets)} WHERE id = ${idx} RETURNING *",
+            *params,
+        )
+    return dict(row) if row else None
+
+
+async def get_template(template_id: UUID) -> Optional[dict]:
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM newsletter_templates WHERE id = $1",
+            template_id,
+        )
+    return dict(row) if row else None
+
+
+async def delete_template(template_id: UUID) -> bool:
+    async with get_connection() as conn:
+        result = await conn.execute("DELETE FROM newsletter_templates WHERE id = $1", template_id)
+    return "DELETE 1" in result
+
+
+# ---------------------------------------------------------------------------
+# Analytics + growth (P2)
+# ---------------------------------------------------------------------------
+
+
+async def get_subscriber_growth(days: int = 90) -> list[dict]:
+    """Return daily new-subscriber counts for the last `days` days. Used by
+    the admin overview sparkline."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT date_trunc('day', subscribed_at)::date AS day,
+                      COUNT(*) AS subscribed,
+                      COUNT(*) FILTER (WHERE status IN ('active','unsubscribed','bounced')) AS confirmed
+                 FROM newsletter_subscribers
+                WHERE subscribed_at >= NOW() - ($1::int * INTERVAL '1 day')
+                GROUP BY 1
+                ORDER BY 1""",
+            days,
+        )
+    return [
+        {
+            "day": r["day"].isoformat() if r["day"] else None,
+            "subscribed": r["subscribed"],
+            "confirmed": r["confirmed"],
+        }
+        for r in rows
+    ]
+
+
+async def get_newsletter_analytics(newsletter_id: UUID) -> dict:
+    """Per-issue analytics — counts + computed rates against eligible
+    recipients (sent rows, excluding never-attempted)."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT
+                 COUNT(*) FILTER (WHERE status IN ('sent','failed')) AS attempted,
+                 COUNT(*) FILTER (WHERE status = 'sent') AS sent,
+                 COUNT(*) FILTER (WHERE status = 'failed') AS failed,
+                 COUNT(*) FILTER (WHERE opened_at IS NOT NULL) AS opened,
+                 COUNT(DISTINCT subscriber_id) FILTER (WHERE clicked_at IS NOT NULL) AS clicked_uniq,
+                 COUNT(*) FILTER (WHERE clicked_at IS NOT NULL) AS clicked_total,
+                 COUNT(*) FILTER (WHERE bounced_at IS NOT NULL OR status = 'bounced') AS bounced
+               FROM newsletter_sends
+              WHERE newsletter_id = $1""",
+            newsletter_id,
+        )
+        # Unsubscribes attributed to this newsletter — heuristic: subscribers
+        # who unsubscribed AFTER this newsletter's sent_at and BEFORE the
+        # next newsletter went out. Without a direct link from unsub → issue
+        # we approximate via a 7-day window from sent_at.
+        nl = await conn.fetchrow(
+            "SELECT sent_at FROM newsletters WHERE id = $1",
+            newsletter_id,
+        )
+        unsub_count = 0
+        if nl and nl["sent_at"]:
+            unsub_count = await conn.fetchval(
+                """SELECT COUNT(*)
+                     FROM newsletter_subscribers
+                    WHERE status = 'unsubscribed'
+                      AND unsubscribed_at BETWEEN $1 AND $1 + INTERVAL '7 days'""",
+                nl["sent_at"],
+            ) or 0
+
+    sent = row["sent"] or 0
+    opened = row["opened"] or 0
+    clicked = row["clicked_uniq"] or 0
+    bounced = row["bounced"] or 0
+    return {
+        "attempted": row["attempted"] or 0,
+        "sent": sent,
+        "failed": row["failed"] or 0,
+        "opened": opened,
+        "clicked_unique": clicked,
+        "clicked_total": row["clicked_total"] or 0,
+        "bounced": bounced,
+        "unsubscribed_window": unsub_count,
+        "open_rate": (opened / sent) if sent else 0.0,
+        "click_rate": (clicked / sent) if sent else 0.0,
+        "bounce_rate": (bounced / (sent + bounced)) if (sent + bounced) else 0.0,
+        "unsubscribe_rate": (unsub_count / sent) if sent else 0.0,
+    }
+
+
+async def get_send_progress(newsletter_id: UUID) -> dict:
+    """Live progress snapshot for the admin send progress bar."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT
+                 COUNT(*) AS queued,
+                 COUNT(*) FILTER (WHERE status = 'sent') AS sent,
+                 COUNT(*) FILTER (WHERE status = 'failed') AS failed,
+                 COUNT(*) FILTER (WHERE status = 'pending') AS pending,
+                 COUNT(*) FILTER (WHERE opened_at IS NOT NULL) AS opened,
+                 COUNT(*) FILTER (WHERE clicked_at IS NOT NULL) AS clicked,
+                 COUNT(*) FILTER (WHERE bounced_at IS NOT NULL OR status = 'bounced') AS bounced
+               FROM newsletter_sends
+              WHERE newsletter_id = $1""",
+            newsletter_id,
+        )
+        nl_row = await conn.fetchrow(
+            "SELECT status FROM newsletters WHERE id = $1",
+            newsletter_id,
+        )
+    return {
+        "newsletter_status": nl_row["status"] if nl_row else None,
+        "queued": row["queued"] or 0,
+        "sent": row["sent"] or 0,
+        "failed": row["failed"] or 0,
+        "pending": row["pending"] or 0,
+        "opened": row["opened"] or 0,
+        "clicked": row["clicked"] or 0,
+        "bounced": row["bounced"] or 0,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Admin audit helper
+# ---------------------------------------------------------------------------
+
+
 async def log_admin_action(
     actor_id: Optional[UUID],
     action: str,

@@ -106,8 +106,8 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
 
         {embedded ? (
           <div className="mb-6">
-            <h1 className="text-2xl font-semibold text-zinc-100">HR Templates</h1>
-            <p className="mt-1 text-sm text-zinc-500">
+            <h1 className="text-2xl font-semibold text-vsc-text">HR Templates</h1>
+            <p className="mt-1 text-sm text-vsc-text/50">
               Free, editable templates for the documents HR teams use most. Reviewed against current employment-law guidance.
             </p>
           </div>
@@ -130,30 +130,30 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
         <Link
           to={`${root}/templates/job-descriptions`}
           className={embedded
-            ? 'block mb-4 p-4 rounded-lg border border-zinc-800 hover:border-zinc-600 hover:bg-zinc-900/40 transition-colors'
+            ? 'block mb-4 p-4 rounded-xl border border-vsc-border bg-vsc-panel hover:border-vsc-text/30 transition-colors'
             : 'block mb-6 p-6 rounded-2xl transition-opacity hover:opacity-80'}
           style={embedded ? undefined : { border: `1px solid ${t.line}`, backgroundColor: t.cardBg }}
         >
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className={embedded ? 'text-[11px] uppercase tracking-wider mb-1 text-zinc-500' : 'text-xs uppercase tracking-wider mb-2'} style={embedded ? undefined : { color: t.muted }}>Library</p>
+              <p className={embedded ? 'text-[11px] uppercase tracking-wider mb-1 text-vsc-text/40' : 'text-xs uppercase tracking-wider mb-2'} style={embedded ? undefined : { color: t.muted }}>Library</p>
               <h2
-                className={embedded ? 'text-base font-medium text-zinc-100 mb-1' : 'text-2xl mb-1'}
+                className={embedded ? 'text-base font-semibold text-vsc-text mb-1' : 'text-2xl mb-1'}
                 style={embedded ? undefined : { fontFamily: t.display, color: t.ink, fontWeight: 500 }}
               >
                 Job Descriptions Library
               </h2>
-              <p className={embedded ? 'text-xs text-zinc-500' : 'text-sm'} style={embedded ? undefined : { color: t.muted }}>
+              <p className={embedded ? 'text-xs text-vsc-text/50' : 'text-sm'} style={embedded ? undefined : { color: t.muted }}>
                 Browse 62 ready-to-edit job descriptions across hospitality, healthcare,
                 retail, corporate, and more.
               </p>
             </div>
-            <ArrowUpRight className={embedded ? 'w-4 h-4 mt-1 flex-shrink-0 text-zinc-400' : 'w-5 h-5 mt-1 flex-shrink-0'} style={embedded ? undefined : { color: t.ink }} />
+            <ArrowUpRight className={embedded ? 'w-4 h-4 mt-1 flex-shrink-0 text-vsc-text/50' : 'w-5 h-5 mt-1 flex-shrink-0'} style={embedded ? undefined : { color: t.ink }} />
           </div>
         </Link>
 
         {loading ? (
-          <p style={{ color: t.muted }}>Loading templates…</p>
+          <p className={embedded ? 'text-vsc-text/50' : ''} style={embedded ? undefined : { color: t.muted }}>Loading templates…</p>
         ) : (
           <div className={embedded ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3' : 'grid grid-cols-1 sm:grid-cols-2 gap-4'}>
             {assets.map(asset => {
@@ -162,26 +162,26 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
                 return (
                   <article
                     key={asset.slug}
-                    className="p-4 rounded-lg border border-zinc-800 flex flex-col"
+                    className="p-4 rounded-xl border border-vsc-border bg-vsc-panel flex flex-col"
                     style={{ opacity: available ? 1 : 0.7 }}
                   >
                     <div className="flex items-start justify-between mb-3">
-                      <div className="w-8 h-8 rounded-md bg-zinc-800 flex items-center justify-center">
-                        <FileText className="w-4 h-4 text-zinc-300" />
+                      <div className="w-8 h-8 rounded-md bg-vsc-bg flex items-center justify-center">
+                        <FileText className="w-4 h-4 text-vsc-text/70" />
                       </div>
                       <div className="flex items-center gap-1.5">
                         {!available && (
-                          <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-zinc-800 text-zinc-500">
+                          <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-vsc-border text-vsc-text/40">
                             Soon
                           </span>
                         )}
-                        <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-zinc-800 text-zinc-500">
+                        <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-vsc-border text-vsc-text/40">
                           {formatFor(asset.path)}
                         </span>
                       </div>
                     </div>
-                    <h3 className="text-sm font-medium text-zinc-100 mb-1">{asset.name}</h3>
-                    <p className="text-xs text-zinc-500 mb-4 flex-1 line-clamp-3">
+                    <h3 className="text-sm font-medium text-vsc-text mb-1">{asset.name}</h3>
+                    <p className="text-xs text-vsc-text/50 mb-4 flex-1 line-clamp-3">
                       {TEMPLATE_DESCRIPTIONS[asset.slug] ?? ''}
                     </p>
                     <button
@@ -189,8 +189,8 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
                       disabled={!available}
                       className={`inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium transition-colors ${
                         available
-                          ? 'bg-emerald-700 hover:bg-emerald-600 text-white'
-                          : 'border border-zinc-800 text-zinc-500'
+                          ? 'bg-zinc-700 hover:bg-zinc-600 text-white'
+                          : 'border border-vsc-border text-vsc-text/40'
                       }`}
                     >
                       {available ? (<><Download className="w-3.5 h-3.5" />Download</>) : (<><Bell className="w-3.5 h-3.5" />Notify</>)}
@@ -268,15 +268,15 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
         )}
 
         {embedded ? (
-          <section className="mt-8 p-5 rounded-lg border border-zinc-800 bg-zinc-900/30">
-            <h2 className="text-base font-medium text-zinc-100 mb-1">Need state-specific versions?</h2>
-            <p className="text-xs text-zinc-500 mb-4 max-w-2xl">
+          <section className="mt-8 p-5 rounded-xl border border-vsc-border bg-vsc-panel">
+            <h2 className="text-base font-semibold text-vsc-text mb-1">Need state-specific versions?</h2>
+            <p className="text-xs text-vsc-text/50 mb-4 max-w-2xl">
               Matcha generates templates tailored to your state's wage, leave,
               and termination rules — pulled from a live compliance database covering all 50 states.
             </p>
             <button
               onClick={() => setShowPricing(true)}
-              className="inline-flex items-center justify-center px-4 h-8 rounded-md text-xs font-medium bg-emerald-700 hover:bg-emerald-600 text-white"
+              className="inline-flex items-center justify-center px-4 h-8 rounded-md text-xs font-medium bg-zinc-700 hover:bg-zinc-600 text-white transition-colors"
             >
               See how Matcha works →
             </button>

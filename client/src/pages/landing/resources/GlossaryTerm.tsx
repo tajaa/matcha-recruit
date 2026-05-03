@@ -79,40 +79,40 @@ export default function GlossaryTerm({ embedded }: { embedded?: boolean }) {
       {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
       <main className={embedded ? '' : 'pt-28 pb-20 max-w-[760px] mx-auto px-6 sm:px-10'}>
-        <nav className="flex items-center gap-2 text-xs mb-8 flex-wrap" style={{ color: t.muted }}>
-          <Link to={root} className="hover:opacity-60">Resources</Link>
-          <ChevronRight className="w-3 h-3" />
-          <Link to={`${root}/glossary`} className="hover:opacity-60">Glossary</Link>
-          <ChevronRight className="w-3 h-3" />
-          <span style={{ color: t.ink }}>{term.abbreviation ?? term.term}</span>
+        <nav className={`flex items-center gap-2 text-xs mb-8 flex-wrap ${embedded ? 'text-vsc-text/40' : ''}`} style={embedded ? undefined : { color: t.muted }}>
+          <Link to={root} className={embedded ? 'hover:text-vsc-text/70 transition-colors' : 'hover:opacity-60'}>Resources</Link>
+          <ChevronRight className={`w-3 h-3 ${embedded ? 'text-vsc-text/20' : ''}`} />
+          <Link to={`${root}/glossary`} className={embedded ? 'hover:text-vsc-text/70 transition-colors' : 'hover:opacity-60'}>Glossary</Link>
+          <ChevronRight className={`w-3 h-3 ${embedded ? 'text-vsc-text/20' : ''}`} />
+          <span className={embedded ? 'text-vsc-text/60' : ''} style={embedded ? undefined : { color: t.ink }}>{term.abbreviation ?? term.term}</span>
         </nav>
 
         <header className="mb-10">
           <span
-            className="inline-block text-[10px] tracking-wider px-2 py-1 rounded mb-4"
-            style={{ border: `1px solid ${t.line}`, color: t.muted }}
+            className={`inline-block text-[10px] tracking-wider px-2 py-1 rounded mb-4 ${embedded ? 'border border-vsc-border text-vsc-text/40' : ''}`}
+            style={embedded ? undefined : { border: `1px solid ${t.line}`, color: t.muted }}
           >
             {CATEGORIES_LABEL[term.category].toUpperCase()}
           </span>
           <h1
-            className={embedded ? "text-2xl font-semibold mb-2" : "text-4xl sm:text-5xl tracking-tight mb-3"}
-            style={embedded ? { color: t.ink } : { fontFamily: t.display, fontWeight: 500, color: t.ink }}
+            className={embedded ? "text-2xl font-semibold text-vsc-text mb-2" : "text-4xl sm:text-5xl tracking-tight mb-3"}
+            style={embedded ? undefined : { fontFamily: t.display, fontWeight: 500, color: t.ink }}
           >
             {term.abbreviation ?? term.term}
           </h1>
           {term.abbreviation && (
-            <p className="text-xl mb-2" style={{ color: t.muted, fontFamily: t.display }}>
+            <p className={`text-xl mb-2 ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted, fontFamily: t.display }}>
               {term.term}
             </p>
           )}
-          <p className="text-lg mt-4" style={{ color: t.ink, opacity: 0.8 }}>
+          <p className={`text-lg mt-4 ${embedded ? 'text-vsc-text/80' : ''}`} style={embedded ? undefined : { color: t.ink, opacity: 0.8 }}>
             {term.short}
           </p>
         </header>
 
         <article
-          className="text-base leading-relaxed mb-12"
-          style={{ color: t.ink, opacity: 0.85 }}
+          className={`text-base leading-relaxed mb-12 ${embedded ? 'text-vsc-text/80' : ''}`}
+          style={embedded ? undefined : { color: t.ink, opacity: 0.85 }}
         >
           {term.definition.split('\n').map((para, i) => (
             <p key={i} className="mb-4">{para}</p>
@@ -122,8 +122,8 @@ export default function GlossaryTerm({ embedded }: { embedded?: boolean }) {
         {related.length > 0 && (
           <section className="mb-12">
             <h2
-              className="text-sm tracking-wider mb-4 uppercase"
-              style={{ color: t.muted }}
+              className={`text-sm tracking-wider mb-4 uppercase ${embedded ? 'text-vsc-text/40' : ''}`}
+              style={embedded ? undefined : { color: t.muted }}
             >
               Related Terms
             </h2>
@@ -132,16 +132,18 @@ export default function GlossaryTerm({ embedded }: { embedded?: boolean }) {
                 <Link
                   key={r.slug}
                   to={`${root}/glossary/${r.slug}`}
-                  className="p-4 rounded-xl block transition-opacity hover:opacity-80"
-                  style={{ border: `1px solid ${t.line}` }}
+                  className={embedded
+                    ? 'border border-vsc-border bg-vsc-panel rounded-xl p-4 block hover:border-vsc-text/30 transition-colors'
+                    : 'p-4 rounded-xl block transition-opacity hover:opacity-80'}
+                  style={embedded ? undefined : { border: `1px solid ${t.line}` }}
                 >
                   <div
-                    className="text-base mb-1"
-                    style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}
+                    className={`text-base mb-1 ${embedded ? 'font-semibold text-vsc-text' : ''}`}
+                    style={embedded ? undefined : { fontFamily: t.display, color: t.ink, fontWeight: 500 }}
                   >
                     {r.abbreviation ?? r.term}
                   </div>
-                  <div className="text-xs" style={{ color: t.muted }}>
+                  <div className={`text-xs ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>
                     {r.short}
                   </div>
                 </Link>
@@ -151,21 +153,23 @@ export default function GlossaryTerm({ embedded }: { embedded?: boolean }) {
         )}
 
         <section
-          className="p-8 rounded-2xl"
-          style={{ border: `1px solid ${t.line}`, backgroundColor: t.cardBg }}
+          className={embedded ? 'rounded-xl border border-vsc-border bg-vsc-panel p-6' : 'p-8 rounded-2xl'}
+          style={embedded ? undefined : { border: `1px solid ${t.line}`, backgroundColor: t.cardBg }}
         >
-          <h2 className="text-xl mb-3" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>
+          <h2 className={embedded ? 'text-base font-semibold text-vsc-text mb-2' : 'text-xl mb-3'} style={embedded ? undefined : { fontFamily: t.display, color: t.ink, fontWeight: 500 }}>
             Stop guessing. Get state-specific HR guidance built into your tools.
           </h2>
-          <p className="text-sm mb-6" style={{ color: t.muted }}>
+          <p className={embedded ? 'text-sm text-vsc-text/50 mb-4' : 'text-sm mb-6'} style={embedded ? undefined : { color: t.muted }}>
             Matcha tracks compliance changes across all 50 states and surfaces
             them where you need them — at the point of hiring, terminating,
             and writing policies.
           </p>
           <button
             onClick={() => setShowPricing(true)}
-            className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
-            style={t.btnPrimary}
+            className={embedded
+              ? 'inline-flex items-center h-9 px-4 rounded-lg text-xs font-medium bg-zinc-700 hover:bg-zinc-600 text-white transition-colors'
+              : 'inline-flex items-center px-5 h-10 rounded-full text-sm font-medium'}
+            style={embedded ? undefined : t.btnPrimary}
           >
             See Matcha →
           </button>

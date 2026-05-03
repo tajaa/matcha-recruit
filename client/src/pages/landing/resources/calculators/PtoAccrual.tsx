@@ -84,22 +84,22 @@ export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
       {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
       <main className={embedded ? '' : 'pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10'}>
-        <nav className="flex items-center gap-2 text-xs mb-8 flex-wrap" style={{ color: t.muted }}>
-          <Link to={root} className="hover:opacity-60">Resources</Link>
-          <ChevronRight className="w-3 h-3" />
-          <Link to={`${root}/calculators`} className="hover:opacity-60">Calculators</Link>
-          <ChevronRight className="w-3 h-3" />
-          <span style={{ color: t.ink }}>PTO Accrual</span>
+        <nav className={`flex items-center gap-2 text-xs mb-8 flex-wrap ${embedded ? 'text-vsc-text/40' : ''}`} style={embedded ? undefined : { color: t.muted }}>
+          <Link to={root} className={embedded ? 'hover:text-vsc-text/70 transition-colors' : 'hover:opacity-60'}>Resources</Link>
+          <ChevronRight className={`w-3 h-3 ${embedded ? 'text-vsc-text/20' : ''}`} />
+          <Link to={`${root}/calculators`} className={embedded ? 'hover:text-vsc-text/70 transition-colors' : 'hover:opacity-60'}>Calculators</Link>
+          <ChevronRight className={`w-3 h-3 ${embedded ? 'text-vsc-text/20' : ''}`} />
+          <span className={embedded ? 'text-vsc-text/60' : ''} style={embedded ? undefined : { color: t.ink }}>PTO Accrual</span>
         </nav>
 
         <header className="mb-10 max-w-2xl">
           <h1
-            className={embedded ? "text-2xl font-semibold" : "text-4xl sm:text-5xl tracking-tight"}
-            style={embedded ? { color: t.ink } : { fontFamily: t.display, fontWeight: 500, color: t.ink }}
+            className={embedded ? "text-2xl font-semibold text-vsc-text" : "text-4xl sm:text-5xl tracking-tight"}
+            style={embedded ? undefined : { fontFamily: t.display, fontWeight: 500, color: t.ink }}
           >
             PTO Accrual Calculator
           </h1>
-          <p className="mt-4 text-base" style={{ color: t.muted }}>
+          <p className={`mt-4 text-base ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>
             Convert annual PTO into per-pay-period accruals, hourly rates,
             and projected balances by tenure.
           </p>
@@ -107,32 +107,32 @@ export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <section
-            className="p-6 rounded-2xl"
-            style={{ border: `1px solid ${t.line}` }}
+            className={`p-6 rounded-xl ${embedded ? 'border border-vsc-border bg-vsc-panel' : 'rounded-2xl'}`}
+            style={embedded ? undefined : { border: `1px solid ${t.line}` }}
           >
             <h2
-              className="text-xl mb-6"
-              style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}
+              className={embedded ? 'text-base font-semibold text-vsc-text mb-5' : 'text-xl mb-6'}
+              style={embedded ? undefined : { fontFamily: t.display, color: t.ink, fontWeight: 500 }}
             >
               Inputs
             </h2>
             <div className="flex flex-col gap-5">
               <div>
-                <label className="block text-xs mb-2" style={{ color: t.muted }}>Annual PTO</label>
+                <label className={`block text-xs mb-2 ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>Annual PTO</label>
                 <div className="flex gap-2">
                   <input
                     type="number"
                     min={0}
                     value={annual}
                     onChange={e => setAnnual(Number(e.target.value))}
-                    className="flex-1 px-4 h-11 rounded-lg text-sm outline-none"
-                    style={{ backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
+                    className={`flex-1 px-4 h-11 rounded-lg text-sm outline-none ${embedded ? 'bg-vsc-bg border border-vsc-border text-vsc-text focus:border-vsc-text/50 transition-colors' : ''}`}
+                    style={embedded ? undefined : { backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
                   />
                   <select
                     value={unit}
                     onChange={e => setUnit(e.target.value as 'days' | 'hours')}
-                    className="px-3 h-11 rounded-lg text-sm outline-none"
-                    style={{ backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
+                    className={`px-3 h-11 rounded-lg text-sm outline-none ${embedded ? 'bg-vsc-bg border border-vsc-border text-vsc-text focus:border-vsc-text/50 transition-colors' : ''}`}
+                    style={embedded ? undefined : { backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
                   >
                     <option value="days">days</option>
                     <option value="hours">hours</option>
@@ -140,36 +140,36 @@ export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
                 </div>
               </div>
               <div>
-                <label className="block text-xs mb-2" style={{ color: t.muted }}>Standard hours per day</label>
+                <label className={`block text-xs mb-2 ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>Standard hours per day</label>
                 <input
                   type="number"
                   min={1}
                   max={24}
                   value={hoursPerDay}
                   onChange={e => setHoursPerDay(Number(e.target.value))}
-                  className="w-full px-4 h-11 rounded-lg text-sm outline-none"
-                  style={{ backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
+                  className={`w-full px-4 h-11 rounded-lg text-sm outline-none ${embedded ? 'bg-vsc-bg border border-vsc-border text-vsc-text focus:border-vsc-text/50 transition-colors' : ''}`}
+                  style={embedded ? undefined : { backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
                 />
               </div>
               <div>
-                <label className="block text-xs mb-2" style={{ color: t.muted }}>Hours worked per week</label>
+                <label className={`block text-xs mb-2 ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>Hours worked per week</label>
                 <input
                   type="number"
                   min={0}
                   max={80}
                   value={hoursPerWeek}
                   onChange={e => setHoursPerWeek(Number(e.target.value))}
-                  className="w-full px-4 h-11 rounded-lg text-sm outline-none"
-                  style={{ backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
+                  className={`w-full px-4 h-11 rounded-lg text-sm outline-none ${embedded ? 'bg-vsc-bg border border-vsc-border text-vsc-text focus:border-vsc-text/50 transition-colors' : ''}`}
+                  style={embedded ? undefined : { backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
                 />
               </div>
               <div>
-                <label className="block text-xs mb-2" style={{ color: t.muted }}>Pay frequency</label>
+                <label className={`block text-xs mb-2 ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>Pay frequency</label>
                 <select
                   value={frequency}
                   onChange={e => setFrequency(e.target.value as Frequency)}
-                  className="w-full px-4 h-11 rounded-lg text-sm outline-none"
-                  style={{ backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
+                  className={`w-full px-4 h-11 rounded-lg text-sm outline-none ${embedded ? 'bg-vsc-bg border border-vsc-border text-vsc-text focus:border-vsc-text/50 transition-colors' : ''}`}
+                  style={embedded ? undefined : { backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
                 >
                   {(Object.keys(FREQ_LABEL) as Frequency[]).map(f => (
                     <option key={f} value={f}>{FREQ_LABEL[f]}</option>
@@ -177,47 +177,48 @@ export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
                 </select>
               </div>
               <div>
-                <label className="block text-xs mb-2" style={{ color: t.muted }}>Project balance after (months)</label>
+                <label className={`block text-xs mb-2 ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>Project balance after (months)</label>
                 <input
                   type="number"
                   min={0}
                   max={120}
                   value={tenureMonths}
                   onChange={e => setTenureMonths(Number(e.target.value))}
-                  className="w-full px-4 h-11 rounded-lg text-sm outline-none"
-                  style={{ backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
+                  className={`w-full px-4 h-11 rounded-lg text-sm outline-none ${embedded ? 'bg-vsc-bg border border-vsc-border text-vsc-text focus:border-vsc-text/50 transition-colors' : ''}`}
+                  style={embedded ? undefined : { backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
                 />
               </div>
             </div>
           </section>
 
           <section className="flex flex-col gap-4">
-            <ResultBox t={t} label="Per pay period" value={`${result.accrualPerPeriod.toFixed(2)} hrs`} sub={`${(result.accrualPerPeriod / hoursPerDay).toFixed(2)} days`} />
-            <ResultBox t={t} label="Per hour worked" value={`${result.accrualPerHourWorked.toFixed(4)} hrs`} sub="multiply by hours worked in period" />
-            <ResultBox t={t} label="Per month" value={`${result.monthlyAccrual.toFixed(2)} hrs`} sub={`${(result.monthlyAccrual / hoursPerDay).toFixed(2)} days`} />
+            <ResultBox t={t} embedded={embedded} label="Per pay period" value={`${result.accrualPerPeriod.toFixed(2)} hrs`} sub={`${(result.accrualPerPeriod / hoursPerDay).toFixed(2)} days`} />
+            <ResultBox t={t} embedded={embedded} label="Per hour worked" value={`${result.accrualPerHourWorked.toFixed(4)} hrs`} sub="multiply by hours worked in period" />
+            <ResultBox t={t} embedded={embedded} label="Per month" value={`${result.monthlyAccrual.toFixed(2)} hrs`} sub={`${(result.monthlyAccrual / hoursPerDay).toFixed(2)} days`} />
             <ResultBox
               t={t}
+              embedded={embedded}
               label={`Projected balance at ${tenureMonths} months`}
               value={`${result.projectedHours.toFixed(1)} hrs`}
               sub={`${result.projectedDays.toFixed(1)} days (assumes no use, no cap)`}
             />
-            <p className="text-xs mt-2" style={{ color: t.muted }}>
+            <p className={`text-xs mt-2 ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>
               Heads-up: many states (CA, CO, MA, IL, NE, ND) treat accrued
               PTO as wages, banning use-it-or-lose-it forfeiture and
               requiring payout at separation. Caps must be reasonable.
-              See your state's <Link to={`${root}/states`} style={{ color: t.ink }}>compliance guide</Link>.
+              See your state's <Link to={`${root}/states`} className={embedded ? 'text-vsc-text underline hover:text-white' : ''} style={embedded ? undefined : { color: t.ink }}>compliance guide</Link>.
             </p>
           </section>
         </div>
 
         <section
-          className="mt-16 p-8 rounded-2xl"
-          style={{ border: `1px solid ${t.line}`, backgroundColor: t.cardBg }}
+          className={`mt-12 ${embedded ? 'rounded-xl border border-vsc-border bg-vsc-panel p-6' : 'mt-16 p-8 rounded-2xl'}`}
+          style={embedded ? undefined : { border: `1px solid ${t.line}`, backgroundColor: t.cardBg }}
         >
-          <h2 className="text-2xl mb-3" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>
+          <h2 className={embedded ? 'text-base font-semibold text-vsc-text mb-2' : 'text-2xl mb-3'} style={embedded ? undefined : { fontFamily: t.display, color: t.ink, fontWeight: 500 }}>
             Run accruals on autopilot
           </h2>
-          <p className="text-sm mb-6 max-w-2xl" style={{ color: t.muted }}>
+          <p className={embedded ? 'text-sm text-vsc-text/50 mb-5 max-w-2xl' : 'text-sm mb-6 max-w-2xl'} style={embedded ? undefined : { color: t.muted }}>
             Matcha tracks accruals per employee, per state, with
             tenure tiers, caps, carryover rules, and payout-on-separation
             built in.
@@ -225,15 +226,19 @@ export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
           <div className="flex flex-wrap gap-3">
             <Link
               to="/auth/resources-signup"
-              className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
-              style={t.btnPrimary}
+              className={embedded
+                ? 'inline-flex items-center h-9 px-4 rounded-lg text-xs font-medium bg-zinc-700 hover:bg-zinc-600 text-white transition-colors'
+                : 'inline-flex items-center px-5 h-10 rounded-full text-sm font-medium'}
+              style={embedded ? undefined : t.btnPrimary}
             >
               Create free account →
             </Link>
             <button
               onClick={() => setShowPricing(true)}
-              className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
-              style={{ border: `1px solid ${t.line}`, color: t.ink }}
+              className={embedded
+                ? 'inline-flex items-center h-9 px-4 rounded-lg text-xs font-medium border border-vsc-border text-vsc-text/70 hover:text-vsc-text hover:border-vsc-text/40 transition-colors'
+                : 'inline-flex items-center px-5 h-10 rounded-full text-sm font-medium'}
+              style={embedded ? undefined : { border: `1px solid ${t.line}`, color: t.ink }}
             >
               Talk to sales
             </button>
@@ -247,15 +252,15 @@ export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
   )
 }
 
-function ResultBox({ t, label, value, sub }: { t: ReturnType<typeof mkT>; label: string; value: string; sub?: string }) {
+function ResultBox({ t, embedded, label, value, sub }: { t: ReturnType<typeof mkT>; embedded?: boolean; label: string; value: string; sub?: string }) {
   return (
     <div
-      className="p-5 rounded-xl"
-      style={{ border: `1px solid ${t.line}` }}
+      className={`p-5 rounded-xl ${embedded ? 'border border-vsc-border bg-vsc-panel' : ''}`}
+      style={embedded ? undefined : { border: `1px solid ${t.line}` }}
     >
-      <div className="text-xs mb-1" style={{ color: t.muted }}>{label}</div>
-      <div className="text-2xl" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>{value}</div>
-      {sub && <div className="text-xs mt-1" style={{ color: t.muted }}>{sub}</div>}
+      <div className={`text-[10px] uppercase tracking-wider mb-1 ${embedded ? 'text-vsc-text/40' : ''}`} style={embedded ? undefined : { color: t.muted }}>{label}</div>
+      <div className={embedded ? 'text-3xl font-bold text-vsc-text' : 'text-2xl'} style={embedded ? undefined : { fontFamily: t.display, color: t.ink, fontWeight: 500 }}>{value}</div>
+      {sub && <div className={`text-xs mt-1 ${embedded ? 'text-vsc-text/40' : ''}`} style={embedded ? undefined : { color: t.muted }}>{sub}</div>}
     </div>
   )
 }

@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm'
 
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
+import NewsletterSignup from '../../components/NewsletterSignup'
 import { PricingContactModal } from '../../components/PricingContactModal'
 import { api } from '../../api/client'
 
@@ -127,6 +128,15 @@ export default function BlogPostPage() {
             </div>
           </>
         ) : null}
+
+        <div className="mt-16 max-w-xl mx-auto">
+          <NewsletterSignup
+            source="blog_post"
+            variant="card"
+            headline="Liked this? Get the next one in your inbox."
+            description="One short brief a week. Employment-law changes, compliance gotchas."
+          />
+        </div>
       </article>
 
       <MarketingFooter />

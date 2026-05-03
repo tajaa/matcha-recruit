@@ -5525,4 +5525,49 @@ async def init_db():
                 WHERE status = 'scheduled' AND scheduled_at IS NOT NULL
         """)
 
+        # P1 — tags + per-subscriber tag attachments.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS newsletter_tags (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                slug VARCHAR(64) NOT NULL UNIQUE,
+                label VARCHAR(120) NOT NULL,
+                description TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS newsletter_subscriber_tags (
+                subscriber_id UUID NOT NULL REFERENCES newsletter_subscribers(id) ON DELETE CASCADE,
+                tag_id UUID NOT NULL REFERENCES newsletter_tags(id) ON DELETE CASCADE,
+                attached_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (subscriber_id, tag_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_newsletter_subscriber_tags_tag
+                ON newsletter_subscriber_tags(tag_id)
+        """)
+        await conn.execute("""
+            INSERT INTO newsletter_tags (slug, label, description) VALUES
+                ('tier-free', 'Free tier', 'Subscribers who signed up while logged in as a resources_free customer'),
+                ('tier-lite', 'Matcha Lite', 'Subscribers from Matcha Lite tenants'),
+                ('tier-platform', 'Platform', 'Subscribers from bespoke / platform tenants'),
+                ('tier-personal', 'Matcha Work Personal', 'Personal-workspace individuals')
+            ON CONFLICT (slug) DO NOTHING
+        """)
+
+        # P2 — saved newsletter templates.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS newsletter_templates (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name VARCHAR(255) NOT NULL,
+                description TEXT,
+                content_html TEXT,
+                preheader VARCHAR(255),
+                created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+
         print("[DB] Tables initialized")

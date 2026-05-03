@@ -4,6 +4,7 @@ import { ArrowUpRight, FileText, Lock } from 'lucide-react'
 
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
+import NewsletterSignup from '../../components/NewsletterSignup'
 import { PricingContactModal } from '../../components/PricingContactModal'
 import { useMe } from '../../hooks/useMe'
 
@@ -200,6 +201,15 @@ export default function ResourcesHub() {
             </Link>
           )}
         </div>
+
+        <section className="mt-16 max-w-2xl mx-auto">
+          <NewsletterSignup
+            source="resources_hub"
+            variant="card"
+            headline="One brief a week."
+            description="Employment-law changes, compliance gotchas, and the occasional template."
+          />
+        </section>
       </main>
 
       <MarketingFooter />

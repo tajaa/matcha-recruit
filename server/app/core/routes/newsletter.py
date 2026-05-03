@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
-from ..dependencies import get_current_user, require_admin
+from ..dependencies import get_current_user, get_optional_user, require_admin
 from ..models.auth import CurrentUser
 from ..services import newsletter_service as svc
 
@@ -23,10 +23,12 @@ admin_router = APIRouter()
 
 
 # ---------------------------------------------------------------------------
-# In-process rate limit for /subscribe (mirrors client_errors.py pattern).
-# Keyed by client IP. Resets on backend restart. Per-worker — a deployment
-# with N uvicorn workers effectively allows _SUBSCRIBE_MAX_PER_WINDOW * N
-# attempts per IP per window. Move to Redis if abuse becomes real.
+# Rate limit for /subscribe — Redis-backed when available, falls back to an
+# in-process counter so single-worker dev environments still work.
+#
+# Redis path: INCR a per-IP key with a 60s EXPIRE. Counter is atomic and
+# survives across uvicorn workers, so a deployment behind N workers no
+# longer multiplies the effective limit by N.
 # ---------------------------------------------------------------------------
 
 _SUBSCRIBE_WINDOW_SECONDS = 60
@@ -34,7 +36,24 @@ _SUBSCRIBE_MAX_PER_WINDOW = 10
 _subscribe_state: dict[str, list[float]] = {}
 
 
-def _subscribe_rate_limited(client_ip: str) -> bool:
+async def _subscribe_rate_limited(client_ip: str) -> bool:
+    from ..services.redis_cache import get_redis_cache
+
+    redis = get_redis_cache()
+    if redis is not None:
+        key = f"newsletter:subscribe:rl:{client_ip}"
+        try:
+            count = await redis.incr(key)
+            if count == 1:
+                # Only set EXPIRE on the first hit so the window slides
+                # naturally — INCR doesn't reset TTL.
+                await redis.expire(key, _SUBSCRIBE_WINDOW_SECONDS)
+            return count > _SUBSCRIBE_MAX_PER_WINDOW
+        except Exception:
+            # Redis unreachable — fall through to in-process limiter so a
+            # transient infra blip doesn't wedge signups.
+            logger.warning("Newsletter subscribe rate limit fell back to in-process — Redis unreachable")
+
     now = time.monotonic()
     cutoff = now - _SUBSCRIBE_WINDOW_SECONDS
     timestamps = [t for t in _subscribe_state.get(client_ip, []) if t >= cutoff]
@@ -112,9 +131,19 @@ async def _send_confirmation_email(to_email: str, to_name: Optional[str], confir
 
 
 @public_router.post("/subscribe")
-async def subscribe(body: SubscribeRequest, request: Request):
-    """Public subscribe — starts double-opt-in unless email already active."""
-    if _subscribe_rate_limited(_client_ip(request)):
+async def subscribe(
+    body: SubscribeRequest,
+    request: Request,
+    current_user: Optional[CurrentUser] = Depends(get_optional_user),
+):
+    """Public subscribe — starts double-opt-in unless email already active.
+
+    If the request is authenticated, the user's id is used to derive a
+    tier-tag (tier-free / tier-lite / tier-platform / tier-personal) so
+    admin can target segments later. Source-bucket tags ('blog', 'calculators',
+    etc.) are also auto-attached based on `source`.
+    """
+    if await _subscribe_rate_limited(_client_ip(request)):
         raise HTTPException(status_code=429, detail="Too many subscribe attempts. Please wait a minute.")
 
     metadata = {}
@@ -122,10 +151,20 @@ async def subscribe(body: SubscribeRequest, request: Request):
     if body.utm_medium: metadata["utm_medium"] = body.utm_medium
     if body.utm_campaign: metadata["utm_campaign"] = body.utm_campaign
 
+    user_id = current_user.id if current_user else None
     result = await svc.subscribe(
         email=body.email, name=body.name, source=body.source,
         metadata=metadata if metadata else None,
+        user_id=user_id,
     )
+
+    # Auto-tag — best effort, never blocks the subscribe response.
+    try:
+        tag_slugs = await svc.derive_signup_tags(body.source, user_id)
+        if tag_slugs:
+            await svc.attach_tags_to_subscriber(UUID(result["id"]), tag_slugs)
+    except Exception:
+        logger.exception("Auto-tag failed for subscriber %s", result.get("id"))
 
     if result.get("confirmation_token"):
         confirm_url = _confirmation_url(result["confirmation_token"])
@@ -209,22 +248,42 @@ class BounceEvent(BaseModel):
 async def bounce_webhook(body: BounceEvent, request: Request):
     """Email-provider bounce callback.
 
-    Authenticated via shared secret in the X-Bounce-Secret header — the env
-    var NEWSLETTER_BOUNCE_SECRET must match. The endpoint stays disabled
-    (always 503) when the secret is unset so an open route can't slip into
-    production by default.
+    Authenticated EITHER via:
+    - X-Bounce-Signature: hex-encoded HMAC-SHA256 of the raw request body
+      using NEWSLETTER_BOUNCE_SECRET as the key. (Preferred — protects
+      against header replay if logs leak.)
+    - X-Bounce-Secret: shared-secret header (legacy / fallback).
 
-    Soft bounces are logged but don't deactivate; hard bounces flip the
-    subscriber to 'bounced' + auto-unsubscribed.
+    Endpoint stays disabled (503) when NEWSLETTER_BOUNCE_SECRET is unset so
+    an open route can't slip into production by default.
+
+    Soft bounces increment the subscriber's soft_bounce_count and flip
+    them to 'bounced' at SOFT_BOUNCE_LIMIT. Hard bounces flip immediately.
     """
     from ...config import get_settings
+    import hmac as _hmac
+    import hashlib as _hashlib
+
     expected = (get_settings().newsletter_bounce_secret or "").strip()
     if not expected:
         raise HTTPException(status_code=503, detail="Bounce webhook not configured")
-    received = request.headers.get("x-bounce-secret", "")
-    # Constant-time compare to defeat timing oracles.
-    import hmac as _hmac
-    if not _hmac.compare_digest(received.encode(), expected.encode()):
+
+    raw_body = await request.body()
+    sig_header = request.headers.get("x-bounce-signature", "").strip()
+    legacy_header = request.headers.get("x-bounce-secret", "")
+
+    authed = False
+    if sig_header:
+        expected_sig = _hmac.new(expected.encode(), raw_body, _hashlib.sha256).hexdigest()
+        # Strip optional 'sha256=' prefix if the provider includes it.
+        provided = sig_header.split("=", 1)[-1].strip().lower()
+        if _hmac.compare_digest(provided.encode(), expected_sig.encode()):
+            authed = True
+    if not authed and legacy_header:
+        if _hmac.compare_digest(legacy_header.encode(), expected.encode()):
+            authed = True
+            logger.info("Newsletter bounce webhook authed via legacy X-Bounce-Secret — migrate to X-Bounce-Signature")
+    if not authed:
         raise HTTPException(status_code=401, detail="Bad secret")
 
     target = body.subscriber_id or body.email
@@ -669,3 +728,185 @@ async def delete_newsletter(
     if not deleted:
         raise HTTPException(status_code=400, detail="Newsletter not found, already deleted, or not in draft")
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Tags + segments (P1)
+# ---------------------------------------------------------------------------
+
+
+class TagCreateRequest(BaseModel):
+    slug: str
+    label: str
+    description: Optional[str] = None
+
+
+class SubscriberTagsRequest(BaseModel):
+    tag_ids: list[UUID]
+
+
+class SegmentSendRequest(BaseModel):
+    tag_slugs: Optional[list[str]] = None  # None / [] = whole list
+
+
+@admin_router.get("/tags")
+async def list_tags(current_user: CurrentUser = Depends(require_admin)):
+    return {"tags": await svc.list_tags()}
+
+
+@admin_router.post("/tags")
+async def create_tag(
+    body: TagCreateRequest,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    try:
+        return await svc.create_tag(body.slug, body.label, body.description)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@admin_router.delete("/tags/{tag_id}")
+async def delete_tag(
+    tag_id: UUID,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    if not await svc.delete_tag(tag_id):
+        raise HTTPException(status_code=404, detail="Tag not found")
+    return {"ok": True}
+
+
+@admin_router.get("/subscribers/{subscriber_id}/tags")
+async def get_subscriber_tags_endpoint(
+    subscriber_id: UUID,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    return {"tags": await svc.get_subscriber_tags(subscriber_id)}
+
+
+@admin_router.put("/subscribers/{subscriber_id}/tags")
+async def replace_subscriber_tags_endpoint(
+    subscriber_id: UUID,
+    body: SubscriberTagsRequest,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    await svc.replace_subscriber_tags(subscriber_id, body.tag_ids)
+    return {"ok": True}
+
+
+@admin_router.post("/newsletters/{newsletter_id}/send-segment")
+async def send_to_segment(
+    newsletter_id: UUID,
+    body: SegmentSendRequest,
+    request: Request,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Variant of /send that filters to subscribers carrying any of the
+    given tag slugs. Empty / null tag_slugs falls back to the full list."""
+    try:
+        return await svc.send_newsletter_to_segment(
+            newsletter_id, tag_slugs=body.tag_slugs or None, actor_id=current_user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Templates (P2)
+# ---------------------------------------------------------------------------
+
+
+class TemplateCreateRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+    content_html: Optional[str] = None
+    preheader: Optional[str] = Field(default=None, max_length=255)
+
+
+class TemplateUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    content_html: Optional[str] = None
+    preheader: Optional[str] = Field(default=None, max_length=255)
+
+
+@admin_router.get("/templates")
+async def list_templates(current_user: CurrentUser = Depends(require_admin)):
+    return {"templates": await svc.list_templates()}
+
+
+@admin_router.post("/templates")
+async def create_template(
+    body: TemplateCreateRequest,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    return await svc.create_template(
+        body.name, body.description, body.content_html, body.preheader,
+        created_by=current_user.id,
+    )
+
+
+@admin_router.get("/templates/{template_id}")
+async def get_template(
+    template_id: UUID,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    row = await svc.get_template(template_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return row
+
+
+@admin_router.put("/templates/{template_id}")
+async def update_template(
+    template_id: UUID,
+    body: TemplateUpdateRequest,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No updates provided")
+    row = await svc.update_template(template_id, updates)
+    if not row:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return row
+
+
+@admin_router.delete("/templates/{template_id}")
+async def delete_template(
+    template_id: UUID,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    if not await svc.delete_template(template_id):
+        raise HTTPException(status_code=404, detail="Template not found")
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Analytics + send progress (P2)
+# ---------------------------------------------------------------------------
+
+
+@admin_router.get("/subscribers/growth")
+async def subscriber_growth(
+    days: int = Query(90, ge=1, le=730),
+    current_user: CurrentUser = Depends(require_admin),
+):
+    return {"days": days, "series": await svc.get_subscriber_growth(days)}
+
+
+@admin_router.get("/newsletters/{newsletter_id}/analytics")
+async def newsletter_analytics(
+    newsletter_id: UUID,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    return await svc.get_newsletter_analytics(newsletter_id)
+
+
+@admin_router.get("/newsletters/{newsletter_id}/progress")
+async def newsletter_progress(
+    newsletter_id: UUID,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Live send-progress snapshot. Frontend polls this every 2-5s while
+    a newsletter is in 'sending' status."""
+    return await svc.get_send_progress(newsletter_id)

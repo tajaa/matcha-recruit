@@ -129,17 +129,18 @@ export default function ComplianceAudit({ embedded }: { embedded?: boolean }) {
       {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
       <main className={`${embedded ? 'pt-6 pb-8' : 'pt-28 pb-20'} max-w-[820px] mx-auto px-6 sm:px-10`}>
-        <nav className="flex items-center gap-2 text-xs mb-8" style={{ color: t.muted }}>
-          <Link to={root} className="hover:opacity-60">Resources</Link>
-          <ChevronRight className="w-3 h-3" />
-          <span style={{ color: t.ink }}>Compliance Audit</span>
+        <nav className={`flex items-center gap-2 text-xs mb-8 ${embedded ? 'text-vsc-text/40' : ''}`} style={embedded ? undefined : { color: t.muted }}>
+          <Link to={root} className={embedded ? 'hover:text-vsc-text/70 transition-colors' : 'hover:opacity-60'}>Resources</Link>
+          <ChevronRight className={`w-3 h-3 ${embedded ? 'text-vsc-text/20' : ''}`} />
+          <span className={embedded ? 'text-vsc-text/60' : ''} style={embedded ? undefined : { color: t.ink }}>Compliance Audit</span>
         </nav>
 
-        {step === 'intro' && <Intro t={t} onStart={() => setStep('context')} />}
+        {step === 'intro' && <Intro t={t} embedded={embedded} onStart={() => setStep('context')} />}
 
         {step === 'context' && (
           <Context
             t={t}
+            embedded={embedded}
             stateSlug={stateSlug}
             setStateSlug={setStateSlug}
             headcount={headcount}
@@ -166,6 +167,7 @@ export default function ComplianceAudit({ embedded }: { embedded?: boolean }) {
         {step === 'results' && score && (
           <Results
             t={t}
+            embedded={embedded}
             score={score.score}
             findings={findings}
             stateSlug={stateSlug}
@@ -192,17 +194,17 @@ export default function ComplianceAudit({ embedded }: { embedded?: boolean }) {
   )
 }
 
-function Intro({ t, onStart }: { t: ReturnType<typeof mkT>; onStart: () => void }) {
+function Intro({ t, embedded, onStart }: { t: ReturnType<typeof mkT>; embedded?: boolean; onStart: () => void }) {
   return (
     <>
       <header className="mb-10">
         <h1
-          className={embedded ? "text-2xl font-semibold" : "text-5xl sm:text-6xl tracking-tight"}
-          style={embedded ? { color: t.ink } : { fontFamily: t.display, fontWeight: 500, color: t.ink }}
+          className={embedded ? "text-2xl font-semibold text-vsc-text" : "text-5xl sm:text-6xl tracking-tight"}
+          style={embedded ? undefined : { fontFamily: t.display, fontWeight: 500, color: t.ink }}
         >
           12-Question HR Compliance Audit
         </h1>
-        <p className="mt-4 text-base" style={{ color: t.muted }}>
+        <p className={`mt-4 text-base ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>
           A 3-minute self-audit covering the highest-cost compliance
           areas: posters, handbooks, I-9s, classification, leave,
           harassment, records, terminations, background checks, pay
@@ -218,24 +220,24 @@ function Intro({ t, onStart }: { t: ReturnType<typeof mkT>; onStart: () => void 
         ].map(s => (
           <div
             key={s.l}
-            className="p-5 rounded-xl text-center"
-            style={{ border: `1px solid ${t.line}` }}
+            className={`p-5 rounded-xl text-center ${embedded ? 'border border-vsc-border bg-vsc-panel' : ''}`}
+            style={embedded ? undefined : { border: `1px solid ${t.line}` }}
           >
-            <div className="text-3xl mb-1" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>{s.n}</div>
-            <div className="text-xs" style={{ color: t.muted }}>{s.l}</div>
+            <div className={`text-3xl mb-1 ${embedded ? 'text-vsc-text font-semibold' : ''}`} style={embedded ? undefined : { fontFamily: t.display, color: t.ink, fontWeight: 500 }}>{s.n}</div>
+            <div className={`text-xs ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>{s.l}</div>
           </div>
         ))}
       </div>
 
       <button
         onClick={onStart}
-        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 h-12 rounded-full text-sm font-medium"
-        style={t.btnPrimary}
+        className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 ${embedded ? 'h-9 px-4 rounded-lg text-xs font-medium bg-zinc-700 hover:bg-zinc-600 text-white transition-colors' : 'px-6 h-12 rounded-full text-sm font-medium'}`}
+        style={embedded ? undefined : t.btnPrimary}
       >
         Start the audit <ArrowRight className="w-4 h-4" />
       </button>
 
-      <p className="text-xs mt-6" style={{ color: t.muted }}>
+      <p className={`text-xs mt-6 ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>
         Responses stay in your browser. Email yourself the gap report
         from the results screen. Informational only — not legal advice.
       </p>
@@ -245,32 +247,36 @@ function Intro({ t, onStart }: { t: ReturnType<typeof mkT>; onStart: () => void 
 
 function Context(props: {
   t: ReturnType<typeof mkT>
+  embedded?: boolean
   stateSlug: string; setStateSlug: (s: string) => void
   headcount: number | ''; setHeadcount: (n: number | '') => void
   industry: string; setIndustry: (s: string) => void
   onBack: () => void; onNext: () => void
 }) {
-  const { t } = props
+  const { t, embedded } = props
   return (
     <>
       <header className="mb-8">
-        <p className="text-xs uppercase tracking-wider mb-2" style={{ color: t.muted }}>Step 1 of 2</p>
-        <h2 className="text-3xl" style={embedded ? { color: t.ink } : { fontFamily: t.display, fontWeight: 500, color: t.ink }}>
+        <p className={`text-xs uppercase tracking-wider mb-2 ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>Step 1 of 2</p>
+        <h2
+          className={embedded ? 'text-xl font-semibold text-vsc-text' : 'text-3xl'}
+          style={embedded ? undefined : { fontFamily: t.display, fontWeight: 500, color: t.ink }}
+        >
           Tell us about your business
         </h2>
-        <p className="mt-2 text-sm" style={{ color: t.muted }}>
+        <p className={`mt-2 text-sm ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>
           Used to tailor your gap report. Not stored unless you email yourself the results.
         </p>
       </header>
 
       <div className="flex flex-col gap-5 mb-10">
         <div>
-          <label className="block text-xs mb-2" style={{ color: t.muted }}>Primary state</label>
+          <label className={`block text-xs mb-2 ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>Primary state</label>
           <select
             value={props.stateSlug}
             onChange={e => props.setStateSlug(e.target.value)}
-            className="w-full px-4 h-11 rounded-lg text-sm outline-none"
-            style={{ backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
+            className={`w-full px-4 h-11 rounded-lg text-sm outline-none ${embedded ? 'bg-vsc-bg border border-vsc-border text-vsc-text focus:border-vsc-text/50 transition-colors' : ''}`}
+            style={embedded ? undefined : { backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
           >
             <option value="">— Select state —</option>
             {STATES_50.map(s => (
@@ -279,23 +285,23 @@ function Context(props: {
           </select>
         </div>
         <div>
-          <label className="block text-xs mb-2" style={{ color: t.muted }}>Headcount (US employees)</label>
+          <label className={`block text-xs mb-2 ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>Headcount (US employees)</label>
           <input
             type="number"
             min={1}
             value={props.headcount}
             onChange={e => props.setHeadcount(e.target.value ? Number(e.target.value) : '')}
-            className="w-full px-4 h-11 rounded-lg text-sm outline-none"
-            style={{ backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
+            className={`w-full px-4 h-11 rounded-lg text-sm outline-none ${embedded ? 'bg-vsc-bg border border-vsc-border text-vsc-text focus:border-vsc-text/50 transition-colors' : ''}`}
+            style={embedded ? undefined : { backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
           />
         </div>
         <div>
-          <label className="block text-xs mb-2" style={{ color: t.muted }}>Industry</label>
+          <label className={`block text-xs mb-2 ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>Industry</label>
           <select
             value={props.industry}
             onChange={e => props.setIndustry(e.target.value)}
-            className="w-full px-4 h-11 rounded-lg text-sm outline-none"
-            style={{ backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
+            className={`w-full px-4 h-11 rounded-lg text-sm outline-none ${embedded ? 'bg-vsc-bg border border-vsc-border text-vsc-text focus:border-vsc-text/50 transition-colors' : ''}`}
+            style={embedded ? undefined : { backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
           >
             {INDUSTRIES.map(i => <option key={i} value={i}>{i}</option>)}
           </select>
@@ -305,15 +311,15 @@ function Context(props: {
       <div className="flex items-center justify-between">
         <button
           onClick={props.onBack}
-          className="inline-flex items-center gap-2 text-sm transition-opacity hover:opacity-60"
-          style={{ color: t.ink }}
+          className={`inline-flex items-center gap-2 text-sm transition-colors ${embedded ? 'text-vsc-text/50 hover:text-vsc-text' : 'transition-opacity hover:opacity-60'}`}
+          style={embedded ? undefined : { color: t.ink }}
         >
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
         <button
           onClick={props.onNext}
-          className="inline-flex items-center gap-2 px-6 h-11 rounded-full text-sm font-medium"
-          style={t.btnPrimary}
+          className={`inline-flex items-center gap-2 font-medium ${embedded ? 'h-9 px-4 rounded-lg text-xs bg-zinc-700 hover:bg-zinc-600 text-white transition-colors' : 'px-6 h-11 rounded-full text-sm'}`}
+          style={embedded ? undefined : t.btnPrimary}
         >
           Continue <ArrowRight className="w-4 h-4" />
         </button>
@@ -420,6 +426,7 @@ function Questions(props: {
 
 function Results(props: {
   t: ReturnType<typeof mkT>
+  embedded?: boolean
   score: number
   findings: Finding[]
   stateSlug: string
@@ -429,7 +436,7 @@ function Results(props: {
   onRestart: () => void
   onSeePricing: () => void
 }) {
-  const { t } = props
+  const { t, embedded } = props
   const grade =
     props.score >= 90 ? 'A — Strong'
     : props.score >= 75 ? 'B — Solid, gaps to close'
@@ -448,14 +455,14 @@ function Results(props: {
   return (
     <>
       <header className="mb-10">
-        <p className="text-xs uppercase tracking-wider mb-2" style={{ color: t.muted }}>Your Gap Report</p>
+        <p className={`text-xs uppercase tracking-wider mb-2 ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>Your Gap Report</p>
         <h2
-          className={embedded ? "text-2xl font-semibold" : "text-4xl sm:text-5xl tracking-tight"}
-          style={embedded ? { color: t.ink } : { fontFamily: t.display, fontWeight: 500, color: t.ink }}
+          className={embedded ? "text-2xl font-semibold text-vsc-text" : "text-4xl sm:text-5xl tracking-tight"}
+          style={embedded ? undefined : { fontFamily: t.display, fontWeight: 500, color: t.ink }}
         >
           Compliance score: {props.score}/100
         </h2>
-        <p className="mt-3 text-lg" style={{ color: gradeColor, fontFamily: t.display }}>
+        <p className="mt-3 text-lg" style={{ color: gradeColor, fontFamily: embedded ? 'inherit' : t.display }}>
           {grade}
         </p>
       </header>

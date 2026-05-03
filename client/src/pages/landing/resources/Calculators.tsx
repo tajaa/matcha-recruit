@@ -4,6 +4,7 @@ import { ArrowUpRight, Calculator, ChevronRight } from 'lucide-react'
 
 import MarketingNav from '../MarketingNav'
 import MarketingFooter from '../MarketingFooter'
+import NewsletterSignup from '../../../components/NewsletterSignup'
 import { PricingContactModal } from '../../../components/PricingContactModal'
 
 const INK = 'var(--color-ivory-ink)'
@@ -72,20 +73,20 @@ export default function Calculators({ embedded }: { embedded?: boolean }) {
       {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
       <main className={embedded ? '' : 'pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10'}>
-        <nav className="flex items-center gap-2 text-xs mb-8" style={{ color: t.muted }}>
-          <Link to={root} className="hover:opacity-60">Resources</Link>
-          <ChevronRight className="w-3 h-3" />
-          <span style={{ color: t.ink }}>Calculators</span>
+        <nav className={`flex items-center gap-2 text-xs mb-8 ${embedded ? 'text-vsc-text/40' : ''}`} style={embedded ? undefined : { color: t.muted }}>
+          <Link to={root} className={embedded ? 'hover:text-vsc-text/70 transition-colors' : 'hover:opacity-60'}>Resources</Link>
+          <ChevronRight className={`w-3 h-3 ${embedded ? 'text-vsc-text/20' : ''}`} />
+          <span className={embedded ? 'text-vsc-text/60' : ''} style={embedded ? undefined : { color: t.ink }}>Calculators</span>
         </nav>
 
         <header className="mb-14 max-w-2xl">
           <h1
-            className={embedded ? "text-2xl font-semibold" : "text-5xl sm:text-6xl tracking-tight"}
-            style={embedded ? { color: t.ink } : { fontFamily: t.display, fontWeight: 500, color: t.ink }}
+            className={embedded ? "text-2xl font-semibold text-vsc-text" : "text-5xl sm:text-6xl tracking-tight"}
+            style={embedded ? undefined : { fontFamily: t.display, fontWeight: 500, color: t.ink }}
           >
             HR Calculators
           </h1>
-          <p className="mt-4 text-base" style={{ color: t.muted }}>
+          <p className={`mt-4 text-base ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>
             Quick, no-login math for the numbers you need most — accruals,
             turnover cost, overtime, total comp.
           </p>
@@ -96,40 +97,42 @@ export default function Calculators({ embedded }: { embedded?: boolean }) {
             const live = c.status === 'live'
             const Card = (
               <article
-                className="p-6 rounded-2xl flex flex-col h-full"
-                style={{ border: `1px solid ${t.line}`, opacity: live ? 1 : 0.6 }}
+                className={embedded
+                  ? 'p-6 rounded-xl flex flex-col h-full border border-vsc-border bg-vsc-panel'
+                  : 'p-6 rounded-2xl flex flex-col h-full'}
+                style={embedded ? { opacity: live ? 1 : 0.6 } : { border: `1px solid ${t.line}`, opacity: live ? 1 : 0.6 }}
               >
                 <div className="flex items-start justify-between mb-4">
                   <div
-                    className="w-10 h-10 rounded-lg flex items-center justify-center"
-                    style={{ backgroundColor: t.iconBg }}
+                    className={`w-10 h-10 rounded-lg flex items-center justify-center ${embedded ? 'bg-vsc-bg' : ''}`}
+                    style={embedded ? undefined : { backgroundColor: t.iconBg }}
                   >
-                    <Calculator className="w-5 h-5" style={{ color: t.ink }} />
+                    <Calculator className={`w-5 h-5 ${embedded ? 'text-vsc-text' : ''}`} style={embedded ? undefined : { color: t.ink }} />
                   </div>
                   {live ? (
-                    <ArrowUpRight className="w-4 h-4" style={{ color: t.muted }} />
+                    <ArrowUpRight className={`w-4 h-4 ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }} />
                   ) : (
                     <span
-                      className="text-[10px] tracking-wider px-2 py-1 rounded"
-                      style={{ border: `1px solid ${t.line}`, color: t.muted }}
+                      className={`text-[10px] tracking-wider px-2 py-1 rounded ${embedded ? 'border border-vsc-border text-vsc-text/40' : ''}`}
+                      style={embedded ? undefined : { border: `1px solid ${t.line}`, color: t.muted }}
                     >
                       COMING SOON
                     </span>
                   )}
                 </div>
                 <h3
-                  className="text-xl mb-2"
-                  style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}
+                  className={embedded ? 'text-xl font-semibold text-vsc-text mb-2' : 'text-xl mb-2'}
+                  style={embedded ? undefined : { fontFamily: t.display, color: t.ink, fontWeight: 500 }}
                 >
                   {c.title}
                 </h3>
-                <p className="text-sm" style={{ color: t.muted }}>
+                <p className={embedded ? 'text-sm text-vsc-text/50' : 'text-sm'} style={embedded ? undefined : { color: t.muted }}>
                   {c.description}
                 </p>
               </article>
             )
             return live ? (
-              <Link key={c.title} to={embedded ? `/app${c.to}` : c.to} className="block hover:opacity-80 transition-opacity">
+              <Link key={c.title} to={embedded ? `/app${c.to}` : c.to} className={embedded ? 'block hover:border-vsc-text/30 transition-colors' : 'block hover:opacity-80 transition-opacity'}>
                 {Card}
               </Link>
             ) : (
@@ -137,6 +140,17 @@ export default function Calculators({ embedded }: { embedded?: boolean }) {
             )
           })}
         </div>
+
+        {!embedded && (
+          <section className="mt-14 max-w-xl mx-auto">
+            <NewsletterSignup
+              source="calculators"
+              variant="card"
+              headline="Get the next calc when it ships."
+              description="We add a calculator every couple weeks. Subscribe to know when."
+            />
+          </section>
+        )}
       </main>
 
       {!embedded && <MarketingFooter />}

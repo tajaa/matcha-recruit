@@ -4,6 +4,7 @@ import { ChevronRight, Download } from 'lucide-react'
 
 import MarketingNav from '../MarketingNav'
 import MarketingFooter from '../MarketingFooter'
+import NewsletterSignup from '../../../components/NewsletterSignup'
 import { PricingContactModal } from '../../../components/PricingContactModal'
 import { useMe } from '../../../hooks/useMe'
 import { JOB_DESCRIPTIONS } from './jobDescriptionsData'
@@ -79,18 +80,18 @@ export default function JobDescriptionDetail({ embedded }: { embedded?: boolean 
         {embedded ? (
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
             <div className="flex-1">
-              <Link to={`${root}/templates/job-descriptions`} className="text-xs text-zinc-500 hover:text-zinc-300 mb-2 inline-flex items-center gap-1">
+              <Link to={`${root}/templates/job-descriptions`} className="text-xs text-vsc-text/40 hover:text-vsc-text/70 transition-colors mb-2 inline-flex items-center gap-1">
                 ← Back to library
               </Link>
-              <span className="inline-block text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-zinc-800 text-zinc-500 mb-2 ml-2">
+              <span className="inline-block text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-vsc-border text-vsc-text/40 mb-2 ml-2">
                 {jd.industry}
               </span>
-              <h1 className="text-2xl font-semibold text-zinc-100">{jd.title}</h1>
-              <p className="mt-1 text-sm text-zinc-500">{jd.description}</p>
+              <h1 className="text-2xl font-semibold text-vsc-text">{jd.title}</h1>
+              <p className="mt-1 text-sm text-vsc-text/50">{jd.description}</p>
             </div>
             <button
               onClick={handleDownload}
-              className="inline-flex items-center gap-1.5 px-4 h-9 rounded-md text-sm font-medium whitespace-nowrap bg-emerald-700 hover:bg-emerald-600 text-white"
+              className="inline-flex items-center gap-1.5 px-4 h-9 rounded-lg text-sm font-medium whitespace-nowrap bg-zinc-700 hover:bg-zinc-600 text-white transition-colors"
             >
               <Download className="w-4 h-4" />
               Download DOCX
@@ -133,13 +134,13 @@ export default function JobDescriptionDetail({ embedded }: { embedded?: boolean 
 
         <article className={embedded ? 'flex flex-col gap-5' : 'flex flex-col gap-8'}>
           <JDSection t={t} heading="Job Summary" embedded={embedded}>
-            <p className={embedded ? 'text-sm leading-relaxed text-zinc-300' : 'text-sm leading-relaxed'} style={embedded ? undefined : { color: t.ink }}>{content.summary}</p>
+            <p className={embedded ? 'text-sm leading-relaxed text-vsc-text/70' : 'text-sm leading-relaxed'} style={embedded ? undefined : { color: t.ink }}>{content.summary}</p>
           </JDSection>
 
           <JDSection t={t} heading="Key Responsibilities" embedded={embedded}>
             <ul className="flex flex-col gap-1.5">
               {content.responsibilities.map((r, i) => (
-                <li key={i} className={embedded ? 'flex items-start gap-2 text-sm text-zinc-300' : 'flex items-start gap-3 text-sm'} style={embedded ? undefined : { color: t.ink }}>
+                <li key={i} className={embedded ? 'flex items-start gap-2 text-sm text-vsc-text/70' : 'flex items-start gap-3 text-sm'} style={embedded ? undefined : { color: t.ink }}>
                   <span className="mt-1.5 w-1 h-1 rounded-full shrink-0 bg-zinc-500" />
                   {r}
                 </li>
@@ -150,7 +151,7 @@ export default function JobDescriptionDetail({ embedded }: { embedded?: boolean 
           <JDSection t={t} heading="Requirements" embedded={embedded}>
             <ul className="flex flex-col gap-1.5">
               {content.requirements.map((r, i) => (
-                <li key={i} className={embedded ? 'flex items-start gap-2 text-sm text-zinc-300' : 'flex items-start gap-3 text-sm'} style={embedded ? undefined : { color: t.ink }}>
+                <li key={i} className={embedded ? 'flex items-start gap-2 text-sm text-vsc-text/70' : 'flex items-start gap-3 text-sm'} style={embedded ? undefined : { color: t.ink }}>
                   <span className="mt-1.5 w-1 h-1 rounded-full shrink-0 bg-zinc-500" />
                   {r}
                 </li>
@@ -161,7 +162,7 @@ export default function JobDescriptionDetail({ embedded }: { embedded?: boolean 
           <JDSection t={t} heading="Preferred Qualifications" embedded={embedded}>
             <ul className="flex flex-col gap-1.5">
               {content.preferred.map((r, i) => (
-                <li key={i} className={embedded ? 'flex items-start gap-2 text-sm text-zinc-300' : 'flex items-start gap-3 text-sm'} style={embedded ? undefined : { color: t.ink }}>
+                <li key={i} className={embedded ? 'flex items-start gap-2 text-sm text-vsc-text/70' : 'flex items-start gap-3 text-sm'} style={embedded ? undefined : { color: t.ink }}>
                   <span className="mt-1.5 w-1 h-1 rounded-full shrink-0 bg-zinc-500" />
                   {r}
                 </li>
@@ -170,7 +171,7 @@ export default function JobDescriptionDetail({ embedded }: { embedded?: boolean 
           </JDSection>
 
           <JDSection t={t} heading="Compensation & Benefits" embedded={embedded}>
-            <p className={embedded ? 'text-sm leading-relaxed text-zinc-500' : 'text-sm leading-relaxed'} style={embedded ? undefined : { color: t.muted }}>
+            <p className={embedded ? 'text-sm leading-relaxed text-vsc-text/50' : 'text-sm leading-relaxed'} style={embedded ? undefined : { color: t.muted }}>
               Compensation is competitive and commensurate with experience. We offer a comprehensive benefits
               package including health, dental, vision, retirement savings, paid time off, and other benefits
               as described in the Employee Handbook. [Insert specific compensation range and benefits details.]
@@ -178,7 +179,7 @@ export default function JobDescriptionDetail({ embedded }: { embedded?: boolean 
           </JDSection>
 
           <JDSection t={t} heading="Equal Opportunity Employer" embedded={embedded}>
-            <p className={embedded ? 'text-sm leading-relaxed text-zinc-500' : 'text-sm leading-relaxed'} style={embedded ? undefined : { color: t.muted }}>{EEO_STATEMENT}</p>
+            <p className={embedded ? 'text-sm leading-relaxed text-vsc-text/50' : 'text-sm leading-relaxed'} style={embedded ? undefined : { color: t.muted }}>{EEO_STATEMENT}</p>
           </JDSection>
         </article>
 
@@ -235,6 +236,14 @@ export default function JobDescriptionDetail({ embedded }: { embedded?: boolean 
                 </button>
               </div>
             </section>
+            <div className="mt-10">
+              <NewsletterSignup
+                source="job_descriptions"
+                variant="card"
+                headline="More HR templates, every week."
+                description="Subscribe for new JDs, calculators, and employment-law briefs."
+              />
+            </div>
           </>
         )}
       </main>
@@ -249,7 +258,7 @@ function JDSection({ t, heading, children, embedded }: { t: ReturnType<typeof mk
   if (embedded) {
     return (
       <section>
-        <h2 className="text-xs uppercase tracking-wider font-medium text-zinc-400 mb-2 pb-1.5 border-b border-zinc-800">
+        <h2 className="text-xs uppercase tracking-wider font-medium text-vsc-text/40 mb-2 pb-1.5 border-b border-vsc-border">
           {heading}
         </h2>
         {children}

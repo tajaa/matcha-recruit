@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import NewsletterSignup from '../../components/NewsletterSignup'
 
 const INK = 'var(--color-ivory-ink)'
 const MUTED = 'var(--color-ivory-muted)'
@@ -20,6 +21,9 @@ export default function MarketingFooter() {
             <p className="mt-4 text-sm max-w-xs" style={{ color: MUTED }}>
               Bespoke HR, GRC, employee relations, and AI integration consulting.
             </p>
+            <div className="mt-6">
+              <NewsletterSignup source="footer" variant="footer" headline="Get the brief" description="Weekly HR + employment-law updates." />
+            </div>
           </div>
           <FooterCol title="Services" links={[
             { label: 'HR Consulting', to: '/services' },
