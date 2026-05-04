@@ -945,7 +945,8 @@ class TestPaymentFailedCycleDedupe:
         #   1. last_success → None (never paid before)
         #   2. already_failed_this_cycle → False (first fail)
         #   3. channel name lookup → "test"
-        mock_conn.fetchval = AsyncMock(side_effect=[None, False, "test-channel"])
+        #   4. subscriber's own company (cross-tenant scope for notification)
+        mock_conn.fetchval = AsyncMock(side_effect=[None, False, "test-channel", uuid4()])
         mock_conn.execute = AsyncMock()
 
         with patch("app.core.services.channel_payment_service.get_connection") as mock_gc:

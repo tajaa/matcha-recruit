@@ -360,10 +360,15 @@ async def discover_public_channels(
     """
     async with get_connection() as conn:
         params: list = [current_user.id]
+        # Restrict to personal-account workspaces. Corporate tenants
+        # (signup_source != personal, is_personal=false) keep their channel
+        # list private to their own workspace; only personal creators —
+        # who have no other distribution channel — are surfaced here.
         clauses = [
             "ch.is_archived = false",
             "COALESCE(ch.visibility, 'public') = 'public'",
             "cm.user_id IS NULL",  # not already a member
+            "COALESCE(comp.is_personal, false) = true",
         ]
         if paid_only:
             clauses.append("ch.is_paid = true")
@@ -387,6 +392,7 @@ async def discover_public_channels(
                    FALSE AS is_member,
                    NULL::text AS my_role
             FROM channels ch
+            JOIN companies comp ON comp.id = ch.company_id
             LEFT JOIN channel_members cm ON cm.channel_id = ch.id AND cm.user_id = $1
             WHERE {' AND '.join(clauses)}
             ORDER BY ch.is_paid DESC, member_count DESC, ch.created_at DESC
@@ -1307,16 +1313,31 @@ async def join_channel(
     channel_id: UUID,
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Join a channel in the user's company."""
+    """Join a channel. Same-company channels are always joinable subject to
+    visibility/paid checks. Cross-company joins are only allowed when the
+    target channel is hosted in a personal-account workspace and has
+    visibility='public' — matches the Discover surface."""
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
         ch = await conn.fetchrow(
-            "SELECT id, COALESCE(visibility, 'public') AS visibility, is_paid FROM channels WHERE id = $1 AND company_id = $2 AND is_archived = false",
-            channel_id, company_id,
+            """
+            SELECT ch.id, COALESCE(ch.visibility, 'public') AS visibility,
+                   ch.is_paid, ch.company_id,
+                   COALESCE(comp.is_personal, false) AS is_personal
+            FROM channels ch
+            JOIN companies comp ON comp.id = ch.company_id
+            WHERE ch.id = $1 AND ch.is_archived = false
+            """,
+            channel_id,
         )
         if not ch:
             raise HTTPException(status_code=404, detail="Channel not found")
+
+        # Cross-tenant join only allowed for public channels in personal workspaces
+        if ch["company_id"] != company_id:
+            if not ch["is_personal"] or ch["visibility"] != "public":
+                raise HTTPException(status_code=404, detail="Channel not found")
 
         if ch["visibility"] in ("private", "invite_only"):
             raise HTTPException(status_code=403, detail="This channel requires an invitation to join")
@@ -1928,16 +1949,30 @@ async def create_channel_checkout(
     channel_id: UUID,
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Create a Stripe checkout session for subscribing to a paid channel."""
+    """Create a Stripe checkout session for subscribing to a paid channel.
+    Cross-tenant subscribes are allowed for paid channels hosted in a
+    personal-account workspace — matches the Discover surface so a user
+    in Corp A (or another personal account) can subscribe to a personal
+    creator's paid channel."""
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
         ch = await conn.fetchrow(
-            "SELECT id, name, is_paid, stripe_price_id, created_by FROM channels WHERE id = $1 AND company_id = $2",
-            channel_id, company_id,
+            """
+            SELECT ch.id, ch.name, ch.is_paid, ch.stripe_price_id, ch.created_by,
+                   ch.company_id, COALESCE(comp.is_personal, false) AS is_personal,
+                   COALESCE(ch.visibility, 'public') AS visibility
+            FROM channels ch
+            JOIN companies comp ON comp.id = ch.company_id
+            WHERE ch.id = $1
+            """,
+            channel_id,
         )
         if not ch:
             raise HTTPException(status_code=404, detail="Channel not found")
+        if ch["company_id"] != company_id:
+            if not ch["is_personal"] or ch["visibility"] != "public":
+                raise HTTPException(status_code=404, detail="Channel not found")
         if not ch["is_paid"]:
             raise HTTPException(status_code=400, detail="This channel is free to join")
         if not ch["stripe_price_id"]:
@@ -2564,13 +2599,25 @@ async def join_by_invite(
 
         channel_id = invite["channel_id"]
 
-        # Verify channel belongs to user's company
+        # Same-company is always allowed; cross-company invite redeem is
+        # allowed only for public channels in personal-account workspaces
+        # (matches Discover surface).
         ch = await conn.fetchrow(
-            "SELECT id, is_paid, stripe_price_id, name, created_by FROM channels WHERE id = $1 AND company_id = $2 AND is_archived = false",
-            channel_id, company_id,
+            """
+            SELECT ch.id, ch.is_paid, ch.stripe_price_id, ch.name, ch.created_by,
+                   ch.company_id, COALESCE(ch.visibility, 'public') AS visibility,
+                   COALESCE(comp.is_personal, false) AS is_personal
+            FROM channels ch
+            JOIN companies comp ON comp.id = ch.company_id
+            WHERE ch.id = $1 AND ch.is_archived = false
+            """,
+            channel_id,
         )
         if not ch:
-            raise HTTPException(status_code=404, detail="Channel not found in your company")
+            raise HTTPException(status_code=404, detail="Channel not found")
+        if ch["company_id"] != company_id:
+            if not ch["is_personal"] or ch["visibility"] != "public":
+                raise HTTPException(status_code=404, detail="Channel not found in your company")
 
         # Check if already an active member — don't consume an invite use
         existing = await conn.fetchrow(

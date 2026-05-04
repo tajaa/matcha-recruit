@@ -427,13 +427,18 @@ async def handle_payment_failed(stripe_subscription_id: str) -> None:
             __import__("json").dumps({"stripe_subscription_id": stripe_subscription_id}),
         )
 
-        # Send notification
+        # Send notification — scoped to the subscriber's own company so it
+        # surfaces in their notification feed regardless of where the
+        # channel is hosted (cross-tenant subscribes to personal channels).
         try:
             from ...matcha.services import notification_service as notif_svc
             channel_name = await conn.fetchval("SELECT name FROM channels WHERE id = $1", row["channel_id"])
+            subscriber_company_id = await conn.fetchval(
+                "SELECT company_id FROM clients WHERE user_id = $1", row["user_id"],
+            ) or row["company_id"]
             await notif_svc.create_notification(
                 user_id=row["user_id"],
-                company_id=row["company_id"],
+                company_id=subscriber_company_id,
                 type="channel_payment_failed",
                 title=f"Payment failed for #{channel_name}",
                 body="Your subscription payment failed. Please update your payment method to keep access.",

@@ -15,11 +15,20 @@ struct DiscoverChannelsSheet: View {
     @State private var error: String?
     @State private var actionInFlight: String?
     @State private var searchTask: Task<Void, Never>?
+    /// Set after the user clicks Subscribe — Stripe Checkout opens in the
+    /// browser and there's no in-app signal that payment finished. Show a
+    /// banner so the user knows to come back, and refresh the channel list
+    /// when the window regains focus to pick up the new membership.
+    @State private var waitingForCheckoutChannel: ChannelSummary?
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider().opacity(0.3)
+            if waitingForCheckoutChannel != nil {
+                checkoutBanner
+                Divider().opacity(0.2)
+            }
             filters
             Divider().opacity(0.2)
             content
@@ -27,6 +36,40 @@ struct DiscoverChannelsSheet: View {
         .frame(width: 520, height: 560)
         .background(Color.appBackground)
         .task { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            // User likely returned from Stripe Checkout — re-fetch so the
+            // newly-joined channel disappears from Discover and the parent
+            // sidebar can refresh.
+            if waitingForCheckoutChannel != nil {
+                Task { await reloadAfterCheckout() }
+            }
+        }
+    }
+
+    private var checkoutBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.up.right.square")
+                .font(.system(size: 11))
+                .foregroundColor(.matcha500)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Complete payment in your browser")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.primary)
+                if let ch = waitingForCheckoutChannel {
+                    Text("Subscribing to #\(ch.name). The channel will appear in your sidebar once Stripe confirms the payment.")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+            }
+            Spacer()
+            Button("Dismiss") { waitingForCheckoutChannel = nil }
+                .buttonStyle(.plain)
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.matcha500.opacity(0.10))
     }
 
     private var header: some View {
@@ -258,11 +301,24 @@ struct DiscoverChannelsSheet: View {
             if let nsUrl = URL(string: url) {
                 NSWorkspace.shared.open(nsUrl)
             }
-            // Don't auto-close — user finishes Stripe Checkout in browser,
-            // returns to the app; the activation webhook adds them as a member
-            // and the sidebar refresh picks it up on next focus.
+            // Show the in-app banner. didBecomeActive will refresh on return.
+            waitingForCheckoutChannel = channel
         } catch {
             self.error = (error as NSError).localizedDescription
+        }
+    }
+
+    /// Re-pull the discover list after the user returns from Checkout. If
+    /// the channel is no longer in the result set, the activation webhook
+    /// has run — close the sheet so the parent sidebar refreshes and
+    /// surfaces the new subscription.
+    private func reloadAfterCheckout() async {
+        guard let waiting = waitingForCheckoutChannel else { return }
+        await load()
+        if !channels.contains(where: { $0.id == waiting.id }) {
+            onJoined(waiting.id)
+            waitingForCheckoutChannel = nil
+            dismiss()
         }
     }
 }
