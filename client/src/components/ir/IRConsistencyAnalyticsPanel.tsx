@@ -25,12 +25,11 @@ export function IRConsistencyAnalyticsPanel() {
     <div className="space-y-5">
       <div>
         <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">By Status</h2>
-        <div className="grid gap-3 grid-cols-4">
+        <div className="grid gap-3 grid-cols-3">
           {([
             ['Open', summary.open],
             ['Investigating', summary.investigating],
-            ['Resolved', summary.resolved],
-            ['Closed', summary.closed],
+            ['Closed', summary.closed + (summary.resolved ?? 0)],
           ] as const).map(([label, value]) => (
             <div key={label} className="border border-zinc-800 rounded-lg px-3 py-3 text-center">
               <p className="text-xl font-semibold text-zinc-100">{value}</p>

@@ -26,7 +26,6 @@ const STATUS_OPTIONS = [
   { value: 'reported', label: 'Reported' },
   { value: 'investigating', label: 'Investigating' },
   { value: 'action_required', label: 'Action Required' },
-  { value: 'resolved', label: 'Resolved' },
   { value: 'closed', label: 'Closed' },
 ]
 

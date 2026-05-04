@@ -17,7 +17,7 @@ import {
 
 type Tab = 'dashboard' | 'incidents' | 'risk' | 'analytics' | 'osha' | 'survey'
 type SeverityFilter = 'all' | 'low' | 'medium' | 'high' | 'critical'
-type StatusFilter = 'all' | 'needs_attention' | 'reported' | 'investigating' | 'action_required' | 'resolved' | 'closed'
+type StatusFilter = 'all' | 'reported' | 'investigating' | 'action_required' | 'closed'
 type TypeFilter = 'all' | IRIncidentType
 
 type IncidentListResponse = { incidents: IRIncident[]; total: number }
@@ -41,9 +41,7 @@ export default function IRList() {
     setLoading(true)
     const params = new URLSearchParams()
     if (severityFilter !== 'all') params.set('severity', severityFilter)
-    if (statusFilter === 'needs_attention') {
-      params.set('status', 'reported,action_required')
-    } else if (statusFilter !== 'all') {
+    if (statusFilter !== 'all') {
       params.set('status', statusFilter)
     }
     if (typeFilter !== 'all') params.set('incident_type', typeFilter)
@@ -130,11 +128,9 @@ export default function IRList() {
           <div className="flex items-center gap-1 flex-wrap">
             {([
               ['all', 'All'],
-              ['needs_attention', 'Needs Attention'],
               ['reported', 'Reported'],
               ['investigating', 'Investigating'],
               ['action_required', 'Action Required'],
-              ['resolved', 'Resolved'],
               ['closed', 'Closed'],
             ] as const).map(([val, label]) => (
               <Button key={val} variant={statusFilter === val ? 'primary' : 'ghost'} size="sm" onClick={() => setStatusFilter(val)}>
