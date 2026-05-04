@@ -5425,15 +5425,31 @@ async def sync_project_interviews(
     return {"updated": updated}
 
 
+_IMG_LINE_RE = re.compile(r'^!\[([^\]]*)\]\(([^)]+)\)$')
+
+
 def _render_inline_md(text: str) -> str:
     """Inline-only markdown matching SwiftUI inlineOnlyPreservingWhitespace.
 
     Converts **bold**, *italic*, `code` but leaves block structure (lists,
     headings, checkboxes) as literal text so the PDF matches the desktop preview.
+
+    Standalone image lines `![alt](url)` are emitted as <img> tags so the
+    downstream _inline_images() pass can convert storage URLs to base64
+    data URIs. Mirrors the desktop preview's parseImage() in
+    MarkdownPreviewView.swift.
     """
     import re as _re_i, html as _html_i
     out = []
     for line in text.split('\n'):
+        # Standalone image line: ![alt](url) — emit <img>, bypass escape so
+        # _inline_images() can pick up the src.
+        img_match = _IMG_LINE_RE.match(line.strip())
+        if img_match:
+            alt = _html_i.escape(img_match.group(1))
+            src = _html_i.escape(img_match.group(2), quote=True)
+            out.append(f'<img src="{src}" alt="{alt}" />')
+            continue
         s = _html_i.escape(line)
         s = _re_i.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', s)
         s = _re_i.sub(r'__(.+?)__', r'<strong>\1</strong>', s)

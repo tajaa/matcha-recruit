@@ -37,7 +37,6 @@ private struct SectionPreviewView: View {
     let section: MWProjectSection
     let isLast: Bool
     @State private var blocks: [RenderedBlock] = []
-    @State private var parsedFor: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -50,10 +49,6 @@ private struct SectionPreviewView: View {
                 ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                     renderBlock(block)
                 }
-                .onAppear { parseIfNeeded(content) }
-                .onChange(of: section.content ?? "") { _, newValue in
-                    parseIfNeeded(newValue)
-                }
             } else {
                 Text("No content yet")
                     .font(.system(size: 12))
@@ -61,15 +56,15 @@ private struct SectionPreviewView: View {
                     .italic()
             }
         }
+        // .task(id:) fires reliably on first appear AND when content changes,
+        // unlike .onAppear on a ForEach with an initially-empty @State (which
+        // can no-op and leave the section body blank).
+        .task(id: section.content ?? "") {
+            blocks = renderBlocks(for: section.content ?? "")
+        }
         if !isLast {
             Divider().opacity(0.2)
         }
-    }
-
-    private func parseIfNeeded(_ content: String) {
-        guard parsedFor != content else { return }
-        blocks = renderBlocks(for: content)
-        parsedFor = content
     }
 
     // MARK: - Block parsing
