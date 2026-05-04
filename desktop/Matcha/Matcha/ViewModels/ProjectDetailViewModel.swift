@@ -482,10 +482,16 @@ class ProjectDetailViewModel {
         guard let pid = project?.id else { return }
         guard let idx = tasks.firstIndex(where: { $0.id == id }) else { return }
         let newStatus = tasks[idx].status == "completed" ? "pending" : "completed"
+        let newColumn = newStatus == "completed" ? "done" : "todo"
         let title = tasks[idx].title
         await MainActor.run {
-            tasks[idx].status = newStatus
-            tasks[idx].boardColumn = newStatus == "completed" ? "done" : "todo"
+            // Replace the whole element (rather than mutating two fields in
+            // sequence) so SwiftUI sees a single coherent change and the row
+            // animates cleanly between columns.
+            var copy = tasks[idx]
+            copy.status = newStatus
+            copy.boardColumn = newColumn
+            tasks[idx] = copy
             if newStatus == "completed" {
                 logActivity("checkmark.circle.fill", "completed “\(title)”")
             } else {
@@ -493,13 +499,29 @@ class ProjectDetailViewModel {
             }
         }
         do {
+            // Send both status AND board_column. The server enforces sync
+            // rules either way, but sending both makes intent explicit and
+            // protects against a server that returns the row before the
+            // column-sync rule has applied (which would snap the card back).
             let updated = try await service.updateProjectTask(
                 projectId: pid, taskId: id,
-                patch: MatchaWorkService.ProjectTaskPatch(status: newStatus)
+                patch: MatchaWorkService.ProjectTaskPatch(
+                    boardColumn: newColumn,
+                    status: newStatus
+                )
             )
             await MainActor.run {
                 if let i = tasks.firstIndex(where: { $0.id == id }) {
-                    tasks[i] = updated
+                    // Defensive: if the server response somehow diverges from
+                    // the intended state, normalize it client-side. The
+                    // status↔column relationship is invariant.
+                    var fixed = updated
+                    if fixed.status == "completed" && fixed.boardColumn != "done" {
+                        fixed.boardColumn = "done"
+                    } else if fixed.status == "pending" && fixed.boardColumn == "done" {
+                        fixed.boardColumn = "todo"
+                    }
+                    tasks[i] = fixed
                 }
             }
         } catch {
