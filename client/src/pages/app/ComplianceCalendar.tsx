@@ -166,25 +166,22 @@ export default function ComplianceCalendar() {
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <Select
+          label=""
           value={locationFilter}
           onChange={(e) => setParam('location', e.target.value)}
-        >
-          <option value="">All locations</option>
-          {locations.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.name || `${l.city || ''}, ${l.state || ''}`}
-            </option>
-          ))}
-        </Select>
+          placeholder="All locations"
+          options={locations.map((l) => ({
+            value: l.id,
+            label: l.name || `${l.city || ''}, ${l.state || ''}`,
+          }))}
+        />
         <Select
+          label=""
           value={categoryFilter}
           onChange={(e) => setParam('category', e.target.value)}
-        >
-          <option value="">All categories</option>
-          {categories.map((c) => (
-            <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>
-          ))}
-        </Select>
+          placeholder="All categories"
+          options={categories.map((c) => ({ value: c, label: c.replace(/_/g, ' ') }))}
+        />
         {(locationFilter || categoryFilter) && (
           <button
             onClick={() => setSearchParams({}, { replace: true })}
