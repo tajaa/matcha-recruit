@@ -37,6 +37,19 @@ class ProjectDetailViewModel {
     }
 
     func loadProject(id: String) async {
+        // Clear per-project caches before fetching. The VM is persistent
+        // @State on ProjectDetailView and gets reused across projects, so
+        // without this reset Project A's tasks/files/activity render in
+        // Project B's overview during the gap between project switch and
+        // loadTasks/loadFiles completing.
+        let switchingProjects = project?.id != id
+        if switchingProjects {
+            await MainActor.run {
+                tasks = []
+                files = []
+                recentActivity = []
+            }
+        }
         await MainActor.run { isLoading = true; errorMessage = nil }
         do {
             let proj = try await service.getProjectDetail(id: id)

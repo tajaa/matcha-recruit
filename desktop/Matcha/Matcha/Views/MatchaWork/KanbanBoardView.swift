@@ -31,14 +31,14 @@ struct KanbanBoardView: View {
             }
         }
         .background(Color.appBackground)
-        // Eager prefetch in `loadProject` usually means tasks are already
-        // here. Refresh in background on first appear without clobbering
-        // the visible list.
+        // Only fetch when we have nothing yet. The eager prefetch in
+        // `loadProject` already runs for collab projects, and a background
+        // refresh races user toggles: a stale GET-list response can land
+        // after the PATCH and overwrite the optimistic done-state with
+        // the pre-toggle todo state, snapping the card back across columns.
         .task {
             if viewModel.tasks.isEmpty {
                 await viewModel.loadTasks()
-            } else {
-                Task.detached { await viewModel.loadTasks() }
             }
         }
         .sheet(item: $editingTask) { task in
