@@ -113,6 +113,10 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
     if body.contact_info and body.contact_info.strip():
         extra_category_data["contact_info"] = body.contact_info.strip()
 
+    location_clean = body.location.strip() if body.location else None
+    if not location_clean:
+        location_clean = None
+
     # 1. Quick lookup to resolve company_id (companies table has no RLS)
     async with get_connection() as conn:
         company_id_row = await conn.fetchval(
@@ -162,9 +166,9 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
                 body.incident_type or "other",
                 "medium",
                 occurred_at,
-                (body.location.strip() if body.location else None),
+                location_clean,
                 "Anonymous",
-                json.dumps(extra_category_data) if extra_category_data else None,
+                json.dumps(extra_category_data),
                 company_id,
                 None,
             )
