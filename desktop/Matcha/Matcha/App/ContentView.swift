@@ -14,6 +14,7 @@ struct ContentView: View {
     @State private var showNewBlog = false
     @State private var pendingConnectionsCount = 0
     @State private var showCreateChannel = false
+    @State private var showDiscoverChannels = false
     @State private var showProjectTypePicker = false
     @State private var isCreatingProject = false
     @State private var projectCreateError: String?
@@ -41,35 +42,54 @@ struct ContentView: View {
                             icon: "number",
                             isOpen: $channelsSectionOpen,
                             trailing: {
-                                Menu {
-                                    Button("New channel") {
-                                        appState.channelAdminWizardMode = .create
-                                        appState.showChannelAdminWizard = true
+                                HStack(spacing: 4) {
+                                    Button {
+                                        showDiscoverChannels = true
+                                    } label: {
+                                        Image(systemName: "magnifyingglass")
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .foregroundColor(.secondary)
+                                            .frame(width: 18, height: 18)
+                                            .background(Color.zinc800)
+                                            .cornerRadius(4)
                                     }
-                                    Button("Quick create (no guide)") {
-                                        showCreateChannel = true
-                                    }
-                                    Divider()
-                                    Button("Channel admin guide") {
-                                        if let id = appState.selectedChannelId {
-                                            appState.channelAdminWizardMode = .manage(channelId: id)
-                                        } else {
+                                    .buttonStyle(.plain)
+                                    .help("Discover public channels")
+
+                                    Menu {
+                                        Button("New channel") {
                                             appState.channelAdminWizardMode = .create
+                                            appState.showChannelAdminWizard = true
                                         }
-                                        appState.showChannelAdminWizard = true
+                                        Button("Quick create (no guide)") {
+                                            showCreateChannel = true
+                                        }
+                                        Divider()
+                                        Button("Discover public channels") {
+                                            showDiscoverChannels = true
+                                        }
+                                        Divider()
+                                        Button("Channel admin guide") {
+                                            if let id = appState.selectedChannelId {
+                                                appState.channelAdminWizardMode = .manage(channelId: id)
+                                            } else {
+                                                appState.channelAdminWizardMode = .create
+                                            }
+                                            appState.showChannelAdminWizard = true
+                                        }
+                                    } label: {
+                                        Image(systemName: "plus")
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .foregroundColor(.secondary)
+                                            .frame(width: 18, height: 18)
+                                            .background(Color.zinc800)
+                                            .cornerRadius(4)
                                     }
-                                } label: {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 10, weight: .semibold))
-                                        .foregroundColor(.secondary)
-                                        .frame(width: 18, height: 18)
-                                        .background(Color.zinc800)
-                                        .cornerRadius(4)
+                                    .menuStyle(.borderlessButton)
+                                    .menuIndicator(.hidden)
+                                    .frame(width: 22, height: 18)
+                                    .help("New channel · admin guide")
                                 }
-                                .menuStyle(.borderlessButton)
-                                .menuIndicator(.hidden)
-                                .frame(width: 22, height: 18)
-                                .help("New channel · admin guide")
                             }
                         ) {
                             ChannelsSidebarView(showHeader: false)
@@ -322,6 +342,12 @@ struct ContentView: View {
                 appState.selectedProjectId = nil
                 appState.channelsListGeneration &+= 1
                 NotificationCenter.default.post(name: .mwChannelCreated, object: newChannel.id)
+            }
+        }
+        .sheet(isPresented: $showDiscoverChannels) {
+            DiscoverChannelsSheet { joinedId in
+                appState.channelsListGeneration &+= 1
+                appState.selectedChannelId = joinedId
             }
         }
         .sheet(isPresented: $appState.showChannelAdminWizard, onDismiss: {

@@ -120,8 +120,12 @@ class ChannelsService {
     func searchInvitableUsers(query: String, channelId: String? = nil) async throws -> [InvitableUser] {
         var path = "\(basePath)/invitable-users"
         var params: [String] = []
+        // urlQueryAllowed leaves "+", "&", "=" unencoded which breaks emails
+        // like "user+tag@gmail.com" — the server decodes "+" as a space.
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "+&=#?")
         if !query.isEmpty {
-            let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+            let encoded = query.addingPercentEncoding(withAllowedCharacters: allowed) ?? query
             params.append("q=\(encoded)")
         }
         if let cid = channelId {
