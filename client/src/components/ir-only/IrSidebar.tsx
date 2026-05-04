@@ -1,10 +1,11 @@
-import { AlertTriangle, Users, Building2, Gavel, MapPin, BookOpen, CalendarDays } from 'lucide-react'
+import { AlertTriangle, Users, Building2, Gavel, MapPin, BookOpen, CalendarDays, LayoutDashboard } from 'lucide-react'
 import SidebarShell from '../SidebarShell'
 import type { NavItem, NavGroup } from '../SidebarShell'
 import { useMe } from '../../hooks/useMe'
 import { useSidebarBadges } from '../../hooks/useSidebarBadges'
 
 const nav: (NavItem | NavGroup)[] = [
+  { to: '/app', icon: LayoutDashboard, label: 'Command Center' },
   { to: '/app/ir', icon: AlertTriangle, label: 'Incidents' },
   { to: '/app/employees', icon: Users, label: 'Employees', feature: 'employees' },
   { to: '/app/locations', icon: MapPin, label: 'Locations' },

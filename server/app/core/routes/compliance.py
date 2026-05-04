@@ -63,6 +63,12 @@ from ..services.compliance_service import (
 
 router = APIRouter()
 
+# Routes that must be accessible to all client tenants regardless of the
+# `compliance` feature flag — e.g. matcha-lite gets the compliance calendar
+# even though the full Compliance page is gated. Mounted separately in
+# core/routes/__init__.py without `require_feature("compliance")`.
+lite_router = APIRouter()
+
 
 async def resolve_company_id(
     current_user, company_id_override: str | None
@@ -221,7 +227,7 @@ async def check_location_compliance_endpoint(
     )
 
 
-@router.get("/locations", response_model=List[dict])
+@lite_router.get("/locations", response_model=List[dict])
 async def get_locations_endpoint(
     company_id: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
@@ -546,7 +552,7 @@ async def get_wage_violations_endpoint(
     }
 
 
-@router.get("/calendar", response_model=List[CalendarItem])
+@lite_router.get("/calendar", response_model=List[CalendarItem])
 async def get_compliance_calendar(
     from_date: Optional[date] = Query(None, alias="from"),
     to_date: Optional[date] = Query(None, alias="to"),
@@ -602,7 +608,7 @@ async def get_alerts_endpoint(
     return await get_company_alerts(company_id, status, severity, limit, location_id=loc_uuid)
 
 
-@router.put("/alerts/{alert_id}/read")
+@lite_router.put("/alerts/{alert_id}/read")
 async def mark_alert_read_endpoint(
     alert_id: str,
     company_id: Optional[str] = Query(None),
@@ -643,7 +649,7 @@ class ActionPlanUpdateRequest(BaseModel):
     mark_actioned: Optional[bool] = None
 
 
-@router.put("/alerts/{alert_id}/dismiss")
+@lite_router.put("/alerts/{alert_id}/dismiss")
 async def dismiss_alert_endpoint(
     alert_id: str,
     data: Optional[DismissAlertRequest] = None,
