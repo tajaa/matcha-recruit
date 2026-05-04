@@ -6,23 +6,11 @@ const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
 type Stage = 'validating' | 'invalid' | 'used' | 'form' | 'submitting' | 'submitted' | 'error'
 
-type IncidentType = '' | 'safety' | 'behavioral' | 'property' | 'near_miss' | 'other'
-
-const TYPE_OPTIONS: { value: Exclude<IncidentType, ''>; label: string }[] = [
-  { value: 'safety', label: 'Safety' },
-  { value: 'behavioral', label: 'Behavioral' },
-  { value: 'property', label: 'Property' },
-  { value: 'near_miss', label: 'Near miss' },
-  { value: 'other', label: 'Other' },
-]
-
 export default function AnonymousReport() {
   const { token } = useParams<{ token: string }>()
   const [stage, setStage] = useState<Stage>('validating')
   const [error, setError] = useState<string | null>(null)
-  const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [incidentType, setIncidentType] = useState<IncidentType>('')
   const [occurredAt, setOccurredAt] = useState('')
   const [location, setLocation] = useState('')
   const [involvedParties, setInvolvedParties] = useState('')
@@ -48,7 +36,7 @@ export default function AnonymousReport() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (title.trim().length < 3 || description.trim().length < 10) return
+    if (description.trim().length < 10) return
     setStage('submitting')
     setError(null)
     try {
@@ -56,10 +44,8 @@ export default function AnonymousReport() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: title.trim(),
           description: description.trim(),
-          incident_type: incidentType || null,
-          occurred_at: occurredAt ? new Date(occurredAt).toISOString() : null,
+          occurred_at: occurredAt.trim() || null,
           location: location.trim() || null,
           involved_parties: involvedParties.trim() || null,
           contact_info: contactInfo.trim() || null,
@@ -131,39 +117,27 @@ export default function AnonymousReport() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4 text-left">
-        <Field label="Title">
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            maxLength={255}
+        <Field label="Description">
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={6}
+            maxLength={10000}
+            placeholder="Describe what happened…"
             className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
           />
         </Field>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label="Incident type" optional>
-            <select
-              value={incidentType}
-              onChange={(e) => setIncidentType(e.target.value as IncidentType)}
-              className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
-            >
-              <option value="">Select…</option>
-              {TYPE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </Field>
-
-          <Field label="Date and time" optional>
-            <input
-              type="datetime-local"
-              value={occurredAt}
-              onChange={(e) => setOccurredAt(e.target.value)}
-              className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
-            />
-          </Field>
-        </div>
+        <Field label="Date and time" optional hint='When did this happen? Free text — e.g. "yesterday at 3pm", "May 1 around noon".'>
+          <input
+            type="text"
+            value={occurredAt}
+            onChange={(e) => setOccurredAt(e.target.value)}
+            maxLength={255}
+            placeholder="yesterday around 4pm"
+            className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
+          />
+        </Field>
 
         <Field label="Location" optional hint="Building, area, or address. Skip if it would identify you.">
           <input
@@ -171,16 +145,6 @@ export default function AnonymousReport() {
             value={location}
             onChange={(e) => setLocation(e.target.value)}
             maxLength={255}
-            className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
-          />
-        </Field>
-
-        <Field label="Description">
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={5}
-            maxLength={10000}
             className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
           />
         </Field>
@@ -221,7 +185,7 @@ export default function AnonymousReport() {
 
         <button
           type="submit"
-          disabled={stage === 'submitting' || title.trim().length < 3 || description.trim().length < 10}
+          disabled={stage === 'submitting' || description.trim().length < 10}
           className="w-full bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white font-medium py-2.5 rounded transition-colors flex items-center justify-center"
         >
           {stage === 'submitting' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Submit report'}

@@ -9,13 +9,17 @@ import logging
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Literal, Optional
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ...database import get_connection
-from .ir_incidents import generate_incident_number, send_ir_notifications_task
+from .ir_incidents import (
+    _parse_occurred_at,
+    generate_incident_number,
+    send_ir_notifications_task,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,15 +49,32 @@ def _is_rate_limited(ip: str) -> bool:
 # ---------------------------------------------------------------------------
 
 class AnonymousReportRequest(BaseModel):
-    title: str = Field(..., min_length=3, max_length=255)
     description: str = Field(..., min_length=10, max_length=10_000)
-    incident_type: Optional[Literal["safety", "behavioral", "property", "near_miss", "other"]] = None
-    occurred_at: Optional[datetime] = None
+    occurred_at: Optional[str] = Field(None, max_length=255)
     location: Optional[str] = Field(None, max_length=255)
     involved_parties: Optional[str] = Field(None, max_length=2_000)
     contact_info: Optional[str] = Field(None, max_length=255)
     # Honeypot — must be empty
     company_name: Optional[str] = Field(None, max_length=255)
+
+
+def _derive_title(description: str, limit: int = 80) -> str:
+    """Pull a title from the first line/sentence of the description."""
+    text = description.strip()
+    # First non-empty line
+    for line in text.splitlines():
+        line = line.strip()
+        if line:
+            text = line
+            break
+    # Cut at first sentence-ending punctuation if it's reasonably short
+    for sep in (". ", "! ", "? "):
+        idx = text.find(sep)
+        if 0 < idx <= limit:
+            return text[: idx + 1].strip()
+    if len(text) > limit:
+        return text[: limit - 1].rstrip() + "…"
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -87,14 +108,11 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
         # Silently accept to not tip off the bot
         return {"submitted": True}
 
-    # Re-validate trimmed lengths — Pydantic min_length runs pre-strip, so
-    # "   abc   " (9 chars) would slip past a 3-char min and write 3 chars.
-    title_trimmed = body.title.strip()
+    # Re-validate trimmed length — Pydantic min_length runs pre-strip.
     description_trimmed = body.description.strip()
-    if len(title_trimmed) < 3:
-        raise HTTPException(status_code=422, detail="Title must be at least 3 characters")
     if len(description_trimmed) < 10:
         raise HTTPException(status_code=422, detail="Description must be at least 10 characters")
+    title_derived = _derive_title(description_trimmed)
 
     # Rate limit
     client_ip = request.client.host if request.client else "unknown"
@@ -108,13 +126,11 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
     incident_number = generate_incident_number()
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
-    # User-supplied occurred_at takes precedence; clamp to naive UTC.
-    occurred_at = now_naive
-    if body.occurred_at is not None:
-        dt = body.occurred_at
-        if dt.tzinfo is not None:
-            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-        occurred_at = dt
+    # User types occurred_at as free text ("yesterday at 3pm", "May 1 4pm").
+    # _parse_occurred_at falls back to NOW() on parse failure.
+    occurred_at = (
+        _parse_occurred_at(body.occurred_at) if body.occurred_at else now_naive
+    )
 
     extra_category_data: dict = {}
     if body.involved_parties and body.involved_parties.strip():
@@ -170,9 +186,9 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
                 RETURNING id, incident_number, title, status
                 """,
                 incident_number,
-                title_trimmed,
+                title_derived,
                 description_trimmed,
-                body.incident_type or "other",
+                "other",
                 "medium",
                 occurred_at,
                 location_clean,
