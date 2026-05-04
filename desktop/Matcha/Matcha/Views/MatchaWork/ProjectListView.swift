@@ -375,7 +375,7 @@ struct ProjectListView: View {
     private func load() async {
         do {
             let p = try await MatchaWorkService.shared.listProjects()
-            let filtered = p.filter { $0.projectType != "consultation" }
+            let filtered = p
             await MainActor.run {
                 projects = filtered
                 recomputeGroups()

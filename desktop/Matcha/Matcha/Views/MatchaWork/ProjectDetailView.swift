@@ -72,11 +72,11 @@ struct ProjectDetailView: View {
 
     /// True for general-shaped projects that use `standardLayout` (sections +
     /// chat). Used to gate the Edit/Preview tab toggle in the toolbar so it
-    /// doesn't show on recruiting / consultation / blog (which already has its
-    /// own preview tab) / collab / discipline.
+    /// doesn't show on recruiting / blog (which already has its own preview tab) /
+    /// collab / discipline.
     private var isStandardLayout: Bool {
         let t = viewModel.project?.projectType ?? ""
-        return !["recruiting", "consultation", "blog", "collab", "discipline"].contains(t)
+        return !["recruiting", "blog", "collab", "discipline"].contains(t)
     }
 
     private var selectedModelValue: String? {
@@ -87,8 +87,6 @@ struct ProjectDetailView: View {
         Group {
             if viewModel.project?.projectType == "recruiting" {
                 recruitingLayout
-            } else if viewModel.project?.projectType == "consultation" {
-                consultationLayout
             } else if viewModel.project?.projectType == "blog" {
                 BlogEditorView(
                     viewModel: viewModel,
@@ -120,7 +118,7 @@ struct ProjectDetailView: View {
             }
         }
         // Chat streams mutate project data (sections for blog, posting for
-        // recruiting, consultation fields, etc.) via server-side directives.
+        // recruiting, etc.) via server-side directives.
         // Refetch the project when a stream completes so the panel reflects
         // the new state without requiring the user to navigate away and back.
         // Cancel any in-flight refresh so rapid stream-end events coalesce.
@@ -781,36 +779,6 @@ struct ProjectDetailView: View {
         .cornerRadius(6)
     }
 
-    private var consultationLayout: some View {
-        HSplitView {
-            if viewModel.activeChatId != nil {
-                ChatPanelView(viewModel: chatVM, lightMode: lightMode, selectedModel: selectedModelValue)
-                    .frame(minWidth: 320)
-            } else {
-                VStack(spacing: 12) {
-                    Spacer()
-                    Image(systemName: "bubble.left.and.bubble.right")
-                        .font(.system(size: 28))
-                        .foregroundColor(.secondary)
-                    Text("Starting chat…")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                    Spacer()
-                }
-                .frame(minWidth: 320)
-                .background(Color.appBackground)
-                .task {
-                    if viewModel.activeChatId == nil && viewModel.errorMessage == nil {
-                        await viewModel.createChat(title: nil)
-                    }
-                }
-            }
-
-            ConsultationDetailView(viewModel: viewModel)
-                .frame(minWidth: 340)
-        }
-        .background(Color.appBackground)
-    }
 
     private var recruitingLayout: some View {
         HSplitView {

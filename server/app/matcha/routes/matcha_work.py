@@ -1025,114 +1025,6 @@ def _scope_slide_update(ai_resp, current_state: dict, slide_index: Optional[int]
     ai_resp.structured_update["slides"] = merged
 
 
-_ACTION_ITEMS_RE = re.compile(
-    r"\n?\s*ACTION ITEMS DETECTED:\s*\n((?:\s*[-*•]\s*.+\n?)+)",
-    re.IGNORECASE,
-)
-
-
-def _extract_action_items(reply: str) -> tuple[str, list[str]]:
-    """Pull the 'ACTION ITEMS DETECTED:' block out of the reply. Returns
-    (cleaned_reply, items). If no block, returns (reply, [])."""
-    if not reply:
-        return reply, []
-    match = _ACTION_ITEMS_RE.search(reply)
-    if not match:
-        return reply, []
-    block = match.group(1)
-    items: list[str] = []
-    for line in block.splitlines():
-        stripped = line.strip().lstrip("-*•").strip()
-        if stripped:
-            items.append(stripped)
-    cleaned = _ACTION_ITEMS_RE.sub("", reply).rstrip()
-    return cleaned, items
-
-
-async def _inject_consultation_context(ctx: str, row) -> str:
-    """Inject context for a consultation project so the AI can act as a
-    freelancer's CRM sidekick: recall prior sessions, surface action items,
-    draft communications grounded in the engagement data."""
-    project_data = json.loads(row["project_data"]) if isinstance(row["project_data"], str) else (row["project_data"] or {})
-    client = project_data.get("client") or {}
-    engagement = project_data.get("engagement") or {}
-    stage = project_data.get("stage") or "active"
-    tags = project_data.get("tags") or []
-    sessions = project_data.get("sessions") or []
-    action_items = project_data.get("action_items") or []
-    deliverables = project_data.get("deliverables") or []
-
-    pricing = engagement.get("pricing_model") or "hourly"
-    rate_line = ""
-    if pricing == "hourly" and engagement.get("rate_cents_per_hour"):
-        rate_line = f" · Rate: ${engagement['rate_cents_per_hour']/100:.2f}/hr"
-    elif pricing == "retainer" and engagement.get("monthly_retainer_cents"):
-        rate_line = f" · Retainer: ${engagement['monthly_retainer_cents']/100:.2f}/mo"
-    elif pricing == "fixed" and engagement.get("fixed_fee_cents"):
-        rate_line = f" · Fixed fee: ${engagement['fixed_fee_cents']/100:.2f}"
-
-    client_name = client.get("name") or row["title"] or "this client"
-    client_org = client.get("org")
-    pc = client.get("primary_contact") or {}
-    pc_line = ""
-    if pc.get("name") or pc.get("email"):
-        pc_line = f"\nPrimary contact: {pc.get('name') or ''} <{pc.get('email') or ''}>".strip()
-
-    # Sessions: last 3 most recent, most-recent first
-    sorted_sessions = sorted(
-        [s for s in sessions if isinstance(s, dict)],
-        key=lambda s: s.get("at") or "",
-        reverse=True,
-    )[:3]
-    session_lines: list[str] = []
-    for s in sorted_sessions:
-        dur = s.get("duration_min")
-        dur_part = f"{dur} min" if dur else "duration n/a"
-        billable = ", billable" if s.get("billable") else ""
-        notes = (s.get("notes") or "").strip().replace("\n", " ")
-        if len(notes) > 240:
-            notes = notes[:237] + "..."
-        at = (s.get("at") or "")[:10]
-        session_lines.append(f"  - {at} ({dur_part}{billable}): {notes or '(no notes)'}")
-
-    open_items = [a for a in action_items if isinstance(a, dict) and not a.get("completed") and not a.get("pending_confirmation")]
-    item_lines = [f"  - [ ] {a.get('text','')}" for a in open_items[:10]]
-
-    active_delivs = [d for d in deliverables if isinstance(d, dict) and (d.get("status") or "").lower() in ("planned", "in_progress")]
-    deliv_lines = []
-    for d in active_delivs[:10]:
-        status = d.get("status") or "planned"
-        due = f", due {d.get('due_date')}" if d.get("due_date") else ""
-        deliv_lines.append(f"  - {d.get('title','(untitled)')} ({status}{due})")
-
-    unbilled_cents = 0
-    for s in sessions:
-        if not isinstance(s, dict) or not s.get("billable") or s.get("invoice_id"):
-            continue
-        dur = s.get("duration_min") or 0
-        rate = s.get("rate_cents_override") or engagement.get("rate_cents_per_hour") or 0
-        unbilled_cents += int(dur * rate / 60)
-
-    ctx += f"""
-
-=== CONSULTATION CONTEXT ===
-This chat is tied to the consultation with {client_name}{f' ({client_org})' if client_org else ''}.
-Stage: {stage}{rate_line}{(' · Started: ' + engagement['start_date']) if engagement.get('start_date') else ''}{(' · Tags: ' + ', '.join(tags)) if tags else ''}{pc_line}
-
-Recent sessions (most recent first):
-{chr(10).join(session_lines) if session_lines else '  (no sessions logged yet)'}
-
-Active deliverables:
-{chr(10).join(deliv_lines) if deliv_lines else '  (none)'}
-
-Open action items:
-{chr(10).join(item_lines) if item_lines else '  (none)'}
-
-Unbilled this period: ${unbilled_cents/100:.2f}
-"""
-    return ctx
-
-
 def _format_blog_mode_state(row) -> str:
     """Return a plain-text block describing the current blog draft (title,
     tone, audience, sections with ids, word counts, etc.). This is passed as
@@ -1207,8 +1099,7 @@ def _blog_mode_state_from_meta(project_meta: Optional[dict]) -> Optional[str]:
 
 async def _inject_recruiting_project_context(ctx: str, thread: dict, current_state: dict) -> str:
     """If this thread belongs to a recruiting project, inject context so the AI
-    generates posting sections instead of creating a new project. If it's a
-    consultation project, dispatch to the consultation injector instead."""
+    generates posting sections instead of creating a new project."""
     project_id = thread.get("project_id")
     if not project_id:
         return ctx
@@ -1221,8 +1112,6 @@ async def _inject_recruiting_project_context(ctx: str, thread: dict, current_sta
         )
     if not row:
         return ctx
-    if row["project_type"] == "consultation":
-        return await _inject_consultation_context(ctx, row)
     if row["project_type"] == "blog":
         # Blog projects use a dedicated system prompt (built separately via
         # _fetch_blog_mode_state) — skip the generic context injection.
@@ -1389,14 +1278,11 @@ async def _apply_ai_updates_and_operations(
             # Match by title (case-insensitive) so regenerations update existing
             # sections in place instead of appending duplicates. Sections added
             # manually by the user keep their own titles and are preserved.
-            # Skip this sync for consultation and blog projects:
-            #   - Consultations are CRM engagements, not document drafts
-            #   - Blog drafts use blog_outline / blog_section_draft / blog_sections_replace
-            #     directives; a stray project_sections emission would silently
-            #     append to the blog's sections (was a real bug, see commit
-            #     history). Use project_meta to decide without another DB fetch.
+            # Skip for blog projects: blog drafts use blog_outline / blog_section_draft /
+            # blog_sections_replace directives; a stray project_sections emission would
+            # silently append to the blog's sections (was a real bug, see commit history).
             _project_type = (project_meta or {}).get("project_type") if project_id else None
-            _skip_project_sections_sync = _project_type in ("consultation", "blog")
+            _skip_project_sections_sync = _project_type == "blog"
 
             if project_id and not _skip_project_sections_sync and "project_sections" in safe_updates:
                 from ..services import project_service as proj_svc
@@ -2951,18 +2837,7 @@ async def create_project_endpoint(
     hiring_client_id = UUID(hiring_client_id_raw) if hiring_client_id_raw else None
 
     extra_data: Optional[dict] = None
-    if project_type == "consultation":
-        extra_data = {
-            "client": body.get("client") or {},
-            "engagement": body.get("engagement") or {},
-            "tags": body.get("tags") or [],
-        }
-        # Consultation title defaults to the client name when caller didn't set one.
-        if body.get("title") in (None, "", "Untitled Project"):
-            client_name = (extra_data["client"] or {}).get("name")
-            if client_name:
-                title = client_name
-    elif project_type == "blog":
+    if project_type == "blog":
         blog = body.get("blog") or {}
         extra_data = {
             "title": title,
@@ -3168,24 +3043,6 @@ async def unarchive_project_endpoint(
     await _verify_project_access(project_id, current_user)
     await proj_svc.unarchive_project(project_id)
     return {"status": "active"}
-
-
-# ── Consultation endpoints (project_type == 'consultation') ──
-
-
-@router.patch("/projects/{project_id}/consultation")
-async def patch_consultation_endpoint(
-    project_id: UUID,
-    body: dict,
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    """Partial update of a consultation's client/engagement/stage/tags/custom_fields."""
-    from ..services import project_service as proj_svc
-    await _verify_project_access(project_id, current_user)
-    try:
-        return await proj_svc.patch_consultation(project_id, body)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ── Discipline project endpoints ───────────────────────────────────
@@ -3400,92 +3257,6 @@ async def signature_webhook(body: dict):
         method="digital",
     )
     return {"ok": True}
-
-
-@router.post("/projects/{project_id}/sessions")
-async def add_session_endpoint(
-    project_id: UUID,
-    body: dict,
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    """Append a real-world session entry (time + notes + billable)."""
-    from ..services import project_service as proj_svc
-    await _verify_project_access(project_id, current_user)
-    try:
-        return await proj_svc.append_session(project_id, body)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.patch("/projects/{project_id}/sessions/{session_id}")
-async def patch_session_endpoint(
-    project_id: UUID,
-    session_id: str,
-    body: dict,
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    from ..services import project_service as proj_svc
-    await _verify_project_access(project_id, current_user)
-    try:
-        return await proj_svc.update_session(project_id, session_id, body)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-
-@router.delete("/projects/{project_id}/sessions/{session_id}")
-async def delete_session_endpoint(
-    project_id: UUID,
-    session_id: str,
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    from ..services import project_service as proj_svc
-    await _verify_project_access(project_id, current_user)
-    return await proj_svc.delete_session(project_id, session_id)
-
-
-@router.post("/projects/{project_id}/action-items")
-async def add_action_item_endpoint(
-    project_id: UUID,
-    body: dict,
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    from ..services import project_service as proj_svc
-    await _verify_project_access(project_id, current_user)
-    text = (body.get("text") or "").strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="text is required")
-    return await proj_svc.append_action_item(
-        project_id,
-        text=text,
-        source_thread_id=body.get("source_thread_id"),
-        pending_confirmation=bool(body.get("pending_confirmation", False)),
-    )
-
-
-@router.patch("/projects/{project_id}/action-items/{item_id}")
-async def patch_action_item_endpoint(
-    project_id: UUID,
-    item_id: str,
-    body: dict,
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    from ..services import project_service as proj_svc
-    await _verify_project_access(project_id, current_user)
-    try:
-        return await proj_svc.patch_action_item(project_id, item_id, body)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-
-@router.delete("/projects/{project_id}/action-items/{item_id}")
-async def delete_action_item_endpoint(
-    project_id: UUID,
-    item_id: str,
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    from ..services import project_service as proj_svc
-    await _verify_project_access(project_id, current_user)
-    return await proj_svc.delete_action_item(project_id, item_id)
 
 
 # ── Blog endpoints (project_type == 'blog') ──
@@ -7007,37 +6778,6 @@ async def send_message(
                 n_bullets = len(changed_slide.get("bullets", []))
                 change_note = f"\n\n[Applied changes to Slide {body.slide_index + 1}: title=\"{changed_slide.get('title', '')}\", {n_bullets} bullets]"
                 assistant_reply_text += change_note
-
-    # Consultation: parse ACTION ITEMS DETECTED block from the reply, strip it
-    # from the visible text, and append each item to project_data.action_items
-    # with pending_confirmation=true so the UI can show them as ✨ proposed.
-    if thread.get("project_id"):
-        try:
-            async with get_connection() as _conn:
-                _ptype = await _conn.fetchval(
-                    "SELECT project_type FROM mw_projects WHERE id = $1",
-                    thread["project_id"],
-                )
-            if _ptype == "consultation":
-                cleaned, detected_items = _extract_action_items(assistant_reply_text)
-                if detected_items:
-                    assistant_reply_text = cleaned
-                    from ..services import project_service as _proj_svc
-                    for item_text in detected_items:
-                        try:
-                            await _proj_svc.append_action_item(
-                                thread["project_id"],
-                                text=item_text,
-                                source_thread_id=str(thread_id),
-                                pending_confirmation=True,
-                            )
-                        except Exception:
-                            logger.warning(
-                                "Failed to append detected action item for project %s",
-                                thread["project_id"], exc_info=True,
-                            )
-        except Exception:
-            logger.warning("Consultation action-item parser failed", exc_info=True)
 
     # Save assistant message
     assistant_msg = await doc_svc.add_message(

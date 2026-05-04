@@ -15,7 +15,6 @@ struct ProfileSheet: View {
     @State private var isUploadingAvatar = false
     @State private var errorMessage: String?
 
-    @AppStorage("mw-feature-consultations-enabled") private var consultationsFeatureEnabled = false
     @AppStorage("mw-channel-notifications-enabled") private var channelNotificationsEnabled = true
 
     var body: some View {
@@ -64,18 +63,6 @@ struct ProfileSheet: View {
                             .font(.system(size: 12))
                             .foregroundColor(.white.opacity(0.85))
                         Text("Show a notification when a message arrives while away.")
-                            .font(.system(size: 10))
-                            .foregroundColor(.white.opacity(0.4))
-                    }
-                }
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                Toggle(isOn: $consultationsFeatureEnabled) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Show Consultations section")
-                            .font(.system(size: 12))
-                            .foregroundColor(.white.opacity(0.85))
-                        Text("Adds a sidebar section for consulting engagements.")
                             .font(.system(size: 10))
                             .foregroundColor(.white.opacity(0.4))
                     }

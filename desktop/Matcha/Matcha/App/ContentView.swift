@@ -9,13 +9,8 @@ struct ContentView: View {
     @State private var upgradeError: String?
     @State private var showProfile = false
     @AppStorage("mw-sidebar-channels-open") private var channelsSectionOpen = true
-    @AppStorage("mw-sidebar-consultations-open") private var consultationsSectionOpen = false
     @AppStorage("mw-sidebar-projects-open") private var projectsSectionOpen = true
     @AppStorage("mw-sidebar-threads-open") private var threadsSectionOpen = true
-    /// Off by default — only consulting users see the Consultations section.
-    /// Toggle on from ProfileSheet → "Show Consultations" to surface it.
-    @AppStorage("mw-feature-consultations-enabled") private var consultationsFeatureEnabled = false
-    @State private var showNewConsultation = false
     @State private var showNewBlog = false
     @State private var pendingConnectionsCount = 0
     @State private var showCreateChannel = false
@@ -82,31 +77,6 @@ struct ContentView: View {
                         }
 
                         Divider().opacity(0.2)
-
-                        if appState.mwBetaFull && consultationsFeatureEnabled {
-                            sidebarSection(
-                                title: "Consultations",
-                                icon: "person.crop.rectangle.stack",
-                                isOpen: $consultationsSectionOpen,
-                                trailing: {
-                                    Button { showNewConsultation = true } label: {
-                                        Image(systemName: "plus")
-                                            .font(.system(size: 10, weight: .semibold))
-                                            .foregroundColor(.secondary)
-                                            .frame(width: 18, height: 18)
-                                            .background(Color.zinc800)
-                                            .cornerRadius(4)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("New consultation")
-                                }
-                            ) {
-                                ConsultationListView(showHeader: false)
-                                    .frame(height: 240)
-                            }
-
-                            Divider().opacity(0.2)
-                        }
 
                         if appState.mwBetaLite {
                         sidebarSection(
@@ -366,13 +336,6 @@ struct ContentView: View {
             UserDefaults.standard.set(true, forKey: "collab-project-wizard-shown-v1")
         }) {
             CollabProjectWizardView(mode: appState.collabProjectWizardMode)
-        }
-        .sheet(isPresented: $showNewConsultation) {
-            NewConsultationSheet { created in
-                appState.selectedProjectId = created.id
-                appState.selectedThreadId = nil
-                appState.channelsListGeneration &+= 1
-            }
         }
         .toolbar {
             ToolbarItem(placement: .status) {

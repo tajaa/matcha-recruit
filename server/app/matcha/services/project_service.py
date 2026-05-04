@@ -13,9 +13,7 @@ from ...database import get_connection
 logger = logging.getLogger(__name__)
 
 
-_ALLOWED_PROJECT_TYPES = {"general", "presentation", "recruiting", "consultation", "blog", "collab", "discipline"}
-_ALLOWED_STAGES = {"lead", "proposal", "active", "completed", "archived"}
-_ALLOWED_PRICING_MODELS = {"hourly", "retainer", "fixed", "free"}
+_ALLOWED_PROJECT_TYPES = {"general", "presentation", "recruiting", "blog", "collab", "discipline"}
 _ALLOWED_BLOG_TONES = {"expert-casual", "technical", "exec-brief", "conversational", "academic"}
 _ALLOWED_BLOG_STATUSES = {"draft", "scheduled", "published"}
 _ALLOWED_DISCIPLINE_LEVELS = {"verbal_warning", "written_warning", "final_warning", "termination_notice"}
@@ -111,43 +109,6 @@ def _compute_blog_stats(sections: list) -> dict:
     return {"word_count": wc, "read_minutes": max(1, round(wc / 225)) if wc else 0}
 
 
-def _seed_consultation_data(extra_data: Optional[dict]) -> dict:
-    """Build the initial project_data shape for a new consultation."""
-    extra = extra_data or {}
-    client_in = extra.get("client") or {}
-    eng_in = extra.get("engagement") or {}
-    pricing = eng_in.get("pricing_model") or "hourly"
-    if pricing not in _ALLOWED_PRICING_MODELS:
-        pricing = "hourly"
-    return {
-        "client": {
-            "name": client_in.get("name"),
-            "org": client_in.get("org"),
-            "website": client_in.get("website"),
-            "avatar_url": None,
-            "primary_contact": client_in.get("primary_contact") or {},
-            "additional_contacts": [],
-        },
-        "stage": "active",
-        "tags": list(extra.get("tags") or []),
-        "engagement": {
-            "start_date": eng_in.get("start_date"),
-            "end_date": None,
-            "pricing_model": pricing,
-            "rate_cents_per_hour": eng_in.get("rate_cents_per_hour"),
-            "monthly_retainer_cents": eng_in.get("monthly_retainer_cents"),
-            "fixed_fee_cents": eng_in.get("fixed_fee_cents"),
-            "sow_url": eng_in.get("sow_url"),
-            "contract_signed_at": None,
-        },
-        "sessions": [],
-        "deliverables": [],
-        "action_items": [],
-        "custom_fields": [],
-        "last_contact_at": None,
-    }
-
-
 async def create_project(
     company_id: UUID,
     user_id: UUID,
@@ -167,9 +128,7 @@ async def create_project(
             if owner_check != company_id:
                 raise ValueError("Hiring client does not belong to this workspace")
 
-        if project_type == "consultation":
-            initial_project_data = _seed_consultation_data(extra_data)
-        elif project_type == "blog":
+        if project_type == "blog":
             seed_extra = dict(extra_data or {})
             seed_extra.setdefault("title", title)
             initial_project_data = _seed_blog_data(seed_extra)
@@ -180,14 +139,13 @@ async def create_project(
 
         # Auto-name "New Project N" when caller passed a default. Counts
         # existing projects for this company that share the "New Project"
-        # prefix and bumps the next integer. Skips numbering for blog /
-        # consultation and for any caller-supplied non-default title.
-        if title in (None, "", "Untitled Project", "New Project") and project_type not in ("blog", "consultation"):
+        # prefix and bumps the next integer. Skips numbering for blog.
+        if title in (None, "", "Untitled Project", "New Project") and project_type != "blog":
             existing = await conn.fetchval(
                 """
                 SELECT COUNT(*) FROM mw_projects
                 WHERE company_id = $1
-                  AND project_type NOT IN ('blog','consultation')
+                  AND project_type != 'blog'
                   AND (title = 'New Project' OR title ~ '^New Project [0-9]+$')
                 """,
                 company_id,
@@ -1010,16 +968,6 @@ async def toggle_dismiss(project_id: UUID, candidate_id: str) -> dict:
     return _parse_project(result)
 
 
-# ── Consultation operations ──
-
-
-def _new_id(prefix: str) -> str:
-    return f"{prefix}_{os.urandom(6).hex()}"
-
-
-def _max_session_iso(sessions: list[dict]) -> Optional[str]:
-    dates = [s.get("at") for s in sessions if isinstance(s, dict) and s.get("at")]
-    return max(dates) if dates else None
 
 
 async def _load_and_lock_data(conn, project_id: UUID) -> dict:
@@ -1042,41 +990,6 @@ async def _persist_data(conn, project_id: UUID, data: dict) -> dict:
     return _parse_project(result)
 
 
-async def patch_consultation(project_id: UUID, patch: dict) -> dict:
-    """Deep-merge client + engagement, replace stage/tags/custom_fields when provided."""
-    async with get_connection() as conn:
-        async with conn.transaction():
-            data = await _load_and_lock_data(conn, project_id)
-            if "client" in patch and isinstance(patch["client"], dict):
-                client = dict(data.get("client") or {})
-                client.update(patch["client"])
-                data["client"] = client
-            if "engagement" in patch and isinstance(patch["engagement"], dict):
-                eng = dict(data.get("engagement") or {})
-                pricing = patch["engagement"].get("pricing_model")
-                if pricing is not None and pricing not in _ALLOWED_PRICING_MODELS:
-                    raise ValueError(f"Unknown pricing_model '{pricing}'")
-                eng.update(patch["engagement"])
-                data["engagement"] = eng
-            if "stage" in patch:
-                if patch["stage"] not in _ALLOWED_STAGES:
-                    raise ValueError(f"Unknown stage '{patch['stage']}'")
-                data["stage"] = patch["stage"]
-            if "tags" in patch and isinstance(patch["tags"], list):
-                data["tags"] = [str(t) for t in patch["tags"]]
-            if "custom_fields" in patch and isinstance(patch["custom_fields"], list):
-                data["custom_fields"] = patch["custom_fields"]
-            # If the client name changed, sync project title to match
-            new_title = None
-            if "client" in patch and isinstance(patch["client"], dict) and patch["client"].get("name"):
-                new_title = patch["client"]["name"]
-            if new_title:
-                await conn.execute(
-                    "UPDATE mw_projects SET title = $1 WHERE id = $2", new_title, project_id
-                )
-            return await _persist_data(conn, project_id, data)
-
-
 async def get_project_raw(project_id: UUID) -> Optional[dict]:
     """Fetch a single project row by id with no auth scoping.
 
@@ -1096,8 +1009,7 @@ async def get_project_raw(project_id: UUID) -> Optional[dict]:
 async def patch_discipline(project_id: UUID, patch: dict) -> dict:
     """Deep-merge employee + infraction; replace level when provided.
 
-    Mirrors patch_consultation in style. Used by the Quick Setup tab
-    and by AI directives that emit discipline_setup updates.
+    Used by the Quick Setup tab and by AI directives that emit discipline_setup updates.
     """
     async with get_connection() as conn:
         async with conn.transaction():
@@ -1194,112 +1106,6 @@ async def record_discipline_refused(project_id: UUID, *, notes: str) -> dict:
             data["signature"] = sig
             data["draft_status"] = "refused"
             data["delivered_status"] = "closed"
-            return await _persist_data(conn, project_id, data)
-
-
-async def append_session(project_id: UUID, session: dict) -> dict:
-    """Append a session entry and refresh last_contact_at."""
-    entry = {
-        "id": _new_id("s"),
-        "at": session.get("at") or datetime.now(timezone.utc).isoformat(),
-        "duration_min": session.get("duration_min"),
-        "notes": session.get("notes"),
-        "billable": bool(session.get("billable", True)),
-        "rate_cents_override": session.get("rate_cents_override"),
-        "linked_thread_id": session.get("linked_thread_id"),
-        "invoice_id": None,
-    }
-    async with get_connection() as conn:
-        async with conn.transaction():
-            data = await _load_and_lock_data(conn, project_id)
-            sessions = list(data.get("sessions") or [])
-            sessions.append(entry)
-            data["sessions"] = sessions
-            data["last_contact_at"] = _max_session_iso(sessions)
-            return await _persist_data(conn, project_id, data)
-
-
-async def update_session(project_id: UUID, session_id: str, patch: dict) -> dict:
-    async with get_connection() as conn:
-        async with conn.transaction():
-            data = await _load_and_lock_data(conn, project_id)
-            sessions = list(data.get("sessions") or [])
-            found = False
-            for i, s in enumerate(sessions):
-                if isinstance(s, dict) and s.get("id") == session_id:
-                    merged = {**s, **{k: v for k, v in patch.items() if k in (
-                        "at", "duration_min", "notes", "billable",
-                        "rate_cents_override", "linked_thread_id", "invoice_id",
-                    )}}
-                    sessions[i] = merged
-                    found = True
-                    break
-            if not found:
-                raise ValueError("Session not found")
-            data["sessions"] = sessions
-            data["last_contact_at"] = _max_session_iso(sessions)
-            return await _persist_data(conn, project_id, data)
-
-
-async def delete_session(project_id: UUID, session_id: str) -> dict:
-    async with get_connection() as conn:
-        async with conn.transaction():
-            data = await _load_and_lock_data(conn, project_id)
-            sessions = [s for s in (data.get("sessions") or []) if not (isinstance(s, dict) and s.get("id") == session_id)]
-            data["sessions"] = sessions
-            data["last_contact_at"] = _max_session_iso(sessions)
-            return await _persist_data(conn, project_id, data)
-
-
-async def append_action_item(
-    project_id: UUID,
-    text: str,
-    source_thread_id: Optional[str] = None,
-    pending_confirmation: bool = False,
-) -> dict:
-    entry = {
-        "id": _new_id("a"),
-        "text": text,
-        "completed": False,
-        "pending_confirmation": pending_confirmation,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "source_thread_id": source_thread_id,
-    }
-    async with get_connection() as conn:
-        async with conn.transaction():
-            data = await _load_and_lock_data(conn, project_id)
-            items = list(data.get("action_items") or [])
-            items.append(entry)
-            data["action_items"] = items
-            return await _persist_data(conn, project_id, data)
-
-
-async def patch_action_item(project_id: UUID, item_id: str, patch: dict) -> dict:
-    async with get_connection() as conn:
-        async with conn.transaction():
-            data = await _load_and_lock_data(conn, project_id)
-            items = list(data.get("action_items") or [])
-            found = False
-            for i, it in enumerate(items):
-                if isinstance(it, dict) and it.get("id") == item_id:
-                    merged = {**it, **{k: v for k, v in patch.items() if k in ("text", "completed", "pending_confirmation")}}
-                    items[i] = merged
-                    found = True
-                    break
-            if not found:
-                raise ValueError("Action item not found")
-            data["action_items"] = items
-            return await _persist_data(conn, project_id, data)
-
-
-async def delete_action_item(project_id: UUID, item_id: str) -> dict:
-    async with get_connection() as conn:
-        async with conn.transaction():
-            data = await _load_and_lock_data(conn, project_id)
-            data["action_items"] = [
-                it for it in (data.get("action_items") or [])
-                if not (isinstance(it, dict) and it.get("id") == item_id)
-            ]
             return await _persist_data(conn, project_id, data)
 
 

@@ -63,10 +63,6 @@
 		FADFA74F8E449B203A55B306 /* ThreadListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA53495B161A46747955400C /* ThreadListViewModel.swift */; };
 		FC22CC98585FB00D59E39358 /* PreviewPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCD9DCBDB9CC47BA70B5F0FF /* PreviewPanelView.swift */; };
 		FF11223344556677AA000001 /* PeopleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF11223344556677BB000001 /* PeopleView.swift */; };
-		CC01AA22BB33CC44DD550001 /* ConsultationListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC01AA22BB33CC44EE660001 /* ConsultationListView.swift */; };
-		CC01AA22BB33CC44DD550002 /* NewConsultationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC01AA22BB33CC44EE660002 /* NewConsultationSheet.swift */; };
-		CC01AA22BB33CC44DD550003 /* ConsultationDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC01AA22BB33CC44EE660003 /* ConsultationDetailView.swift */; };
-		CC01AA22BB33CC44DD550004 /* LogSessionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC01AA22BB33CC44EE660004 /* LogSessionSheet.swift */; };
 		BB01CC22DD33EE44FF550001 /* NewBlogSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC22DD33EE44FF660001 /* NewBlogSheet.swift */; };
 		BB01CC22DD33EE44FF550002 /* BlogEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC22DD33EE44FF660002 /* BlogEditorView.swift */; };
 		BB01CC22DD33EE44FF550003 /* MarkdownPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC22DD33EE44FF660003 /* MarkdownPreviewView.swift */; };
@@ -130,10 +126,6 @@
 		FA53495B161A46747955400C /* ThreadListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadListViewModel.swift; sourceTree = "<group>"; };
 		FAD09F509367E88989F2B765 /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
 		FF11223344556677BB000001 /* PeopleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleView.swift; sourceTree = "<group>"; };
-		CC01AA22BB33CC44EE660001 /* ConsultationListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConsultationListView.swift; sourceTree = "<group>"; };
-		CC01AA22BB33CC44EE660002 /* NewConsultationSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewConsultationSheet.swift; sourceTree = "<group>"; };
-		CC01AA22BB33CC44EE660003 /* ConsultationDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConsultationDetailView.swift; sourceTree = "<group>"; };
-		CC01AA22BB33CC44EE660004 /* LogSessionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogSessionSheet.swift; sourceTree = "<group>"; };
 		BB01CC22DD33EE44FF660001 /* NewBlogSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewBlogSheet.swift; sourceTree = "<group>"; };
 		BB01CC22DD33EE44FF660002 /* BlogEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlogEditorView.swift; sourceTree = "<group>"; };
 		BB01CC22DD33EE44FF660003 /* MarkdownPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPreviewView.swift; sourceTree = "<group>"; };
@@ -224,10 +216,6 @@
 				AA11BB22CC33DD44EE660006 /* AgentPanelView.swift */,
 				AA11BB22CC33DD44EE660007 /* ComplianceDecisionTreeView.swift */,
 				EE11FF2233445566BB000001 /* RecruitingPipelineView.swift */,
-				CC01AA22BB33CC44EE660001 /* ConsultationListView.swift */,
-				CC01AA22BB33CC44EE660002 /* NewConsultationSheet.swift */,
-				CC01AA22BB33CC44EE660003 /* ConsultationDetailView.swift */,
-				CC01AA22BB33CC44EE660004 /* LogSessionSheet.swift */,
 			BB01CC22DD33EE44FF660001 /* NewBlogSheet.swift */,
 			BB01CC22DD33EE44FF660002 /* BlogEditorView.swift */,
 			BB01CC22DD33EE44FF660003 /* MarkdownPreviewView.swift */,
@@ -460,10 +448,6 @@
 				DD00EE11FF22334455660D22 /* ChannelAdminWizardView.swift in Sources */,
 				DD00EE11FF22334455660D33 /* DiscoverChannelsSheet.swift in Sources */,
 				EE11FF2233445566AA000001 /* RecruitingPipelineView.swift in Sources */,
-				CC01AA22BB33CC44DD550001 /* ConsultationListView.swift in Sources */,
-				CC01AA22BB33CC44DD550002 /* NewConsultationSheet.swift in Sources */,
-				CC01AA22BB33CC44DD550003 /* ConsultationDetailView.swift in Sources */,
-				CC01AA22BB33CC44DD550004 /* LogSessionSheet.swift in Sources */,
 				BB01CC22DD33EE44FF550001 /* NewBlogSheet.swift in Sources */,
 				BB01CC22DD33EE44FF550002 /* BlogEditorView.swift in Sources */,
 				BB01CC22DD33EE44FF550003 /* MarkdownPreviewView.swift in Sources */,
