@@ -87,6 +87,15 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
         # Silently accept to not tip off the bot
         return {"submitted": True}
 
+    # Re-validate trimmed lengths — Pydantic min_length runs pre-strip, so
+    # "   abc   " (9 chars) would slip past a 3-char min and write 3 chars.
+    title_trimmed = body.title.strip()
+    description_trimmed = body.description.strip()
+    if len(title_trimmed) < 3:
+        raise HTTPException(status_code=422, detail="Title must be at least 3 characters")
+    if len(description_trimmed) < 10:
+        raise HTTPException(status_code=422, detail="Description must be at least 10 characters")
+
     # Rate limit
     client_ip = request.client.host if request.client else "unknown"
     if _is_rate_limited(client_ip):
@@ -161,8 +170,8 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
                 RETURNING id, incident_number, title, status
                 """,
                 incident_number,
-                body.title.strip(),
-                body.description.strip(),
+                title_trimmed,
+                description_trimmed,
                 body.incident_type or "other",
                 "medium",
                 occurred_at,
