@@ -1,10 +1,20 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Loader2, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, AlertTriangle, ShieldCheck } from 'lucide-react'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
 type Stage = 'validating' | 'invalid' | 'used' | 'form' | 'submitting' | 'submitted' | 'error'
+
+type IncidentType = '' | 'safety' | 'behavioral' | 'property' | 'near_miss' | 'other'
+
+const TYPE_OPTIONS: { value: Exclude<IncidentType, ''>; label: string }[] = [
+  { value: 'safety', label: 'Safety' },
+  { value: 'behavioral', label: 'Behavioral' },
+  { value: 'property', label: 'Property' },
+  { value: 'near_miss', label: 'Near miss' },
+  { value: 'other', label: 'Other' },
+]
 
 export default function AnonymousReport() {
   const { token } = useParams<{ token: string }>()
@@ -12,6 +22,11 @@ export default function AnonymousReport() {
   const [error, setError] = useState<string | null>(null)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
+  const [incidentType, setIncidentType] = useState<IncidentType>('')
+  const [occurredAt, setOccurredAt] = useState('')
+  const [location, setLocation] = useState('')
+  const [involvedParties, setInvolvedParties] = useState('')
+  const [contactInfo, setContactInfo] = useState('')
   const [honeypot, setHoneypot] = useState('')
 
   useEffect(() => {
@@ -43,6 +58,11 @@ export default function AnonymousReport() {
         body: JSON.stringify({
           title: title.trim(),
           description: description.trim(),
+          incident_type: incidentType || null,
+          occurred_at: occurredAt ? new Date(occurredAt).toISOString() : null,
+          location: location.trim() || null,
+          involved_parties: involvedParties.trim() || null,
+          contact_info: contactInfo.trim() || null,
           company_name: honeypot,
         }),
       })
@@ -98,12 +118,20 @@ export default function AnonymousReport() {
   }
 
   return (
-    <Shell>
-      <h1 className="text-lg font-semibold text-zinc-100 mb-1">File an anonymous incident report</h1>
-      <p className="text-sm text-zinc-400 mb-5">Your identity is not collected. HR will review your submission.</p>
+    <Shell wide>
+      <h1 className="text-lg font-semibold text-zinc-100 mb-1 text-center">File an anonymous incident report</h1>
+      <p className="text-sm text-zinc-400 mb-4 text-center">Your identity is not collected. HR will review your submission.</p>
+
+      <div className="flex items-start gap-2 bg-zinc-900/60 border border-zinc-800 rounded p-3 mb-5 text-left">
+        <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+        <p className="text-xs text-zinc-400">
+          Fields marked <span className="text-zinc-300">optional</span> can be left blank to preserve anonymity. Including more detail
+          helps HR investigate effectively.
+        </p>
+      </div>
+
       <form onSubmit={handleSubmit} className="space-y-4 text-left">
-        <label className="block">
-          <span className="text-xs text-zinc-400 uppercase tracking-wide">Title</span>
+        <Field label="Title">
           <input
             type="text"
             value={title}
@@ -111,17 +139,71 @@ export default function AnonymousReport() {
             maxLength={255}
             className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
           />
-        </label>
-        <label className="block">
-          <span className="text-xs text-zinc-400 uppercase tracking-wide">Description</span>
+        </Field>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Incident type" optional>
+            <select
+              value={incidentType}
+              onChange={(e) => setIncidentType(e.target.value as IncidentType)}
+              className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
+            >
+              <option value="">Select…</option>
+              {TYPE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Date and time" optional>
+            <input
+              type="datetime-local"
+              value={occurredAt}
+              onChange={(e) => setOccurredAt(e.target.value)}
+              className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
+            />
+          </Field>
+        </div>
+
+        <Field label="Location" optional hint="Building, area, or address. Skip if it would identify you.">
+          <input
+            type="text"
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            maxLength={255}
+            className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
+          />
+        </Field>
+
+        <Field label="Description">
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            rows={6}
+            rows={5}
             maxLength={10000}
             className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
           />
-        </label>
+        </Field>
+
+        <Field label="Names of all involved" optional hint="Skip if it would identify you. HR may have limited ability to resolve without this.">
+          <textarea
+            value={involvedParties}
+            onChange={(e) => setInvolvedParties(e.target.value)}
+            rows={2}
+            maxLength={2000}
+            className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
+          />
+        </Field>
+
+        <Field label="Contact for follow-up" optional hint="Email or phone. Provide only if you'd like HR to follow up; leave blank for full anonymity.">
+          <input
+            type="text"
+            value={contactInfo}
+            onChange={(e) => setContactInfo(e.target.value)}
+            maxLength={255}
+            className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
+          />
+        </Field>
 
         {/* Honeypot — hidden from real users; bots fill this */}
         <input
@@ -149,10 +231,33 @@ export default function AnonymousReport() {
   )
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+function Field({
+  label,
+  optional,
+  hint,
+  children,
+}: {
+  label: string
+  optional?: boolean
+  hint?: string
+  children: React.ReactNode
+}) {
+  return (
+    <label className="block">
+      <span className="text-xs text-zinc-400 uppercase tracking-wide">
+        {label}
+        {optional && <span className="ml-1 normal-case tracking-normal text-zinc-600">(optional)</span>}
+      </span>
+      {hint && <span className="block text-[11px] text-zinc-500 mt-0.5">{hint}</span>}
+      {children}
+    </label>
+  )
+}
+
+function Shell({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
   return (
     <div className="min-h-screen bg-[#0c0c0e] flex items-center justify-center px-4 py-10">
-      <div className="max-w-md w-full text-center">{children}</div>
+      <div className={`${wide ? 'max-w-xl' : 'max-w-md'} w-full text-center`}>{children}</div>
     </div>
   )
 }

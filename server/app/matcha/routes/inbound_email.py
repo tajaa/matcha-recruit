@@ -9,7 +9,7 @@ import logging
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -47,6 +47,11 @@ def _is_rate_limited(ip: str) -> bool:
 class AnonymousReportRequest(BaseModel):
     title: str = Field(..., min_length=3, max_length=255)
     description: str = Field(..., min_length=10, max_length=10_000)
+    incident_type: Optional[Literal["safety", "behavioral", "property", "near_miss", "other"]] = None
+    occurred_at: Optional[datetime] = None
+    location: Optional[str] = Field(None, max_length=255)
+    involved_parties: Optional[str] = Field(None, max_length=2_000)
+    contact_info: Optional[str] = Field(None, max_length=255)
     # Honeypot — must be empty
     company_name: Optional[str] = Field(None, max_length=255)
 
@@ -94,6 +99,20 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
     incident_number = generate_incident_number()
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
+    # User-supplied occurred_at takes precedence; clamp to naive UTC.
+    occurred_at = now_naive
+    if body.occurred_at is not None:
+        dt = body.occurred_at
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        occurred_at = dt
+
+    extra_category_data: dict = {}
+    if body.involved_parties and body.involved_parties.strip():
+        extra_category_data["involved_parties"] = body.involved_parties.strip()
+    if body.contact_info and body.contact_info.strip():
+        extra_category_data["contact_info"] = body.contact_info.strip()
+
     # 1. Quick lookup to resolve company_id (companies table has no RLS)
     async with get_connection() as conn:
         company_id_row = await conn.fetchval(
@@ -131,18 +150,21 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
                 """
                 INSERT INTO ir_incidents (
                     incident_number, title, description, incident_type, severity,
-                    occurred_at, reported_by_name, company_id, created_by
+                    occurred_at, location, reported_by_name, category_data,
+                    company_id, created_by
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 RETURNING id, incident_number, title, status
                 """,
                 incident_number,
                 body.title.strip(),
                 body.description.strip(),
-                "other",
+                body.incident_type or "other",
                 "medium",
-                now_naive,
+                occurred_at,
+                (body.location.strip() if body.location else None),
                 "Anonymous",
+                json.dumps(extra_category_data) if extra_category_data else None,
                 company_id,
                 None,
             )
@@ -164,7 +186,7 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
                 current_status=row["status"],
                 changed_by_email=None,
                 previous_status=None,
-                occurred_at=now_naive,
+                occurred_at=occurred_at,
             )
         except Exception as e:
             logger.warning(f"[Anon Report] Failed to send notifications: {e}")
