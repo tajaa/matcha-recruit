@@ -347,12 +347,16 @@ class ConsistencyAnalytics(BaseModel):
 
 class AnalyticsSummary(BaseModel):
     """Summary analytics for dashboard."""
-    total_incidents: int
-    by_status: dict[str, int]
+    total: int
+    open: int
+    investigating: int
+    resolved: int
+    closed: int
+    critical: int
+    high: int
+    medium: int
+    low: int
     by_type: dict[str, int]
-    by_severity: dict[str, int]
-    recent_count: int  # last 30 days
-    avg_resolution_days: Optional[float] = None
 
 
 class TrendDataPoint(BaseModel):

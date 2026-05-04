@@ -1664,57 +1664,43 @@ async def get_analytics_summary(
 ):
     """Get summary analytics for the dashboard."""
     company_id = await get_client_company_id(current_user)
+    empty = AnalyticsSummary(
+        total=0, open=0, investigating=0, resolved=0, closed=0,
+        critical=0, high=0, medium=0, low=0, by_type={},
+    )
     if company_id is None:
-        return AnalyticsSummary(total_incidents=0, by_status={}, by_type={}, by_severity={}, recent_count=0, avg_resolution_days=None)
+        return empty
     co_filter = "company_id = $1"
 
     async with get_connection() as conn:
-        # Total incidents
         total = await conn.fetchval(f"SELECT COUNT(*) FROM ir_incidents WHERE {co_filter}", company_id)
 
-        # By status
         status_rows = await conn.fetch(
             f"SELECT status, COUNT(*) as count FROM ir_incidents WHERE {co_filter} GROUP BY status", company_id
         )
         by_status = {row["status"]: row["count"] for row in status_rows}
 
-        # By type
         type_rows = await conn.fetch(
             f"SELECT incident_type, COUNT(*) as count FROM ir_incidents WHERE {co_filter} GROUP BY incident_type", company_id
         )
         by_type = {row["incident_type"]: row["count"] for row in type_rows}
 
-        # By severity
         severity_rows = await conn.fetch(
             f"SELECT severity, COUNT(*) as count FROM ir_incidents WHERE {co_filter} GROUP BY severity", company_id
         )
         by_severity = {row["severity"]: row["count"] for row in severity_rows}
 
-        # Recent (last 30 days)
-        thirty_days_ago = _utc_now_naive() - timedelta(days=30)
-        recent_count = await conn.fetchval(
-            f"SELECT COUNT(*) FROM ir_incidents WHERE {co_filter} AND occurred_at >= $2",
-            company_id,
-            thirty_days_ago,
-        )
-
-        # Average resolution time (days) for resolved/closed incidents
-        avg_resolution = await conn.fetchval(
-            f"""
-            SELECT AVG(EXTRACT(EPOCH FROM (resolved_at - occurred_at)) / 86400)
-            FROM ir_incidents
-            WHERE {co_filter} AND resolved_at IS NOT NULL
-            """,
-            company_id,
-        )
-
         return AnalyticsSummary(
-            total_incidents=total or 0,
-            by_status=by_status,
+            total=total or 0,
+            open=by_status.get("reported", 0) + by_status.get("action_required", 0),
+            investigating=by_status.get("investigating", 0),
+            resolved=by_status.get("resolved", 0),
+            closed=by_status.get("closed", 0),
+            critical=by_severity.get("critical", 0),
+            high=by_severity.get("high", 0),
+            medium=by_severity.get("medium", 0),
+            low=by_severity.get("low", 0),
             by_type=by_type,
-            by_severity=by_severity,
-            recent_count=recent_count or 0,
-            avg_resolution_days=round(avg_resolution, 1) if avg_resolution else None,
         )
 
 
