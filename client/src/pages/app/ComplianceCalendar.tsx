@@ -420,6 +420,19 @@ interface MonthViewProps {
   onClick: (item: ComplianceCalendarItem) => void
 }
 
+// Format a Date as 'YYYY-MM-DD' in *local* time. Using `toISOString()` here
+// would convert to UTC and shift the date by ±1 day in many timezones,
+// causing cell keys never to match server-provided deadlines (which are
+// already 'YYYY-MM-DD' with no timezone). The bug surfaced as an
+// always-empty Month view for users in any non-near-UTC timezone — and
+// even in PST it was still wrong on month boundaries.
+function localDateKey(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 function MonthView({ items, onClick }: MonthViewProps) {
   const [cursor, setCursor] = useState(() => {
     const today = new Date()
@@ -441,15 +454,31 @@ function MonthView({ items, onClick }: MonthViewProps) {
   const startOffset = cursor.getDay()
   const daysInMonth = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate()
   const today = new Date()
-  const todayKey = today.toISOString().slice(0, 10)
+  const todayKey = localDateKey(today)
 
   const cells = []
   for (let i = 0; i < startOffset; i++) cells.push(null)
   for (let day = 1; day <= daysInMonth; day++) {
     const d = new Date(cursor.getFullYear(), cursor.getMonth(), day)
-    const key = d.toISOString().slice(0, 10)
+    const key = localDateKey(d)
     cells.push({ day, key, items: itemsByDate.get(key) ?? [] })
   }
+
+  // Items in the current month, and (when empty) a hint to the next one
+  // that has any. Otherwise the user paging through months sees a row
+  // of blank cells with no signal that the calendar is actually populated.
+  const itemsInThisMonth = cells.reduce(
+    (n, c) => n + (c?.items.length ?? 0),
+    0,
+  )
+  const nextItemAfterCursor = useMemo(() => {
+    if (itemsInThisMonth > 0) return null
+    const monthStart = localDateKey(new Date(cursor.getFullYear(), cursor.getMonth(), 1))
+    const future = items
+      .filter((i) => i.deadline >= monthStart)
+      .sort((a, b) => a.deadline.localeCompare(b.deadline))[0]
+    return future ?? null
+  }, [items, cursor, itemsInThisMonth])
 
   return (
     <Card>
@@ -468,6 +497,26 @@ function MonthView({ items, onClick }: MonthViewProps) {
           <ChevronRight size={18} />
         </button>
       </div>
+      {itemsInThisMonth === 0 && (
+        <div className="mb-3 px-3 py-2 rounded border border-zinc-800 bg-zinc-900/40 text-xs text-zinc-400">
+          {nextItemAfterCursor ? (
+            <>
+              Nothing in {monthLabel}. Next deadline:{' '}
+              <button
+                onClick={() => {
+                  const d = new Date(nextItemAfterCursor.deadline + 'T00:00:00')
+                  setCursor(new Date(d.getFullYear(), d.getMonth(), 1))
+                }}
+                className="text-emerald-400 hover:underline"
+              >
+                {formatDate(nextItemAfterCursor.deadline)} — {nextItemAfterCursor.title}
+              </button>
+            </>
+          ) : (
+            <>Nothing in {monthLabel}. No deadlines on the calendar yet.</>
+          )}
+        </div>
+      )}
       <div className="grid grid-cols-7 gap-1 text-center text-[10px] uppercase text-zinc-600 mb-1">
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
           <div key={d}>{d}</div>
