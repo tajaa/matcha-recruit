@@ -129,8 +129,6 @@ async def update_project_task(project_id: UUID, task_id: UUID, patch: dict) -> O
             elif new_status == "pending" and new_column == "done":
                 new_column = "todo"
 
-        completed_at_expr = "CASE WHEN $3 = 'completed' THEN COALESCE(completed_at, NOW()) ELSE NULL END"
-
         # Collect simple field updates
         title = patch.get("title")
         description = patch.get("description")
@@ -141,12 +139,26 @@ async def update_project_task(project_id: UUID, task_id: UUID, patch: dict) -> O
         if priority is not None and priority not in _ALLOWED_PRIORITIES:
             raise ValueError(f"Invalid priority: {priority}")
 
+        # Compute completed_at in Python rather than via a SQL CASE on $3.
+        # The previous SQL used $3 in both `status = $3` (text column) and
+        # `CASE WHEN $3 = 'completed' THEN ... ELSE NULL END`. asyncpg's
+        # type inference saw inconsistent contexts (NULL branch in the
+        # CASE produced a timestamptz/unknown coercion) and raised
+        # AmbiguousParameterError on every PATCH — desktop catch-block
+        # then ran loadTasks() and the kanban toggle snapped back.
+        completed_at_value = (
+            datetime.now(timezone.utc) if new_status == "completed" else None
+        )
+
         row = await conn.fetchrow(
-            f"""
+            """
             UPDATE mw_tasks SET
                 board_column = $1,
                 status = $3,
-                completed_at = {completed_at_expr},
+                completed_at = CASE
+                    WHEN $3::text = 'completed' THEN COALESCE(completed_at, $13::timestamptz)
+                    ELSE NULL
+                END,
                 title = COALESCE($4, title),
                 description = CASE WHEN $5::boolean THEN $6 ELSE description END,
                 priority = COALESCE($7, priority),
@@ -170,6 +182,7 @@ async def update_project_task(project_id: UUID, task_id: UUID, patch: dict) -> O
             "assigned_to" in patch,       # $10
             assigned_to,                  # $11
             project_id,                   # $12
+            completed_at_value,           # $13
         )
     return _row_to_task(dict(row)) if row else None
 

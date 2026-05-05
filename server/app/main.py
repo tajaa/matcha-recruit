@@ -3,6 +3,18 @@ import os
 import traceback as tb_module
 from contextlib import asynccontextmanager
 
+# WeasyPrint (used by /api/matcha-work/projects/{id}/export/pdf and the
+# discipline signature flow) calls out to fontconfig, which writes its
+# cache to ~/.cache/fontconfig. The matcha-backend container runs as uid
+# 999 with HOME=/home/matcha — and that directory does not exist in the
+# image — so fontconfig fails with "No writable cache directories" on
+# every render. Point the cache at /tmp (writable, tmpfs in container)
+# before any module imports WeasyPrint. Must run before fontconfig is
+# initialized for the first time.
+os.environ.setdefault("XDG_CACHE_HOME", "/tmp")
+os.environ.setdefault("HOME", "/tmp")
+os.environ.setdefault("FONTCONFIG_PATH", "/etc/fonts")
+
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
