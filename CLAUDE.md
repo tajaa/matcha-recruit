@@ -204,6 +204,36 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 - **Risk Assessment** (`matcha/routes/risk_assessment.py`).
 - **Interviews** (`matcha/services/`) — voice interviews via Gemini Live API.
 
+## Background Workers (Celery)
+
+Celery worker container `matcha-worker` runs everything that can't run inline. Single concurrency, restarts after 5 tasks (`--max-tasks-per-child=5`) to recycle memory. `task_acks_late=True` + `max_retries=3` so OOM-killed tasks retry.
+
+Scheduling model: no celery-beat. A systemd timer on the EC2 host restarts the worker every 15 min, and `@worker_ready` in `app/workers/celery_app.py` re-dispatches the periodic tasks on startup. Each scheduled task is gated by a `scheduler_settings` row, defaulting to disabled.
+
+**Periodic / scheduled** (`app/workers/tasks/`):
+- `compliance_checks` — per-location Gemini scans
+- `compliance_action_reminders` — nudges for open requirements
+- `legislation_watch` — Gemini-grounded legislation deltas
+- `leave_deadline_checks`, `leave_agent_orchestration` — leave-of-absence tracking
+- `onboarding_reminders` — new-hire task chases
+- `discipline_expiry` — auto-close stale discipline records
+- `handbook_freshness` — re-evaluate handbooks against current law
+- `pattern_recognition` — cross-incident analysis
+- `auto_archive` — close-out abandoned projects
+- `newsletter_scheduler` — periodic digest send
+- `structured_data_fetch` — pull authoritative regulator feeds
+
+**Heavy ad-hoc** (dispatched from routes):
+- `healthcare_research`, `oncology_research`, `medical_compliance_research` — deep Gemini research jobs (memory-heavy bursts)
+- `er_analysis` (5 tasks) — incident pattern + risk inference
+- `er_document_processing` — DOC/PDF parsing
+- `risk_assessment` — quantitative analysis runs
+- `interview_analysis` — post-call transcript scoring
+
+**Stays inline in FastAPI (NOT on worker)**: WebSocket chat streams, voice interview WS (Gemini Live), PDF render via WeasyPrint (`asyncio.to_thread` in `routes/matcha_work.py`), all CRUD, Stripe webhooks, auth.
+
+PDF render is intentionally inline because the desktop client awaits the bytes — but it is the dominant memory consumer in the backend container. If backend memory pressure recurs, moving `_render_project_pdf` to a celery task and `.get(timeout=60)` is the obvious next step.
+
 ## Local Development
 
 **Primary script**: `./scripts/dev-remote.sh` — SSH-tunnels Postgres from EC2 (`3.101.83.217:5432`), starts Redis tunnel, backend on `:8001`, frontend on `:5174`, local chat model on `:8080`. Requires `roonMT-arm.pem` at repo root.
