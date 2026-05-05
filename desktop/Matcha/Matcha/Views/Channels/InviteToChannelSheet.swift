@@ -122,10 +122,23 @@ struct InviteToChannelSheet: View {
 
     private func search(_ q: String) async {
         loading = true
+        // Clear any stale error from a previous keystroke whose request was
+        // cancelled by the debounce. Without this, "cancelled" stays visible
+        // even when the final search returns 0 legitimate results, making it
+        // look like the search is broken when it isn't.
+        error = nil
         defer { loading = false }
         do {
             users = try await ChannelsService.shared.searchInvitableUsers(query: q, channelId: channelId)
+        } catch is CancellationError {
+            // Debounced cancellation is expected; don't surface as an error.
+            return
         } catch {
+            let nsErr = error as NSError
+            // URLSession cancellation surfaces as NSURLErrorCancelled (-999).
+            if nsErr.domain == NSURLErrorDomain && nsErr.code == NSURLErrorCancelled {
+                return
+            }
             // keep prior list; surface via inline error
             self.error = error.localizedDescription
         }

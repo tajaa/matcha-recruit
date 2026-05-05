@@ -651,7 +651,11 @@ class MatchaWorkService {
     }
 
     func searchInvitableUsers(query: String) async throws -> [MWAdminSearchUser] {
-        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        // urlQueryAllowed leaves "+", "&", "=" unencoded which breaks emails
+        // like "user+tag@gmail.com" — Starlette decodes "+" as a space.
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "+&=#?")
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: allowed) ?? query
         return try await client.request(method: "GET", path: "/channels/invitable-users?q=\(encoded)")
     }
 

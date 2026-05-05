@@ -687,13 +687,36 @@ async def search_invitable_users(
         name_filter = ""
         exact_email_clause = "FALSE"
         if has_search:
+            # Workaround for clients that don't percent-encode "+" in the
+            # query string. Starlette decodes raw "+" as a space, so an email
+            # like "user+tag@gmail.com" arrives as "user tag@gmail.com" and
+            # neither the ILIKE filter nor the exact-email clause can match.
+            # When the query contains a space AND looks like an email, also
+            # try the "+"-substituted form so old desktop builds keep working.
+            q_normalized = q.strip()
+            q_alt = q_normalized.replace(" ", "+") if " " in q_normalized else None
+            search_alt = f"%{q_alt}%" if q_alt else None
+
             params.append(search)
             search_idx = len(params)
-            name_filter = f"AND ({_USER_NAME_EXPR} ILIKE ${search_idx} OR u.email ILIKE ${search_idx})"
-            if "@" in q and "." in q.split("@", 1)[1]:
-                params.append(q.strip().lower())
+            email_filters = [f"u.email ILIKE ${search_idx}"]
+            if search_alt:
+                params.append(search_alt)
+                search_alt_idx = len(params)
+                email_filters.append(f"u.email ILIKE ${search_alt_idx}")
+            email_or = " OR ".join(email_filters)
+            name_filter = f"AND ({_USER_NAME_EXPR} ILIKE ${search_idx} OR {email_or})"
+
+            looks_like_email = "@" in q_normalized and "." in q_normalized.split("@", 1)[1]
+            if looks_like_email:
+                params.append(q_normalized.lower())
                 exact_idx = len(params)
-                exact_email_clause = f"LOWER(u.email) = ${exact_idx}"
+                exact_clauses = [f"LOWER(u.email) = ${exact_idx}"]
+                if q_alt and "@" in q_alt and "." in q_alt.split("@", 1)[1]:
+                    params.append(q_alt.lower())
+                    exact_alt_idx = len(params)
+                    exact_clauses.append(f"LOWER(u.email) = ${exact_alt_idx}")
+                exact_email_clause = "(" + " OR ".join(exact_clauses) + ")"
 
         rows = await conn.fetch(
             f"""
