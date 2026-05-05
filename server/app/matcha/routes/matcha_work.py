@@ -5523,7 +5523,7 @@ async def _render_project_pdf(project: dict) -> bytes:
   .title-rule {{ border: none; border-top: 3px solid #22c55e; margin: 0 0 30px 0; }}
   h2 {{ font-size: 14pt; font-weight: 600; color: #0f172a; margin: 28px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #e2e8f0; }}
   .section-num {{ color: #22c55e; font-weight: 700; }}
-  img {{ max-width: 100%; height: auto; page-break-inside: avoid; margin: 12px 0; border-radius: 4px; }}
+  img {{ max-width: 100%; max-height: 22cm; height: auto; margin: 12px 0; border-radius: 4px; }}
   .section-body {{ margin-bottom: 16px; }}
   .section-body div {{ color: #334155; line-height: 1.7; }}
   .section-body strong {{ color: #0f172a; }}
@@ -5672,7 +5672,7 @@ async def export_project_endpoint(
   .title-rule {{ border: none; border-top: 3px solid #22c55e; margin: 0 0 30px 0; }}
   h2 {{ font-size: 14pt; font-weight: 600; color: #0f172a; margin: 28px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #e2e8f0; }}
   .section-num {{ color: #22c55e; font-weight: 700; }}
-  img {{ max-width: 100%; height: auto; page-break-inside: avoid; margin: 12px 0; border-radius: 4px; }}
+  img {{ max-width: 100%; max-height: 22cm; height: auto; margin: 12px 0; border-radius: 4px; }}
   .section-body {{ margin-bottom: 16px; }}
   .section-body div {{ color: #334155; line-height: 1.7; }}
   .section-body strong {{ color: #0f172a; }}
@@ -5996,8 +5996,8 @@ async def export_project(
   }}
   img {{
     max-width: 100%;
+    max-height: 22cm;
     height: auto;
-    page-break-inside: avoid;
     margin: 12px 0;
     border-radius: 4px;
   }}
