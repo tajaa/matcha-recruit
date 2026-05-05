@@ -18,7 +18,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 128M
+          memory: 48M
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping"]
       interval: 5s
@@ -81,12 +81,16 @@ services:
     restart: unless-stopped
     networks:
       - matcha-network
-    # Low memory mode: 1 concurrent task, restart after each to free memory
+    # Low memory mode: 1 concurrent task, restart after each to free memory.
+    # 128M is enough for the periodic scheduled tasks (compliance checks,
+    # reminders, deadline escalation). Heavy LLM research tasks (healthcare,
+    # oncology, legislation watch) are rare; if one OOMs, task_acks_late +
+    # max_retries=3 will retry it.
     command: python -m celery -A app.workers.celery_app worker --loglevel=info --concurrency=1 --max-tasks-per-child=5
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 128M
     logging:
       driver: "json-file"
       options:
