@@ -6034,10 +6034,17 @@ async def get_calendar_items(
     to_date: Optional[date] = None,
 ) -> List["CalendarItem"]:
     """Compliance-calendar feed: non-dismissed alerts with a deadline,
-    plus location context and a derived status bucket the UI groups by.
+    plus broad-strokes federal + CA baseline deadlines (W-2, OSHA 300A,
+    ACA, EEO-1, Form 5500, CA DE 9 quarters, IIPP, harassment training,
+    pay data reporting). Each item has a location context (when known)
+    and a derived status bucket the UI groups by. Baseline items have
+    synthetic ids prefixed `baseline:` and are read-only — the frontend
+    hides dismiss / mark-read on them.
     """
     from ...database import get_connection
     from ..models.compliance import CalendarItem
+    from .compliance_baseline import get_baseline_calendar_items
+    from datetime import date as _date
 
     async with get_connection() as conn:
         params: list = [company_id]
@@ -6098,6 +6105,40 @@ async def get_calendar_items(
                 alert_status=r["status"],
                 created_at=r["created_at"].isoformat(),
             ))
+
+        # ── Baseline broad-strokes feed.
+        # Skip when the caller filters by a specific location: those alerts
+        # are scoped, baseline items are company-wide. Also skip if the
+        # explicit date window excludes today's lookahead (the from/to
+        # filter is rare in practice — the desktop client never sends it).
+        if location_id is None:
+            employee_count: int = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM employees
+                WHERE org_id = $1 AND termination_date IS NULL
+                """,
+                company_id,
+            ) or 0
+            has_ca = bool(await conn.fetchval(
+                "SELECT 1 FROM business_locations WHERE company_id = $1 AND state = 'CA' AND is_active = true LIMIT 1",
+                company_id,
+            ))
+            today = _date.today()
+            baseline = get_baseline_calendar_items(
+                today=today,
+                employee_count=int(employee_count),
+                has_ca_location=has_ca,
+            )
+            # Apply the same from/to filter the alert query honors so a
+            # caller asking for a specific window isn't surprised by
+            # baseline rows outside it.
+            if from_date is not None:
+                baseline = [b for b in baseline if _date.fromisoformat(b.deadline) >= from_date]
+            if to_date is not None:
+                baseline = [b for b in baseline if _date.fromisoformat(b.deadline) <= to_date]
+            out.extend(baseline)
+            out.sort(key=lambda i: i.deadline)
+
         return out
 
 

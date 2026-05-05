@@ -108,6 +108,9 @@ export default function ComplianceCalendar() {
 
   const handleMarkRead = async (item: ComplianceCalendarItem) => {
     if (item.alert_status === 'read' || item.alert_status === 'actioned') return
+    // Baseline rows have synthetic ids prefixed `baseline:` and aren't
+    // backed by the alerts table — there's nothing to mark.
+    if (item.alert_status === 'baseline' || item.id.startsWith('baseline:')) return
     try {
       await markAlertRead(item.id)
       setItems((prev) =>
@@ -119,6 +122,7 @@ export default function ComplianceCalendar() {
   }
 
   const handleDismiss = async (item: ComplianceCalendarItem) => {
+    if (item.alert_status === 'baseline' || item.id.startsWith('baseline:')) return
     try {
       await dismissAlert(item.id)
       setItems((prev) => prev.filter((p) => p.id !== item.id))
@@ -255,11 +259,14 @@ function HowItWorks() {
             <div className="space-y-3 text-xs leading-relaxed text-zinc-400">
               <div>
                 <p className="text-zinc-300 font-medium mb-1">Where deadlines come from</p>
-                Each row is a compliance alert with a deadline date. Alerts are
-                generated when you run a compliance check on a location
-                (Locations page → Run check). The system picks up rule changes
-                from federal + state sources and turns any with a deadline into
-                a calendar entry.
+                <span className="text-emerald-400">Baseline</span> rows are the
+                broad-strokes federal + California annual deadlines every
+                employer is expected to know — W-2, OSHA 300A, ACA, EEO-1, Form
+                5500, CA DE 9 quarters, IIPP, harassment training. They appear
+                automatically based on your headcount and locations. The other
+                rows come from compliance alerts generated when you run a check
+                on a location (Locations → Run check) — those add jurisdiction-
+                specific rule changes on top of the baseline.
               </div>
               <div>
                 <p className="text-zinc-300 font-medium mb-1">Status buckets</p>
@@ -365,24 +372,35 @@ function ListView({ grouped, onView, onMarkRead, onDismiss }: ListViewProps) {
                           )}
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              onView(item)
-                            }}
-                            className="text-xs text-zinc-500 hover:text-zinc-200 px-2 py-1 rounded hover:bg-zinc-800"
-                          >
-                            View
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              onDismiss(item)
-                            }}
-                            className="text-xs text-zinc-500 hover:text-red-400 px-2 py-1 rounded hover:bg-zinc-800"
-                          >
-                            Dismiss
-                          </button>
+                          {item.alert_status === 'baseline' ? (
+                            <span
+                              className="text-[10px] uppercase tracking-wide text-emerald-500/70 px-2 py-1"
+                              title="Universal annual deadline — included by default. Run a compliance check to enrich with location-specific rules."
+                            >
+                              Baseline
+                            </span>
+                          ) : (
+                            <>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  onView(item)
+                                }}
+                                className="text-xs text-zinc-500 hover:text-zinc-200 px-2 py-1 rounded hover:bg-zinc-800"
+                              >
+                                View
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  onDismiss(item)
+                                }}
+                                className="text-xs text-zinc-500 hover:text-red-400 px-2 py-1 rounded hover:bg-zinc-800"
+                              >
+                                Dismiss
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>

@@ -269,9 +269,11 @@ class AlertResponse(BaseModel):
 class CalendarItem(BaseModel):
     """Compliance calendar row — a non-dismissed alert with a deadline,
     enriched with location context and a status bucket the UI can group by.
+    Baseline broad-stroke items (federal / state-wide annual deadlines)
+    have a synthetic id prefixed `baseline:` and may have no location.
     """
     id: str
-    location_id: str
+    location_id: Optional[str] = None
     location_name: Optional[str] = None
     location_state: Optional[str] = None
     jurisdiction_name: Optional[str] = None
@@ -283,7 +285,7 @@ class CalendarItem(BaseModel):
     derived_status: str  # 'overdue' | 'due_soon' | 'upcoming' | 'future'
     days_until_due: int
     action_required: Optional[str] = None
-    alert_status: str  # underlying alert status (unread / read / actioned)
+    alert_status: str  # underlying alert status (unread / read / actioned / baseline)
     created_at: str
 
 

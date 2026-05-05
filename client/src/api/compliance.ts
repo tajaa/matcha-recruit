@@ -27,7 +27,7 @@ export function fetchJurisdictions() {
 
 export interface ComplianceCalendarItem {
   id: string
-  location_id: string
+  location_id: string | null
   location_name: string | null
   location_state: string | null
   jurisdiction_name: string | null
@@ -39,7 +39,7 @@ export interface ComplianceCalendarItem {
   derived_status: 'overdue' | 'due_soon' | 'upcoming' | 'future'
   days_until_due: number
   action_required: string | null
-  alert_status: string
+  alert_status: string  // 'unread' | 'read' | 'actioned' | 'dismissed' | 'baseline'
   created_at: string
 }
 
