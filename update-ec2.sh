@@ -82,6 +82,15 @@ pre_cleanup() {
 update_matcha() {
     log_info "Updating Matcha-Recruit..."
 
+    # Sync docker-compose.yml from repo so live host config can't drift from
+    # source (memory limits, env vars, profiles). Without this, hand-edits to
+    # ~/matcha/docker-compose.yml on EC2 silently override repo defaults
+    # forever — which is how matcha-backend stayed pinned at 384M for months
+    # while the repo said 1g.
+    log_info "Syncing docker-compose.yml..."
+    scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new docker-compose.yml \
+        "$EC2_USER@$EC2_HOST:~/matcha/docker-compose.yml"
+
     # Only restart app containers, not shared infrastructure (postgres, redis)
     # Use --profile worker so the Celery worker container is also created/started
     ssh_cmd "cd ~/matcha && docker-compose --profile worker pull && docker-compose --profile worker up -d --no-deps matcha-backend matcha-frontend matcha-worker"
