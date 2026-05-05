@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
-import { Pencil, Plus, Trash2, ExternalLink } from 'lucide-react'
+import { Pencil, Plus, Trash2, ExternalLink, Check, X } from 'lucide-react'
 
 type BlogStatus = 'draft' | 'published' | 'archived'
 
@@ -40,12 +40,45 @@ function slugify(input: string): string {
     .slice(0, 80)
 }
 
+type AdminTab = 'posts' | 'comments'
+
+type PendingComment = {
+  id: string
+  post_id: string
+  user_id: string | null
+  author_name: string
+  content: string
+  status: 'pending' | 'approved' | 'rejected' | 'spam'
+  created_at: string
+  post_title?: string | null
+}
+
 export default function Blogs() {
+  // Tab is hash-driven so the email notification deep-link
+  // (/admin/blogs?tab=comments) lands directly on moderation.
+  const initialTab: AdminTab =
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('tab') === 'comments'
+      ? 'comments'
+      : 'posts'
+  const [tab, setTab] = useState<AdminTab>(initialTab)
+  const [pendingCount, setPendingCount] = useState<number>(0)
+
   const [posts, setPosts] = useState<BlogPost[]>([])
   const [loading, setLoading] = useState(false)
   const [filter, setFilter] = useState<BlogStatus | 'all' | 'pending'>('all')
   const [editing, setEditing] = useState<BlogPost | null>(null)
   const [creating, setCreating] = useState(false)
+
+  // Initial pending-count fetch so the tab badge is correct on first
+  // render. While on the Comments tab, CommentsModerationPanel keeps the
+  // count fresh via onCountChange — no need to re-fetch here on tab swap.
+  useEffect(() => {
+    let cancelled = false
+    api.get<PendingComment[]>('/blogs/comments/pending')
+      .then(rows => { if (!cancelled) setPendingCount(rows.length) })
+      .catch(() => { if (!cancelled) setPendingCount(0) })
+    return () => { cancelled = true }
+  }, [])
 
   async function load() {
     setLoading(true)
@@ -107,13 +140,43 @@ export default function Blogs() {
           <h1 className="text-2xl font-semibold text-zinc-100">Blog</h1>
           <p className="text-xs text-zinc-500 mt-1">Posts publish to the public landing page at /blog.</p>
         </div>
-        <button
-          onClick={() => { setCreating(true); setEditing(null) }}
-          className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded text-sm font-medium flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" /> New post
-        </button>
+        {tab === 'posts' && (
+          <button
+            onClick={() => { setCreating(true); setEditing(null) }}
+            className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded text-sm font-medium flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" /> New post
+          </button>
+        )}
       </div>
+
+      <div className="flex gap-1 mb-5 border-b border-zinc-800">
+        {(['posts', 'comments'] as AdminTab[]).map(t => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${
+              tab === t
+                ? 'border-emerald-500 text-zinc-100'
+                : 'border-transparent text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            {t === 'posts' ? 'Posts' : (
+              <span className="flex items-center gap-1.5">
+                Comments
+                {pendingCount > 0 && (
+                  <span className="text-[10px] bg-amber-900/50 text-amber-300 rounded-full px-1.5 py-0.5">{pendingCount}</span>
+                )}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'comments' ? (
+        <CommentsModerationPanel onCountChange={setPendingCount} />
+      ) : (
+      <>
 
       <div className="flex gap-2 mb-4">
         {STATUS_FILTERS.map(s => (
@@ -216,6 +279,91 @@ export default function Blogs() {
           onSaved={() => { setCreating(false); setEditing(null); load() }}
         />
       )}
+
+      </>
+      )}
+    </div>
+  )
+}
+
+function CommentsModerationPanel({ onCountChange }: { onCountChange: (n: number) => void }) {
+  const [comments, setComments] = useState<PendingComment[]>([])
+  const [loading, setLoading] = useState(false)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function load() {
+    setLoading(true)
+    setError(null)
+    try {
+      const rows = await api.get<PendingComment[]>('/blogs/comments/pending')
+      setComments(rows)
+      onCountChange(rows.length)
+    } catch (e) {
+      setError((e as Error).message)
+      setComments([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [])
+
+  async function moderate(id: string, status: 'approved' | 'rejected') {
+    setBusyId(id)
+    try {
+      // Backend accepts the status as a query parameter on PATCH.
+      await api.patch(`/blogs/comments/${id}?status=${status}`)
+      const remaining = comments.filter(c => c.id !== id)
+      setComments(remaining)
+      onCountChange(remaining.length)
+    } catch (e) {
+      alert(`Moderation failed: ${(e as Error).message}`)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  if (loading) return <div className="text-zinc-500 text-sm">Loading…</div>
+  if (error) return <div className="text-amber-400 text-sm">{error}</div>
+  if (comments.length === 0) {
+    return (
+      <div className="text-zinc-500 text-sm py-12 text-center border border-dashed border-zinc-800 rounded">
+        No pending comments. New comments will appear here.
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {comments.map((c) => (
+        <div key={c.id} className="border border-zinc-800 rounded p-4 bg-zinc-950">
+          <div className="flex items-baseline justify-between mb-2">
+            <div className="text-xs text-zinc-500">
+              <span className="text-zinc-300 font-medium">{c.author_name}</span>
+              {c.post_title && <> on <span className="text-zinc-300">{c.post_title}</span></>}
+              <span className="ml-2">{new Date(c.created_at).toLocaleString()}</span>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => moderate(c.id, 'approved')}
+                disabled={busyId === c.id}
+                className="text-emerald-400 hover:text-emerald-300 text-xs font-medium px-2.5 py-1 rounded border border-emerald-900/60 disabled:opacity-40 flex items-center gap-1"
+              >
+                <Check className="w-3 h-3" /> Approve
+              </button>
+              <button
+                onClick={() => moderate(c.id, 'rejected')}
+                disabled={busyId === c.id}
+                className="text-amber-400 hover:text-amber-300 text-xs font-medium px-2.5 py-1 rounded border border-amber-900/60 disabled:opacity-40 flex items-center gap-1"
+              >
+                <X className="w-3 h-3" /> Reject
+              </button>
+            </div>
+          </div>
+          <p className="text-sm text-zinc-200 whitespace-pre-wrap">{c.content}</p>
+        </div>
+      ))}
     </div>
   )
 }

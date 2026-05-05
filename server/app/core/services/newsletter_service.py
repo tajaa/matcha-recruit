@@ -25,7 +25,7 @@ import logging
 import re
 import secrets
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 from urllib.parse import quote
 from uuid import UUID
 
@@ -698,6 +698,39 @@ async def send_newsletter(newsletter_id: UUID, actor_id: Optional[UUID] = None) 
     return {"queued": len(subscribers), "status": "sending"}
 
 
+def render_preview(
+    title: str,
+    subject: str,
+    preheader: str,
+    content_html: str,
+    *,
+    theme: Literal["dark", "light"] = "dark",
+) -> str:
+    """Render a draft body through the same pipeline used at send time.
+
+    Used by the admin compose preview pane so the iframe shows what
+    recipients will actually see — including video poster fallback and
+    branded chrome. No tracking pixel is injected (send_id=None).
+    """
+    settings = get_settings()
+    base_url = (settings.app_base_url or "https://hey-matcha.com").rstrip("/")
+    fake_unsub = f"{base_url}/api/newsletter/unsubscribe?token=preview"
+    # Sanitize on read just like the write path does, so the preview can't
+    # be spoofed into rendering arbitrary HTML if the input is bypassed.
+    sanitized = sanitize_html(content_html or "")
+    return _render_email(
+        {
+            "title": title or "(untitled)",
+            "subject": subject or "",
+            "preheader": preheader or "",
+            "content_html": sanitized,
+        },
+        {"name": "there"},
+        fake_unsub,
+        theme=theme,
+    )
+
+
 async def send_test_email(newsletter_id: UUID, to_email: str, to_name: Optional[str] = None) -> bool:
     """Send a single test render to an arbitrary address. Doesn't touch
     newsletter_sends or newsletter status."""
@@ -823,6 +856,100 @@ async def _send_emails(newsletter_id: UUID, nl: dict, subscribers: list[dict]) -
 _HREF_RE = re.compile(r'href=(["\'])(https?://[^"\']+)\1', re.IGNORECASE)
 
 
+# Email-safe theme palettes. Gmail and Outlook strip <video> and many CSS
+# rules, so the wrapper colors must be set inline. Light is what most clients
+# render; dark matches admins' compose-time preference but Gmail's auto-dark
+# is stricter and unpredictable, so we keep contrast loud.
+EMAIL_THEMES = {
+    "dark": {
+        "wrapper_bg": "#1e1e1e",
+        "wrapper_fg": "#d4d4d4",
+        "heading_fg": "#e4e4e7",
+        "accent": "#ce9178",
+        "link": "#569cd6",
+        "muted": "#6a737d",
+        "rule": "#333",
+    },
+    "light": {
+        "wrapper_bg": "#ffffff",
+        "wrapper_fg": "#1f1f1f",
+        "heading_fg": "#0a0a0a",
+        "accent": "#a04a23",
+        "link": "#1d4ed8",
+        "muted": "#6b7280",
+        "rule": "#e5e7eb",
+    },
+}
+
+
+# Match an opening <video> tag (with optional attrs and trailing content
+# until the closing </video>). Captures src + poster attributes if present.
+# Tolerates the <source> child pattern Tiptap may emit later — we just
+# extract the first src or poster and ignore the rest.
+_VIDEO_TAG_RE = re.compile(
+    r"<video\b([^>]*)>(.*?)</video>",
+    re.IGNORECASE | re.DOTALL,
+)
+_ATTR_RE = re.compile(r"""(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+
+
+def _video_to_poster_fallback(html: str, theme: dict) -> str:
+    """Replace every <video> tag with a Gmail/Outlook-safe poster card.
+
+    Most email clients silently drop <video>. Without this transform, video
+    newsletters look empty in 80%+ of inboxes. We render a clickable poster
+    image (or a generic "Watch video" card if no poster attr) that links to
+    the underlying video URL — recipients always see *something* clickable.
+    """
+    if not html or "<video" not in html.lower():
+        return html
+
+    def _replace(match: re.Match) -> str:
+        attrs_str = match.group(1) or ""
+        inner = match.group(2) or ""
+        attrs = {k.lower(): (v1 or v2) for k, v1, v2 in _ATTR_RE.findall(attrs_str)}
+
+        src = attrs.get("src")
+        poster = attrs.get("poster")
+        # Tiptap / hand-written video tags may use a child <source src="...">
+        if not src:
+            inner_attrs = {k.lower(): (v1 or v2) for k, v1, v2 in _ATTR_RE.findall(inner)}
+            src = inner_attrs.get("src")
+        if not src:
+            return ""  # nothing to link to — drop the tag entirely
+
+        accent = theme["accent"]
+        muted = theme["muted"]
+        wrapper_fg = theme["wrapper_fg"]
+
+        if poster:
+            inner_card = (
+                f'<img src="{poster}" alt="Watch video" '
+                f'style="display:block;width:100%;max-width:560px;height:auto;border-radius:6px;margin:0 auto;" />'
+                f'<div style="text-align:center;margin-top:8px;color:{accent};font-size:14px;font-weight:600;">'
+                f'&#9654; Watch video</div>'
+            )
+        else:
+            inner_card = (
+                f'<div style="display:block;width:100%;max-width:560px;margin:0 auto;'
+                f'padding:48px 16px;text-align:center;background:#0a0a0a;border-radius:6px;'
+                f'border:1px solid {muted};">'
+                f'<div style="font-size:32px;color:{accent};line-height:1;">&#9654;</div>'
+                f'<div style="margin-top:8px;color:{wrapper_fg};font-size:14px;font-weight:600;">Watch video</div>'
+                f'<div style="margin-top:4px;color:{muted};font-size:11px;">Click to play</div>'
+                f'</div>'
+            )
+
+        return (
+            f'<a href="{src}" target="_blank" rel="noopener" '
+            f'style="text-decoration:none;display:block;margin:16px 0;">'
+            f'{inner_card}'
+            f'</a>'
+        )
+
+    return _VIDEO_TAG_RE.sub(_replace, html)
+
+
 def _rewrite_links_for_tracking(
     html: str,
     *,
@@ -860,6 +987,7 @@ def _render_email(
     *,
     base_url: str = "",
     send_id: Optional[UUID] = None,
+    theme: Literal["dark", "light"] = "dark",
 ) -> str:
     """Render newsletter HTML with branded template, tracking, and CAN-SPAM
     footer. content_html is already sanitized at write time.
@@ -867,13 +995,23 @@ def _render_email(
     `send_id` is the newsletter_sends row id — used to build the open-pixel
     URL and click-tracking redirect targets. When omitted (test send) tracking
     is skipped so we don't pollute the analytics with previews.
+
+    `theme` controls the wrapper palette. Defaults to dark to match the
+    legacy look. The compose-preview endpoint can request "light" to simulate
+    how recipients in light-mode clients will see the email.
     """
     settings = get_settings()
     if not base_url:
         base_url = (settings.app_base_url or "https://hey-matcha.com").rstrip("/")
 
+    palette = EMAIL_THEMES.get(theme, EMAIL_THEMES["dark"])
+
     content = newsletter.get("content_html") or ""
     preheader = (newsletter.get("preheader") or "").strip()
+
+    # Video fallback BEFORE tracking rewrite so the new <a href> can be
+    # click-tracked alongside any other external links.
+    content = _video_to_poster_fallback(content, palette)
 
     # Click-tracking — wrap external links once, before any tracking pixels
     # are spliced in (the pixel src must NOT be wrapped).
@@ -913,21 +1051,21 @@ def _render_email(
 
     return f"""
     {preheader_html}
-    <div style="max-width:600px;margin:0 auto;font-family:-apple-system,system-ui,sans-serif;background:#1e1e1e;color:#d4d4d4;padding:32px 24px;">
+    <div style="max-width:600px;margin:0 auto;font-family:-apple-system,system-ui,sans-serif;background:{palette['wrapper_bg']};color:{palette['wrapper_fg']};padding:32px 24px;">
         <div style="text-align:center;margin-bottom:24px;">
-            <span style="font-size:20px;font-weight:700;color:#ce9178;">Matcha</span>
+            <span style="font-size:20px;font-weight:700;color:{palette['accent']};">Matcha</span>
         </div>
-        <h1 style="font-size:22px;color:#e4e4e7;margin-bottom:16px;">{newsletter['title']}</h1>
-        <div style="font-size:15px;line-height:1.7;color:#d4d4d4;">
+        <h1 style="font-size:22px;color:{palette['heading_fg']};margin-bottom:16px;">{newsletter['title']}</h1>
+        <div style="font-size:15px;line-height:1.7;color:{palette['wrapper_fg']};">
             {content}
         </div>
-        <hr style="border:none;border-top:1px solid #333;margin:32px 0;" />
-        <div style="text-align:center;font-size:12px;color:#6a737d;line-height:1.6;">
+        <hr style="border:none;border-top:1px solid {palette['rule']};margin:32px 0;" />
+        <div style="text-align:center;font-size:12px;color:{palette['muted']};line-height:1.6;">
             <p style="margin:0 0 8px 0;">You received this because you subscribed to Matcha updates.</p>
             <p style="margin:0 0 12px 0;">
-                <a href="{unsubscribe_url}" style="color:#569cd6;text-decoration:underline;">Unsubscribe</a>
+                <a href="{unsubscribe_url}" style="color:{palette['link']};text-decoration:underline;">Unsubscribe</a>
             </p>
-            {f'<p style="margin:0;color:#6a737d;">{address_html}</p>' if address_html else ''}
+            {f'<p style="margin:0;color:{palette["muted"]};">{address_html}</p>' if address_html else ''}
         </div>
         {pixel_html}
     </div>

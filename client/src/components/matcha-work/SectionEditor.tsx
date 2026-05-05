@@ -1,13 +1,38 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
-import { Extension } from '@tiptap/core'
+import { Extension, Node, mergeAttributes } from '@tiptap/core'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import LinkExtension from '@tiptap/extension-link'
 import ImageExtension from '@tiptap/extension-image'
-import { Bold, Italic, Heading2, List, ListOrdered, Link, ImagePlus, Loader2, Undo, Redo } from 'lucide-react'
+import { Bold, Italic, Heading2, List, ListOrdered, Link, ImagePlus, Film, Loader2, Undo, Redo } from 'lucide-react'
+
+/** Block-level <video> node so insertContent('<video ...>') survives TipTap
+ * serialization. StarterKit has no video node — without this, the tag is
+ * stripped on the next getHTML() and the upload silently disappears. */
+const VideoNode = Node.create({
+  name: 'video',
+  group: 'block',
+  atom: true,
+  selectable: true,
+  draggable: true,
+  addAttributes() {
+    return {
+      src: { default: null },
+      poster: { default: null },
+      controls: { default: true },
+      width: { default: '600' },
+    }
+  },
+  parseHTML() {
+    return [{ tag: 'video' }]
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['video', mergeAttributes(HTMLAttributes)]
+  },
+})
 
 /** TipTap extension that highlights [bracketed placeholders] with orange styling */
 const PlaceholderHighlight = Extension.create({
@@ -49,11 +74,14 @@ interface SectionEditorProps {
   content: string
   onUpdate: (html: string) => void
   onImageUpload?: (file: File) => Promise<string | null>
+  onVideoUpload?: (file: File) => Promise<string | null>
   uploadingImage?: boolean
+  uploadingVideo?: boolean
 }
 
-export default function SectionEditor({ content, onUpdate, onImageUpload, uploadingImage }: SectionEditorProps) {
+export default function SectionEditor({ content, onUpdate, onImageUpload, onVideoUpload, uploadingImage, uploadingVideo }: SectionEditorProps) {
   const imageInputRef = useRef<HTMLInputElement>(null)
+  const videoInputRef = useRef<HTMLInputElement>(null)
 
   const editor = useEditor({
     extensions: [
@@ -63,6 +91,7 @@ export default function SectionEditor({ content, onUpdate, onImageUpload, upload
       Placeholder.configure({ placeholder: 'Start typing...' }),
       LinkExtension.configure({ openOnClick: false }),
       ImageExtension,
+      VideoNode,
       PlaceholderHighlight,
     ],
     content,
@@ -120,6 +149,24 @@ export default function SectionEditor({ content, onUpdate, onImageUpload, upload
       editor.chain().focus().setImage({ src: url }).run()
     }
   }, [onImageUpload, editor])
+
+  const handleVideoClick = useCallback(() => {
+    videoInputRef.current?.click()
+  }, [])
+
+  const handleVideoFile = useCallback(async (file: File) => {
+    if (!onVideoUpload || !editor) return
+    const url = await onVideoUpload(file)
+    if (url) {
+      // Insert via the registered VideoNode so the tag survives TipTap's
+      // serialization round-trip. The email render path later swaps this
+      // for a Gmail/Outlook-safe poster fallback.
+      editor.chain().focus().insertContent({
+        type: 'video',
+        attrs: { src: url, controls: true, width: '600' },
+      }).run()
+    }
+  }, [onVideoUpload, editor])
 
   if (!editor) return null
 
@@ -194,6 +241,30 @@ export default function SectionEditor({ content, onUpdate, onImageUpload, upload
         >
           {uploadingImage ? <Loader2 size={13} className="animate-spin" /> : <ImagePlus size={13} />}
         </button>
+
+        {onVideoUpload && (
+          <>
+            <input
+              ref={videoInputRef}
+              type="file"
+              accept="video/mp4,video/quicktime"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) handleVideoFile(f)
+                e.target.value = ''
+              }}
+            />
+            <button
+              onMouseDown={(e) => { e.preventDefault(); handleVideoClick() }}
+              className="p-1 rounded transition-colors"
+              style={{ color: uploadingVideo ? '#ce9178' : '#6a737d' }}
+              title="Insert video (mp4/mov)"
+            >
+              {uploadingVideo ? <Loader2 size={13} className="animate-spin" /> : <Film size={13} />}
+            </button>
+          </>
+        )}
 
         <div className="w-px h-3 mx-1" style={{ background: '#333' }} />
 

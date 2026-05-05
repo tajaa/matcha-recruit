@@ -44,6 +44,27 @@ type Progress = {
 
 type Tab = 'subscribers' | 'newsletters' | 'compose' | 'tags' | 'templates'
 
+// Shared upload helper — both image and video go to the same endpoint;
+// the backend keys off file extension and the editor inserts the right tag.
+async function uploadNewsletterMedia(file: File): Promise<string | null> {
+  const BASE = import.meta.env.VITE_API_URL ?? '/api'
+  const token = localStorage.getItem('matcha_access_token')
+  const form = new FormData()
+  form.append('file', file)
+  try {
+    const res = await fetch(`${BASE}/admin/newsletter/media/upload`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.url
+  } catch {
+    return null
+  }
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function NewsletterAdmin() {
@@ -499,24 +520,8 @@ export default function NewsletterAdmin() {
                   <SectionEditor
                     content={composeHtml}
                     onUpdate={(html) => setComposeHtml(html)}
-                    onImageUpload={async (file) => {
-                      const BASE = import.meta.env.VITE_API_URL ?? '/api'
-                      const token = localStorage.getItem('matcha_access_token')
-                      const form = new FormData()
-                      form.append('file', file)
-                      try {
-                        const res = await fetch(`${BASE}/admin/newsletter/media/upload`, {
-                          method: 'POST',
-                          headers: token ? { Authorization: `Bearer ${token}` } : {},
-                          body: form,
-                        })
-                        if (!res.ok) return null
-                        const data = await res.json()
-                        return data.url
-                      } catch {
-                        return null
-                      }
-                    }}
+                    onImageUpload={uploadNewsletterMedia}
+                    onVideoUpload={uploadNewsletterMedia}
                   />
                 </div>
               </div>
@@ -654,33 +659,80 @@ export default function NewsletterAdmin() {
 
 // ── Mobile preview ──────────────────────────────────────────────────────────
 
+type ViewportKey = 'mobile' | 'desktop' | 'wide'
+type ThemeKey = 'dark' | 'light'
+
+const VIEWPORT_WIDTHS: Record<ViewportKey, number> = { mobile: 360, desktop: 640, wide: 800 }
+
 function MobilePreview({ title, subject, preheader, html }: { title: string; subject: string; preheader: string; html: string }) {
-  // Render the body inside a sandboxed iframe so any scripts/styles in the
-  // admin-supplied HTML can't touch the parent page. `sandbox=""` (empty)
-  // strips ALL capabilities — no JS, no top-nav, no form submit. Body comes
-  // through srcdoc; we don't need to re-bleach client-side because the
-  // backend already sanitized at write time, but the sandbox is the second
-  // line of defense.
-  const safeTitle = (title || '(title)').replace(/[<&>"]/g, (c) =>
-    ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c] ?? c),
-  )
+  // Iframe runs the SAME render pipeline as outbound mail — POSTs the draft
+  // to /admin/newsletter/preview and inlines whatever the backend produces.
+  // That's the only way the preview can stay honest about video poster
+  // fallback, branded chrome, theme palette, and CAN-SPAM footer changes.
+  const [viewport, setViewport] = useState<ViewportKey>('mobile')
+  const [theme, setTheme] = useState<ThemeKey>('dark')
+  const [previewHtml, setPreviewHtml] = useState<string>('')
+  const [previewLoading, setPreviewLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setPreviewLoading(true)
+    const t = window.setTimeout(async () => {
+      try {
+        const res = await api.post<{ html: string }>('/admin/newsletter/preview', {
+          title, subject, preheader, content_html: html, theme,
+        })
+        if (!cancelled) setPreviewHtml(res.html || '')
+      } catch {
+        if (!cancelled) setPreviewHtml('<p style="padding:16px;color:#a00;">Preview failed to render.</p>')
+      } finally {
+        if (!cancelled) setPreviewLoading(false)
+      }
+    }, 500)
+    return () => { cancelled = true; window.clearTimeout(t) }
+  }, [title, subject, preheader, html, theme])
+
+  // Wrap server-rendered fragment in a minimal HTML document. The server
+  // returns the email body div; we add a doctype + the recipient-side
+  // background that simulates what the email client paints around the email.
+  const clientBg = theme === 'dark' ? '#0a0a0a' : '#f3f4f6'
   const previewDoc = `<!doctype html><html><head><meta charset="utf-8"><style>
-    body{margin:0;padding:16px;background:#1e1e1e;color:#d4d4d4;font:13px -apple-system,system-ui,sans-serif;line-height:1.6}
-    h1,h2{color:#e4e4e7}
-    a{color:#569cd6}
+    html,body{margin:0;padding:0;background:${clientBg};}
+    body{padding:16px 0;}
     img{max-width:100%;height:auto}
-    .matcha{font-weight:700;color:#ce9178;font-size:16px;margin-bottom:12px}
-  </style></head><body>
-    <div class="matcha">Matcha</div>
-    <h2>${safeTitle}</h2>
-    ${html || '<p style="color:#777">(content goes here)</p>'}
-  </body></html>`
+    video{max-width:100%;height:auto}
+  </style></head><body>${previewHtml || '<p style="padding:16px;color:#777;text-align:center;">Loading preview…</p>'}</body></html>`
+
+  const viewportPx = VIEWPORT_WIDTHS[viewport]
 
   return (
     <div className="lg:sticky lg:top-4 self-start">
-      <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">Mobile preview</p>
-      <div className="rounded-2xl border-2 border-zinc-800 bg-zinc-900 p-2 max-w-[360px]">
-        <div className="rounded-lg bg-[#1e1e1e] overflow-hidden">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Inbox preview {previewLoading && <Loader2 className="inline-block animate-spin ml-1" size={10} />}</p>
+      </div>
+      <div className="flex items-center gap-1 mb-2 flex-wrap">
+        {(['mobile', 'desktop', 'wide'] as ViewportKey[]).map((v) => (
+          <button
+            key={v}
+            onClick={() => setViewport(v)}
+            className={`text-[10px] px-2 py-1 rounded ${viewport === v ? 'bg-zinc-700 text-zinc-100' : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'}`}
+          >
+            {v === 'mobile' ? 'Mobile' : v === 'desktop' ? 'Desktop' : 'Wide'} <span className="text-zinc-500">({VIEWPORT_WIDTHS[v]})</span>
+          </button>
+        ))}
+        <div className="w-px h-4 mx-1 bg-zinc-700" />
+        {(['dark', 'light'] as ThemeKey[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTheme(t)}
+            className={`text-[10px] px-2 py-1 rounded ${theme === t ? 'bg-zinc-700 text-zinc-100' : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'}`}
+          >
+            {t === 'dark' ? 'Dark' : 'Light'}
+          </button>
+        ))}
+      </div>
+      <div className="rounded-2xl border-2 border-zinc-800 bg-zinc-900 p-2" style={{ maxWidth: viewportPx + 16 }}>
+        <div className="rounded-lg bg-zinc-950 overflow-hidden">
           <div className="px-3 py-2 border-b border-zinc-800">
             <p className="text-[11px] text-zinc-500">Inbox</p>
             <p className="text-xs text-zinc-200 font-medium truncate">{subject || 'Subject…'}</p>
@@ -690,8 +742,8 @@ function MobilePreview({ title, subject, preheader, html }: { title: string; sub
             title="Newsletter preview"
             sandbox=""
             srcDoc={previewDoc}
-            className="w-full block"
-            style={{ height: 600, border: 0, background: '#1e1e1e' }}
+            className="block"
+            style={{ width: viewportPx, height: 700, border: 0, background: clientBg }}
           />
         </div>
       </div>

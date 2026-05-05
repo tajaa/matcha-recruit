@@ -3089,6 +3089,74 @@ Please log in and review your handbook:
             text_content=text_content,
         )
 
+    async def send_blog_comment_pending_notification(
+        self,
+        to_email: str,
+        post_title: str,
+        post_slug: str,
+        author_label: str,
+        comment_excerpt: str,
+        comment_id: str,
+    ) -> bool:
+        """Notify a platform admin that a blog comment is awaiting review."""
+        if not self.is_configured():
+            logger.warning("Email not configured, skipping blog comment notification")
+            return False
+
+        app_base_url = (self.settings.app_base_url or "").rstrip("/")
+        post_url = f"{app_base_url}/blog/{post_slug}" if app_base_url else f"/blog/{post_slug}"
+        admin_url = f"{app_base_url}/admin/blogs?tab=comments" if app_base_url else "/admin/blogs?tab=comments"
+
+        post_title_safe = html.escape(post_title)
+        author_safe = html.escape(author_label)
+        excerpt_safe = html.escape(comment_excerpt)
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .logo {{ color: #22c55e; font-size: 22px; font-weight: bold; letter-spacing: 2px; }}
+        .card {{ background: #f8fafc; border-left: 4px solid #2563eb; border-radius: 8px; padding: 16px; margin: 16px 0; }}
+        .quote {{ background: #f9fafb; border-radius: 6px; padding: 12px 14px; font-style: italic; color: #444; margin: 12px 0; white-space: pre-wrap; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 12px 20px; text-decoration: none; border-radius: 6px; font-weight: 600; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; margin-top: 24px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">MATCHA</div>
+        <h2 style="font-size:18px;color:#111;">New blog comment awaiting review</h2>
+        <div class="card">
+            <p style="margin:0 0 4px 0;"><strong>Post:</strong> <a href="{post_url}">{post_title_safe}</a></p>
+            <p style="margin:0;"><strong>From:</strong> {author_safe}</p>
+        </div>
+        <div class="quote">{excerpt_safe}</div>
+        <p style="text-align:center;">
+            <a href="{admin_url}" class="btn">Review &amp; moderate</a>
+        </p>
+        <div class="footer">Sent via Matcha Recruit · comment id {comment_id}</div>
+    </div>
+</body>
+</html>
+"""
+        text_content = (
+            f"New blog comment awaiting review\n\n"
+            f"Post: {post_title}\n{post_url}\n\n"
+            f"From: {author_label}\n\n"
+            f"\"{comment_excerpt}\"\n\n"
+            f"Review & moderate: {admin_url}\n"
+        )
+
+        return await self.send_email(
+            to_email=to_email,
+            subject=f"[Matcha] New blog comment on \"{post_title}\" awaiting review",
+            html_content=html_content,
+            text_content=text_content,
+        )
+
 
 # Singleton instance
 _email_service: Optional[EmailService] = None

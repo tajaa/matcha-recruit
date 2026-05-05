@@ -709,7 +709,34 @@ async def unschedule_newsletter(
 
 
 _ALLOWED_MEDIA_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".mp4", ".mov", ".pdf"}
-_MAX_MEDIA_SIZE = 10 * 1024 * 1024  # 10 MB
+_MAX_MEDIA_SIZE = 50 * 1024 * 1024  # 50 MB — bumped to fit short videos
+
+
+class PreviewRequest(BaseModel):
+    title: str = ""
+    subject: str = ""
+    preheader: str = ""
+    content_html: str = ""
+    theme: str = "dark"  # "dark" | "light"
+
+
+@admin_router.post("/preview")
+async def render_newsletter_preview(
+    body: PreviewRequest,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Render a draft body through the same pipeline as send time so the
+    compose iframe shows what recipients actually see (video poster fallback,
+    branded chrome, theme-correct palette). No tracking pixel injected."""
+    theme = body.theme if body.theme in ("dark", "light") else "dark"
+    html = svc.render_preview(
+        title=body.title,
+        subject=body.subject,
+        preheader=body.preheader,
+        content_html=body.content_html,
+        theme=theme,
+    )
+    return {"html": html}
 
 
 @admin_router.post("/media/upload")

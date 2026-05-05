@@ -1,9 +1,10 @@
 import json
+import logging
 from datetime import datetime
 from uuid import UUID
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, UploadFile, File, Query
 from pydantic import BaseModel
 
 from ...database import get_connection
@@ -474,20 +475,24 @@ async def list_comments(slug: str):
 async def create_comment(
     slug: str,
     comment: BlogCommentCreate,
+    background_tasks: BackgroundTasks,
     current_user: Optional[CurrentUser] = Depends(get_optional_user)
 ):
-    """Create a new comment. Auto-approved for users, pending for guests."""
+    """Create a new comment. All comments start PENDING and require admin approval."""
     async with get_connection() as conn:
-        post = await conn.fetchrow("SELECT id FROM blog_posts WHERE slug = $1", slug)
+        post = await conn.fetchrow("SELECT id, title, slug FROM blog_posts WHERE slug = $1", slug)
         if not post:
             raise HTTPException(status_code=404, detail="Blog post not found")
 
-        status = CommentStatus.APPROVED if current_user else CommentStatus.PENDING
         user_id = current_user.id if current_user else None
 
-        # If guest, author_name is required
-        if not current_user and not comment.author_name:
-             raise HTTPException(status_code=400, detail="Author name is required for guests")
+        # Author name: prefer the logged-in user's email, otherwise fall back
+        # to the form field. Guests must supply one.
+        author_name = comment.author_name
+        if current_user and not author_name:
+            author_name = current_user.email
+        if not author_name:
+            raise HTTPException(status_code=400, detail="Author name is required for guests")
 
         row = await conn.fetchrow(
             """
@@ -495,7 +500,57 @@ async def create_comment(
             VALUES ($1, $2, $3, $4, $5)
             RETURNING id, created_at, status, user_id, author_name, content, post_id
             """,
-            post["id"], user_id, comment.author_name, comment.content, status.value
+            post["id"], user_id, author_name, comment.content, CommentStatus.PENDING.value
         )
 
-        return BlogComment(**row)
+        admin_emails = [
+            r["email"] for r in await conn.fetch(
+                "SELECT email FROM users WHERE role = 'admin' AND email IS NOT NULL"
+            )
+        ]
+
+    # Fire-and-forget admin notifications. Failure to email must not block
+    # the comment write — pattern mirrors inbound_email.py:208.
+    if admin_emails:
+        excerpt = (comment.content or "").strip()
+        if len(excerpt) > 280:
+            excerpt = excerpt[:277] + "…"
+        for admin_email in admin_emails:
+            background_tasks.add_task(
+                _notify_admin_pending_comment,
+                admin_email,
+                post["title"],
+                post["slug"],
+                author_name,
+                excerpt,
+                str(row["id"]),
+            )
+
+    return BlogComment(**row)
+
+
+async def _notify_admin_pending_comment(
+    admin_email: str,
+    post_title: str,
+    post_slug: str,
+    author_label: str,
+    comment_excerpt: str,
+    comment_id: str,
+) -> None:
+    """Wrapper around send_blog_comment_pending_notification that swallows
+    exceptions so a flaky email backend can't 500 the public POST."""
+    from ..services.email import get_email_service
+    try:
+        await get_email_service().send_blog_comment_pending_notification(
+            to_email=admin_email,
+            post_title=post_title,
+            post_slug=post_slug,
+            author_label=author_label,
+            comment_excerpt=comment_excerpt,
+            comment_id=comment_id,
+        )
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "Failed to email %s about pending comment %s: %s",
+            admin_email, comment_id, e,
+        )

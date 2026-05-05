@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm'
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
 import NewsletterSignup from '../../components/NewsletterSignup'
+import BlogComments from '../../components/BlogComments'
 import { PricingContactModal } from '../../components/PricingContactModal'
 import { api } from '../../api/client'
 
@@ -137,6 +138,8 @@ export default function BlogPostPage() {
             description="One short brief a week. Employment-law changes, compliance gotchas."
           />
         </div>
+
+        {post && slug && <BlogComments slug={slug} />}
       </article>
 
       <MarketingFooter />
