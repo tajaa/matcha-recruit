@@ -72,7 +72,16 @@ class ProjectDetailViewModel {
                 async let _ = loadTasks()
                 async let _ = loadFiles()
             }
+        } catch is CancellationError {
+            // Rapid project switch cancelled the in-flight load. Don't show
+            // a red banner — the new project's .task is already loading.
+            await MainActor.run { isLoading = false }
         } catch {
+            let nsErr = error as NSError
+            if nsErr.domain == NSURLErrorDomain && nsErr.code == NSURLErrorCancelled {
+                await MainActor.run { isLoading = false }
+                return
+            }
             await MainActor.run { errorMessage = error.localizedDescription; isLoading = false }
         }
     }
@@ -426,7 +435,15 @@ class ProjectDetailViewModel {
                 tasks = list
                 isLoadingTasks = false
             }
+        } catch is CancellationError {
+            // Project switch / re-render race — don't surface as red banner.
+            await MainActor.run { isLoadingTasks = false }
         } catch {
+            let nsErr = error as NSError
+            if nsErr.domain == NSURLErrorDomain && nsErr.code == NSURLErrorCancelled {
+                await MainActor.run { isLoadingTasks = false }
+                return
+            }
             await MainActor.run {
                 errorMessage = error.localizedDescription
                 isLoadingTasks = false
@@ -582,7 +599,14 @@ class ProjectDetailViewModel {
                 files = list
                 isLoadingFiles = false
             }
+        } catch is CancellationError {
+            await MainActor.run { isLoadingFiles = false }
         } catch {
+            let nsErr = error as NSError
+            if nsErr.domain == NSURLErrorDomain && nsErr.code == NSURLErrorCancelled {
+                await MainActor.run { isLoadingFiles = false }
+                return
+            }
             await MainActor.run {
                 errorMessage = error.localizedDescription
                 isLoadingFiles = false
