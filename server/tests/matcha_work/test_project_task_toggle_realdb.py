@@ -39,17 +39,17 @@ pytestmark = [
 # in the service file's SQL surfaces here at prepare time.
 UPDATE_TASK_SQL = """
 UPDATE mw_tasks SET
-    board_column = $1,
-    status = $3,
+    board_column = $1::text,
+    status = $3::text,
     completed_at = CASE
         WHEN $3::text = 'completed' THEN COALESCE(completed_at, $13::timestamptz)
         ELSE NULL
     END,
-    title = COALESCE($4, title),
-    description = CASE WHEN $5::boolean THEN $6 ELSE description END,
-    priority = COALESCE($7, priority),
-    due_date = CASE WHEN $8::boolean THEN $9 ELSE due_date END,
-    assigned_to = CASE WHEN $10::boolean THEN $11 ELSE assigned_to END,
+    title = COALESCE($4::text, title),
+    description = CASE WHEN $5::boolean THEN $6::text ELSE description END,
+    priority = COALESCE($7::text, priority),
+    due_date = CASE WHEN $8::boolean THEN $9::date ELSE due_date END,
+    assigned_to = CASE WHEN $10::boolean THEN $11::uuid ELSE assigned_to END,
     updated_at = NOW()
 WHERE id = $2 AND project_id = $12
 RETURNING id, project_id, company_id, created_by, title, description,
@@ -73,10 +73,8 @@ async def test_update_sql_prepares_without_ambiguous_parameters(pool):
     async with pool.acquire() as conn:
         # If prepare raises, the test fails — that's the regression signal.
         stmt = await conn.prepare(UPDATE_TASK_SQL)
-        param_types = [str(p.type.name) for p in stmt.get_parameters()]
-        # Sanity: 13 params, $3 is text (because of the explicit cast inside
-        # the CASE), $13 is timestamptz (explicit cast).
-        assert len(param_types) == 13, f"expected 13 params, got {param_types}"
+        params = stmt.get_parameters()
+        assert len(params) == 13, f"expected 13 params, got {len(params)}"
 
 
 async def test_update_sql_executes_against_nonexistent_row_is_noop(pool):

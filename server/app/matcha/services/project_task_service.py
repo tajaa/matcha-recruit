@@ -140,12 +140,15 @@ async def update_project_task(project_id: UUID, task_id: UUID, patch: dict) -> O
             raise ValueError(f"Invalid priority: {priority}")
 
         # Compute completed_at in Python rather than via a SQL CASE on $3.
-        # The previous SQL used $3 in both `status = $3` (text column) and
-        # `CASE WHEN $3 = 'completed' THEN ... ELSE NULL END`. asyncpg's
-        # type inference saw inconsistent contexts (NULL branch in the
-        # CASE produced a timestamptz/unknown coercion) and raised
-        # AmbiguousParameterError on every PATCH — desktop catch-block
-        # then ran loadTasks() and the kanban toggle snapped back.
+        # asyncpg infers each $N's type from how it's used. $3 is assigned to
+        # `status` (varchar column) AND compared to text inside the CASE; the
+        # previous attempt cast only the CASE site (`$3::text = 'completed'`)
+        # but PG saw two contexts demanding different types for the same
+        # parameter and raised
+        #   AmbiguousParameterError: inconsistent types deduced for $3
+        #   DETAIL: text versus character varying
+        # Fix: cast at every use of $3 (and $1) so all references are
+        # unambiguously text. PG assignment-casts text -> varchar implicitly.
         completed_at_value = (
             datetime.now(timezone.utc) if new_status == "completed" else None
         )
@@ -153,17 +156,17 @@ async def update_project_task(project_id: UUID, task_id: UUID, patch: dict) -> O
         row = await conn.fetchrow(
             """
             UPDATE mw_tasks SET
-                board_column = $1,
-                status = $3,
+                board_column = $1::text,
+                status = $3::text,
                 completed_at = CASE
                     WHEN $3::text = 'completed' THEN COALESCE(completed_at, $13::timestamptz)
                     ELSE NULL
                 END,
-                title = COALESCE($4, title),
-                description = CASE WHEN $5::boolean THEN $6 ELSE description END,
-                priority = COALESCE($7, priority),
-                due_date = CASE WHEN $8::boolean THEN $9 ELSE due_date END,
-                assigned_to = CASE WHEN $10::boolean THEN $11 ELSE assigned_to END,
+                title = COALESCE($4::text, title),
+                description = CASE WHEN $5::boolean THEN $6::text ELSE description END,
+                priority = COALESCE($7::text, priority),
+                due_date = CASE WHEN $8::boolean THEN $9::date ELSE due_date END,
+                assigned_to = CASE WHEN $10::boolean THEN $11::uuid ELSE assigned_to END,
                 updated_at = NOW()
             WHERE id = $2 AND project_id = $12
             RETURNING id, project_id, company_id, created_by, title, description,
