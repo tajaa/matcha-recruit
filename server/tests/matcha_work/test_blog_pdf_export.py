@@ -247,6 +247,41 @@ class TestRenderProjectPdf:
         assert pdf_bytes.startswith(b"%PDF")
         storage.download_file.assert_awaited_once_with("/uploads/foo.png")
 
+    @pytest.mark.asyncio
+    async def test_render_with_markdown_image_inlines_data_uri(self):
+        """Standalone markdown image `![alt](url)` lines are emitted as <img>
+        tags by _render_inline_md, then base64-inlined by _inline_images.
+        Regression: an earlier version called _inline_images BEFORE markdown
+        rendering, so the just-emitted <img> tag never got base64'd and
+        WeasyPrint couldn't fetch the private URL — image rendered as URL
+        text. This test ensures the storage download is invoked for markdown
+        image syntax (not just inline-HTML <img>)."""
+        pytest.importorskip("weasyprint")
+        from app.matcha.routes import matcha_work as mw
+
+        storage = MagicMock()
+        storage.is_supported_storage_path = MagicMock(
+            side_effect=lambda src: src.startswith("/uploads/")
+        )
+        png_bytes = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xfa\xcf"
+            b"\x00\x00\x00\x02\x00\x01\xe5'\xde\xfc\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        storage.download_file = AsyncMock(return_value=png_bytes)
+
+        with patch.object(mw, "get_storage", return_value=storage):
+            project = {
+                "title": "Markdown Image Doc",
+                "sections": [
+                    {"title": "Body", "content": "Intro line\n\n![diagram](/uploads/diagram.png)\n\nOutro line"},
+                ],
+            }
+            pdf_bytes = await mw._render_project_pdf(project)
+
+        assert pdf_bytes.startswith(b"%PDF")
+        storage.download_file.assert_awaited_once_with("/uploads/diagram.png")
+
 
 # ============================================================
 # Format validation in the export endpoint
