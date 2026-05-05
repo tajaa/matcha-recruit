@@ -118,6 +118,10 @@ final class ChannelsWebSocket: NSObject {
 
     func leaveRoom(channelId: String) {
         if currentRoom == channelId { currentRoom = nil }
+        // Drop from backgroundRoomIds too; otherwise a subsequent joinRoom
+        // will short-circuit and never re-subscribe on the server, leaving
+        // the user out of room_members and missing their own message echo.
+        backgroundRoomIds.remove(channelId)
         send(["type": "leave_room", "channel_id": channelId])
     }
 

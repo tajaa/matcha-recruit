@@ -83,7 +83,14 @@ struct ChannelDetailView: View {
             ws.joinRoom(channelId: channelId)
         }
         .onDisappear {
-            ws.leaveRoom(channelId: channelId)
+            // Don't leaveRoom — keep this channel subscribed via
+            // joinBackgroundRooms so background message notifications still
+            // arrive when the user is viewing a different channel/project.
+            // The matching design intent is documented on joinRoom().
+            // The original leaveRoom-on-disappear desynced backgroundRoomIds
+            // (server forgot user, client cache still claimed subscription),
+            // and on re-entry joinRoom would skip and the user's own message
+            // would not echo back until a manual refresh.
             ws.clearCallbacksIfRoomMatches(channelId)
         }
         .sheet(isPresented: $showInviteSheet) {
