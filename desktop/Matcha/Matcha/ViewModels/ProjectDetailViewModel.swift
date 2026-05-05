@@ -68,9 +68,13 @@ class ProjectDetailViewModel {
             // taps Kanban or Files seconds after landing. Kick off both fetches
             // in parallel right now so the panels are populated before the
             // user even clicks. Errors per-task surface via existing flows.
+            //
+            // Use Task { } not `async let _ = ...` — `async let` requires an
+            // await before scope exit; without it Swift implicitly cancels
+            // the child task and the network request never completes.
             if proj.projectType == "collab" {
-                async let _ = loadTasks()
-                async let _ = loadFiles()
+                Task { await self.loadTasks() }
+                Task { await self.loadFiles() }
             }
         } catch is CancellationError {
             // Rapid project switch cancelled the in-flight load. Don't show
