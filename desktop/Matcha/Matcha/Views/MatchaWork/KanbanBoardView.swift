@@ -22,6 +22,29 @@ struct KanbanBoardView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let err = viewModel.errorMessage {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.red)
+                    Text(err)
+                        .font(.system(size: 11))
+                        .foregroundColor(.white)
+                        .lineLimit(2)
+                    Spacer()
+                    Button {
+                        viewModel.errorMessage = nil
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.red.opacity(0.15))
+            }
             if viewModel.isLoadingTasks && viewModel.tasks.isEmpty {
                 Spacer()
                 ProgressView().tint(.secondary)

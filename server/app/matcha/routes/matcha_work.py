@@ -5501,11 +5501,15 @@ async def _render_project_pdf(project: dict) -> bytes:
         if s.get("title"):
             heading = f'<h2><span class="section-num">{idx + 1}.</span> {_html.escape(s["title"])}</h2>'
         content = s.get("content", "") or ""
-        content = await _inline_images(content)
+        # Render markdown FIRST so standalone ![alt](url) lines become <img> tags,
+        # THEN inline images so those <img src="..."> URLs get base64'd. The
+        # opposite order leaves the just-emitted <img src=https://s3...> tags
+        # unprocessed and WeasyPrint can't fetch private storage URLs.
         if content.lstrip().startswith("<"):
-            content_html = content
+            content_html = await _inline_images(content)
         else:
             content_html = f"<div>{_render_inline_md(content)}</div>"
+            content_html = await _inline_images(content_html)
         sections_html.append(f"{heading}\n<div class='section-body'>{content_html}</div>")
 
     body_html = "\n".join(sections_html)
@@ -5646,11 +5650,15 @@ async def export_project_endpoint(
             if s.get("title"):
                 heading = f'<h2><span class="section-num">{idx + 1}.</span> {_html.escape(s["title"])}</h2>'
             content = s.get("content", "")
-            content = await _inline_images(content)
+            # Render markdown FIRST so standalone ![alt](url) lines become <img>
+            # tags, THEN inline so those URLs get base64'd. The opposite order
+            # left freshly-emitted <img src=https://s3...> tags unprocessed and
+            # WeasyPrint couldn't fetch them — image rendered as the URL string.
             if content.lstrip().startswith("<"):
-                content_html = content
+                content_html = await _inline_images(content)
             else:
                 content_html = f"<div>{_render_inline_md(content)}</div>"
+                content_html = await _inline_images(content_html)
             sections_html.append(f"{heading}\n<div class='section-body'>{content_html}</div>")
 
         body_html = "\n".join(sections_html)

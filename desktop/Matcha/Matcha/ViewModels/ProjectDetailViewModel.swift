@@ -525,8 +525,9 @@ class ProjectDetailViewModel {
                 }
             }
         } catch {
+            print("[Kanban] toggleTaskComplete PATCH failed task=\(id): \(error)")
             await loadTasks()
-            await MainActor.run { errorMessage = error.localizedDescription }
+            await MainActor.run { errorMessage = "Toggle failed: \(error.localizedDescription)" }
         }
     }
 
