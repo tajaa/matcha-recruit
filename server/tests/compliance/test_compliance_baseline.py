@@ -235,3 +235,82 @@ class TestAnnualRollover:
         w2 = next(i for i in items if "w2-to-employees" in i.id)
         # Should be next year's deadline now
         assert w2.deadline == "2027-01-31"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# New York
+# ─────────────────────────────────────────────────────────────────────
+
+class TestNewYork:
+    def test_ny_location_includes_quarterly_nys45(self):
+        items = get_baseline_calendar_items(
+            today=date(2026, 1, 15),
+            employee_count=10,
+            has_ca_location=False,
+            has_ny_location=True,
+        )
+        nys45_slugs = sorted(
+            i.id.split(":")[2] for i in items if "ny-nys45" in i.id
+        )
+        assert nys45_slugs == [
+            "ny-nys45-q1", "ny-nys45-q2", "ny-nys45-q3", "ny-nys45-q4",
+        ]
+
+    def test_ny_universal_items(self):
+        """NY harassment training, PFL notice, and HERO Act review apply
+        to every NY employer regardless of size."""
+        items = get_baseline_calendar_items(
+            today=date(2026, 1, 15),
+            employee_count=1,
+            has_ca_location=False,
+            has_ny_location=True,
+        )
+        slugs = [i.id.split(":")[2] for i in items]
+        assert "ny-harassment-training" in slugs
+        assert "ny-pfl-notice" in slugs
+        assert "ny-hero-act-review" in slugs
+
+    def test_ny_pay_transparency_4plus(self):
+        items_3 = get_baseline_calendar_items(
+            today=date(2026, 1, 15), employee_count=3,
+            has_ca_location=False, has_ny_location=True,
+        )
+        items_4 = get_baseline_calendar_items(
+            today=date(2026, 1, 15), employee_count=4,
+            has_ca_location=False, has_ny_location=True,
+        )
+        slugs_3 = [i.id.split(":")[2] for i in items_3]
+        slugs_4 = [i.id.split(":")[2] for i in items_4]
+        assert "ny-pay-transparency-review" not in slugs_3
+        assert "ny-pay-transparency-review" in slugs_4
+
+    def test_ca_only_omits_ny_items(self):
+        items = get_baseline_calendar_items(
+            today=date(2026, 1, 15),
+            employee_count=200,
+            has_ca_location=True,
+            has_ny_location=False,
+        )
+        scopes = {i.id.split(":")[1] for i in items}
+        assert "ny" not in scopes
+
+    def test_ca_and_ny_both_present(self):
+        items = get_baseline_calendar_items(
+            today=date(2026, 1, 15),
+            employee_count=200,
+            has_ca_location=True,
+            has_ny_location=True,
+        )
+        scopes = {i.id.split(":")[1] for i in items}
+        # Both state scopes appear alongside federal
+        assert scopes == {"fed", "ca", "ny"}
+
+    def test_ny_only_omits_ca_items(self):
+        items = get_baseline_calendar_items(
+            today=date(2026, 1, 15),
+            employee_count=200,
+            has_ca_location=False,
+            has_ny_location=True,
+        )
+        scopes = {i.id.split(":")[1] for i in items}
+        assert "ca" not in scopes

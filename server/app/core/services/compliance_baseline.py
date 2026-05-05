@@ -113,11 +113,12 @@ def get_baseline_calendar_items(
     today: date,
     employee_count: int,
     has_ca_location: bool,
+    has_ny_location: bool = False,
 ) -> list[CalendarItem]:
     """Compute the broad-strokes baseline calendar feed.
 
-    Returns federal items always; CA items only when the company has
-    at least one CA business_location. Rules with headcount thresholds
+    Returns federal items always; CA / NY items only when the company has
+    at least one location in that state. Rules with headcount thresholds
     self-filter: a 5-employee tenant sees W-2 / 1099 / IIPP but not
     OSHA 300A or EEO-1.
     """
@@ -222,64 +223,132 @@ def get_baseline_calendar_items(
         jurisdiction_name="Federal",
     ))
 
-    if not has_ca_location:
-        return sorted(out, key=lambda i: i.deadline)
+    if has_ca_location:
+        # ── California — DE 9 / DE 9C quarterly (every employer)
+        for q_label, q_due in (
+            ("Q1", (4, 30)),
+            ("Q2", (7, 31)),
+            ("Q3", (10, 31)),
+            ("Q4", (1, 31)),
+        ):
+            out.append(_make(
+                slug=f"ca-de9-{q_label.lower()}", scope="ca", today=today,
+                title=f"CA DE 9 / DE 9C — {q_label} payroll filing",
+                category="payroll_tax",
+                severity="high",
+                deadline=_resolve_date(today, *q_due),
+                action="File quarterly DE 9 (contribution return) and DE 9C (wage detail) with the California EDD.",
+                jurisdiction_name="California",
+                location_state="CA",
+            ))
 
-    # ── California — DE 9 / DE 9C quarterly (every employer)
-    for q_label, q_due in (
-        ("Q1", (4, 30)),
-        ("Q2", (7, 31)),
-        ("Q3", (10, 31)),
-        ("Q4", (1, 31)),
-    ):
+        # ── California — IIPP annual review (1+ employees, every CA employer)
         out.append(_make(
-            slug=f"ca-de9-{q_label.lower()}", scope="ca", today=today,
-            title=f"CA DE 9 / DE 9C — {q_label} payroll filing",
-            category="payroll_tax",
-            severity="high",
-            deadline=_resolve_date(today, *q_due),
-            action="File quarterly DE 9 (contribution return) and DE 9C (wage detail) with the California EDD.",
+            slug="ca-iipp-review", scope="ca", today=today,
+            title="CA IIPP annual review",
+            category="safety",
+            severity="medium",
+            deadline=_resolve_date(today, 12, 31),
+            action="Review and update the Injury & Illness Prevention Program — required of every CA employer with at least one employee.",
             jurisdiction_name="California",
             location_state="CA",
         ))
 
-    # ── California — IIPP annual review (1+ employees, every CA employer)
-    out.append(_make(
-        slug="ca-iipp-review", scope="ca", today=today,
-        title="CA IIPP annual review",
-        category="safety",
-        severity="medium",
-        deadline=_resolve_date(today, 12, 31),
-        action="Review and update the Injury & Illness Prevention Program — required of every CA employer with at least one employee.",
-        jurisdiction_name="California",
-        location_state="CA",
-    ))
+        # ── California — DFEH/CRD harassment prevention training (5+, biennial)
+        if employee_count >= 5:
+            out.append(_make(
+                slug="ca-harassment-training", scope="ca", today=today,
+                title="CA harassment prevention training (biennial)",
+                category="employment_law",
+                severity="medium",
+                deadline=_resolve_date(today, 12, 31),
+                action="Provide CRD-compliant sexual harassment prevention training — supervisors 2 hours, non-supervisors 1 hour, every 2 years.",
+                jurisdiction_name="California",
+                location_state="CA",
+            ))
 
-    # ── California — DFEH/CRD harassment prevention training (5+, biennial)
-    if employee_count >= 5:
+        # ── California — Pay Data Reporting SB 1162 (100+)
+        if employee_count >= 100:
+            out.append(_make(
+                slug="ca-pay-data-report", scope="ca", today=today,
+                title="CA Pay Data Reporting (SB 1162)",
+                category="employment_law",
+                severity="high",
+                deadline=_resolve_second_wed_may(today),
+                action="File pay data report with the California Civil Rights Department (second Wednesday of May).",
+                jurisdiction_name="California",
+                location_state="CA",
+            ))
+
+    if has_ny_location:
+        # ── New York — NYS-45 quarterly combined withholding/wage/UI
+        # (every NY employer). Same Q-end-month-plus-one cadence as CA DE 9.
+        for q_label, q_due in (
+            ("Q1", (4, 30)),
+            ("Q2", (7, 31)),
+            ("Q3", (10, 31)),
+            ("Q4", (1, 31)),
+        ):
+            out.append(_make(
+                slug=f"ny-nys45-{q_label.lower()}", scope="ny", today=today,
+                title=f"NY NYS-45 — {q_label} combined withholding & UI return",
+                category="payroll_tax",
+                severity="high",
+                deadline=_resolve_date(today, *q_due),
+                action="File NYS-45 (combined NYS-1 withholding + UI Form 45 wage detail) with the NY Department of Taxation and Finance.",
+                jurisdiction_name="New York",
+                location_state="NY",
+            ))
+
+        # ── NY — Sexual Harassment Prevention Training (every employee, annual)
+        # NYSHRL applies to every NY employer regardless of size — no threshold.
         out.append(_make(
-            slug="ca-harassment-training", scope="ca", today=today,
-            title="CA harassment prevention training (biennial)",
+            slug="ny-harassment-training", scope="ny", today=today,
+            title="NY sexual harassment prevention training (annual)",
             category="employment_law",
             severity="medium",
             deadline=_resolve_date(today, 12, 31),
-            action="Provide CRD-compliant sexual harassment prevention training — supervisors 2 hours, non-supervisors 1 hour, every 2 years.",
-            jurisdiction_name="California",
-            location_state="CA",
+            action="Provide NY DOL/Division of Human Rights compliant interactive sexual-harassment training to every employee — required annually under §201-g.",
+            jurisdiction_name="New York",
+            location_state="NY",
         ))
 
-    # ── California — Pay Data Reporting SB 1162 (100+)
-    if employee_count >= 100:
+        # ── NY — Paid Family Leave annual employee notice (every NY employer)
         out.append(_make(
-            slug="ca-pay-data-report", scope="ca", today=today,
-            title="CA Pay Data Reporting (SB 1162)",
-            category="employment_law",
-            severity="high",
-            deadline=_resolve_second_wed_may(today),
-            action="File pay data report with the California Civil Rights Department (second Wednesday of May).",
-            jurisdiction_name="California",
-            location_state="CA",
+            slug="ny-pfl-notice", scope="ny", today=today,
+            title="NY Paid Family Leave annual employee notice",
+            category="benefits",
+            severity="medium",
+            deadline=_resolve_date(today, 12, 31),
+            action="Distribute the NY PFL Statement of Rights notice to all eligible employees and post the required PFL workplace poster.",
+            jurisdiction_name="New York",
+            location_state="NY",
         ))
+
+        # ── NY — HERO Act airborne infectious disease plan (every employer)
+        out.append(_make(
+            slug="ny-hero-act-review", scope="ny", today=today,
+            title="NY HERO Act airborne disease plan review",
+            category="safety",
+            severity="medium",
+            deadline=_resolve_date(today, 12, 31),
+            action="Review and update the NY HERO Act airborne infectious disease exposure prevention plan; distribute current plan to employees.",
+            jurisdiction_name="New York",
+            location_state="NY",
+        ))
+
+        # ── NY — Pay Transparency Act (4+; effective Sept 17, 2023)
+        if employee_count >= 4:
+            out.append(_make(
+                slug="ny-pay-transparency-review", scope="ny", today=today,
+                title="NY Pay Transparency compliance review",
+                category="employment_law",
+                severity="medium",
+                deadline=_resolve_date(today, 12, 31),
+                action="Audit current job postings — all NY-advertised roles must include a good-faith salary range and job description (Labor Law §194-b, 4+ employees).",
+                jurisdiction_name="New York",
+                location_state="NY",
+            ))
 
     # Trim items past the lookahead window — keeps the feed near-term.
     cutoff = today + timedelta(days=_LOOKAHEAD_DAYS)

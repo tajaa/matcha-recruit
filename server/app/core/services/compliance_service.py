@@ -6123,11 +6123,16 @@ async def get_calendar_items(
                 "SELECT 1 FROM business_locations WHERE company_id = $1 AND state = 'CA' AND is_active = true LIMIT 1",
                 company_id,
             ))
+            has_ny = bool(await conn.fetchval(
+                "SELECT 1 FROM business_locations WHERE company_id = $1 AND state = 'NY' AND is_active = true LIMIT 1",
+                company_id,
+            ))
             today = _date.today()
             baseline = get_baseline_calendar_items(
                 today=today,
                 employee_count=int(employee_count),
                 has_ca_location=has_ca,
+                has_ny_location=has_ny,
             )
             # Apply the same from/to filter the alert query honors so a
             # caller asking for a specific window isn't surprised by
