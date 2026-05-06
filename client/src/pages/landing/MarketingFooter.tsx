@@ -1,12 +1,20 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import NewsletterSignup from '../../components/NewsletterSignup'
+import { PricingContactModal } from '../../components/PricingContactModal'
 
 const INK = 'var(--color-ivory-ink)'
 const MUTED = 'var(--color-ivory-muted)'
 const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 
+type FooterLink =
+  | { label: string; to: string }
+  | { label: string; onClick: () => void }
+
 export default function MarketingFooter() {
+  const [consultationOpen, setConsultationOpen] = useState(false)
+
   return (
     <footer className="border-t py-16" style={{ borderColor: LINE }}>
       <div className="max-w-[1440px] mx-auto px-6 sm:px-10">
@@ -33,7 +41,7 @@ export default function MarketingFooter() {
           ]} />
           <FooterCol title="Company" links={[
             { label: 'Matcha Work', to: '/matcha-work' },
-            { label: 'Book a Consultation', to: '/login' },
+            { label: 'Book a Consultation', onClick: () => setConsultationOpen(true) },
             { label: 'Client Login', to: '/login' },
           ]} />
           <FooterCol title="Legal" links={[
@@ -54,20 +62,36 @@ export default function MarketingFooter() {
           <span>Made with care.</span>
         </div>
       </div>
+      <PricingContactModal
+        isOpen={consultationOpen}
+        onClose={() => setConsultationOpen(false)}
+        mode="consultation"
+      />
     </footer>
   )
 }
 
-function FooterCol({ title, links }: { title: string; links: { label: string; to: string }[] }) {
+function FooterCol({ title, links }: { title: string; links: FooterLink[] }) {
   return (
     <div>
       <div className="text-xs uppercase tracking-wider mb-4" style={{ color: MUTED }}>{title}</div>
       <ul className="space-y-3">
         {links.map(link => (
           <li key={link.label}>
-            <Link to={link.to} className="text-sm hover:opacity-60 transition-opacity" style={{ color: INK }}>
-              {link.label}
-            </Link>
+            {'to' in link ? (
+              <Link to={link.to} className="text-sm hover:opacity-60 transition-opacity" style={{ color: INK }}>
+                {link.label}
+              </Link>
+            ) : (
+              <button
+                type="button"
+                onClick={link.onClick}
+                className="text-sm hover:opacity-60 transition-opacity text-left"
+                style={{ color: INK }}
+              >
+                {link.label}
+              </button>
+            )}
           </li>
         ))}
       </ul>

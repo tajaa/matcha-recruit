@@ -171,7 +171,7 @@ export default function AskExpert() {
         </button>
 
         <p className="text-[11px] text-vsc-text/50 text-center">
-          One business day response. For urgent matters, call (555) 123-4567 directly.
+          One business day response.
         </p>
       </form>
     </div>

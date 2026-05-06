@@ -75,7 +75,7 @@ export default function TermsPage() {
           </Section>
 
           <Section title="12. Contact">
-            <p>Questions about these Terms? Reach us at <a href="mailto:legal@matchahq.com" className="underline underline-offset-2" style={{ color: INK }}>legal@matchahq.com</a>.</p>
+            <p>Questions about these Terms? Reach us at <a href="mailto:support@hey-matcha.com" className="underline underline-offset-2" style={{ color: INK }}>support@hey-matcha.com</a>.</p>
           </Section>
         </div>
       </main>

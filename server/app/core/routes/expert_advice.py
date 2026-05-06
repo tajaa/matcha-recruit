@@ -55,7 +55,12 @@ async def submit_expert_advice(
 
     async with get_connection() as conn:
         user_row = await conn.fetchrow(
-            "SELECT email, name FROM users WHERE id = $1",
+            """
+            SELECT u.email, c.name
+            FROM users u
+            LEFT JOIN clients c ON c.user_id = u.id
+            WHERE u.id = $1
+            """,
             current_user.id,
         )
         company_row = None
