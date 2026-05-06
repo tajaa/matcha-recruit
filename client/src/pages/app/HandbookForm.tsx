@@ -9,7 +9,6 @@ import { HandbookProfileForm } from '../../components/handbook/HandbookProfileFo
 import { HandbookPolicyPack } from '../../components/handbook/HandbookPolicyPack'
 import { HandbookCustomSections } from '../../components/handbook/HandbookCustomSections'
 import { HandbookReviewStep } from '../../components/handbook/HandbookReviewStep'
-import { useMe } from '../../hooks/useMe'
 import type {
   HandbookMode,
   HandbookSourceType,
@@ -20,13 +19,8 @@ import type {
   HandbookWizardDraftState,
   WorkbookType,
 } from '../../types/handbook'
-import {
-  HEALTHCARE_WORKBOOK_TYPES,
-  GENERAL_WORKBOOK_TYPES,
-  WORKBOOK_TYPE_LABELS,
-} from '../../types/handbook'
 
-const STEPS = ['Business Profile', 'Workbook Type', 'State Scope', 'Company Profile', 'Policy Setup', 'Review']
+const STEPS = ['Business Profile', 'State Scope', 'Company Profile', 'Policy Setup', 'Review']
 
 const DEFAULT_PROFILE: CompanyHandbookProfileInput = {
   legal_name: '',
@@ -50,7 +44,6 @@ export default function HandbookForm() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const isEdit = !!id
-  const { isHealthcare } = useMe()
 
   // Wizard state
   const [step, setStep] = useState(0)
@@ -78,8 +71,6 @@ export default function HandbookForm() {
   const [error, setError] = useState<string | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
-  const workbookOptions = isHealthcare ? HEALTHCARE_WORKBOOK_TYPES : GENERAL_WORKBOOK_TYPES
-
   // Build draft state for save/restore
   const buildDraftState = useCallback((): HandbookWizardDraftState => ({
     step, title, mode, sourceType, industry, workbookType, states, profile,
@@ -88,7 +79,12 @@ export default function HandbookForm() {
   }), [step, title, mode, sourceType, industry, workbookType, states, profile, customSections, guidedAnswers, suggestedSections, fileUrl, fileName])
 
   function restoreDraft(s: HandbookWizardDraftState) {
-    if (s.step != null) setStep(s.step as number)
+    if (s.step != null) {
+      // Drafts saved before the Workbook Type step was removed may carry
+      // step indexes up to 5; clamp so we never land on a non-rendered step.
+      const raw = s.step as number
+      setStep(Math.max(0, Math.min(raw, STEPS.length - 1)))
+    }
     if (s.title) setTitle(s.title as string)
     if (s.mode) setMode(s.mode as HandbookMode)
     if (s.sourceType) setSourceType(s.sourceType as HandbookSourceType)
@@ -238,13 +234,18 @@ export default function HandbookForm() {
     setCreating(true)
     setError(null)
     try {
+      // Drop sections the user added but never titled — backend rejects
+      // title length < 2 with a 422.
+      const validCustomSections = customSections.filter(
+        (s) => s.title.trim().length >= 2,
+      )
       if (isEdit) {
         await handbooks.update(id!, {
           title,
           mode,
           scopes: states.map((s) => ({ state: s })),
           profile,
-          sections: customSections.length > 0 ? customSections : undefined,
+          sections: validCustomSections.length > 0 ? validCustomSections : undefined,
           file_url: fileUrl,
           file_name: fileName,
           workbook_type: workbookType,
@@ -278,7 +279,7 @@ export default function HandbookForm() {
           industry: industry || undefined,
           scopes: states.map((s) => ({ state: s })),
           profile,
-          custom_sections: [...customSections, ...conditionalSections],
+          custom_sections: [...validCustomSections, ...conditionalSections],
           guided_answers: guidedAnswers,
           file_url: fileUrl ?? undefined,
           file_name: fileName ?? undefined,
@@ -300,11 +301,10 @@ export default function HandbookForm() {
   function canAdvance(): boolean {
     switch (step) {
       case 0: return title.trim().length >= 2
-      case 1: return workbookType !== null
-      case 2: return states.length >= (mode === 'multi_state' ? 2 : 1)
-      case 3: return profile.legal_name.trim().length > 0 && profile.ceo_or_president.trim().length > 0
-      case 4: return sourceType === 'upload' ? !!fileUrl : true
-      case 5: return true
+      case 1: return states.length >= (mode === 'multi_state' ? 2 : 1)
+      case 2: return profile.legal_name.trim().length > 0 && profile.ceo_or_president.trim().length > 0
+      case 3: return sourceType === 'upload' ? !!fileUrl : true
+      case 4: return true
       default: return false
     }
   }
@@ -365,33 +365,9 @@ export default function HandbookForm() {
         </HandbookWizardCard>
       )}
 
-      {/* Step 1: Workbook Type */}
+      {/* Step 1: State Scope */}
       {step === 1 && (
-        <HandbookWizardCard stepLabel="Step 2" title="Workbook Type" description="Select the category for this handbook." required>
-          <div className="grid grid-cols-2 gap-3">
-            {workbookOptions.map((wt) => (
-              <button
-                key={wt}
-                type="button"
-                onClick={() => setWorkbookType(wt)}
-                className={`text-left p-3 rounded-lg border transition-colors ${
-                  workbookType === wt
-                    ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500'
-                    : 'border-zinc-700 bg-zinc-800/50 hover:border-zinc-600'
-                }`}
-              >
-                <span className={`text-sm font-medium ${workbookType === wt ? 'text-emerald-400' : 'text-zinc-200'}`}>
-                  {WORKBOOK_TYPE_LABELS[wt]}
-                </span>
-              </button>
-            ))}
-          </div>
-        </HandbookWizardCard>
-      )}
-
-      {/* Step 2: State Scope */}
-      {step === 2 && (
-        <HandbookWizardCard stepLabel="Step 3" title="State Scope" description="Select the states your handbook will cover." required>
+        <HandbookWizardCard stepLabel="Step 2" title="State Scope" description="Select the states your handbook will cover." required>
           <HandbookStateSelector
             selected={states}
             onChange={setStates}
@@ -402,16 +378,16 @@ export default function HandbookForm() {
         </HandbookWizardCard>
       )}
 
-      {/* Step 3: Company Profile */}
-      {step === 3 && (
-        <HandbookWizardCard stepLabel="Step 4" title="Company Profile" description="Enter your company details and workforce profile." required>
+      {/* Step 2: Company Profile */}
+      {step === 2 && (
+        <HandbookWizardCard stepLabel="Step 3" title="Company Profile" description="Enter your company details and workforce profile." required>
           <HandbookProfileForm profile={profile} onChange={setProfile} />
         </HandbookWizardCard>
       )}
 
-      {/* Step 4: Policy Setup */}
-      {step === 4 && (
-        <HandbookWizardCard stepLabel="Step 5" title="Policy Setup" description={sourceType === 'upload' ? 'Upload your existing handbook PDF.' : 'Build your policy pack using AI guidance.'}>
+      {/* Step 3: Policy Setup */}
+      {step === 3 && (
+        <HandbookWizardCard stepLabel="Step 4" title="Policy Setup" description={sourceType === 'upload' ? 'Upload your existing handbook PDF.' : 'Build your policy pack using AI guidance.'}>
           {sourceType === 'upload' ? (
             <div className="space-y-3">
               <FileUpload accept=".pdf" onFiles={handleFileUpload}>
@@ -443,9 +419,9 @@ export default function HandbookForm() {
         </HandbookWizardCard>
       )}
 
-      {/* Step 5: Review */}
-      {step === 5 && (
-        <HandbookWizardCard stepLabel="Step 6" title="Review" description="Review your handbook configuration before creating.">
+      {/* Step 4: Review */}
+      {step === 4 && (
+        <HandbookWizardCard stepLabel="Step 5" title="Review" description="Review your handbook configuration before creating.">
           <HandbookReviewStep
             title={title}
             mode={mode}

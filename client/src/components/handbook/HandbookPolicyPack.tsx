@@ -8,6 +8,7 @@ const INDUSTRIES = [
   { value: 'general', label: 'General' },
   { value: 'tech', label: 'Technology' },
   { value: 'hospitality', label: 'Hospitality' },
+  { value: 'food_service', label: 'Food Service' },
   { value: 'retail', label: 'Retail' },
   { value: 'manufacturing', label: 'Manufacturing' },
   { value: 'healthcare', label: 'Healthcare' },

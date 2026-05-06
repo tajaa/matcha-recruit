@@ -21,26 +21,6 @@ export type WorkbookType =
   | 'finance'
   | 'general'
 
-export const HEALTHCARE_WORKBOOK_TYPES: WorkbookType[] = [
-  'clinical_patient_care',
-  'infection_control',
-  'hipaa_privacy',
-  'safety_emergency',
-  'human_resources',
-  'administrative_operations',
-  'compliance_regulatory',
-  'financial_billing',
-]
-
-export const GENERAL_WORKBOOK_TYPES: WorkbookType[] = [
-  'human_resources',
-  'operations',
-  'safety_compliance',
-  'it_security',
-  'finance',
-  'general',
-]
-
 export const WORKBOOK_TYPE_LABELS: Record<WorkbookType, string> = {
   clinical_patient_care: 'Clinical / Patient Care',
   infection_control: 'Infection Control',
