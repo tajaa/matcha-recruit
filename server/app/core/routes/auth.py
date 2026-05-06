@@ -2288,7 +2288,10 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
             # Compute which enabled features still need onboarding setup
             onboarding_needed = {}
             if profile:
-                enabled_features = merge_company_features(profile["enabled_features"])
+                enabled_features = merge_company_features(
+                    profile["enabled_features"],
+                    profile["signup_source"],
+                )
                 company_id = profile["company_id"]
 
                 # Company profile completeness (always checked)
@@ -2352,7 +2355,10 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                     "rejection_reason": profile["rejection_reason"],
                     "industry": profile["industry"],
                     "healthcare_specialties": list(profile["healthcare_specialties"] or []),
-                    "enabled_features": merge_company_features(profile["enabled_features"]),
+                    "enabled_features": merge_company_features(
+                        profile["enabled_features"],
+                        profile["signup_source"],
+                    ),
                     "is_personal": profile["is_personal"],
                     "signup_source": profile["signup_source"] if "signup_source" in profile.keys() else None,
                     "ir_onboarding_completed_at": (
@@ -2408,6 +2414,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                 """
                 SELECT e.id, e.user_id, e.org_id, c.name as company_name,
                        COALESCE(c.enabled_features, $2::jsonb) as enabled_features,
+                       c.signup_source,
                        e.first_name, e.last_name, e.email, e.work_state,
                        e.employment_type, e.start_date, e.manager_id, e.created_at
                 FROM employees e
@@ -2424,7 +2431,10 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                     "user_id": str(profile["user_id"]),
                     "company_id": str(profile["org_id"]),
                     "company_name": profile["company_name"],
-                    "enabled_features": merge_company_features(profile["enabled_features"]),
+                    "enabled_features": merge_company_features(
+                        profile["enabled_features"],
+                        profile["signup_source"],
+                    ),
                     "first_name": profile["first_name"],
                     "last_name": profile["last_name"],
                     "email": profile["email"],

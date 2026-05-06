@@ -431,22 +431,26 @@ def require_feature(feature_name: str):
             )
 
         async with get_connection() as conn:
-            enabled_features = await conn.fetchval(
+            row = await conn.fetchrow(
                 """
-                SELECT COALESCE(enabled_features, $2::jsonb)
+                SELECT COALESCE(enabled_features, $2::jsonb) AS enabled_features,
+                       signup_source
                 FROM companies
                 WHERE id = $1
                 """,
                 company_id,
                 default_company_features_json(),
             )
-            if enabled_features is None:
+            if row is None or row["enabled_features"] is None:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Company not found",
                 )
 
-            features = merge_company_features(enabled_features)
+            features = merge_company_features(
+                row["enabled_features"],
+                row["signup_source"],
+            )
 
             if not features.get(feature_name, False):
                 raise HTTPException(

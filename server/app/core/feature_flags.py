@@ -17,12 +17,24 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "discipline": True,
 }
 
+# Tier-defining features that should always be on for a given signup_source,
+# regardless of what's stored in `companies.enabled_features`. Lets new
+# bundle members inherit features without a per-row backfill migration.
+# Paid gates (incidents/employees/discipline) intentionally NOT here —
+# those flip via Stripe webhook on checkout completion.
+TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
+    "matcha_lite": {"handbooks": True},
+}
+
 
 def default_company_features_json() -> str:
     return json.dumps(DEFAULT_COMPANY_FEATURES)
 
 
-def merge_company_features(raw_features: Any) -> dict[str, bool]:
+def merge_company_features(
+    raw_features: Any,
+    signup_source: str | None = None,
+) -> dict[str, bool]:
     if isinstance(raw_features, str):
         try:
             raw_features = json.loads(raw_features)
@@ -33,4 +45,9 @@ def merge_company_features(raw_features: Any) -> dict[str, bool]:
     merged = dict(DEFAULT_COMPANY_FEATURES)
     for key, value in features.items():
         merged[key] = bool(value)
+
+    if signup_source and signup_source in TIER_REQUIRED_FEATURES:
+        for key, value in TIER_REQUIRED_FEATURES[signup_source].items():
+            merged[key] = value
+
     return merged
