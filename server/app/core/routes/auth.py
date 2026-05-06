@@ -1150,8 +1150,12 @@ async def register_admin(request: AdminRegister):
 
 
 @router.post("/register/client", response_model=TokenResponse)
-async def register_client(request: ClientRegister, http_request: Request):
-    """Register a new client linked to a company."""
+async def register_client(
+    request: ClientRegister,
+    http_request: Request,
+    _admin: CurrentUser = Depends(require_admin),
+):
+    """Register a new client linked to a company. Admin-only — used by internal tooling."""
     ip = client_ip(http_request)
     await check_rate_limit(ip, "register_client", 10, 3600)
     async with get_connection() as conn:
@@ -1685,6 +1689,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 company_status = "approved"
                 signup_source = "matcha_lite"
                 lite_features = {k: False for k in DEFAULT_COMPANY_FEATURES}
+                lite_features["handbooks"] = True
                 if lite_broker_pays:
                     lite_features["incidents"] = True
                 enabled_features_json = json.dumps(lite_features)

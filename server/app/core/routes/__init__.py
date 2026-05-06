@@ -14,7 +14,7 @@ from .chat import router as chat_router, ws_router as chat_ws_router
 from .contact import router as contact_router
 from .leads_agent import router as leads_agent_router
 from .posters import router as posters_router
-from .hr_news import router as hr_news_router
+from .hr_news import router as hr_news_router, public_router as hr_news_public_router
 from .admin_handbook_references import router as admin_handbook_references_router
 from .legislative_tracker import router as legislative_tracker_router
 from .investigation_invite import router as investigation_invite_router
@@ -31,6 +31,7 @@ from .client_errors import router as client_errors_router
 from .server_errors import router as server_errors_router
 from .landing_media import public_router as landing_media_public_router, admin_router as landing_media_admin_router
 from .resources import router as resources_router
+from .expert_advice import router as expert_advice_router
 from ...matcha.dependencies import require_feature
 
 # Create main core router
@@ -59,6 +60,7 @@ core_router.include_router(leads_agent_router, prefix="/leads-agent", tags=["lea
 core_router.include_router(posters_router, prefix="/compliance/posters", tags=["compliance-posters"],
                            dependencies=[Depends(require_feature("compliance"))])
 core_router.include_router(hr_news_router, prefix="/admin/news", tags=["hr-news"])
+core_router.include_router(hr_news_public_router, prefix="/news", tags=["hr-news-public"])
 core_router.include_router(legislative_tracker_router, prefix="/admin/legislative-tracker", tags=["legislative-tracker"])
 core_router.include_router(investigation_invite_router, tags=["investigation-invite"])
 core_router.include_router(candidate_invite_router, tags=["candidate-invite"])
@@ -73,6 +75,7 @@ core_router.include_router(profile_resume_router, prefix="/users", tags=["profil
 core_router.include_router(newsletter_public_router, prefix="/newsletter", tags=["newsletter-public"])
 core_router.include_router(newsletter_admin_router, prefix="/admin/newsletter", tags=["newsletter-admin"])
 core_router.include_router(resources_router, prefix="/resources", tags=["resources"])
+core_router.include_router(expert_advice_router, prefix="/expert-advice", tags=["expert-advice"])
 core_router.include_router(landing_media_public_router, tags=["landing-media-public"])
 core_router.include_router(landing_media_admin_router, prefix="/admin", tags=["landing-media-admin"])
 core_router.include_router(client_errors_router, tags=["client-errors"])

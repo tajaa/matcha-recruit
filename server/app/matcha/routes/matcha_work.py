@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, UploadFile, File, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, UploadFile, File, status
 from fastapi.responses import StreamingResponse
 
 from ...core.models.auth import CurrentUser
@@ -3188,17 +3188,36 @@ async def discipline_upload_physical_endpoint(
     )
 
 
-@router.post("/signature/webhook")
-async def signature_webhook(body: dict):
+@public_router.post("/signature/webhook")
+async def signature_webhook(request: Request):
     """Provider webhook fan-in for completed e-signatures.
 
-    Provider-specific request shape varies; for v1 we accept the stub
-    provider's shape: {envelope_id, project_id, status='completed'}.
-    Concrete providers add header signature verification before this
-    body is trusted.
+    Mounted on the matcha-work public router so the e-sign provider can
+    POST without an authenticated session. URL: /api/matcha-work/public/signature/webhook
+    Configure DocuSeal (or other provider) to point at this path.
+
+    HMAC verification (X-Docuseal-Signature header) is required — see
+    matcha/services/signature_provider.py:verify_webhook_signature.
     """
     from ..services import project_service as proj_svc
-    from ..services.signature_provider import get_signature_provider
+    from ..services.signature_provider import get_signature_provider, verify_webhook_signature
+
+    raw = await request.body()
+    sig_header = (
+        request.headers.get("X-Docuseal-Signature")
+        or request.headers.get("X-DocuSeal-Signature")
+        or request.headers.get("X-Signature")
+        or ""
+    )
+    provider = get_signature_provider()
+    if not sig_header or not verify_webhook_signature(provider, raw, sig_header):
+        logger.warning("[matcha_work signature_webhook] HMAC verification failed")
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    try:
+        body = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
 
     envelope_id = body.get("envelope_id")
     project_id_raw = body.get("project_id")

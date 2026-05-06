@@ -68,6 +68,7 @@ import Locations from './pages/app/Locations'
 import Handbooks from './pages/app/Handbooks'
 import HandbookDetail from './pages/app/HandbookDetail'
 import HandbookForm from './pages/app/HandbookForm'
+import AskExpert from './pages/app/AskExpert'
 import Policies from './pages/app/Policies'
 import RiskAssessment from './pages/app/RiskAssessment'
 import CredentialTemplates from './pages/app/CredentialTemplates'
@@ -210,6 +211,7 @@ export default function App() {
         <Route path="handbook/new" element={<FeatureGate feature="handbooks" label="Handbooks"><HandbookForm /></FeatureGate>} />
         <Route path="handbook/:id" element={<FeatureGate feature="handbooks" label="Handbooks"><HandbookDetail /></FeatureGate>} />
         <Route path="handbook/:id/edit" element={<FeatureGate feature="handbooks" label="Handbooks"><HandbookForm /></FeatureGate>} />
+        <Route path="ask-expert" element={<AskExpert />} />
         <Route path="risk-assessment" element={<FeatureGate feature="risk_assessment" label="Risk Assessment"><RiskAssessment /></FeatureGate>} />
         <Route path="credential-templates" element={<FeatureGate feature="credential_templates" label="Credential Templates"><CredentialTemplates /></FeatureGate>} />
         <Route path="resources" element={<AppResources />} />

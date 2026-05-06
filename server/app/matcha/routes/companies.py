@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Depends, File, UploadFile
 from ...database import get_connection
 from ..models.company import CompanyCreate, CompanyUpdate, CompanyResponse
 from ..dependencies import require_admin_or_client, get_client_company_id
+from ...core.dependencies import require_admin
 from ...core.models.auth import CurrentUser
 from ...core.services.storage import get_storage
 
@@ -61,8 +62,11 @@ def _row_to_response(row, *, culture_profile=None, interview_count=0):
 
 
 @router.post("", response_model=CompanyResponse)
-async def create_company(company: CompanyCreate):
-    """Create a new company."""
+async def create_company(
+    company: CompanyCreate,
+    _admin: CurrentUser = Depends(require_admin),
+):
+    """Create a new company. Admin-only — bespoke onboarding goes through /auth/register/business."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
             f"""

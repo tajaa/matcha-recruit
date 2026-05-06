@@ -6,6 +6,7 @@ import json
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends, Query
 
 from ...core.dependencies import get_current_user, require_admin
+from ..dependencies import require_admin_or_client, get_client_company_id
 from ...core.models.auth import CurrentUser
 
 from ...database import get_connection
@@ -46,8 +47,16 @@ router = APIRouter()
 
 
 @router.post("/companies/{company_id}/interviews", response_model=InterviewStart)
-async def create_interview(company_id: UUID, interview: InterviewCreate):
+async def create_interview(
+    company_id: UUID,
+    interview: InterviewCreate,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
     """Create a new interview session for a company."""
+    if current_user.role == "client":
+        owned = await get_client_company_id(current_user)
+        if owned != company_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
     async with get_connection() as conn:
         # Verify company exists
         company = await conn.fetchrow(
@@ -949,7 +958,10 @@ async def get_interview_analysis(interview_id: UUID):
 
 
 @router.post("/interviews/{interview_id}/analyze")
-async def analyze_interview(interview_id: UUID):
+async def analyze_interview(
+    interview_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
     """Generate or regenerate conversation analysis for an interview."""
     settings = get_settings()
 
@@ -965,6 +977,11 @@ async def analyze_interview(interview_id: UUID):
         )
         if not row:
             raise HTTPException(status_code=404, detail="Interview not found")
+
+        if current_user.role == "client":
+            owned = await get_client_company_id(current_user)
+            if owned != row["company_id"]:
+                raise HTTPException(status_code=403, detail="Forbidden")
 
         if row["status"] != "completed":
             raise HTTPException(status_code=400, detail="Interview must be completed before analysis")

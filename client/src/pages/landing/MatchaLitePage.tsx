@@ -6,6 +6,7 @@ import { ShieldAlert, FileText, MapPin, Calculator, Bell, Loader2 } from 'lucide
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
 import { ComplianceTicker } from '../../components/landing/ComplianceTicker'
+import { HRNewsSection } from '../../components/landing/HRNewsSection'
 import { MatchaLiteMockup } from '../../components/landing/MatchaLiteMockup'
 import { PricingContactModal } from '../../components/PricingContactModal'
 import { api } from '../../api/client'
@@ -77,6 +78,7 @@ export default function MatchaLitePage() {
 
       <main>
         <FeatureGrid />
+        <HRNewsSection />
         <WaitlistSection waitlistRef={waitlistRef} />
       </main>
 

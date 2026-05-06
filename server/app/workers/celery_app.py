@@ -36,6 +36,7 @@ celery_app = Celery(
         "app.workers.tasks.discipline_expiry",
         "app.workers.tasks.auto_archive",
         "app.workers.tasks.newsletter_scheduler",
+        "app.workers.tasks.hr_news_fetch",
     ],
 )
 
@@ -195,6 +196,13 @@ def on_worker_ready(**kwargs):
         run_newsletter_scheduler.delay()
     else:
         print("[Worker] Newsletter scheduler is disabled, skipping.")
+
+    from app.workers.tasks.hr_news_fetch import run_hr_news_fetch
+
+    if _is_scheduler_enabled("hr_news_fetch"):
+        run_hr_news_fetch.delay()
+    else:
+        print("[Worker] HR news fetch scheduler is disabled, skipping.")
 
 
 # ── Server error reporter integration ───────────────────────────────────────
