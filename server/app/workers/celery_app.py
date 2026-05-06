@@ -37,6 +37,7 @@ celery_app = Celery(
         "app.workers.tasks.auto_archive",
         "app.workers.tasks.newsletter_scheduler",
         "app.workers.tasks.hr_news_fetch",
+        "app.workers.tasks.training_cadence",
     ],
 )
 
@@ -203,6 +204,13 @@ def on_worker_ready(**kwargs):
         run_hr_news_fetch.delay()
     else:
         print("[Worker] HR news fetch scheduler is disabled, skipping.")
+
+    from app.workers.tasks.training_cadence import run_training_cadence
+
+    if _is_scheduler_enabled("training_cadence"):
+        run_training_cadence.delay()
+    else:
+        print("[Worker] Training cadence scheduler is disabled, skipping.")
 
 
 # ── Server error reporter integration ───────────────────────────────────────

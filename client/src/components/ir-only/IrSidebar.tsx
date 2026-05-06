@@ -1,4 +1,4 @@
-import { AlertTriangle, Users, Building2, Gavel, MapPin, BookOpen, CalendarDays, LayoutDashboard, FileText, MessageCircleQuestion } from 'lucide-react'
+import { AlertTriangle, Users, Building2, Gavel, MapPin, BookOpen, CalendarDays, LayoutDashboard, FileText, MessageCircleQuestion, GraduationCap } from 'lucide-react'
 import SidebarShell from '../SidebarShell'
 import type { NavItem, NavGroup } from '../SidebarShell'
 import { useMe } from '../../hooks/useMe'
@@ -12,6 +12,7 @@ const nav: (NavItem | NavGroup)[] = [
   { to: '/app/compliance-calendar', icon: CalendarDays, label: 'Compliance Calendar' },
   { to: '/app/discipline', icon: Gavel, label: 'Performance Action', feature: 'discipline' },
   { to: '/app/handbooks', icon: FileText, label: 'Handbooks', feature: 'handbooks' },
+  { to: '/app/training', icon: GraduationCap, label: 'Training', feature: 'training' },
   { to: '/app/ask-expert', icon: MessageCircleQuestion, label: 'Ask an Expert' },
   { to: '/app/resources', icon: BookOpen, label: 'Resources' },
   { to: '/app/company', icon: Building2, label: 'Company' },

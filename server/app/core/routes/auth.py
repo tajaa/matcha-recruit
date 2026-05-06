@@ -1690,6 +1690,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 signup_source = "matcha_lite"
                 lite_features = {k: False for k in DEFAULT_COMPANY_FEATURES}
                 lite_features["handbooks"] = True
+                lite_features["training"] = True
                 if lite_broker_pays:
                     lite_features["incidents"] = True
                 enabled_features_json = json.dumps(lite_features)
@@ -1747,6 +1748,42 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 "UPDATE companies SET owner_id = $1 WHERE id = $2",
                 user["id"], company_id
             )
+
+            # Step 4b: Seed training_requirements for matcha_lite tenants from
+            # global lesson templates. Idempotent — skipped when no templates
+            # exist (e.g. fresh dev DB before generate_training_templates.py
+            # has been run).
+            if is_matcha_lite:
+                await conn.execute(
+                    """
+                    INSERT INTO training_requirements
+                      (company_id, title, description, training_type, jurisdiction,
+                       frequency_months, applies_to, template_id, required_minutes,
+                       pass_score_percent, is_active)
+                    SELECT $1,
+                           t.title,
+                           NULL,
+                           t.training_type,
+                           t.jurisdiction,
+                           t.frequency_months,
+                           CASE t.variant
+                               WHEN 'supervisor' THEN 'supervisor'
+                               ELSE 'nonsupervisor'
+                           END,
+                           t.id,
+                           t.required_minutes,
+                           t.pass_score_percent,
+                           TRUE
+                    FROM training_lesson_templates t
+                    WHERE t.is_active = TRUE
+                      AND NOT EXISTS (
+                          SELECT 1 FROM training_requirements tr
+                          WHERE tr.company_id = $1
+                            AND tr.template_id = t.id
+                      )
+                    """,
+                    company_id,
+                )
 
             # Seed profile data used by handbook/compliance flows.
             await _upsert_business_headcount_profile(

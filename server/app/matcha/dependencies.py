@@ -343,6 +343,7 @@ async def require_employee_record(
         employee = await conn.fetchrow(
             """SELECT id, org_id, user_id, email, first_name, last_name, work_state,
                       employment_type, start_date, termination_date, manager_id,
+                      is_supervisor,
                       phone, address, emergency_contact, created_at, updated_at
                FROM employees WHERE user_id = $1""",
             current_user.id

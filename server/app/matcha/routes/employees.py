@@ -249,6 +249,7 @@ class EmployeeUpdateRequest(BaseModel):
     start_date: Optional[str] = None
     termination_date: Optional[str] = None
     manager_id: Optional[UUID] = None
+    is_supervisor: Optional[bool] = None
     phone: Optional[str] = None
     address: Optional[str] = None
     pay_classification: Optional[str] = None
@@ -287,6 +288,7 @@ class EmployeeListResponse(BaseModel):
     termination_date: Optional[str]
     manager_id: Optional[UUID]
     manager_name: Optional[str]
+    is_supervisor: bool = False
     user_id: Optional[UUID]
     invitation_status: Optional[str]
     pay_classification: Optional[str] = None
@@ -865,7 +867,7 @@ async def list_employees(
             SELECT
                 e.id, e.email, e.personal_email, e.first_name, e.last_name, e.work_state,
                 e.employment_type, e.start_date, e.termination_date,
-                e.manager_id, e.user_id, e.created_at,
+                e.manager_id, e.is_supervisor, e.user_id, e.created_at,
                 {compensation_select}
                 {org_select}
                 {status_select}
@@ -953,6 +955,7 @@ async def list_employees(
                     termination_date=str(row["termination_date"]) if row["termination_date"] else None,
                     manager_id=row["manager_id"],
                     manager_name=row["manager_name"],
+                    is_supervisor=bool(row["is_supervisor"]),
                     user_id=row["user_id"],
                     invitation_status=row["invitation_status"],
                     pay_classification=pay_classification,
@@ -1247,6 +1250,7 @@ async def create_employee(
             termination_date=str(row["termination_date"]) if row["termination_date"] else None,
             manager_id=row["manager_id"],
             manager_name=None,
+            is_supervisor=bool(row.get("is_supervisor", False)) if hasattr(row, "get") else bool(row["is_supervisor"]),
             user_id=row["user_id"],
             invitation_status=None,
             pay_classification=pay_classification,
@@ -1354,6 +1358,7 @@ async def get_employee(
             termination_date=str(row["termination_date"]) if row["termination_date"] else None,
             manager_id=row["manager_id"],
             manager_name=row["manager_name"],
+            is_supervisor=bool(row["is_supervisor"]) if "is_supervisor" in row.keys() else False,
             user_id=row["user_id"],
             invitation_status=row["invitation_status"],
             pay_classification=pay_classification,
@@ -1460,6 +1465,11 @@ async def update_employee(
             values.append(request.manager_id)
             param_num += 1
 
+        if request.is_supervisor is not None:
+            updates.append(f"is_supervisor = ${param_num}")
+            values.append(bool(request.is_supervisor))
+            param_num += 1
+
         if request.phone is not None:
             updates.append(f"phone = ${param_num}")
             values.append(request.phone)
@@ -1559,6 +1569,7 @@ async def update_employee(
             termination_date=str(row["termination_date"]) if row["termination_date"] else None,
             manager_id=row["manager_id"],
             manager_name=manager_name,
+            is_supervisor=bool(row["is_supervisor"]) if "is_supervisor" in row.keys() else False,
             user_id=row["user_id"],
             invitation_status=invitation_status,
             pay_classification=pay_classification,
@@ -1650,6 +1661,7 @@ async def update_employee_status(
             termination_date=str(row["termination_date"]) if row["termination_date"] else None,
             manager_id=row["manager_id"],
             manager_name=manager_name,
+            is_supervisor=bool(row["is_supervisor"]) if "is_supervisor" in row.keys() else False,
             user_id=row["user_id"],
             invitation_status=invitation_status,
             pay_classification=pay_classification,

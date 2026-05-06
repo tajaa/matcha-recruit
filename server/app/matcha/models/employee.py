@@ -50,6 +50,7 @@ class EmployeeUpdate(BaseModel):
     phone: Optional[str] = None
     address: Optional[str] = None
     manager_id: Optional[UUID] = None
+    is_supervisor: Optional[bool] = None
     emergency_contact: Optional[dict] = None
 
 

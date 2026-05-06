@@ -4,6 +4,7 @@ import { Badge, Button, Card, Input, Select } from '../../components/ui'
 import { EmployeeStatusBadge } from '../../components/employees/EmployeeStatusBadge'
 import { OnboardingTaskList } from '../../components/employees/OnboardingTaskList'
 import { CredentialManager } from '../../components/employees/CredentialManager'
+import SupervisorToggle from '../../components/employees/SupervisorToggle'
 import { useEmployeeDetail } from '../../hooks/employees/useEmployeeDetail'
 import { typeLabel, statusLabel } from '../../types/employee'
 
@@ -264,6 +265,10 @@ export default function EmployeeDetail() {
                   <dd className="text-zinc-200">{employee.manager_name}</dd>
                 </div>
               )}
+              <SupervisorToggle
+                isSupervisor={!!employee.is_supervisor}
+                onChange={async (next) => { await updateEmployee({ is_supervisor: next }) }}
+              />
             </dl>
           </Card>
 

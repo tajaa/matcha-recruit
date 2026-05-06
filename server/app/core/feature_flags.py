@@ -23,7 +23,7 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
 # Paid gates (incidents/employees/discipline) intentionally NOT here —
 # those flip via Stripe webhook on checkout completion.
 TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
-    "matcha_lite": {"handbooks": True},
+    "matcha_lite": {"handbooks": True, "training": True},
 }
 
 

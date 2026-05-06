@@ -4,16 +4,27 @@ Manage training requirements, assign/track employee training records,
 and view compliance dashboards for overdue and completed trainings.
 """
 
+import json
 import logging
-from datetime import date, timedelta
-from typing import Optional
-from uuid import UUID
+import os
+from datetime import date, datetime, timedelta
+from typing import Any, Optional
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 
 from ...database import get_connection
-from ..dependencies import require_admin_or_client, get_client_company_id
+from ..dependencies import (
+    require_admin_or_client,
+    get_client_company_id,
+    require_employee_record,
+)
+from ..services.training_grading import (
+    grade_quiz as _grade_quiz_pure,
+    parse_jsonb as _parse_jsonb,
+    sanitize_lesson_template as _sanitize_lesson_template,
+)
 from ...core.models.auth import CurrentUser
 
 logger = logging.getLogger(__name__)
@@ -283,7 +294,12 @@ async def bulk_assign(
     user: CurrentUser = Depends(require_admin_or_client),
     company_id: UUID = Depends(get_client_company_id),
 ):
-    """Assign a training requirement to all active employees."""
+    """Assign a training requirement to active employees who match its `applies_to`
+    (supervisor / nonsupervisor / all) and `jurisdiction` (work_state filter).
+
+    Records `assigned_by` for audit. Skips employees with an existing active
+    assignment for the same requirement via the partial unique index.
+    """
     if not company_id:
         raise HTTPException(status_code=400, detail="No company found")
 
@@ -296,18 +312,26 @@ async def bulk_assign(
         if not requirement:
             raise HTTPException(status_code=404, detail="Training requirement not found")
 
-        # Find all active employees (no termination_date or termination_date in the future)
+        applies_to = (requirement["applies_to"] or "all").lower()
+        jurisdiction = requirement["jurisdiction"]  # may be None or e.g. 'CA'
+
         employees = await conn.fetch(
             """
             SELECT id FROM employees
             WHERE org_id = $1
               AND (termination_date IS NULL OR termination_date > CURRENT_DATE)
+              AND ($2 = 'all'
+                   OR ($2 = 'supervisor' AND is_supervisor = TRUE)
+                   OR ($2 = 'nonsupervisor' AND is_supervisor = FALSE))
+              AND ($3::varchar IS NULL OR work_state = $3)
             """,
             company_id,
+            applies_to,
+            jurisdiction,
         )
 
         if not employees:
-            return {"assigned_count": 0, "requirement_id": str(body.requirement_id), "message": "No active employees found"}
+            return {"assigned_count": 0, "requirement_id": str(body.requirement_id), "message": "No matching active employees found"}
 
         assigned_date = date.today()
         due_date = None
@@ -323,17 +347,18 @@ async def bulk_assign(
             requirement["training_type"],
             assigned_date,
             due_date,
+            user.id,  # assigned_by
         ]
         base_idx = len(params) + 1
         for i, emp in enumerate(employees):
-            values_parts.append(f"($1, ${base_idx + i}, $2, $3, $4, $5, $6)")
+            values_parts.append(f"($1, ${base_idx + i}, $2, $3, $4, $5, $6, $7)")
             params.append(emp["id"])
 
         result = await conn.execute(
             f"""
             INSERT INTO training_records
                 (company_id, employee_id, requirement_id, title, training_type,
-                 assigned_date, due_date)
+                 assigned_date, due_date, assigned_by)
             VALUES {', '.join(values_parts)}
             ON CONFLICT (employee_id, requirement_id)
                 WHERE status IN ('assigned', 'in_progress')
@@ -634,3 +659,461 @@ async def _execute_update(query: str, params: list):
     """Run an UPDATE ... RETURNING query and return the row."""
     async with get_connection() as conn:
         return await conn.fetchrow(query, *params)
+
+
+# ---------------------------------------------------------------------------
+# Employee-side endpoints (require_employee_record)
+# ---------------------------------------------------------------------------
+
+
+class QuizSubmitRequest(BaseModel):
+    answers: dict[str, str] = Field(..., description="{question_id: chosen_key}")
+    elapsed_seconds: Optional[int] = None
+
+
+class AttestRequest(BaseModel):
+    attestation_text: str = Field(
+        default=(
+            "I attest that I personally completed the training modules and assessment "
+            "without assistance, and that the answers I submitted are my own."
+        ),
+        max_length=2000,
+    )
+
+
+async def _load_record_for_employee(conn, record_id: UUID, employee_id: UUID) -> dict:
+    row = await conn.fetchrow(
+        """
+        SELECT r.*,
+               req.template_id, req.required_minutes AS req_required_minutes,
+               req.pass_score_percent AS req_pass_score_percent,
+               req.frequency_months AS req_frequency_months,
+               req.applies_to AS req_applies_to,
+               req.jurisdiction AS req_jurisdiction
+        FROM training_records r
+        LEFT JOIN training_requirements req ON req.id = r.requirement_id
+        WHERE r.id = $1 AND r.employee_id = $2
+        """,
+        record_id, employee_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Training record not found")
+    return dict(row)
+
+
+async def _load_template_for_record(conn, record: dict) -> dict:
+    template_id = record.get("template_id")
+    if not template_id:
+        raise HTTPException(
+            status_code=409,
+            detail="This training record has no lesson template attached. Contact your administrator.",
+        )
+    row = await conn.fetchrow(
+        "SELECT * FROM training_lesson_templates WHERE id = $1 AND is_active = TRUE",
+        template_id,
+    )
+    if not row:
+        raise HTTPException(
+            status_code=409,
+            detail="Lesson template is no longer active.",
+        )
+    return dict(row)
+
+
+@router.get("/records/me")
+async def list_my_records(
+    employee=Depends(require_employee_record),
+):
+    """List training records assigned to the current employee."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT r.*, req.required_minutes AS req_required_minutes,
+                   req.template_id
+            FROM training_records r
+            LEFT JOIN training_requirements req ON req.id = r.requirement_id
+            WHERE r.employee_id = $1
+            ORDER BY
+                CASE r.status
+                    WHEN 'in_progress' THEN 0
+                    WHEN 'assigned' THEN 1
+                    WHEN 'completed' THEN 2
+                    ELSE 3
+                END,
+                r.due_date NULLS LAST,
+                r.created_at DESC
+            """,
+            employee["id"],
+        )
+        out = []
+        for r in rows:
+            d = _record_to_dict(r)
+            d["required_minutes"] = r["req_required_minutes"]
+            d["has_lesson"] = r["template_id"] is not None
+            d["started_at"] = r["started_at"].isoformat() if r["started_at"] else None
+            d["attested_at"] = r["attested_at"].isoformat() if r["attested_at"] else None
+            out.append(d)
+        return out
+
+
+@router.get("/records/{record_id}/lesson")
+async def get_lesson(
+    record_id: UUID,
+    employee=Depends(require_employee_record),
+):
+    """Return sanitized lesson + quiz (no correct_key, no rationale)."""
+    async with get_connection() as conn:
+        record = await _load_record_for_employee(conn, record_id, employee["id"])
+        template = await _load_template_for_record(conn, record)
+
+    sanitized = _sanitize_lesson_template(template["lesson_content"], template["quiz"])
+    return {
+        "record_id": str(record_id),
+        "template_id": str(template["id"]),
+        "template_key": template["template_key"],
+        "variant": template["variant"],
+        "title": sanitized["title"] or template["title"],
+        "summary_for_certificate": sanitized["summary_for_certificate"],
+        "required_minutes": template["required_minutes"],
+        "pass_score_percent": template["pass_score_percent"],
+        "sections": sanitized["sections"],
+        "quiz": sanitized["quiz"],
+        "started_at": record["started_at"].isoformat() if record["started_at"] else None,
+        "status": record["status"],
+    }
+
+
+@router.post("/records/{record_id}/start")
+async def start_lesson(
+    record_id: UUID,
+    employee=Depends(require_employee_record),
+):
+    """Mark training as in_progress + record started_at (idempotent)."""
+    async with get_connection() as conn:
+        record = await _load_record_for_employee(conn, record_id, employee["id"])
+
+        if record["status"] in ("completed", "expired", "waived"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Training is {record['status']} and cannot be started again.",
+            )
+
+        if record["started_at"]:
+            return {
+                "started_at": record["started_at"].isoformat(),
+                "status": record["status"],
+                "already_started": True,
+            }
+
+        row = await conn.fetchrow(
+            """
+            UPDATE training_records
+            SET started_at = NOW(),
+                status = CASE WHEN status = 'assigned' THEN 'in_progress' ELSE status END,
+                updated_at = NOW()
+            WHERE id = $1
+            RETURNING started_at, status
+            """,
+            record_id,
+        )
+        return {
+            "started_at": row["started_at"].isoformat(),
+            "status": row["status"],
+            "already_started": False,
+        }
+
+
+def _grade_quiz(quiz_payload: Any, submitted_answers: dict[str, str]) -> tuple[float, int, int]:
+    """Thin alias for the pure-function grader, kept for in-route call sites."""
+    return _grade_quiz_pure(quiz_payload, submitted_answers)
+
+
+@router.post("/records/{record_id}/quiz")
+async def submit_quiz(
+    record_id: UUID,
+    body: QuizSubmitRequest,
+    employee=Depends(require_employee_record),
+):
+    """Submit quiz answers. Enforces minimum seat-time. Writes attempt audit row."""
+    async with get_connection() as conn:
+        record = await _load_record_for_employee(conn, record_id, employee["id"])
+        template = await _load_template_for_record(conn, record)
+
+        if record["status"] in ("completed", "expired", "waived"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Training is {record['status']}; cannot submit a new attempt.",
+            )
+
+        if not record["started_at"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Training has not been started. Call /start first.",
+            )
+
+        required_minutes = (
+            record.get("req_required_minutes") or template["required_minutes"] or 0
+        )
+        required_seconds = required_minutes * 60
+        elapsed_seconds = (datetime.utcnow() - record["started_at"].replace(tzinfo=None)).total_seconds()
+
+        if not os.getenv("TRAINING_DEV_SKIP_TIMER") and elapsed_seconds < required_seconds:
+            remaining = int(required_seconds - elapsed_seconds)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Minimum seat time not met. {remaining} seconds remaining.",
+            )
+
+        score_percent, correct, total = _grade_quiz(template["quiz"], body.answers)
+        pass_score = (
+            record.get("req_pass_score_percent")
+            or template["pass_score_percent"]
+            or 80
+        )
+        passed = score_percent >= pass_score
+
+        # Determine attempt_number
+        prev_max = await conn.fetchval(
+            "SELECT COALESCE(MAX(attempt_number), 0) FROM training_quiz_attempts WHERE record_id = $1",
+            record_id,
+        )
+        attempt_number = int(prev_max) + 1
+
+        await conn.execute(
+            """
+            INSERT INTO training_quiz_attempts
+              (record_id, employee_id, company_id, attempt_number, answers,
+               score_percent, passed, elapsed_seconds, started_at)
+            VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9)
+            """,
+            record_id,
+            employee["id"],
+            record["company_id"],
+            attempt_number,
+            json.dumps(body.answers),
+            score_percent,
+            passed,
+            int(body.elapsed_seconds) if body.elapsed_seconds is not None else int(elapsed_seconds),
+            record["started_at"],
+        )
+
+        return {
+            "record_id": str(record_id),
+            "attempt_number": attempt_number,
+            "score_percent": score_percent,
+            "correct": correct,
+            "total": total,
+            "passed": passed,
+            "pass_score_percent": pass_score,
+        }
+
+
+@router.post("/records/{record_id}/attest")
+async def attest_completion(
+    record_id: UUID,
+    body: AttestRequest,
+    request: Request,
+    employee=Depends(require_employee_record),
+):
+    """Finalize training: requires a passed quiz attempt. Generates PDF cert,
+    uploads to S3, sets completion fields, returns presigned cert URL."""
+    from ..services.training_pdf import (
+        new_certificate_id,
+        render_certificate_pdf,
+        upload_certificate,
+    )
+
+    async with get_connection() as conn:
+        record = await _load_record_for_employee(conn, record_id, employee["id"])
+        template = await _load_template_for_record(conn, record)
+
+        if record["status"] == "completed" and record["certificate_url"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Training already completed and attested.",
+            )
+
+        latest = await conn.fetchrow(
+            """
+            SELECT score_percent, passed
+            FROM training_quiz_attempts
+            WHERE record_id = $1
+            ORDER BY attempt_number DESC
+            LIMIT 1
+            """,
+            record_id,
+        )
+        if not latest or not latest["passed"]:
+            raise HTTPException(
+                status_code=400,
+                detail="A passing quiz attempt is required before attestation.",
+            )
+
+        company_row = await conn.fetchrow(
+            "SELECT name FROM companies WHERE id = $1", record["company_id"],
+        )
+        company_name = company_row["name"] if company_row else "Your Company"
+
+        completed_date = date.today()
+        frequency_months = (
+            record.get("req_frequency_months") or template["frequency_months"] or 24
+        )
+        expiration_date = completed_date + timedelta(days=int(frequency_months) * 30)
+        retention_until = date(
+            completed_date.year + 4, completed_date.month, completed_date.day
+        ) if completed_date.month != 2 or completed_date.day != 29 else date(
+            completed_date.year + 4, completed_date.month, 28
+        )
+
+        certificate_id = new_certificate_id()
+        attested_at = datetime.utcnow()
+        attestation_ip = (
+            request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            or request.client.host
+            if request.client else ""
+        ) or "unknown"
+
+        variant_label = (
+            "Supervisor (2 hours)"
+            if (template["variant"] or "").lower() == "supervisor"
+            else "Employee (1 hour)"
+        )
+
+        # Render + upload PDF
+        try:
+            pdf_bytes = await render_certificate_pdf(
+                employee_first=employee["first_name"],
+                employee_last=employee["last_name"],
+                company_name=company_name,
+                training_title=template["title"] or record["title"],
+                variant_label=variant_label,
+                completed_date=completed_date,
+                score_percent=float(latest["score_percent"]),
+                required_minutes=int(template["required_minutes"]),
+                expiration_date=expiration_date,
+                attested_at=attested_at,
+                attestation_ip=attestation_ip,
+                certificate_id=certificate_id,
+            )
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=504, detail="Certificate generation timed out. Please retry.")
+        except Exception as exc:  # pragma: no cover — surface storage/render errors
+            logger.exception("Certificate render failed for record %s: %s", record_id, exc)
+            raise HTTPException(status_code=500, detail="Failed to generate certificate.")
+
+        try:
+            cert_uri = await upload_certificate(
+                pdf_bytes=pdf_bytes,
+                company_id=record["company_id"],
+                employee_id=employee["id"],
+                certificate_id=certificate_id,
+            )
+        except Exception as exc:
+            logger.exception("Certificate upload failed for record %s: %s", record_id, exc)
+            raise HTTPException(status_code=500, detail="Failed to store certificate.")
+
+        # Persist completion + attestation
+        await conn.execute(
+            """
+            UPDATE training_records
+            SET status = 'completed',
+                completed_date = $1,
+                expiration_date = $2,
+                retention_until = $3,
+                attested_at = $4,
+                attestation_ip = $5,
+                attestation_text = $6,
+                certificate_id = $7,
+                certificate_url = $8,
+                score = $9,
+                updated_at = NOW()
+            WHERE id = $10
+            """,
+            completed_date,
+            expiration_date,
+            retention_until,
+            attested_at,
+            attestation_ip[:45],
+            body.attestation_text,
+            certificate_id,
+            cert_uri,
+            float(latest["score_percent"]),
+            record_id,
+        )
+
+    # Email completion notice with cert attachment (best-effort, non-blocking failure)
+    try:
+        from ...core.services.email import get_email_service
+        email_svc = get_email_service()
+        if email_svc.is_configured() and employee.get("email"):
+            await email_svc.send_training_completion_email(
+                to_email=employee["email"],
+                to_name=f"{employee['first_name']} {employee['last_name']}",
+                training_title=template["title"] or record["title"],
+                score_percent=float(latest["score_percent"]),
+                expiration_date=expiration_date,
+                pdf_bytes=pdf_bytes,
+            )
+    except Exception as exc:
+        logger.warning("Training completion email failed for record %s: %s", record_id, exc)
+
+    return {
+        "record_id": str(record_id),
+        "status": "completed",
+        "completed_date": completed_date.isoformat(),
+        "expiration_date": expiration_date.isoformat(),
+        "score_percent": float(latest["score_percent"]),
+        "certificate_id": str(certificate_id),
+    }
+
+
+@router.get("/records/{record_id}/certificate-url")
+async def get_certificate_url(
+    record_id: UUID,
+    user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Admin/client-side certificate fetch. Returns presigned URL."""
+    company_id = await get_client_company_id(user) if user.role != "admin" else None
+
+    async with get_connection() as conn:
+        if user.role == "admin":
+            row = await conn.fetchrow(
+                "SELECT certificate_url, company_id FROM training_records WHERE id = $1",
+                record_id,
+            )
+        else:
+            row = await conn.fetchrow(
+                "SELECT certificate_url FROM training_records WHERE id = $1 AND company_id = $2",
+                record_id, company_id,
+            )
+        if not row or not row["certificate_url"]:
+            raise HTTPException(status_code=404, detail="Certificate not found")
+
+    from ...core.services.storage import get_storage
+    storage = get_storage()
+    presigned = storage.get_presigned_download_url(row["certificate_url"], expires_in=900)
+    if not presigned:
+        raise HTTPException(status_code=500, detail="Failed to generate download URL")
+    return {"url": presigned}
+
+
+@router.get("/records/me/{record_id}/certificate-url")
+async def get_my_certificate_url(
+    record_id: UUID,
+    employee=Depends(require_employee_record),
+):
+    """Employee fetches presigned cert URL for their own record."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT certificate_url FROM training_records WHERE id = $1 AND employee_id = $2",
+            record_id, employee["id"],
+        )
+        if not row or not row["certificate_url"]:
+            raise HTTPException(status_code=404, detail="Certificate not found")
+
+    from ...core.services.storage import get_storage
+    storage = get_storage()
+    presigned = storage.get_presigned_download_url(row["certificate_url"], expires_in=900)
+    if not presigned:
+        raise HTTPException(status_code=500, detail="Failed to generate download URL")
+    return {"url": presigned}

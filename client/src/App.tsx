@@ -82,6 +82,8 @@ import CompanySettings from './pages/app/CompanySettings'
 import Discipline from './pages/app/Discipline'
 import DisciplineDetail from './pages/app/DisciplineDetail'
 import DisciplineSettings from './pages/app/DisciplineSettings'
+import Training from './pages/app/Training'
+import TrainingDetail from './pages/app/TrainingDetail'
 import AppResources from './pages/app/AppResources'
 import { FeatureGate } from './components/FeatureGate'
 import BrokerSidebar from './components/BrokerSidebar'
@@ -96,6 +98,9 @@ import SSOCallback from './pages/SSOCallback'
 import BetaRegister from './pages/BetaRegister'
 import ResetPassword from './pages/ResetPassword'
 import WorkLayout from './layouts/WorkLayout'
+import PortalLayout from './pages/portal/PortalLayout'
+import PortalDashboard from './pages/portal/PortalDashboard'
+import EmployeeTakeTraining from './pages/portal/EmployeeTakeTraining'
 import MatchaWorkList from './pages/work/MatchaWorkList'
 import MatchaWorkThread from './pages/work/MatchaWorkThread'
 import ProjectView from './pages/work/ProjectView'
@@ -183,6 +188,10 @@ export default function App() {
         <Route path="settings" element={<BrokerSettings />} />
         <Route path="clients/:companyId" element={<BrokerClientDetail />} />
       </Route>
+      <Route path="/portal" element={<PortalLayout />}>
+        <Route index element={<PortalDashboard />} />
+        <Route path="training/:recordId" element={<EmployeeTakeTraining />} />
+      </Route>
       <Route path="/ir/signup" element={<IrSignup />} />
       <Route path="/lite/signup" element={<MatchaLiteSignup />} />
       <Route path="/ir/onboarding" element={<IrOnboardingWizard />} />
@@ -211,6 +220,8 @@ export default function App() {
         <Route path="handbook/new" element={<FeatureGate feature="handbooks" label="Handbooks"><HandbookForm /></FeatureGate>} />
         <Route path="handbook/:id" element={<FeatureGate feature="handbooks" label="Handbooks"><HandbookDetail /></FeatureGate>} />
         <Route path="handbook/:id/edit" element={<FeatureGate feature="handbooks" label="Handbooks"><HandbookForm /></FeatureGate>} />
+        <Route path="training" element={<FeatureGate feature="training" label="Training"><Training /></FeatureGate>} />
+        <Route path="training/:requirementId" element={<FeatureGate feature="training" label="Training"><TrainingDetail /></FeatureGate>} />
         <Route path="ask-expert" element={<AskExpert />} />
         <Route path="risk-assessment" element={<FeatureGate feature="risk_assessment" label="Risk Assessment"><RiskAssessment /></FeatureGate>} />
         <Route path="credential-templates" element={<FeatureGate feature="credential_templates" label="Credential Templates"><CredentialTemplates /></FeatureGate>} />

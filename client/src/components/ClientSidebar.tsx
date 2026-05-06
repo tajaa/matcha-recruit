@@ -2,6 +2,7 @@ import {
   LayoutDashboard, Users, Shield, FileText, ClipboardCheck, Scale,
   AlertTriangle, BookOpen, BarChart2, Sparkles, Building2, Accessibility,
   BadgeCheck, MessageSquareWarning, Mail, Bell, Gavel, MapPin, CalendarDays,
+  GraduationCap,
 } from 'lucide-react'
 import SidebarShell from './SidebarShell'
 import type { NavGroup, NavItem } from './SidebarShell'
@@ -27,6 +28,7 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/compliance-calendar', icon: CalendarDays, label: 'Calendar' },
       { to: '/app/policies', icon: FileText, label: 'Policies' },
       { to: '/app/handbooks', icon: BookOpen, label: 'Handbooks' },
+      { to: '/app/training', icon: GraduationCap, label: 'Training', feature: 'training' },
       { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credentialing' },
     ],
   },

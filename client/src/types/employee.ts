@@ -36,6 +36,7 @@ export type Employee = {
   termination_date: string | null
   manager_id: string | null
   manager_name: string | null
+  is_supervisor: boolean
   user_id: string | null
   invitation_status: string | null
   pay_classification: string | null

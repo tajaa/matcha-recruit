@@ -27,6 +27,12 @@ def test_matcha_lite_tier_forces_handbooks_on():
     assert features["handbooks"] is True
 
 
+def test_matcha_lite_tier_forces_training_on():
+    # Same overlay applies to training (added with SB 1343 module).
+    features = merge_company_features({"training": False}, "matcha_lite")
+    assert features["training"] is True
+
+
 def test_ir_only_self_serve_respects_explicit_disable():
     # Matcha Cap bundle does NOT include handbooks — stored value wins.
     features = merge_company_features({"handbooks": False}, "ir_only_self_serve")
