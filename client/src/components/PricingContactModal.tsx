@@ -111,13 +111,17 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.97, y: 16 }}
             transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-            className="relative w-full max-w-lg bg-zinc-900 border border-white/10 overflow-hidden shadow-2xl max-h-[92vh] flex flex-col"
+            className="relative w-full max-w-lg overflow-hidden shadow-2xl max-h-[92vh] flex flex-col"
+            style={{ backgroundColor: 'var(--color-ivory-bg)', border: '1px solid var(--color-ivory-line)' }}
           >
-            <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-amber-500/60 to-transparent" />
+            <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-amber-600/40 to-transparent" />
 
             <button
               onClick={handleClose}
-              className="absolute top-6 right-6 p-1.5 text-zinc-600 hover:text-white transition-colors z-10"
+              className="absolute top-6 right-6 p-1.5 transition-colors z-10"
+              style={{ color: 'var(--color-ivory-muted)' }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-ivory-ink)')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-ivory-muted)')}
             >
               <X size={18} />
             </button>
@@ -129,21 +133,23 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
                     transition={{ type: 'spring', damping: 12, stiffness: 200 }}
-                    className="inline-flex items-center justify-center w-16 h-16 border border-amber-500/30 text-amber-500 mb-4"
+                    className="inline-flex items-center justify-center w-16 h-16 mb-4"
+                    style={{ border: '1px solid rgba(180, 130, 40, 0.4)', color: '#b48228' }}
                   >
                     <CheckCircle size={32} />
                   </motion.div>
-                  <h3 className="text-xl font-bold text-white uppercase tracking-[0.08em]">
+                  <h3 className="text-xl font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--color-ivory-ink)' }}>
                     {isConsultation ? 'Consultation Requested' : 'Sequence Initiated'}
                   </h3>
-                  <p className="text-zinc-500 text-sm leading-relaxed max-w-xs mx-auto font-light">
+                  <p className="text-sm leading-relaxed max-w-xs mx-auto font-light" style={{ color: 'var(--color-ivory-muted)' }}>
                     {isConsultation
                       ? "We'll confirm your time slot within one business day."
                       : "Your request has been logged. We'll synchronize with you shortly."}
                   </p>
                   <button
                     onClick={handleClose}
-                    className="mt-6 px-10 py-3 bg-white text-zinc-900 text-[10px] font-mono uppercase tracking-[0.3em] font-bold hover:bg-zinc-100 transition-colors"
+                    className="mt-6 px-10 py-3 text-[10px] font-mono uppercase tracking-[0.3em] font-bold transition-colors"
+                    style={{ backgroundColor: 'var(--color-ivory-ink)', color: 'var(--color-ivory-bg)' }}
                   >
                     Close
                   </button>
@@ -151,13 +157,13 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
               ) : (
                 <>
                   <div className="mb-8">
-                    <p className="text-[10px] font-mono uppercase tracking-[0.4em] text-amber-500 mb-4">
+                    <p className="text-[10px] font-mono uppercase tracking-[0.4em] mb-4" style={{ color: '#b48228' }}>
                       {isConsultation ? 'Consulting // Schedule' : 'Initialize Account // Access'}
                     </p>
-                    <h2 className="text-2xl font-bold text-white tracking-tight uppercase">
+                    <h2 className="text-2xl font-bold tracking-tight uppercase" style={{ color: 'var(--color-ivory-ink)' }}>
                       {isConsultation ? 'Book a Consultation' : 'Request Access'}
                     </h2>
-                    <p className="mt-3 text-zinc-500 text-sm font-light leading-relaxed">
+                    <p className="mt-3 text-sm font-light leading-relaxed" style={{ color: 'var(--color-ivory-muted)' }}>
                       {isConsultation
                         ? 'Pick a time and we will confirm within one business day.'
                         : 'Tell us about your organization to receive custom pricing for the Matcha platform.'}
@@ -172,7 +178,7 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                       <>
                         {/* Date picker */}
                         <div>
-                          <label className="block text-[9px] font-mono uppercase tracking-[0.25em] text-zinc-500 mb-3">
+                          <label className="block text-[9px] font-mono uppercase tracking-[0.25em] mb-3" style={{ color: 'var(--color-ivory-muted)' }}>
                             Preferred Date
                           </label>
                           <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-none">
@@ -187,15 +193,15 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                                   className="flex-none flex flex-col items-center gap-1 px-3 py-2.5 text-center transition-colors"
                                   style={{
                                     minWidth: 52,
-                                    border: selected ? '1px solid rgba(245,158,11,0.6)' : '1px solid rgba(255,255,255,0.08)',
-                                    backgroundColor: selected ? 'rgba(245,158,11,0.08)' : 'transparent',
-                                    color: selected ? '#f59e0b' : '#71717a',
+                                    border: selected ? '1px solid rgba(180,130,40,0.55)' : '1px solid var(--color-ivory-line)',
+                                    backgroundColor: selected ? 'rgba(180,130,40,0.08)' : 'transparent',
+                                    color: selected ? '#b48228' : 'var(--color-ivory-muted)',
                                   }}
                                 >
                                   <span className="text-[9px] font-mono uppercase tracking-wider">
                                     {DAY_NAMES[d.getDay()]}
                                   </span>
-                                  <span className="text-sm font-medium" style={{ color: selected ? '#f59e0b' : '#e4e4e7' }}>
+                                  <span className="text-sm font-medium" style={{ color: selected ? '#b48228' : 'var(--color-ivory-ink)' }}>
                                     {d.getDate()}
                                   </span>
                                   <span className="text-[9px]">
@@ -214,8 +220,8 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.2 }}
                           >
-                            <label className="block text-[9px] font-mono uppercase tracking-[0.25em] text-zinc-500 mb-3">
-                              Preferred Time <span className="text-zinc-700 normal-case tracking-normal font-sans">(ET)</span>
+                            <label className="block text-[9px] font-mono uppercase tracking-[0.25em] mb-3" style={{ color: 'var(--color-ivory-muted)' }}>
+                              Preferred Time <span className="normal-case tracking-normal font-sans" style={{ color: '#9b958a' }}>(ET)</span>
                             </label>
                             <div className="grid grid-cols-4 gap-2">
                               {TIME_SLOTS.map((slot) => {
@@ -227,9 +233,9 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                                     onClick={() => setSelectedTime(slot)}
                                     className="py-2 text-[11px] font-mono transition-colors"
                                     style={{
-                                      border: selected ? '1px solid rgba(245,158,11,0.6)' : '1px solid rgba(255,255,255,0.08)',
-                                      backgroundColor: selected ? 'rgba(245,158,11,0.08)' : 'transparent',
-                                      color: selected ? '#f59e0b' : '#a1a1aa',
+                                      border: selected ? '1px solid rgba(180,130,40,0.55)' : '1px solid var(--color-ivory-line)',
+                                      backgroundColor: selected ? 'rgba(180,130,40,0.08)' : 'transparent',
+                                      color: selected ? '#b48228' : 'var(--color-ivory-muted)',
                                     }}
                                   >
                                     {slot}
@@ -240,48 +246,51 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                           </motion.div>
                         )}
 
-                        <div className="border-t border-white/5 pt-2" />
+                        <div className="pt-2" style={{ borderTop: '1px solid var(--color-ivory-line)' }} />
                       </>
                     )}
 
                     <div>
-                      <label className="block text-[9px] font-mono uppercase tracking-[0.25em] text-zinc-500 mb-2">Name</label>
+                      <label className="block text-[9px] font-mono uppercase tracking-[0.25em] mb-2" style={{ color: 'var(--color-ivory-muted)' }}>Name</label>
                       <input
                         type="text"
                         required
                         value={formData.contactName}
                         onChange={(e) => setFormData({ ...formData, contactName: e.target.value })}
-                        className="w-full bg-transparent border-b border-white/10 px-0 py-3 text-sm text-white focus:outline-none focus:border-white/40 transition-colors placeholder:text-zinc-700"
+                        className="w-full bg-transparent px-0 py-3 text-sm focus:outline-none transition-colors"
+                        style={{ color: 'var(--color-ivory-ink)', borderBottom: '1px solid var(--color-ivory-line)' }}
                         placeholder="Jane Doe"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[9px] font-mono uppercase tracking-[0.25em] text-zinc-500 mb-2">Company</label>
+                      <label className="block text-[9px] font-mono uppercase tracking-[0.25em] mb-2" style={{ color: 'var(--color-ivory-muted)' }}>Company</label>
                       <input
                         type="text"
                         required
                         value={formData.companyName}
                         onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
-                        className="w-full bg-transparent border-b border-white/10 px-0 py-3 text-sm text-white focus:outline-none focus:border-white/40 transition-colors placeholder:text-zinc-700"
+                        className="w-full bg-transparent px-0 py-3 text-sm focus:outline-none transition-colors"
+                        style={{ color: 'var(--color-ivory-ink)', borderBottom: '1px solid var(--color-ivory-line)' }}
                         placeholder="Acme Corp"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[9px] font-mono uppercase tracking-[0.25em] text-zinc-500 mb-2">Email</label>
+                      <label className="block text-[9px] font-mono uppercase tracking-[0.25em] mb-2" style={{ color: 'var(--color-ivory-muted)' }}>Email</label>
                       <input
                         type="email"
                         required
                         value={formData.email}
                         onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                        className="w-full bg-transparent border-b border-white/10 px-0 py-3 text-sm text-white focus:outline-none focus:border-white/40 transition-colors placeholder:text-zinc-700"
+                        className="w-full bg-transparent px-0 py-3 text-sm focus:outline-none transition-colors"
+                        style={{ color: 'var(--color-ivory-ink)', borderBottom: '1px solid var(--color-ivory-line)' }}
                         placeholder="name@company.com"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[9px] font-mono uppercase tracking-[0.25em] text-zinc-500 mb-2">
+                      <label className="block text-[9px] font-mono uppercase tracking-[0.25em] mb-2" style={{ color: 'var(--color-ivory-muted)' }}>
                         {isConsultation ? 'What do you need help with?' : 'Workforce Scale & Needs'}
                       </label>
                       <textarea
@@ -289,7 +298,8 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                         rows={3}
                         value={formData.description}
                         onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                        className="w-full bg-transparent border-b border-white/10 px-0 py-3 text-sm text-white focus:outline-none focus:border-white/40 transition-colors placeholder:text-zinc-700 resize-none"
+                        className="w-full bg-transparent px-0 py-3 text-sm focus:outline-none transition-colors resize-none"
+                        style={{ color: 'var(--color-ivory-ink)', borderBottom: '1px solid var(--color-ivory-line)' }}
                         placeholder={isConsultation ? 'Brief description of your situation...' : 'Describe your team size and requirements...'}
                       />
                     </div>
@@ -298,15 +308,11 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                       <button
                         type="submit"
                         disabled={isSubmitting}
-                        className="group relative w-full py-4 bg-white text-zinc-900 text-[10px] font-mono uppercase tracking-[0.3em] font-bold overflow-hidden disabled:opacity-50"
+                        className="w-full py-4 text-[10px] font-mono uppercase tracking-[0.3em] font-bold overflow-hidden disabled:opacity-50 transition-opacity hover:opacity-90 inline-flex items-center justify-center gap-3"
+                        style={{ backgroundColor: 'var(--color-ivory-ink)', color: 'var(--color-ivory-bg)' }}
                       >
-                        <span className="relative z-10 flex items-center justify-center gap-3 group-hover:text-white transition-colors duration-500">
-                          {isSubmitting ? 'Sending...' : isConsultation ? 'Request Consultation' : 'Submit Request'}
-                          {!isSubmitting && <Send size={11} />}
-                        </span>
-                        <motion.div
-                          className="absolute inset-0 bg-zinc-900 border border-white translate-y-full group-hover:translate-y-0 transition-transform duration-500 ease-[0.16,1,0.3,1]"
-                        />
+                        {isSubmitting ? 'Sending...' : isConsultation ? 'Request Consultation' : 'Submit Request'}
+                        {!isSubmitting && <Send size={11} />}
                       </button>
                     </div>
                   </form>

@@ -211,8 +211,8 @@ async def subscribe(
             """INSERT INTO newsletter_subscribers
                  (email, name, source, user_id, company_id, metadata, status,
                   confirmation_token, confirmed_at)
-               VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8,
-                       CASE WHEN $7 = 'active' THEN NOW() ELSE NULL END)
+               VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::varchar, $8,
+                       CASE WHEN $7::text = 'active' THEN NOW() ELSE NULL END)
                RETURNING id, status""",
             email, name, source, user_id, company_id,
             json.dumps(metadata or {}), initial_status, confirm_token,
