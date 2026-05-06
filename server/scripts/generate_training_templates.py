@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from google import genai
 
 from app.config import load_settings
-from app.database import get_connection, init_db
+from app.database import get_connection, init_db, init_pool
 from app.core.services.handbook_service import _extract_json_payload
 
 
@@ -324,6 +324,10 @@ async def main() -> None:
     settings = load_settings()
     model_name = settings.analysis_model or "gemini-2.5-pro"
 
+    db_url = os.getenv("DATABASE_URL") or settings.database_url
+    if not db_url:
+        raise RuntimeError("DATABASE_URL not set")
+    await init_pool(db_url)
     await init_db()
 
     for v in VARIANTS:
