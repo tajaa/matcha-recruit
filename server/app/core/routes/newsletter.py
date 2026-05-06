@@ -88,6 +88,7 @@ class SubscribeRequest(BaseModel):
     utm_source: Optional[str] = None
     utm_medium: Optional[str] = None
     utm_campaign: Optional[str] = None
+    website: Optional[str] = None  # honeypot
 
 
 def _confirmation_url(token: str) -> str:
@@ -143,6 +144,9 @@ async def subscribe(
     admin can target segments later. Source-bucket tags ('blog', 'calculators',
     etc.) are also auto-attached based on `source`.
     """
+    if body.website:
+        raise HTTPException(status_code=400, detail="Invalid submission")
+
     if await _subscribe_rate_limited(_client_ip(request)):
         raise HTTPException(status_code=429, detail="Too many subscribe attempts. Please wait a minute.")
 

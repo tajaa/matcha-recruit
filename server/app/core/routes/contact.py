@@ -1,9 +1,11 @@
 """Contact form route - no authentication required."""
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, EmailStr
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, EmailStr, Field
+from typing import Optional
 
 from ..services.email import get_email_service
+from ..services.redis_cache import check_rate_limit, client_ip
 
 
 router = APIRouter()
@@ -11,12 +13,13 @@ router = APIRouter()
 
 class ContactFormRequest(BaseModel):
     """Contact form submission."""
-    company_name: str
-    contact_name: str
+    company_name: str = Field(..., max_length=200)
+    contact_name: str = Field(..., max_length=200)
     email: EmailStr
-    description: str
-    preferred_date: str | None = None
-    preferred_time: str | None = None
+    description: str = Field(..., max_length=4000)
+    preferred_date: str | None = Field(default=None, max_length=50)
+    preferred_time: str | None = Field(default=None, max_length=50)
+    website: Optional[str] = Field(default=None)  # honeypot
 
 
 class ContactFormResponse(BaseModel):
@@ -26,25 +29,30 @@ class ContactFormResponse(BaseModel):
 
 
 @router.post("", response_model=ContactFormResponse)
-async def submit_contact_form(request: ContactFormRequest):
+async def submit_contact_form(body: ContactFormRequest, request: Request):
     """Submit a contact form inquiry."""
+    if body.website:
+        raise HTTPException(status_code=400, detail="Invalid submission")
+
+    ip = client_ip(request)
+    await check_rate_limit(ip, "contact", 5, 3600)
+
     email_service = get_email_service()
 
     if not email_service.is_configured():
-        # Log the submission even if email isn't configured
-        print(f"[Contact] Form submitted (email not configured): {request.company_name} - {request.contact_name} <{request.email}>")
+        print(f"[Contact] Form submitted (email not configured): {body.company_name} - {body.contact_name} <{body.email}>")
         return ContactFormResponse(
             success=True,
             message="Thank you for your interest. We'll be in touch shortly."
         )
 
     success = await email_service.send_contact_form_email(
-        sender_name=request.contact_name,
-        sender_email=request.email,
-        company_name=request.company_name,
-        message=request.description,
-        preferred_date=request.preferred_date,
-        preferred_time=request.preferred_time,
+        sender_name=body.contact_name,
+        sender_email=body.email,
+        company_name=body.company_name,
+        message=body.description,
+        preferred_date=body.preferred_date,
+        preferred_time=body.preferred_time,
     )
 
     if not success:

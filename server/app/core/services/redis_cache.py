@@ -1,9 +1,12 @@
 """Lightweight Redis cache module for server-side response caching."""
 
 import json
+import time as _time
+from collections import defaultdict
 from typing import Any, Optional
 
 import redis.asyncio as aioredis
+from fastapi import HTTPException, Request
 
 _redis_client: Optional[aioredis.Redis] = None
 
@@ -86,6 +89,49 @@ def admin_jurisdiction_policy_overview_key(category=None) -> str:
 
 def admin_bookmarked_requirements_key() -> str:
     return "admin_bookmarked_requirements"
+
+
+_rl_attempts: dict[str, list[float]] = defaultdict(list)
+
+
+def client_ip(request: Request) -> str:
+    """Extract client IP from X-Forwarded-For header (nginx-set) with safe fallback."""
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+async def check_rate_limit(ip: str, action: str, limit: int, window: int) -> None:
+    """Raise 429 if ip exceeds limit requests for action within window seconds."""
+    redis = get_redis_cache()
+    if redis:
+        key = f"rl:{action}:{ip}"
+        try:
+            count = await redis.incr(key)
+            if count == 1:
+                await redis.expire(key, window)
+            if count > limit:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many requests. Please try again later.",
+                    headers={"Retry-After": str(window)},
+                )
+            return
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+    fk = f"{action}:{ip}"
+    now = _time.monotonic()
+    _rl_attempts[fk] = [t for t in _rl_attempts[fk] if t > now - window]
+    if len(_rl_attempts[fk]) >= limit:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests. Please try again later.",
+            headers={"Retry-After": str(window)},
+        )
+    _rl_attempts[fk].append(now)
 
 
 async def cache_delete_pattern(redis, prefix: str) -> None:

@@ -19,6 +19,7 @@ export default function Subscribe() {
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<SubscribeResponse | null>(null)
   const [error, setError] = useState('')
+  const [honeypot, setHoneypot] = useState('')
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -33,6 +34,7 @@ export default function Subscribe() {
           email: email.trim(),
           name: name.trim() || undefined,
           source: params.get('utm_source') || 'website',
+          website: honeypot,
           utm_source: params.get('utm_source') || undefined,
           utm_medium: params.get('utm_medium') || undefined,
           utm_campaign: params.get('utm_campaign') || undefined,
@@ -105,6 +107,9 @@ export default function Subscribe() {
             </p>
 
             <form onSubmit={handleSubmit} className="space-y-4">
+              <input type="text" name="website" tabIndex={-1} autoComplete="off"
+                aria-hidden="true" value={honeypot} onChange={e => setHoneypot(e.target.value)}
+                style={{position:'absolute',left:'-9999px',width:1,height:1,opacity:0}} />
               <div>
                 <input
                   type="email"

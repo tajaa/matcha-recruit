@@ -40,6 +40,7 @@ export default function NewsletterSignup({
   const [email, setEmail] = useState('')
   const [status, setStatus] = useState<'idle' | 'submitting' | 'done' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [honeypot, setHoneypot] = useState('')
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -68,6 +69,7 @@ export default function NewsletterSignup({
         body: JSON.stringify({
           email: email.trim().toLowerCase(),
           source,
+          website: honeypot,
           ...utm,
         }),
       })
@@ -114,6 +116,9 @@ export default function NewsletterSignup({
         </div>
       )}
       <form onSubmit={handleSubmit} className="flex gap-2">
+        <input type="text" name="website" tabIndex={-1} autoComplete="off"
+          aria-hidden="true" value={honeypot} onChange={e => setHoneypot(e.target.value)}
+          style={{position:'absolute',left:'-9999px',width:1,height:1,opacity:0}} />
         <input
           type="email"
           required

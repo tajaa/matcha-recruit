@@ -11,12 +11,13 @@ import logging
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ...database import get_connection
 from ..models.auth import CurrentUser
 from ...matcha.dependencies import require_client, get_client_company_id
+from ..services.redis_cache import check_rate_limit, client_ip
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +417,7 @@ class LiteWaitlistRequest(BaseModel):
     company_name: Optional[str] = Field(default=None, max_length=255)
     headcount: Optional[int] = Field(default=None, ge=1, le=100_000)
     note: Optional[str] = Field(default=None, max_length=1000)
+    website: Optional[str] = Field(default=None)  # honeypot
 
 
 class LiteWaitlistResponse(BaseModel):
@@ -423,9 +425,15 @@ class LiteWaitlistResponse(BaseModel):
 
 
 @router.post("/waitlist/lite", response_model=LiteWaitlistResponse)
-async def join_lite_waitlist(body: LiteWaitlistRequest):
+async def join_lite_waitlist(body: LiteWaitlistRequest, request: Request):
     """Public Matcha Lite waitlist capture. Writes to lead_captures and
     fires a best-effort sales notification email."""
+    if body.website:
+        raise HTTPException(status_code=400, detail="Invalid submission")
+
+    ip = client_ip(request)
+    await check_rate_limit(ip, "waitlist_lite", 5, 3600)
+
     import re as _re
     email = body.email.strip().lower()
     if not _re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):

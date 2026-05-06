@@ -50,6 +50,7 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
   const [selectedTime, setSelectedTime] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [honeypot, setHoneypot] = useState('');
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -62,6 +63,7 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
         company_name: formData.companyName,
         email: formData.email,
         description: formData.description,
+        website: honeypot,
       };
       if (selectedDate) body.preferred_date = selectedDate;
       if (selectedTime) body.preferred_time = selectedTime;
@@ -163,6 +165,9 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                   </div>
 
                   <form onSubmit={handleSubmit} className="space-y-6">
+                    <input type="text" name="website" tabIndex={-1} autoComplete="off"
+                      aria-hidden="true" value={honeypot} onChange={e => setHoneypot(e.target.value)}
+                      style={{position:'absolute',left:'-9999px',width:1,height:1,opacity:0}} />
                     {isConsultation && (
                       <>
                         {/* Date picker */}

@@ -260,6 +260,7 @@ function WaitlistSection({ waitlistRef }: { waitlistRef: React.RefObject<HTMLDiv
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [honeypot, setHoneypot] = useState('')
 
   const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
 
@@ -275,6 +276,7 @@ function WaitlistSection({ waitlistRef }: { waitlistRef: React.RefObject<HTMLDiv
         name: name.trim() || undefined,
         company_name: companyName.trim() || undefined,
         headcount: !isNaN(hc) && hc > 0 ? hc : undefined,
+        website: honeypot,
       })
       setSubmitted(true)
     } catch (err: any) {
@@ -331,6 +333,9 @@ function WaitlistSection({ waitlistRef }: { waitlistRef: React.RefObject<HTMLDiv
               className="p-6 sm:p-8 rounded-2xl flex flex-col gap-4"
               style={{ border: `1px solid ${LINE}`, backgroundColor: 'rgba(31,29,26,0.03)' }}
             >
+              <input type="text" name="website" tabIndex={-1} autoComplete="off"
+                aria-hidden="true" value={honeypot} onChange={e => setHoneypot(e.target.value)}
+                style={{position:'absolute',left:'-9999px',width:1,height:1,opacity:0}} />
               <Field label="Work email *" type="email" value={email} onChange={setEmail} required />
               <Field label="Your name" value={name} onChange={setName} />
               <Field label="Company name" value={companyName} onChange={setCompanyName} />

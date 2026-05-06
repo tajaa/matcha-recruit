@@ -38,6 +38,7 @@ from ..feature_flags import (
     merge_company_features,
 )
 from ..services.platform_settings import get_visible_features
+from ..services.redis_cache import check_rate_limit, client_ip
 from ...config import get_settings
 
 router = APIRouter()
@@ -1149,8 +1150,10 @@ async def register_admin(request: AdminRegister):
 
 
 @router.post("/register/client", response_model=TokenResponse)
-async def register_client(request: ClientRegister):
+async def register_client(request: ClientRegister, http_request: Request):
     """Register a new client linked to a company."""
+    ip = client_ip(http_request)
+    await check_rate_limit(ip, "register_client", 10, 3600)
     async with get_connection() as conn:
         # Check if email exists
         existing = await conn.fetchval("SELECT id FROM users WHERE email = $1", request.email)
@@ -1364,8 +1367,10 @@ async def validate_broker_client_invite(token: str):
 
 
 @router.post("/broker-client-invite/{token}/accept")
-async def accept_broker_client_invite(token: str, request: BrokerClientInviteAcceptRequest):
+async def accept_broker_client_invite(token: str, request: BrokerClientInviteAcceptRequest, http_request: Request):
     """Accept a broker client invite and provision the first company client admin user."""
+    ip = client_ip(http_request)
+    await check_rate_limit(ip, "broker_invite_accept", 10, 3600)
     async with get_connection() as conn:
         async with conn.transaction():
             invite = await conn.fetchrow(
@@ -1518,7 +1523,7 @@ async def accept_broker_client_invite(token: str, request: BrokerClientInviteAcc
 
 
 @router.post("/register/business")
-async def register_business(request: BusinessRegister):
+async def register_business(request: BusinessRegister, http_request: Request):
     """
     Register a new business with first admin/client user.
     This creates:
@@ -1533,6 +1538,8 @@ async def register_business(request: BusinessRegister):
     link instead of creating any DB rows. The /verify-email endpoint
     completes the signup once the user clicks the link.
     """
+    ip = client_ip(http_request)
+    await check_rate_limit(ip, "register_business", 10, 3600)
     from ..services.email import get_email_service
 
     # ---- resources_free deferred-create path -----------------------------
@@ -1860,7 +1867,7 @@ class EmailVerifyRequest(BaseModel):
 
 
 @router.post("/verify-email")
-async def verify_email(request: EmailVerifyRequest):
+async def verify_email(request: EmailVerifyRequest, http_request: Request):
     """Complete a deferred-create signup (resources_free).
 
     Decodes the email-verification JWT issued by /register/business, then
@@ -1868,6 +1875,8 @@ async def verify_email(request: EmailVerifyRequest):
     immediate-create flow runs for resources_free. Returns access/refresh
     tokens so the client can drop the user straight into /app/resources.
     """
+    ip = client_ip(http_request)
+    await check_rate_limit(ip, "verify_email", 20, 3600)
     from ..services.email import get_email_service
 
     payload = decode_email_verify_token(request.token)
@@ -2079,8 +2088,10 @@ async def register_test_account(
 
 
 @router.post("/register/employee", response_model=TokenResponse)
-async def register_employee(request: EmployeeRegister):
+async def register_employee(request: EmployeeRegister, http_request: Request):
     """Register a new employee."""
+    ip = client_ip(http_request)
+    await check_rate_limit(ip, "register_employee", 10, 3600)
     async with get_connection() as conn:
         # Check if email exists
         existing = await conn.fetchval("SELECT id FROM users WHERE email = $1", request.email)
@@ -2133,8 +2144,10 @@ async def register_employee(request: EmployeeRegister):
 
 
 @router.post("/register/candidate", response_model=TokenResponse)
-async def register_candidate(request: CandidateRegister):
+async def register_candidate(request: CandidateRegister, http_request: Request):
     """Register a new candidate."""
+    ip = client_ip(http_request)
+    await check_rate_limit(ip, "register_candidate", 10, 3600)
     async with get_connection() as conn:
         # Check if email exists in users
         existing = await conn.fetchval("SELECT id FROM users WHERE email = $1", request.email)
@@ -2579,8 +2592,10 @@ class ResetPasswordRequest(BaseModel):
 
 
 @router.post("/forgot-password")
-async def forgot_password(request: ForgotPasswordRequest):
+async def forgot_password(request: ForgotPasswordRequest, http_request: Request):
     """Send a password reset email. Always returns 200 to avoid email enumeration."""
+    ip = client_ip(http_request)
+    await check_rate_limit(ip, "forgot_password", 5, 3600)
     from ..services.email import get_email_service
     from ...config import get_settings
 
@@ -2635,8 +2650,10 @@ async def forgot_password(request: ForgotPasswordRequest):
 
 
 @router.post("/reset-password")
-async def reset_password(request: ResetPasswordRequest):
+async def reset_password(request: ResetPasswordRequest, http_request: Request):
     """Reset password using a valid reset token."""
+    ip = client_ip(http_request)
+    await check_rate_limit(ip, "reset_password", 10, 3600)
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """SELECT prt.user_id, u.is_suspended, u.is_active
@@ -3027,8 +3044,10 @@ async def validate_beta_invite(token: str):
 
 
 @router.post("/register/beta")
-async def register_beta(request: BetaRegisterRequest):
+async def register_beta(request: BetaRegisterRequest, http_request: Request):
     """Register a new individual account via beta invitation token."""
+    ip = client_ip(http_request)
+    await check_rate_limit(ip, "register_beta", 10, 3600)
     from ..feature_flags import DEFAULT_COMPANY_FEATURES
     from ...matcha.services.token_budget_service import FREE_TOKEN_GRANT
 
@@ -3107,8 +3126,10 @@ class IndividualRegister(BaseModel):
 
 
 @router.post("/register/individual")
-async def register_individual(request: IndividualRegister):
+async def register_individual(request: IndividualRegister, http_request: Request):
     """Register an individual user with a personal workspace for matcha-work."""
+    ip = client_ip(http_request)
+    await check_rate_limit(ip, "register_individual", 10, 3600)
     from ..feature_flags import DEFAULT_COMPANY_FEATURES
     from ...matcha.services.token_budget_service import FREE_TOKEN_GRANT
 
@@ -3171,8 +3192,10 @@ class GoogleAuthRequest(BaseModel):
 
 
 @router.post("/google", response_model=TokenResponse)
-async def google_auth(request: GoogleAuthRequest):
+async def google_auth(request: GoogleAuthRequest, http_request: Request):
     """Sign in or register with Google. Creates an individual account if the user is new."""
+    ip = client_ip(http_request)
+    await check_rate_limit(ip, "google_auth", 15, 3600)
     from google.oauth2 import id_token as google_id_token
     from google.auth.transport import requests as google_requests
     from ..feature_flags import DEFAULT_COMPANY_FEATURES
