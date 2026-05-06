@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 
 interface Props {
-  onPricingClick: () => void
-  onDemoClick: () => void
+  onPricingClick?: () => void
+  onDemoClick?: () => void
 }
 
 const NAV_LINKS = [
@@ -145,7 +145,7 @@ export default function MarketingNav({ onPricingClick, onDemoClick }: Props) {
               Login
             </Link>
             <button
-              onClick={() => { setMenuOpen(false); onDemoClick() }}
+              onClick={() => { setMenuOpen(false); onDemoClick?.() }}
               className="mt-6 inline-flex items-center justify-center px-6 h-12 rounded-full text-base font-medium cursor-pointer"
               style={{
                 backgroundColor: '#F5F2ED',
