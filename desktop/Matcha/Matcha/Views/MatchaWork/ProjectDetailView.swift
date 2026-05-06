@@ -552,7 +552,8 @@ struct ProjectDetailView: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.white)
                 HStack(spacing: 10) {
-                    headerChip(icon: "list.bullet", label: "\(viewModel.tasks.count) tasks")
+                    TaskProgressBar(tasks: viewModel.tasks)
+                        .frame(width: 180)
                     headerChip(icon: "doc", label: "\(viewModel.files.count) files")
                     headerChip(icon: "person.2", label: "\(project.collaborators?.count ?? 0) collaborators")
                 }
@@ -602,17 +603,28 @@ struct ProjectDetailView: View {
                     Button {
                         collabPanel = .kanban
                     } label: {
-                        HStack(spacing: 8) {
-                            Circle().fill(priorityColor(task.priority)).frame(width: 6, height: 6)
-                            Text(task.title)
-                                .font(.system(size: 12))
-                                .foregroundColor(.white.opacity(0.85))
-                                .lineLimit(1)
-                            Spacer()
-                            if let due = task.dueDate, !due.isEmpty {
-                                Text(due.prefix(10))
-                                    .font(.system(size: 9))
-                                    .foregroundColor(.white.opacity(0.4))
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 8) {
+                                Circle().fill(priorityColor(task.priority)).frame(width: 6, height: 6)
+                                Text(task.title)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.white.opacity(0.85))
+                                    .lineLimit(1)
+                                Spacer()
+                                if let due = task.dueDate, !due.isEmpty {
+                                    Text(due.prefix(10))
+                                        .font(.system(size: 9))
+                                        .foregroundColor(.white.opacity(0.4))
+                                }
+                            }
+                            if let note = task.progressNote,
+                               !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                Text(note)
+                                    .font(.system(size: 10))
+                                    .italic()
+                                    .foregroundColor(.white.opacity(0.5))
+                                    .lineLimit(1)
+                                    .padding(.leading, 14)
                             }
                         }
                     }

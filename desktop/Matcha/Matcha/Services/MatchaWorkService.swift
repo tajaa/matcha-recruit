@@ -700,12 +700,14 @@ class MatchaWorkService {
         var status: String?
         var dueDate: String?
         var assignedTo: String?
+        var progressNote: String?
 
         enum CodingKeys: String, CodingKey {
             case title, description, priority, status
             case boardColumn = "board_column"
             case dueDate = "due_date"
             case assignedTo = "assigned_to"
+            case progressNote = "progress_note"
         }
 
         /// Custom encode — emit only the fields that were actually set.
@@ -727,6 +729,7 @@ class MatchaWorkService {
             try c.encodeIfPresent(status, forKey: .status)
             try c.encodeIfPresent(dueDate, forKey: .dueDate)
             try c.encodeIfPresent(assignedTo, forKey: .assignedTo)
+            try c.encodeIfPresent(progressNote, forKey: .progressNote)
         }
     }
 
@@ -747,6 +750,18 @@ class MatchaWorkService {
             method: "DELETE",
             path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)"
         )
+    }
+
+    // MARK: - Dashboard
+
+    /// Pending tasks across all projects in the current user's company.
+    func listOpenTasks() async throws -> [MWOpenTask] {
+        try await client.request(method: "GET", path: "\(basePath)/tasks/open")
+    }
+
+    /// Recent activity feed (projects, tasks, threads) within the last 14 days.
+    func listRecentActivity() async throws -> [MWActivityItem] {
+        try await client.request(method: "GET", path: "\(basePath)/activity/recent")
     }
 
     func markProjectComplete(projectId: String) async throws {

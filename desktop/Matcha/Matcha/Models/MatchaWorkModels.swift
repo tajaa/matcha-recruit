@@ -687,6 +687,7 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
     var completedAt: String?
     var createdAt: String?
     var updatedAt: String?
+    var progressNote: String?
 
     enum CodingKeys: String, CodingKey {
         case id, title, description, priority, status
@@ -698,6 +699,7 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
         case completedAt = "completed_at"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case progressNote = "progress_note"
     }
 }
 
@@ -1193,5 +1195,56 @@ struct AnyCodable: Codable {
         case let v as [AnyCodable]: try container.encode(v)
         default: try container.encodeNil()
         }
+    }
+}
+
+// MARK: - Dashboard models
+
+/// Cross-project pending task surfaced on the Home dashboard.
+struct MWOpenTask: Codable, Identifiable, Hashable {
+    let id: String
+    var projectId: String?
+    var projectTitle: String?
+    var projectType: String?
+    var title: String
+    var priority: String
+    var status: String
+    var dueDate: String?
+    var progressNote: String?
+    var assignedTo: String?
+    var createdBy: String?
+    var updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, priority, status
+        case projectId = "project_id"
+        case projectTitle = "project_title"
+        case projectType = "project_type"
+        case dueDate = "due_date"
+        case progressNote = "progress_note"
+        case assignedTo = "assigned_to"
+        case createdBy = "created_by"
+        case updatedAt = "updated_at"
+    }
+}
+
+/// Recent-activity feed item for the Home dashboard.
+struct MWActivityItem: Codable, Identifiable, Hashable {
+    let kind: String        // "project" | "task" | "thread"
+    let refId: String
+    var projectId: String?
+    var title: String
+    var projectType: String?
+    var updatedAt: String?
+
+    /// Identifiable: kind+refId is unique across the union'd feed.
+    var id: String { "\(kind):\(refId)" }
+
+    enum CodingKeys: String, CodingKey {
+        case kind, title
+        case refId = "ref_id"
+        case projectId = "project_id"
+        case projectType = "project_type"
+        case updatedAt = "updated_at"
     }
 }

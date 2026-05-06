@@ -11,6 +11,7 @@ class AppState {
     var showSkills: Bool = false
     var showInbox: Bool = false
     var showPeople: Bool = false
+    var showHome: Bool = false
     var onlineUsers: [MWOnlineUser] = []
     var unreadInboxCount: Int = 0
     var notificationsUnreadCount: Int = 0
@@ -123,6 +124,7 @@ class AppState {
         selectedChannelId = nil
         showInbox = false
         showPeople = false
+        showHome = false
         ChannelsWebSocket.shared.disconnect()
         heartbeatTask?.cancel()
         heartbeatTask = nil

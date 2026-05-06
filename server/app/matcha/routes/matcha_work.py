@@ -3638,6 +3638,118 @@ async def list_project_tasks_endpoint(
     return await pt_svc.list_project_tasks(project_id)
 
 
+@router.get("/tasks/open")
+async def list_open_tasks_endpoint(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Cross-project pending tasks for the dashboard.
+
+    Returns tasks the current user owns or created, scoped to their company,
+    sorted by priority then due date. Joins project title for display.
+    """
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT t.id, t.project_id, t.title, t.priority, t.status,
+                   t.due_date, t.progress_note, t.assigned_to, t.created_by,
+                   t.updated_at,
+                   p.title AS project_title, p.project_type
+            FROM mw_tasks t
+            LEFT JOIN mw_projects p ON p.id = t.project_id
+            WHERE t.company_id = $1
+              AND t.status = 'pending'
+              AND t.project_id IS NOT NULL
+              AND (t.assigned_to = $2 OR t.created_by = $2 OR t.assigned_to IS NULL)
+            ORDER BY
+                CASE t.priority
+                    WHEN 'critical' THEN 0 WHEN 'high' THEN 1
+                    WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4
+                END,
+                t.due_date NULLS LAST,
+                t.updated_at DESC
+            LIMIT 50
+            """,
+            company_id, current_user.id,
+        )
+    out = []
+    for r in rows:
+        d = dict(r)
+        for k in ("id", "project_id", "assigned_to", "created_by"):
+            if d.get(k) is not None:
+                d[k] = str(d[k])
+        if d.get("due_date") is not None:
+            d["due_date"] = d["due_date"].isoformat()
+        if d.get("updated_at") is not None:
+            d["updated_at"] = d["updated_at"].isoformat()
+        out.append(d)
+    return out
+
+
+@router.get("/activity/recent")
+async def list_recent_activity_endpoint(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Recent activity feed across projects, tasks, threads in this company."""
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            WITH recent AS (
+                SELECT 'project'::text AS kind,
+                       p.id::text AS ref_id,
+                       p.id::text AS project_id,
+                       p.title,
+                       p.project_type,
+                       p.updated_at
+                FROM mw_projects p
+                WHERE p.company_id = $1
+                  AND p.updated_at > NOW() - INTERVAL '14 days'
+                ORDER BY p.updated_at DESC
+                LIMIT 30
+            ), recent_tasks AS (
+                SELECT 'task'::text AS kind,
+                       t.id::text AS ref_id,
+                       t.project_id::text AS project_id,
+                       t.title,
+                       NULL::text AS project_type,
+                       t.updated_at
+                FROM mw_tasks t
+                WHERE t.company_id = $1
+                  AND t.project_id IS NOT NULL
+                  AND t.updated_at > NOW() - INTERVAL '14 days'
+                ORDER BY t.updated_at DESC
+                LIMIT 30
+            ), recent_threads AS (
+                SELECT 'thread'::text AS kind,
+                       th.id::text AS ref_id,
+                       NULL::text AS project_id,
+                       th.title,
+                       NULL::text AS project_type,
+                       th.updated_at
+                FROM mw_threads th
+                WHERE th.company_id = $1
+                  AND th.updated_at > NOW() - INTERVAL '14 days'
+                ORDER BY th.updated_at DESC
+                LIMIT 30
+            )
+            SELECT * FROM recent
+            UNION ALL SELECT * FROM recent_tasks
+            UNION ALL SELECT * FROM recent_threads
+            ORDER BY updated_at DESC
+            LIMIT 25
+            """,
+            company_id,
+        )
+    out = []
+    for r in rows:
+        d = dict(r)
+        if d.get("updated_at") is not None:
+            d["updated_at"] = d["updated_at"].isoformat()
+        out.append(d)
+    return out
+
+
 @router.post("/projects/{project_id}/tasks", status_code=201)
 async def create_project_task_endpoint(
     project_id: UUID,
@@ -3672,6 +3784,7 @@ async def create_project_task_endpoint(
             priority=body.get("priority", "medium"),
             due_date=due_date,
             assigned_to=assigned_to,
+            progress_note=body.get("progress_note"),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -3691,7 +3804,7 @@ async def update_project_task_endpoint(
     await _verify_project_access(project_id, current_user)
 
     patch: dict = {}
-    for key in ("title", "description", "priority", "board_column", "status"):
+    for key in ("title", "description", "priority", "board_column", "status", "progress_note"):
         if key in body:
             patch[key] = body[key]
 

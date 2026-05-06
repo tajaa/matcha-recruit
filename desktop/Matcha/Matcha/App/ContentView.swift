@@ -4,7 +4,6 @@ import AppKit
 struct ContentView: View {
     @Environment(AppState.self) private var appState
     @State private var threadListVM = ThreadListViewModel()
-    @State private var isCreating = false
     @State private var isOpeningCheckout = false
     @State private var upgradeError: String?
     @State private var showProfile = false
@@ -37,6 +36,31 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 ScrollView {
                     VStack(spacing: 0) {
+                        sidebarFooterButton(
+                            icon: "house",
+                            label: "Home",
+                            badge: 0,
+                            isActive: appState.showHome || (
+                                appState.selectedThreadId == nil &&
+                                appState.selectedProjectId == nil &&
+                                appState.selectedChannelId == nil &&
+                                !appState.showInbox &&
+                                !appState.showPeople &&
+                                !appState.showSkills
+                            )
+                        ) {
+                            appState.showHome = true
+                            appState.showInbox = false
+                            appState.showPeople = false
+                            appState.showSkills = false
+                            appState.selectedThreadId = nil
+                            appState.selectedProjectId = nil
+                            appState.selectedChannelId = nil
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.top, 8)
+                        .padding(.bottom, 4)
+
                         sidebarSection(
                             title: "Channels",
                             icon: "number",
@@ -238,6 +262,7 @@ struct ContentView: View {
                     ) {
                         appState.showInbox = true
                         appState.showPeople = false
+                        appState.showHome = false
                         appState.selectedThreadId = nil
                         appState.selectedProjectId = nil
                         appState.selectedChannelId = nil
@@ -252,6 +277,7 @@ struct ContentView: View {
                     ) {
                         appState.showPeople = true
                         appState.showInbox = false
+                        appState.showHome = false
                         appState.selectedThreadId = nil
                         appState.selectedProjectId = nil
                         appState.selectedChannelId = nil
@@ -282,44 +308,10 @@ struct ContentView: View {
             } else if appState.showSkills {
                 SkillsView()
             } else {
-                ZStack {
-                    Color.appBackground.ignoresSafeArea()
-                    VStack(spacing: 16) {
-                        Image(systemName: "bubble.left.and.bubble.right")
-                            .font(.system(size: 48))
-                            .foregroundColor(.secondary)
-                        Text("No thread selected")
-                            .foregroundColor(.secondary)
-                        Button {
-                            guard !isCreating else { return }
-                            isCreating = true
-                            let dateStr = Date().formatted(date: .abbreviated, time: .omitted)
-                            Task {
-                                if let thread = await threadListVM.createThread(
-                                    title: "New Chat \(dateStr)",
-                                    initialMessage: nil
-                                ) {
-                                    await MainActor.run {
-                                        appState.selectedThreadId = thread.id
-                                        appState.showSkills = false
-                                    }
-                                }
-                                isCreating = false
-                            }
-                        } label: {
-                            if isCreating {
-                                ProgressView().controlSize(.small).tint(.white)
-                            } else {
-                                Label("New Chat", systemImage: "plus")
-                                    .font(.system(size: 13, weight: .medium))
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Color.matcha600)
-                        .keyboardShortcut("n", modifiers: .command)
-                        .disabled(isCreating)
-                    }
-                }
+                // Default detail pane: Home dashboard. Replaces the old
+                // "No thread selected" placeholder so users always land
+                // somewhere actionable.
+                HomeDashboardView()
             }
         }
         .environment(appState)

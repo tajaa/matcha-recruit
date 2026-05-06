@@ -39,7 +39,7 @@ async def list_project_tasks(project_id: UUID) -> list[dict]:
             """
             SELECT t.id, t.project_id, t.company_id, t.created_by, t.title, t.description,
                    t.due_date, t.priority, t.status, t.board_column, t.assigned_to,
-                   t.completed_at, t.created_at, t.updated_at,
+                   t.completed_at, t.created_at, t.updated_at, t.progress_note,
                    COALESCE(a.name, u.email) AS assigned_name
             FROM mw_tasks t
             LEFT JOIN users u ON u.id = t.assigned_to
@@ -68,6 +68,7 @@ async def create_project_task(
     priority: str = "medium",
     due_date: Optional[_date] = None,
     assigned_to: Optional[UUID] = None,
+    progress_note: Optional[str] = None,
 ) -> dict:
     if board_column not in _ALLOWED_COLUMNS:
         raise ValueError(f"Invalid board_column: {board_column}")
@@ -85,16 +86,16 @@ async def create_project_task(
             INSERT INTO mw_tasks (
                 company_id, created_by, project_id, title, description,
                 due_date, priority, status, board_column, assigned_to,
-                completed_at, category
+                completed_at, category, progress_note
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'manual')
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'manual', $12)
             RETURNING id, project_id, company_id, created_by, title, description,
                       due_date, priority, status, board_column, assigned_to,
-                      completed_at, created_at, updated_at
+                      completed_at, created_at, updated_at, progress_note
             """,
             company_id, created_by, project_id, title.strip(), description,
             due_date, priority, status, board_column, assigned_to,
-            completed_at,
+            completed_at, progress_note,
         )
     return _row_to_task(dict(row))
 
@@ -135,6 +136,7 @@ async def update_project_task(project_id: UUID, task_id: UUID, patch: dict) -> O
         priority = patch.get("priority")
         due_date = patch.get("due_date")
         assigned_to = patch.get("assigned_to")
+        progress_note = patch.get("progress_note")
 
         if priority is not None and priority not in _ALLOWED_PRIORITIES:
             raise ValueError(f"Invalid priority: {priority}")
@@ -167,11 +169,12 @@ async def update_project_task(project_id: UUID, task_id: UUID, patch: dict) -> O
                 priority = COALESCE($7::text, priority),
                 due_date = CASE WHEN $8::boolean THEN $9::date ELSE due_date END,
                 assigned_to = CASE WHEN $10::boolean THEN $11::uuid ELSE assigned_to END,
+                progress_note = CASE WHEN $14::boolean THEN $15::text ELSE progress_note END,
                 updated_at = NOW()
             WHERE id = $2 AND project_id = $12
             RETURNING id, project_id, company_id, created_by, title, description,
                       due_date, priority, status, board_column, assigned_to,
-                      completed_at, created_at, updated_at
+                      completed_at, created_at, updated_at, progress_note
             """,
             new_column,                   # $1
             task_id,                      # $2
@@ -186,6 +189,8 @@ async def update_project_task(project_id: UUID, task_id: UUID, patch: dict) -> O
             assigned_to,                  # $11
             project_id,                   # $12
             completed_at_value,           # $13
+            "progress_note" in patch,     # $14
+            progress_note,                # $15
         )
     return _row_to_task(dict(row)) if row else None
 

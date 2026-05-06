@@ -50,6 +50,12 @@ struct KanbanBoardView: View {
                 ProgressView().tint(.secondary)
                 Spacer()
             } else {
+                if !viewModel.tasks.isEmpty {
+                    TaskProgressBar(tasks: viewModel.tasks, compact: true)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 8)
+                        .padding(.bottom, 4)
+                }
                 boardColumns
             }
         }
@@ -303,6 +309,19 @@ private struct KanbanCardView: View {
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
 
+                if let note = task.progressNote, !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "location.north.line")
+                            .font(.system(size: 8))
+                            .foregroundColor(.matcha500)
+                        Text(note)
+                            .font(.system(size: 10))
+                            .italic()
+                            .foregroundColor(.white.opacity(0.6))
+                            .lineLimit(1)
+                    }
+                }
+
                 HStack(spacing: 5) {
                     Circle().fill(priorityColor).frame(width: 5, height: 5)
                     if let name = task.assignedName, !name.isEmpty {
@@ -341,6 +360,7 @@ private struct TaskEditorSheet: View {
     @State private var priority: String
     @State private var dueDate: String
     @State private var boardColumn: String
+    @State private var progressNote: String
 
     init(
         task: MWProjectTask,
@@ -357,6 +377,7 @@ private struct TaskEditorSheet: View {
         _priority = State(initialValue: task.priority)
         _dueDate = State(initialValue: task.dueDate.map { String($0.prefix(10)) } ?? "")
         _boardColumn = State(initialValue: task.boardColumn)
+        _progressNote = State(initialValue: task.progressNote ?? "")
     }
 
     var body: some View {
@@ -381,6 +402,30 @@ private struct TaskEditorSheet: View {
                 .padding(8)
                 .background(Color.zinc800)
                 .cornerRadius(6)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 4) {
+                    Image(systemName: "location.north.line")
+                        .font(.system(size: 9))
+                        .foregroundColor(.matcha500)
+                    Text("WHERE WE'RE AT")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.matcha500)
+                        .tracking(0.5)
+                }
+                TextField("Current status, blockers, latest update…", text: $progressNote, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundColor(.white)
+                    .lineLimit(2...5)
+                    .padding(8)
+                    .background(Color.zinc800)
+                    .cornerRadius(6)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(Color.matcha500.opacity(0.4), lineWidth: 1)
+                    )
+            }
 
             TextField("Description", text: $description, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -431,7 +476,8 @@ private struct TaskEditorSheet: View {
                         description: description,
                         boardColumn: boardColumn,
                         priority: priority,
-                        dueDate: dueDate.isEmpty ? nil : dueDate
+                        dueDate: dueDate.isEmpty ? nil : dueDate,
+                        progressNote: progressNote
                     )
                     onSave(patch)
                 }
