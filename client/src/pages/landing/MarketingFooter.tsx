@@ -39,7 +39,6 @@ export default function MarketingFooter() {
           <FooterCol title="Legal" links={[
             { label: 'Terms', to: '/terms' },
             { label: 'Privacy', to: '/privacy' },
-            { label: 'Status', to: '/status' },
           ]} />
         </div>
         <div

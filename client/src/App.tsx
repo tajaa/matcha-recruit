@@ -34,6 +34,8 @@ import NewsletterAdmin from './pages/admin/Newsletter'
 import LandingMediaAdmin from './pages/admin/LandingMedia'
 import Blogs from './pages/admin/Blogs'
 import Subscribe from './pages/landing/Subscribe'
+import TermsPage from './pages/landing/TermsPage'
+import PrivacyPage from './pages/landing/PrivacyPage'
 import BlogIndex from './pages/landing/BlogIndex'
 import BlogPostPage from './pages/landing/BlogPost'
 import ResourcesHub from './pages/landing/ResourcesHub'
@@ -111,6 +113,8 @@ export default function App() {
       <Route path="/matcha-lite" element={<MatchaLitePage />} />
       <Route path="/services" element={<ServicesPage />} />
       <Route path="/subscribe" element={<Subscribe />} />
+      <Route path="/terms" element={<TermsPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
       <Route path="/blog" element={<BlogIndex />} />
       <Route path="/blog/:slug" element={<BlogPostPage />} />
       <Route path="/resources" element={<ResourcesHub />} />

@@ -37,6 +37,11 @@ function formatDateKey(d: Date): string {
 
 const BUSINESS_DAYS = getNextBusinessDays(14);
 
+const IV_BG = '#F5F2ED'
+const IV_INK = '#1F1D1A'
+const IV_MUTED = '#6B6760'
+const IV_LINE = '#E4DED2'
+
 export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: PricingContactModalProps) {
   const isConsultation = mode === 'consultation';
 
@@ -112,16 +117,16 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
             exit={{ opacity: 0, scale: 0.97, y: 16 }}
             transition={{ type: 'spring', damping: 28, stiffness: 320 }}
             className="relative w-full max-w-lg overflow-hidden shadow-2xl max-h-[92vh] flex flex-col"
-            style={{ backgroundColor: 'var(--color-ivory-bg)', border: '1px solid var(--color-ivory-line)' }}
+            style={{ backgroundColor: IV_BG, border: `1px solid ${IV_LINE}`, colorScheme: 'light' }}
           >
             <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-amber-600/40 to-transparent" />
 
             <button
               onClick={handleClose}
               className="absolute top-6 right-6 p-1.5 transition-colors z-10"
-              style={{ color: 'var(--color-ivory-muted)' }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-ivory-ink)')}
-              onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-ivory-muted)')}
+              style={{ color: IV_MUTED }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = IV_INK)}
+              onMouseLeave={(e) => (e.currentTarget.style.color = IV_MUTED)}
             >
               <X size={18} />
             </button>
@@ -138,10 +143,10 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                   >
                     <CheckCircle size={32} />
                   </motion.div>
-                  <h3 className="text-xl font-bold uppercase tracking-[0.08em]" style={{ color: 'var(--color-ivory-ink)' }}>
+                  <h3 className="text-xl font-bold uppercase tracking-[0.08em]" style={{ color: IV_INK }}>
                     {isConsultation ? 'Consultation Requested' : 'Sequence Initiated'}
                   </h3>
-                  <p className="text-sm leading-relaxed max-w-xs mx-auto font-light" style={{ color: 'var(--color-ivory-muted)' }}>
+                  <p className="text-sm leading-relaxed max-w-xs mx-auto font-light" style={{ color: IV_MUTED }}>
                     {isConsultation
                       ? "We'll confirm your time slot within one business day."
                       : "Your request has been logged. We'll synchronize with you shortly."}
@@ -149,7 +154,7 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                   <button
                     onClick={handleClose}
                     className="mt-6 px-10 py-3 text-[10px] font-mono uppercase tracking-[0.3em] font-bold transition-colors"
-                    style={{ backgroundColor: 'var(--color-ivory-ink)', color: 'var(--color-ivory-bg)' }}
+                    style={{ backgroundColor: IV_INK, color: IV_BG }}
                   >
                     Close
                   </button>
@@ -160,10 +165,10 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                     <p className="text-[10px] font-mono uppercase tracking-[0.4em] mb-4" style={{ color: '#b48228' }}>
                       {isConsultation ? 'Consulting // Schedule' : 'Initialize Account // Access'}
                     </p>
-                    <h2 className="text-2xl font-bold tracking-tight uppercase" style={{ color: 'var(--color-ivory-ink)' }}>
+                    <h2 className="text-2xl font-bold tracking-tight uppercase" style={{ color: IV_INK }}>
                       {isConsultation ? 'Book a Consultation' : 'Request Access'}
                     </h2>
-                    <p className="mt-3 text-sm font-light leading-relaxed" style={{ color: 'var(--color-ivory-muted)' }}>
+                    <p className="mt-3 text-sm font-light leading-relaxed" style={{ color: IV_MUTED }}>
                       {isConsultation
                         ? 'Pick a time and we will confirm within one business day.'
                         : 'Tell us about your organization to receive custom pricing for the Matcha platform.'}
@@ -178,7 +183,7 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                       <>
                         {/* Date picker */}
                         <div>
-                          <label className="block text-[9px] font-mono uppercase tracking-[0.25em] mb-3" style={{ color: 'var(--color-ivory-muted)' }}>
+                          <label className="block text-[9px] font-mono uppercase tracking-[0.25em] mb-3" style={{ color: IV_MUTED }}>
                             Preferred Date
                           </label>
                           <div className="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-none">
@@ -193,15 +198,15 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                                   className="flex-none flex flex-col items-center gap-1 px-3 py-2.5 text-center transition-colors"
                                   style={{
                                     minWidth: 52,
-                                    border: selected ? '1px solid rgba(180,130,40,0.55)' : '1px solid var(--color-ivory-line)',
+                                    border: selected ? '1px solid rgba(180,130,40,0.55)' : `1px solid ${IV_LINE}`,
                                     backgroundColor: selected ? 'rgba(180,130,40,0.08)' : 'transparent',
-                                    color: selected ? '#b48228' : 'var(--color-ivory-muted)',
+                                    color: selected ? '#b48228' : IV_MUTED,
                                   }}
                                 >
                                   <span className="text-[9px] font-mono uppercase tracking-wider">
                                     {DAY_NAMES[d.getDay()]}
                                   </span>
-                                  <span className="text-sm font-medium" style={{ color: selected ? '#b48228' : 'var(--color-ivory-ink)' }}>
+                                  <span className="text-sm font-medium" style={{ color: selected ? '#b48228' : IV_INK }}>
                                     {d.getDate()}
                                   </span>
                                   <span className="text-[9px]">
@@ -220,7 +225,7 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.2 }}
                           >
-                            <label className="block text-[9px] font-mono uppercase tracking-[0.25em] mb-3" style={{ color: 'var(--color-ivory-muted)' }}>
+                            <label className="block text-[9px] font-mono uppercase tracking-[0.25em] mb-3" style={{ color: IV_MUTED }}>
                               Preferred Time <span className="normal-case tracking-normal font-sans" style={{ color: '#9b958a' }}>(ET)</span>
                             </label>
                             <div className="grid grid-cols-4 gap-2">
@@ -233,9 +238,9 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                                     onClick={() => setSelectedTime(slot)}
                                     className="py-2 text-[11px] font-mono transition-colors"
                                     style={{
-                                      border: selected ? '1px solid rgba(180,130,40,0.55)' : '1px solid var(--color-ivory-line)',
+                                      border: selected ? '1px solid rgba(180,130,40,0.55)' : `1px solid ${IV_LINE}`,
                                       backgroundColor: selected ? 'rgba(180,130,40,0.08)' : 'transparent',
-                                      color: selected ? '#b48228' : 'var(--color-ivory-muted)',
+                                      color: selected ? '#b48228' : IV_MUTED,
                                     }}
                                   >
                                     {slot}
@@ -246,51 +251,51 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                           </motion.div>
                         )}
 
-                        <div className="pt-2" style={{ borderTop: '1px solid var(--color-ivory-line)' }} />
+                        <div className="pt-2" style={{ borderTop: `1px solid ${IV_LINE}` }} />
                       </>
                     )}
 
                     <div>
-                      <label className="block text-[9px] font-mono uppercase tracking-[0.25em] mb-2" style={{ color: 'var(--color-ivory-muted)' }}>Name</label>
+                      <label className="block text-[9px] font-mono uppercase tracking-[0.25em] mb-2" style={{ color: IV_MUTED }}>Name</label>
                       <input
                         type="text"
                         required
                         value={formData.contactName}
                         onChange={(e) => setFormData({ ...formData, contactName: e.target.value })}
                         className="w-full bg-transparent px-0 py-3 text-sm focus:outline-none transition-colors"
-                        style={{ color: 'var(--color-ivory-ink)', borderBottom: '1px solid var(--color-ivory-line)' }}
+                        style={{ color: IV_INK, borderBottom: `1px solid ${IV_LINE}` }}
                         placeholder="Jane Doe"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[9px] font-mono uppercase tracking-[0.25em] mb-2" style={{ color: 'var(--color-ivory-muted)' }}>Company</label>
+                      <label className="block text-[9px] font-mono uppercase tracking-[0.25em] mb-2" style={{ color: IV_MUTED }}>Company</label>
                       <input
                         type="text"
                         required
                         value={formData.companyName}
                         onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
                         className="w-full bg-transparent px-0 py-3 text-sm focus:outline-none transition-colors"
-                        style={{ color: 'var(--color-ivory-ink)', borderBottom: '1px solid var(--color-ivory-line)' }}
+                        style={{ color: IV_INK, borderBottom: `1px solid ${IV_LINE}` }}
                         placeholder="Acme Corp"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[9px] font-mono uppercase tracking-[0.25em] mb-2" style={{ color: 'var(--color-ivory-muted)' }}>Email</label>
+                      <label className="block text-[9px] font-mono uppercase tracking-[0.25em] mb-2" style={{ color: IV_MUTED }}>Email</label>
                       <input
                         type="email"
                         required
                         value={formData.email}
                         onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                         className="w-full bg-transparent px-0 py-3 text-sm focus:outline-none transition-colors"
-                        style={{ color: 'var(--color-ivory-ink)', borderBottom: '1px solid var(--color-ivory-line)' }}
+                        style={{ color: IV_INK, borderBottom: `1px solid ${IV_LINE}` }}
                         placeholder="name@company.com"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[9px] font-mono uppercase tracking-[0.25em] mb-2" style={{ color: 'var(--color-ivory-muted)' }}>
+                      <label className="block text-[9px] font-mono uppercase tracking-[0.25em] mb-2" style={{ color: IV_MUTED }}>
                         {isConsultation ? 'What do you need help with?' : 'Workforce Scale & Needs'}
                       </label>
                       <textarea
@@ -299,7 +304,7 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                         value={formData.description}
                         onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                         className="w-full bg-transparent px-0 py-3 text-sm focus:outline-none transition-colors resize-none"
-                        style={{ color: 'var(--color-ivory-ink)', borderBottom: '1px solid var(--color-ivory-line)' }}
+                        style={{ color: IV_INK, borderBottom: `1px solid ${IV_LINE}` }}
                         placeholder={isConsultation ? 'Brief description of your situation...' : 'Describe your team size and requirements...'}
                       />
                     </div>
@@ -309,7 +314,7 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                         type="submit"
                         disabled={isSubmitting}
                         className="w-full py-4 text-[10px] font-mono uppercase tracking-[0.3em] font-bold overflow-hidden disabled:opacity-50 transition-opacity hover:opacity-90 inline-flex items-center justify-center gap-3"
-                        style={{ backgroundColor: 'var(--color-ivory-ink)', color: 'var(--color-ivory-bg)' }}
+                        style={{ backgroundColor: IV_INK, color: IV_BG }}
                       >
                         {isSubmitting ? 'Sending...' : isConsultation ? 'Request Consultation' : 'Submit Request'}
                         {!isSubmitting && <Send size={11} />}
