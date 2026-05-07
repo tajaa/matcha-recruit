@@ -144,6 +144,25 @@ async def list_requirements(
         return [_requirement_to_dict(r) for r in rows]
 
 
+@router.get("/requirements/{requirement_id}")
+async def get_requirement(
+    requirement_id: UUID,
+    user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    """Get a single training requirement by id."""
+    if not company_id:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM training_requirements WHERE id = $1 AND company_id = $2",
+            requirement_id, company_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Requirement not found")
+        return _requirement_to_dict(row)
+
+
 @router.put("/requirements/{requirement_id}")
 async def update_requirement(
     requirement_id: UUID,
