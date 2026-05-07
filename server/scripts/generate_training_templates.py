@@ -276,9 +276,10 @@ async def upsert_template(v: dict, payload: dict, model_name: str) -> str:
 
 
 async def seed_matcha_lite_requirements() -> int:
-    """Insert one training_requirements row per (matcha_lite company, active template).
+    """Insert one training_requirements row per (lite company, active template).
 
-    Idempotent — uses NOT EXISTS so re-running is safe.
+    Covers both matcha_lite (current) and ir_only_self_serve (legacy name —
+    same feature surface). Idempotent — NOT EXISTS guards re-run.
     Returns number of rows inserted.
     """
     async with get_connection() as conn:
@@ -304,7 +305,7 @@ async def seed_matcha_lite_requirements() -> int:
                    TRUE
             FROM companies c
             CROSS JOIN training_lesson_templates t
-            WHERE c.signup_source = 'matcha_lite'
+            WHERE c.signup_source IN ('matcha_lite', 'ir_only_self_serve')
               AND t.is_active = TRUE
               AND NOT EXISTS (
                   SELECT 1 FROM training_requirements tr

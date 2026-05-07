@@ -1665,6 +1665,10 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 ir_features["incidents"] = True
                 ir_features["employees"] = True
                 ir_features["discipline"] = True
+                # ir_only_self_serve = legacy alias for matcha_lite — same
+                # surface (handbooks + training auto-enabled).
+                ir_features["handbooks"] = True
+                ir_features["training"] = True
                 enabled_features_json = json.dumps(ir_features)
             elif is_resources_free:
                 # Resources-tier signup: auto-approved so they can immediately
@@ -1749,11 +1753,11 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 user["id"], company_id
             )
 
-            # Step 4b: Seed training_requirements for matcha_lite tenants from
-            # global lesson templates. Idempotent — skipped when no templates
-            # exist (e.g. fresh dev DB before generate_training_templates.py
-            # has been run).
-            if is_matcha_lite:
+            # Step 4b: Seed training_requirements for lite tenants from
+            # global lesson templates. Covers matcha_lite + ir_only_self_serve
+            # (legacy alias). Idempotent — no-op when no templates exist
+            # (e.g. fresh dev DB before generate_training_templates.py runs).
+            if is_matcha_lite or is_ir_only:
                 await conn.execute(
                     """
                     INSERT INTO training_requirements

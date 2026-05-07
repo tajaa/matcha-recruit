@@ -24,6 +24,10 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
 # those flip via Stripe webhook on checkout completion.
 TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
     "matcha_lite": {"handbooks": True, "training": True},
+    # ir_only_self_serve is the legacy name for matcha_lite — same feature
+    # surface (handbooks + training auto-enabled). Kept distinct only because
+    # the signup_source value persists on existing rows.
+    "ir_only_self_serve": {"handbooks": True, "training": True},
 }
 
 
