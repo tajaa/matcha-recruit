@@ -12,6 +12,7 @@ import { IRDocumentPanel } from '../../components/ir/IRDocumentPanel'
 import { IRInterviewScheduler } from '../../components/ir/IRInterviewScheduler'
 import { IREscalationForm } from '../../components/ir/IREscalationForm'
 import { IRCategoryDataDisplay } from '../../components/ir/IRCategoryDataDisplay'
+import IRCopilotPanel from '../../components/ir/IRCopilotPanel'
 import { UpgradeUpsellCard } from '../../components/UpgradeUpsellCard'
 import { useMe } from '../../hooks/useMe'
 import {
@@ -29,7 +30,7 @@ const STATUS_OPTIONS = [
   { value: 'closed', label: 'Closed' },
 ]
 
-type Tab = 'overview' | 'documents' | 'analysis' | 'interviews'
+type Tab = 'copilot' | 'overview' | 'documents' | 'analysis' | 'interviews'
 
 export default function IRDetail() {
   const { incidentId } = useParams<{ incidentId: string }>()
@@ -39,7 +40,7 @@ export default function IRDetail() {
   const showUpsell = !showPolicyMapping || !showERFeatures
   const navigate = useNavigate()
   const { incident, loading, error, updateIncident, deleteIncident } = useIRIncident(incidentId!)
-  const [tab, setTab] = useState<Tab>('overview')
+  const [tab, setTab] = useState<Tab>('copilot')
 
   const [rootCause, setRootCause] = useState('')
   const [correctiveActions, setCorrectiveActions] = useState('')
@@ -89,14 +90,19 @@ export default function IRDetail() {
         {/* Main */}
         <div className="col-span-2">
           <div className="flex gap-1 mb-4">
-            {(['overview', 'documents', 'analysis', 'interviews'] as const).map((t) => (
+            {(['copilot', 'overview', 'documents', 'analysis', 'interviews'] as const).map((t) => (
               <Button key={t} variant={tab === t ? 'secondary' : 'ghost'} size="sm" onClick={() => setTab(t)}>
-                {t === 'analysis' ? 'AI Analysis' : t.charAt(0).toUpperCase() + t.slice(1)}
+                {t === 'analysis' ? 'AI Analysis' : t === 'copilot' ? 'Copilot' : t.charAt(0).toUpperCase() + t.slice(1)}
               </Button>
             ))}
           </div>
 
           <Card className="p-5">
+            {/* Copilot */}
+            {tab === 'copilot' && (
+              <IRCopilotPanel incidentId={incidentId!} />
+            )}
+
             {/* Overview */}
             {tab === 'overview' && (
               <div className="space-y-5">

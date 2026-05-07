@@ -512,3 +512,62 @@ class Osha300ASummary(BaseModel):
     total_other_illnesses: int
     average_employees: Optional[int]
     total_hours_worked: Optional[int]
+
+
+# ===========================================
+# Copilot models
+# ===========================================
+
+IRCopilotRole = Literal["user", "assistant", "system"]
+IRCopilotMessageType = Literal["text", "card", "event"]
+IRCopilotActionType = Literal[
+    "run_analysis", "set_field", "request_info", "escalate", "close_incident", "open_tab",
+]
+
+
+class IRCopilotCardAction(BaseModel):
+    type: IRCopilotActionType
+    label: str
+    tab: Optional[str] = None
+    analysis_type: Optional[str] = None
+    field_name: Optional[str] = None
+    field_value: Optional[Any] = None
+    search_query: Optional[str] = None
+
+
+class IRCopilotCard(BaseModel):
+    id: str
+    title: str
+    recommendation: str
+    rationale: str
+    priority: Literal["high", "medium", "low"] = "medium"
+    blockers: list[str] = []
+    action: IRCopilotCardAction
+    interview_questions: Optional[list[str]] = None
+
+
+class IRCopilotMessage(BaseModel):
+    id: UUID
+    role: IRCopilotRole
+    message_type: IRCopilotMessageType = "text"
+    content: str
+    metadata: Optional[dict[str, Any]] = None
+    created_by: Optional[UUID] = None
+    created_at: datetime
+
+
+class IRCopilotTranscript(BaseModel):
+    incident_id: UUID
+    messages: list[IRCopilotMessage]
+    current_cards: list[IRCopilotCard] = []
+    summary: Optional[str] = None
+    open_questions: list[str] = []
+
+
+class IRCopilotStreamRequest(BaseModel):
+    message: Optional[str] = Field(default=None, max_length=4000)
+
+
+class IRCopilotAcceptRequest(BaseModel):
+    message_id: UUID
+    card_id: str

@@ -37,13 +37,21 @@ def _guidance_card_id(raw_id: Any, title: str, idx: int) -> str:
     return f"guidance-{idx + 1}"
 
 
+DEFAULT_VALID_TABS = {"timeline", "discrepancies", "policy", "search"}
+DEFAULT_VALID_ANALYSIS_TYPES = {"timeline", "discrepancies", "policy", "similar_cases"}
+
+
 def _normalize_guidance_action(
     raw_action: Any,
     can_run_discrepancies: bool,
+    valid_tabs: Optional[set[str]] = None,
+    valid_analysis_types: Optional[set[str]] = None,
 ) -> dict[str, Any]:
     valid_action_types = {"run_analysis", "open_tab", "search_evidence", "upload_document", "schedule_interview"}
-    valid_tabs = {"timeline", "discrepancies", "policy", "search"}
-    valid_analysis_types = {"timeline", "discrepancies", "policy", "similar_cases"}
+    if valid_tabs is None:
+        valid_tabs = DEFAULT_VALID_TABS
+    if valid_analysis_types is None:
+        valid_analysis_types = DEFAULT_VALID_ANALYSIS_TYPES
 
     action_type = "open_tab"
     label = "Open Timeline"
@@ -130,6 +138,8 @@ def _normalize_guidance_action(
 def _normalize_guidance_cards(
     cards_value: Any,
     can_run_discrepancies: bool,
+    valid_tabs: Optional[set[str]] = None,
+    valid_analysis_types: Optional[set[str]] = None,
 ) -> list[dict[str, Any]]:
     normalized_cards: list[dict[str, Any]] = []
     priorities = {"high", "medium", "low"}
@@ -185,7 +195,12 @@ def _normalize_guidance_cards(
                 "rationale": rationale.strip()[:320],
                 "priority": priority,
                 "blockers": blockers[:3],
-                "action": _normalize_guidance_action(card.get("action"), can_run_discrepancies),
+                "action": _normalize_guidance_action(
+                    card.get("action"),
+                    can_run_discrepancies,
+                    valid_tabs=valid_tabs,
+                    valid_analysis_types=valid_analysis_types,
+                ),
                 "interview_questions": interview_questions,
             }
         )
@@ -381,6 +396,8 @@ def _normalize_suggested_guidance_payload(
     fallback_payload: dict[str, Any],
     can_run_discrepancies: bool,
     model_name: str,
+    valid_tabs: Optional[set[str]] = None,
+    valid_analysis_types: Optional[set[str]] = None,
 ) -> dict[str, Any]:
     if not isinstance(raw_payload, dict):
         return fallback_payload
@@ -391,7 +408,12 @@ def _normalize_suggested_guidance_payload(
     else:
         summary = summary.strip()[:600]
 
-    cards = _normalize_guidance_cards(raw_payload.get("cards"), can_run_discrepancies)
+    cards = _normalize_guidance_cards(
+        raw_payload.get("cards"),
+        can_run_discrepancies,
+        valid_tabs=valid_tabs,
+        valid_analysis_types=valid_analysis_types,
+    )
     if not cards:
         cards = fallback_payload["cards"]
 

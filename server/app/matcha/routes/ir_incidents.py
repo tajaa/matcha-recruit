@@ -27,6 +27,11 @@ from ...config import get_settings
 from ...core.services.storage import get_storage
 from ...core.services.email import get_email_service
 from ..models.ir_incident import (
+    IRCopilotAcceptRequest,
+    IRCopilotCard,
+    IRCopilotMessage,
+    IRCopilotStreamRequest,
+    IRCopilotTranscript,
     IRIncidentCreate,
     IRIncidentUpdate,
     IRIncidentResponse,
@@ -4048,3 +4053,374 @@ async def get_linked_er_case(
             "incident_id": str(incident_id),
             "er_case_id": str(incident["er_case_id"]) if incident["er_case_id"] else None,
         }
+
+
+# ===========================================
+# IR Copilot — orchestrator endpoints
+# ===========================================
+
+
+def _coerce_metadata_dict(value):
+    """asyncpg returns JSONB as str when no codec is registered."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
+def _serialize_message(row) -> IRCopilotMessage:
+    return IRCopilotMessage(
+        id=row["id"],
+        role=row["role"],
+        message_type=row.get("message_type", "text") if isinstance(row, dict) else row["message_type"],
+        content=row["content"],
+        metadata=_coerce_metadata_dict(row["metadata"]),
+        created_by=row["created_by"],
+        created_at=row["created_at"],
+    )
+
+
+def _extract_current_cards(messages: list) -> list[IRCopilotCard]:
+    """Latest assistant card-set is everything between the last assistant text and now."""
+    cards: list[dict] = []
+    saw_assistant_text = False
+    for m in messages:
+        role = m["role"] if isinstance(m, dict) else m.role
+        mtype = (m["message_type"] if isinstance(m, dict) else m.message_type) if hasattr(m, 'message_type') or isinstance(m, dict) else "text"
+        if role == "assistant" and mtype == "text":
+            saw_assistant_text = True
+            cards = []  # reset — start fresh after each assistant text
+            continue
+        if saw_assistant_text and role == "assistant" and mtype == "card":
+            md = _coerce_metadata_dict(m["metadata"] if isinstance(m, dict) else m.metadata) or {}
+            card = md.get("card")
+            if isinstance(card, dict):
+                # Only include cards that haven't been accepted yet.
+                if not md.get("accepted"):
+                    try:
+                        cards.append(IRCopilotCard.model_validate(card))
+                    except Exception:
+                        continue
+    return cards
+
+
+def _extract_summary_and_open_questions(messages: list) -> tuple[Optional[str], list[str]]:
+    summary: Optional[str] = None
+    open_questions: list[str] = []
+    for m in reversed(messages):
+        role = m["role"] if isinstance(m, dict) else m.role
+        mtype = m["message_type"] if isinstance(m, dict) else m.message_type
+        if role == "assistant" and mtype == "text":
+            summary = m["content"] if isinstance(m, dict) else m.content
+            md = _coerce_metadata_dict(m["metadata"] if isinstance(m, dict) else m.metadata) or {}
+            raw_q = md.get("open_questions") or []
+            if isinstance(raw_q, list):
+                open_questions = [str(q)[:280] for q in raw_q if isinstance(q, str)]
+            break
+    return summary, open_questions
+
+
+@router.get("/{incident_id}/copilot", response_model=IRCopilotTranscript)
+async def get_copilot_transcript(
+    incident_id: UUID,
+    current_user=Depends(require_admin_or_client),
+):
+    """Return the full chat transcript + currently-active cards for an incident."""
+    async with get_connection() as conn:
+        await _get_incident_with_company_check(conn, incident_id, current_user, columns="id")
+        rows = await conn.fetch(
+            "SELECT id, role, message_type, content, metadata, created_by, created_at "
+            "FROM ir_incident_ai_messages WHERE incident_id = $1 ORDER BY created_at",
+            incident_id,
+        )
+
+    messages = [_serialize_message(r) for r in rows]
+    cards = _extract_current_cards(messages)
+    summary, open_questions = _extract_summary_and_open_questions(messages)
+    return IRCopilotTranscript(
+        incident_id=incident_id,
+        messages=messages,
+        current_cards=cards,
+        summary=summary,
+        open_questions=open_questions,
+    )
+
+
+@router.post("/{incident_id}/copilot/stream")
+async def stream_copilot_round(
+    incident_id: UUID,
+    body: IRCopilotStreamRequest,
+    request: Request,
+    current_user=Depends(require_admin_or_client),
+):
+    """Run one guidance round. Empty body = cold start. SSE stream of:
+      - {type:'status', stage:'thinking'}
+      - {type:'summary', text:...}
+      - {type:'card', card:...}  (one event per card)
+      - {type:'open_question', text:...}
+      - {type:'done'}
+    Persists user message + assistant text + one row per card.
+    """
+    from ..services.ir_ai_orchestrator import (
+        generate_guidance,
+        load_incident_state,
+        persist_assistant_round,
+    )
+
+    company_id = await get_client_company_id(current_user)
+
+    async def event_stream():
+        # Acquire connection inside generator so it lives for the full stream
+        async with get_connection() as conn:
+            incident, analyses, messages = await load_incident_state(
+                conn, incident_id, company_id
+            )
+            if incident is None:
+                yield _sse({"type": "error", "detail": "Incident not found"})
+                return
+
+            yield _sse({"type": "status", "stage": "thinking"})
+
+            # Append the user's message FIRST so the orchestrator includes it.
+            user_msg = (body.message or "").strip()
+            if user_msg:
+                from ..services.ir_ai_orchestrator import append_message
+                user_row = await append_message(
+                    conn,
+                    incident_id=incident_id,
+                    role="user",
+                    message_type="text",
+                    content=user_msg[:4000],
+                    created_by=current_user.id,
+                )
+                messages.append(user_row)
+
+            try:
+                payload = await generate_guidance(
+                    incident=incident,
+                    analyses=analyses,
+                    messages=messages,
+                )
+            except Exception as exc:
+                logger.exception("IR Copilot round failed for incident %s", incident_id)
+                yield _sse({"type": "error", "detail": "Failed to generate guidance"})
+                return
+
+            # Persist assistant text + cards
+            await persist_assistant_round(
+                conn,
+                incident_id=incident_id,
+                user_id=current_user.id,
+                user_message=None,  # already inserted above
+                guidance_payload=payload,
+            )
+
+            yield _sse({"type": "summary", "text": payload.get("summary") or ""})
+            for q in payload.get("open_questions") or []:
+                yield _sse({"type": "open_question", "text": q})
+            for card in payload.get("cards") or []:
+                yield _sse({"type": "card", "card": card})
+            yield _sse({"type": "done", "model": payload.get("model")})
+
+            await log_audit(
+                conn,
+                incident_id=str(incident_id),
+                user_id=str(current_user.id),
+                action="copilot_message",
+                entity_type="incident",
+                entity_id=str(incident_id),
+                details={"cards": len(payload.get("cards") or []), "user_message_len": len(user_msg)},
+                ip_address=request.client.host if request.client else None,
+            )
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+_FIELD_WHITELIST = {
+    "category": "incident_type",  # alias — DB col is incident_type
+    "incident_type": "incident_type",
+    "severity": "severity",
+    "status": "status",
+    "root_cause": "root_cause",
+    "corrective_actions": "corrective_actions",
+}
+
+
+_VALID_INCIDENT_TYPES = {"safety", "behavioral", "property", "near_miss", "other"}
+_VALID_SEVERITIES = {"critical", "high", "medium", "low"}
+_VALID_STATUSES = {"reported", "investigating", "action_required", "resolved", "closed"}
+
+
+def _validate_field_value(field: str, value):
+    if field == "incident_type" and value not in _VALID_INCIDENT_TYPES:
+        raise HTTPException(status_code=400, detail=f"Invalid incident_type: {value}")
+    if field == "severity" and value not in _VALID_SEVERITIES:
+        raise HTTPException(status_code=400, detail=f"Invalid severity: {value}")
+    if field == "status" and value not in _VALID_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {value}")
+
+
+@router.post("/{incident_id}/copilot/accept")
+async def accept_copilot_card(
+    incident_id: UUID,
+    body: IRCopilotAcceptRequest,
+    request: Request,
+    current_user=Depends(require_admin_or_client),
+):
+    """Execute a card action (set_field/run_analysis/escalate/close_incident/request_info),
+    persist an event message, then trigger a fresh guidance round (returned non-streaming).
+    """
+    from ..services.ir_ai_orchestrator import (
+        append_message,
+        generate_guidance,
+        load_incident_state,
+        persist_assistant_round,
+    )
+
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        incident, analyses, messages = await load_incident_state(
+            conn, incident_id, company_id
+        )
+        if incident is None:
+            raise HTTPException(status_code=404, detail="Incident not found")
+
+        # Find the card row
+        card_row = await conn.fetchrow(
+            "SELECT id, metadata FROM ir_incident_ai_messages "
+            "WHERE id = $1 AND incident_id = $2 AND message_type = 'card'",
+            body.message_id, incident_id,
+        )
+        if not card_row:
+            raise HTTPException(status_code=404, detail="Card not found")
+
+        md = _coerce_metadata_dict(card_row["metadata"]) or {}
+        card = md.get("card") or {}
+        if card.get("id") != body.card_id:
+            raise HTTPException(status_code=400, detail="Card id mismatch")
+        if md.get("accepted"):
+            raise HTTPException(status_code=400, detail="Card already accepted")
+
+        action = card.get("action") or {}
+        action_type = action.get("type")
+        event_summary = ""
+
+        if action_type == "set_field":
+            raw_field = (action.get("field_name") or "").strip()
+            new_value = action.get("field_value")
+            if raw_field not in _FIELD_WHITELIST:
+                raise HTTPException(status_code=400, detail="Field not editable via copilot")
+            db_field = _FIELD_WHITELIST[raw_field]
+            _validate_field_value(db_field, new_value)
+            prev = await conn.fetchval(
+                f"SELECT {db_field} FROM ir_incidents WHERE id = $1", incident_id,
+            )
+            await conn.execute(
+                f"UPDATE ir_incidents SET {db_field} = $1, updated_at = NOW() WHERE id = $2",
+                new_value, incident_id,
+            )
+            event_summary = f"Set {db_field} = {new_value!r} (was {prev!r})"
+
+        elif action_type == "run_analysis":
+            analysis_type = action.get("analysis_type")
+            if analysis_type not in {
+                "categorization", "severity", "root_cause", "recommendations", "similar", "policy_mapping",
+            }:
+                raise HTTPException(status_code=400, detail="Invalid analysis_type")
+            event_summary = (
+                f"Queued {analysis_type} analysis. Click Refresh to see updated cards once ready."
+            )
+
+        elif action_type == "escalate":
+            existing_er = await conn.fetchval(
+                "SELECT er_case_id FROM ir_incidents WHERE id = $1", incident_id,
+            )
+            if existing_er:
+                event_summary = f"Already linked to ER case {existing_er}"
+            else:
+                event_summary = (
+                    "Marked for ER escalation — open ER Copilot to create the case."
+                )
+
+        elif action_type == "close_incident":
+            await conn.execute(
+                "UPDATE ir_incidents SET status = 'resolved', resolved_at = NOW(), "
+                "updated_at = NOW() WHERE id = $1",
+                incident_id,
+            )
+            event_summary = "Incident marked resolved."
+
+        elif action_type == "request_info":
+            event_summary = "Request acknowledged — answer in chat below."
+
+        elif action_type == "open_tab":
+            event_summary = f"Opening {action.get('tab') or 'tab'}"
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown action type: {action_type}")
+
+        # Mark the card accepted
+        new_md = dict(md)
+        new_md["accepted"] = True
+        new_md["accepted_at"] = datetime.now(timezone.utc).isoformat()
+        new_md["accepted_by"] = str(current_user.id)
+        await conn.execute(
+            "UPDATE ir_incident_ai_messages SET metadata = $1::jsonb WHERE id = $2",
+            json.dumps(new_md), card_row["id"],
+        )
+
+        # Persist event message
+        await append_message(
+            conn,
+            incident_id=incident_id,
+            role="system",
+            message_type="event",
+            content=event_summary,
+            metadata={"action": action_type, "card_id": body.card_id},
+            created_by=current_user.id,
+        )
+
+        await log_audit(
+            conn,
+            incident_id=str(incident_id),
+            user_id=str(current_user.id),
+            action="copilot_card_accepted",
+            entity_type="incident",
+            entity_id=str(incident_id),
+            details={"card_id": body.card_id, "action_type": action_type},
+            ip_address=request.client.host if request.client else None,
+        )
+
+        # Re-run guidance with fresh state
+        incident, analyses, messages = await load_incident_state(
+            conn, incident_id, company_id
+        )
+        try:
+            payload = await generate_guidance(
+                incident=incident, analyses=analyses, messages=messages,
+            )
+        except Exception:
+            logger.exception("Follow-up guidance failed after accept")
+            payload = {"summary": event_summary, "open_questions": [], "cards": []}
+
+        await persist_assistant_round(
+            conn,
+            incident_id=incident_id,
+            user_id=current_user.id,
+            user_message=None,
+            guidance_payload=payload,
+        )
+
+    return {
+        "status": "accepted",
+        "summary": payload.get("summary") or event_summary,
+        "open_questions": payload.get("open_questions") or [],
+        "cards": payload.get("cards") or [],
+    }
