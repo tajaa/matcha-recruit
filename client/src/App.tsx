@@ -158,7 +158,7 @@ export default function App() {
         <Route path=":threadId" element={<MatchaWorkThread />} />
         <Route path="projects/:projectId" element={<ProjectView />} />
       </Route>
-      <Route path="/admin" element={<AppLayout sidebar={<AdminSidebar />} />}>
+      <Route path="/admin" element={<AppLayout sidebar={<AdminSidebar />} logoLabel="Matcha Admin" />}>
         <Route index element={<Navigate to="customers" replace />} />
         <Route path="customers" element={<Customers />} />
         <Route path="companies" element={<Companies />} />
@@ -181,7 +181,7 @@ export default function App() {
         <Route path="landing-media" element={<LandingMediaAdmin />} />
         <Route path="blogs" element={<Blogs />} />
       </Route>
-      <Route path="/broker" element={<AppLayout sidebar={<BrokerSidebar />} />}>
+      <Route path="/broker" element={<AppLayout sidebar={<BrokerSidebar />} logoLabel="Matcha Broker" />}>
         <Route index element={<BrokerDashboard />} />
         <Route path="clients" element={<BrokerClients />} />
         <Route path="referrals" element={<BrokerReferralLinks />} />

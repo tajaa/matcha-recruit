@@ -1,4 +1,4 @@
-import { AlertTriangle, Users, Building2, MapPin, BookOpen, CalendarDays, LayoutDashboard, FileText, MessageCircleQuestion, GraduationCap, ClipboardCheck } from 'lucide-react'
+import { AlertTriangle, Users, Building2, MapPin, BookOpen, CalendarDays, LayoutDashboard, FileText, MessageCircleQuestion, GraduationCap } from 'lucide-react'
 import SidebarShell from '../SidebarShell'
 import type { NavItem, NavGroup } from '../SidebarShell'
 import { useMe } from '../../hooks/useMe'
@@ -18,7 +18,6 @@ const nav: (NavItem | NavGroup)[] = [
   { to: '/app/resources', icon: BookOpen, label: 'Resources' },
   { to: '/app/locations', icon: MapPin, label: 'Locations' },
   { to: '/app/employees', icon: Users, label: 'Employees', feature: 'employees' },
-  { to: '/app/onboarding', icon: ClipboardCheck, label: 'Onboarding', feature: 'employees' },
   { to: '/app/company', icon: Building2, label: 'Company' },
 ]
 
@@ -50,7 +49,7 @@ export default function IrSidebar() {
   return (
     <SidebarShell
       logoTo="/app/ir"
-      logoLabel="Matcha IR"
+      logoLabel="Matcha Lite"
       nav={loading ? [] : items}
       user={footerName ? {
         name: footerName,
