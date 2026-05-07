@@ -35,6 +35,40 @@ IR_VALID_ANALYSIS_TYPES = {
     "policy_mapping",
 }
 
+# AI commonly emits abbreviated / alternate names. Map them to canonical IDs
+# so "policy" / "rca" / "categorize" all resolve. Keys are lowercased before
+# lookup; values must be in IR_VALID_ANALYSIS_TYPES.
+ANALYSIS_TYPE_ALIASES = {
+    "policy": "policy_mapping",
+    "policies": "policy_mapping",
+    "policy-mapping": "policy_mapping",
+    "policy_check": "policy_mapping",
+    "policy_violations": "policy_mapping",
+    "rca": "root_cause",
+    "root-cause": "root_cause",
+    "five_whys": "root_cause",
+    "categorize": "categorization",
+    "categorise": "categorization",
+    "category": "categorization",
+    "similar_incidents": "similar",
+    "precedents": "similar",
+    "recommendation": "recommendations",
+    "recommended_actions": "recommendations",
+    "severity_assessment": "severity",
+}
+
+
+def _canonical_analysis_type(raw: Optional[str]) -> Optional[str]:
+    """Resolve aliases to a canonical IR analysis_type, or None if unknown."""
+    if not isinstance(raw, str):
+        return None
+    key = raw.strip().lower()
+    if key in IR_VALID_ANALYSIS_TYPES:
+        return key
+    if key in ANALYSIS_TYPE_ALIASES:
+        return ANALYSIS_TYPE_ALIASES[key]
+    return None
+
 # Action types the orchestrator may emit and the accept endpoint dispatches.
 IR_ACTION_TYPES = {
     "run_analysis",
@@ -282,10 +316,8 @@ async def generate_guidance(
         card_action_type = raw_action.get("type")
         if card_action_type in IR_ACTION_TYPES:
             card["action"]["type"] = card_action_type
-        card["action"]["analysis_type"] = (
+        card["action"]["analysis_type"] = _canonical_analysis_type(
             raw_action.get("analysis_type")
-            if raw_action.get("analysis_type") in IR_VALID_ANALYSIS_TYPES
-            else None
         )
         card["action"]["field_name"] = raw_action.get("field_name") if isinstance(raw_action.get("field_name"), str) else None
         card["action"]["field_value"] = raw_action.get("field_value") if isinstance(raw_action.get("field_value"), (str, type(None))) else None

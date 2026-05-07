@@ -117,3 +117,18 @@ def test_action_type_set_complete():
     """All emitted action types match the dispatch whitelist in the route."""
     expected = {"run_analysis", "set_field", "request_info", "escalate", "close_incident"}
     assert expected.issubset(IR_ACTION_TYPES)
+
+
+def test_canonical_analysis_type_aliases():
+    """AI commonly emits abbreviated names. Aliases must resolve to canonical."""
+    from app.matcha.services.ir_ai_orchestrator import _canonical_analysis_type
+
+    assert _canonical_analysis_type("policy") == "policy_mapping"
+    assert _canonical_analysis_type("Policy") == "policy_mapping"
+    assert _canonical_analysis_type("policy-mapping") == "policy_mapping"
+    assert _canonical_analysis_type("rca") == "root_cause"
+    assert _canonical_analysis_type("categorize") == "categorization"
+    assert _canonical_analysis_type("similar_incidents") == "similar"
+    assert _canonical_analysis_type("severity") == "severity"  # already canonical
+    assert _canonical_analysis_type(None) is None
+    assert _canonical_analysis_type("nonsense") is None

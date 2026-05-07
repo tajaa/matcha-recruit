@@ -4329,14 +4329,26 @@ async def accept_copilot_card(
             event_summary = f"Set {db_field} = {new_value!r} (was {prev!r})"
 
         elif action_type == "run_analysis":
-            analysis_type = action.get("analysis_type")
-            if analysis_type not in {
-                "categorization", "severity", "root_cause", "recommendations", "similar", "policy_mapping",
-            }:
-                raise HTTPException(status_code=400, detail="Invalid analysis_type")
-            event_summary = (
-                f"Queued {analysis_type} analysis. Click Refresh to see updated cards once ready."
-            )
+            from ..services.ir_ai_orchestrator import _canonical_analysis_type
+            analysis_type = _canonical_analysis_type(action.get("analysis_type"))
+            if analysis_type is None:
+                event_summary = (
+                    "Couldn't determine which analysis to run. Open the AI Analysis tab and pick one manually."
+                )
+            elif analysis_type == "policy_mapping":
+                # Run inline so the next guidance round sees the result.
+                try:
+                    await _auto_map_policy_violations(str(incident_id), str(incident["company_id"]))
+                    event_summary = "Policy mapping complete (uses active handbook + policies)."
+                except Exception as exc:
+                    logger.exception("policy_mapping failed for incident %s", incident_id)
+                    event_summary = f"Policy mapping failed: {exc}"
+            else:
+                # Other analyses live behind dedicated routes; nudge user to the
+                # AI Analysis tab for now (v1.1 will inline these too).
+                event_summary = (
+                    f"Open the AI Analysis tab and click Run on '{analysis_type.replace('_', ' ').title()}'."
+                )
 
         elif action_type == "escalate":
             existing_er = await conn.fetchval(
