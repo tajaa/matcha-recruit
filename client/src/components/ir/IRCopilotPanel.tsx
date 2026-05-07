@@ -32,7 +32,6 @@ export default function IRCopilotPanel({ incidentId }: Props) {
   const [messages, setMessages] = useState<CopilotMessage[]>([])
   const [currentCards, setCurrentCards] = useState<CopilotCard[]>([])
   const [openQuestions, setOpenQuestions] = useState<string[]>([])
-  const [summary, setSummary] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [streaming, setStreaming] = useState(false)
   const [busyCardMessageId, setBusyCardMessageId] = useState<string | null>(null)
@@ -46,7 +45,6 @@ export default function IRCopilotPanel({ incidentId }: Props) {
       const t = await api.get<Transcript>(`/ir/incidents/${incidentId}/copilot`)
       setMessages(t.messages)
       setCurrentCards(t.current_cards)
-      setSummary(t.summary)
       setOpenQuestions(t.open_questions)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load copilot')
@@ -97,10 +95,8 @@ export default function IRCopilotPanel({ incidentId }: Props) {
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buf = ''
-      // Reset for the new round
       const newCards: CopilotCard[] = []
-      let newSummary = ''
-      let newOpenQuestions: string[] = []
+      const newOpenQuestions: string[] = []
 
       while (true) {
         const { value, done } = await reader.read()
@@ -112,10 +108,7 @@ export default function IRCopilotPanel({ incidentId }: Props) {
           if (!ev.startsWith('data: ')) continue
           try {
             const data = JSON.parse(ev.slice(6))
-            if (data.type === 'summary') {
-              newSummary = data.text
-              setSummary(data.text)
-            } else if (data.type === 'open_question') {
+            if (data.type === 'open_question') {
               newOpenQuestions.push(data.text)
               setOpenQuestions([...newOpenQuestions])
             } else if (data.type === 'card') {
