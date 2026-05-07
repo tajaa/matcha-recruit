@@ -23,11 +23,18 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
 # Paid gates (incidents/employees/discipline) intentionally NOT here —
 # those flip via Stripe webhook on checkout completion.
 TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
+    # matcha_lite (paid) — employees/discipline gated on Stripe; only the
+    # always-on bundle items overlay here.
     "matcha_lite": {"handbooks": True, "training": True},
-    # ir_only_self_serve is the legacy name for matcha_lite — same feature
-    # surface (handbooks + training auto-enabled). Kept distinct only because
-    # the signup_source value persists on existing rows.
-    "ir_only_self_serve": {"handbooks": True, "training": True},
+    # ir_only_self_serve (legacy free private beta) — full IR + HR bundle is
+    # always on, no payment gate.
+    "ir_only_self_serve": {
+        "handbooks": True,
+        "training": True,
+        "employees": True,
+        "discipline": True,
+        "incidents": True,
+    },
 }
 
 

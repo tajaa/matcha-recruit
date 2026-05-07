@@ -33,13 +33,31 @@ def test_matcha_lite_tier_forces_training_on():
     assert features["training"] is True
 
 
-def test_ir_only_self_serve_forces_handbooks_and_training_on():
-    # Legacy matcha-lite signups; same overlay applies.
+def test_ir_only_self_serve_forces_full_ir_bundle_on():
+    # Legacy free beta — full bundle (handbooks, training, employees,
+    # discipline, incidents) auto-enabled regardless of stored value.
     features = merge_company_features(
-        {"handbooks": False, "training": False}, "ir_only_self_serve"
+        {
+            "handbooks": False,
+            "training": False,
+            "employees": False,
+            "discipline": False,
+            "incidents": False,
+        },
+        "ir_only_self_serve",
     )
     assert features["handbooks"] is True
     assert features["training"] is True
+    assert features["employees"] is True
+    assert features["discipline"] is True
+    assert features["incidents"] is True
+
+
+def test_matcha_lite_keeps_employees_payment_gated():
+    # Stored false stays false — Stripe webhook flips it after payment.
+    features = merge_company_features({"employees": False, "discipline": False}, "matcha_lite")
+    assert features["employees"] is False
+    assert features["discipline"] is False
 
 
 def test_bespoke_tier_respects_explicit_disable():
