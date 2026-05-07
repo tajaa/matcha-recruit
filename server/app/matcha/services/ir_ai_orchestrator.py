@@ -158,7 +158,7 @@ def _serialize_conversation(messages: list[dict[str, Any]], limit: int = 12) -> 
         message_type = m.get("message_type", "text")
         content = (m.get("content") or "")[:600]
         if message_type == "card":
-            md = m.get("metadata") or {}
+            md = _coerce_metadata(m.get("metadata")) or {}
             accepted = md.get("accepted")
             tag = "ACCEPTED" if accepted else "OFFERED"
             lines.append(f"[{role}/card/{tag}] {content}")
