@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Button, Input } from '../../components/ui'
 import { api } from '../../api/client'
+import { MultiBatchModal } from '../../components/employees/MultiBatchModal'
+import { BulkUploadModal } from '../../components/employees/BulkUploadModal'
 
 // --- Types ---
 
@@ -57,6 +59,14 @@ export default function Onboarding() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+  const [showAddEmployees, setShowAddEmployees] = useState(false)
+  const [showBulkUpload, setShowBulkUpload] = useState(false)
+  const [departments, setDepartments] = useState<string[]>([])
+
+  function refreshDepartments() {
+    api.get<string[]>('/employees/departments').then(setDepartments).catch(() => setDepartments([]))
+  }
+  useEffect(() => { refreshDepartments() }, [])
 
   useEffect(() => {
     Promise.all([
@@ -118,10 +128,30 @@ export default function Onboarding() {
             Task templates and onboarding analytics.
           </p>
         </div>
-        <Button onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancel' : 'Add Task'}
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={() => setShowBulkUpload(true)}>
+            Upload CSV
+          </Button>
+          <Button variant="ghost" onClick={() => setShowAddEmployees(true)}>
+            Add Employees
+          </Button>
+          <Button onClick={() => setShowForm(!showForm)}>
+            {showForm ? 'Cancel' : 'Add Task'}
+          </Button>
+        </div>
       </div>
+
+      <MultiBatchModal
+        open={showAddEmployees}
+        onClose={() => setShowAddEmployees(false)}
+        onSuccess={refreshDepartments}
+        departments={departments}
+      />
+      <BulkUploadModal
+        open={showBulkUpload}
+        onClose={() => setShowBulkUpload(false)}
+        onSuccess={refreshDepartments}
+      />
 
       {/* Analytics funnel */}
       {analytics && (
