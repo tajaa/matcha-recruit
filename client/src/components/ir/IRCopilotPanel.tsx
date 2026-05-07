@@ -35,6 +35,7 @@ export default function IRCopilotPanel({ incidentId }: Props) {
   const [loading, setLoading] = useState(true)
   const [streaming, setStreaming] = useState(false)
   const [busyCardMessageId, setBusyCardMessageId] = useState<string | null>(null)
+  const [busyStage, setBusyStage] = useState<string | null>(null)
   const [skippedCards, setSkippedCards] = useState<Set<string>>(new Set())
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -150,18 +151,59 @@ export default function IRCopilotPanel({ incidentId }: Props) {
 
   async function handleAccept(messageId: string, cardId: string) {
     setBusyCardMessageId(messageId)
+    setBusyStage('Starting…')
     setError(null)
     try {
-      await api.post(`/ir/incidents/${incidentId}/copilot/accept`, {
-        message_id: messageId,
-        card_id: cardId,
+      const token = localStorage.getItem('matcha_access_token')
+      const res = await fetch(`${BASE}/ir/incidents/${incidentId}/copilot/accept`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ message_id: messageId, card_id: cardId }),
       })
+      if (!res.ok || !res.body) {
+        throw new Error(`Accept failed (${res.status})`)
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const events = buf.split('\n\n')
+        buf = events.pop() || ''
+        for (const ev of events) {
+          if (!ev.startsWith('data: ')) continue
+          try {
+            const data = JSON.parse(ev.slice(6))
+            if (data.type === 'status') {
+              if (data.stage === 'starting') setBusyStage('Starting…')
+              else if (data.stage === 'running_analysis') setBusyStage(data.label || `Running ${data.analysis_type || 'analysis'}…`)
+              else if (data.stage === 'analysis_complete') setBusyStage('Analysis complete — generating guidance…')
+              else if (data.stage === 'thinking') setBusyStage('Generating next steps…')
+            } else if (data.type === 'event') {
+              setBusyStage(data.text)
+            } else if (data.type === 'error') {
+              setError(data.detail || 'Action failed')
+            }
+            // We don't render cards/summary inline here — refresh below
+            // pulls authoritative transcript with proper IDs.
+          } catch {
+            // ignore
+          }
+        }
+      }
       setSkippedCards(new Set())
       await refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Accept failed')
     } finally {
       setBusyCardMessageId(null)
+      setBusyStage(null)
     }
   }
 
@@ -214,6 +256,13 @@ export default function IRCopilotPanel({ incidentId }: Props) {
           </span>
         )}
       </div>
+
+      {busyStage && (
+        <div className="mb-4 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-200 flex items-center gap-2">
+          <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+          <span className="leading-snug">{busyStage}</span>
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-300">

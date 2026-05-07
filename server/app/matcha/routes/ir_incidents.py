@@ -4273,10 +4273,22 @@ async def accept_copilot_card(
     request: Request,
     current_user=Depends(require_admin_or_client),
 ):
-    """Execute a card action (set_field/run_analysis/escalate/close_incident/request_info),
-    persist an event message, then trigger a fresh guidance round (returned non-streaming).
+    """Execute a card action and stream stage progression to the client.
+
+    SSE events:
+      - {type:'status', stage:'starting'}
+      - {type:'status', stage:'running_analysis', analysis_type:'policy_mapping'}
+      - {type:'status', stage:'analysis_complete', analysis_type:...}
+      - {type:'event', text:...}              event summary persisted
+      - {type:'status', stage:'thinking'}     guidance round starting
+      - {type:'summary', text:...}
+      - {type:'card', card:...}                one event per card
+      - {type:'open_question', text:...}
+      - {type:'done'}
+      - {type:'error', detail:...}
     """
     from ..services.ir_ai_orchestrator import (
+        _canonical_analysis_type,
         append_message,
         generate_guidance,
         load_incident_state,
@@ -4285,170 +4297,193 @@ async def accept_copilot_card(
 
     company_id = await get_client_company_id(current_user)
 
-    async with get_connection() as conn:
-        incident, analyses, messages = await load_incident_state(
-            conn, incident_id, company_id
-        )
-        if incident is None:
-            raise HTTPException(status_code=404, detail="Incident not found")
-
-        # Find the card row
-        card_row = await conn.fetchrow(
-            "SELECT id, metadata FROM ir_incident_ai_messages "
-            "WHERE id = $1 AND incident_id = $2 AND message_type = 'card'",
-            body.message_id, incident_id,
-        )
-        if not card_row:
-            raise HTTPException(status_code=404, detail="Card not found")
-
-        md = _coerce_metadata_dict(card_row["metadata"]) or {}
-        card = md.get("card") or {}
-        if card.get("id") != body.card_id:
-            raise HTTPException(status_code=400, detail="Card id mismatch")
-        if md.get("accepted"):
-            raise HTTPException(status_code=400, detail="Card already accepted")
-
-        action = card.get("action") or {}
-        action_type = action.get("type")
-        event_summary = ""
-
-        if action_type == "set_field":
-            raw_field = (action.get("field_name") or "").strip()
-            new_value = action.get("field_value")
-            if raw_field not in _FIELD_WHITELIST:
-                raise HTTPException(status_code=400, detail="Field not editable via copilot")
-            db_field = _FIELD_WHITELIST[raw_field]
-            _validate_field_value(db_field, new_value)
-            prev = await conn.fetchval(
-                f"SELECT {db_field} FROM ir_incidents WHERE id = $1", incident_id,
+    async def event_stream():
+        async with get_connection() as conn:
+            incident, analyses, messages = await load_incident_state(
+                conn, incident_id, company_id
             )
-            await conn.execute(
-                f"UPDATE ir_incidents SET {db_field} = $1, updated_at = NOW() WHERE id = $2",
-                new_value, incident_id,
-            )
-            event_summary = f"Set {db_field} = {new_value!r} (was {prev!r})"
+            if incident is None:
+                yield _sse({"type": "error", "detail": "Incident not found"})
+                return
 
-        elif action_type == "run_analysis":
-            from ..services.ir_ai_orchestrator import _canonical_analysis_type
-            analysis_type = _canonical_analysis_type(action.get("analysis_type"))
-            if analysis_type is None:
-                event_summary = (
-                    "Couldn't determine which analysis to run. Open the AI Analysis tab and pick one manually."
+            card_row = await conn.fetchrow(
+                "SELECT id, metadata FROM ir_incident_ai_messages "
+                "WHERE id = $1 AND incident_id = $2 AND message_type = 'card'",
+                body.message_id, incident_id,
+            )
+            if not card_row:
+                yield _sse({"type": "error", "detail": "Card not found"})
+                return
+
+            md = _coerce_metadata_dict(card_row["metadata"]) or {}
+            card = md.get("card") or {}
+            if card.get("id") != body.card_id:
+                yield _sse({"type": "error", "detail": "Card id mismatch"})
+                return
+            if md.get("accepted"):
+                yield _sse({"type": "error", "detail": "Card already accepted"})
+                return
+
+            action = card.get("action") or {}
+            action_type = action.get("type")
+            event_summary = ""
+
+            yield _sse({"type": "status", "stage": "starting", "action_type": action_type})
+
+            try:
+                if action_type == "set_field":
+                    raw_field = (action.get("field_name") or "").strip()
+                    new_value = action.get("field_value")
+                    if raw_field not in _FIELD_WHITELIST:
+                        yield _sse({"type": "error", "detail": "Field not editable via copilot"})
+                        return
+                    db_field = _FIELD_WHITELIST[raw_field]
+                    try:
+                        _validate_field_value(db_field, new_value)
+                    except HTTPException as exc:
+                        yield _sse({"type": "error", "detail": exc.detail})
+                        return
+                    prev = await conn.fetchval(
+                        f"SELECT {db_field} FROM ir_incidents WHERE id = $1", incident_id,
+                    )
+                    await conn.execute(
+                        f"UPDATE ir_incidents SET {db_field} = $1, updated_at = NOW() WHERE id = $2",
+                        new_value, incident_id,
+                    )
+                    event_summary = f"Set {db_field} = {new_value!r} (was {prev!r})"
+
+                elif action_type == "run_analysis":
+                    analysis_type = _canonical_analysis_type(action.get("analysis_type"))
+                    if analysis_type is None:
+                        event_summary = (
+                            "Couldn't determine which analysis to run. Open the AI Analysis tab and pick one manually."
+                        )
+                    elif analysis_type == "policy_mapping":
+                        yield _sse({
+                            "type": "status",
+                            "stage": "running_analysis",
+                            "analysis_type": "policy_mapping",
+                            "label": "Reading active handbook + policies, running policy mapping…",
+                        })
+                        try:
+                            await _auto_map_policy_violations(str(incident_id), str(incident["company_id"]))
+                            yield _sse({
+                                "type": "status",
+                                "stage": "analysis_complete",
+                                "analysis_type": "policy_mapping",
+                            })
+                            event_summary = "Policy mapping complete (uses active handbook + policies)."
+                        except Exception as exc:
+                            logger.exception("policy_mapping failed for incident %s", incident_id)
+                            event_summary = f"Policy mapping failed: {exc}"
+                    else:
+                        event_summary = (
+                            f"Open the AI Analysis tab and click Run on '{analysis_type.replace('_', ' ').title()}'."
+                        )
+
+                elif action_type == "escalate":
+                    existing_er = await conn.fetchval(
+                        "SELECT er_case_id FROM ir_incidents WHERE id = $1", incident_id,
+                    )
+                    if existing_er:
+                        event_summary = f"Already linked to ER case {existing_er}"
+                    else:
+                        event_summary = "Marked for ER escalation — open ER Copilot to create the case."
+
+                elif action_type == "close_incident":
+                    await conn.execute(
+                        "UPDATE ir_incidents SET status = 'resolved', resolved_at = NOW(), "
+                        "updated_at = NOW() WHERE id = $1",
+                        incident_id,
+                    )
+                    await conn.execute(
+                        """
+                        UPDATE ir_incident_ai_messages
+                        SET metadata = jsonb_set(
+                            COALESCE(metadata, '{}'::jsonb),
+                            '{superseded}', 'true'::jsonb, true
+                        )
+                        WHERE incident_id = $1
+                          AND message_type = 'card'
+                          AND id != $2
+                          AND COALESCE((metadata->>'accepted')::boolean, FALSE) = FALSE
+                          AND COALESCE((metadata->>'superseded')::boolean, FALSE) = FALSE
+                        """,
+                        incident_id, card_row["id"],
+                    )
+                    event_summary = "Incident marked resolved. Other recommendations cleared."
+
+                elif action_type == "request_info":
+                    event_summary = "Request acknowledged — answer in chat below."
+
+                elif action_type == "open_tab":
+                    event_summary = f"Opening {action.get('tab') or 'tab'}"
+
+                else:
+                    yield _sse({"type": "error", "detail": f"Unknown action type: {action_type}"})
+                    return
+
+                # Mark the card accepted
+                new_md = dict(md)
+                new_md["accepted"] = True
+                new_md["accepted_at"] = datetime.now(timezone.utc).isoformat()
+                new_md["accepted_by"] = str(current_user.id)
+                await conn.execute(
+                    "UPDATE ir_incident_ai_messages SET metadata = $1::jsonb WHERE id = $2",
+                    json.dumps(new_md), card_row["id"],
                 )
-            elif analysis_type == "policy_mapping":
-                # Run inline so the next guidance round sees the result.
+
+                await append_message(
+                    conn,
+                    incident_id=incident_id,
+                    role="system",
+                    message_type="event",
+                    content=event_summary,
+                    metadata={"action": action_type, "card_id": body.card_id},
+                    created_by=current_user.id,
+                )
+                yield _sse({"type": "event", "text": event_summary})
+
+                await log_audit(
+                    conn,
+                    incident_id=str(incident_id),
+                    user_id=str(current_user.id),
+                    action="copilot_card_accepted",
+                    entity_type="incident",
+                    entity_id=str(incident_id),
+                    details={"card_id": body.card_id, "action_type": action_type},
+                    ip_address=request.client.host if request.client else None,
+                )
+
+                # Re-run guidance with fresh state
+                yield _sse({"type": "status", "stage": "thinking"})
+                incident, analyses, messages = await load_incident_state(
+                    conn, incident_id, company_id
+                )
                 try:
-                    await _auto_map_policy_violations(str(incident_id), str(incident["company_id"]))
-                    event_summary = "Policy mapping complete (uses active handbook + policies)."
-                except Exception as exc:
-                    logger.exception("policy_mapping failed for incident %s", incident_id)
-                    event_summary = f"Policy mapping failed: {exc}"
-            else:
-                # Other analyses live behind dedicated routes; nudge user to the
-                # AI Analysis tab for now (v1.1 will inline these too).
-                event_summary = (
-                    f"Open the AI Analysis tab and click Run on '{analysis_type.replace('_', ' ').title()}'."
+                    payload = await generate_guidance(
+                        incident=incident, analyses=analyses, messages=messages,
+                    )
+                except Exception:
+                    logger.exception("Follow-up guidance failed after accept")
+                    payload = {"summary": event_summary, "open_questions": [], "cards": []}
+
+                await persist_assistant_round(
+                    conn,
+                    incident_id=incident_id,
+                    user_id=current_user.id,
+                    user_message=None,
+                    guidance_payload=payload,
                 )
 
-        elif action_type == "escalate":
-            existing_er = await conn.fetchval(
-                "SELECT er_case_id FROM ir_incidents WHERE id = $1", incident_id,
-            )
-            if existing_er:
-                event_summary = f"Already linked to ER case {existing_er}"
-            else:
-                event_summary = (
-                    "Marked for ER escalation — open ER Copilot to create the case."
-                )
+                yield _sse({"type": "summary", "text": payload.get("summary") or ""})
+                for q in payload.get("open_questions") or []:
+                    yield _sse({"type": "open_question", "text": q})
+                for new_card in payload.get("cards") or []:
+                    yield _sse({"type": "card", "card": new_card})
+                yield _sse({"type": "done", "model": payload.get("model")})
+            except Exception:
+                logger.exception("copilot accept failed for incident %s", incident_id)
+                yield _sse({"type": "error", "detail": "Action failed — see server logs"})
 
-        elif action_type == "close_incident":
-            await conn.execute(
-                "UPDATE ir_incidents SET status = 'resolved', resolved_at = NOW(), "
-                "updated_at = NOW() WHERE id = $1",
-                incident_id,
-            )
-            # Closing the incident supersedes any other still-pending cards.
-            await conn.execute(
-                """
-                UPDATE ir_incident_ai_messages
-                SET metadata = jsonb_set(
-                    COALESCE(metadata, '{}'::jsonb),
-                    '{superseded}', 'true'::jsonb, true
-                )
-                WHERE incident_id = $1
-                  AND message_type = 'card'
-                  AND id != $2
-                  AND COALESCE((metadata->>'accepted')::boolean, FALSE) = FALSE
-                  AND COALESCE((metadata->>'superseded')::boolean, FALSE) = FALSE
-                """,
-                incident_id, card_row["id"],
-            )
-            event_summary = "Incident marked resolved. Other recommendations cleared."
-
-        elif action_type == "request_info":
-            event_summary = "Request acknowledged — answer in chat below."
-
-        elif action_type == "open_tab":
-            event_summary = f"Opening {action.get('tab') or 'tab'}"
-
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown action type: {action_type}")
-
-        # Mark the card accepted
-        new_md = dict(md)
-        new_md["accepted"] = True
-        new_md["accepted_at"] = datetime.now(timezone.utc).isoformat()
-        new_md["accepted_by"] = str(current_user.id)
-        await conn.execute(
-            "UPDATE ir_incident_ai_messages SET metadata = $1::jsonb WHERE id = $2",
-            json.dumps(new_md), card_row["id"],
-        )
-
-        # Persist event message
-        await append_message(
-            conn,
-            incident_id=incident_id,
-            role="system",
-            message_type="event",
-            content=event_summary,
-            metadata={"action": action_type, "card_id": body.card_id},
-            created_by=current_user.id,
-        )
-
-        await log_audit(
-            conn,
-            incident_id=str(incident_id),
-            user_id=str(current_user.id),
-            action="copilot_card_accepted",
-            entity_type="incident",
-            entity_id=str(incident_id),
-            details={"card_id": body.card_id, "action_type": action_type},
-            ip_address=request.client.host if request.client else None,
-        )
-
-        # Re-run guidance with fresh state
-        incident, analyses, messages = await load_incident_state(
-            conn, incident_id, company_id
-        )
-        try:
-            payload = await generate_guidance(
-                incident=incident, analyses=analyses, messages=messages,
-            )
-        except Exception:
-            logger.exception("Follow-up guidance failed after accept")
-            payload = {"summary": event_summary, "open_questions": [], "cards": []}
-
-        await persist_assistant_round(
-            conn,
-            incident_id=incident_id,
-            user_id=current_user.id,
-            user_message=None,
-            guidance_payload=payload,
-        )
-
-    return {
-        "status": "accepted",
-        "summary": payload.get("summary") or event_summary,
-        "open_questions": payload.get("open_questions") or [],
-        "cards": payload.get("cards") or [],
-    }
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
