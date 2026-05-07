@@ -1,21 +1,24 @@
-import { AlertTriangle, Users, Building2, Gavel, MapPin, BookOpen, CalendarDays, LayoutDashboard, FileText, MessageCircleQuestion, GraduationCap, ClipboardCheck } from 'lucide-react'
+import { AlertTriangle, Users, Building2, MapPin, BookOpen, CalendarDays, LayoutDashboard, FileText, MessageCircleQuestion, GraduationCap, ClipboardCheck } from 'lucide-react'
 import SidebarShell from '../SidebarShell'
 import type { NavItem, NavGroup } from '../SidebarShell'
 import { useMe } from '../../hooks/useMe'
 import { useSidebarBadges } from '../../hooks/useSidebarBadges'
 
+// Order: top-of-mind workflows first (incidents → ask → handbooks → training),
+// then references (calendar, resources), then admin/HR ops (locations,
+// employees, onboarding), then company settings. Discipline / Performance
+// Action is NOT in matcha-lite bundle and intentionally omitted.
 const nav: (NavItem | NavGroup)[] = [
   { to: '/app', icon: LayoutDashboard, label: 'Command Center' },
   { to: '/app/ir', icon: AlertTriangle, label: 'Incidents' },
-  { to: '/app/employees', icon: Users, label: 'Employees', feature: 'employees' },
-  { to: '/app/onboarding', icon: ClipboardCheck, label: 'Onboarding', feature: 'employees' },
-  { to: '/app/locations', icon: MapPin, label: 'Locations' },
-  { to: '/app/compliance-calendar', icon: CalendarDays, label: 'Compliance Calendar' },
-  { to: '/app/discipline', icon: Gavel, label: 'Performance Action', feature: 'discipline' },
+  { to: '/app/ask-expert', icon: MessageCircleQuestion, label: 'Ask an Expert' },
   { to: '/app/handbooks', icon: FileText, label: 'Handbooks', feature: 'handbooks' },
   { to: '/app/training', icon: GraduationCap, label: 'Training', feature: 'training' },
-  { to: '/app/ask-expert', icon: MessageCircleQuestion, label: 'Ask an Expert' },
+  { to: '/app/compliance-calendar', icon: CalendarDays, label: 'Compliance Calendar' },
   { to: '/app/resources', icon: BookOpen, label: 'Resources' },
+  { to: '/app/locations', icon: MapPin, label: 'Locations' },
+  { to: '/app/employees', icon: Users, label: 'Employees', feature: 'employees' },
+  { to: '/app/onboarding', icon: ClipboardCheck, label: 'Onboarding', feature: 'employees' },
   { to: '/app/company', icon: Building2, label: 'Company' },
 ]
 
