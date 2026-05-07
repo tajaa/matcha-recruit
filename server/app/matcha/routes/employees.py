@@ -209,6 +209,7 @@ class EmployeeCreateRequest(BaseModel):
     employment_type: Optional[str] = None
     start_date: Optional[str] = None
     manager_id: Optional[UUID] = None
+    is_supervisor: Optional[bool] = None
     skip_google_workspace_provisioning: bool = False
     skip_invitation: bool = False
     pay_classification: Optional[str] = None
@@ -1091,6 +1092,7 @@ async def create_employee(
         insert_cols = [
             "org_id", "email", "personal_email", "first_name", "last_name",
             "work_state", "employment_type", "start_date", "address", "manager_id",
+            "is_supervisor",
         ]
         insert_vals = [
             company_id,
@@ -1103,6 +1105,7 @@ async def create_employee(
             start_date,
             request.address.strip() if request.address else None,
             request.manager_id,
+            bool(request.is_supervisor) if request.is_supervisor is not None else False,
         ]
 
         if compensation_fields_available:

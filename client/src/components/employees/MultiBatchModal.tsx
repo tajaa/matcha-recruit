@@ -11,6 +11,8 @@ type Row = {
   department: string
   employment_type: string
   start_date: string
+  work_state: string
+  is_supervisor: boolean
   rowStatus: 'idle' | 'saving' | 'success' | 'error'
   error?: string
 }
@@ -23,6 +25,8 @@ const emptyRow = (): Row => ({
   department: '',
   employment_type: 'full_time',
   start_date: '',
+  work_state: '',
+  is_supervisor: false,
   rowStatus: 'idle',
 })
 
@@ -71,6 +75,8 @@ export function MultiBatchModal({ open, onClose, onSuccess, departments }: Multi
           department: r.department || undefined,
           employment_type: r.employment_type || undefined,
           start_date: r.start_date || undefined,
+          work_state: r.work_state.trim().toUpperCase() || undefined,
+          is_supervisor: r.is_supervisor || undefined,
           skip_invitation: !sendInvitations,
         })
         updateRow(i, { rowStatus: 'success' })
@@ -112,6 +118,8 @@ export function MultiBatchModal({ open, onClose, onSuccess, departments }: Multi
               <th className="text-left px-1 py-2 font-medium">Dept</th>
               <th className="text-left px-1 py-2 font-medium">Type</th>
               <th className="text-left px-1 py-2 font-medium">Start</th>
+              <th className="text-left px-1 py-2 font-medium" title="2-letter state code (CA, NY...)">State</th>
+              <th className="text-left px-1 py-2 font-medium" title="Supervisor — receives 2hr SB 1343 training">Sup</th>
               <th className="w-8"></th>
             </tr>
           </thead>
@@ -163,6 +171,16 @@ export function MultiBatchModal({ open, onClose, onSuccess, departments }: Multi
                   <Input label="" type="date" value={r.start_date} disabled={r.rowStatus !== 'idle'}
                     onChange={(e) => updateRow(i, { start_date: e.target.value })}
                     className="!py-1.5 text-xs" />
+                </td>
+                <td className="px-1 py-1">
+                  <Input label="" value={r.work_state} disabled={r.rowStatus !== 'idle'}
+                    maxLength={2} placeholder="CA"
+                    onChange={(e) => updateRow(i, { work_state: e.target.value.toUpperCase() })}
+                    className="!py-1.5 text-xs w-14" />
+                </td>
+                <td className="px-1 py-1 text-center">
+                  <input type="checkbox" checked={r.is_supervisor} disabled={r.rowStatus !== 'idle'}
+                    onChange={(e) => updateRow(i, { is_supervisor: e.target.checked })} />
                 </td>
                 <td className="px-1 py-1 text-center">
                   {r.rowStatus === 'success' ? (
