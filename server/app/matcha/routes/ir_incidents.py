@@ -4101,8 +4101,8 @@ def _extract_current_cards(messages: list) -> list[IRCopilotCard]:
             md = _coerce_metadata_dict(m["metadata"] if isinstance(m, dict) else m.metadata) or {}
             card = md.get("card")
             if isinstance(card, dict):
-                # Only include cards that haven't been accepted yet.
-                if not md.get("accepted"):
+                # Only include cards that haven't been accepted or superseded.
+                if not md.get("accepted") and not md.get("superseded"):
                     try:
                         cards.append(IRCopilotCard.model_validate(card))
                     except Exception:
@@ -4367,7 +4367,23 @@ async def accept_copilot_card(
                 "updated_at = NOW() WHERE id = $1",
                 incident_id,
             )
-            event_summary = "Incident marked resolved."
+            # Closing the incident supersedes any other still-pending cards.
+            await conn.execute(
+                """
+                UPDATE ir_incident_ai_messages
+                SET metadata = jsonb_set(
+                    COALESCE(metadata, '{}'::jsonb),
+                    '{superseded}', 'true'::jsonb, true
+                )
+                WHERE incident_id = $1
+                  AND message_type = 'card'
+                  AND id != $2
+                  AND COALESCE((metadata->>'accepted')::boolean, FALSE) = FALSE
+                  AND COALESCE((metadata->>'superseded')::boolean, FALSE) = FALSE
+                """,
+                incident_id, card_row["id"],
+            )
+            event_summary = "Incident marked resolved. Other recommendations cleared."
 
         elif action_type == "request_info":
             event_summary = "Request acknowledged — answer in chat below."
