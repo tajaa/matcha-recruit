@@ -103,6 +103,11 @@ class Settings:
     # resources_free tenants. Override with MATCHA_IR_PRICE_CENTS.
     matcha_ir_price_cents: int = 4900
 
+    # LiveKit (self-hosted SFU for channel broadcasts)
+    livekit_url: Optional[str] = None           # wss://livekit.hey-matcha.com
+    livekit_api_key: Optional[str] = None
+    livekit_api_secret: Optional[str] = None
+
     # Newsletter
     # Shared secret expected in X-Bounce-Secret header on /newsletter/bounce.
     # Empty string disables the webhook entirely (safer default than open).
@@ -217,6 +222,9 @@ def load_settings() -> Settings:
             "http://localhost:5174/app/matcha/work/billing?canceled=1",
         ),
         matcha_ir_price_cents=int(os.getenv("MATCHA_IR_PRICE_CENTS", "4900")),
+        livekit_url=os.getenv("LIVEKIT_URL"),
+        livekit_api_key=os.getenv("LIVEKIT_API_KEY"),
+        livekit_api_secret=os.getenv("LIVEKIT_API_SECRET"),
         newsletter_bounce_secret=os.getenv("NEWSLETTER_BOUNCE_SECRET", ""),
         newsletter_mailing_address=os.getenv(
             "NEWSLETTER_MAILING_ADDRESS",

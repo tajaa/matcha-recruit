@@ -31,6 +31,9 @@ struct ChannelDetailView: View {
     @State private var lastTypingSentAt: Date = .distantPast
     @State private var showInviteSheet = false
     @State private var inviteToast: String?
+    @State private var showBroadcastPanel = false
+
+    @Environment(BroadcastService.self) private var broadcast: BroadcastService
 
     private var isAdmin: Bool {
         let role = channel?.myRole ?? ""
@@ -64,6 +67,11 @@ struct ChannelDetailView: View {
                     .foregroundColor(.white.opacity(0.4))
                 Spacer()
             } else {
+                if broadcast.channelId == channelId && broadcast.isConnected {
+                    BroadcastPanelView(channelId: channelId, isOwner: broadcast.isOwner)
+                        .environment(broadcast)
+                    Divider()
+                }
                 messagesList
                 Divider()
                 inputBar
@@ -132,6 +140,44 @@ struct ChannelDetailView: View {
                         Text("\(count) members")
                             .font(.system(size: 10))
                             .foregroundColor(.white.opacity(0.4))
+                    }
+                    // Live now badge
+                    if broadcast.channelId == channelId && broadcast.isConnected {
+                        HStack(spacing: 3) {
+                            Circle().fill(Color.red).frame(width: 5, height: 5)
+                            Text("LIVE").font(.system(size: 9, weight: .bold)).foregroundColor(.red)
+                        }
+                    }
+                    // Go Live button (owner only)
+                    if channel?.myRole == "owner" {
+                        Button {
+                            Task {
+                                if broadcast.channelId == channelId && broadcast.isConnected {
+                                    await broadcast.stopBroadcast()
+                                } else {
+                                    await broadcast.startBroadcast(channelId: channelId)
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: broadcast.channelId == channelId && broadcast.isConnected
+                                      ? "stop.circle" : "video.badge.plus")
+                                    .font(.system(size: 10))
+                                Text(broadcast.channelId == channelId && broadcast.isConnected
+                                     ? "End" : "Go Live")
+                                    .font(.system(size: 10, weight: .medium))
+                            }
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(broadcast.channelId == channelId && broadcast.isConnected
+                                        ? Color.red.opacity(0.2) : Color.matcha600.opacity(0.2))
+                            .foregroundColor(broadcast.channelId == channelId && broadcast.isConnected
+                                             ? .red : Color.matcha500)
+                            .cornerRadius(4)
+                        }
+                        .buttonStyle(.plain)
+                        .help(broadcast.channelId == channelId && broadcast.isConnected
+                              ? "End the live broadcast" : "Start a live broadcast")
                     }
                     Button {
                         showInviteSheet = true
@@ -850,6 +896,28 @@ struct ChannelDetailView: View {
         }
         ws.onError = { msg in
             errorMessage = msg
+        }
+        ws.onBroadcastStarted = { event in
+            guard event.channelId == channelId else { return }
+            // If not already connected to this broadcast, join as viewer.
+            if broadcast.channelId != channelId || !broadcast.isConnected {
+                Task { await broadcast.handleBroadcastStarted(event) }
+            }
+        }
+        ws.onBroadcastEnded = { event in
+            guard event.channelId == channelId else { return }
+            Task { await broadcast.handleBroadcastEnded(event) }
+        }
+        ws.onBroadcastPublisherChanged = { event in
+            guard event.channelId == channelId else { return }
+            broadcast.handlePublisherChanged(event)
+        }
+        ws.onBroadcastTokenGrant = { event in
+            guard event.channelId == channelId else { return }
+            Task { await broadcast.handleTokenGrant(
+                channelId: channelId, token: event.token,
+                liveKitUrl: event.liveKitUrl, canPublish: event.canPublish
+            )}
         }
     }
 

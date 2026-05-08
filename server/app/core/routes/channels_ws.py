@@ -207,6 +207,32 @@ async def broadcast_message_deleted(
     )
 
 
+async def broadcast_broadcast_started(
+    channel_id: str,
+    broadcast_id: str,
+    started_by: str,
+    started_at: str,
+    title: Optional[str] = None,
+) -> None:
+    """Push broadcast.started to all connected members of a channel."""
+    await manager._broadcast_to_room(channel_id, {
+        "type": "broadcast.started",
+        "channel_id": channel_id,
+        "broadcast_id": broadcast_id,
+        "started_by": started_by,
+        "started_at": started_at,
+        "title": title,
+    })
+
+
+async def broadcast_broadcast_ended(channel_id: str, broadcast_id: str) -> None:
+    await manager._broadcast_to_room(channel_id, {
+        "type": "broadcast.ended",
+        "channel_id": channel_id,
+        "broadcast_id": broadcast_id,
+    })
+
+
 async def broadcast_reaction_update(
     channel_id: str,
     message_id: str,
@@ -327,6 +353,20 @@ async def channel_websocket(
                                 "room": room_key,
                                 "users": online,
                             })
+                            # Emit live broadcast state so late-joiners see "Live now"
+                            bc = await conn.fetchrow(
+                                "SELECT id, started_by, started_at, title FROM channel_broadcasts WHERE channel_id = $1 AND ended_at IS NULL",
+                                ch_uuid,
+                            )
+                            if bc:
+                                await websocket.send_json({
+                                    "type": "broadcast.started",
+                                    "channel_id": str(channel_id),
+                                    "broadcast_id": str(bc["id"]),
+                                    "started_by": str(bc["started_by"]),
+                                    "started_at": bc["started_at"].isoformat(),
+                                    "title": bc["title"],
+                                })
                         else:
                             await websocket.send_json({
                                 "type": "error",

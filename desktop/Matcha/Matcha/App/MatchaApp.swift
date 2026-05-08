@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct MatchaApp: App {
     @State private var appState = AppState()
+    @State private var broadcastService = BroadcastService.shared
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -11,6 +12,7 @@ struct MatchaApp: App {
                 if appState.isAuthenticated {
                     ContentView()
                         .environment(appState)
+                        .environment(broadcastService)
                 } else {
                     LoginView()
                         .environment(appState)

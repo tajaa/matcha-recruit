@@ -26,6 +26,10 @@ final class ChannelsWebSocket: NSObject {
     var onTyping: ((_ userId: String, _ name: String) -> Void)?
     var onMessageDeleted: ((_ messageId: String, _ deletedBy: String) -> Void)?
     var onError: ((String) -> Void)?
+    var onBroadcastStarted: ((WSBroadcastStarted) -> Void)?
+    var onBroadcastEnded: ((WSBroadcastEnded) -> Void)?
+    var onBroadcastPublisherChanged: ((WSBroadcastPublisherChanged) -> Void)?
+    var onBroadcastTokenGrant: ((WSBroadcastTokenGrant) -> Void)?
 
     override private init() {
         super.init()
@@ -106,6 +110,10 @@ final class ChannelsWebSocket: NSObject {
         onTyping = nil
         onReactionUpdate = nil
         onError = nil
+        onBroadcastStarted = nil
+        onBroadcastEnded = nil
+        onBroadcastPublisherChanged = nil
+        onBroadcastTokenGrant = nil
     }
 
     /// Clear callbacks only if no other view has joined a different room since
@@ -235,6 +243,43 @@ final class ChannelsWebSocket: NSObject {
                let reactionsData = try? JSONSerialization.data(withJSONObject: reactionsArr),
                let reactions = try? JSONDecoder().decode([ChannelReaction].self, from: reactionsData) {
                 onReactionUpdate?(messageId, reactions)
+            }
+        case "broadcast.started":
+            if let channelId = obj["channel_id"] as? String,
+               let broadcastId = obj["broadcast_id"] as? String,
+               let startedBy = obj["started_by"] as? String,
+               let startedAt = obj["started_at"] as? String {
+                let event = WSBroadcastStarted(
+                    channelId: channelId,
+                    broadcastId: broadcastId,
+                    startedBy: startedBy,
+                    startedAt: startedAt,
+                    title: obj["title"] as? String
+                )
+                onBroadcastStarted?(event)
+            }
+        case "broadcast.ended":
+            if let channelId = obj["channel_id"] as? String,
+               let broadcastId = obj["broadcast_id"] as? String {
+                onBroadcastEnded?(WSBroadcastEnded(channelId: channelId, broadcastId: broadcastId))
+            }
+        case "broadcast.publisher_changed":
+            if let channelId = obj["channel_id"] as? String,
+               let userId = obj["user_id"] as? String,
+               let canPublish = obj["can_publish"] as? Bool {
+                onBroadcastPublisherChanged?(WSBroadcastPublisherChanged(
+                    channelId: channelId, userId: userId, canPublish: canPublish
+                ))
+            }
+        case "broadcast.token_grant":
+            if let channelId = obj["channel_id"] as? String,
+               let token = obj["token"] as? String,
+               let liveKitUrl = obj["livekit_url"] as? String {
+                let canPublish = obj["can_publish"] as? Bool ?? false
+                onBroadcastTokenGrant?(WSBroadcastTokenGrant(
+                    channelId: channelId, token: token,
+                    liveKitUrl: liveKitUrl, canPublish: canPublish
+                ))
             }
         case "error":
             if let msg = obj["message"] as? String { onError?(msg) }

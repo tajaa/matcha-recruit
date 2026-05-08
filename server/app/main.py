@@ -99,6 +99,28 @@ async def lifespan(app: FastAPI):
         if recovered:
             print(f"[Matcha] Reset {recovered} stuck research input(s) to pending")
 
+    # Close out any broadcasts that were active when the server last crashed.
+    # Any broadcast older than 6 hours is definitively dead (LiveKit auto-closes
+    # empty rooms after empty_timeout; this just cleans up the DB row).
+    # Tolerate missing table — `alembic upgrade head` may not have run yet.
+    try:
+        async with get_connection() as conn:
+            stale = await conn.execute(
+                """
+                UPDATE channel_broadcasts
+                SET ended_at = NOW()
+                WHERE ended_at IS NULL
+                  AND started_at < NOW() - INTERVAL '6 hours'
+                """
+            )
+            count = stale.split()[-1] if stale else "0"
+            if count != "0":
+                print(f"[Matcha] Closed {count} stale broadcast(s) from previous run")
+    except Exception as e:
+        # UndefinedTableError when migration zzzz5d6e7f8g9 hasn't run yet.
+        # Don't block boot — broadcast routes will surface a clear DB error.
+        print(f"[Matcha] Skipping channel_broadcasts cleanup: {type(e).__name__}: {e}")
+
     # Initialize Redis notification manager (for worker task notifications)
     await init_notification_manager(settings.redis_url)
     print(f"[Matcha] Redis notification manager connected to {settings.redis_url}")

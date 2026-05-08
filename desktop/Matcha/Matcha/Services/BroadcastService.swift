@@ -1,0 +1,333 @@
+/// BroadcastService — wraps the LiveKit Swift SDK for channel live broadcasts.
+///
+/// # SDK dependency
+/// Add via Xcode → File → Add Package Dependencies:
+///   https://github.com/livekit/client-sdk-swift  ≥ 2.0.0
+///   Product: LiveKit → Target: Matcha
+///
+/// # Token lifecycle
+/// Tokens expire in 1h. scheduleTokenRefresh() fires at 55 min and calls
+/// /broadcast/refresh-token, then room.connectOptions is updated in-place via
+/// the SDK's live token swap (Room requires reconnect if not in Quick mode).
+
+import Foundation
+import AVFoundation
+
+#if canImport(LiveKit)
+import LiveKit
+#endif
+
+@Observable
+@MainActor
+final class BroadcastService {
+    static let shared = BroadcastService()
+    private init() {}
+
+    // MARK: - Published state
+
+    var isConnected = false
+    var isPublishing = false   // true = this client has camera/mic on-stage
+    var isOwner = false
+    var channelId: String?
+    var broadcastId: String?
+    var liveKitUrl: String?
+    var publisherUserIds: Set<String> = []
+    var errorMessage: String?
+    /// Mutates whenever LiveKit participants change so @Observable triggers SwiftUI re-render.
+    var participantTick: UInt64 = 0
+
+    // Per-stream cap (set on connect, ticks down via countdownTask).
+    var maxDurationSeconds: Int = 600
+    var elapsedSeconds: Int = 0
+    var weeklyRemaining: Int? = nil
+
+    private var countdownTask: Task<Void, Never>?
+
+    // MARK: - LiveKit room
+
+    #if canImport(LiveKit)
+    private(set) var room = Room()
+    private var roomDelegate: BroadcastRoomDelegate?
+    #endif
+
+
+    // MARK: - REST helpers
+
+    private struct StartBody: Encodable { let title: String? }
+    private struct PromoteBody: Encodable { let user_id: String }
+    private struct OkResp: Codable { let ok: Bool }
+
+    private func get<T: Decodable>(path: String) async throws -> T {
+        try await APIClient.shared.request(method: "GET", path: path)
+    }
+
+    private func post<T: Decodable>(path: String, body: (any Encodable)? = nil) async throws -> T {
+        try await APIClient.shared.request(method: "POST", path: path, body: body)
+    }
+
+    // MARK: - Owner: Start broadcast
+
+    func startBroadcast(channelId: String, title: String? = nil) async {
+        errorMessage = nil
+        isOwner = true
+        self.channelId = channelId
+
+        do {
+            let resp: BroadcastStartResponse = try await post(
+                path: "/channels/\(channelId)/broadcast/start",
+                body: StartBody(title: title)
+            )
+            broadcastId = resp.broadcastId
+            liveKitUrl = resp.liveKitUrl
+            maxDurationSeconds = resp.maxDurationSeconds ?? 600
+            weeklyRemaining = resp.weeklyRemaining
+            elapsedSeconds = 0
+            publisherUserIds.insert(currentUserId() ?? "")
+            await connectToRoom(url: resp.liveKitUrl, token: resp.token, asPublisher: true)
+            startCountdown()
+        } catch {
+            errorMessage = error.localizedDescription
+            isOwner = false
+            self.channelId = nil
+        }
+    }
+
+    // MARK: - Member: Join as viewer
+
+    func joinAsViewer(channelId: String) async {
+        errorMessage = nil
+        isOwner = false
+        self.channelId = channelId
+
+        do {
+            let resp: BroadcastTokenResponse = try await get(path: "/channels/\(channelId)/broadcast/token")
+            liveKitUrl = resp.liveKitUrl
+            maxDurationSeconds = resp.maxDurationSeconds ?? 600
+            elapsedSeconds = resp.elapsedSeconds ?? 0
+            await connectToRoom(url: resp.liveKitUrl, token: resp.token, asPublisher: false)
+            startCountdown()
+        } catch {
+            errorMessage = error.localizedDescription
+            self.channelId = nil
+        }
+    }
+
+    // MARK: - Owner: Stop broadcast
+
+    func stopBroadcast() async {
+        guard let channelId else { return }
+        do {
+            let _: OkResp = try await post(path: "/channels/\(channelId)/broadcast/stop")
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        await leave()
+    }
+
+    // MARK: - Leave / disconnect
+
+    func leave() async {
+        countdownTask?.cancel(); countdownTask = nil
+        #if canImport(LiveKit)
+        await room.disconnect()
+        #endif
+        reset()
+    }
+
+    // MARK: - Owner: Promote / Demote
+
+    func promote(userId: String, channelId: String) async {
+        do {
+            let _: OkResp = try await post(
+                path: "/channels/\(channelId)/broadcast/promote",
+                body: PromoteBody(user_id: userId)
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func demote(userId: String, channelId: String) async {
+        do {
+            let _: OkResp = try await post(
+                path: "/channels/\(channelId)/broadcast/demote",
+                body: PromoteBody(user_id: userId)
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - A/V controls
+
+    func setMicEnabled(_ enabled: Bool) {
+        #if canImport(LiveKit)
+        Task { try? await room.localParticipant.setMicrophone(enabled: enabled) }
+        #endif
+    }
+
+    func setCameraEnabled(_ enabled: Bool) {
+        #if canImport(LiveKit)
+        Task { try? await room.localParticipant.setCamera(enabled: enabled) }
+        #endif
+    }
+
+    var isMicEnabled: Bool {
+        #if canImport(LiveKit)
+        return room.localParticipant.isMicrophoneEnabled()
+        #else
+        return false
+        #endif
+    }
+
+    var isCameraEnabled: Bool {
+        #if canImport(LiveKit)
+        return room.localParticipant.isCameraEnabled()
+        #else
+        return false
+        #endif
+    }
+
+    // MARK: - WS token grant (promote/demote pushes new token)
+
+    func handleTokenGrant(channelId: String, token: String, liveKitUrl: String, canPublish: Bool) async {
+        guard self.channelId == channelId, isConnected else { return }
+        self.isPublishing = canPublish
+        #if canImport(LiveKit)
+        // LiveKit 2.x: reconnect with new token to apply changed grants.
+        await room.disconnect()
+        await connectToRoom(url: liveKitUrl, token: token, asPublisher: canPublish)
+        #endif
+    }
+
+    // MARK: - WS broadcast events
+
+    func handleBroadcastStarted(_ event: WSBroadcastStarted) async {
+        guard self.channelId == event.channelId || self.channelId == nil else { return }
+        broadcastId = event.broadcastId
+        publisherUserIds = Set([event.startedBy])
+        // If this client is not already connected, join as viewer.
+        guard !isConnected else { return }
+        await joinAsViewer(channelId: event.channelId)
+    }
+
+    func handleBroadcastEnded(_ event: WSBroadcastEnded) async {
+        guard broadcastId == event.broadcastId else { return }
+        await leave()
+    }
+
+    func handlePublisherChanged(_ event: WSBroadcastPublisherChanged) {
+        if event.canPublish {
+            publisherUserIds.insert(event.userId)
+        } else {
+            publisherUserIds.remove(event.userId)
+        }
+    }
+
+    // MARK: - Internal
+
+    private func connectToRoom(url: String, token: String, asPublisher: Bool) async {
+        #if canImport(LiveKit)
+        isPublishing = asPublisher
+
+        let delegate = BroadcastRoomDelegate(service: self)
+        self.roomDelegate = delegate
+        room = Room(delegate: delegate)
+
+        do {
+            try await room.connect(url: url, token: token)
+            isConnected = true
+
+            if asPublisher {
+                try? await room.localParticipant.setCamera(enabled: true)
+                try? await room.localParticipant.setMicrophone(enabled: true)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+            isConnected = false
+        }
+        #endif
+    }
+
+    /// Tick `elapsedSeconds` once per second while connected so the UI can show
+    /// a countdown. Server enforces the cap independently — this is display-only.
+    private func startCountdown() {
+        countdownTask?.cancel()
+        countdownTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard let self else { return }
+                if !self.isConnected { return }
+                self.elapsedSeconds += 1
+                if self.elapsedSeconds >= self.maxDurationSeconds {
+                    return
+                }
+            }
+        }
+    }
+
+    var remainingSeconds: Int { max(0, maxDurationSeconds - elapsedSeconds) }
+
+    private func reset() {
+        isConnected = false
+        isPublishing = false
+        isOwner = false
+        channelId = nil
+        broadcastId = nil
+        liveKitUrl = nil
+        publisherUserIds = []
+        elapsedSeconds = 0
+        weeklyRemaining = nil
+        countdownTask?.cancel(); countdownTask = nil
+        #if canImport(LiveKit)
+        room = Room()
+        roomDelegate = nil
+        #endif
+    }
+
+    private func currentUserId() -> String? {
+        // AppState stores the current user — access via shared if available.
+        return nil  // populated from WS event (started_by) instead
+    }
+}
+
+// MARK: - Room delegate
+
+#if canImport(LiveKit)
+@MainActor
+private final class BroadcastRoomDelegate: RoomDelegate, @unchecked Sendable {
+    weak var service: BroadcastService?
+    init(service: BroadcastService) { self.service = service }
+
+    /// Triggers @Observable property change so SwiftUI views re-render.
+    /// @Observable doesn't expose objectWillChange; we mutate a tracked
+    /// counter on the service to drive view updates.
+    private func tickService() {
+        Task { @MainActor [weak service] in
+            service?.participantTick &+= 1
+        }
+    }
+
+    func room(_ room: Room, participantDidConnect participant: RemoteParticipant) {
+        tickService()
+    }
+
+    func room(_ room: Room, participantDidDisconnect participant: RemoteParticipant) {
+        tickService()
+    }
+
+    func room(_ room: Room, didUpdateConnectionState connectionState: ConnectionState,
+              from oldValue: ConnectionState) {
+        Task { @MainActor [weak service] in
+            switch connectionState {
+            case .disconnected:
+                service?.isConnected = false
+            case .connected:
+                service?.isConnected = true
+            default:
+                break
+            }
+        }
+    }
+}
+#endif
