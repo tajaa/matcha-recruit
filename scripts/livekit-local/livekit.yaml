@@ -1,0 +1,24 @@
+# LiveKit local-dev config (Docker on macOS).
+#
+# Why this exists: `livekit-server --dev` auto-detects the container's bridge
+# IP (172.17.0.x) and advertises that as the ICE candidate, which the macOS
+# host can't reach. Forcing node_ip = 127.0.0.1 makes WebRTC candidates point
+# at loopback, where Docker port mappings forward UDP back into the container.
+#
+# Also pins the UDP port range to 7882 so docker-run can map exactly that port.
+
+port: 7880                  # signaling (HTTP/WS)
+bind_addresses:
+  - 0.0.0.0
+
+rtc:
+  tcp_port: 7881            # WebRTC over TCP fallback
+  udp_port: 7882            # single UDP port (avoids needing a range mapping)
+  use_external_ip: false    # do NOT try to detect an external IP
+  node_ip: 127.0.0.1        # advertise loopback in ICE candidates
+
+keys:
+  devkey: secretthatslongenoughforhmac256bits
+
+logging:
+  level: info

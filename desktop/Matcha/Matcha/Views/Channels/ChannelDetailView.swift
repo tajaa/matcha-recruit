@@ -899,10 +899,10 @@ struct ChannelDetailView: View {
         }
         ws.onBroadcastStarted = { event in
             guard event.channelId == channelId else { return }
-            // If not already connected to this broadcast, join as viewer.
-            if broadcast.channelId != channelId || !broadcast.isConnected {
-                Task { await broadcast.handleBroadcastStarted(event) }
-            }
+            // Owner that just /start'd ignores the echo to avoid double-connect.
+            if broadcast.isOwner && broadcast.channelId == channelId { return }
+            if broadcast.broadcastId == event.broadcastId { return }
+            Task { await broadcast.handleBroadcastStarted(event) }
         }
         ws.onBroadcastEnded = { event in
             guard event.channelId == channelId else { return }

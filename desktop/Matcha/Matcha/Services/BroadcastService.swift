@@ -203,10 +203,13 @@ final class BroadcastService {
     // MARK: - WS broadcast events
 
     func handleBroadcastStarted(_ event: WSBroadcastStarted) async {
+        // Ignore echo of our own start (owner already running connectToRoom).
+        if broadcastId == event.broadcastId { return }
+        if isOwner && channelId == event.channelId { return }
+        // Different channel than the one we're currently in/joining → ignore.
         guard self.channelId == event.channelId || self.channelId == nil else { return }
         broadcastId = event.broadcastId
         publisherUserIds = Set([event.startedBy])
-        // If this client is not already connected, join as viewer.
         guard !isConnected else { return }
         await joinAsViewer(channelId: event.channelId)
     }

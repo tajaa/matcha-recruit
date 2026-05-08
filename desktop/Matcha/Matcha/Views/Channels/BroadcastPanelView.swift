@@ -126,7 +126,11 @@ struct BroadcastPanelView: View {
     @ViewBuilder
     private var localVideoTile: some View {
         #if canImport(LiveKit)
-        if let track = broadcast.room.localParticipant.firstCameraVideoTrack {
+        // firstCameraVideoTrack gates on isSubscribed which is false for local
+        // publications, so we go through firstCameraPublication directly.
+        if let pub = broadcast.room.localParticipant.firstCameraPublication,
+           !pub.isMuted,
+           let track = pub.track as? VideoTrack {
             ZStack(alignment: .bottomLeading) {
                 SwiftUIVideoView(track,
                                 layoutMode: .fill,

@@ -186,8 +186,26 @@ async def start_broadcast(
     async with get_connection() as conn:
         await _assert_owner(conn, channel_id, current_user.id)
 
-        # Enforce max 1 active broadcast per channel
+        # Enforce max 1 active broadcast per channel.
+        # Recover orphans: if existing row is past the duration cap (server may
+        # have restarted before the in-process auto-stop fired), close it now.
         existing = await _active_broadcast(conn, channel_id)
+        if existing:
+            elapsed = (datetime.now(timezone.utc) - existing["started_at"]).total_seconds()
+            if elapsed > BROADCAST_MAX_DURATION_SECONDS + 30:
+                await conn.execute(
+                    "UPDATE channel_broadcasts SET ended_at = NOW() WHERE id = $1",
+                    existing["id"],
+                )
+                # Best-effort: tell members the orphan ended.
+                await _push_broadcast_event(str(channel_id), {
+                    "type": "broadcast.ended",
+                    "channel_id": str(channel_id),
+                    "broadcast_id": str(existing["id"]),
+                    "reason": "orphan_recovered",
+                })
+                existing = None
+
         if existing:
             raise HTTPException(status_code=409, detail="A broadcast is already active in this channel")
 
