@@ -897,28 +897,9 @@ struct ChannelDetailView: View {
         ws.onError = { msg in
             errorMessage = msg
         }
-        ws.onBroadcastStarted = { event in
-            guard event.channelId == channelId else { return }
-            // Owner that just /start'd ignores the echo to avoid double-connect.
-            if broadcast.isOwner && broadcast.channelId == channelId { return }
-            if broadcast.broadcastId == event.broadcastId { return }
-            Task { await broadcast.handleBroadcastStarted(event) }
-        }
-        ws.onBroadcastEnded = { event in
-            guard event.channelId == channelId else { return }
-            Task { await broadcast.handleBroadcastEnded(event) }
-        }
-        ws.onBroadcastPublisherChanged = { event in
-            guard event.channelId == channelId else { return }
-            broadcast.handlePublisherChanged(event)
-        }
-        ws.onBroadcastTokenGrant = { event in
-            guard event.channelId == channelId else { return }
-            Task { await broadcast.handleTokenGrant(
-                channelId: channelId, token: event.token,
-                liveKitUrl: event.liveKitUrl, canPublish: event.canPublish
-            )}
-        }
+        // Broadcast WS callbacks are wired GLOBALLY in AppState.didLogin so
+        // the singleton's callbacks aren't overwritten when this view tears
+        // down or another channel's view mounts. See app/AppState.swift.
     }
 
     // MARK: - Formatting

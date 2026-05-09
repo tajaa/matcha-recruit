@@ -88,6 +88,31 @@ class AppState {
                 )
             }
         }
+
+        // Global broadcast WS handlers — must persist across view changes so a
+        // viewer in any view (or none) reacts when an owner goes live.
+        // Per-view wiring in ChannelDetailView would race/overwrite when the
+        // shared singleton's callbacks were set by the most recent view.
+        let bsvc = BroadcastService.shared
+        ChannelsWebSocket.shared.onBroadcastStarted = { event in
+            print("[AppState] WS broadcast.started channel=\(event.channelId)")
+            Task { @MainActor in await bsvc.handleBroadcastStarted(event) }
+        }
+        ChannelsWebSocket.shared.onBroadcastEnded = { event in
+            print("[AppState] WS broadcast.ended channel=\(event.channelId)")
+            Task { @MainActor in await bsvc.handleBroadcastEnded(event) }
+        }
+        ChannelsWebSocket.shared.onBroadcastPublisherChanged = { event in
+            Task { @MainActor in bsvc.handlePublisherChanged(event) }
+        }
+        ChannelsWebSocket.shared.onBroadcastTokenGrant = { event in
+            Task { @MainActor in
+                await bsvc.handleTokenGrant(channelId: event.channelId,
+                                            token: event.token,
+                                            liveKitUrl: event.liveKitUrl,
+                                            canPublish: event.canPublish)
+            }
+        }
     }
 
     @MainActor
@@ -135,6 +160,11 @@ class AppState {
         notificationsUnreadCount = 0
         betaFeatures = [:]
         ChannelsWebSocket.shared.onMessageGlobal = nil
+        ChannelsWebSocket.shared.onBroadcastStarted = nil
+        ChannelsWebSocket.shared.onBroadcastEnded = nil
+        ChannelsWebSocket.shared.onBroadcastPublisherChanged = nil
+        ChannelsWebSocket.shared.onBroadcastTokenGrant = nil
+        Task { await BroadcastService.shared.leave() }
         MatchaWorkService.shared.updateCacheScope(nil)
         APIClient.shared.accessToken = nil
         KeychainHelper.delete(key: KeychainHelper.Keys.accessToken)

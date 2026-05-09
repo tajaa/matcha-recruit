@@ -95,18 +95,21 @@ final class BroadcastService {
     // MARK: - Member: Join as viewer
 
     func joinAsViewer(channelId: String) async {
+        print("[Broadcast] joinAsViewer channelId=\(channelId)")
         errorMessage = nil
         isOwner = false
         self.channelId = channelId
 
         do {
             let resp: BroadcastTokenResponse = try await get(path: "/channels/\(channelId)/broadcast/token")
+            print("[Broadcast] viewer token fetched url=\(resp.liveKitUrl) elapsed=\(resp.elapsedSeconds ?? 0)")
             liveKitUrl = resp.liveKitUrl
             maxDurationSeconds = resp.maxDurationSeconds ?? 600
             elapsedSeconds = resp.elapsedSeconds ?? 0
             await connectToRoom(url: resp.liveKitUrl, token: resp.token, asPublisher: false)
             startCountdown()
         } catch {
+            print("[Broadcast] joinAsViewer FAILED: \(error)")
             errorMessage = error.localizedDescription
             self.channelId = nil
         }
@@ -203,14 +206,27 @@ final class BroadcastService {
     // MARK: - WS broadcast events
 
     func handleBroadcastStarted(_ event: WSBroadcastStarted) async {
+        print("[Broadcast] handleBroadcastStarted channel=\(event.channelId) broadcast=\(event.broadcastId) startedBy=\(event.startedBy) selfChannelId=\(channelId ?? "nil") isOwner=\(isOwner) isConnected=\(isConnected)")
         // Ignore echo of our own start (owner already running connectToRoom).
-        if broadcastId == event.broadcastId { return }
-        if isOwner && channelId == event.channelId { return }
+        if broadcastId == event.broadcastId {
+            print("[Broadcast] skip — same broadcastId already tracked")
+            return
+        }
+        if isOwner && channelId == event.channelId {
+            print("[Broadcast] skip — we're the owner running connectToRoom")
+            return
+        }
         // Different channel than the one we're currently in/joining → ignore.
-        guard self.channelId == event.channelId || self.channelId == nil else { return }
+        guard self.channelId == event.channelId || self.channelId == nil else {
+            print("[Broadcast] skip — viewing different channel")
+            return
+        }
         broadcastId = event.broadcastId
         publisherUserIds = Set([event.startedBy])
-        guard !isConnected else { return }
+        guard !isConnected else {
+            print("[Broadcast] skip — already connected")
+            return
+        }
         await joinAsViewer(channelId: event.channelId)
     }
 
@@ -230,6 +246,7 @@ final class BroadcastService {
     // MARK: - Internal
 
     private func connectToRoom(url: String, token: String, asPublisher: Bool) async {
+        print("[Broadcast] connectToRoom url=\(url) asPublisher=\(asPublisher)")
         #if canImport(LiveKit)
         isPublishing = asPublisher
 
@@ -237,15 +254,43 @@ final class BroadcastService {
         self.roomDelegate = delegate
         room = Room(delegate: delegate)
 
+        // Force OS permission dialogs BEFORE LiveKit tries to grab tracks.
+        // setMicrophone/setCamera under `try?` swallowed errors and never
+        // surfaced a system prompt for some users.
+        var camOK = true
+        var micOK = true
+        if asPublisher {
+            camOK = await AVCaptureDevice.requestAccess(for: .video)
+            micOK = await AVCaptureDevice.requestAccess(for: .audio)
+            print("[Broadcast] permissions: cam=\(camOK) mic=\(micOK)")
+            if !micOK {
+                errorMessage = "Microphone access denied. Open System Settings → Privacy & Security → Microphone and enable Matcha."
+            }
+        }
+
         do {
             try await room.connect(url: url, token: token)
             isConnected = true
+            print("[Broadcast] room.connect OK identity=\(room.localParticipant.identity?.stringValue ?? "?")")
 
             if asPublisher {
-                try? await room.localParticipant.setCamera(enabled: true)
-                try? await room.localParticipant.setMicrophone(enabled: true)
+                do {
+                    try await room.localParticipant.setCamera(enabled: camOK)
+                    print("[Broadcast] camera enabled=\(camOK)")
+                } catch {
+                    print("[Broadcast] setCamera failed: \(error)")
+                    errorMessage = "Camera failed: \(error.localizedDescription)"
+                }
+                do {
+                    try await room.localParticipant.setMicrophone(enabled: micOK)
+                    print("[Broadcast] microphone enabled=\(micOK)")
+                } catch {
+                    print("[Broadcast] setMicrophone failed: \(error)")
+                    errorMessage = "Microphone failed: \(error.localizedDescription)"
+                }
             }
         } catch {
+            print("[Broadcast] room.connect FAILED: \(error)")
             errorMessage = error.localizedDescription
             isConnected = false
         }

@@ -429,7 +429,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "set -e\nSRC=\"${BUILT_PRODUCTS_DIR}/PackageFrameworks\"\nDST=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}\"\nmkdir -p \"$DST\"\nfor fw in LiveKit LiveKitWebRTC LiveKitUniFFI; do\n  if [ -d \"$SRC/$fw.framework\" ]; then\n    rsync -avh --delete \"$SRC/$fw.framework\" \"$DST/\"\n    /usr/bin/codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY:-$CODE_SIGN_IDENTITY}\" --timestamp=none \"$DST/$fw.framework\"\n  fi\ndone\n";
+			shellScript = "set -e\n# SwiftPM auto-embeds LiveKit binary XCFrameworks now that the package\n# product is in the target's Frameworks build phase. We only need to\n# extract stub dSYMs (LiveKit XCFrameworks ship without them) so that\n# App Store Connect's symbol upload doesn't warn.\nDST=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}\"\nDSYM_DST=\"${DWARF_DSYM_FOLDER_PATH:-$BUILT_PRODUCTS_DIR}\"\nmkdir -p \"$DSYM_DST\"\nfor fw in LiveKitWebRTC RustLiveKitUniFFI LiveKitUniFFI; do\n  BIN=\"$DST/$fw.framework/Versions/A/$fw\"\n  [ -f \"$BIN\" ] || BIN=\"$DST/$fw.framework/$fw\"\n  if [ -f \"$BIN\" ]; then\n    dsymutil \"$BIN\" -o \"$DSYM_DST/$fw.framework.dSYM\" 2>/dev/null || true\n  fi\ndone\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

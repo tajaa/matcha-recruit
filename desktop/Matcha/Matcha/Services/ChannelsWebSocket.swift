@@ -110,10 +110,8 @@ final class ChannelsWebSocket: NSObject {
         onTyping = nil
         onReactionUpdate = nil
         onError = nil
-        onBroadcastStarted = nil
-        onBroadcastEnded = nil
-        onBroadcastPublisherChanged = nil
-        onBroadcastTokenGrant = nil
+        // Broadcast handlers are owned by AppState (global). Don't clear here
+        // — view teardown shouldn't kill the singleton's broadcast routing.
     }
 
     /// Clear callbacks only if no other view has joined a different room since
