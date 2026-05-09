@@ -274,28 +274,32 @@ function computeTooltipPosition(
   }
   const tooltipHeight = 180  // approximate; tooltip content is short
   const margin = 20
+  // Bind rect to a non-null local so the nested `place` closure has a
+  // narrowed type — TS doesn't propagate the early-return narrowing into
+  // nested function scopes, which produced TS18047 errors before.
+  const r = rect
 
   function place(side: 'top' | 'bottom' | 'left' | 'right'): { left: number; top: number } {
     switch (side) {
       case 'right':
         return {
-          left: rect.left + rect.width + TOOLTIP_GAP,
-          top: rect.top + rect.height / 2 - tooltipHeight / 2,
+          left: r.left + r.width + TOOLTIP_GAP,
+          top: r.top + r.height / 2 - tooltipHeight / 2,
         }
       case 'left':
         return {
-          left: rect.left - TOOLTIP_WIDTH - TOOLTIP_GAP,
-          top: rect.top + rect.height / 2 - tooltipHeight / 2,
+          left: r.left - TOOLTIP_WIDTH - TOOLTIP_GAP,
+          top: r.top + r.height / 2 - tooltipHeight / 2,
         }
       case 'bottom':
         return {
-          left: rect.left + rect.width / 2 - TOOLTIP_WIDTH / 2,
-          top: rect.top + rect.height + TOOLTIP_GAP,
+          left: r.left + r.width / 2 - TOOLTIP_WIDTH / 2,
+          top: r.top + r.height + TOOLTIP_GAP,
         }
       case 'top':
         return {
-          left: rect.left + rect.width / 2 - TOOLTIP_WIDTH / 2,
-          top: rect.top - tooltipHeight - TOOLTIP_GAP,
+          left: r.left + r.width / 2 - TOOLTIP_WIDTH / 2,
+          top: r.top - tooltipHeight - TOOLTIP_GAP,
         }
     }
   }
