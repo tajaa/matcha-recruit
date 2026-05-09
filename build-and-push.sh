@@ -398,17 +398,31 @@ build_image() {
         build_args+=("--no-cache")
         log_info "Building with --no-cache"
     elif [ "$PUSH_TO_ECR" = true ]; then
-        # Always read from registry cache
-        build_args+=(--cache-from "type=registry,ref=${image_uri}:buildcache")
-        log_info "Using registry cache (read): ${image_uri}:buildcache"
-        # Only write cache back on main branch to avoid thrashing with feature-branch cache busts
         local current_branch
         current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+        # Sanitize branch name for Docker tag (slashes, etc → '-')
+        local branch_tag
+        branch_tag=$(echo "$current_branch" | tr '/' '-' | tr -c 'A-Za-z0-9._-' '-')
+
+        # Read from BOTH the branch-specific cache (incremental, fast on
+        # repeat builds of the same branch) AND the shared main cache
+        # (covers first build of a fresh branch).
+        build_args+=(--cache-from "type=registry,ref=${image_uri}:buildcache-${branch_tag}")
+        build_args+=(--cache-from "type=registry,ref=${image_uri}:buildcache")
+        log_info "Cache reads: buildcache-${branch_tag}, buildcache"
+
+        # Always write back to a branch-scoped cache tag so subsequent
+        # builds of THIS branch are incremental. mode=max preserves
+        # intermediate layers — bigger cache, much higher hit rate than
+        # mode=min on the typical multi-stage Dockerfile.
+        # Main branch ALSO updates the shared :buildcache tag that other
+        # branches read on first build.
+        local cache_to_targets="type=registry,ref=${image_uri}:buildcache-${branch_tag},mode=max,image-manifest=true,oci-mediatypes=true"
+        build_args+=(--cache-to "$cache_to_targets")
+        log_info "Cache write: buildcache-${branch_tag} (mode=max)"
         if [[ "$current_branch" == "main" || "$current_branch" == "master" ]]; then
-            build_args+=(--cache-to "type=registry,ref=${image_uri}:buildcache,mode=min,image-manifest=true,oci-mediatypes=true")
-            log_info "Writing registry cache (main branch, mode=min)"
-        else
-            log_info "Skipping cache write (branch: ${current_branch})"
+            build_args+=(--cache-to "type=registry,ref=${image_uri}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true")
+            log_info "Cache write: buildcache (shared, main branch)"
         fi
     else
         log_info "Local build - using default Docker cache"
