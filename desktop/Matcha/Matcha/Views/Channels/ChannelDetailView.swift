@@ -71,7 +71,8 @@ struct ChannelDetailView: View {
                     BroadcastPanelView(channelId: channelId, isOwner: broadcast.isOwner)
                         .environment(broadcast)
                     Divider()
-                } else if broadcast.activeBroadcasts[channelId] != nil {
+                } else if let info = broadcast.activeBroadcasts[channelId],
+                          info.startedBy != appState.currentUser?.id {
                     watchFeedBanner
                     Divider()
                 }
@@ -158,31 +159,36 @@ struct ChannelDetailView: View {
                             Text("LIVE").font(.system(size: 9, weight: .bold)).foregroundColor(.red)
                         }
                     }
-                    // Go Live button (owner only)
+                    // Go Live button (owner only). "End" when this client is
+                    // actively broadcasting OR when an active broadcast in this
+                    // channel was started by the current user from another
+                    // session (orphan recovery — quit app mid-stream, etc.).
                     if channel?.myRole == "owner" {
+                        let info = broadcast.activeBroadcasts[channelId]
+                        let isOwnActive = info?.startedBy == appState.currentUser?.id && info != nil
+                        let isLiveHere = broadcast.channelId == channelId && broadcast.isConnected
+                        let showEnd = isLiveHere || isOwnActive
                         Button {
                             Task {
-                                if broadcast.channelId == channelId && broadcast.isConnected {
+                                if isLiveHere {
                                     await broadcast.stopBroadcast()
+                                } else if isOwnActive {
+                                    await broadcast.endBroadcastForChannel(channelId: channelId)
                                 } else {
                                     await broadcast.startBroadcast(channelId: channelId)
                                 }
                             }
                         } label: {
                             HStack(spacing: 3) {
-                                Image(systemName: broadcast.channelId == channelId && broadcast.isConnected
-                                      ? "stop.circle" : "video.badge.plus")
+                                Image(systemName: showEnd ? "stop.circle" : "video.badge.plus")
                                     .font(.system(size: 10))
-                                Text(broadcast.channelId == channelId && broadcast.isConnected
-                                     ? "End" : "Go Live")
+                                Text(showEnd ? "End" : "Go Live")
                                     .font(.system(size: 10, weight: .medium))
                             }
                             .padding(.horizontal, 7)
                             .padding(.vertical, 3)
-                            .background(broadcast.channelId == channelId && broadcast.isConnected
-                                        ? Color.red.opacity(0.2) : Color.matcha600.opacity(0.2))
-                            .foregroundColor(broadcast.channelId == channelId && broadcast.isConnected
-                                             ? .red : Color.matcha500)
+                            .background(showEnd ? Color.red.opacity(0.2) : Color.matcha600.opacity(0.2))
+                            .foregroundColor(showEnd ? .red : Color.matcha500)
                             .cornerRadius(4)
                         }
                         .buttonStyle(.plain)

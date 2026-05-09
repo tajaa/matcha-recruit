@@ -144,6 +144,23 @@ final class BroadcastService {
         await leave()
     }
 
+    /// End an orphaned broadcast for a channel without requiring this client
+    /// to currently be the publisher. Used when an owner quits the app mid-
+    /// stream and the server-side broadcast row stays open: returning to the
+    /// channel, the owner sees the LIVE pill and an "End" button that calls
+    /// this. POSTs to the same /stop endpoint — the server-side `_assert_owner`
+    /// gate ensures only the channel owner can end it.
+    func endBroadcastForChannel(channelId: String) async {
+        do {
+            let _: OkResp = try await post(path: "/channels/\(channelId)/broadcast/stop")
+            activeBroadcasts.removeValue(forKey: channelId)
+            print("[Broadcast] endBroadcastForChannel ok channel=\(channelId)")
+        } catch {
+            print("[Broadcast] endBroadcastForChannel failed channel=\(channelId): \(error)")
+            errorMessage = "Couldn't end broadcast: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Leave / disconnect
 
     func leave() async {

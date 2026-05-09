@@ -7,7 +7,7 @@ Mounted via core_router:
 Limits (per channel):
 - BROADCAST_MAX_DURATION_SECONDS: hard cap per stream (10 min). Enforced via
   short token TTL + async auto-stop timer + refresh-token rejection.
-- BROADCAST_WEEKLY_LIMIT: max streams started per rolling 7 days (10).
+- BROADCAST_WEEKLY_LIMIT: max streams started per rolling 7 days (30).
 """
 
 import asyncio
@@ -30,7 +30,7 @@ webhook_router = APIRouter()  # mounted under /webhooks prefix
 
 # Per-stream + per-week limits
 BROADCAST_MAX_DURATION_SECONDS = 600   # 10 minutes
-BROADCAST_WEEKLY_LIMIT = 10            # 10 streams / rolling 7 days
+BROADCAST_WEEKLY_LIMIT = 30            # 30 streams / rolling 7 days
 BROADCAST_TOKEN_TTL_SECONDS = BROADCAST_MAX_DURATION_SECONDS + 30  # tiny grace
 
 # Tracks per-broadcast auto-stop tasks so a manual /stop can cancel them.
