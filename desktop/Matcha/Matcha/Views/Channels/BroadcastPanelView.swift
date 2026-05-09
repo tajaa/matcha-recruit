@@ -19,6 +19,14 @@ struct BroadcastPanelView: View {
         VStack(spacing: 0) {
             header
             videoGrid
+            if let err = broadcast.errorMessage {
+                Text(err)
+                    .font(.system(size: 10))
+                    .foregroundColor(.red.opacity(0.85))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 4)
+            }
             toolbar
         }
         .background(Color.black.opacity(0.85))
@@ -135,7 +143,8 @@ struct BroadcastPanelView: View {
                 SwiftUIVideoView(track,
                                 layoutMode: .fill,
                                 mirrorMode: .mirror)
-                    .frame(height: 140)
+                    .aspectRatio(16.0/9.0, contentMode: .fit)
+                    .frame(maxWidth: .infinity, minHeight: 240, maxHeight: 360)
                     .cornerRadius(6)
                     .clipped()
                 Text("You")
@@ -242,7 +251,8 @@ private struct RemoteVideoTile: View {
         ZStack(alignment: .bottomLeading) {
             if let track = participant.firstCameraVideoTrack {
                 SwiftUIVideoView(track, layoutMode: .fill)
-                    .frame(height: 140)
+                    .aspectRatio(16.0/9.0, contentMode: .fit)
+                    .frame(maxWidth: .infinity, minHeight: 240, maxHeight: 360)
                     .cornerRadius(6)
                     .clipped()
             } else {
@@ -252,7 +262,8 @@ private struct RemoteVideoTile: View {
                         .font(.system(size: 24))
                         .foregroundColor(.white.opacity(0.25))
                 }
-                .frame(height: 140)
+                .aspectRatio(16.0/9.0, contentMode: .fit)
+                .frame(maxWidth: .infinity, minHeight: 240, maxHeight: 360)
                 .cornerRadius(6)
             }
             Text(displayName)

@@ -35,6 +35,13 @@ final class BroadcastService {
     var errorMessage: String?
     /// Mutates whenever LiveKit participants change so @Observable triggers SwiftUI re-render.
     var participantTick: UInt64 = 0
+    /// Observable backing for the Mic/Camera toolbar buttons. Reading from
+    /// `room.localParticipant.isMicrophoneEnabled()` directly does NOT trigger
+    /// SwiftUI invalidation under `@Observable`, so the toolbar icon would
+    /// stale-cache after a toggle. We mirror the LiveKit state into observable
+    /// properties and update them after every successful set call.
+    var localMicEnabled: Bool = false
+    var localCameraEnabled: Bool = false
     /// All channels with a known-active broadcast, keyed by channelId. Drives the
     /// "Live now — Watch feed" banner and the LIVE pill in channel header.
     /// Populated by WS broadcast.started events AND a REST poll on channel-view
@@ -175,31 +182,55 @@ final class BroadcastService {
 
     func setMicEnabled(_ enabled: Bool) {
         #if canImport(LiveKit)
-        Task { try? await room.localParticipant.setMicrophone(enabled: enabled) }
+        // Re-check permission at toggle time — connectToRoom prompts once, but
+        // the user can revoke mic access in System Settings between connect
+        // and toggle. Without this, setMicrophone fails with a generic error.
+        if enabled, AVCaptureDevice.authorizationStatus(for: .audio) == .denied {
+            errorMessage = "Microphone access denied. Open System Settings → Privacy & Security → Microphone and enable Matcha."
+            print("[Broadcast] setMicEnabled(\(enabled)) blocked: permission denied")
+            return
+        }
+        Task { @MainActor in
+            do {
+                try await room.localParticipant.setMicrophone(enabled: enabled)
+                localMicEnabled = enabled
+                errorMessage = nil
+                print("[Broadcast] setMicEnabled(\(enabled)) ok")
+            } catch {
+                print("[Broadcast] setMicEnabled(\(enabled)) failed: \(error)")
+                errorMessage = "Mic toggle failed: \(error.localizedDescription)"
+            }
+        }
         #endif
     }
 
     func setCameraEnabled(_ enabled: Bool) {
         #if canImport(LiveKit)
-        Task { try? await room.localParticipant.setCamera(enabled: enabled) }
+        if enabled, AVCaptureDevice.authorizationStatus(for: .video) == .denied {
+            errorMessage = "Camera access denied. Open System Settings → Privacy & Security → Camera and enable Matcha."
+            print("[Broadcast] setCameraEnabled(\(enabled)) blocked: permission denied")
+            return
+        }
+        Task { @MainActor in
+            do {
+                try await room.localParticipant.setCamera(enabled: enabled)
+                localCameraEnabled = enabled
+                errorMessage = nil
+                print("[Broadcast] setCameraEnabled(\(enabled)) ok")
+            } catch {
+                print("[Broadcast] setCameraEnabled(\(enabled)) failed: \(error)")
+                errorMessage = "Camera toggle failed: \(error.localizedDescription)"
+            }
+        }
         #endif
     }
 
-    var isMicEnabled: Bool {
-        #if canImport(LiveKit)
-        return room.localParticipant.isMicrophoneEnabled()
-        #else
-        return false
-        #endif
-    }
+    /// Backed by `localMicEnabled` so SwiftUI re-renders when toggled. Reading
+    /// `room.localParticipant.isMicrophoneEnabled()` directly does not invalidate
+    /// the @Observable snapshot.
+    var isMicEnabled: Bool { localMicEnabled }
 
-    var isCameraEnabled: Bool {
-        #if canImport(LiveKit)
-        return room.localParticipant.isCameraEnabled()
-        #else
-        return false
-        #endif
-    }
+    var isCameraEnabled: Bool { localCameraEnabled }
 
     // MARK: - WS token grant (promote/demote pushes new token)
 
@@ -302,17 +333,21 @@ final class BroadcastService {
             if asPublisher {
                 do {
                     try await room.localParticipant.setCamera(enabled: camOK)
+                    localCameraEnabled = camOK
                     print("[Broadcast] camera enabled=\(camOK)")
                 } catch {
                     print("[Broadcast] setCamera failed: \(error)")
                     errorMessage = "Camera failed: \(error.localizedDescription)"
+                    localCameraEnabled = false
                 }
                 do {
                     try await room.localParticipant.setMicrophone(enabled: micOK)
+                    localMicEnabled = micOK
                     print("[Broadcast] microphone enabled=\(micOK)")
                 } catch {
                     print("[Broadcast] setMicrophone failed: \(error)")
                     errorMessage = "Microphone failed: \(error.localizedDescription)"
+                    localMicEnabled = false
                 }
             }
         } catch {
@@ -352,6 +387,8 @@ final class BroadcastService {
         publisherUserIds = []
         elapsedSeconds = 0
         weeklyRemaining = nil
+        localMicEnabled = false
+        localCameraEnabled = false
         countdownTask?.cancel(); countdownTask = nil
         #if canImport(LiveKit)
         room = Room()
