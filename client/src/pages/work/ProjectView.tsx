@@ -17,7 +17,37 @@ import RecruitingWizard from '../../components/matcha-work/RecruitingWizard'
 import CollaboratorPanel from '../../components/matcha-work/CollaboratorPanel'
 import CollaboratorsPill from '../../components/matcha-work/CollaboratorsPill'
 import PresenceLayer from '../../components/matcha-work/PresenceLayer'
+import ProjectTour, { type TourStep } from '../../components/matcha-work/ProjectTour'
 import { useProjectPresence } from '../../hooks/useProjectPresence'
+
+const TOUR_DISMISSED_KEY = 'mw_project_tour_dismissed'
+
+const TOUR_STEPS: TourStep[] = [
+  {
+    target: '[data-tour="sections-panel"]',
+    title: 'Sections — your project document',
+    description: 'Pre-filled when you pick a template. Click any [bracketed placeholder] to edit, drag to reorder, or send a message in chat to auto-fill all placeholders at once.',
+    side: 'left',
+  },
+  {
+    target: '[data-tour="chat-input"]',
+    title: 'AI chat — your project copilot',
+    description: 'Type something like "Acme Corp · B2B SaaS · $25k Q3" and Matcha fills bracketed placeholders across every section. Also use it to add new sections, rewrite, or summarize.',
+    side: 'top',
+  },
+  {
+    target: '[data-tour="collaborators-pill"]',
+    title: 'See who else is here',
+    description: 'When teammates open the same project, you see their colored cursors and carets in real time. Names appear in the header pill so you know who else is around.',
+    side: 'bottom',
+  },
+  {
+    target: '[data-tour="export-button"]',
+    title: 'Export & share',
+    description: 'Export the project as PDF or DOCX. Invite collaborators from the project menu — anyone you invite can edit alongside you.',
+    side: 'left',
+  },
+]
 import { MODEL_OPTIONS, formatTokens } from '../../components/matcha-work/constants'
 
 export default function ProjectView() {
@@ -60,6 +90,24 @@ export default function ProjectView() {
   const [activePageKey, setActivePageKey] = useState<string>('sections')
   const presence = useProjectPresence(projectId ?? null, activePageKey)
   const cursorsActive = activePageKey === 'sections'
+
+  // Onboarding tour: spotlight Sections / Chat / Collaborators / Export the
+  // first time the user lands on a project, until they hit Skip / Done. Open
+  // again from the "?" button on the project header.
+  const [showTour, setShowTour] = useState(false)
+  useEffect(() => {
+    if (!project) return
+    const dismissed = localStorage.getItem(TOUR_DISMISSED_KEY) === 'true'
+    if (!dismissed) setShowTour(true)
+  }, [project?.id])
+
+  function dismissTour(_dismissed: boolean) {
+    setShowTour(false)
+    // Persist regardless of whether the user clicked Skip or finished — both
+    // signal "I've seen this." Re-open via the "?" button if they want a
+    // refresher.
+    localStorage.setItem(TOUR_DISMISSED_KEY, 'true')
+  }
 
   // Switch the page_key when the project type loads so the recruiting view
   // shows the "Pipeline" pill state and the project view shows "Sections".
@@ -667,6 +715,15 @@ export default function ProjectView() {
                 <HelpCircle size={14} />
               </button>
             )}
+            {project.project_type !== 'recruiting' && (
+              <button
+                onClick={() => setShowTour(true)}
+                title="Project tour"
+                className="p-1 rounded transition-colors text-[#6a737d] hover:text-[#ce9178]"
+              >
+                <HelpCircle size={14} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -773,6 +830,7 @@ export default function ProjectView() {
             )}
             <textarea
               ref={textareaRef}
+              data-tour="chat-input"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
@@ -796,16 +854,24 @@ export default function ProjectView() {
       )}
 
       {/* Right — Project panel or Recruiting pipeline */}
-      <div className={`${mobileView === 'panel' ? 'flex w-full' : 'hidden'} md:flex flex-1 min-w-0 flex-col`}>
-        {/* Collaborator presence pill (cross-tab awareness) */}
-        {presence.members.length > 1 && (
-          <div
-            className="flex items-center justify-end px-3 py-1"
-            style={{ borderBottom: '1px solid #333', background: '#1e1e1e' }}
-          >
+      <div
+        className={`${mobileView === 'panel' ? 'flex w-full' : 'hidden'} md:flex flex-1 min-w-0 flex-col`}
+        data-tour="sections-panel"
+      >
+        {/* Collaborator presence pill (cross-tab awareness). Always rendered
+            so the onboarding tour can target it; shows "Working solo" when
+            no one else is in the project. */}
+        <div
+          data-tour="collaborators-pill"
+          className="flex items-center justify-end px-3 py-1"
+          style={{ borderBottom: '1px solid #333', background: '#1e1e1e' }}
+        >
+          {presence.members.length > 1 ? (
             <CollaboratorsPill members={presence.members} selfId={currentUserId} />
-          </div>
-        )}
+          ) : (
+            <span style={{ fontSize: 10, color: '#555' }}>Working solo</span>
+          )}
+        </div>
         <PresenceLayer
           members={presence.members}
           remoteCursors={presence.remoteCursors}
@@ -880,6 +946,10 @@ export default function ProjectView() {
         )}
         </PresenceLayer>
       </div>
+
+      {showTour && project.project_type !== 'recruiting' && (
+        <ProjectTour steps={TOUR_STEPS} onComplete={dismissTour} />
+      )}
     </div>
   )
 }

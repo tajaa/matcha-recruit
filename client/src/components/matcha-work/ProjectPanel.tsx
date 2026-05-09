@@ -371,7 +371,7 @@ export default function ProjectPanel(props: ProjectPanelProps) {
             {previewMode ? 'Edit' : 'Preview'}
           </button>
 
-          <div className="relative" ref={exportRef}>
+          <div className="relative" ref={exportRef} data-tour="export-button">
           <button
             onClick={() => setShowExport(!showExport)}
             disabled={sections.length === 0 || exporting}
