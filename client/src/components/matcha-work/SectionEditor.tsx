@@ -8,6 +8,9 @@ import Placeholder from '@tiptap/extension-placeholder'
 import LinkExtension from '@tiptap/extension-link'
 import ImageExtension from '@tiptap/extension-image'
 import { Bold, Italic, Heading2, List, ListOrdered, Link, ImagePlus, Film, Loader2, Undo, Redo } from 'lucide-react'
+import { avatarColor } from '../../utils/avatarColor'
+import type { PresenceMember } from '../../api/projectSocket'
+import type { RemoteCaret } from '../../hooks/useProjectPresence'
 
 /** Block-level <video> node so insertContent('<video ...>') survives TipTap
  * serialization. StarterKit has no video node — without this, the tag is
@@ -31,6 +34,38 @@ const VideoNode = Node.create({
   },
   renderHTML({ HTMLAttributes }) {
     return ['video', mergeAttributes(HTMLAttributes)]
+  },
+})
+
+/** Plugin key for the remote-caret decorations. The SectionEditor component
+ * dispatches a transaction with `tr.setMeta(remoteCaretPluginKey, set)`
+ * whenever the `remoteCarets` map updates; the plugin renders that
+ * DecorationSet (caret bars + selection highlights for collaborators on the
+ * same section). Doc edits between dispatches still re-map positions via
+ * `old.map(tr.mapping, tr.doc)` so the markers stay aligned. */
+const remoteCaretPluginKey = new PluginKey('remoteCaret')
+
+const RemoteCaretExtension = Extension.create({
+  name: 'remoteCaret',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: remoteCaretPluginKey,
+        state: {
+          init: () => DecorationSet.empty,
+          apply(tr, old) {
+            const incoming = tr.getMeta(remoteCaretPluginKey)
+            if (incoming) return incoming as DecorationSet
+            return (old as DecorationSet).map(tr.mapping, tr.doc)
+          },
+        },
+        props: {
+          decorations(state) {
+            return remoteCaretPluginKey.getState(state) as DecorationSet
+          },
+        },
+      }),
+    ]
   },
 })
 
@@ -77,9 +112,27 @@ interface SectionEditorProps {
   onVideoUpload?: (file: File) => Promise<string | null>
   uploadingImage?: boolean
   uploadingVideo?: boolean
+  // Real-time collaboration (optional — when omitted, editor behaves as before)
+  sectionId?: string
+  selfId?: string
+  members?: PresenceMember[]
+  remoteCarets?: Map<string, RemoteCaret>
+  onCaretChange?: (sectionId: string, anchor: number, head: number) => void
 }
 
-export default function SectionEditor({ content, onUpdate, onImageUpload, onVideoUpload, uploadingImage, uploadingVideo }: SectionEditorProps) {
+export default function SectionEditor({
+  content,
+  onUpdate,
+  onImageUpload,
+  onVideoUpload,
+  uploadingImage,
+  uploadingVideo,
+  sectionId,
+  selfId,
+  members,
+  remoteCarets,
+  onCaretChange,
+}: SectionEditorProps) {
   const imageInputRef = useRef<HTMLInputElement>(null)
   const videoInputRef = useRef<HTMLInputElement>(null)
 
@@ -93,12 +146,18 @@ export default function SectionEditor({ content, onUpdate, onImageUpload, onVide
       ImageExtension,
       VideoNode,
       PlaceholderHighlight,
+      RemoteCaretExtension,
     ],
     content,
     onUpdate: ({ editor: e }) => {
       const html = e.getHTML()
       lastServerContent.current = html
       onUpdate(html)
+    },
+    onSelectionUpdate: ({ editor: e }) => {
+      if (!onCaretChange || !sectionId) return
+      const { from, to } = e.state.selection
+      onCaretChange(sectionId, from, to)
     },
     editorProps: {
       attributes: {
@@ -137,6 +196,43 @@ export default function SectionEditor({ content, onUpdate, onImageUpload, onVide
       }
     }
   }, [content, editor])
+
+  // Push remote-caret decorations into the editor whenever the carets map,
+  // members list, or active section changes.
+  useEffect(() => {
+    if (!editor || !remoteCarets || !sectionId) return
+    const decos: Decoration[] = []
+    const docSize = editor.state.doc.content.size
+    const memberById = new Map((members ?? []).map((m) => [m.id, m]))
+    for (const [userId, caret] of remoteCarets.entries()) {
+      if (userId === selfId) continue
+      if (caret.sectionId !== sectionId) continue
+      const member = memberById.get(userId)
+      if (!member) continue
+      const color = avatarColor(userId)
+      const from = Math.max(0, Math.min(Math.min(caret.anchor, caret.head), docSize))
+      const to = Math.max(from, Math.min(Math.max(caret.anchor, caret.head), docSize))
+      if (to > from) {
+        decos.push(
+          Decoration.inline(from, to, {
+            style: `background-color: ${color}33;`,
+          })
+        )
+      }
+      const head = Math.max(0, Math.min(caret.head, docSize))
+      const widget = document.createElement('span')
+      widget.className = 'remote-caret'
+      widget.style.cssText = `position: relative; display: inline-block; width: 0; height: 1em; vertical-align: text-bottom; border-left: 2px solid ${color};`
+      const flag = document.createElement('span')
+      flag.textContent = member.name
+      flag.style.cssText = `position: absolute; top: -14px; left: -1px; background: ${color}; color: #000; font-size: 9px; font-weight: 600; padding: 1px 4px; border-radius: 2px; white-space: nowrap; pointer-events: none;`
+      widget.appendChild(flag)
+      decos.push(Decoration.widget(head, widget, { side: 1 }))
+    }
+    const set = DecorationSet.create(editor.state.doc, decos)
+    const tr = editor.state.tr.setMeta(remoteCaretPluginKey, set)
+    editor.view.dispatch(tr)
+  }, [editor, remoteCarets, members, sectionId, selfId])
 
   const handleImageClick = useCallback(async () => {
     imageInputRef.current?.click()

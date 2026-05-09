@@ -6,12 +6,24 @@ import type { ProjectFile } from '../../api/matchaWork'
 import SectionEditor from './SectionEditor'
 import { sectionToHtml } from './markdownToHtml'
 import ResearchPanel from './ResearchPanel'
+import type { PresenceMember } from '../../api/projectSocket'
+import type { RemoteCaret } from '../../hooks/useProjectPresence'
 
 const DiagramEditor = lazy(() => import('./DiagramEditor'))
 
 const ALLOWED_FILE_EXT = /\.(pdf|docx?|txt|csv|xlsx?|png|jpe?g|gif|webp|svg|pptx|md)$/i
 
-interface ProjectPanelPropsLegacy {
+interface CollabProps {
+  // Real-time collaborator presence (optional). When passed in from
+  // ProjectView via useProjectPresence, the SectionEditor renders remote
+  // carets for each member and reports its own caret on selection change.
+  selfId?: string
+  members?: PresenceMember[]
+  remoteCarets?: Map<string, RemoteCaret>
+  onCaretChange?: (sectionId: string, anchor: number, head: number) => void
+}
+
+interface ProjectPanelPropsLegacy extends CollabProps {
   state: Record<string, unknown>
   threadId: string
   lightMode: boolean
@@ -22,7 +34,7 @@ interface ProjectPanelPropsLegacy {
   onProjectUpdate?: undefined
 }
 
-interface ProjectPanelPropsNew {
+interface ProjectPanelPropsNew extends CollabProps {
   projectId: string
   project: MWProject
   onProjectUpdate: (project: MWProject) => void
@@ -573,6 +585,11 @@ export default function ProjectPanel(props: ProjectPanelProps) {
                   onUpdate={(html) => handleSectionContentUpdate(s.id, html)}
                   onImageUpload={handleImageUpload}
                   uploadingImage={uploadingImage}
+                  sectionId={s.id}
+                  selfId={props.selfId}
+                  members={props.members}
+                  remoteCarets={props.remoteCarets}
+                  onCaretChange={props.onCaretChange}
                 />
 
                 {/* Edit Diagram button for sections with diagram data */}

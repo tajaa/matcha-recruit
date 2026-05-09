@@ -15,6 +15,9 @@ import ProjectPanel from '../../components/matcha-work/ProjectPanel'
 import RecruitingPipeline from '../../components/matcha-work/RecruitingPipeline'
 import RecruitingWizard from '../../components/matcha-work/RecruitingWizard'
 import CollaboratorPanel from '../../components/matcha-work/CollaboratorPanel'
+import CollaboratorsPill from '../../components/matcha-work/CollaboratorsPill'
+import PresenceLayer from '../../components/matcha-work/PresenceLayer'
+import { useProjectPresence } from '../../hooks/useProjectPresence'
 import { MODEL_OPTIONS, formatTokens } from '../../components/matcha-work/constants'
 
 export default function ProjectView() {
@@ -49,6 +52,21 @@ export default function ProjectView() {
   const [inboxComposeOpen, setInboxComposeOpen] = useState(false)
   const { me } = useMe()
   const currentUserId = me?.user?.id ?? ''
+
+  // Real-time presence: which sub-tab is the user on inside this project?
+  // The page_key drives cursor + caret fan-out on the server. Only Sections
+  // gets cursors/carets (recruiting Pipeline + Chat are passive — collaborators
+  // still appear in the header pill, but no cursor traffic flows).
+  const [activePageKey, setActivePageKey] = useState<string>('sections')
+  const presence = useProjectPresence(projectId ?? null, activePageKey)
+  const cursorsActive = activePageKey === 'sections'
+
+  // Switch the page_key when the project type loads so the recruiting view
+  // shows the "Pipeline" pill state and the project view shows "Sections".
+  useEffect(() => {
+    if (!project) return
+    setActivePageKey(project.project_type === 'recruiting' ? 'pipeline' : 'sections')
+  }, [project?.project_type])
 
   const loadInbox = useCallback(async () => {
     setInboxLoading(true)
@@ -778,7 +796,24 @@ export default function ProjectView() {
       )}
 
       {/* Right — Project panel or Recruiting pipeline */}
-      <div className={`${mobileView === 'panel' ? 'flex w-full' : 'hidden'} md:flex flex-1 min-w-0`}>
+      <div className={`${mobileView === 'panel' ? 'flex w-full' : 'hidden'} md:flex flex-1 min-w-0 flex-col`}>
+        {/* Collaborator presence pill (cross-tab awareness) */}
+        {presence.members.length > 1 && (
+          <div
+            className="flex items-center justify-end px-3 py-1"
+            style={{ borderBottom: '1px solid #333', background: '#1e1e1e' }}
+          >
+            <CollaboratorsPill members={presence.members} selfId={currentUserId} />
+          </div>
+        )}
+        <PresenceLayer
+          members={presence.members}
+          remoteCursors={presence.remoteCursors}
+          reportCursor={presence.reportCursor}
+          selfId={currentUserId}
+          pageKey={activePageKey}
+          enabled={cursorsActive}
+        >
         {project.project_type === 'recruiting' ? (
           <RecruitingPipeline
             project={project}
@@ -837,8 +872,13 @@ export default function ProjectView() {
             projectId={projectId!}
             project={project}
             onProjectUpdate={(updated) => setProject(updated)}
+            selfId={currentUserId}
+            members={presence.members}
+            remoteCarets={presence.remoteCarets}
+            onCaretChange={presence.reportCaret}
           />
         )}
+        </PresenceLayer>
       </div>
     </div>
   )
