@@ -51,6 +51,7 @@ struct ProjectDetailView: View {
     @Environment(AppState.self) private var appState
     @State private var viewModel = ProjectDetailViewModel()
     @State private var chatVM = ThreadDetailViewModel()
+    @State private var presenceVM = ProjectPresenceViewModel()
     @State private var editingSectionId: String?
     @State private var newSectionTitle = ""
     @State private var showCollaborators = false
@@ -110,6 +111,19 @@ struct ProjectDetailView: View {
             // is the single source of truth and fires on initial nil→value.
             // SwiftUI auto-cancels this .task block when projectId changes.
             await viewModel.loadProject(id: projectId)
+        }
+        .task(id: projectId) {
+            // Connect to the presence WebSocket once the project is identified.
+            // We always join (not just collab) so the pill works on all
+            // matcha-work projects; cursor traffic is page-scoped server-side
+            // so it stays cheap for sub-tabs that don't render cursors.
+            presenceVM.start(projectId: projectId, pageKey: collabPanel.rawValue)
+        }
+        .onChange(of: collabPanel) { _, newPanel in
+            presenceVM.setPage(newPanel.rawValue)
+        }
+        .onDisappear {
+            presenceVM.stop()
         }
         .onChange(of: viewModel.activeChatId) {
             threadLoadTask?.cancel()
@@ -202,14 +216,32 @@ struct ProjectDetailView: View {
                 }
                 .menuStyle(.borderlessButton)
 
-                Button { showCollaborators = true } label: {
-                    Image(systemName: "person.2").font(.system(size: 13))
-                }
-                .help("Collaborators")
-                .popover(isPresented: $showCollaborators) {
-                    if let pid = viewModel.project?.id {
-                        CollaboratorPanelView(projectId: pid)
-                            .frame(width: 300, height: 360)
+                // Live presence pill — small avatar dots for everyone in the
+                // project right now. Pulses softly so it reads as live state
+                // and not just "list of members". Click → opens the same
+                // CollaboratorPanelView popover the static button used.
+                if !presenceVM.members.isEmpty {
+                    Button { showCollaborators = true } label: {
+                        PresencePillContent(members: presenceVM.members)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Collaborators online now")
+                    .popover(isPresented: $showCollaborators, arrowEdge: .bottom) {
+                        if let pid = viewModel.project?.id {
+                            CollaboratorPanelView(projectId: pid)
+                                .frame(width: 300, height: 360)
+                        }
+                    }
+                } else {
+                    Button { showCollaborators = true } label: {
+                        Image(systemName: "person.2").font(.system(size: 13))
+                    }
+                    .help("Collaborators")
+                    .popover(isPresented: $showCollaborators) {
+                        if let pid = viewModel.project?.id {
+                            CollaboratorPanelView(projectId: pid)
+                                .frame(width: 300, height: 360)
+                        }
                     }
                 }
 
@@ -482,6 +514,11 @@ struct ProjectDetailView: View {
     }
 
     private var collabSections: some View {
+        // Wrap the panel in a presence overlay so remote cursor positions
+        // render on top of the same coordinate space we report mouse moves
+        // from. Page-scoped server-side, so cursor traffic only fans out
+        // between users on the Sections sub-tab.
+        ProjectPresenceOverlay(presenceVM: presenceVM, members: presenceVM.members) {
         VStack(spacing: 0) {
             if let sections = viewModel.project?.sections, !sections.isEmpty {
                 if let sid = editingSectionId,
@@ -490,23 +527,42 @@ struct ProjectDetailView: View {
                         section: section,
                         onSave: { title, content in
                             Task { await viewModel.updateSection(sectionId: sid, title: title, content: content) }
+                        },
+                        onCaretMove: { anchor, head in
+                            presenceVM.reportCaret(sectionId: sid, anchor: anchor, head: head)
                         }
                     )
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(sections) { section in
+                                let editingMember = remoteEditor(for: section.id)
                                 Button { editingSectionId = section.id } label: {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(section.title).font(.system(size: 12, weight: .medium)).foregroundColor(.white)
-                                        if let c = section.content, !c.isEmpty {
-                                            Text(c.prefix(120))
-                                                .font(.system(size: 10))
-                                                .foregroundColor(.secondary)
-                                                .lineLimit(2)
+                                    HStack(alignment: .top, spacing: 8) {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(section.title).font(.system(size: 12, weight: .medium)).foregroundColor(.white)
+                                            if let c = section.content, !c.isEmpty {
+                                                Text(c.prefix(120))
+                                                    .font(.system(size: 10))
+                                                    .foregroundColor(.secondary)
+                                                    .lineLimit(2)
+                                            }
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        if let m = editingMember {
+                                            // Small colored dot + initial when a remote
+                                            // collaborator's caret is in this section.
+                                            // Skips in-text caret rendering for v1 — too
+                                            // much NSTextView overlay work — but keeps
+                                            // the at-a-glance "X is editing here" signal.
+                                            HStack(spacing: 3) {
+                                                Circle()
+                                                    .fill(UserColor.forUserId(m.id))
+                                                    .frame(width: 6, height: 6)
+                                                Text(m.name).font(.system(size: 9)).foregroundColor(.secondary)
+                                            }
                                         }
                                     }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
                                     .padding(10)
                                     .background(Color.zinc900.opacity(0.5))
                                     .cornerRadius(6)
@@ -526,6 +582,16 @@ struct ProjectDetailView: View {
                 Spacer()
             }
         }
+        }
+    }
+
+    /// Returns the member whose caret is currently in the given section, if
+    /// any. Used to render the "X is editing" badge on the section list.
+    private func remoteEditor(for sectionId: String) -> ProjectWebSocket.PresenceMember? {
+        guard let entry = presenceVM.remoteCarets.first(where: { $0.value.sectionId == sectionId }) else {
+            return nil
+        }
+        return presenceVM.members.first { $0.id == entry.key }
     }
 
     private var collabOverview: some View {

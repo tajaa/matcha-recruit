@@ -12,6 +12,9 @@ struct SectionEditorView: View {
     /// buttons are disabled (callers that don't expose a project context can
     /// omit this).
     var projectId: String? = nil
+    /// Reports caret position changes (anchor + head as character offsets)
+    /// for real-time presence broadcasting. Throttling is the caller's job.
+    var onCaretMove: ((Int, Int) -> Void)? = nil
 
     @State private var title: String = ""
     @State private var content: String = ""
@@ -44,7 +47,13 @@ struct SectionEditorView: View {
             formattingToolbar
 
             // Content editor
-            MarkdownTextEditor(text: $content, controller: $controller)
+            MarkdownTextEditor(
+                text: $content,
+                controller: $controller,
+                onSelectionChange: { anchor, head in
+                    onCaretMove?(anchor, head)
+                }
+            )
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .onChange(of: content) { scheduleSave() }

@@ -10,6 +10,11 @@ import AppKit
 struct MarkdownTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var controller: MarkdownEditorController
+    /// Fires whenever the user moves the caret or changes the selection.
+    /// `anchor` and `head` are character offsets (UTF-16 to match
+    /// NSTextView's selectedRange). Used by collab presence to broadcast
+    /// remote-caret position; nil for editors that don't broadcast.
+    var onSelectionChange: ((Int, Int) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -60,6 +65,16 @@ struct MarkdownTextEditor: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let tv = notification.object as? NSTextView else { return }
             parent.text = tv.string
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView else { return }
+            let sel = tv.selectedRange()
+            // anchor + head distinguish the start vs end of the selection so
+            // the receiver can render a directional selection bar. NSTextView
+            // doesn't expose direction; we treat anchor as start and head as
+            // start+length — close enough for rendering, matches web behavior.
+            parent.onSelectionChange?(sel.location, sel.location + sel.length)
         }
     }
 }

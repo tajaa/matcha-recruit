@@ -72,6 +72,10 @@
 		BB01CC22DD33EE44FF550001 /* NewBlogSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC22DD33EE44FF660001 /* NewBlogSheet.swift */; };
 		BB01CC22DD33EE44FF550002 /* BlogEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC22DD33EE44FF660002 /* BlogEditorView.swift */; };
 		BB01CC22DD33EE44FF550003 /* MarkdownPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC22DD33EE44FF660003 /* MarkdownPreviewView.swift */; };
+		C0C0C0C0C0C0C0C001010001 /* ProjectWebSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0C0C0C0C0C0C001010002 /* ProjectWebSocket.swift */; };
+		C0C0C0C0C0C0C0C001010003 /* ProjectPresenceViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0C0C0C0C0C0C001010004 /* ProjectPresenceViewModel.swift */; };
+		C0C0C0C0C0C0C0C001010005 /* ProjectPresenceOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0C0C0C0C0C0C001010006 /* ProjectPresenceOverlay.swift */; };
+		C0C0C0C0C0C0C0C001010007 /* PresencePillContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0C0C0C0C0C0C001010008 /* PresencePillContent.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -140,6 +144,10 @@
 		BB01CC22DD33EE44FF660001 /* NewBlogSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewBlogSheet.swift; sourceTree = "<group>"; };
 		BB01CC22DD33EE44FF660002 /* BlogEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlogEditorView.swift; sourceTree = "<group>"; };
 		BB01CC22DD33EE44FF660003 /* MarkdownPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPreviewView.swift; sourceTree = "<group>"; };
+		C0C0C0C0C0C0C0C001010002 /* ProjectWebSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectWebSocket.swift; sourceTree = "<group>"; };
+		C0C0C0C0C0C0C0C001010004 /* ProjectPresenceViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectPresenceViewModel.swift; sourceTree = "<group>"; };
+		C0C0C0C0C0C0C0C001010006 /* ProjectPresenceOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectPresenceOverlay.swift; sourceTree = "<group>"; };
+		C0C0C0C0C0C0C0C001010008 /* PresencePillContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresencePillContent.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -202,6 +210,7 @@
 				DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */,
 				DD00EE11FF22334455770099 /* ChannelNotificationManager.swift */,
 				BC01DD22EE33FF445566BB02 /* BroadcastService.swift */,
+				C0C0C0C0C0C0C0C001010002 /* ProjectWebSocket.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -238,6 +247,8 @@
 			AA11BB22CC33DD44EE66000D /* MarkdownTextEditor.swift */,
 			AA11BB22CC33DD44EE6600E1 /* TaskProgressBar.swift */,
 			AA11BB22CC33DD44EE6600E2 /* HomeDashboardView.swift */,
+			C0C0C0C0C0C0C0C001010006 /* ProjectPresenceOverlay.swift */,
+			C0C0C0C0C0C0C0C001010008 /* PresencePillContent.swift */,
 			);
 			path = MatchaWork;
 			sourceTree = "<group>";
@@ -306,6 +317,7 @@
 				FA53495B161A46747955400C /* ThreadListViewModel.swift */,
 				F88AB428B69CD0DC86AF1AA9 /* ThreadDetailViewModel.swift */,
 				AA11BB22CC33DD44EE660001 /* ProjectDetailViewModel.swift */,
+				C0C0C0C0C0C0C0C001010004 /* ProjectPresenceViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -501,6 +513,10 @@
 				A1B2C3D4E5F60708AA000001 /* ProfileSheet.swift in Sources */,
 				59E0948E7E02B420F0B7B103 /* StatusBadge.swift in Sources */,
 				208F703F48307B35717A911B /* LoadingDots.swift in Sources */,
+				C0C0C0C0C0C0C0C001010001 /* ProjectWebSocket.swift in Sources */,
+				C0C0C0C0C0C0C0C001010003 /* ProjectPresenceViewModel.swift in Sources */,
+				C0C0C0C0C0C0C0C001010005 /* ProjectPresenceOverlay.swift in Sources */,
+				C0C0C0C0C0C0C0C001010007 /* PresencePillContent.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

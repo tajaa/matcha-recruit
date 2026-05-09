@@ -1,0 +1,129 @@
+import SwiftUI
+
+/// Observable presence state for a single project view. Owns the WebSocket
+/// callbacks while the ProjectDetailView is on screen and exposes:
+///
+/// - `members`: who's anywhere in the project (drives the header pill)
+/// - `remoteCursors`: latest cursor position per remote user (drives the
+///   floating dot+name overlay on the active sub-tab)
+/// - `remoteCarets`: latest caret per remote user, keyed by section_id
+///   (drives the "X is editing" badge on the section list)
+///
+/// Throttling is local: cursor sends throttled at 50ms, caret sends at
+/// 100ms — same budgets the web client uses, well under the server's
+/// 60 msg/sec rate limit.
+@MainActor
+@Observable
+final class ProjectPresenceViewModel {
+    private(set) var members: [ProjectWebSocket.PresenceMember] = []
+    private(set) var remoteCursors: [String: ProjectWebSocket.CursorPayload] = [:]
+    private(set) var remoteCarets: [String: ProjectWebSocket.CaretPayload] = [:]
+
+    private var projectId: String?
+    private var pageKey: String = "sections"
+    private var lastCursorSend: Date = .distantPast
+    private var lastCaretSend: Date = .distantPast
+    private let cursorMinInterval: TimeInterval = 0.050
+    private let caretMinInterval: TimeInterval = 0.100
+
+    /// Connect (or reuse existing connection), join the project on the given
+    /// sub-tab, and wire callbacks into local state.
+    func start(projectId: String, pageKey: String) {
+        self.projectId = projectId
+        self.pageKey = pageKey
+        let ws = ProjectWebSocket.shared
+        ws.connect()
+        ws.onPresence = { [weak self] members in
+            self?.members = members
+        }
+        ws.onPresenceUpdate = { [weak self] userId, newPage in
+            guard let self else { return }
+            // Replace the page_key on the matching member; leave the rest as-is.
+            self.members = self.members.map { m in
+                guard m.id == userId else { return m }
+                return ProjectWebSocket.PresenceMember(
+                    id: m.id, name: m.name, email: m.email, role: m.role,
+                    avatarUrl: m.avatarUrl, pageKey: newPage,
+                )
+            }
+        }
+        ws.onUserJoined = { [weak self] member in
+            guard let self else { return }
+            // Replace if present (rare reconnect race), else append.
+            self.members.removeAll { $0.id == member.id }
+            self.members.append(member)
+        }
+        ws.onUserLeft = { [weak self] userId in
+            guard let self else { return }
+            self.members.removeAll { $0.id == userId }
+            self.remoteCursors.removeValue(forKey: userId)
+            self.remoteCarets.removeValue(forKey: userId)
+        }
+        ws.onCursor = { [weak self] payload in
+            self?.remoteCursors[payload.userId] = payload
+        }
+        ws.onCaret = { [weak self] payload in
+            self?.remoteCarets[payload.userId] = payload
+        }
+        ws.joinProject(projectId: projectId, pageKey: pageKey)
+    }
+
+    func setPage(_ pageKey: String) {
+        guard let projectId, self.pageKey != pageKey else { return }
+        self.pageKey = pageKey
+        ProjectWebSocket.shared.changePage(projectId: projectId, pageKey: pageKey)
+    }
+
+    func reportCursor(xPct: Double, yPct: Double) {
+        guard let projectId else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastCursorSend) >= cursorMinInterval else { return }
+        lastCursorSend = now
+        ProjectWebSocket.shared.sendCursor(
+            projectId: projectId, pageKey: pageKey,
+            xPct: max(0, min(1, xPct)), yPct: max(0, min(1, yPct)),
+        )
+    }
+
+    func reportCaret(sectionId: String, anchor: Int, head: Int) {
+        guard let projectId else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastCaretSend) >= caretMinInterval else { return }
+        lastCaretSend = now
+        ProjectWebSocket.shared.sendCaret(
+            projectId: projectId, pageKey: pageKey,
+            sectionId: sectionId, anchor: anchor, head: head,
+        )
+    }
+
+    func stop() {
+        let ws = ProjectWebSocket.shared
+        if let pid = projectId { ws.leaveProject(projectId: pid) }
+        ws.clearCallbacks()
+        members = []
+        remoteCursors = [:]
+        remoteCarets = [:]
+        projectId = nil
+    }
+}
+
+/// Stable per-user color for cursor + caret rendering. Hash the user id
+/// into a fixed palette so the same collaborator gets the same color
+/// across sessions and across the app (avatar circle, cursor dot, caret bar).
+enum UserColor {
+    private static let palette: [Color] = [
+        Color(red: 0.92, green: 0.40, blue: 0.40), // red
+        Color(red: 0.40, green: 0.74, blue: 0.45), // green
+        Color(red: 0.30, green: 0.62, blue: 0.92), // blue
+        Color(red: 0.95, green: 0.65, blue: 0.30), // orange
+        Color(red: 0.66, green: 0.45, blue: 0.88), // purple
+        Color(red: 0.95, green: 0.46, blue: 0.69), // pink
+        Color(red: 0.30, green: 0.74, blue: 0.74), // teal
+        Color(red: 0.86, green: 0.78, blue: 0.30), // gold
+    ]
+
+    static func forUserId(_ id: String) -> Color {
+        let hash = id.unicodeScalars.reduce(0) { ($0 &* 31) &+ Int($1.value) }
+        return palette[abs(hash) % palette.count]
+    }
+}
