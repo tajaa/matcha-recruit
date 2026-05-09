@@ -75,10 +75,49 @@ def _livekit_room_name(channel_id: UUID) -> str:
 
 
 async def _push_broadcast_event(channel_id: str, event: dict) -> None:
-    """Fan out a broadcast event to all WS-connected channel members."""
+    """Fan out a broadcast event to every channel_member with an active WS.
+
+    Uses send_to_user (per-user) instead of _broadcast_to_room (per-channel-room
+    set) because room_members on the backend is only populated when a Mac
+    client sends `join_room`. Viewers who haven't loaded the channels sidebar
+    aren't in room_members and would silently miss the event. This walks
+    channel_members and targets every active connection for each member.
+    """
     try:
         from .channels_ws import manager
-        await manager._broadcast_to_room(channel_id, event)
+        from ...database import get_connection
+
+        try:
+            ch_uuid = UUID(channel_id) if isinstance(channel_id, str) else channel_id
+        except (ValueError, TypeError):
+            logger.warning("invalid channel_id in broadcast push: %r", channel_id)
+            return
+
+        async with get_connection() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT user_id FROM channel_members
+                WHERE channel_id = $1 AND removed_for_inactivity IS NOT TRUE
+                """,
+                ch_uuid,
+            )
+        member_ids = [r["user_id"] for r in rows]
+        logger.info(
+            "broadcast WS fan-out: type=%s channel=%s members=%d",
+            event.get("type"), channel_id, len(member_ids),
+        )
+        for uid in member_ids:
+            try:
+                await manager.send_to_user(uid, event)
+            except Exception:
+                logger.warning("send_to_user failed for %s", uid, exc_info=True)
+
+        # Also fan out via room set so anyone who DID join_room (but isn't a
+        # channel_member, e.g. cross-tenant guests in the future) still gets it.
+        try:
+            await manager._broadcast_to_room(str(channel_id), event)
+        except Exception:
+            pass
     except Exception:
         logger.warning("Failed to push broadcast WS event", exc_info=True)
 

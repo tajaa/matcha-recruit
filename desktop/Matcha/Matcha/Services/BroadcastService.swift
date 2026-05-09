@@ -206,27 +206,30 @@ final class BroadcastService {
     // MARK: - WS broadcast events
 
     func handleBroadcastStarted(_ event: WSBroadcastStarted) async {
-        print("[Broadcast] handleBroadcastStarted channel=\(event.channelId) broadcast=\(event.broadcastId) startedBy=\(event.startedBy) selfChannelId=\(channelId ?? "nil") isOwner=\(isOwner) isConnected=\(isConnected)")
-        // Ignore echo of our own start (owner already running connectToRoom).
-        if broadcastId == event.broadcastId {
-            print("[Broadcast] skip — same broadcastId already tracked")
+        print("[Broadcast] handleBroadcastStarted channel=\(event.channelId) broadcast=\(event.broadcastId) startedBy=\(event.startedBy) selfChannelId=\(channelId ?? "nil") selfBroadcastId=\(broadcastId ?? "nil") isOwner=\(isOwner) isConnected=\(isConnected)")
+        // Owner echo of own start → ignore.
+        if isOwner && broadcastId == event.broadcastId {
+            print("[Broadcast] skip — owner echo of own broadcast")
             return
         }
-        if isOwner && channelId == event.channelId {
-            print("[Broadcast] skip — we're the owner running connectToRoom")
+        // Already connected to THIS broadcast.
+        if isConnected && broadcastId == event.broadcastId {
+            print("[Broadcast] skip — already connected to this broadcast")
             return
         }
-        // Different channel than the one we're currently in/joining → ignore.
-        guard self.channelId == event.channelId || self.channelId == nil else {
-            print("[Broadcast] skip — viewing different channel")
-            return
+        // Stale singleton state from a prior session/broadcast → reset before
+        // applying the new event. Without this, a viewer who joined+left an
+        // earlier broadcast in the same app launch keeps stale channelId/
+        // broadcastId/isOwner that block the next event.
+        if !isConnected && (channelId != nil || broadcastId != nil) {
+            print("[Broadcast] resetting stale state before joining new broadcast")
+            isOwner = false
+            channelId = nil
+            broadcastId = nil
+            publisherUserIds = []
         }
         broadcastId = event.broadcastId
         publisherUserIds = Set([event.startedBy])
-        guard !isConnected else {
-            print("[Broadcast] skip — already connected")
-            return
-        }
         await joinAsViewer(channelId: event.channelId)
     }
 
