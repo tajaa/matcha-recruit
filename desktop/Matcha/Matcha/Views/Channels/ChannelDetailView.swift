@@ -71,6 +71,9 @@ struct ChannelDetailView: View {
                     BroadcastPanelView(channelId: channelId, isOwner: broadcast.isOwner)
                         .environment(broadcast)
                     Divider()
+                } else if broadcast.activeBroadcasts[channelId] != nil {
+                    watchFeedBanner
+                    Divider()
                 }
                 messagesList
                 Divider()
@@ -89,6 +92,10 @@ struct ChannelDetailView: View {
             wireWebSocket()
             ws.connect()
             ws.joinRoom(channelId: channelId)
+            // REST fallback so a viewer who navigates into the channel mid-stream
+            // (or whose WS dropped before the broadcast.started fan-out) still
+            // sees the Watch-feed banner without depending on the WS event.
+            await broadcast.fetchBroadcastStatus(channelId: channelId)
         }
         .onDisappear {
             // Don't leaveRoom — keep this channel subscribed via
@@ -141,8 +148,11 @@ struct ChannelDetailView: View {
                             .font(.system(size: 10))
                             .foregroundColor(.white.opacity(0.4))
                     }
-                    // Live now badge
-                    if broadcast.channelId == channelId && broadcast.isConnected {
+                    // Live now badge — shown the moment we know a broadcast is
+                    // active in this channel, regardless of whether THIS client
+                    // has connected to the LiveKit feed yet. Sourced from
+                    // BroadcastService.activeBroadcasts (WS + REST poll).
+                    if broadcast.activeBroadcasts[channelId] != nil {
                         HStack(spacing: 3) {
                             Circle().fill(Color.red).frame(width: 5, height: 5)
                             Text("LIVE").font(.system(size: 9, weight: .bold)).foregroundColor(.red)
@@ -219,6 +229,61 @@ struct ChannelDetailView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(.regularMaterial)
+    }
+
+    // MARK: - Watch-feed banner
+    //
+    // Shown above the messages list whenever an active broadcast exists in
+    // this channel AND we're not currently connected to its LiveKit feed.
+    // Replaces the silent auto-join — viewer always sees a "Live now" prompt
+    // and clicks Watch to connect (covers the case where auto-join would have
+    // failed token fetch / LiveKit connect with no UI feedback).
+
+    private var watchFeedBanner: some View {
+        let info = broadcast.activeBroadcasts[channelId]
+        let starterName = info.flatMap { id in
+            onlineUsers.first(where: { $0.id == id.startedBy })?.name
+        } ?? info?.title
+        let title: String = {
+            if let n = starterName { return "\(n) is live" }
+            return "Live now in this channel"
+        }()
+        let hasErr = broadcast.errorMessage != nil
+            && broadcast.channelId == channelId
+            && !broadcast.isConnected
+
+        return HStack(spacing: 10) {
+            Circle().fill(Color.red).frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.95))
+                if hasErr, let msg = broadcast.errorMessage {
+                    Text("Couldn't connect: \(msg)")
+                        .font(.system(size: 10))
+                        .foregroundColor(.red.opacity(0.85))
+                        .lineLimit(2)
+                }
+            }
+            Spacer()
+            Button {
+                Task { await broadcast.joinAsViewer(channelId: channelId) }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "play.circle.fill").font(.system(size: 11))
+                    Text(hasErr ? "Retry" : "Watch feed").font(.system(size: 11, weight: .semibold))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.red.opacity(0.85))
+                .foregroundColor(.white)
+                .cornerRadius(5)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.red.opacity(0.12))
     }
 
     // MARK: - Messages

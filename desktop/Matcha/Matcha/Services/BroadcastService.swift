@@ -35,6 +35,12 @@ final class BroadcastService {
     var errorMessage: String?
     /// Mutates whenever LiveKit participants change so @Observable triggers SwiftUI re-render.
     var participantTick: UInt64 = 0
+    /// All channels with a known-active broadcast, keyed by channelId. Drives the
+    /// "Live now — Watch feed" banner and the LIVE pill in channel header.
+    /// Populated by WS broadcast.started events AND a REST poll on channel-view
+    /// appear (so users who join the channel after the broadcast started, or
+    /// whose WS dropped, still see the indicator).
+    var activeBroadcasts: [String: ActiveBroadcastInfo] = [:]
 
     // Per-stream cap (set on connect, ticks down via countdownTask).
     var maxDurationSeconds: Int = 600
@@ -121,6 +127,10 @@ final class BroadcastService {
         guard let channelId else { return }
         do {
             let _: OkResp = try await post(path: "/channels/\(channelId)/broadcast/stop")
+            // Clear the active-broadcast entry locally so the LIVE pill and
+            // Watch-feed banner disappear immediately, without waiting for the
+            // round-trip broadcast.ended WS event.
+            activeBroadcasts.removeValue(forKey: channelId)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -206,36 +216,49 @@ final class BroadcastService {
     // MARK: - WS broadcast events
 
     func handleBroadcastStarted(_ event: WSBroadcastStarted) async {
-        print("[Broadcast] handleBroadcastStarted channel=\(event.channelId) broadcast=\(event.broadcastId) startedBy=\(event.startedBy) selfChannelId=\(channelId ?? "nil") selfBroadcastId=\(broadcastId ?? "nil") isOwner=\(isOwner) isConnected=\(isConnected)")
-        // Owner echo of own start → ignore.
-        if isOwner && broadcastId == event.broadcastId {
-            print("[Broadcast] skip — owner echo of own broadcast")
-            return
-        }
-        // Already connected to THIS broadcast.
-        if isConnected && broadcastId == event.broadcastId {
-            print("[Broadcast] skip — already connected to this broadcast")
-            return
-        }
-        // Stale singleton state from a prior session/broadcast → reset before
-        // applying the new event. Without this, a viewer who joined+left an
-        // earlier broadcast in the same app launch keeps stale channelId/
-        // broadcastId/isOwner that block the next event.
-        if !isConnected && (channelId != nil || broadcastId != nil) {
-            print("[Broadcast] resetting stale state before joining new broadcast")
-            isOwner = false
-            channelId = nil
-            broadcastId = nil
-            publisherUserIds = []
-        }
-        broadcastId = event.broadcastId
-        publisherUserIds = Set([event.startedBy])
-        await joinAsViewer(channelId: event.channelId)
+        print("[Broadcast] handleBroadcastStarted channel=\(event.channelId) broadcast=\(event.broadcastId) startedBy=\(event.startedBy)")
+        // Record the active broadcast so the channel UI can show a banner +
+        // LIVE pill. Joining LiveKit is now an explicit user action (Watch
+        // button) — auto-join was silently dropping any viewer for whom the
+        // token fetch or LiveKit connect failed, leaving them with zero UI.
+        activeBroadcasts[event.channelId] = ActiveBroadcastInfo(
+            broadcastId: event.broadcastId,
+            startedBy: event.startedBy,
+            startedAt: event.startedAt,
+            title: event.title
+        )
     }
 
     func handleBroadcastEnded(_ event: WSBroadcastEnded) async {
-        guard broadcastId == event.broadcastId else { return }
-        await leave()
+        activeBroadcasts.removeValue(forKey: event.channelId)
+        if broadcastId == event.broadcastId {
+            await leave()
+        }
+    }
+
+    /// REST fallback: query current broadcast state for a channel and update
+    /// `activeBroadcasts` accordingly. Called from ChannelDetailView on appear
+    /// so viewers who navigate in mid-stream (or whose WS dropped) still see
+    /// the banner without depending on a real-time event.
+    func fetchBroadcastStatus(channelId: String) async {
+        do {
+            let status: BroadcastStatusResponse = try await get(path: "/channels/\(channelId)/broadcast")
+            if status.active,
+               let bid = status.broadcastId,
+               let startedBy = status.startedBy,
+               let startedAt = status.startedAt {
+                activeBroadcasts[channelId] = ActiveBroadcastInfo(
+                    broadcastId: bid,
+                    startedBy: startedBy,
+                    startedAt: startedAt,
+                    title: status.title
+                )
+            } else {
+                activeBroadcasts.removeValue(forKey: channelId)
+            }
+        } catch {
+            print("[Broadcast] fetchBroadcastStatus failed channel=\(channelId): \(error)")
+        }
     }
 
     func handlePublisherChanged(_ event: WSBroadcastPublisherChanged) {

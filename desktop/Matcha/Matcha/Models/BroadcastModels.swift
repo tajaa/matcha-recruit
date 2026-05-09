@@ -71,6 +71,17 @@ struct WSBroadcastStarted {
     let title: String?
 }
 
+/// Lightweight active-broadcast record kept in BroadcastService.activeBroadcasts.
+/// Drives the "Live now — Watch feed" banner and the LIVE pill in the channel
+/// header. Populated by WS broadcast.started events AND a REST poll on channel
+/// view appear.
+struct ActiveBroadcastInfo: Equatable {
+    let broadcastId: String
+    let startedBy: String
+    let startedAt: String
+    let title: String?
+}
+
 struct WSBroadcastEnded {
     let channelId: String
     let broadcastId: String
