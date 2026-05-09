@@ -51,10 +51,9 @@ SCHEME="Matcha"
 CONFIG="Release"
 BUILD_DIR="$PROJECT_DIR/build/appstore"
 ARCHIVE_PATH="$HOME/Library/Developer/Xcode/Archives/$(date +%Y-%m-%d)/Matcha.xcarchive"
-EXPORT_PATH="$BUILD_DIR/export"
+EXPORT_PATH="$BUILD_DIR/export"   # legacy — only used if --no-upload is ever extended; current upload path skips local export
 EXPORT_PLIST="$BUILD_DIR/ExportOptions.plist"
 RELEASE_LOG="$PROJECT_DIR/release.log"
-PKG_PATH=""  # filled in after export
 
 # Persistent attempt log — append-only history of every release attempt with
 # build number + archive/upload status. Survives temp-dir cleanup so you can
@@ -187,13 +186,19 @@ do_archive() {
     rm -rf "$ARCHIVE_PATH" "$EXPORT_PATH"
     mkdir -p "$BUILD_DIR" "$(dirname "$ARCHIVE_PATH")"
 
+    # destination=upload tells `xcodebuild -exportArchive` to ship the build
+    # straight to App Store Connect (instead of writing a .pkg locally) AND
+    # write a Distributions entry into the .xcarchive's Info.plist — which is
+    # what flips Xcode Organizer's "Status" column to "Uploaded to Apple".
+    # altool ships the .pkg but never touches the archive, so Organizer
+    # showed `—` for every build despite ASC accepting the upload.
     cat > "$EXPORT_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>method</key>           <string>app-store</string>
-    <key>destination</key>      <string>export</string>
+    <key>destination</key>      <string>upload</string>
     <key>teamID</key>           <string>$APPLE_TEAM_ID</string>
     <key>signingStyle</key>     <string>automatic</string>
     <key>uploadSymbols</key>    <true/>
@@ -225,58 +230,39 @@ PLIST
         return 1
     fi
 
-    step "exporting signed .pkg for App Store..."
-    if ! xcodebuild \
-            -exportArchive \
-            -archivePath "$ARCHIVE_PATH" \
-            -exportPath "$EXPORT_PATH" \
-            -exportOptionsPlist "$EXPORT_PLIST" >>"$log" 2>&1; then
-        echo "${RED}export failed${NC}"
-        grep -E "error:" "$log" | sed 's/^/  /' || tail -40 "$log" | sed 's/^/  /'
-        echo "${DIM}full log: $log${NC}"
-        return 1
-    fi
-
-    PKG_PATH=$(find "$EXPORT_PATH" -name "*.pkg" -maxdepth 2 2>/dev/null | head -1)
-    if [[ -z "$PKG_PATH" || ! -f "$PKG_PATH" ]]; then
-        echo "${RED}error:${NC} export succeeded but no .pkg produced under $EXPORT_PATH"
-        ls -la "$EXPORT_PATH" 2>/dev/null | sed 's/^/  /' || true
-        return 1
-    fi
-    echo "${GREEN}exported:${NC} $PKG_PATH"
     rm -f "$log"
     return 0
 }
 
 # ─── Upload ───────────────────────────────────────────────────────────────
+# Uses xcodebuild -exportArchive with destination=upload so the archive's
+# Distributions plist gets a new entry — Organizer reads that to populate
+# the Status column. Auth via -authenticationKey* flags (same path Xcode's
+# Distribute App uses), no .pkg or altool round-trip.
 do_upload() {
-    # altool requires the .p8 in a standard location OR the API_PRIVATE_KEYS_DIR
-    # env var pointing at its directory. We use the env-var path so we don't
-    # have to copy keys around.
-    local key_dir
-    key_dir=$(dirname "$APPLE_API_KEY_PATH")
-    export API_PRIVATE_KEYS_DIR="$key_dir"
-
     local upload_log
     upload_log="$(mktemp -t matcha-upload.XXXXXX)"
 
     step "uploading to App Store Connect (this can take 1–10 min)..."
-    if ! xcrun altool --upload-app \
-            -f "$PKG_PATH" \
-            -t macos \
-            --apiKey "$APPLE_API_KEY_ID" \
-            --apiIssuer "$APPLE_API_ISSUER_ID" 2>&1 | tee "$upload_log"; then
+    if ! xcodebuild \
+            -exportArchive \
+            -archivePath "$ARCHIVE_PATH" \
+            -exportOptionsPlist "$EXPORT_PLIST" \
+            -authenticationKeyPath "$APPLE_API_KEY_PATH" \
+            -authenticationKeyID "$APPLE_API_KEY_ID" \
+            -authenticationKeyIssuerID "$APPLE_API_ISSUER_ID" >"$upload_log" 2>&1; then
         echo "${RED}upload failed${NC}"
         echo "${DIM}common causes:${NC}"
         echo "  - bundle id not registered in App Store Connect"
         echo "  - build number ($NEW_VERSION) already used (re-run normally to bump again)"
+        echo "  - invalid App Store Connect API key (check APPLE_API_KEY_ID / ISSUER_ID / PATH)"
         echo "  - cert / provisioning-profile mismatch"
-        echo "  - missing 'Mac Installer Distribution' cert for .pkg signing"
+        grep -E ": (error|fatal error):|error:" "$upload_log" | head -20 | sed 's/^/  /' || tail -40 "$upload_log" | sed 's/^/  /'
         echo "${DIM}full log: $upload_log${NC}"
         return 1
     fi
 
-    # altool writes warnings/errors to stdout even on "success" exit — sanity check
+    # xcodebuild may exit 0 but still log an ITMS / Transporter problem.
     if grep -qE "ERROR ITMS|UNEXPECTED|No suitable" "$upload_log"; then
         echo "${RED}upload reported errors despite zero exit:${NC}"
         grep -E "ERROR ITMS|UNEXPECTED|No suitable" "$upload_log" | sed 's/^/  /'
@@ -328,7 +314,6 @@ if $NO_UPLOAD; then
     log_attempt "$NEW_VERSION" "OK" "skipped" "--no-upload"
     echo
     echo "${GREEN}archive ready (upload skipped)${NC}"
-    echo "  pkg:     $PKG_PATH"
     echo "  archive: $ARCHIVE_PATH"
     exit 0
 fi
@@ -343,8 +328,9 @@ log_attempt "$NEW_VERSION" "OK" "OK" "uploaded to ASC; processing 5–15 min bef
 echo
 echo "${GREEN}uploaded to App Store Connect${NC}"
 echo "  build:   $NEW_VERSION"
-echo "  pkg:     $PKG_PATH"
+echo "  archive: $ARCHIVE_PATH"
 echo "  next:    https://appstoreconnect.apple.com/ → Matcha → TestFlight (Mac)"
 echo
 echo "${DIM}note: ASC needs ~5–15 min to process the build before it appears${NC}"
+echo "${DIM}note: Xcode Organizer Status column updates once xcodebuild writes the Distributions entry${NC}"
 echo "${DIM}history: ./release-appstore.sh --status${NC}"
