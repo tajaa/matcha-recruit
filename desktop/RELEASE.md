@@ -2,7 +2,7 @@
 
 This document covers how to produce a signed + notarized build of the Matcha macOS app so your team can install and run it outside of Xcode.
 
-The end-to-end pipeline is wrapped in `desktop/Matcha/release.sh`. For day-to-day dev builds use `desktop/Matcha/run.sh` instead — it builds and launches the unsigned debug app without touching notarization.
+The end-to-end pipeline is wrapped in `desktop/Werk/release.sh`. For day-to-day dev builds use `desktop/Werk/run.sh` instead — it builds and launches the unsigned debug app without touching notarization.
 
 ---
 
@@ -68,7 +68,7 @@ API keys are preferred because they don't expire and don't prompt for MFA.
 
 ## Project signing config
 
-Already wired into `desktop/Matcha/Matcha.xcodeproj`:
+Already wired into `desktop/Werk/Matcha.xcodeproj`:
 
 | Setting | Value |
 | --- | --- |
@@ -79,13 +79,13 @@ Already wired into `desktop/Matcha/Matcha.xcodeproj`:
 
 You shouldn't need to edit these for normal releases. If you later want a different bundle ID (e.g. a white-label build), override at release time with `BUNDLE_ID=com.other.name ./release.sh`.
 
-The app's sandbox entitlements live in `desktop/Matcha/Matcha/Matcha.entitlements` and are compatible with Developer ID distribution: app sandbox on, network client on, user-selected files read-only.
+The app's sandbox entitlements live in `desktop/Werk/Matcha/Matcha.entitlements` and are compatible with Developer ID distribution: app sandbox on, network client on, user-selected files read-only.
 
 ---
 
 ## Cutting a release
 
-From `desktop/Matcha/`:
+From `desktop/Werk/`:
 
 ```bash
 # Signed, notarized, stapled zip → build/release/Matcha.zip
@@ -115,7 +115,7 @@ Typical wall time: 30–90s for the archive + export, 1–5 minutes waiting for 
 
 ### Outputs
 
-All artifacts go to `desktop/Matcha/build/release/`:
+All artifacts go to `desktop/Werk/build/release/`:
 
 ```
 build/release/
@@ -182,8 +182,8 @@ Either way, bump **before** running `./release.sh` or uploads will collide with 
 
 | Path | Purpose |
 | --- | --- |
-| `desktop/Matcha/run.sh` | Dev build + launch (unsigned debug) |
-| `desktop/Matcha/release.sh` | Archive + sign + notarize + staple + zip/dmg |
-| `desktop/Matcha/Matcha.xcodeproj` | Project with team + bundle ID wired in |
-| `desktop/Matcha/Matcha/Matcha.entitlements` | Sandbox + network-client entitlements |
+| `desktop/Werk/run.sh` | Dev build + launch (unsigned debug) |
+| `desktop/Werk/release.sh` | Archive + sign + notarize + staple + zip/dmg |
+| `desktop/Werk/Matcha.xcodeproj` | Project with team + bundle ID wired in |
+| `desktop/Werk/Matcha/Matcha.entitlements` | Sandbox + network-client entitlements |
 | `desktop/RELEASE.md` | This document |

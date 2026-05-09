@@ -30,7 +30,7 @@
 #   ./release.sh --dmg           also produce a .dmg
 #   ./release.sh --skip-notarize local signed build only (for testing)
 #
-# Outputs land in desktop/Matcha/build/release/.
+# Outputs land in desktop/Werk/build/release/.
 
 set -euo pipefail
 

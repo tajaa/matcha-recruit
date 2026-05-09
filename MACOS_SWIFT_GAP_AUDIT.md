@@ -2,13 +2,13 @@
 
 ## Context
 
-The `client/src` React/TS matcha-work surface has been moving fast and the macOS Swift port at `desktop/Matcha` has fallen behind. This audit compares both apps end-to-end to identify everything the web client has that the Swift app is missing, so porting work can be prioritized.
+The `client/src` React/TS matcha-work surface has been moving fast and the macOS Swift port (werk) at `desktop/Werk` has fallen behind. This audit compares both apps end-to-end to identify everything the web client has that the Swift app is missing, so porting work can be prioritized.
 
 ## Method
 
 Two parallel explorations of:
 - **Web client**: `client/src/components/work/`, `client/src/components/matcha-work/`, `client/src/pages/work/`, `client/src/api/matchaWork.ts`, `client/src/types/matcha-work.ts`
-- **Swift app**: `desktop/Matcha/Matcha/` (Views, ViewModels, Services, Models)
+- **Swift app**: `desktop/Werk/Matcha/` (Views, ViewModels, Services, Models)
 
 ## Summary
 
@@ -166,12 +166,12 @@ client/src/types/matcha-work.ts                     ← types to mirror in Match
 ## Critical Files — Swift Side (where ports land)
 
 ```
-desktop/Matcha/Matcha/Views/MatchaWork/             ← new view files
-desktop/Matcha/Matcha/ViewModels/                   ← matching VMs
-desktop/Matcha/Matcha/Services/MatchaWorkService.swift  ← extend with new endpoints
-desktop/Matcha/Matcha/Models/MatchaWorkModels.swift     ← mirror new types
-desktop/Matcha/Matcha/App/ContentView.swift             ← sidebar tab additions
-desktop/Matcha/Matcha/App/AppState.swift                ← new global state (channels, tasks)
+desktop/Werk/Matcha/Views/MatchaWork/             ← new view files
+desktop/Werk/Matcha/ViewModels/                   ← matching VMs
+desktop/Werk/Matcha/Services/MatchaWorkService.swift  ← extend with new endpoints
+desktop/Werk/Matcha/Models/MatchaWorkModels.swift     ← mirror new types
+desktop/Werk/Matcha/App/ContentView.swift             ← sidebar tab additions
+desktop/Werk/Matcha/App/AppState.swift                ← new global state (channels, tasks)
 ```
 
 A new `Services/ChannelsService.swift` will likely be needed (parallel to `InboxService.swift`), plus a Swift WebSocket client (`URLSessionWebSocketTask`) for `ThreadSocket` + `ChannelSocket` parity.

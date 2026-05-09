@@ -111,7 +111,7 @@ xcuserdata/
 Pods/
 
 # Xcode build output
-desktop/Matcha/build/
+desktop/Werk/build/
 .claude/*
 !.claude/commands/
 !.claude/CLAUDE.md
