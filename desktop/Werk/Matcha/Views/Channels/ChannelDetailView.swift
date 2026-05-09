@@ -168,32 +168,59 @@ struct ChannelDetailView: View {
                         let isOwnActive = info?.startedBy == appState.currentUser?.id && info != nil
                         let isLiveHere = broadcast.channelId == channelId && broadcast.isConnected
                         let showEnd = isLiveHere || isOwnActive
-                        Button {
-                            Task {
-                                if isLiveHere {
-                                    await broadcast.stopBroadcast()
-                                } else if isOwnActive {
-                                    await broadcast.endBroadcastForChannel(channelId: channelId)
-                                } else {
-                                    await broadcast.startBroadcast(channelId: channelId)
+                        if showEnd {
+                            Button {
+                                Task {
+                                    if isLiveHere {
+                                        await broadcast.stopBroadcast()
+                                    } else {
+                                        await broadcast.endBroadcastForChannel(channelId: channelId)
+                                    }
                                 }
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "stop.circle").font(.system(size: 10))
+                                    Text("End").font(.system(size: 10, weight: .medium))
+                                }
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Color.red.opacity(0.2))
+                                .foregroundColor(.red)
+                                .cornerRadius(4)
                             }
-                        } label: {
-                            HStack(spacing: 3) {
-                                Image(systemName: showEnd ? "stop.circle" : "video.badge.plus")
-                                    .font(.system(size: 10))
-                                Text(showEnd ? "End" : "Go Live")
-                                    .font(.system(size: 10, weight: .medium))
+                            .buttonStyle(.plain)
+                            .help("End the live broadcast")
+                        } else {
+                            // Pick mode at start time. Audio-only skips the
+                            // camera grab entirely — useful when bandwidth
+                            // is tight or the user just wants a voice call.
+                            Menu {
+                                Button {
+                                    Task { await broadcast.startBroadcast(channelId: channelId, mode: .video) }
+                                } label: {
+                                    Label("Video call", systemImage: "video.fill")
+                                }
+                                Button {
+                                    Task { await broadcast.startBroadcast(channelId: channelId, mode: .audio) }
+                                } label: {
+                                    Label("Audio only", systemImage: "waveform")
+                                }
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "video.badge.plus").font(.system(size: 10))
+                                    Text("Go Live").font(.system(size: 10, weight: .medium))
+                                }
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Color.matcha600.opacity(0.2))
+                                .foregroundColor(Color.matcha500)
+                                .cornerRadius(4)
                             }
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(showEnd ? Color.red.opacity(0.2) : Color.matcha600.opacity(0.2))
-                            .foregroundColor(showEnd ? .red : Color.matcha500)
-                            .cornerRadius(4)
+                            .menuStyle(.borderlessButton)
+                            .menuIndicator(.hidden)
+                            .fixedSize()
+                            .help("Start a live broadcast — video or audio")
                         }
-                        .buttonStyle(.plain)
-                        .help(broadcast.channelId == channelId && broadcast.isConnected
-                              ? "End the live broadcast" : "Start a live broadcast")
                     }
                     Button {
                         showInviteSheet = true

@@ -41,6 +41,11 @@ struct BroadcastPanelView: View {
 
     // MARK: - Header
 
+    private var headerSubtitle: String {
+        let live = broadcast.mode == .audio ? "audio call" : "live"
+        return broadcast.isPublishing ? "You're on \(live)" : "Listening to \(live)"
+    }
+
     private var header: some View {
         HStack(spacing: 8) {
             // LIVE pill
@@ -52,7 +57,7 @@ struct BroadcastPanelView: View {
                 .background(Color.red)
                 .cornerRadius(3)
 
-            Text(broadcast.isPublishing ? "You're on stage" : "Watching live")
+            Text(headerSubtitle)
                 .font(.system(size: 11))
                 .foregroundColor(.white.opacity(0.75))
 
@@ -116,13 +121,16 @@ struct BroadcastPanelView: View {
     }
 
     private var audioOnlyBanner: some View {
+        // Same banner whether mode is .audio (intentional) or .video with
+        // no cameras yet on stage — both render visually identically.
+        // Subtitle differs so the publisher knows their call type.
         HStack {
             Spacer()
             VStack(spacing: 6) {
                 Image(systemName: "waveform.circle")
                     .font(.system(size: 28))
                     .foregroundColor(Color.matcha500)
-                Text("Audio broadcast")
+                Text(broadcast.mode == .audio ? "Audio call" : "Audio broadcast")
                     .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.5))
             }
@@ -171,6 +179,9 @@ struct BroadcastPanelView: View {
                     label: "Mic"
                 ) { broadcast.setMicEnabled(!broadcast.isMicEnabled) }
 
+                // Camera toggle stays available in both modes — audio-only
+                // can be upgraded to video on the fly with this button (and
+                // setCameraEnabled re-prompts for camera permission as needed).
                 toolbarToggle(
                     on: broadcast.isCameraEnabled,
                     icon: broadcast.isCameraEnabled ? "video.fill" : "video.slash.fill",
@@ -178,7 +189,11 @@ struct BroadcastPanelView: View {
                 ) { broadcast.setCameraEnabled(!broadcast.isCameraEnabled) }
             }
 
-            qualityMenu
+            // Quality only matters when video is in play. Hide for audio-only
+            // calls so the toolbar isn't cluttered with irrelevant controls.
+            if broadcast.mode == .video {
+                qualityMenu
+            }
 
             Spacer()
 

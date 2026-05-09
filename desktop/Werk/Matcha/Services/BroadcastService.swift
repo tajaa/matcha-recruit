@@ -17,6 +17,15 @@ import AVFoundation
 import LiveKit
 #endif
 
+/// Broadcast mode — picked at start time. `.video` enables camera + mic at
+/// connect; `.audio` skips the camera grab entirely so a call works in places
+/// where video would be too heavy (or where users just want voice). Both
+/// modes use the same LiveKit room; mode is purely a publisher-side track
+/// choice and the server doesn't need to know.
+enum BroadcastMode: String {
+    case video, audio
+}
+
 /// User-selectable broadcast quality. Caps publisher encoder bitrate/fps and
 /// picks subscriber simulcast layer for viewers. Default `.auto` lets the SDK
 /// negotiate; explicit tiers help when the network is too slow for auto-detect
@@ -88,6 +97,11 @@ final class BroadcastService {
     var broadcastId: String?
     var liveKitUrl: String?
     var publisherUserIds: Set<String> = []
+    /// Active broadcast mode — set at start. Drives whether camera is
+    /// auto-enabled at connect and whether the panel renders the video grid
+    /// or the audio-only banner. Viewers default to `.video` so the panel
+    /// renders any video tracks remote publishers happen to push.
+    var mode: BroadcastMode = .video
     var errorMessage: String?
     /// Mutates whenever LiveKit participants change so @Observable triggers SwiftUI re-render.
     var participantTick: UInt64 = 0
@@ -140,10 +154,11 @@ final class BroadcastService {
 
     // MARK: - Owner: Start broadcast
 
-    func startBroadcast(channelId: String, title: String? = nil) async {
+    func startBroadcast(channelId: String, title: String? = nil, mode: BroadcastMode = .video) async {
         errorMessage = nil
         isOwner = true
         self.channelId = channelId
+        self.mode = mode
 
         do {
             let resp: BroadcastStartResponse = try await post(
@@ -459,9 +474,15 @@ final class BroadcastService {
         var camOK = true
         var micOK = true
         if asPublisher {
-            camOK = await AVCaptureDevice.requestAccess(for: .video)
+            // Audio-only mode skips the camera permission prompt entirely so
+            // a user who declined camera access can still join voice calls.
+            if mode == .video {
+                camOK = await AVCaptureDevice.requestAccess(for: .video)
+            } else {
+                camOK = false
+            }
             micOK = await AVCaptureDevice.requestAccess(for: .audio)
-            print("[Broadcast] permissions: cam=\(camOK) mic=\(micOK)")
+            print("[Broadcast] permissions: cam=\(camOK) mic=\(micOK) mode=\(mode.rawValue)")
             if !micOK {
                 errorMessage = "Microphone access denied. Open System Settings → Privacy & Security → Microphone and enable Matcha."
             }
@@ -473,17 +494,21 @@ final class BroadcastService {
             print("[Broadcast] room.connect OK identity=\(room.localParticipant.identity?.stringValue ?? "?")")
 
             if asPublisher {
-                do {
-                    try await room.localParticipant.setCamera(
-                        enabled: camOK,
-                        captureOptions: camOK ? cameraCaptureOptions() : nil,
-                        publishOptions: camOK ? videoPublishOptions() : nil
-                    )
-                    localCameraEnabled = camOK
-                    print("[Broadcast] camera enabled=\(camOK) quality=\(preferredQuality.rawValue)")
-                } catch {
-                    print("[Broadcast] setCamera failed: \(error)")
-                    errorMessage = "Camera failed: \(error.localizedDescription)"
+                if mode == .video {
+                    do {
+                        try await room.localParticipant.setCamera(
+                            enabled: camOK,
+                            captureOptions: camOK ? cameraCaptureOptions() : nil,
+                            publishOptions: camOK ? videoPublishOptions() : nil
+                        )
+                        localCameraEnabled = camOK
+                        print("[Broadcast] camera enabled=\(camOK) quality=\(preferredQuality.rawValue)")
+                    } catch {
+                        print("[Broadcast] setCamera failed: \(error)")
+                        errorMessage = "Camera failed: \(error.localizedDescription)"
+                        localCameraEnabled = false
+                    }
+                } else {
                     localCameraEnabled = false
                 }
                 do {
@@ -531,6 +556,7 @@ final class BroadcastService {
         broadcastId = nil
         liveKitUrl = nil
         publisherUserIds = []
+        mode = .video
         elapsedSeconds = 0
         weeklyRemaining = nil
         localMicEnabled = false
