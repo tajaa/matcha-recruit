@@ -178,6 +178,8 @@ struct BroadcastPanelView: View {
                 ) { broadcast.setCameraEnabled(!broadcast.isCameraEnabled) }
             }
 
+            qualityMenu
+
             Spacer()
 
             if isOwner {
@@ -215,6 +217,38 @@ struct BroadcastPanelView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(Color.black.opacity(0.4))
+    }
+
+    /// Resolution selector. Shown to publishers AND viewers — for publishers
+    /// it caps the encoder upload bitrate/fps; for viewers it picks the matching
+    /// simulcast layer. Useful when WiFi can't keep up with Auto.
+    private var qualityMenu: some View {
+        Menu {
+            ForEach(BroadcastQuality.allCases) { q in
+                Button {
+                    broadcast.setQuality(q)
+                } label: {
+                    if broadcast.preferredQuality == q {
+                        Label(q.label, systemImage: "checkmark")
+                    } else {
+                        Text(q.label)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "slider.horizontal.3").font(.system(size: 10))
+                Text(broadcast.preferredQuality.label)
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(Color.zinc800.opacity(0.6))
+            .foregroundColor(.white.opacity(0.85))
+            .cornerRadius(5)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 
     private func toolbarToggle(on: Bool, icon: String, label: String, action: @escaping () -> Void) -> some View {

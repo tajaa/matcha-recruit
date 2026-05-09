@@ -17,11 +17,67 @@ import AVFoundation
 import LiveKit
 #endif
 
+/// User-selectable broadcast quality. Caps publisher encoder bitrate/fps and
+/// picks subscriber simulcast layer for viewers. Default `.auto` lets the SDK
+/// negotiate; explicit tiers help when the network is too slow for auto-detect
+/// to recover (e.g. spotty WiFi where publisher upload chokes).
+enum BroadcastQuality: String, CaseIterable, Identifiable {
+    case auto, hd, sd, low
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .auto: return "Auto"
+        case .hd: return "HD · 720p"
+        case .sd: return "SD · 480p"
+        case .low: return "Low · 360p"
+        }
+    }
+    #if canImport(LiveKit)
+    var dimensions: Dimensions {
+        switch self {
+        case .auto, .hd: return Dimensions(width: 1280, height: 720)
+        case .sd:        return Dimensions(width: 854, height: 480)
+        case .low:       return Dimensions(width: 640, height: 360)
+        }
+    }
+    var fps: Int {
+        switch self {
+        case .auto, .hd: return 30
+        case .sd:        return 24
+        case .low:       return 15
+        }
+    }
+    /// `nil` = SDK chooses (auto). Explicit caps for slow networks.
+    var maxBitrate: Int? {
+        switch self {
+        case .auto: return nil
+        case .hd:   return 1_700_000
+        case .sd:   return 800_000
+        case .low:  return 350_000
+        }
+    }
+    /// Viewer-side simulcast layer pick.
+    var subscriberQuality: VideoQuality {
+        switch self {
+        case .auto, .hd: return .high
+        case .sd:        return .medium
+        case .low:       return .low
+        }
+    }
+    #endif
+}
+
 @Observable
 @MainActor
 final class BroadcastService {
     static let shared = BroadcastService()
-    private init() {}
+    private init() {
+        if let raw = UserDefaults.standard.string(forKey: BroadcastService.qualityPrefKey),
+           let q = BroadcastQuality(rawValue: raw) {
+            preferredQuality = q
+        }
+    }
+    private static let qualityPrefKey = "broadcast.preferredQuality"
 
     // MARK: - Published state
 
@@ -42,6 +98,10 @@ final class BroadcastService {
     /// properties and update them after every successful set call.
     var localMicEnabled: Bool = false
     var localCameraEnabled: Bool = false
+    /// User-selected broadcast quality. Loaded from UserDefaults in init().
+    /// Mutated only via setQuality(_:) so we can apply the change to the live
+    /// LiveKit room (republish camera with new options or set subscriber layer).
+    var preferredQuality: BroadcastQuality = .auto
     /// All channels with a known-active broadcast, keyed by channelId. Drives the
     /// "Live now — Watch feed" banner and the LIVE pill in channel header.
     /// Populated by WS broadcast.started events AND a REST poll on channel-view
@@ -230,10 +290,14 @@ final class BroadcastService {
         }
         Task { @MainActor in
             do {
-                try await room.localParticipant.setCamera(enabled: enabled)
+                try await room.localParticipant.setCamera(
+                    enabled: enabled,
+                    captureOptions: enabled ? cameraCaptureOptions() : nil,
+                    publishOptions: enabled ? videoPublishOptions() : nil
+                )
                 localCameraEnabled = enabled
                 errorMessage = nil
-                print("[Broadcast] setCameraEnabled(\(enabled)) ok")
+                print("[Broadcast] setCameraEnabled(\(enabled)) ok quality=\(preferredQuality.rawValue)")
             } catch {
                 print("[Broadcast] setCameraEnabled(\(enabled)) failed: \(error)")
                 errorMessage = "Camera toggle failed: \(error.localizedDescription)"
@@ -241,6 +305,67 @@ final class BroadcastService {
         }
         #endif
     }
+
+    /// Update the preferred broadcast quality. Persists to UserDefaults and
+    /// applies to the live room: publisher republishes camera at the new
+    /// dimensions/bitrate, viewer requests the matching simulcast layer.
+    func setQuality(_ quality: BroadcastQuality) {
+        guard quality != preferredQuality else { return }
+        preferredQuality = quality
+        UserDefaults.standard.set(quality.rawValue, forKey: BroadcastService.qualityPrefKey)
+        print("[Broadcast] setQuality \(quality.rawValue)")
+        #if canImport(LiveKit)
+        Task { @MainActor in await applyQualityChange() }
+        #endif
+    }
+
+    #if canImport(LiveKit)
+    private func cameraCaptureOptions() -> CameraCaptureOptions {
+        CameraCaptureOptions(
+            dimensions: preferredQuality.dimensions,
+            fps: preferredQuality.fps
+        )
+    }
+
+    private func videoPublishOptions() -> VideoPublishOptions? {
+        guard let bitrate = preferredQuality.maxBitrate else { return nil }
+        return VideoPublishOptions(
+            encoding: VideoEncoding(maxBitrate: bitrate, maxFps: preferredQuality.fps),
+            simulcast: true
+        )
+    }
+
+    private func applyQualityChange() async {
+        guard isConnected else { return }
+        if isPublishing && localCameraEnabled {
+            // Republish with new capture/publish options. setCamera(enabled:false)
+            // first to drop the existing track, then re-enable with new options.
+            do {
+                try await room.localParticipant.setCamera(enabled: false)
+                try await room.localParticipant.setCamera(
+                    enabled: true,
+                    captureOptions: cameraCaptureOptions(),
+                    publishOptions: videoPublishOptions()
+                )
+                print("[Broadcast] applyQualityChange republished at \(preferredQuality.rawValue)")
+            } catch {
+                print("[Broadcast] applyQualityChange failed: \(error)")
+                errorMessage = "Quality switch failed: \(error.localizedDescription)"
+            }
+        } else if !isPublishing {
+            // Viewer: ask each remote video pub for the matching simulcast layer.
+            let target = preferredQuality.subscriberQuality
+            for participant in room.remoteParticipants.values {
+                for (_, pub) in participant.trackPublications where pub.kind == .video {
+                    if let remote = pub as? RemoteTrackPublication {
+                        try? await remote.set(videoQuality: target)
+                    }
+                }
+            }
+            print("[Broadcast] applyQualityChange subscriber pref=\(target)")
+        }
+    }
+    #endif
 
     /// Backed by `localMicEnabled` so SwiftUI re-renders when toggled. Reading
     /// `room.localParticipant.isMicrophoneEnabled()` directly does not invalidate
@@ -349,9 +474,13 @@ final class BroadcastService {
 
             if asPublisher {
                 do {
-                    try await room.localParticipant.setCamera(enabled: camOK)
+                    try await room.localParticipant.setCamera(
+                        enabled: camOK,
+                        captureOptions: camOK ? cameraCaptureOptions() : nil,
+                        publishOptions: camOK ? videoPublishOptions() : nil
+                    )
                     localCameraEnabled = camOK
-                    print("[Broadcast] camera enabled=\(camOK)")
+                    print("[Broadcast] camera enabled=\(camOK) quality=\(preferredQuality.rawValue)")
                 } catch {
                     print("[Broadcast] setCamera failed: \(error)")
                     errorMessage = "Camera failed: \(error.localizedDescription)"
