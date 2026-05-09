@@ -242,11 +242,13 @@ export function createProjectNew(
   title: string,
   projectType: string = 'general',
   hiringClientId?: string | null,
+  template?: string | null,
 ) {
   return api.post<import('../types/matcha-work').MWProject>('/matcha-work/projects', {
     title,
     project_type: projectType,
     hiring_client_id: hiringClientId ?? null,
+    template: template ?? null,
   })
 }
 

@@ -10,6 +10,7 @@ import { getUnreadCount } from '../../api/inbox'
 import { useMe } from '../../hooks/useMe'
 import CreateChannelModal from '../channels/CreateChannelModal'
 import HiringClientPickerModal from '../matcha-work/HiringClientPickerModal'
+import TemplatePickerModal from '../matcha-work/TemplatePickerModal'
 import type { RecruitingClient } from '../../types/matcha-work'
 
 interface Props {
@@ -33,6 +34,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const [showCreateChannel, setShowCreateChannel] = useState(false)
   const [showProjectTypePicker, setShowProjectTypePicker] = useState(false)
   const [showHiringClientPicker, setShowHiringClientPicker] = useState(false)
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false)
 
   const [channelsOpen, setChannelsOpen] = useState(true)
   const [projectsOpen, setProjectsOpen] = useState(true)
@@ -120,6 +122,13 @@ export default function WorkSidebar({ open, onToggle }: Props) {
       setShowHiringClientPicker(true)
       return
     }
+    // For general projects, offer the user a starter template (Proposal,
+    // Project Brief, Status Report, Pitch Deck) before creating. Other types
+    // have their own structured flow and skip the picker.
+    if (type === 'general') {
+      setShowTemplatePicker(true)
+      return
+    }
     const titles: Record<string, string> = {
       general: 'New Project',
       presentation: 'New Presentation',
@@ -127,6 +136,23 @@ export default function WorkSidebar({ open, onToggle }: Props) {
     }
     try {
       const project = await createProjectNew(titles[type], type)
+      setProjects((prev) => [project, ...prev])
+      navigate(`/work/projects/${project.id}`)
+    } catch {}
+  }
+
+  async function handlePickTemplate(templateId: string | null) {
+    // Title hint mirrors the template name so the user lands in a project
+    // they can recognize (rather than yet-another "New Project N").
+    const titleByTemplate: Record<string, string> = {
+      proposal: 'New Proposal',
+      project_brief: 'New Project Brief',
+      status_report: 'New Status Report',
+      pitch_deck: 'New Pitch Deck',
+    }
+    const title = templateId ? (titleByTemplate[templateId] ?? 'New Project') : 'New Project'
+    try {
+      const project = await createProjectNew(title, 'general', null, templateId)
       setProjects((prev) => [project, ...prev])
       navigate(`/work/projects/${project.id}`)
     } catch {}
@@ -679,6 +705,12 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           onPicked={handlePickHiringClient}
         />
       )}
+
+      <TemplatePickerModal
+        open={showTemplatePicker}
+        onClose={() => setShowTemplatePicker(false)}
+        onPick={handlePickTemplate}
+      />
     </>
   )
 }

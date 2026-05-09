@@ -46,6 +46,6 @@ export function markdownToHtml(md: string): string {
 export function sectionToHtml(s: ProjectSection): string {
   const content = s.content
   if (!content) return ''
-  if (content.startsWith('<') && (content.includes('</p>') || content.includes('</h') || content.includes('</ul>'))) return content
+  if (content.startsWith('<') && (content.includes('</p>') || content.includes('</h') || content.includes('</ul>') || content.includes('</ol>'))) return content
   return markdownToHtml(content)
 }

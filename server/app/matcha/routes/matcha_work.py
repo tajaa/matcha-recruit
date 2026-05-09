@@ -2847,6 +2847,14 @@ async def create_project_endpoint(
             "author": blog.get("author") or {},
         }
 
+    # Optional starter template (e.g. "proposal", "project_brief"). Only
+    # honored for general projects; backend ignores it for other types so
+    # blog/recruiting/discipline keep their own seeding paths intact.
+    template_id = body.get("template")
+    if template_id and project_type == "general":
+        extra_data = dict(extra_data or {})
+        extra_data["template"] = template_id
+
     try:
         return await proj_svc.create_project(
             company_id, current_user.id, title, project_type,
