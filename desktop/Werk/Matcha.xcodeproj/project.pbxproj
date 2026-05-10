@@ -77,6 +77,7 @@
 		C0C0C0C0C0C0C0C001010005 /* ProjectPresenceOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0C0C0C0C0C0C001010006 /* ProjectPresenceOverlay.swift */; };
 		C0C0C0C0C0C0C0C001010007 /* PresencePillContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0C0C0C0C0C0C001010008 /* PresencePillContent.swift */; };
 		DDDD0E0E0E0E0E0E01010001 /* ManageMembersSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDDD0E0E0E0E0E0E01010002 /* ManageMembersSheet.swift */; };
+		DDDD0E0E0E0E0E0E01010003 /* InviteToBroadcastSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDDD0E0E0E0E0E0E01010004 /* InviteToBroadcastSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -150,6 +151,7 @@
 		C0C0C0C0C0C0C0C001010006 /* ProjectPresenceOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectPresenceOverlay.swift; sourceTree = "<group>"; };
 		C0C0C0C0C0C0C0C001010008 /* PresencePillContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresencePillContent.swift; sourceTree = "<group>"; };
 		DDDD0E0E0E0E0E0E01010002 /* ManageMembersSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManageMembersSheet.swift; sourceTree = "<group>"; };
+		DDDD0E0E0E0E0E0E01010004 /* InviteToBroadcastSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteToBroadcastSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -348,6 +350,7 @@
 				DD00EE11FF22334455770D33 /* DiscoverChannelsSheet.swift */,
 				BC01DD22EE33FF445566BB03 /* BroadcastPanelView.swift */,
 				DDDD0E0E0E0E0E0E01010002 /* ManageMembersSheet.swift */,
+				DDDD0E0E0E0E0E0E01010004 /* InviteToBroadcastSheet.swift */,
 			);
 			path = Channels;
 			sourceTree = "<group>";
@@ -521,6 +524,7 @@
 				C0C0C0C0C0C0C0C001010005 /* ProjectPresenceOverlay.swift in Sources */,
 				C0C0C0C0C0C0C0C001010007 /* PresencePillContent.swift in Sources */,
 				DDDD0E0E0E0E0E0E01010001 /* ManageMembersSheet.swift in Sources */,
+				DDDD0E0E0E0E0E0E01010003 /* InviteToBroadcastSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

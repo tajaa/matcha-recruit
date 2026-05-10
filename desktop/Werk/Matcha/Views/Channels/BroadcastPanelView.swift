@@ -11,9 +11,16 @@ import LiveKit
 
 struct BroadcastPanelView: View {
     let channelId: String
+    let channelName: String
     let isOwner: Bool
+    /// Channel members for the "Invite to stage" picker. Pulled from the
+    /// parent ChannelDetailView's `channel.members` so the sheet doesn't
+    /// have to re-fetch.
+    let members: [ChannelMember]
+    let myUserId: String
 
     @Environment(BroadcastService.self) private var broadcast: BroadcastService
+    @State private var showInviteToStage = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -37,6 +44,15 @@ struct BroadcastPanelView: View {
         )
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        .sheet(isPresented: $showInviteToStage) {
+            InviteToBroadcastSheet(
+                channelId: channelId,
+                channelName: channelName,
+                members: members,
+                myUserId: myUserId,
+            )
+            .environment(broadcast)
+        }
     }
 
     // MARK: - Header
@@ -193,6 +209,27 @@ struct BroadcastPanelView: View {
             // calls so the toolbar isn't cluttered with irrelevant controls.
             if broadcast.mode == .video {
                 qualityMenu
+            }
+
+            // Owner-only — promote channel members to publishers so you can
+            // run a small group call (3+ people on stage). Backend gates
+            // owner-only at /broadcast/promote; we mirror that on the trigger.
+            if isOwner {
+                Button {
+                    showInviteToStage = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "person.badge.plus").font(.system(size: 11))
+                        Text("Invite").font(.system(size: 11, weight: .medium))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color.matcha600.opacity(0.25))
+                    .foregroundColor(Color.matcha500)
+                    .cornerRadius(5)
+                }
+                .buttonStyle(.plain)
+                .help("Invite channel members to the stage")
             }
 
             Spacer()

@@ -70,7 +70,13 @@ struct ChannelDetailView: View {
                 Spacer()
             } else {
                 if broadcast.channelId == channelId && broadcast.isConnected {
-                    BroadcastPanelView(channelId: channelId, isOwner: broadcast.isOwner)
+                    BroadcastPanelView(
+                        channelId: channelId,
+                        channelName: channel?.name ?? "channel",
+                        isOwner: broadcast.isOwner,
+                        members: channel?.members ?? [],
+                        myUserId: appState.currentUser?.id ?? "",
+                    )
                         .environment(broadcast)
                     Divider()
                 } else if let info = broadcast.activeBroadcasts[channelId],
