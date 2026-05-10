@@ -65,6 +65,7 @@ class AppState {
         currentUser = user
         isAuthenticated = true
         MatchaWorkService.shared.updateCacheScope(user.id)
+        ChannelStarStore.shared.bind(userId: user.id)
         startPresenceHeartbeat()
         startInboxPolling()
         startNotificationPolling()
@@ -82,7 +83,12 @@ class AppState {
                 }
                 ChannelNotificationManager.shared.playInAppSound()
             }
-            if !self.isSceneActive {
+            // OS push notifications only fire for starred channels — keeps
+            // them surfacing the people the user marked as friends without
+            // hammering the user's notification center for every busy
+            // channel. In-app sound + unread badge above are unconditional
+            // so quiet channels still register passively.
+            if !self.isSceneActive && ChannelStarStore.shared.isStarred(msg.channelId) {
                 ChannelNotificationManager.shared.post(
                     senderName: msg.senderName,
                     content: msg.content,
@@ -154,6 +160,7 @@ class AppState {
         showPeople = false
         showHome = false
         ChannelsWebSocket.shared.disconnect()
+        ChannelStarStore.shared.bind(userId: nil)
         heartbeatTask?.cancel()
         heartbeatTask = nil
         inboxPollTask?.cancel()

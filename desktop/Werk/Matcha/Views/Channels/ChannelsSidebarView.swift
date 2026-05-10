@@ -160,6 +160,10 @@ struct ChannelsSidebarView: View {
     private func row(for channel: ChannelSummary) -> some View {
         let selected = appState.selectedChannelId == channel.id
         let unread = channel.unreadCount + (appState.channelUnreadOverrides[channel.id] ?? 0)
+        // Observe ChannelStarStore.generation so the row redraws when the
+        // user toggles a star elsewhere (context menu, etc).
+        _ = ChannelStarStore.shared.generation
+        let isStarred = ChannelStarStore.shared.isStarred(channel.id)
         return Button {
             appState.selectedChannelId = channel.id
             appState.clearChannelUnread(channel.id)
@@ -169,9 +173,9 @@ struct ChannelsSidebarView: View {
             appState.showSkills = false
         } label: {
             HStack(alignment: .center, spacing: 8) {
-                Image(systemName: "number")
+                Image(systemName: isStarred ? "star.fill" : "number")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(selected ? Color.matcha500 : .secondary)
+                    .foregroundColor(isStarred ? .yellow : (selected ? Color.matcha500 : .secondary))
                     .frame(width: 14)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
@@ -209,9 +213,21 @@ struct ChannelsSidebarView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            // Star toggle — drives macOS push notifications + sort. Per-user
+            // local state so it can't be shared across devices in v1.
+            Button {
+                ChannelStarStore.shared.toggle(channel.id)
+                Task { await load() }   // re-sort starred-first immediately
+            } label: {
+                Label(
+                    isStarred ? "Unstar channel" : "Star channel",
+                    systemImage: isStarred ? "star.slash" : "star",
+                )
+            }
             let role = channel.myRole ?? ""
             let isAdmin = (appState.currentUser?.role ?? "") == "admin"
             if role == "owner" || isAdmin {
+                Divider()
                 Button(role: .destructive) {
                     channelPendingDelete = channel
                 } label: {
@@ -240,8 +256,14 @@ struct ChannelsSidebarView: View {
     private func load() async {
         do {
             let list = try await ChannelsService.shared.listChannels()
-            channels = list.sorted {
-                ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "")
+            // Starred channels float to the top, then by last activity.
+            // Star state is per-user UserDefaults — bound at login by AppState.
+            let stars = ChannelStarStore.shared
+            channels = list.sorted { a, b in
+                let sa = stars.isStarred(a.id)
+                let sb = stars.isStarred(b.id)
+                if sa != sb { return sa && !sb }
+                return (a.lastMessageAt ?? "") > (b.lastMessageAt ?? "")
             }
             // Subscribe to all member channels so background messages arrive.
             ChannelsWebSocket.shared.joinBackgroundRooms(list.map { (id: $0.id, name: $0.name) })

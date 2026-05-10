@@ -83,6 +83,7 @@
 		EEEE0J0J0J0J0J0J01010005 /* JournalDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE0J0J0J0J0J0J01010006 /* JournalDetailView.swift */; };
 		EEEE0J0J0J0J0J0J01010007 /* NewJournalSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE0J0J0J0J0J0J01010008 /* NewJournalSheet.swift */; };
 		EEEE0J0J0J0J0J0J01010009 /* InviteToJournalSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE0J0J0J0J0J0J0101000A /* InviteToJournalSheet.swift */; };
+		FFFF1S1S1S1S1S1S01010001 /* ChannelStarStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFFF1S1S1S1S1S1S01010002 /* ChannelStarStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -162,6 +163,7 @@
 		EEEE0J0J0J0J0J0J01010006 /* JournalDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalDetailView.swift; sourceTree = "<group>"; };
 		EEEE0J0J0J0J0J0J01010008 /* NewJournalSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewJournalSheet.swift; sourceTree = "<group>"; };
 		EEEE0J0J0J0J0J0J0101000A /* InviteToJournalSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteToJournalSheet.swift; sourceTree = "<group>"; };
+		FFFF1S1S1S1S1S1S01010002 /* ChannelStarStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelStarStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -225,6 +227,7 @@
 				DD00EE11FF22334455770099 /* ChannelNotificationManager.swift */,
 				BC01DD22EE33FF445566BB02 /* BroadcastService.swift */,
 				C0C0C0C0C0C0C0C001010002 /* ProjectWebSocket.swift */,
+				FFFF1S1S1S1S1S1S01010002 /* ChannelStarStore.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -553,6 +556,7 @@
 				EEEE0J0J0J0J0J0J01010005 /* JournalDetailView.swift in Sources */,
 				EEEE0J0J0J0J0J0J01010007 /* NewJournalSheet.swift in Sources */,
 				EEEE0J0J0J0J0J0J01010009 /* InviteToJournalSheet.swift in Sources */,
+				FFFF1S1S1S1S1S1S01010001 /* ChannelStarStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
