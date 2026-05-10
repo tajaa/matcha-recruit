@@ -6,6 +6,7 @@ import MarketingNav from '../MarketingNav'
 import MarketingFooter from '../MarketingFooter'
 import NewsletterSignup from '../../../components/NewsletterSignup'
 import { PricingContactModal } from '../../../components/PricingContactModal'
+import { PinButton } from '../../../components/PinButton'
 import { GLOSSARY, CATEGORIES_LABEL, type GlossaryTerm } from './glossaryData'
 
 const INK = 'var(--color-ivory-ink)'
@@ -177,6 +178,7 @@ export default function Glossary({ embedded }: { embedded?: boolean }) {
                       >
                         {CATEGORIES_LABEL[term.category]}
                       </span>
+                      {embedded && <PinButton kind="glossary" id={term.slug} />}
                     </div>
                     <p className={`text-sm ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }}>
                       {term.short}

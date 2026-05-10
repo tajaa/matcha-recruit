@@ -5078,6 +5078,23 @@ async def init_db():
             ON mw_project_pins(user_id, created_at DESC)
         """)
 
+        # Free-tier resource pins (templates, glossary, state guides, etc).
+        # Generic enough that any tier can pin via the same table.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS resource_pins (
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                resource_kind VARCHAR(32) NOT NULL
+                    CHECK (resource_kind IN ('template','job_description','glossary','state_guide','calculator')),
+                resource_id VARCHAR(128) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (user_id, resource_kind, resource_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_resource_pins_user
+            ON resource_pins(user_id, created_at DESC)
+        """)
+
         # Journals — top-level matcha-work surface for chronological notes
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS mw_journals (

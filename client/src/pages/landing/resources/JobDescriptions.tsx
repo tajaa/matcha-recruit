@@ -5,6 +5,7 @@ import { ChevronRight, Download, FileText, Search } from 'lucide-react'
 import MarketingNav from '../MarketingNav'
 import MarketingFooter from '../MarketingFooter'
 import { PricingContactModal } from '../../../components/PricingContactModal'
+import { PinButton } from '../../../components/PinButton'
 import { useMe } from '../../../hooks/useMe'
 import { INDUSTRIES, JOB_DESCRIPTIONS, type Industry, type JobDescription } from './jobDescriptionsData'
 
@@ -178,6 +179,7 @@ export default function JobDescriptions({ embedded }: { embedded?: boolean }) {
                           >
                             {j.title}
                           </Link>
+                          <PinButton kind="job_description" id={j.slug} />
                         </div>
                         <p className="text-[11px] mb-3 ml-5 text-vsc-text/50 line-clamp-2">{j.description}</p>
                         <div className="ml-5 flex items-center gap-1.5">

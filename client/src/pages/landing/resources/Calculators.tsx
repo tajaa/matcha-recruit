@@ -6,6 +6,7 @@ import MarketingNav from '../MarketingNav'
 import MarketingFooter from '../MarketingFooter'
 import NewsletterSignup from '../../../components/NewsletterSignup'
 import { PricingContactModal } from '../../../components/PricingContactModal'
+import { PinButton } from '../../../components/PinButton'
 
 const INK = 'var(--color-ivory-ink)'
 const BG = 'var(--color-ivory-bg)'
@@ -109,16 +110,21 @@ export default function Calculators({ embedded }: { embedded?: boolean }) {
                   >
                     <Calculator className={`w-5 h-5 ${embedded ? 'text-vsc-text' : ''}`} style={embedded ? undefined : { color: t.ink }} />
                   </div>
-                  {live ? (
-                    <ArrowUpRight className={`w-4 h-4 ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }} />
-                  ) : (
-                    <span
-                      className={`text-[10px] tracking-wider px-2 py-1 rounded ${embedded ? 'border border-vsc-border text-vsc-text/40' : ''}`}
-                      style={embedded ? undefined : { border: `1px solid ${t.line}`, color: t.muted }}
-                    >
-                      COMING SOON
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {embedded && live && (
+                      <PinButton kind="calculator" id={c.to.split('/').pop() || ''} />
+                    )}
+                    {live ? (
+                      <ArrowUpRight className={`w-4 h-4 ${embedded ? 'text-vsc-text/50' : ''}`} style={embedded ? undefined : { color: t.muted }} />
+                    ) : (
+                      <span
+                        className={`text-[10px] tracking-wider px-2 py-1 rounded ${embedded ? 'border border-vsc-border text-vsc-text/40' : ''}`}
+                        style={embedded ? undefined : { border: `1px solid ${t.line}`, color: t.muted }}
+                      >
+                        COMING SOON
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <h3
                   className={embedded ? 'text-xl font-semibold text-vsc-text mb-2' : 'text-xl mb-2'}

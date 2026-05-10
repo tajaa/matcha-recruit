@@ -780,3 +780,49 @@ async def get_state_guide(slug: str, current_user: CurrentUser = Depends(require
         "last_verified": jurisdiction["last_verified_at"].isoformat() if jurisdiction["last_verified_at"] else None,
         "categories": categories,
     }
+
+
+# ── Resource pins ─────────────────────────────────────────────────────
+# Free-tier (and any-tier) per-user favorites. Service layer in
+# `core/services/resource_pins_service.py`. Auth gate is the same
+# `require_client` used by every other endpoint in this file — free-tier
+# users have role=client, so they can pin without an extra feature gate.
+
+
+class ResourcePinBody(BaseModel):
+    kind: str = Field(..., max_length=32)
+    id: str = Field(..., max_length=128)
+
+
+@router.get("/pins")
+async def list_resource_pins(
+    current_user: CurrentUser = Depends(require_client),
+):
+    from ..services import resource_pins_service
+    pins = await resource_pins_service.list_pins(current_user.id)
+    return {"pins": pins}
+
+
+@router.post("/pins", status_code=204)
+async def add_resource_pin(
+    body: ResourcePinBody,
+    current_user: CurrentUser = Depends(require_client),
+):
+    from ..services import resource_pins_service
+    try:
+        await resource_pins_service.add_pin(current_user.id, body.kind, body.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/pins/{kind}/{resource_id}", status_code=204)
+async def remove_resource_pin(
+    kind: str,
+    resource_id: str,
+    current_user: CurrentUser = Depends(require_client),
+):
+    from ..services import resource_pins_service
+    try:
+        await resource_pins_service.remove_pin(current_user.id, kind, resource_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

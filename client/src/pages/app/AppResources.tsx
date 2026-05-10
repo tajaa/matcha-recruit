@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom'
 import { BookOpen, Briefcase, Calculator, ChevronRight, ClipboardList, FileText } from 'lucide-react'
 
+import PinnedResourcesPanel from '../../components/PinnedResourcesPanel'
+
 type Card = {
   to: string
   title: string
@@ -63,6 +65,8 @@ export default function AppResources() {
           </div>
         </div>
       </div>
+
+      <PinnedResourcesPanel />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
         {CARDS.map(card => (

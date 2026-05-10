@@ -5,6 +5,7 @@ import { ArrowUpRight, Bell, ChevronRight, Download, FileText } from 'lucide-rea
 import MarketingNav from '../MarketingNav'
 import MarketingFooter from '../MarketingFooter'
 import { PricingContactModal } from '../../../components/PricingContactModal'
+import { PinButton } from '../../../components/PinButton'
 import { api } from '../../../api/client'
 
 const INK = 'var(--color-ivory-ink)'
@@ -178,6 +179,7 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
                         <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-vsc-border text-vsc-text/40">
                           {formatFor(asset.path)}
                         </span>
+                        <PinButton kind="template" id={asset.slug} />
                       </div>
                     </div>
                     <h3 className="text-sm font-medium text-vsc-text mb-1">{asset.name}</h3>
