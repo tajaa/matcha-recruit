@@ -21,20 +21,37 @@ struct BroadcastPanelView: View {
 
     @Environment(BroadcastService.self) private var broadcast: BroadcastService
     @State private var showInviteToStage = false
+    /// Collapsed state shows only the header strip (LIVE pill + viewer
+    /// count + expand button) so chat fills most of the channel pane.
+    /// Persists per-channel so a user who collapses returns to a thin
+    /// strip on rejoin. Persisted-key uses the channel id so different
+    /// channels remember independently.
+    @AppStorage private var collapsed: Bool
+
+    init(channelId: String, channelName: String, isOwner: Bool, members: [ChannelMember], myUserId: String) {
+        self.channelId = channelId
+        self.channelName = channelName
+        self.isOwner = isOwner
+        self.members = members
+        self.myUserId = myUserId
+        self._collapsed = AppStorage(wrappedValue: false, "mw-broadcast-collapsed:\(channelId)")
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            videoGrid
-            if let err = broadcast.errorMessage {
-                Text(err)
-                    .font(.system(size: 10))
-                    .foregroundColor(.red.opacity(0.85))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 4)
+            if !collapsed {
+                videoGrid
+                if let err = broadcast.errorMessage {
+                    Text(err)
+                        .font(.system(size: 10))
+                        .foregroundColor(.red.opacity(0.85))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 4)
+                }
+                toolbar
             }
-            toolbar
         }
         .background(Color.black.opacity(0.85))
         .cornerRadius(8)
@@ -97,6 +114,19 @@ struct BroadcastPanelView: View {
                 Text("\(viewerCount)").font(.system(size: 10))
             }
             .foregroundColor(.white.opacity(0.5))
+
+            // Collapse toggle — shrinks the panel to a thin LIVE strip so
+            // chat fills the channel pane. State persists per-channel.
+            Button {
+                collapsed.toggle()
+            } label: {
+                Image(systemName: collapsed ? "chevron.down" : "chevron.up")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.7))
+                    .frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+            .help(collapsed ? "Expand video" : "Minimize to focus on chat")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -168,7 +198,7 @@ struct BroadcastPanelView: View {
                                 layoutMode: .fill,
                                 mirrorMode: .mirror)
                     .aspectRatio(16.0/9.0, contentMode: .fit)
-                    .frame(maxWidth: .infinity, minHeight: 240, maxHeight: 360)
+                    .frame(maxWidth: .infinity, minHeight: 160, maxHeight: 240)
                     .cornerRadius(6)
                     .clipped()
                 Text("You")
@@ -338,7 +368,7 @@ private struct RemoteVideoTile: View {
             if let track = participant.firstCameraVideoTrack {
                 SwiftUIVideoView(track, layoutMode: .fill)
                     .aspectRatio(16.0/9.0, contentMode: .fit)
-                    .frame(maxWidth: .infinity, minHeight: 240, maxHeight: 360)
+                    .frame(maxWidth: .infinity, minHeight: 160, maxHeight: 240)
                     .cornerRadius(6)
                     .clipped()
             } else {
@@ -349,7 +379,7 @@ private struct RemoteVideoTile: View {
                         .foregroundColor(.white.opacity(0.25))
                 }
                 .aspectRatio(16.0/9.0, contentMode: .fit)
-                .frame(maxWidth: .infinity, minHeight: 240, maxHeight: 360)
+                .frame(maxWidth: .infinity, minHeight: 160, maxHeight: 240)
                 .cornerRadius(6)
             }
             Text(displayName)
