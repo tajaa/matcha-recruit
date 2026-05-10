@@ -9,7 +9,9 @@ struct ContentView: View {
     @State private var showProfile = false
     @AppStorage("mw-sidebar-channels-open") private var channelsSectionOpen = true
     @AppStorage("mw-sidebar-projects-open") private var projectsSectionOpen = true
+    @AppStorage("mw-sidebar-journals-open") private var journalsSectionOpen = true
     @AppStorage("mw-sidebar-threads-open") private var threadsSectionOpen = true
+    @State private var showNewJournal = false
     @State private var showNewBlog = false
     @State private var pendingConnectionsCount = 0
     @State private var showCreateChannel = false
@@ -223,6 +225,38 @@ struct ContentView: View {
                         }
 
                         Divider().opacity(0.2)
+
+                        sidebarSection(
+                            title: "Journals",
+                            icon: "book.closed",
+                            isOpen: $journalsSectionOpen,
+                            trailing: {
+                                Button { showNewJournal = true } label: {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundColor(.secondary)
+                                        .frame(width: 18, height: 18)
+                                        .background(Color.zinc800)
+                                        .cornerRadius(4)
+                                }
+                                .buttonStyle(.plain)
+                                .help("New journal")
+                                .sheet(isPresented: $showNewJournal) {
+                                    NewJournalSheet { journal in
+                                        appState.selectedJournalId = journal.id
+                                        appState.selectedThreadId = nil
+                                        appState.selectedProjectId = nil
+                                        appState.selectedChannelId = nil
+                                        appState.journalsListGeneration &+= 1
+                                    }
+                                }
+                            }
+                        ) {
+                            JournalListView(showHeader: false)
+                                .frame(height: 220)
+                        }
+
+                        Divider().opacity(0.2)
                         } // end mwBetaLite
 
                         sidebarSection(
@@ -299,6 +333,8 @@ struct ContentView: View {
                     .onChange(of: threadId) { appState.showSkills = false }
             } else if let projectId = appState.selectedProjectId {
                 ProjectDetailView(projectId: projectId)
+            } else if let journalId = appState.selectedJournalId {
+                JournalDetailView(journalId: journalId)
             } else if let channelId = appState.selectedChannelId {
                 ChannelDetailView(channelId: channelId)
             } else if appState.showInbox {

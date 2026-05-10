@@ -8,6 +8,7 @@ class AppState {
     var selectedThreadId: String? = nil
     var selectedProjectId: String? = nil
     var selectedChannelId: String? = nil
+    var selectedJournalId: String? = nil
     var showSkills: Bool = false
     var showInbox: Bool = false
     var showPeople: Bool = false
@@ -40,6 +41,7 @@ class AppState {
     /// hierarchies where `.onReceive` hasn't fired reliably.
     var channelsListGeneration: Int = 0
     var projectsListGeneration: Int = 0
+    var journalsListGeneration: Int = 0
     /// Per-channel unread increments from WebSocket — cleared after API refresh or on channel open.
     var channelUnreadOverrides: [String: Int] = [:]
     private var heartbeatTask: Task<Void, Never>?
@@ -147,6 +149,7 @@ class AppState {
         unreadInboxCount = 0
         selectedProjectId = nil
         selectedChannelId = nil
+        selectedJournalId = nil
         showInbox = false
         showPeople = false
         showHome = false

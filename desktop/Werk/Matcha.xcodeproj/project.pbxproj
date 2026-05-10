@@ -78,6 +78,11 @@
 		C0C0C0C0C0C0C0C001010007 /* PresencePillContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0C0C0C0C0C0C001010008 /* PresencePillContent.swift */; };
 		DDDD0E0E0E0E0E0E01010001 /* ManageMembersSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDDD0E0E0E0E0E0E01010002 /* ManageMembersSheet.swift */; };
 		DDDD0E0E0E0E0E0E01010003 /* InviteToBroadcastSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDDD0E0E0E0E0E0E01010004 /* InviteToBroadcastSheet.swift */; };
+		EEEE0J0J0J0J0J0J01010001 /* JournalDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE0J0J0J0J0J0J01010002 /* JournalDetailViewModel.swift */; };
+		EEEE0J0J0J0J0J0J01010003 /* JournalListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE0J0J0J0J0J0J01010004 /* JournalListView.swift */; };
+		EEEE0J0J0J0J0J0J01010005 /* JournalDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE0J0J0J0J0J0J01010006 /* JournalDetailView.swift */; };
+		EEEE0J0J0J0J0J0J01010007 /* NewJournalSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE0J0J0J0J0J0J01010008 /* NewJournalSheet.swift */; };
+		EEEE0J0J0J0J0J0J01010009 /* InviteToJournalSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE0J0J0J0J0J0J0101000A /* InviteToJournalSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -152,6 +157,11 @@
 		C0C0C0C0C0C0C0C001010008 /* PresencePillContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresencePillContent.swift; sourceTree = "<group>"; };
 		DDDD0E0E0E0E0E0E01010002 /* ManageMembersSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManageMembersSheet.swift; sourceTree = "<group>"; };
 		DDDD0E0E0E0E0E0E01010004 /* InviteToBroadcastSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteToBroadcastSheet.swift; sourceTree = "<group>"; };
+		EEEE0J0J0J0J0J0J01010002 /* JournalDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalDetailViewModel.swift; sourceTree = "<group>"; };
+		EEEE0J0J0J0J0J0J01010004 /* JournalListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalListView.swift; sourceTree = "<group>"; };
+		EEEE0J0J0J0J0J0J01010006 /* JournalDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalDetailView.swift; sourceTree = "<group>"; };
+		EEEE0J0J0J0J0J0J01010008 /* NewJournalSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewJournalSheet.swift; sourceTree = "<group>"; };
+		EEEE0J0J0J0J0J0J0101000A /* InviteToJournalSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteToJournalSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -322,6 +332,7 @@
 				F88AB428B69CD0DC86AF1AA9 /* ThreadDetailViewModel.swift */,
 				AA11BB22CC33DD44EE660001 /* ProjectDetailViewModel.swift */,
 				C0C0C0C0C0C0C0C001010004 /* ProjectPresenceViewModel.swift */,
+				EEEE0J0J0J0J0J0J01010002 /* JournalDetailViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -333,11 +344,23 @@
 				3F39F7E6D963F82CA7F10D0F /* MatchaWork */,
 				AA11BB22CC33DD44EE770001 /* Inbox */,
 				DD00EE11FF22334455880001 /* Channels */,
+				EEEE0J0J0J0J0J0J0101000B /* Journals */,
 				FF11223344556677CC000001 /* People */,
 				A1B2C3D4E5F60708CC000001 /* Profile */,
 				2A3B09DBB213E1E548F63A3D /* Components */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		EEEE0J0J0J0J0J0J0101000B /* Journals */ = {
+			isa = PBXGroup;
+			children = (
+				EEEE0J0J0J0J0J0J01010004 /* JournalListView.swift */,
+				EEEE0J0J0J0J0J0J01010006 /* JournalDetailView.swift */,
+				EEEE0J0J0J0J0J0J01010008 /* NewJournalSheet.swift */,
+				EEEE0J0J0J0J0J0J0101000A /* InviteToJournalSheet.swift */,
+			);
+			path = Journals;
 			sourceTree = "<group>";
 		};
 		DD00EE11FF22334455880001 /* Channels */ = {
@@ -525,6 +548,11 @@
 				C0C0C0C0C0C0C0C001010007 /* PresencePillContent.swift in Sources */,
 				DDDD0E0E0E0E0E0E01010001 /* ManageMembersSheet.swift in Sources */,
 				DDDD0E0E0E0E0E0E01010003 /* InviteToBroadcastSheet.swift in Sources */,
+				EEEE0J0J0J0J0J0J01010001 /* JournalDetailViewModel.swift in Sources */,
+				EEEE0J0J0J0J0J0J01010003 /* JournalListView.swift in Sources */,
+				EEEE0J0J0J0J0J0J01010005 /* JournalDetailView.swift in Sources */,
+				EEEE0J0J0J0J0J0J01010007 /* NewJournalSheet.swift in Sources */,
+				EEEE0J0J0J0J0J0J01010009 /* InviteToJournalSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

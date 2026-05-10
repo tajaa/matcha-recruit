@@ -26,6 +26,7 @@ class MatchaWorkService {
     private var versionsCache: [String: MWCacheEntry<[MWDocumentVersion]>] = [:]
     private var pdfCache: [String: MWCacheEntry<Data>] = [:]
     private var projectListCache: [String: MWCacheEntry<[MWProject]>] = [:]
+    private var journalListCache: [String: MWCacheEntry<[MWJournal]>] = [:]
     private init() {}
 
     private func cachedValue<Value>(_ entry: MWCacheEntry<Value>?) -> Value? {
@@ -54,6 +55,7 @@ class MatchaWorkService {
         versionsCache.removeAll()
         pdfCache.removeAll()
         projectListCache.removeAll()
+        journalListCache.removeAll()
     }
 
     /// Drop cached project lists. Call when project membership in any status
@@ -1075,5 +1077,149 @@ class MatchaWorkService {
     func transitionBlogStatus(id: String, status: String) async throws -> MWProject {
         let body = MWBlogStatusRequest(status: status)
         return try await client.request(method: "POST", path: "\(basePath)/projects/\(id)/blog/status", body: body)
+    }
+
+    // MARK: - Journals
+
+    func invalidateJournalLists() {
+        journalListCache.removeAll()
+    }
+
+    func listJournals(forceRefresh: Bool = false) async throws -> [MWJournal] {
+        let key = "all"
+        if !forceRefresh, let cached = cachedValue(journalListCache[key]) {
+            return cached
+        }
+        let journals: [MWJournal] = try await client.request(method: "GET", path: "\(basePath)/journals")
+        journalListCache[key] = MWCacheEntry(value: journals, expiresAt: Date().addingTimeInterval(cacheTTL))
+        return journals
+    }
+
+    func getJournal(id: String) async throws -> MWJournal {
+        try await client.request(method: "GET", path: "\(basePath)/journals/\(id)")
+    }
+
+    func createJournal(
+        title: String,
+        description: String? = nil,
+        color: String? = nil,
+        icon: String? = nil
+    ) async throws -> MWJournal {
+        struct Body: Codable {
+            let title: String
+            let description: String?
+            let color: String?
+            let icon: String?
+        }
+        let journal: MWJournal = try await client.request(
+            method: "POST",
+            path: "\(basePath)/journals",
+            body: Body(title: title, description: description, color: color, icon: icon),
+        )
+        invalidateJournalLists()
+        return journal
+    }
+
+    func updateJournal(
+        id: String,
+        title: String? = nil,
+        description: String? = nil,
+        color: String? = nil,
+        icon: String? = nil
+    ) async throws -> MWJournal {
+        struct Body: Codable {
+            let title: String?
+            let description: String?
+            let color: String?
+            let icon: String?
+        }
+        let journal: MWJournal = try await client.request(
+            method: "PATCH",
+            path: "\(basePath)/journals/\(id)",
+            body: Body(title: title, description: description, color: color, icon: icon),
+        )
+        invalidateJournalLists()
+        return journal
+    }
+
+    func archiveJournal(id: String) async throws {
+        _ = try await client.requestData(method: "DELETE", path: "\(basePath)/journals/\(id)")
+        invalidateJournalLists()
+    }
+
+    func listJournalEntries(
+        journalId: String, before: String? = nil, limit: Int = 50
+    ) async throws -> [MWJournalEntry] {
+        var path = "\(basePath)/journals/\(journalId)/entries?limit=\(limit)"
+        if let before { path += "&before=\(before)" }
+        return try await client.request(method: "GET", path: path)
+    }
+
+    func createJournalEntry(
+        journalId: String, title: String?, content: String, entryDate: String? = nil
+    ) async throws -> MWJournalEntry {
+        struct Body: Codable {
+            let title: String?
+            let content: String
+            let entryDate: String?
+            enum CodingKeys: String, CodingKey {
+                case title, content
+                case entryDate = "entry_date"
+            }
+        }
+        let entry: MWJournalEntry = try await client.request(
+            method: "POST",
+            path: "\(basePath)/journals/\(journalId)/entries",
+            body: Body(title: title, content: content, entryDate: entryDate),
+        )
+        invalidateJournalLists()
+        return entry
+    }
+
+    func updateJournalEntry(
+        entryId: String, journalId: String,
+        title: String? = nil, content: String? = nil, entryDate: String? = nil
+    ) async throws -> MWJournalEntry {
+        struct Body: Codable {
+            let title: String?
+            let content: String?
+            let entryDate: String?
+            enum CodingKeys: String, CodingKey {
+                case title, content
+                case entryDate = "entry_date"
+            }
+        }
+        return try await client.request(
+            method: "PATCH",
+            path: "\(basePath)/journals/\(journalId)/entries/\(entryId)",
+            body: Body(title: title, content: content, entryDate: entryDate),
+        )
+    }
+
+    func deleteJournalEntry(entryId: String, journalId: String) async throws {
+        _ = try await client.requestData(
+            method: "DELETE",
+            path: "\(basePath)/journals/\(journalId)/entries/\(entryId)",
+        )
+    }
+
+    func listJournalCollaborators(journalId: String) async throws -> [MWProjectCollaborator] {
+        try await client.request(method: "GET", path: "\(basePath)/journals/\(journalId)/collaborators")
+    }
+
+    func addJournalCollaborators(journalId: String, userIds: [String]) async throws {
+        struct Body: Codable { let userIds: [String]; enum CodingKeys: String, CodingKey { case userIds = "user_ids" } }
+        _ = try await client.requestData(
+            method: "POST",
+            path: "\(basePath)/journals/\(journalId)/collaborators",
+            body: Body(userIds: userIds),
+        )
+    }
+
+    func removeJournalCollaborator(journalId: String, userId: String) async throws {
+        _ = try await client.requestData(
+            method: "DELETE",
+            path: "\(basePath)/journals/\(journalId)/collaborators/\(userId)",
+        )
     }
 }
