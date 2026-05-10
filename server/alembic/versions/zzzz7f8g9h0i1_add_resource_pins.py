@@ -22,11 +22,13 @@ def upgrade() -> None:
             resource_id VARCHAR(128) NOT NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (user_id, resource_kind, resource_id)
-        );
+        )
+    """)
+    op.execute("""
         CREATE INDEX IF NOT EXISTS idx_resource_pins_user
-            ON resource_pins(user_id, created_at DESC);
+            ON resource_pins(user_id, created_at DESC)
     """)
 
 
 def downgrade() -> None:
-    op.execute("DROP TABLE IF EXISTS resource_pins;")
+    op.execute("DROP TABLE IF EXISTS resource_pins")
