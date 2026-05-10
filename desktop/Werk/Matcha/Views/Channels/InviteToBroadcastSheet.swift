@@ -159,10 +159,10 @@ struct InviteToBroadcastSheet: View {
         busyMemberId = member.userId
         errorMessage = nil
         defer { busyMemberId = nil }
-        await broadcast.promote(userId: member.userId, channelId: channelId)
-        if let err = broadcast.errorMessage, !err.isEmpty {
-            errorMessage = "Invite failed: \(err)"
-            broadcast.errorMessage = nil
+        do {
+            try await broadcast.promote(userId: member.userId, channelId: channelId)
+        } catch {
+            errorMessage = "Invite failed: \(error.localizedDescription)"
         }
     }
 
@@ -170,10 +170,10 @@ struct InviteToBroadcastSheet: View {
         busyMemberId = member.userId
         errorMessage = nil
         defer { busyMemberId = nil }
-        await broadcast.demote(userId: member.userId, channelId: channelId)
-        if let err = broadcast.errorMessage, !err.isEmpty {
-            errorMessage = "Remove failed: \(err)"
-            broadcast.errorMessage = nil
+        do {
+            try await broadcast.demote(userId: member.userId, channelId: channelId)
+        } catch {
+            errorMessage = "Remove failed: \(error.localizedDescription)"
         }
     }
 }

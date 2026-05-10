@@ -248,26 +248,18 @@ final class BroadcastService {
 
     // MARK: - Owner: Promote / Demote
 
-    func promote(userId: String, channelId: String) async {
-        do {
-            let _: OkResp = try await post(
-                path: "/channels/\(channelId)/broadcast/promote",
-                body: PromoteBody(user_id: userId)
-            )
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+    func promote(userId: String, channelId: String) async throws {
+        let _: OkResp = try await post(
+            path: "/channels/\(channelId)/broadcast/promote",
+            body: PromoteBody(user_id: userId)
+        )
     }
 
-    func demote(userId: String, channelId: String) async {
-        do {
-            let _: OkResp = try await post(
-                path: "/channels/\(channelId)/broadcast/demote",
-                body: PromoteBody(user_id: userId)
-            )
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+    func demote(userId: String, channelId: String) async throws {
+        let _: OkResp = try await post(
+            path: "/channels/\(channelId)/broadcast/demote",
+            body: PromoteBody(user_id: userId)
+        )
     }
 
     // MARK: - A/V controls
@@ -441,6 +433,15 @@ final class BroadcastService {
                     startedAt: startedAt,
                     title: status.title
                 )
+                // Hydrate publisher set from the REST snapshot. Otherwise
+                // the InviteToBroadcastSheet shows promoted members as
+                // "not on stage" until the next publisher_changed WS event,
+                // which only fires on subsequent promote/demote calls.
+                // Only mutate when we're actually in this channel's broadcast
+                // — keeps unrelated channel polls from clobbering live state.
+                if self.channelId == channelId, let ids = status.publisherUserIds {
+                    publisherUserIds = Set(ids)
+                }
             } else {
                 activeBroadcasts.removeValue(forKey: channelId)
             }
