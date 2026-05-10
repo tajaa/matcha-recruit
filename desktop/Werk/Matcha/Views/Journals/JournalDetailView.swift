@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// Right-pane journal view: header (title + collaborators + invite),
+/// Right-pane journal view: header (title + collaborators + invite + style),
 /// composer at top for a new entry today, timeline grouped by date below.
-/// Markdown rendering uses `AttributedString(markdown:)` rather than
-/// `MarkdownPreviewView` (which is project-section-shaped, not generic).
+/// Editor uses `RichJournalEditor` (NSTextView-backed) with a toolbar of
+/// markdown shortcuts; read mode renders via `JournalContentView` (handles
+/// headers, bullets, todos, images, highlight, etc).
 struct JournalDetailView: View {
     let journalId: String
 
@@ -18,7 +19,26 @@ struct JournalDetailView: View {
     @State private var editingTitle: String = ""
     @State private var editingDate: Date = Date()
     @State private var showInviteSheet = false
+    @State private var showStylePopover = false
     @State private var pendingDelete: MWJournalEntry? = nil
+    @StateObject private var composerController = JournalEditorController()
+    @StateObject private var editController = JournalEditorController()
+
+    // Style preferences keyed by journal — read with @AppStorage so the
+    // editor + renderer update as soon as the user changes them.
+    @AppStorage private var fontFamily: String
+    @AppStorage private var fontSizeRaw: Double
+    @AppStorage private var lineSpacingRaw: Double
+
+    init(journalId: String) {
+        self.journalId = journalId
+        _fontFamily = AppStorage(wrappedValue: "system", "journal.\(journalId).font.family")
+        _fontSizeRaw = AppStorage(wrappedValue: 13.0, "journal.\(journalId).font.size")
+        _lineSpacingRaw = AppStorage(wrappedValue: 3.0, "journal.\(journalId).line.spacing")
+    }
+
+    private var fontSize: CGFloat { CGFloat(fontSizeRaw) }
+    private var lineSpacing: CGFloat { CGFloat(lineSpacingRaw) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -30,6 +50,8 @@ struct JournalDetailView: View {
         }
         .background(Color.appBackground)
         .task(id: journalId) { await vm.load(id: journalId) }
+        .onAppear { wireUploadCallbacks() }
+        .onChange(of: journalId) { _, _ in wireUploadCallbacks() }
         .sheet(isPresented: $showInviteSheet) {
             InviteToJournalSheet(
                 journalId: journalId,
@@ -53,6 +75,17 @@ struct JournalDetailView: View {
         } message: { _ in Text("This cannot be undone.") }
     }
 
+    /// Both controllers share a single upload path through the VM.
+    /// Re-wire when the journalId changes so uploads target the right
+    /// journal.
+    private func wireUploadCallbacks() {
+        let uploader: (Data, String, String) async -> String? = { [vm] data, name, mime in
+            await vm.uploadImage(data: data, filename: name, mimeType: mime)
+        }
+        composerController.onUploadImage = uploader
+        editController.onUploadImage = uploader
+    }
+
     // MARK: - Header
 
     private var header: some View {
@@ -69,6 +102,18 @@ struct JournalDetailView: View {
                     .foregroundColor(.secondary)
             }
             Spacer()
+            Button { showStylePopover = true } label: {
+                Image(systemName: "textformat")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.6))
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color.white.opacity(0.05))
+                    .cornerRadius(4)
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showStylePopover, arrowEdge: .bottom) {
+                JournalStylePopover(journalId: journalId)
+            }
             Button {
                 showInviteSheet = true
             } label: {
@@ -113,12 +158,17 @@ struct JournalDetailView: View {
                         .labelsHidden()
                         .controlSize(.small)
                 }
-                TextEditor(text: $composerContent)
-                    .font(.system(size: 12))
-                    .scrollContentBackground(.hidden)
-                    .background(Color.zinc800.opacity(0.4))
-                    .frame(minHeight: 80, maxHeight: 160)
-                    .cornerRadius(4)
+                JournalEditorToolbar(controller: composerController)
+                RichJournalEditor(
+                    text: $composerContent,
+                    controller: composerController,
+                    fontFamily: fontFamily,
+                    fontSize: fontSize,
+                    lineSpacing: lineSpacing,
+                )
+                .frame(minHeight: 100, maxHeight: 200)
+                .background(Color.zinc800.opacity(0.4))
+                .cornerRadius(4)
                 HStack {
                     Spacer()
                     Button("Cancel") { resetComposer() }
@@ -213,12 +263,17 @@ struct JournalDetailView: View {
                 .fixedSize()
             }
             if isEditing {
-                TextEditor(text: $editingDraft)
-                    .font(.system(size: 12))
-                    .scrollContentBackground(.hidden)
-                    .background(Color.zinc800.opacity(0.4))
-                    .frame(minHeight: 80, maxHeight: 200)
-                    .cornerRadius(4)
+                JournalEditorToolbar(controller: editController)
+                RichJournalEditor(
+                    text: $editingDraft,
+                    controller: editController,
+                    fontFamily: fontFamily,
+                    fontSize: fontSize,
+                    lineSpacing: lineSpacing,
+                )
+                .frame(minHeight: 100, maxHeight: 260)
+                .background(Color.zinc800.opacity(0.4))
+                .cornerRadius(4)
                 HStack {
                     Spacer()
                     Button("Cancel") { editingEntryId = nil }
@@ -233,23 +288,20 @@ struct JournalDetailView: View {
                     .controlSize(.small)
                 }
             } else {
-                renderedBody(entry.content)
+                JournalContentView(
+                    content: entry.content,
+                    fontFamily: fontFamily,
+                    fontSize: fontSize,
+                    lineSpacing: lineSpacing,
+                    onToggleTodo: { idx in
+                        Task { await vm.toggleTodo(entry, todoIndex: idx) }
+                    },
+                )
             }
         }
         .padding(10)
         .background(Color.zinc900.opacity(0.5))
         .cornerRadius(6)
-    }
-
-    /// Best-effort markdown renderer — falls back to plain text on parse fail.
-    private func renderedBody(_ source: String) -> Text {
-        if let attr = try? AttributedString(
-            markdown: source,
-            options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace),
-        ) {
-            return Text(attr).font(.system(size: 12)).foregroundColor(.white.opacity(0.85))
-        }
-        return Text(source).font(.system(size: 12)).foregroundColor(.white.opacity(0.85))
     }
 
     private var groupedEntries: [(String, [MWJournalEntry])] {

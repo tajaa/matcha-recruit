@@ -84,6 +84,10 @@
 		EEEE0J0J0J0J0J0J01010007 /* NewJournalSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE0J0J0J0J0J0J01010008 /* NewJournalSheet.swift */; };
 		EEEE0J0J0J0J0J0J01010009 /* InviteToJournalSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE0J0J0J0J0J0J0101000A /* InviteToJournalSheet.swift */; };
 		FFFF1S1S1S1S1S1S01010001 /* ChannelStarStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFFF1S1S1S1S1S1S01010002 /* ChannelStarStore.swift */; };
+		G1G2G3000000000000000001 /* RichJournalEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000002 /* RichJournalEditor.swift */; };
+		G1G2G3000000000000000003 /* JournalEditorToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000004 /* JournalEditorToolbar.swift */; };
+		G1G2G3000000000000000005 /* JournalContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000006 /* JournalContentView.swift */; };
+		G1G2G3000000000000000007 /* JournalStylePopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000008 /* JournalStylePopover.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -164,6 +168,10 @@
 		EEEE0J0J0J0J0J0J01010008 /* NewJournalSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewJournalSheet.swift; sourceTree = "<group>"; };
 		EEEE0J0J0J0J0J0J0101000A /* InviteToJournalSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteToJournalSheet.swift; sourceTree = "<group>"; };
 		FFFF1S1S1S1S1S1S01010002 /* ChannelStarStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelStarStore.swift; sourceTree = "<group>"; };
+		G1G2G3000000000000000002 /* RichJournalEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RichJournalEditor.swift; sourceTree = "<group>"; };
+		G1G2G3000000000000000004 /* JournalEditorToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalEditorToolbar.swift; sourceTree = "<group>"; };
+		G1G2G3000000000000000006 /* JournalContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalContentView.swift; sourceTree = "<group>"; };
+		G1G2G3000000000000000008 /* JournalStylePopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalStylePopover.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -362,6 +370,10 @@
 				EEEE0J0J0J0J0J0J01010006 /* JournalDetailView.swift */,
 				EEEE0J0J0J0J0J0J01010008 /* NewJournalSheet.swift */,
 				EEEE0J0J0J0J0J0J0101000A /* InviteToJournalSheet.swift */,
+				G1G2G3000000000000000002 /* RichJournalEditor.swift */,
+				G1G2G3000000000000000004 /* JournalEditorToolbar.swift */,
+				G1G2G3000000000000000006 /* JournalContentView.swift */,
+				G1G2G3000000000000000008 /* JournalStylePopover.swift */,
 			);
 			path = Journals;
 			sourceTree = "<group>";
@@ -557,6 +569,10 @@
 				EEEE0J0J0J0J0J0J01010007 /* NewJournalSheet.swift in Sources */,
 				EEEE0J0J0J0J0J0J01010009 /* InviteToJournalSheet.swift in Sources */,
 				FFFF1S1S1S1S1S1S01010001 /* ChannelStarStore.swift in Sources */,
+				G1G2G3000000000000000001 /* RichJournalEditor.swift in Sources */,
+				G1G2G3000000000000000003 /* JournalEditorToolbar.swift in Sources */,
+				G1G2G3000000000000000005 /* JournalContentView.swift in Sources */,
+				G1G2G3000000000000000007 /* JournalStylePopover.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

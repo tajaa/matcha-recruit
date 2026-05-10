@@ -6,10 +6,11 @@ from datetime import date, datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from ...core.models.auth import CurrentUser
+from ...core.services.storage import get_storage
 from ..dependencies import require_admin_or_client, get_client_company_id
 from ..services import journal_service
 
@@ -172,6 +173,33 @@ async def delete_entry_endpoint(
         await journal_service.delete_entry(entry_id, current_user.id)
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
+
+
+# ── Images ──────────────────────────────────────────────────────────────
+
+
+@router.post("/journals/{journal_id}/images", status_code=201)
+async def upload_journal_image_endpoint(
+    journal_id: UUID,
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Upload a single image to embed in a journal entry. Returns {"url": ...}."""
+    j = await journal_service.get_journal(journal_id, current_user.id)
+    if j is None:
+        raise HTTPException(status_code=404, detail="Journal not found")
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are allowed")
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image exceeds 10 MB limit")
+    url = await get_storage().upload_file(
+        content,
+        file.filename or "image.png",
+        prefix=f"journal-images/{journal_id}",
+        content_type=file.content_type,
+    )
+    return {"url": url}
 
 
 # ── Collaborators ───────────────────────────────────────────────────────

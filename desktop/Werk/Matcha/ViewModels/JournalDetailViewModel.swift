@@ -94,6 +94,47 @@ final class JournalDetailViewModel {
         }
     }
 
+    /// Flip the Nth `- [ ]` ↔ `- [x]` checkbox within an entry's content
+    /// and persist. `todoIndex` is the order of the todo across all lines.
+    func toggleTodo(_ entry: MWJournalEntry, todoIndex: Int) async {
+        let lines = entry.content.components(separatedBy: "\n")
+        var newLines = lines
+        var seen = 0
+        for i in 0..<lines.count {
+            let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
+            let unchecked = trimmed.hasPrefix("- [ ]") || trimmed.hasPrefix("* [ ]")
+            let checked = trimmed.hasPrefix("- [x]") || trimmed.hasPrefix("- [X]")
+                || trimmed.hasPrefix("* [x]") || trimmed.hasPrefix("* [X]")
+            guard unchecked || checked else { continue }
+            if seen == todoIndex {
+                if unchecked, let r = lines[i].range(of: "[ ]") {
+                    newLines[i] = lines[i].replacingCharacters(in: r, with: "[x]")
+                } else if let r = lines[i].range(of: "[x]") ?? lines[i].range(of: "[X]") {
+                    newLines[i] = lines[i].replacingCharacters(in: r, with: "[ ]")
+                }
+                break
+            }
+            seen += 1
+        }
+        let newContent = newLines.joined(separator: "\n")
+        guard newContent != entry.content else { return }
+        await updateEntry(entry, title: entry.title, content: newContent, entryDate: entry.entryDate)
+    }
+
+    /// Upload an image to the current journal. Returns the public URL on
+    /// success; sets `errorMessage` and returns nil on failure.
+    func uploadImage(data: Data, filename: String, mimeType: String) async -> String? {
+        guard let id = loadedId else { return nil }
+        do {
+            return try await MatchaWorkService.shared.uploadJournalImage(
+                journalId: id, data: data, filename: filename, mimeType: mimeType,
+            )
+        } catch {
+            errorMessage = "Image upload failed: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
     private func sortEntries() {
         entries.sort { a, b in
             if a.entryDate != b.entryDate { return a.entryDate > b.entryDate }

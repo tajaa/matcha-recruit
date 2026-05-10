@@ -1222,4 +1222,37 @@ class MatchaWorkService {
             path: "\(basePath)/journals/\(journalId)/collaborators/\(userId)",
         )
     }
+
+    /// Upload a single image for inline embedding in a journal entry.
+    /// Returns the public URL the markdown `![](url)` can point at.
+    func uploadJournalImage(
+        journalId: String, data: Data, filename: String, mimeType: String,
+    ) async throws -> String {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+        body.append("--\(boundary)\r\n")
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n")
+        body.append("Content-Type: \(mimeType)\r\n\r\n")
+        body.append(data)
+        body.append("\r\n--\(boundary)--\r\n")
+
+        guard let url = URL(string: "\(client.baseURL)\(basePath)/journals/\(journalId)/images") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let token = client.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = body
+
+        let (respData, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let msg = String(data: respData, encoding: .utf8) ?? "Upload failed"
+            throw APIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0, msg)
+        }
+        struct ImageResponse: Decodable { let url: String }
+        return try JSONDecoder().decode(ImageResponse.self, from: respData).url
+    }
 }
