@@ -30,6 +30,8 @@ struct ChannelDetailView: View {
     @State private var hoveredMessageId: String? = nil
     @State private var lastTypingSentAt: Date = .distantPast
     @State private var showInviteSheet = false
+    @State private var showManageMembers = false
+    @State private var pendingMessageDelete: ChannelMessage? = nil
     @State private var inviteToast: String?
     @State private var showBroadcastPanel = false
 
@@ -118,6 +120,36 @@ struct ChannelDetailView: View {
                 Task { await loadChannel() }
             }
         }
+        .sheet(isPresented: $showManageMembers) {
+            if let channel {
+                ManageMembersSheet(
+                    channelId: channelId,
+                    channelName: channel.name,
+                    members: channel.members,
+                    myUserId: appState.currentUser?.id ?? "",
+                    myRole: channel.myRole ?? "member",
+                    isGlobalAdmin: appState.currentUser?.role == "admin",
+                    onChanged: { Task { await loadChannel() } }
+                )
+            }
+        }
+        .confirmationDialog(
+            "Delete this message?",
+            isPresented: Binding(
+                get: { pendingMessageDelete != nil },
+                set: { if !$0 { pendingMessageDelete = nil } }
+            ),
+            presenting: pendingMessageDelete,
+        ) { msg in
+            Button("Delete", role: .destructive) {
+                let target = msg
+                pendingMessageDelete = nil
+                deleteMessage(target)
+            }
+            Button("Cancel", role: .cancel) { pendingMessageDelete = nil }
+        } message: { _ in
+            Text("This cannot be undone.")
+        }
     }
 
     // MARK: - Header
@@ -145,9 +177,18 @@ struct ChannelDetailView: View {
                         Text("·")
                             .font(.system(size: 10))
                             .foregroundColor(.white.opacity(0.25))
-                        Text("\(count) members")
-                            .font(.system(size: 10))
-                            .foregroundColor(.white.opacity(0.4))
+                        // Click → Manage members sheet. Visible to everyone
+                        // (sheet itself adapts to role).
+                        Button {
+                            showManageMembers = true
+                        } label: {
+                            Text("\(count) members")
+                                .font(.system(size: 10))
+                                .foregroundColor(.white.opacity(0.4))
+                                .underline(false)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Manage members")
                     }
                     // Live now badge — shown the moment we know a broadcast is
                     // active in this channel, regardless of whether THIS client
@@ -557,10 +598,15 @@ struct ChannelDetailView: View {
                 Label("React", systemImage: "face.smiling")
             }
 
-            if msg.senderId == appState.currentUser?.id {
+            // Author can delete their own; channel owner / moderator (or
+            // global admin) can delete anyone's. `isAdmin` already covers
+            // those three roles. `deletedAt` gates redundant delete on
+            // already-tombstoned messages.
+            let canDelete = (msg.senderId == appState.currentUser?.id || isAdmin) && msg.deletedAt == nil
+            if canDelete {
                 Divider()
                 Button(role: .destructive) {
-                    deleteMessage(msg)
+                    pendingMessageDelete = msg
                 } label: {
                     Label("Delete message", systemImage: "trash")
                 }

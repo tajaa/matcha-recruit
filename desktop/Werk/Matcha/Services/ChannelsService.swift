@@ -256,4 +256,39 @@ class ChannelsService {
     func deleteMessage(channelId: String, messageId: String) async throws {
         _ = try await client.requestData(method: "DELETE", path: "\(basePath)/\(channelId)/messages/\(messageId)")
     }
+
+    // MARK: - Moderation
+
+    /// Roles a moderation call can assign. Promoting to owner goes through
+    /// `transferOwnership` instead — the PATCH endpoint rejects "owner".
+    enum ManageableRole: String, Encodable { case moderator, member }
+
+    private struct SetRoleBody: Encodable { let role: String }
+    private struct TransferBody: Encodable {
+        let userId: String
+        enum CodingKeys: String, CodingKey { case userId = "user_id" }
+    }
+
+    func setMemberRole(channelId: String, userId: String, role: ManageableRole) async throws {
+        _ = try await client.requestData(
+            method: "PATCH",
+            path: "\(basePath)/\(channelId)/members/\(userId)",
+            body: SetRoleBody(role: role.rawValue),
+        )
+    }
+
+    func kickMember(channelId: String, userId: String) async throws {
+        _ = try await client.requestData(
+            method: "DELETE",
+            path: "\(basePath)/\(channelId)/members/\(userId)",
+        )
+    }
+
+    func transferOwnership(channelId: String, newOwnerId: String) async throws {
+        _ = try await client.requestData(
+            method: "POST",
+            path: "\(basePath)/\(channelId)/transfer-ownership",
+            body: TransferBody(userId: newOwnerId),
+        )
+    }
 }
