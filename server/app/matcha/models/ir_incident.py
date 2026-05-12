@@ -521,7 +521,7 @@ class Osha300ASummary(BaseModel):
 IRCopilotRole = Literal["user", "assistant", "system"]
 IRCopilotMessageType = Literal["text", "card", "event"]
 IRCopilotActionType = Literal[
-    "run_analysis", "set_field", "request_info", "escalate", "close_incident", "open_tab",
+    "run_analysis", "set_field", "request_info", "escalate", "close_incident",
 ]
 
 

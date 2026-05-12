@@ -9,8 +9,11 @@ import json
 
 import pytest
 
+from typing import get_args
+
 from app.matcha.models.ir_incident import (
     IRCopilotAcceptRequest,
+    IRCopilotActionType,
     IRCopilotCard,
     IRCopilotCardAction,
 )
@@ -116,7 +119,99 @@ def test_accept_request_validates_uuid():
 def test_action_type_set_complete():
     """All emitted action types match the dispatch whitelist in the route."""
     expected = {"run_analysis", "set_field", "request_info", "escalate", "close_incident"}
-    assert expected.issubset(IR_ACTION_TYPES)
+    assert IR_ACTION_TYPES == expected
+
+
+def test_pydantic_action_type_matches_orchestrator():
+    """Pydantic Literal must mirror IR_ACTION_TYPES — open_tab in particular
+    must be absent so stale persisted cards die at model_validate."""
+    assert set(get_args(IRCopilotActionType)) == IR_ACTION_TYPES
+    assert "open_tab" not in get_args(IRCopilotActionType)
+
+
+def test_generate_guidance_drops_invalid_cards(monkeypatch):
+    """AI may emit cards with action types IR doesn't support (open_tab via the
+    shared ER normalizer fallback) or run_analysis with an unrecognized
+    analysis_type. Both must be filtered before reaching the user."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.matcha.services import ir_ai_orchestrator
+
+    payload_json = json.dumps({
+        "summary": "Mixed bag.",
+        "open_questions": [],
+        "cards": [
+            {
+                "id": "good_set_field",
+                "title": "Set severity to high",
+                "recommendation": "Severity should be high.",
+                "rationale": "Multiple injuries reported.",
+                "priority": "high",
+                "action": {
+                    "type": "set_field",
+                    "label": "Set severity",
+                    "field_name": "severity",
+                    "field_value": "high",
+                },
+            },
+            {
+                "id": "bad_open_tab",
+                "title": "Look at timeline",
+                "recommendation": "Open the timeline tab.",
+                "rationale": "Context.",
+                "priority": "low",
+                "action": {"type": "open_tab", "label": "Open timeline", "tab": "timeline"},
+            },
+            {
+                "id": "bad_run_analysis",
+                "title": "Run mystery analysis",
+                "recommendation": "Run an unknown analysis.",
+                "rationale": "Reason.",
+                "priority": "medium",
+                "action": {
+                    "type": "run_analysis",
+                    "label": "Run",
+                    "analysis_type": "nonsense",
+                },
+            },
+        ],
+    })
+
+    async def fake_generate_content(*args, **kwargs):
+        return SimpleNamespace(text=payload_json)
+
+    fake_analyzer = SimpleNamespace(
+        client=SimpleNamespace(
+            aio=SimpleNamespace(
+                models=SimpleNamespace(generate_content=fake_generate_content),
+            ),
+        ),
+        model="fake-model",
+        _parse_json_response=lambda raw: json.loads(raw),
+    )
+
+    monkeypatch.setattr(ir_ai_orchestrator, "get_ir_analyzer", lambda: fake_analyzer)
+
+    class FakeRateLimiter:
+        async def check_limit(self, *args, **kwargs):
+            return None
+
+    monkeypatch.setattr(ir_ai_orchestrator, "get_rate_limiter", lambda: FakeRateLimiter())
+
+    incident = {"id": "00000000-0000-0000-0000-000000000000", "title": "Test"}
+    result = asyncio.run(
+        ir_ai_orchestrator.generate_guidance(
+            incident=incident, analyses=[], messages=[],
+        )
+    )
+
+    card_ids = {c["id"] for c in result["cards"]}
+    assert "good-set-field" in card_ids or "good_set_field" in card_ids
+    assert "bad-open-tab" not in card_ids and "bad_open_tab" not in card_ids
+    assert "bad-run-analysis" not in card_ids and "bad_run_analysis" not in card_ids
+    for card in result["cards"]:
+        assert card["action"]["type"] in IR_ACTION_TYPES
 
 
 def test_canonical_analysis_type_aliases():

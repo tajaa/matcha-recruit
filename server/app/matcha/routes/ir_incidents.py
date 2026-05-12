@@ -4355,10 +4355,15 @@ async def accept_copilot_card(
                 elif action_type == "run_analysis":
                     analysis_type = _canonical_analysis_type(action.get("analysis_type"))
                     if analysis_type is None:
-                        event_summary = (
-                            "Couldn't determine which analysis to run. Open the AI Analysis tab and pick one manually."
-                        )
-                    elif analysis_type == "policy_mapping":
+                        # Stale card from before the orchestrator filter landed.
+                        # Surface as ephemeral SSE error — no DB event row, so the
+                        # transcript stays clean instead of accumulating noise.
+                        yield _sse({
+                            "type": "error",
+                            "detail": "Couldn't determine which analysis to run. Open the AI Analysis tab and pick one manually.",
+                        })
+                        return
+                    if analysis_type == "policy_mapping":
                         yield _sse({
                             "type": "status",
                             "stage": "running_analysis",
@@ -4415,9 +4420,6 @@ async def accept_copilot_card(
 
                 elif action_type == "request_info":
                     event_summary = "Request acknowledged — answer in chat below."
-
-                elif action_type == "open_tab":
-                    event_summary = f"Opening {action.get('tab') or 'tab'}"
 
                 else:
                     yield _sse({"type": "error", "detail": f"Unknown action type: {action_type}"})

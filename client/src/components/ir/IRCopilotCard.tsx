@@ -2,7 +2,7 @@ import { Loader2, Check } from 'lucide-react'
 import { Button, Badge } from '../ui'
 
 export type CopilotCardAction = {
-  type: 'run_analysis' | 'set_field' | 'request_info' | 'escalate' | 'close_incident' | 'open_tab'
+  type: 'run_analysis' | 'set_field' | 'request_info' | 'escalate' | 'close_incident'
   label: string
   tab?: string | null
   analysis_type?: string | null

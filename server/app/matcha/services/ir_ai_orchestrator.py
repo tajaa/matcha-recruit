@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
-from ..services.er_guidance import _normalize_guidance_cards
+from ..services.er_guidance import _guidance_card_id, _normalize_guidance_cards
 from ..services.ir_analysis import get_ir_analyzer
 from ...core.services.rate_limiter import get_rate_limiter
 from ...database import get_connection
@@ -304,23 +304,47 @@ async def generate_guidance(
 
     # Layer IR-specific action fields (analysis_type / field_name / field_value)
     # back onto the normalized cards. _normalize_guidance_action stripped them
-    # to its own schema; we re-attach from the raw payload by id.
+    # to its own schema; we re-attach from the raw payload by id and drop any
+    # card whose action doesn't match an IR-supported type. The shared ER
+    # normalizer silently coerces unknown types to open_tab/timeline, which is
+    # a no-op for IR — filtering here keeps the user from seeing dead cards.
+    # Key by the SAME normalized id _normalize_guidance_cards uses, since the
+    # AI may emit snake_case ids that get slugified to kebab-case by
+    # _guidance_card_id. Without this match, every card silently failed the
+    # IR-specific re-attach and fell back to the ER normalizer's open_tab
+    # default — which is exactly the bug we're fixing.
     raw_cards_by_id: dict[str, dict[str, Any]] = {}
     if isinstance(payload.get("cards"), list):
-        for raw in payload["cards"]:
-            if isinstance(raw, dict) and isinstance(raw.get("id"), str):
-                raw_cards_by_id[raw["id"]] = raw
+        for idx, raw in enumerate(payload["cards"]):
+            if isinstance(raw, dict):
+                title = raw.get("title") if isinstance(raw.get("title"), str) else ""
+                normalized_id = _guidance_card_id(raw.get("id"), title, idx)
+                raw_cards_by_id[normalized_id] = raw
+    filtered_cards: list[dict[str, Any]] = []
     for card in cards:
         raw = raw_cards_by_id.get(card["id"]) or {}
         raw_action = raw.get("action") or {}
-        card_action_type = raw_action.get("type")
-        if card_action_type in IR_ACTION_TYPES:
-            card["action"]["type"] = card_action_type
-        card["action"]["analysis_type"] = _canonical_analysis_type(
-            raw_action.get("analysis_type")
-        )
+        raw_type = raw_action.get("type")
+        raw_analysis = raw_action.get("analysis_type")
+        canonical_analysis = _canonical_analysis_type(raw_analysis)
+        if raw_type not in IR_ACTION_TYPES:
+            logger.warning(
+                "IR copilot dropped card %s: unsupported action_type=%r",
+                card["id"], raw_type,
+            )
+            continue
+        if raw_type == "run_analysis" and canonical_analysis is None:
+            logger.warning(
+                "IR copilot dropped card %s: run_analysis without valid analysis_type=%r",
+                card["id"], raw_analysis,
+            )
+            continue
+        card["action"]["type"] = raw_type
+        card["action"]["analysis_type"] = canonical_analysis
         card["action"]["field_name"] = raw_action.get("field_name") if isinstance(raw_action.get("field_name"), str) else None
         card["action"]["field_value"] = raw_action.get("field_value") if isinstance(raw_action.get("field_value"), (str, type(None))) else None
+        filtered_cards.append(card)
+    cards = filtered_cards
 
     if not summary:
         # Minimal fallback — avoids returning empty payload.
