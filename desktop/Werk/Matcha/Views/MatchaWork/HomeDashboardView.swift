@@ -68,6 +68,7 @@ struct HomeDashboardView: View {
                         )
                         await MainActor.run {
                             appState.selectedThreadId = thread.id
+                            appState.selectedJournalId = nil
                             appState.showHome = false
                             appState.showSkills = false
                             isCreatingChat = false
@@ -152,6 +153,7 @@ struct HomeDashboardView: View {
                 ForEach(activeProjects) { project in
                     Button {
                         appState.selectedProjectId = project.id
+                        appState.selectedJournalId = nil
                         appState.showHome = false
                     } label: {
                         HStack(spacing: 8) {
@@ -193,6 +195,7 @@ struct HomeDashboardView: View {
                 ForEach(inFlightBlogs) { blog in
                     Button {
                         appState.selectedProjectId = blog.id
+                        appState.selectedJournalId = nil
                         appState.showHome = false
                     } label: {
                         HStack(spacing: 8) {
@@ -231,6 +234,7 @@ struct HomeDashboardView: View {
                     Button {
                         if let pid = task.projectId {
                             appState.selectedProjectId = pid
+                            appState.selectedJournalId = nil
                             appState.showHome = false
                         }
                     } label: {
@@ -292,14 +296,17 @@ struct HomeDashboardView: View {
                         switch item.kind {
                         case "project":
                             appState.selectedProjectId = item.refId
+                            appState.selectedJournalId = nil
                             appState.showHome = false
                         case "task":
                             if let pid = item.projectId {
                                 appState.selectedProjectId = pid
+                                appState.selectedJournalId = nil
                                 appState.showHome = false
                             }
                         case "thread":
                             appState.selectedThreadId = item.refId
+                            appState.selectedJournalId = nil
                             appState.showHome = false
                         default:
                             break

@@ -50,6 +50,7 @@ struct ProjectListView: View {
             set: {
                 appState.selectedProjectId = $0
                 appState.selectedThreadId = nil
+                appState.selectedJournalId = nil
                 appState.showSkills = false
             }
         )
@@ -150,6 +151,7 @@ struct ProjectListView: View {
                 recomputeGroups()
                 appState.selectedProjectId = proj.id
                 appState.selectedThreadId = nil
+                appState.selectedJournalId = nil
                 appState.projectsListGeneration &+= 1
             }
         }
@@ -436,6 +438,7 @@ struct ProjectListView: View {
                     recomputeGroups()
                     appState.selectedProjectId = proj.id
                     appState.selectedThreadId = nil
+                    appState.selectedJournalId = nil
                     appState.projectsListGeneration &+= 1
                     isCreating = false
                 }

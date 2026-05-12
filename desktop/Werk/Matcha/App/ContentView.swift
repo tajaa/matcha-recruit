@@ -58,6 +58,7 @@ struct ContentView: View {
                             appState.selectedThreadId = nil
                             appState.selectedProjectId = nil
                             appState.selectedChannelId = nil
+                            appState.selectedJournalId = nil
                         }
                         .padding(.horizontal, 8)
                         .padding(.top, 8)
@@ -192,6 +193,8 @@ struct ContentView: View {
                                     NewBlogSheet { proj in
                                         appState.selectedProjectId = proj.id
                                         appState.selectedThreadId = nil
+                                        appState.selectedChannelId = nil
+                                        appState.selectedJournalId = nil
                                         appState.projectsListGeneration &+= 1
                                     }
                                 }
@@ -300,6 +303,7 @@ struct ContentView: View {
                         appState.selectedThreadId = nil
                         appState.selectedProjectId = nil
                         appState.selectedChannelId = nil
+                        appState.selectedJournalId = nil
                         appState.showSkills = false
                     }
 
@@ -315,6 +319,7 @@ struct ContentView: View {
                         appState.selectedThreadId = nil
                         appState.selectedProjectId = nil
                         appState.selectedChannelId = nil
+                        appState.selectedJournalId = nil
                         appState.showSkills = false
                     }
                 }
@@ -368,6 +373,7 @@ struct ContentView: View {
             CreateChannelSheet { newChannel in
                 appState.selectedThreadId = nil
                 appState.selectedProjectId = nil
+                appState.selectedJournalId = nil
                 appState.channelsListGeneration &+= 1
                 NotificationCenter.default.post(name: .mwChannelCreated, object: newChannel.id)
             }
@@ -376,6 +382,9 @@ struct ContentView: View {
             DiscoverChannelsSheet { joinedId in
                 appState.channelsListGeneration &+= 1
                 appState.selectedChannelId = joinedId
+                appState.selectedThreadId = nil
+                appState.selectedProjectId = nil
+                appState.selectedJournalId = nil
             }
         }
         .sheet(isPresented: $appState.showChannelAdminWizard, onDismiss: {
@@ -562,6 +571,7 @@ struct ContentView: View {
                     appState.selectedProjectId = proj.id
                     appState.selectedThreadId = nil
                     appState.selectedChannelId = nil
+                    appState.selectedJournalId = nil
                     appState.projectsListGeneration &+= 1
                     isCreatingProject = false
                 }

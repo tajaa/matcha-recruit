@@ -390,6 +390,7 @@ struct CollabProjectWizardView: View {
                     appState.selectedProjectId = project.id
                     appState.selectedThreadId = nil
                     appState.selectedChannelId = nil
+                    appState.selectedJournalId = nil
                     appState.showInbox = false
                     appState.showSkills = false
                 }

@@ -23,6 +23,9 @@ struct ChannelsSidebarView: View {
                 // GET /channels calls on every channel create.
                 if let newId = note.object as? String {
                     appState.selectedChannelId = newId
+                    appState.selectedThreadId = nil
+                    appState.selectedProjectId = nil
+                    appState.selectedJournalId = nil
                 }
             }
             .onChange(of: appState.channelsListGeneration) { _, _ in
@@ -38,6 +41,9 @@ struct ChannelsSidebarView: View {
                 DiscoverChannelsSheet { joinedId in
                     appState.channelsListGeneration &+= 1
                     appState.selectedChannelId = joinedId
+                    appState.selectedThreadId = nil
+                    appState.selectedProjectId = nil
+                    appState.selectedJournalId = nil
                 }
             }
             .confirmationDialog(
@@ -175,6 +181,7 @@ struct ChannelsSidebarView: View {
             }
             appState.selectedThreadId = nil
             appState.selectedProjectId = nil
+            appState.selectedJournalId = nil
             appState.showInbox = false
             appState.showSkills = false
         } label: {

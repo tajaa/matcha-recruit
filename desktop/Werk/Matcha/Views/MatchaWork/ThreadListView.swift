@@ -182,6 +182,12 @@ struct ThreadListView: View {
                 Divider().opacity(0.3)
                 Button {
                     appState.selectedThreadId = nil
+                    appState.selectedProjectId = nil
+                    appState.selectedChannelId = nil
+                    appState.selectedJournalId = nil
+                    appState.showInbox = false
+                    appState.showPeople = false
+                    appState.showHome = false
                     appState.showSkills = true
                 } label: {
                     HStack(spacing: 8) {
@@ -229,6 +235,9 @@ struct ThreadListView: View {
             ) {
                 await MainActor.run {
                     appState.selectedThreadId = thread.id
+                    appState.selectedProjectId = nil
+                    appState.selectedChannelId = nil
+                    appState.selectedJournalId = nil
                     appState.showSkills = false
                 }
             }

@@ -127,6 +127,9 @@ struct NewThreadView: View {
                             ) {
                                 await MainActor.run {
                                     appState.selectedThreadId = thread.id
+                                    appState.selectedProjectId = nil
+                                    appState.selectedChannelId = nil
+                                    appState.selectedJournalId = nil
                                     dismiss()
                                 }
                             } else {

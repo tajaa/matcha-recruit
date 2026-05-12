@@ -473,6 +473,7 @@ struct ChannelAdminWizardView: View {
                     appState.selectedChannelId = channel.id
                     appState.selectedThreadId = nil
                     appState.selectedProjectId = nil
+                    appState.selectedJournalId = nil
                     appState.showInbox = false
                     appState.showSkills = false
                 }
