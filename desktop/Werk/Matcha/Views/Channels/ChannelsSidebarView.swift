@@ -167,6 +167,12 @@ struct ChannelsSidebarView: View {
         return Button {
             appState.selectedChannelId = channel.id
             appState.clearChannelUnread(channel.id)
+            // Zero the API-sourced count locally so the badge stays cleared
+            // after the user clicks elsewhere. Backend marks last_read_at on
+            // getChannel; next listChannels() refetch returns 0 too.
+            if let idx = channels.firstIndex(where: { $0.id == channel.id }) {
+                channels[idx].unreadCount = 0
+            }
             appState.selectedThreadId = nil
             appState.selectedProjectId = nil
             appState.showInbox = false

@@ -146,6 +146,17 @@ struct NewJournalSheet: View {
             )
             onCreated(journal)
             dismiss()
+        } catch let apiError as APIError {
+            // 404 here means the journals routes aren't registered on the
+            // backend the client is talking to — almost always a stale
+            // deploy. Surface a friendly hint instead of the raw FastAPI
+            // `{"detail":"Not Found"}` body.
+            if case .httpError(let code, _) = apiError, code == 404 {
+                self.error = "Couldn't create journal. The server may need to be updated — try again in a moment or contact support."
+            } else {
+                self.error = apiError.localizedDescription
+            }
+            print("[NewJournalSheet] create failed: \(apiError)")
         } catch {
             self.error = error.localizedDescription
         }

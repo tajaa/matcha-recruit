@@ -143,7 +143,7 @@ struct ChannelSummary: Codable, Identifiable, Hashable {
     let priceCents: Int?
     let currency: String?
     let memberCount: Int
-    let unreadCount: Int
+    var unreadCount: Int
     let lastMessageAt: String?
     let lastMessagePreview: String?
     let isMember: Bool
