@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
@@ -79,6 +80,41 @@ IR_ACTION_TYPES = {
 }
 
 
+# Mirror the route's _FIELD_WHITELIST + enum sets so the orchestrator can drop
+# cards with hallucinated field_values (e.g. AI proposing
+# `incident_type = "Tardiness"`) before the user ever sees them. Backend route
+# revalidates as defense in depth.
+IR_SETTABLE_FIELDS = {
+    "incident_type",
+    "category",  # alias for incident_type — accepted by route
+    "severity",
+    "status",
+    "root_cause",
+    "corrective_actions",
+}
+
+IR_FIELD_VALUE_ENUMS: dict[str, set[str]] = {
+    "incident_type": {"safety", "behavioral", "property", "near_miss", "other"},
+    "category": {"safety", "behavioral", "property", "near_miss", "other"},
+    "severity": {"critical", "high", "medium", "low"},
+    "status": {"reported", "investigating", "action_required", "resolved", "closed"},
+}
+
+
+def _is_valid_set_field(field_name: Optional[str], field_value: Any) -> bool:
+    """True when field_name is settable AND field_value (if enum-constrained)
+    matches the canonical lowercase enum. Free-text fields (root_cause,
+    corrective_actions) accept any non-empty string."""
+    if not isinstance(field_name, str) or field_name not in IR_SETTABLE_FIELDS:
+        return False
+    enum = IR_FIELD_VALUE_ENUMS.get(field_name)
+    if enum is None:
+        return isinstance(field_value, str) and bool(field_value.strip())
+    if not isinstance(field_value, str):
+        return False
+    return field_value.strip().lower() in enum
+
+
 PROMPT_TEMPLATE = """You are an HR incident-response copilot. Your job is to help an HR
 administrator manage a workplace incident report. You see the current incident
 state, all AI analyses already run on it, and the running conversation between
@@ -119,30 +155,75 @@ Return JSON with the following shape — no preamble, no markdown fences:
         "type": "run_analysis" | "set_field" | "request_info" | "escalate" | "close_incident",
         "label": "Button label, ~30 chars",
         "analysis_type": "categorization" | "severity" | "root_cause" | "recommendations" | "similar" | "policy_mapping" | null,
-        "field_name": "category" | "severity" | "status" | "root_cause" | "corrective_actions" | null,
-        "field_value": "string or null"
+        "field_name": "incident_type" | "severity" | "status" | "root_cause" | "corrective_actions" | null,
+        "field_value": "string or null — see SET_FIELD VALUES below"
       }}
     }}
   ]
 }}
 
+SET_FIELD VALUES — when field_name is set, field_value MUST be one of the
+exact strings below (lowercase). Do NOT invent new values; if no enum value
+fits the situation, omit the set_field card and ask via open_questions
+instead. Backend rejects unknown values and the user sees an error.
+- incident_type: "safety" | "behavioral" | "property" | "near_miss" | "other"
+  (a tardiness or attendance issue is "behavioral", not "tardiness")
+- severity: "critical" | "high" | "medium" | "low"
+- status: "reported" | "investigating" | "action_required" | "resolved" | "closed"
+- root_cause: free text (1-3 sentences)
+- corrective_actions: free text (1-3 sentences)
+
 ACTION RULES:
 - run_analysis: pick analysis_type from IR's valid set. Don't recommend an
   analysis that's already in CACHED ANALYSES unless re-running adds value.
-- set_field: when you can confidently propose a value (e.g. category from
-  description), pre-fill field_name + field_value. The user clicks accept and
-  the system writes it.
+- set_field: when you can confidently propose a value (e.g. incident_type
+  from description), pre-fill field_name + field_value. The user clicks
+  accept and the system writes it. field_value MUST be from SET_FIELD
+  VALUES above — never a free-form word like "tardiness" or "harassment".
 - request_info: use sparingly — open_questions cover this; only add as a card
-  when the missing info is high-stakes.
+  when the missing info is high-stakes (disputed facts, intent unclear,
+  legally protected category, or severity high/critical). Do NOT propose
+  request_info for routine low-severity behavioral issues like tardiness,
+  dress-code violations, or minor performance lapses — those need ACTION,
+  not more investigation.
 - escalate: recommend when severity is high/critical OR when an investigation
   would benefit from ER Copilot case management.
 - close_incident: recommend when status is action_required and a corrective
   action plan exists.
 
+INVESTIGATION-VS-ACTION DECISION:
+When the incident facts are clear and the policy violation is unambiguous
+(e.g. attendance / tardiness, missed deadline, minor dress-code), prefer
+ACTION cards over INVESTIGATION cards:
+
+  Prefer (in order):
+    1. set_field corrective_actions = "<concrete next step, 1-2 sentences>"
+       (e.g. "Coach employee on attendance policy. Document conversation in
+       writing. Note that next occurrence triggers written warning.")
+    2. set_field status = "action_required" once corrective_actions is set
+    3. close_incident once status is action_required and the user
+       acknowledges the action plan
+
+  Avoid for clear minor violations:
+    - request_info / "Interview the employee for their statement" cards —
+      attendance is cut and dry; the employee's reason rarely changes the
+      corrective step.
+    - run_analysis root_cause / similar — overkill for routine policy
+      violations with a single obvious cause.
+
+Only recommend interviewing the subject when (a) facts are disputed
+between accounts, (b) intent or context materially affects the response
+(harassment, theft, retaliation), or (c) severity is high/critical.
+
 QUALITY RULES:
 - 1-4 cards. Don't pad. Skip cards if nothing useful applies.
 - Sort cards by priority (high first).
 - summary always present, even when no cards.
+- Do NOT restate prior summaries. If the incident state hasn't materially
+  changed since the last assistant message in RECENT CONVERSATION, write a
+  short progress note instead (e.g. "Awaiting your reply on X" or
+  "Ready to close — accept the recommendation below"). Repeating yesterday's
+  facts in new words wastes the user's attention.
 """
 
 
@@ -339,10 +420,28 @@ async def generate_guidance(
                 card["id"], raw_analysis,
             )
             continue
+        raw_field_name = raw_action.get("field_name")
+        raw_field_value = raw_action.get("field_value")
+        if raw_type == "set_field" and not _is_valid_set_field(raw_field_name, raw_field_value):
+            logger.warning(
+                "IR copilot dropped card %s: set_field with invalid field_name=%r value=%r",
+                card["id"], raw_field_name, raw_field_value,
+            )
+            continue
+        # Normalize enum field_value to lowercase so the route's exact-match
+        # check passes even when the AI capitalizes it ("Behavioral").
+        normalized_value = raw_field_value
+        if (
+            raw_type == "set_field"
+            and isinstance(raw_field_name, str)
+            and raw_field_name in IR_FIELD_VALUE_ENUMS
+            and isinstance(raw_field_value, str)
+        ):
+            normalized_value = raw_field_value.strip().lower()
         card["action"]["type"] = raw_type
         card["action"]["analysis_type"] = canonical_analysis
-        card["action"]["field_name"] = raw_action.get("field_name") if isinstance(raw_action.get("field_name"), str) else None
-        card["action"]["field_value"] = raw_action.get("field_value") if isinstance(raw_action.get("field_value"), (str, type(None))) else None
+        card["action"]["field_name"] = raw_field_name if isinstance(raw_field_name, str) else None
+        card["action"]["field_value"] = normalized_value if isinstance(normalized_value, (str, type(None))) else None
         filtered_cards.append(card)
     cards = filtered_cards
 
@@ -405,6 +504,39 @@ async def append_message(
     return out
 
 
+_SUMMARY_DEDUPE_THRESHOLD = 0.75
+
+
+def _normalize_summary(text: str) -> str:
+    """Lowercase + collapse non-word chars to single spaces. Used by the
+    similarity check so paraphrases compare equal under whitespace and
+    punctuation noise."""
+    return re.sub(r"\W+", " ", (text or "").lower()).strip()
+
+
+def _summaries_too_similar(a: str, b: str, threshold: float = _SUMMARY_DEDUPE_THRESHOLD) -> bool:
+    """True when one summary is mostly contained in the other (token overlap
+    / smaller set size). The IR copilot regenerates a summary every guidance
+    round; AI often restates the prior round when state hasn't changed, which
+    clutters the transcript with near-duplicate assistant messages.
+
+    Containment beats Jaccard here because a longer restatement that adds a
+    bit of new framing still has high containment with the original, even
+    when Jaccard drops below threshold from the added words."""
+    na, nb = _normalize_summary(a), _normalize_summary(b)
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+    sa, sb = set(na.split()), set(nb.split())
+    if not sa or not sb:
+        return False
+    smaller = min(len(sa), len(sb))
+    if smaller == 0:
+        return False
+    return (len(sa & sb) / smaller) >= threshold
+
+
 async def persist_assistant_round(
     conn,
     *,
@@ -414,7 +546,12 @@ async def persist_assistant_round(
     guidance_payload: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Persist a full guidance round: optional user message + assistant text +
-    one card-row per recommendation. Returns the new messages in insertion order."""
+    one card-row per recommendation. Returns the new messages in insertion order.
+
+    Skips persisting the assistant text row when the new summary is a near-
+    duplicate of the most recent persisted assistant text (Jaccard >= 0.75
+    after lowercasing/punctuation strip). Cards still get persisted — the
+    drop only suppresses the redundant prose."""
     inserted: list[dict[str, Any]] = []
 
     if user_message and user_message.strip():
@@ -428,18 +565,33 @@ async def persist_assistant_round(
         ))
 
     assistant_summary = guidance_payload.get("summary") or ""
-    inserted.append(await append_message(
-        conn,
-        incident_id=incident_id,
-        role="assistant",
-        message_type="text",
-        content=assistant_summary,
-        metadata={
-            "open_questions": guidance_payload.get("open_questions") or [],
-            "model": guidance_payload.get("model"),
-            "generated_at": guidance_payload.get("generated_at"),
-        },
-    ))
+
+    last_assistant_text = await conn.fetchval(
+        """
+        SELECT content FROM ir_incident_ai_messages
+        WHERE incident_id = $1 AND role = 'assistant' AND message_type = 'text'
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        incident_id,
+    )
+    if last_assistant_text and _summaries_too_similar(last_assistant_text, assistant_summary):
+        logger.info(
+            "IR copilot suppressed near-duplicate summary for incident %s", incident_id,
+        )
+    else:
+        inserted.append(await append_message(
+            conn,
+            incident_id=incident_id,
+            role="assistant",
+            message_type="text",
+            content=assistant_summary,
+            metadata={
+                "open_questions": guidance_payload.get("open_questions") or [],
+                "model": guidance_payload.get("model"),
+                "generated_at": guidance_payload.get("generated_at"),
+            },
+        ))
 
     for card in guidance_payload.get("cards") or []:
         inserted.append(await append_message(

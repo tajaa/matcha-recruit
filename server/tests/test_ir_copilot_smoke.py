@@ -175,6 +175,19 @@ def test_generate_guidance_drops_invalid_cards(monkeypatch):
                     "analysis_type": "nonsense",
                 },
             },
+            {
+                "id": "bad_set_field",
+                "title": "Categorize as Tardiness",
+                "recommendation": "Set incident_type to Tardiness.",
+                "rationale": "Reported user bug — AI invents enum values.",
+                "priority": "high",
+                "action": {
+                    "type": "set_field",
+                    "label": "Set Type to Tardiness",
+                    "field_name": "incident_type",
+                    "field_value": "Tardiness",
+                },
+            },
         ],
     })
 
@@ -210,8 +223,12 @@ def test_generate_guidance_drops_invalid_cards(monkeypatch):
     assert "good-set-field" in card_ids or "good_set_field" in card_ids
     assert "bad-open-tab" not in card_ids and "bad_open_tab" not in card_ids
     assert "bad-run-analysis" not in card_ids and "bad_run_analysis" not in card_ids
+    assert "bad-set-field" not in card_ids and "bad_set_field" not in card_ids
     for card in result["cards"]:
         assert card["action"]["type"] in IR_ACTION_TYPES
+        if card["action"]["type"] == "set_field":
+            from app.matcha.services.ir_ai_orchestrator import _is_valid_set_field
+            assert _is_valid_set_field(card["action"]["field_name"], card["action"]["field_value"])
 
 
 def test_canonical_analysis_type_aliases():
@@ -227,3 +244,50 @@ def test_canonical_analysis_type_aliases():
     assert _canonical_analysis_type("severity") == "severity"  # already canonical
     assert _canonical_analysis_type(None) is None
     assert _canonical_analysis_type("nonsense") is None
+
+
+def test_is_valid_set_field_rejects_hallucinated_enums():
+    """User-reported bug: AI proposed `set_field incident_type='Tardiness'`
+    which the backend rejects. Orchestrator should drop the card upstream."""
+    from app.matcha.services.ir_ai_orchestrator import _is_valid_set_field
+
+    # Valid enum values
+    assert _is_valid_set_field("incident_type", "behavioral") is True
+    assert _is_valid_set_field("severity", "high") is True
+    assert _is_valid_set_field("status", "investigating") is True
+    # Case-insensitive enum match (orchestrator lowercases before route check)
+    assert _is_valid_set_field("incident_type", "Behavioral") is True
+    # Free-text fields accept any non-empty string
+    assert _is_valid_set_field("root_cause", "Employee was late.") is True
+    assert _is_valid_set_field("corrective_actions", "Coach the employee.") is True
+    # Hallucinated enum — must reject
+    assert _is_valid_set_field("incident_type", "Tardiness") is False
+    assert _is_valid_set_field("severity", "very high") is False
+    assert _is_valid_set_field("status", "new") is False
+    # Unknown field name
+    assert _is_valid_set_field("priority", "high") is False
+    assert _is_valid_set_field(None, "behavioral") is False
+    # Empty / non-string values
+    assert _is_valid_set_field("root_cause", "") is False
+    assert _is_valid_set_field("root_cause", None) is False
+
+
+def test_summaries_too_similar_catches_paraphrase():
+    """Repetitive copilot summaries (same facts, different wording) should
+    register as similar so persist_assistant_round can skip the duplicate."""
+    from app.matcha.services.ir_ai_orchestrator import _summaries_too_similar
+
+    a = "The incident concerns Gina's 10-minute tardiness without prior notification, violating the attendance policy. It is currently categorized as behavioral and low severity."
+    b = "The incident regarding Gina's 10-minute tardiness without prior notification is categorized as behavioral and low severity, with a clear violation of the attendance policy."
+    assert _summaries_too_similar(a, b) is True
+
+    # Distinct summaries describing different state
+    c = "Awaiting your reply on whether the tardiness was documented."
+    d = "Policy mapping complete. Two attendance policy violations identified."
+    assert _summaries_too_similar(c, d) is False
+
+    # Identical strings
+    assert _summaries_too_similar(a, a) is True
+    # Empty inputs short-circuit to False (no signal)
+    assert _summaries_too_similar("", a) is False
+    assert _summaries_too_similar(a, "") is False
