@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowUpRight, Bell, ChevronRight, Download, FileText } from 'lucide-react'
+import { ArrowUpRight, Bell, ChevronRight, Download, FileText, Lock } from 'lucide-react'
 
 import MarketingNav from '../MarketingNav'
 import MarketingFooter from '../MarketingFooter'
 import { PricingContactModal } from '../../../components/PricingContactModal'
 import { PinButton } from '../../../components/PinButton'
 import { api } from '../../../api/client'
+import { useMe } from '../../../hooks/useMe'
 
 const INK = 'var(--color-ivory-ink)'
 const BG = 'var(--color-ivory-bg)'
@@ -14,8 +15,10 @@ const MUTED = 'var(--color-ivory-muted)'
 const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 
-type Asset = { slug: string; path: string; name: string; available: boolean }
+type Asset = { slug: string; path: string | null; name: string; available: boolean; is_free?: boolean }
 type AssetList = { assets: Asset[] }
+
+const SIGNUP_PATH = '/auth/resources-signup?next=%2Fresources%2Ftemplates'
 
 const TEMPLATE_DESCRIPTIONS: Record<string, string> = {
   'offer-letter':
@@ -76,6 +79,8 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
   const [showPricing, setShowPricing] = useState(false)
   const root = embedded ? '/app/resources' : '/resources'
   const t = mkT(embedded)
+  const { me } = useMe()
+  const isAnon = !me
 
   useEffect(() => {
     api.get<AssetList>('/resources/assets')
@@ -86,6 +91,13 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
 
   const handleDownload = (asset: Asset) => {
     if (!asset.available) return
+    // Backend strips `path` for non-free templates when the caller is
+    // unauthenticated. Send them to signup so they can come back with a
+    // session and get the actual URL.
+    if (!asset.path) {
+      window.location.href = SIGNUP_PATH
+      return
+    }
     // Cross-origin downloads (S3/CloudFront, government sites) ignore the
     // `download` attribute — open in a new tab so the browser saves DOCX
     // automatically and renders PDFs inline.
@@ -159,6 +171,10 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
           <div className={embedded ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3' : 'grid grid-cols-1 sm:grid-cols-2 gap-4'}>
             {assets.map(asset => {
               const available = asset.available
+              const locked = isAnon && !asset.is_free
+              const displayFormat = asset.path
+                ? formatFor(asset.path)
+                : asset.slug === 'i9-form' || asset.slug === 'w4-form' ? 'PDF' : 'DOCX'
               if (embedded) {
                 return (
                   <article
@@ -177,7 +193,7 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
                           </span>
                         )}
                         <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-vsc-border text-vsc-text/40">
-                          {formatFor(asset.path)}
+                          {displayFormat}
                         </span>
                         <PinButton kind="template" id={asset.slug} />
                       </div>
@@ -191,11 +207,17 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
                       disabled={!available}
                       className={`inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded-md text-xs font-medium transition-colors ${
                         available
-                          ? 'bg-zinc-700 hover:bg-zinc-600 text-white'
+                          ? locked
+                            ? 'border border-vsc-border text-vsc-text/70 hover:text-vsc-text'
+                            : 'bg-zinc-700 hover:bg-zinc-600 text-white'
                           : 'border border-vsc-border text-vsc-text/40'
                       }`}
                     >
-                      {available ? (<><Download className="w-3.5 h-3.5" />Download</>) : (<><Bell className="w-3.5 h-3.5" />Notify</>)}
+                      {available
+                        ? locked
+                          ? (<><Lock className="w-3.5 h-3.5" />Sign up to download</>)
+                          : (<><Download className="w-3.5 h-3.5" />Download</>)
+                        : (<><Bell className="w-3.5 h-3.5" />Notify</>)}
                     </button>
                   </article>
                 )
@@ -222,11 +244,27 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
                           COMING SOON
                         </span>
                       )}
+                      {available && locked && (
+                        <span
+                          className="text-[10px] tracking-wider px-2 py-1 rounded"
+                          style={{ border: `1px solid ${t.line}`, color: t.muted }}
+                        >
+                          SIGN UP
+                        </span>
+                      )}
+                      {available && !locked && isAnon && asset.is_free && (
+                        <span
+                          className="text-[10px] tracking-wider px-2 py-1 rounded"
+                          style={{ border: `1px solid ${t.line}`, color: t.muted }}
+                        >
+                          FREE
+                        </span>
+                      )}
                       <span
                         className="text-[10px] tracking-wider px-2 py-1 rounded"
                         style={{ border: `1px solid ${t.line}`, color: t.muted }}
                       >
-                        {formatFor(asset.path)}
+                        {displayFormat}
                       </span>
                     </div>
                   </div>
@@ -246,16 +284,23 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
                     disabled={!available}
                     className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-full text-sm font-medium transition-opacity hover:opacity-90 disabled:opacity-60"
                     style={{
-                      backgroundColor: available ? INK : 'transparent',
-                      color: available ? BG : INK,
-                      border: available ? 'none' : `1px solid ${LINE}`,
+                      backgroundColor: available && !locked ? INK : 'transparent',
+                      color: available && !locked ? BG : INK,
+                      border: available && !locked ? 'none' : `1px solid ${LINE}`,
                     }}
                   >
                     {available ? (
-                      <>
-                        <Download className="w-4 h-4" />
-                        Download
-                      </>
+                      locked ? (
+                        <>
+                          <Lock className="w-4 h-4" />
+                          Sign up to download
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-4 h-4" />
+                          Download
+                        </>
+                      )
                     ) : (
                       <>
                         <Bell className="w-4 h-4" />

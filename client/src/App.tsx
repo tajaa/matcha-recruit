@@ -126,7 +126,7 @@ export default function App() {
       <Route path="/resources" element={<ResourcesHub />} />
       <Route path="/resources/glossary" element={<ResourcesGlossary />} />
       <Route path="/resources/glossary/:slug" element={<ResourcesGlossaryTerm />} />
-      <Route path="/resources/templates" element={<RequireBusinessAccount><ResourcesTemplates /></RequireBusinessAccount>} />
+      <Route path="/resources/templates" element={<ResourcesTemplates />} />
       <Route path="/resources/templates/job-descriptions" element={<ResourcesJobDescriptions />} />
       <Route path="/resources/templates/job-descriptions/:slug" element={<JobDescriptionDetail />} />
       <Route path="/resources/states" element={<RequireBusinessAccount><ResourcesStateGuides /></RequireBusinessAccount>} />

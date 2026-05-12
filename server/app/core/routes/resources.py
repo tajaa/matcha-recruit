@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from ...database import get_connection
 from ..models.auth import CurrentUser
+from ..dependencies import get_optional_user
 from ...matcha.dependencies import require_client, get_client_company_id
 from ..services.redis_cache import check_rate_limit, client_ip
 
@@ -167,20 +168,20 @@ router = APIRouter()
 # I-9 / W-4 link out to authoritative government sources (kept current
 # by USCIS/IRS, public-domain).
 ASSETS: dict[str, dict] = {
-    "offer-letter": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/c093d74d2fcc48d7b3d160c083e2773a.docx", "name": "Offer Letter", "available": True},
-    "pip": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/2cad0579c92b4835857549c42ab59195.docx", "name": "Performance Improvement Plan", "available": True},
-    "termination-checklist": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/62c51d1ad2534c179e4195bd15fce47f.docx", "name": "Termination Checklist", "available": True},
-    "interview-scorecard": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/d0b6efa9cfb64530a7e34ece13ecbbec.docx", "name": "Interview Scorecard", "available": True},
-    "interview-guide": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/2a7e7ebbd7c04e7d8ab01bcbcf72ce2c.docx", "name": "Interview Guide — What You Can & Can't Ask", "available": True},
-    "pto-policy": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/40a74d49dbe340d9aca6c55c64382470.docx", "name": "PTO Policy Template", "available": True},
-    "workplace-investigation-report": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/a3d51b0794074aadba31cc3624c0ebc3.docx", "name": "Workplace Investigation Report", "available": True},
-    "performance-review": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/cf44966c6c21473f94d8ad933b12ad05.docx", "name": "Performance Review Template", "available": True},
-    "disciplinary-action": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/1cc56d1056a14b45ac1f723edd8dff08.docx", "name": "Disciplinary Action Form", "available": True},
-    "remote-work-agreement": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/fc9340721c1c4011b74081442c9fc809.docx", "name": "Remote Work Agreement", "available": True},
-    "expense-reimbursement": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/b23c734a36da4089a86b5f448dd785ab.docx", "name": "Expense Reimbursement Form", "available": True},
-    "severance-agreement": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/75854b4bc58845d4889a7dd59affc9d7.docx", "name": "Severance Agreement", "available": True},
-    "i9-form": {"path": "https://www.uscis.gov/sites/default/files/document/forms/i-9.pdf", "name": "Form I-9 — Employment Eligibility Verification (USCIS)", "available": True},
-    "w4-form": {"path": "https://www.irs.gov/pub/irs-pdf/fw4.pdf", "name": "Form W-4 — Employee's Withholding Certificate (IRS)", "available": True},
+    "offer-letter": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/c093d74d2fcc48d7b3d160c083e2773a.docx", "name": "Offer Letter", "available": True, "is_free": True},
+    "pip": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/2cad0579c92b4835857549c42ab59195.docx", "name": "Performance Improvement Plan", "available": True, "is_free": True},
+    "termination-checklist": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/62c51d1ad2534c179e4195bd15fce47f.docx", "name": "Termination Checklist", "available": True, "is_free": True},
+    "interview-scorecard": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/d0b6efa9cfb64530a7e34ece13ecbbec.docx", "name": "Interview Scorecard", "available": True, "is_free": True},
+    "interview-guide": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/2a7e7ebbd7c04e7d8ab01bcbcf72ce2c.docx", "name": "Interview Guide — What You Can & Can't Ask", "available": True, "is_free": True},
+    "pto-policy": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/40a74d49dbe340d9aca6c55c64382470.docx", "name": "PTO Policy Template", "available": True, "is_free": True},
+    "workplace-investigation-report": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/a3d51b0794074aadba31cc3624c0ebc3.docx", "name": "Workplace Investigation Report", "available": True, "is_free": False},
+    "performance-review": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/cf44966c6c21473f94d8ad933b12ad05.docx", "name": "Performance Review Template", "available": True, "is_free": False},
+    "disciplinary-action": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/1cc56d1056a14b45ac1f723edd8dff08.docx", "name": "Disciplinary Action Form", "available": True, "is_free": False},
+    "remote-work-agreement": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/fc9340721c1c4011b74081442c9fc809.docx", "name": "Remote Work Agreement", "available": True, "is_free": False},
+    "expense-reimbursement": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/b23c734a36da4089a86b5f448dd785ab.docx", "name": "Expense Reimbursement Form", "available": True, "is_free": False},
+    "severance-agreement": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/75854b4bc58845d4889a7dd59affc9d7.docx", "name": "Severance Agreement", "available": True, "is_free": False},
+    "i9-form": {"path": "https://www.uscis.gov/sites/default/files/document/forms/i-9.pdf", "name": "Form I-9 — Employment Eligibility Verification (USCIS)", "available": True, "is_free": False},
+    "w4-form": {"path": "https://www.irs.gov/pub/irs-pdf/fw4.pdf", "name": "Form W-4 — Employee's Withholding Certificate (IRS)", "available": True, "is_free": False},
 }
 
 
@@ -190,9 +191,18 @@ ASSETS: dict[str, dict] = {
 
 
 @router.get("/assets")
-async def list_assets(current_user: CurrentUser = Depends(require_client)):
-    """List downloadable assets — gated to signed-in business accounts."""
-    return {"assets": [{"slug": k, **v} for k, v in ASSETS.items()]}
+async def list_assets(current_user: Optional[CurrentUser] = Depends(get_optional_user)):
+    """List downloadable assets. Anonymous visitors see metadata for all
+    templates but only get the download `path` for free-tier ones — the rest
+    show a "Sign up to download" CTA on the frontend. Signed-in business
+    accounts get every path."""
+    assets: list[dict] = []
+    for slug, meta in ASSETS.items():
+        entry = {"slug": slug, **meta}
+        if current_user is None and not meta.get("is_free", False):
+            entry["path"] = None
+        assets.append(entry)
+    return {"assets": assets}
 
 
 # ---------------------------------------------------------------------------

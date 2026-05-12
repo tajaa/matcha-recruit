@@ -37,9 +37,9 @@ const CATEGORIES: Category[] = [
     to: '/resources/templates',
     title: 'Templates',
     description:
-      '14 editable HR templates — offer letters, PIPs, termination checklists, interview scorecards, and more.',
+      '14 editable HR templates — offer letters, PIPs, termination checklists, interview scorecards, and more. 6 free without signup.',
     status: 'live',
-    gated: true,
+    gated: false,
     icon: FileText,
   },
   {
