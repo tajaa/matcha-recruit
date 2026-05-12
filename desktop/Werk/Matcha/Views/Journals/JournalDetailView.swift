@@ -199,10 +199,18 @@ struct JournalDetailView: View {
         if vm.isLoading {
             Spacer(); ProgressView().tint(.secondary); Spacer()
         } else if let err = vm.errorMessage {
-            VStack(spacing: 6) {
+            VStack(spacing: 10) {
                 Spacer()
                 Image(systemName: "exclamationmark.triangle").font(.system(size: 22)).foregroundColor(.red)
-                Text(err).font(.system(size: 11)).foregroundColor(.secondary)
+                Text(err).font(.system(size: 11)).foregroundColor(.secondary).multilineTextAlignment(.center).padding(.horizontal, 16)
+                Button {
+                    Task { await vm.refresh() }
+                } label: {
+                    Text("Try again").font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.matcha600)
+                .controlSize(.small)
                 Spacer()
             }
         } else if vm.entries.isEmpty {

@@ -7,6 +7,7 @@ enum APIError: Error, LocalizedError {
     case unauthorized
     case invalidURL
     case noData
+    case networkUnavailable(URLError)
 
     var errorDescription: String? {
         switch self {
@@ -33,8 +34,33 @@ enum APIError: Error, LocalizedError {
             return "Invalid URL"
         case .noData:
             return "No data received"
+        case .networkUnavailable(let urlError):
+            switch urlError.code {
+            case .notConnectedToInternet:
+                return "No internet connection. Reconnect and try again."
+            case .timedOut:
+                return "Request timed out. Try again."
+            case .cannotFindHost, .dnsLookupFailed:
+                return "Couldn't reach the server. Check your network and try again."
+            case .cannotConnectToHost, .networkConnectionLost:
+                return "Lost connection to the server. Try again."
+            default:
+                return "Network error. Try again."
+            }
         }
     }
+}
+
+/// URLError codes that indicate a probably-transient network failure worth
+/// auto-retrying once before surfacing to the user.
+private let _transientNetworkCodes: Set<URLError.Code> = [
+    .cannotFindHost, .dnsLookupFailed, .networkConnectionLost,
+    .timedOut, .cannotConnectToHost,
+]
+
+private func _isTransientNetworkError(_ error: Error) -> URLError? {
+    guard let urlError = error as? URLError else { return nil }
+    return _transientNetworkCodes.contains(urlError.code) ? urlError : nil
 }
 
 class APIClient {
@@ -129,7 +155,23 @@ class APIClient {
             urlRequest.httpBody = try encoder.encode(body)
         }
 
-        let (data, response) = try await URLSession.shared.data(for: urlRequest)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: urlRequest)
+        } catch {
+            // DNS hiccup / brief disconnect / VPN flap — retry once after a
+            // short delay, then surface a friendlier APIError so the UI shows
+            // "Couldn't reach the server" instead of raw Foundation text.
+            if let urlError = _isTransientNetworkError(error) {
+                if retryOnMaintenance {
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    return try await request(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: false)
+                }
+                throw APIError.networkUnavailable(urlError)
+            }
+            throw error
+        }
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.noData
@@ -206,7 +248,20 @@ class APIClient {
             urlRequest.httpBody = try encoder.encode(body)
             urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
-        let (data, response) = try await URLSession.shared.data(for: urlRequest)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: urlRequest)
+        } catch {
+            if let urlError = _isTransientNetworkError(error) {
+                if retryOnMaintenance {
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    return try await requestData(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: false)
+                }
+                throw APIError.networkUnavailable(urlError)
+            }
+            throw error
+        }
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.noData
         }

@@ -64,9 +64,27 @@ struct ChannelDetailView: View {
                 Spacer()
             } else if let errorMessage {
                 Spacer()
-                Text(errorMessage)
-                    .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.4))
+                VStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 22))
+                        .foregroundColor(.red)
+                    Text(errorMessage)
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.4))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                    Button {
+                        Task {
+                            self.errorMessage = nil
+                            await loadChannel()
+                        }
+                    } label: {
+                        Text("Try again").font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.matcha600)
+                    .controlSize(.small)
+                }
                 Spacer()
             } else {
                 if broadcast.channelId == channelId && broadcast.isConnected {
