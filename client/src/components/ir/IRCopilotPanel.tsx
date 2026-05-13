@@ -288,6 +288,36 @@ export default function IRCopilotPanel({ incidentId }: Props) {
             )
           }
           if (m.message_type === 'event') {
+            const md = (m.metadata || {}) as Record<string, unknown>
+            const action = typeof md.action === 'string' ? md.action : null
+            const fieldLabel = typeof md.field_label === 'string' ? md.field_label : null
+            const newValue = md.new_value
+            const prevValue = md.previous_value
+            const note = typeof md.note === 'string' ? md.note : null
+            if ((action === 'set_field' || action === 'close_incident') && fieldLabel) {
+              const fmt = (v: unknown): string => {
+                if (v === null || v === undefined || v === '') return '—'
+                if (typeof v === 'string') return v
+                return String(v)
+              }
+              return (
+                <div
+                  key={m.id}
+                  className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5"
+                >
+                  <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-emerald-400 mb-1">
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.704 5.29a1 1 0 010 1.42l-8 8a1 1 0 01-1.42 0l-4-4a1 1 0 011.42-1.42L8 12.585l7.29-7.295a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
+                    <span>Updated {fieldLabel}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm flex-wrap">
+                    <span className="text-zinc-500 line-through">{fmt(prevValue)}</span>
+                    <span className="text-zinc-500">→</span>
+                    <span className="text-emerald-300 font-medium">{fmt(newValue)}</span>
+                  </div>
+                  {note && <div className="text-[11px] text-zinc-500 mt-1.5">{note}</div>}
+                </div>
+              )
+            }
             return (
               <div key={m.id} className="text-xs text-zinc-500 italic px-3">
                 · {m.content}

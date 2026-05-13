@@ -4251,6 +4251,14 @@ _FIELD_WHITELIST = {
     "corrective_actions": "corrective_actions",
 }
 
+_FIELD_LABELS = {
+    "incident_type": "Type",
+    "severity": "Severity",
+    "status": "Status",
+    "root_cause": "Root cause",
+    "corrective_actions": "Corrective actions",
+}
+
 
 _VALID_INCIDENT_TYPES = {"safety", "behavioral", "property", "near_miss", "other"}
 _VALID_SEVERITIES = {"critical", "high", "medium", "low"}
@@ -4327,6 +4335,7 @@ async def accept_copilot_card(
             action = card.get("action") or {}
             action_type = action.get("type")
             event_summary = ""
+            event_extra: dict = {}
 
             yield _sse({"type": "status", "stage": "starting", "action_type": action_type})
 
@@ -4350,7 +4359,14 @@ async def accept_copilot_card(
                         f"UPDATE ir_incidents SET {db_field} = $1, updated_at = NOW() WHERE id = $2",
                         new_value, incident_id,
                     )
-                    event_summary = f"Set {db_field} = {new_value!r} (was {prev!r})"
+                    field_label = _FIELD_LABELS.get(db_field, db_field.replace("_", " ").title())
+                    event_summary = f"Updated {field_label}"
+                    event_extra = {
+                        "field": db_field,
+                        "field_label": field_label,
+                        "previous_value": prev,
+                        "new_value": new_value,
+                    }
 
                 elif action_type == "run_analysis":
                     analysis_type = _canonical_analysis_type(action.get("analysis_type"))
@@ -4396,6 +4412,9 @@ async def accept_copilot_card(
                         event_summary = "Marked for ER escalation — open ER Copilot to create the case."
 
                 elif action_type == "close_incident":
+                    prev_status = await conn.fetchval(
+                        "SELECT status FROM ir_incidents WHERE id = $1", incident_id,
+                    )
                     await conn.execute(
                         "UPDATE ir_incidents SET status = 'resolved', resolved_at = NOW(), "
                         "updated_at = NOW() WHERE id = $1",
@@ -4416,7 +4435,14 @@ async def accept_copilot_card(
                         """,
                         incident_id, card_row["id"],
                     )
-                    event_summary = "Incident marked resolved. Other recommendations cleared."
+                    event_summary = "Updated Status"
+                    event_extra = {
+                        "field": "status",
+                        "field_label": "Status",
+                        "previous_value": prev_status,
+                        "new_value": "resolved",
+                        "note": "Other recommendations cleared.",
+                    }
 
                 elif action_type == "request_info":
                     event_summary = "Request acknowledged — answer in chat below."
@@ -4435,16 +4461,17 @@ async def accept_copilot_card(
                     json.dumps(new_md), card_row["id"],
                 )
 
+                event_metadata = {"action": action_type, "card_id": body.card_id, **event_extra}
                 await append_message(
                     conn,
                     incident_id=incident_id,
                     role="system",
                     message_type="event",
                     content=event_summary,
-                    metadata={"action": action_type, "card_id": body.card_id},
+                    metadata=event_metadata,
                     created_by=current_user.id,
                 )
-                yield _sse({"type": "event", "text": event_summary})
+                yield _sse({"type": "event", "text": event_summary, **event_extra, "action": action_type})
 
                 await log_audit(
                     conn,
