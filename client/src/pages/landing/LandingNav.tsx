@@ -6,7 +6,7 @@ interface Props {
 }
 
 const NAV_LINKS = [
-  { to: '/matcha-work', label: 'Matcha Work' },
+  // { to: '/matcha-work', label: 'Matcha Work' }, // beta — hidden until launch
   { to: '/services', label: 'Services' },
 ]
 
