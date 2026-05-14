@@ -4416,7 +4416,7 @@ async def accept_copilot_card(
                         "SELECT status FROM ir_incidents WHERE id = $1", incident_id,
                     )
                     await conn.execute(
-                        "UPDATE ir_incidents SET status = 'resolved', resolved_at = NOW(), "
+                        "UPDATE ir_incidents SET status = 'closed', resolved_at = NOW(), "
                         "updated_at = NOW() WHERE id = $1",
                         incident_id,
                     )
@@ -4440,7 +4440,7 @@ async def accept_copilot_card(
                         "field": "status",
                         "field_label": "Status",
                         "previous_value": prev_status,
-                        "new_value": "resolved",
+                        "new_value": "closed",
                         "note": "Other recommendations cleared.",
                     }
 

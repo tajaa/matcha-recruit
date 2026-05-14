@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Badge, Button, Card, Select } from '../../components/ui'
 import { useIRIncident } from '../../hooks/ir/useIRIncident'
@@ -15,6 +15,7 @@ import { IRCategoryDataDisplay } from '../../components/ir/IRCategoryDataDisplay
 import IRCopilotPanel from '../../components/ir/IRCopilotPanel'
 import { UpgradeUpsellCard } from '../../components/UpgradeUpsellCard'
 import { useMe } from '../../hooks/useMe'
+import { isIrOnlyTier } from '../../utils/tier'
 import {
   typeLabel, statusLabel, severityLabel,
   SEVERITY_BADGE, STATUS_BADGE, SEVERITY_OPTIONS,
@@ -27,19 +28,25 @@ const STATUS_OPTIONS = [
   { value: 'reported', label: 'Reported' },
   { value: 'investigating', label: 'Investigating' },
   { value: 'action_required', label: 'Action Required' },
+  { value: 'resolved', label: 'Resolved' },
   { value: 'closed', label: 'Closed' },
 ]
 
 type Tab = 'copilot' | 'overview' | 'documents' | 'analysis' | 'interviews'
 
+const FULL_TABS = ['copilot', 'overview', 'documents', 'analysis', 'interviews'] as const
+const LITE_TABS = ['copilot', 'overview', 'documents'] as const
+
 export default function IRDetail() {
   const { incidentId } = useParams<{ incidentId: string }>()
-  const { hasFeature } = useMe()
+  const { me, hasFeature } = useMe()
   const showPolicyMapping = hasFeature('policies')
   const showERFeatures = hasFeature('er_copilot')
   const showUpsell = !showPolicyMapping || !showERFeatures
+  const liteTier = isIrOnlyTier(me?.profile)
+  const tabs: readonly Tab[] = liteTier ? LITE_TABS : FULL_TABS
   const navigate = useNavigate()
-  const { incident, loading, error, updateIncident, deleteIncident } = useIRIncident(incidentId!)
+  const { incident, loading, error, updateIncident, deleteIncident, refetch } = useIRIncident(incidentId!)
   const [tab, setTab] = useState<Tab>('copilot')
 
   const [rootCause, setRootCause] = useState('')
@@ -51,6 +58,11 @@ export default function IRDetail() {
   const [categorizationResult, setCategorizationResult] = useState<IRCategorizationAnalysis | null>(null)
   const [rootCauseResult, setRootCauseResult] = useState<IRRootCauseAnalysis | null>(null)
   const [recommendationsResult, setRecommendationsResult] = useState<IRRecommendationsAnalysis | null>(null)
+
+  // Bounce stale URL/tab state when tier-restricted tabs aren't available.
+  useEffect(() => {
+    if (!tabs.includes(tab)) setTab('copilot')
+  }, [tabs, tab])
 
   // Sync local textarea state from incident on first load
   if (incident && !initialized) {
@@ -90,7 +102,7 @@ export default function IRDetail() {
         {/* Main */}
         <div className="col-span-2">
           <div className="flex gap-1 mb-4">
-            {(['copilot', 'overview', 'documents', 'analysis', 'interviews'] as const).map((t) => (
+            {tabs.map((t) => (
               <Button key={t} variant={tab === t ? 'secondary' : 'ghost'} size="sm" onClick={() => setTab(t)}>
                 {t === 'analysis' ? 'AI Analysis' : t === 'copilot' ? 'Copilot' : t.charAt(0).toUpperCase() + t.slice(1)}
               </Button>
@@ -100,7 +112,7 @@ export default function IRDetail() {
           <Card className="p-5">
             {/* Copilot */}
             {tab === 'copilot' && (
-              <IRCopilotPanel incidentId={incidentId!} />
+              <IRCopilotPanel incidentId={incidentId!} onIncidentChanged={refetch} />
             )}
 
             {/* Overview */}

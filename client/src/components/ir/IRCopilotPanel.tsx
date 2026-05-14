@@ -26,9 +26,10 @@ type Transcript = {
 
 interface Props {
   incidentId: string
+  onIncidentChanged?: () => void
 }
 
-export default function IRCopilotPanel({ incidentId }: Props) {
+export default function IRCopilotPanel({ incidentId, onIncidentChanged }: Props) {
   const [messages, setMessages] = useState<CopilotMessage[]>([])
   const [currentCards, setCurrentCards] = useState<CopilotCard[]>([])
   const [openQuestions, setOpenQuestions] = useState<string[]>([])
@@ -170,6 +171,7 @@ export default function IRCopilotPanel({ incidentId }: Props) {
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buf = ''
+      let didMutateIncident = false
       while (true) {
         const { value, done } = await reader.read()
         if (done) break
@@ -187,6 +189,9 @@ export default function IRCopilotPanel({ incidentId }: Props) {
               else if (data.stage === 'thinking') setBusyStage('Generating next steps…')
             } else if (data.type === 'event') {
               setBusyStage(data.text)
+              if (data.action === 'set_field' || data.action === 'close_incident') {
+                didMutateIncident = true
+              }
             } else if (data.type === 'error') {
               setError(data.detail || 'Action failed')
             }
@@ -199,6 +204,7 @@ export default function IRCopilotPanel({ incidentId }: Props) {
       }
       setSkippedCards(new Set())
       await refresh()
+      if (didMutateIncident) onIncidentChanged?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Accept failed')
     } finally {
