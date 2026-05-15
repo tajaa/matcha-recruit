@@ -64,6 +64,7 @@ import ComplianceCalendar from './pages/app/ComplianceCalendar'
 import EmployeeDetail from './pages/app/EmployeeDetail'
 import IRList from './pages/app/IRList'
 import IRDetail from './pages/app/IRDetail'
+import IRRiskInsights from './pages/app/IRRiskInsights'
 import Locations from './pages/app/Locations'
 import Handbooks from './pages/app/Handbooks'
 import HandbookDetail from './pages/app/HandbookDetail'
@@ -207,6 +208,7 @@ export default function App() {
         <Route path="compliance" element={<FeatureGate feature="compliance" label="Compliance"><Compliance /></FeatureGate>} />
         <Route path="compliance-calendar" element={<ComplianceCalendar />} />
         <Route path="ir" element={<IRList />} />
+        <Route path="ir/risk-insights" element={<IRRiskInsights />} />
         <Route path="ir/:incidentId" element={<IRDetail />} />
         <Route path="locations" element={<FeatureGate feature="incidents" label="Locations"><Locations /></FeatureGate>} />
         <Route path="escalated-queries" element={<EscalatedQueries />} />
