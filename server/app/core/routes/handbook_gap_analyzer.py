@@ -38,7 +38,61 @@ MAX_AUDITS_PER_ACCOUNT_PER_MONTH = 2  # hard cap; resets at the start of each ca
 IP_RATE_LIMIT_KEY = "handbook_gap_analyzer:ip"
 IP_RATE_LIMIT_PER_DAY = 12  # belt-and-suspenders against one IP fanning out via many accounts
 STATE_CODE_RE = re.compile(r"^[A-Z]{2}$")
-SAMPLE_GAPS_LIMIT = 2
+SAMPLE_GAPS_LIMIT = 3  # how many gaps Free-tier callers see in full on the report page
+
+
+async def _resolve_caller_tier(conn, user_id: UUID) -> str:
+    """Return 'free' for resources_free companies with no features on, else 'paid'.
+
+    Mirrors client/src/utils/tier.ts:isResourcesFreeTier so frontend + backend
+    apply the exact same gating definition. Admins/brokers/employees that don't
+    have a clients row default to 'paid' (they get the full report).
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT comp.signup_source, comp.enabled_features
+        FROM clients c
+        JOIN companies comp ON comp.id = c.company_id
+        WHERE c.user_id = $1
+        """,
+        user_id,
+    )
+    if not row:
+        return "paid"
+    if row["signup_source"] != "resources_free":
+        return "paid"
+    features = row["enabled_features"] or {}
+    if isinstance(features, str):
+        try:
+            features = json.loads(features)
+        except json.JSONDecodeError:
+            features = {}
+    any_enabled = any(bool(v) for v in (features or {}).values())
+    return "paid" if any_enabled else "free"
+
+
+def _build_hidden_by_state(
+    by_state: dict[str, dict[str, int]],
+    sample_gaps: list[dict[str, Any]],
+) -> dict[str, int]:
+    """For each state, count gaps that aren't in the sample so the UI can render
+    'X more gaps hidden — upgrade to reveal' cards."""
+    sample_per_state: dict[str, int] = {}
+    for g in sample_gaps:
+        s = g.get("state")
+        if s:
+            sample_per_state[s] = sample_per_state.get(s, 0) + 1
+    hidden: dict[str, int] = {}
+    for state, counts in (by_state or {}).items():
+        total = (
+            int(counts.get("critical", 0))
+            + int(counts.get("important", 0))
+            + int(counts.get("recommended", 0))
+        )
+        revealed = sample_per_state.get(state, 0)
+        if total - revealed > 0:
+            hidden[state] = total - revealed
+    return hidden
 
 
 def _parse_states(raw: str) -> list[str]:
@@ -57,6 +111,41 @@ def _parse_states(raw: str) -> list[str]:
     return out
 
 
+_SEVERITY_ORDER = {"critical": 0, "important": 1, "recommended": 2}
+
+
+def _pick_samples_distributed(gaps: list[dict[str, Any]], n: int) -> list[dict[str, Any]]:
+    """Pick up to N sample gaps. Prefer state diversity (one per state first),
+    then fall back to severity-ranked picks until N is reached."""
+    if not gaps or n <= 0:
+        return []
+    ranked = sorted(
+        gaps,
+        key=lambda g: (
+            _SEVERITY_ORDER.get((g.get("severity") or "").lower(), 9),
+            (g.get("requirement_title") or ""),
+        ),
+    )
+    picked: list[dict[str, Any]] = []
+    seen_states: set[str] = set()
+    # Pass 1: one-per-state, severity-first.
+    for g in ranked:
+        state = g.get("state")
+        if state and state not in seen_states:
+            picked.append(g)
+            seen_states.add(state)
+            if len(picked) >= n:
+                return picked
+    # Pass 2: top up by severity regardless of state.
+    for g in ranked:
+        if g in picked:
+            continue
+        picked.append(g)
+        if len(picked) >= n:
+            break
+    return picked
+
+
 def _summarize_gaps(report: dict[str, Any]) -> dict[str, Any]:
     counts = report.get("gap_counts") or {}
     if isinstance(counts, str):
@@ -64,8 +153,9 @@ def _summarize_gaps(report: dict[str, Any]) -> dict[str, Any]:
             counts = json.loads(counts)
         except json.JSONDecodeError:
             counts = {}
-
-    sample = counts.pop("sample_gaps", []) if isinstance(counts, dict) else []
+    if isinstance(counts, dict):
+        # Worker stashes a sample list in here; we re-derive at response time.
+        counts.pop("sample_gaps", None)
     return {
         "status": report.get("status"),
         "states": report.get("states") or [],
@@ -78,7 +168,6 @@ def _summarize_gaps(report: dict[str, Any]) -> dict[str, Any]:
             "total_states": int(counts.get("total_states", len(report.get("states") or []))),
             "by_state": counts.get("by_state") or {},
         },
-        "sample_gaps": sample[:SAMPLE_GAPS_LIMIT],
         "created_at": report["created_at"].isoformat() if report.get("created_at") else None,
         "completed_at": report["completed_at"].isoformat() if report.get("completed_at") else None,
     }
@@ -291,5 +380,22 @@ async def get_handbook_audit_report(
             gaps_raw = json.loads(gaps_raw)
         except json.JSONDecodeError:
             gaps_raw = []
-    summary["gaps"] = gaps_raw or []
+    full_gaps: list[dict[str, Any]] = list(gaps_raw or [])
+
+    async with get_connection() as conn:
+        tier = await _resolve_caller_tier(conn, current_user.id)
+    summary["tier"] = tier
+
+    samples = _pick_samples_distributed(full_gaps, SAMPLE_GAPS_LIMIT)
+    summary["sample_gaps"] = samples
+
+    if tier == "paid":
+        summary["gaps"] = full_gaps
+    else:
+        # Free tier: hide the full list, expose how much is locked per state.
+        summary["gaps"] = None
+        summary["hidden_by_state"] = _build_hidden_by_state(
+            summary["gap_counts"]["by_state"],
+            samples,
+        )
     return summary

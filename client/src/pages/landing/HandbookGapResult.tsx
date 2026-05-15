@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import {
-  AlertOctagon, AlertTriangle, CheckCircle2, Info, Loader2, ShieldCheck,
+  AlertOctagon, AlertTriangle, CheckCircle2, Info, Loader2, Lock, ShieldCheck, Sparkles,
 } from 'lucide-react'
 
 import MarketingNav from './MarketingNav'
@@ -33,6 +33,7 @@ interface Gap {
 interface ReportPayload {
   report_id: string
   status: 'processing' | 'ready' | 'failed'
+  tier: 'free' | 'paid'
   states: string[]
   industry: string | null
   gap_counts: {
@@ -44,7 +45,8 @@ interface ReportPayload {
     by_state: Record<string, { critical?: number; important?: number; recommended?: number; covered?: number }>
   }
   sample_gaps: Gap[]
-  gaps?: Gap[]
+  gaps?: Gap[] | null
+  hidden_by_state?: Record<string, number>
   is_owner: boolean
   error?: string
   created_at?: string | null
@@ -164,21 +166,37 @@ function ErrorBlock({ message }: { message: string }) {
 }
 
 function ResultBody({ report }: { report: ReportPayload }) {
-  const { gap_counts, gaps, states } = report
+  const { gap_counts, gaps, sample_gaps, states, tier, hidden_by_state } = report
+  const isFree = tier === 'free'
 
   const groupedGaps = useMemo(() => {
-    const all = gaps || []
+    // Paid sees the full gaps array. Free sees only sample_gaps; we still group
+    // them by state so the per-state "X more hidden" reveal cards render in
+    // the right place.
+    const all = isFree ? (sample_gaps || []) : (gaps || [])
     const map = new Map<string, Gap[]>()
     for (const g of all) {
       const key = g.state
       if (!map.has(key)) map.set(key, [])
       map.get(key)!.push(g)
     }
+    // For Free tier, ensure every state with hidden gaps shows up even if no
+    // sample landed in it (so the reveal card still renders).
+    if (isFree && hidden_by_state) {
+      for (const state of Object.keys(hidden_by_state)) {
+        if (!map.has(state)) map.set(state, [])
+      }
+    }
     for (const list of map.values()) {
       list.sort((a, b) => severityRank(a.severity) - severityRank(b.severity))
     }
-    return Array.from(map.entries())
-  }, [gaps])
+    // Sort sections so states with most hidden gaps surface first on Free.
+    return Array.from(map.entries()).sort(([a], [b]) => {
+      const ah = (hidden_by_state || {})[a] || 0
+      const bh = (hidden_by_state || {})[b] || 0
+      return bh - ah
+    })
+  }, [gaps, sample_gaps, hidden_by_state, isFree])
 
   return (
     <>
@@ -226,25 +244,35 @@ function ResultBody({ report }: { report: ReportPayload }) {
         />
       </div>
 
+      {isFree && gap_counts.total_gaps > 0 && (
+        <UpgradeBanner totalGaps={gap_counts.total_gaps} sampleCount={(sample_gaps || []).length} />
+      )}
+
       <div className="space-y-8">
-        {groupedGaps.map(([state, list]) => (
-          <section key={state}>
-            <div className="flex items-center justify-between mb-4">
-              <h2
-                className="tracking-tight"
-                style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: '1.4rem', color: INK }}
-              >
-                {state}
-              </h2>
-              <span className="text-xs" style={{ color: MUTED, fontFamily: 'var(--font-mono)' }}>
-                {list.length} gap{list.length === 1 ? '' : 's'}
-              </span>
-            </div>
-            <div className="space-y-3">
-              {list.map((g, i) => <GapCard key={`${state}-${i}`} gap={g} />)}
-            </div>
-          </section>
-        ))}
+        {groupedGaps.map(([state, list]) => {
+          const hidden = (hidden_by_state || {})[state] || 0
+          return (
+            <section key={state}>
+              <div className="flex items-center justify-between mb-4">
+                <h2
+                  className="tracking-tight"
+                  style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: '1.4rem', color: INK }}
+                >
+                  {state}
+                </h2>
+                <span className="text-xs" style={{ color: MUTED, fontFamily: 'var(--font-mono)' }}>
+                  {isFree
+                    ? `${list.length} sample${list.length === 1 ? '' : 's'}${hidden > 0 ? ` · ${hidden} hidden` : ''}`
+                    : `${list.length} gap${list.length === 1 ? '' : 's'}`}
+                </span>
+              </div>
+              <div className="space-y-3">
+                {list.map((g, i) => <GapCard key={`${state}-${i}`} gap={g} />)}
+                {isFree && hidden > 0 && <UpgradeRevealCard count={hidden} />}
+              </div>
+            </section>
+          )
+        })}
         {groupedGaps.length === 0 && (
           <div
             className="rounded-2xl p-8 text-center"
@@ -333,6 +361,73 @@ function SeverityTile({
       </div>
       <p className="text-xs" style={{ color: MUTED }}>{help}</p>
     </div>
+  )
+}
+
+function UpgradeBanner({ totalGaps, sampleCount }: { totalGaps: number; sampleCount: number }) {
+  const hidden = Math.max(0, totalGaps - sampleCount)
+  return (
+    <div
+      className="mb-10 rounded-2xl p-7"
+      style={{ backgroundColor: INK, color: BG }}
+    >
+      <div className="flex items-start gap-4">
+        <Sparkles className="w-5 h-5 mt-1 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <h2
+            className="tracking-tight mb-2"
+            style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: '1.4rem' }}
+          >
+            You're seeing {sampleCount} of {totalGaps} gaps.
+          </h2>
+          <p className="text-sm leading-relaxed mb-4" style={{ color: 'rgba(245,242,237,0.75)' }}>
+            The full clause-by-clause report — every missing policy, what good
+            looks like, and the matched section in your handbook — is included
+            with Matcha Lite or Platform. {hidden > 0 ? `${hidden} more gap${hidden === 1 ? ' is' : 's are'} waiting on your upgrade.` : ''}
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              to="/matcha-lite"
+              className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
+              style={{ backgroundColor: BG, color: INK }}
+            >
+              See Matcha Lite
+            </Link>
+            <Link
+              to="/"
+              className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
+              style={{ border: `1px solid rgba(245,242,237,0.3)`, color: BG }}
+            >
+              Compare Platform
+            </Link>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function UpgradeRevealCard({ count }: { count: number }) {
+  return (
+    <Link
+      to="/matcha-lite"
+      className="block rounded-xl px-5 py-4 transition-colors"
+      style={{
+        backgroundColor: 'rgba(31,29,26,0.04)',
+        border: `1px dashed ${LINE}`,
+        color: MUTED,
+      }}
+    >
+      <div className="flex items-center gap-3">
+        <Lock className="w-4 h-4 shrink-0" style={{ color: INK }} />
+        <span className="text-sm" style={{ color: INK }}>
+          {count} more gap{count === 1 ? '' : 's'} hidden
+        </span>
+        <span className="ml-auto text-[11px] uppercase tracking-[0.2em]" style={{ color: MUTED, fontFamily: 'var(--font-mono)' }}>
+          Upgrade to reveal →
+        </span>
+      </div>
+    </Link>
   )
 }
 
