@@ -8,11 +8,14 @@ type SelectProps = {
   options: Option[]
   value?: string
   onChange?: (event: { target: { value: string } }) => void
+  onBlur?: () => void
   placeholder?: string
   id?: string
   className?: string
   disabled?: boolean
   name?: string
+  required?: boolean
+  autoFocus?: boolean
 }
 
 export function Select({
@@ -20,11 +23,14 @@ export function Select({
   options,
   value = '',
   onChange,
+  onBlur,
   placeholder,
   id,
   className = '',
   disabled = false,
   name,
+  required,
+  autoFocus,
 }: SelectProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -59,7 +65,7 @@ export function Select({
     <div className={className}>
       {label && (
         <label htmlFor={id} className="block text-[10px] font-medium uppercase tracking-[0.16em] text-zinc-500 mb-1.5">
-          {label}
+          {label}{required && <span className="text-red-400 ml-1">*</span>}
         </label>
       )}
       <div ref={ref} className="relative">
@@ -68,7 +74,9 @@ export function Select({
           id={id}
           name={name}
           disabled={disabled}
+          autoFocus={autoFocus}
           onClick={() => !disabled && setOpen((v) => !v)}
+          onBlur={onBlur}
           className={`w-full flex items-center justify-between gap-2 bg-zinc-900 border border-white/[0.08] rounded-lg px-3 py-2 text-[12px] text-zinc-200 hover:border-white/15 hover:bg-zinc-800/60 transition-colors ${
             disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
           } ${open ? 'border-white/20' : ''}`}
