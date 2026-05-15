@@ -1,4 +1,4 @@
-import { AlertTriangle, BookOpen, TrendingUp } from 'lucide-react'
+import { AlertTriangle, BookOpen, FileText, TrendingUp } from 'lucide-react'
 import SidebarShell from '../SidebarShell'
 import type { NavItem, NavGroup } from '../SidebarShell'
 import { useMe } from '../../hooks/useMe'
@@ -7,10 +7,10 @@ import { useSidebarBadges } from '../../hooks/useSidebarBadges'
 const nav: (NavItem | NavGroup)[] = [
   { to: '/app/ir', icon: AlertTriangle, label: 'Incidents' },
   { to: '/app/ir/risk-insights', icon: TrendingUp, label: 'Risk Insights' },
+  { to: '/app/handbooks', icon: FileText, label: 'Handbooks' },
   { to: '/app/resources', icon: BookOpen, label: 'Resources' },
   // { to: '/app', icon: LayoutDashboard, label: 'Command Center' },
   // { to: '/app/ask-expert', icon: MessageCircleQuestion, label: 'Ask an Expert' },
-  // { to: '/app/handbooks', icon: FileText, label: 'Handbooks', feature: 'handbooks' },
   // { to: '/app/training', icon: GraduationCap, label: 'Training', feature: 'training' },
   // { to: '/app/compliance-calendar', icon: CalendarDays, label: 'Compliance Calendar' },
   // { to: '/app/locations', icon: MapPin, label: 'Locations' },
