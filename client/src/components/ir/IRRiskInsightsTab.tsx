@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Loader2, RefreshCw } from 'lucide-react'
 import { api } from '../../api/client'
-import { Badge, Button, Select } from '../ui'
-import {
-  SEVERITY_BADGE,
-  severityLabel,
-  type IRIncidentType,
-  type IRRiskInsights,
-  type IRRiskMatrix,
-  type IRRiskMatrixCell,
-  type IRRiskTheme,
+import { Button, Select } from '../ui'
+import type {
+  IRRiskInsights,
+  IRRiskMatrix,
 } from '../../types/ir'
+import { BAND_COLOR, BAND_LABEL, type Band } from '../../types/risk-assessment'
+import { synthesizeAssessment } from './risk/synth'
+import { IRRiskHeroCard } from './risk/IRRiskHeroCard'
+import { IRDimensionsGrid } from './risk/IRDimensionsGrid'
+import { IRRiskMatrixHeatmap } from './risk/IRRiskMatrixHeatmap'
+import { IRThemeCard } from './risk/IRThemeCard'
 
 type LocationRow = {
   id: string
@@ -23,14 +24,6 @@ type LocationRow = {
 type Props = {
   onNavigateIncident?: (id: string) => void
 }
-
-const TYPE_COLUMNS: { key: IRIncidentType; label: string }[] = [
-  { key: 'safety', label: 'Safety' },
-  { key: 'behavioral', label: 'Behavioral' },
-  { key: 'property', label: 'Property' },
-  { key: 'near_miss', label: 'Near Miss' },
-  { key: 'other', label: 'Other' },
-]
 
 const DAYS_OPTIONS = [
   { value: '30', label: 'Last 30 days' },
@@ -60,9 +53,8 @@ function relativeTime(iso: string): string {
 
 export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
   const [locations, setLocations] = useState<LocationRow[] | null>(null)
-  const [locationFilter, setLocationFilter] = useState<string>('') // '' = all
-  const [days, setDays] = useState<string>('30')
-  const [insightDays, setInsightDays] = useState<string>('30')
+  const [locationFilter, setLocationFilter] = useState<string>('')
+  const [days, setDays] = useState<string>('90')
 
   const [matrix, setMatrix] = useState<IRRiskMatrix | null>(null)
   const [matrixLoading, setMatrixLoading] = useState(false)
@@ -78,15 +70,10 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
       .catch(() => setLocations([]))
   }, [])
 
-  function buildQs(extra?: Record<string, string | undefined>): string {
+  function buildMatrixQs(): string {
     const p = new URLSearchParams()
     if (locationFilter) p.set('location_id', locationFilter)
     p.set('days', days)
-    if (extra) {
-      for (const [k, v] of Object.entries(extra)) {
-        if (v != null) p.set(k, v)
-      }
-    }
     return p.toString()
   }
 
@@ -94,7 +81,7 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
     setMatrixLoading(true)
     setMatrixError(null)
     try {
-      const res = await api.get<IRRiskMatrix>(`/ir/incidents/analytics/risk-matrix?${buildQs()}`)
+      const res = await api.get<IRRiskMatrix>(`/ir/incidents/analytics/risk-matrix?${buildMatrixQs()}`)
       setMatrix(res)
     } catch (e) {
       setMatrixError(e instanceof Error ? e.message : 'Failed to load risk matrix')
@@ -109,7 +96,7 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
     try {
       const p = new URLSearchParams()
       if (locationFilter) p.set('location_id', locationFilter)
-      p.set('days', insightDays)
+      p.set('days', days)
       if (opts?.regenerate) p.set('regenerate', 'true')
       const res = await api.get<IRRiskInsights>(`/ir/incidents/analytics/risk-insights?${p.toString()}`)
       setInsights(res)
@@ -122,13 +109,9 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
 
   useEffect(() => {
     loadMatrix()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locationFilter, days])
-
-  useEffect(() => {
     loadInsights()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [locationFilter, insightDays])
+  }, [locationFilter, days])
 
   const locationOptions = useMemo(() => {
     const active = (locations || []).filter((l) => l.is_active)
@@ -138,228 +121,126 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
     ]
   }, [locations])
 
-  const totalsRow = useMemo(() => {
-    if (!matrix) return null
-    const totals: Record<string, number> = {}
-    let grand = 0
-    for (const r of matrix.rows) {
-      for (const c of r.cells) {
-        totals[c.incident_type] = (totals[c.incident_type] || 0) + c.count
-        grand += c.count
-      }
-    }
-    return { totals, grand }
-  }, [matrix])
+  const assessment = useMemo(
+    () => synthesizeAssessment(matrix, insights),
+    [matrix, insights],
+  )
+
+  const fullyLoading = matrixLoading && !matrix
 
   return (
-    <div className="space-y-6">
-      {/* Filter bar */}
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="w-56">
-          <Select
-            label="Location"
-            options={locationOptions}
-            value={locationFilter}
-            onChange={(e) => setLocationFilter(e.target.value)}
-          />
-        </div>
-        <div className="w-44">
-          <Select
-            label="Matrix window"
-            options={DAYS_OPTIONS}
-            value={days}
-            onChange={(e) => setDays(e.target.value)}
-          />
-        </div>
-        <div className="w-44">
-          <Select
-            label="Insights window"
-            options={DAYS_OPTIONS}
-            value={insightDays}
-            onChange={(e) => setInsightDays(e.target.value)}
-          />
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => loadInsights({ regenerate: true })}
-          disabled={insightsLoading}
-        >
-          <RefreshCw className={`w-4 h-4 ${insightsLoading ? 'animate-spin' : ''}`} />
-          <span className="ml-2">Regenerate insights</span>
-        </Button>
-      </div>
-
-      {/* Risk Matrix */}
-      <section>
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
-            Risk Matrix · last {matrix?.period_days ?? days} days
-          </h2>
-          {matrix && (
-            <span className="text-xs text-zinc-500">
-              {matrix.company_total} incidents across {matrix.location_count} location
-              {matrix.location_count === 1 ? '' : 's'}
-            </span>
-          )}
-        </div>
-        <div className="border border-zinc-800 rounded-lg overflow-hidden">
-          {matrixLoading ? (
-            <div className="p-6 flex items-center justify-center text-zinc-500">
-              <Loader2 className="w-4 h-4 animate-spin" />
-            </div>
-          ) : matrixError ? (
-            <p className="p-4 text-sm text-red-400">{matrixError}</p>
-          ) : !matrix || matrix.rows.length === 0 ? (
-            <p className="p-6 text-sm text-zinc-500 text-center">
-              No incidents reported in this window.
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-zinc-100">Risk Insights</h1>
+          {assessment && (
+            <p className="mt-1 text-[10px] text-zinc-500 font-mono uppercase tracking-wider">
+              Computed {new Date(assessment.computed_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
             </p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-zinc-900 text-zinc-400 text-xs uppercase tracking-wide">
-                <tr>
-                  <th className="text-left px-4 py-3">Location</th>
-                  {TYPE_COLUMNS.map((c) => (
-                    <th key={c.key} className="text-right px-4 py-3">{c.label}</th>
-                  ))}
-                  <th className="text-right px-4 py-3">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {matrix.rows.map((row) => (
-                  <tr key={row.location_id ?? '__unassigned__'} className="border-t border-zinc-900">
-                    <td className="px-4 py-3 text-zinc-200">{row.location_name}</td>
-                    {TYPE_COLUMNS.map((col) => {
-                      const cell = row.cells.find((c) => c.incident_type === col.key)
-                      return <MatrixCellView key={col.key} cell={cell} />
-                    })}
-                    <td className="px-4 py-3 text-right text-zinc-300 font-medium">
-                      {row.total_incidents}
-                    </td>
-                  </tr>
-                ))}
-                {totalsRow && (
-                  <tr className="border-t border-zinc-800 bg-zinc-900/40">
-                    <td className="px-4 py-3 text-xs text-zinc-500 uppercase tracking-wide">
-                      Company total
-                    </td>
-                    {TYPE_COLUMNS.map((col) => (
-                      <td key={col.key} className="px-4 py-3 text-right text-zinc-400">
-                        {totalsRow.totals[col.key] || 0}
-                      </td>
-                    ))}
-                    <td className="px-4 py-3 text-right text-zinc-300 font-medium">
-                      {totalsRow.grand}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
           )}
         </div>
-        <p className="text-xs text-zinc-500 mt-2">
-          <span className="inline-block w-2 h-2 rounded-full bg-red-500 mr-1.5" />
-          Cell flagged when a location runs ≥2× the company-wide baseline rate for that
-          incident type AND has at least 3 incidents.
-        </p>
-      </section>
-
-      {/* AI Themes */}
-      <section>
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="flex items-center gap-2 text-xs font-medium text-zinc-400 uppercase tracking-wide">
-            <AlertTriangle className="w-3.5 h-3.5" />
-            AI Themes · last {insights?.period_days ?? insightDays} days
-          </h2>
-          {insights && (
-            <span className="text-xs text-zinc-500">
-              {insights.from_cache ? 'cached' : 'fresh'} · generated {relativeTime(insights.generated_at)}
-            </span>
-          )}
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="w-48">
+            <Select
+              label=""
+              options={locationOptions}
+              value={locationFilter}
+              onChange={(e) => setLocationFilter(e.target.value)}
+            />
+          </div>
+          <div className="w-36">
+            <Select
+              label=""
+              options={DAYS_OPTIONS}
+              value={days}
+              onChange={(e) => setDays(e.target.value)}
+            />
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => loadInsights({ regenerate: true })}
+            disabled={insightsLoading}
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${insightsLoading ? 'animate-spin' : ''}`} />
+            <span className="ml-2">Regenerate</span>
+          </Button>
         </div>
-        {insightsLoading ? (
-          <div className="border border-zinc-800 rounded-lg p-6 flex items-center justify-center text-zinc-500">
-            <Loader2 className="w-4 h-4 animate-spin" />
-          </div>
-        ) : insightsError ? (
-          <p className="text-sm text-red-400">{insightsError}</p>
-        ) : !insights || insights.themes.length === 0 ? (
-          <div className="border border-zinc-800 rounded-lg p-6 text-sm text-zinc-500 text-center">
-            No recurring patterns detected in this window. Themes need ≥3 supporting
-            incidents to surface.
-          </div>
-        ) : (
-          <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
-            {insights.themes.map((t, idx) => (
-              <ThemeCard
-                key={`${t.label}-${idx}`}
-                theme={t}
-                onNavigateIncident={onNavigateIncident}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-    </div>
-  )
-}
-
-function MatrixCellView({ cell }: { cell: IRRiskMatrixCell | undefined }) {
-  if (!cell || cell.count === 0) {
-    return <td className="px-4 py-3 text-right text-zinc-700">—</td>
-  }
-  return (
-    <td className="px-4 py-3 text-right">
-      <span className="inline-flex items-center gap-1.5">
-        {cell.flagged && (
-          <span
-            className="inline-block w-2 h-2 rounded-full bg-red-500"
-            title={`${cell.deviation_ratio.toFixed(1)}× company baseline`}
-          />
-        )}
-        <span className={cell.flagged ? 'text-red-300 font-medium' : 'text-zinc-200'}>
-          {cell.count}
-        </span>
-      </span>
-    </td>
-  )
-}
-
-function ThemeCard({
-  theme,
-  onNavigateIncident,
-}: {
-  theme: IRRiskTheme
-  onNavigateIncident?: (id: string) => void
-}) {
-  const variant = SEVERITY_BADGE[theme.severity] ?? 'neutral'
-  return (
-    <div className="border border-zinc-800 rounded-lg p-4 bg-zinc-950 space-y-2">
-      <div className="flex items-start justify-between gap-3">
-        <h3 className="text-sm font-medium text-zinc-100">{theme.label}</h3>
-        <Badge variant={variant}>{severityLabel(theme.severity)}</Badge>
       </div>
-      <p className="text-xs text-zinc-500">
-        {theme.incident_count} incident{theme.incident_count === 1 ? '' : 's'}
-        {theme.location_name ? ` at ${theme.location_name}` : ' across multiple locations'}
-      </p>
-      <p className="text-sm text-zinc-300">{theme.insight}</p>
-      <p className="text-xs text-zinc-400">
-        <span className="text-zinc-500 uppercase tracking-wide">Suggested:</span>{' '}
-        {theme.recommendation}
-      </p>
-      {theme.evidence_incident_ids.length > 0 && (
-        <div className="pt-2 border-t border-zinc-900 flex flex-wrap gap-1.5">
-          {theme.evidence_incident_ids.map((id) => (
-            <button
-              key={id}
-              onClick={() => onNavigateIncident?.(id)}
-              className="text-[11px] font-mono text-emerald-400 hover:text-emerald-300 underline underline-offset-2"
-            >
-              {id.slice(0, 8)}
-            </button>
-          ))}
+
+      {fullyLoading ? (
+        <div className="flex items-center justify-center min-h-[40vh]">
+          <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse">Loading risk insights…</div>
         </div>
+      ) : matrixError ? (
+        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 text-sm text-red-400">{matrixError}</div>
+      ) : !assessment || matrix?.company_total === 0 ? (
+        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-12 text-center">
+          <p className="text-sm text-zinc-400 mb-1">No incidents in this window.</p>
+          <p className="text-[11px] text-zinc-600">
+            Once incidents are reported, scores and themes will appear here.
+          </p>
+        </div>
+      ) : (
+        <>
+          <IRRiskHeroCard assessment={assessment} />
+
+          <IRDimensionsGrid assessment={assessment} />
+
+          <IRRiskMatrixHeatmap matrix={matrix} loading={matrixLoading} error={matrixError} />
+
+          {/* AI Themes */}
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="flex items-center gap-2 text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                AI Themes · last {insights?.period_days ?? days} days
+              </h2>
+              {insights && (
+                <span className="text-[10px] text-zinc-600 font-mono">
+                  {insights.from_cache ? 'cached' : 'fresh'} · {relativeTime(insights.generated_at)}
+                </span>
+              )}
+            </div>
+            {insightsLoading && !insights ? (
+              <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 flex items-center justify-center text-zinc-500">
+                <Loader2 className="w-4 h-4 animate-spin" />
+              </div>
+            ) : insightsError ? (
+              <p className="text-sm text-red-400">{insightsError}</p>
+            ) : !insights || insights.themes.length === 0 ? (
+              <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 text-sm text-zinc-500 text-center">
+                No recurring patterns detected. Themes need ≥3 supporting incidents to surface.
+              </div>
+            ) : (
+              <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
+                {insights.themes.map((t, idx) => (
+                  <IRThemeCard
+                    key={`${t.label}-${idx}`}
+                    theme={t}
+                    onNavigateIncident={onNavigateIncident}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Score Bands legend */}
+          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6">
+            <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-4">Score Bands</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-px bg-white/10 rounded-lg overflow-hidden">
+              {(['low', 'moderate', 'high', 'critical'] as Band[]).map((band) => (
+                <div key={band} className="bg-zinc-800 px-4 py-3">
+                  <div className={`text-[10px] font-bold uppercase tracking-widest ${BAND_COLOR[band].text}`}>{BAND_LABEL[band]}</div>
+                  <div className="text-[9px] text-zinc-600 mt-1 font-mono">
+                    {band === 'low' ? '0 – 25' : band === 'moderate' ? '26 – 50' : band === 'high' ? '51 – 75' : '76 – 100'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
       )}
     </div>
   )
