@@ -136,3 +136,5 @@ scripts/grab-ss.sh
 
 # Deal proposals (confidential, not tracked)
 deals/
+
+server/db.sqlite
