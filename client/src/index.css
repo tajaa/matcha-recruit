@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --default-font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-sans: 'GFS Didot', 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --default-font-family: 'GFS Didot', 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
   --default-font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
 
   --color-vsc-bg: #1e1e1e;
@@ -39,7 +39,7 @@
 }
 
 html, body {
-  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-family: 'GFS Didot', 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
   font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

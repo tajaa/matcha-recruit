@@ -22,7 +22,7 @@ type BadgeProps = ComponentProps<'span'> & {
 export function Badge({ variant = 'neutral', className = '', ...props }: BadgeProps) {
   return (
     <span
-      className={`inline-flex items-center rounded border px-2 py-0.5 text-[10px] uppercase tracking-widest font-bold ${variants[variant]} ${className}`}
+      className={`inline-flex items-center rounded-sm border px-1.5 py-[1px] text-[9px] uppercase tracking-[0.12em] font-light ${variants[variant]} ${className}`}
       {...props}
     />
   )
