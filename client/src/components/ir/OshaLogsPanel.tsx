@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import { Badge, Button } from '../ui'
 import { Download, Loader2, FileSpreadsheet } from 'lucide-react'
@@ -56,6 +57,7 @@ const classificationBadge: Record<string, 'danger' | 'warning' | 'neutral'> = {
 }
 
 export function OshaLogsPanel() {
+  const navigate = useNavigate()
   const currentYear = new Date().getFullYear()
   const [year, setYear] = useState(currentYear)
   const [entries, setEntries] = useState<LogEntry[]>([])
@@ -165,7 +167,11 @@ export function OshaLogsPanel() {
             </thead>
             <tbody className="divide-y divide-zinc-800/60">
               {entries.map((e) => (
-                <tr key={e.incident_id} className="text-zinc-300">
+                <tr
+                  key={e.incident_id}
+                  className="text-zinc-300 hover:bg-white/[0.02] transition-colors cursor-pointer"
+                  onClick={() => navigate(`/app/ir/${e.incident_id}`)}
+                >
                   <td className="px-3 py-2 font-mono">{e.case_number}</td>
                   <td className="px-3 py-2">{e.employee_name}</td>
                   <td className="px-3 py-2 text-zinc-500">{e.job_title || '—'}</td>
