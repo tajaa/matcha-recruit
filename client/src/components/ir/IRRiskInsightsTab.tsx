@@ -6,7 +6,6 @@ import type {
   IRRiskInsights,
   IRRiskMatrix,
 } from '../../types/ir'
-import { BAND_COLOR, BAND_LABEL, type Band } from '../../types/risk-assessment'
 import { synthesizeAssessment } from './risk/synth'
 import { IRRiskHeroCard } from './risk/IRRiskHeroCard'
 import { IRDimensionsGrid } from './risk/IRDimensionsGrid'
@@ -184,7 +183,7 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
         </div>
       ) : (
         <>
-          <IRRiskHeroCard assessment={assessment} />
+          <IRRiskHeroCard assessment={assessment} periodDays={matrix?.period_days ?? days} />
 
           <IRDimensionsGrid assessment={assessment} />
 
@@ -226,19 +225,20 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
             )}
           </section>
 
-          {/* Score Bands legend */}
-          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6">
-            <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-4">Score Bands</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-px bg-white/10 rounded-lg overflow-hidden">
-              {(['low', 'moderate', 'high', 'critical'] as Band[]).map((band) => (
-                <div key={band} className="bg-zinc-800 px-4 py-3">
-                  <div className={`text-[10px] font-bold uppercase tracking-widest ${BAND_COLOR[band].text}`}>{BAND_LABEL[band]}</div>
-                  <div className="text-[9px] text-zinc-600 mt-1 font-mono">
-                    {band === 'low' ? '0 – 25' : band === 'moderate' ? '26 – 50' : band === 'high' ? '51 – 75' : '76 – 100'}
-                  </div>
-                </div>
-              ))}
+          {/* Upgrade footer */}
+          <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <div className="text-sm font-medium text-zinc-100">Want a holistic risk score?</div>
+              <p className="text-xs text-zinc-500 mt-1 leading-relaxed">
+                Matcha Platform adds compliance, ER cases, workforce, and legislative dimensions for a full 0–100 risk assessment.
+              </p>
             </div>
+            <a
+              href="mailto:hello@matcha.work?subject=Upgrade%20to%20Matcha%20Platform"
+              className="text-xs font-medium text-emerald-400 hover:text-emerald-300 underline underline-offset-2 whitespace-nowrap"
+            >
+              Talk to sales →
+            </a>
           </div>
         </>
       )}

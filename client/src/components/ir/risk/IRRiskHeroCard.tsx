@@ -1,5 +1,4 @@
-import { HelpCircle } from 'lucide-react'
-import { BAND_COLOR, BAND_LABEL, type Band } from '../../../types/risk-assessment'
+import { HelpCircle, AlertTriangle, MapPin, Sparkles } from 'lucide-react'
 import {
   IR_DIMENSION_ORDER,
   IR_DIMENSION_LABELS,
@@ -18,71 +17,82 @@ function HelpTooltip({ text }: { text: string }) {
   )
 }
 
-function ScoreBar({ score, band }: { score: number; band: Band }) {
-  return (
-    <div className="h-px w-full bg-white/10 relative overflow-hidden">
-      <div
-        className={`absolute inset-y-0 left-0 ${BAND_COLOR[band].bar} transition-all duration-700`}
-        style={{ width: `${Math.min(100, Math.max(0, score))}%` }}
-      />
-    </div>
-  )
-}
-
-function BandBadge({ band }: { band: Band }) {
-  const c = BAND_COLOR[band]
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${c.badge}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${c.dot}`} />
-      {BAND_LABEL[band]}
-    </span>
-  )
-}
-
-const OVERALL_HELP =
-  'Composite incident-risk score 0–100. Weighted by incident count and severity across all types. +10 bump if a critical AI theme is detected.'
-
-export function IRRiskHeroCard({ assessment }: { assessment: IRSyntheticAssessment }) {
+export function IRRiskHeroCard({
+  assessment,
+  periodDays,
+}: {
+  assessment: IRSyntheticAssessment
+  periodDays: number | string
+}) {
+  const flagged = assessment.flagged_count
+  const critical = assessment.critical_themes
   return (
     <div>
       <div className="grid grid-cols-1 lg:grid-cols-7 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
         {/* Big number — span 2 of 7 */}
-        <div className="lg:col-span-2 bg-zinc-900 p-8 flex flex-col justify-between group">
-          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold flex items-center gap-1.5">
-            Overall Risk Score
-            <HelpTooltip text={OVERALL_HELP} />
+        <div className="lg:col-span-2 bg-zinc-900 p-8 flex flex-col justify-between">
+          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
+            Incidents · last {periodDays} days
           </div>
           <div className="flex items-end gap-4 mt-4">
-            <span className={`text-8xl font-light font-mono ${BAND_COLOR[assessment.overall_band].text}`}>
-              {assessment.overall_score}
+            <span className="text-8xl font-light font-mono text-zinc-100">
+              {assessment.total_incidents}
             </span>
-            <div className="mb-2 flex flex-col gap-2">
-              <BandBadge band={assessment.overall_band} />
-              <span className="text-[9px] text-zinc-600 font-mono">/100</span>
-            </div>
           </div>
-          <div className="mt-6">
-            <ScoreBar score={assessment.overall_score} band={assessment.overall_band} />
+          <div className="mt-6 flex flex-wrap items-center gap-3 text-[11px]">
+            {flagged > 0 && (
+              <span className="inline-flex items-center gap-1.5 text-orange-400">
+                <MapPin className="w-3 h-3" />
+                {flagged} flagged hotspot{flagged === 1 ? '' : 's'}
+              </span>
+            )}
+            {critical > 0 && (
+              <span className="inline-flex items-center gap-1.5 text-red-400">
+                <AlertTriangle className="w-3 h-3" />
+                {critical} critical theme{critical === 1 ? '' : 's'}
+              </span>
+            )}
+            {flagged === 0 && critical === 0 && (
+              <span className="inline-flex items-center gap-1.5 text-zinc-600">
+                <Sparkles className="w-3 h-3" />
+                No flagged locations or critical patterns
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Per-incident-type mini-stats — 5 dims fill remaining 5 cols */}
+        {/* Per-incident-type counts */}
         {IR_DIMENSION_ORDER.map((key) => {
           const dim = assessment.dimensions[key]
           if (!dim) return null
-          const c = BAND_COLOR[dim.band]
+          const isZero = dim.count === 0
+          const numTone = isZero
+            ? 'text-zinc-700'
+            : dim.flagged_locations > 0
+              ? 'text-orange-400'
+              : 'text-zinc-200'
           return (
-            <div key={key} className="bg-zinc-900 p-6 flex flex-col justify-between group">
+            <div key={key} className="bg-zinc-900 p-6 flex flex-col justify-between">
               <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
                 {IR_DIMENSION_LABELS[key]}
                 <HelpTooltip text={IR_DIMENSION_HELP[key]} />
               </div>
-              <div className={`text-3xl font-light font-mono mt-2 ${c.text}`}>{dim.score}</div>
-              <div className="mt-3 space-y-2">
-                <div className="text-[9px] text-zinc-600 uppercase tracking-widest">
-                  {dim.count} incident{dim.count === 1 ? '' : 's'}
-                </div>
-                <BandBadge band={dim.band} />
+              <div className={`text-3xl font-light font-mono mt-2 ${numTone}`}>{dim.count}</div>
+              <div className="mt-3 space-y-1">
+                {dim.count > 0 ? (
+                  <>
+                    <div className="text-[9px] text-zinc-600 uppercase tracking-widest">
+                      avg sev {dim.severity_avg.toFixed(1)}
+                    </div>
+                    {dim.flagged_locations > 0 && (
+                      <div className="text-[9px] text-orange-400 uppercase tracking-widest">
+                        {dim.flagged_locations} hotspot{dim.flagged_locations === 1 ? '' : 's'}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="text-[9px] text-zinc-700 uppercase tracking-widest">none</div>
+                )}
               </div>
             </div>
           )
