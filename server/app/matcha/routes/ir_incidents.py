@@ -1062,7 +1062,7 @@ async def get_osha_300_log(
             FROM ir_incidents i
             LEFT JOIN employees e
                 ON e.email = i.reported_by_email
-                AND e.org_id::text = i.company_id
+                AND e.org_id = i.company_id
             WHERE i.company_id = $1
               AND i.osha_recordable = true
               AND EXTRACT(YEAR FROM i.occurred_at) = $2
@@ -1163,16 +1163,16 @@ async def get_osha_301_form(
                 e.personal_email AS emp_email,
                 e.start_date AS emp_start_date
             FROM ir_incidents i
-            LEFT JOIN companies c ON c.id::text = i.company_id
-            LEFT JOIN business_locations bl ON bl.id::text = i.location_id
+            LEFT JOIN companies c ON c.id = i.company_id
+            LEFT JOIN business_locations bl ON bl.id = i.location_id
             LEFT JOIN employees e
                 ON e.email = i.reported_by_email
-                AND e.org_id::text = i.company_id
+                AND e.org_id = i.company_id
             WHERE i.id = $1
               AND i.company_id = $2
               AND i.osha_recordable = true
             """,
-            str(incident_id),
+            incident_id,
             company_id,
         )
 
