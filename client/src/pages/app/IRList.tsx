@@ -7,6 +7,7 @@ import { IRCreateIncidentModal } from '../../components/ir/IRCreateIncidentModal
 import { IRDashboardTab } from '../../components/ir/IRDashboardTab'
 import { IRAnonymousReportingPanel } from '../../components/ir/IRAnonymousReportingPanel'
 import { IRExportModal } from '../../components/ir/IRExportModal'
+import { IRStatHero } from '../../components/ir/IRStatHero'
 import type { IRIncident, IRIncidentType, IRAnalyticsSummary } from '../../types/ir'
 import {
   typeLabel, statusLabel, severityLabel,
@@ -19,14 +20,6 @@ type StatusFilter = 'all' | 'reported' | 'investigating' | 'action_required' | '
 type TypeFilter = 'all' | IRIncidentType
 
 type IncidentListResponse = { incidents: IRIncident[]; total: number }
-
-type SummaryNumKey = 'total' | 'open' | 'investigating' | 'critical'
-const STAT_CARDS: Array<{ key: SummaryNumKey; label: string; tone: string }> = [
-  { key: 'total', label: 'Total', tone: 'text-zinc-100' },
-  { key: 'open', label: 'Open', tone: 'text-amber-400' },
-  { key: 'investigating', label: 'Investigating', tone: 'text-orange-400' },
-  { key: 'critical', label: 'Critical', tone: 'text-red-400' },
-]
 
 export default function IRList() {
   const navigate = useNavigate()
@@ -124,17 +117,7 @@ export default function IRList() {
 
       {tab === 'incidents' && (
         <div className="space-y-6">
-          {/* Summary stats */}
-          {summary && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
-              {STAT_CARDS.map((card) => (
-                <div key={card.key} className="bg-zinc-900 px-5 py-5 flex flex-col">
-                  <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{card.label}</div>
-                  <div className={`text-3xl font-light font-mono mt-2 ${card.tone}`}>{summary[card.key]}</div>
-                </div>
-              ))}
-            </div>
-          )}
+          {summary && <IRStatHero summary={summary} captionLeft="Total Incidents" />}
 
           {/* Filter bar */}
           <div className="bg-zinc-900 border border-white/10 rounded-2xl p-4 space-y-3">

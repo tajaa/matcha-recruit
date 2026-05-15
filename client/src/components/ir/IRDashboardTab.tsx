@@ -3,19 +3,13 @@ import { api } from '../../api/client'
 import { Badge } from '../ui'
 import type { IRIncident, IRAnalyticsSummary, IRTrendPoint, IRLocationData } from '../../types/ir'
 import { severityLabel, statusLabel, SEVERITY_BADGE, STATUS_BADGE } from '../../types/ir'
+import { IRStatHero } from './IRStatHero'
 
 type Props = {
   incidents: IRIncident[]
   summary: IRAnalyticsSummary | null
   onNavigate: (id: string) => void
 }
-
-const STAT_CARDS = [
-  { key: 'total' as const, label: 'Total', tone: 'text-zinc-100' },
-  { key: 'open' as const, label: 'Open', tone: 'text-amber-400' },
-  { key: 'investigating' as const, label: 'Investigating', tone: 'text-orange-400' },
-  { key: 'critical' as const, label: 'Critical', tone: 'text-red-400' },
-]
 
 export function IRDashboardTab({ incidents, summary, onNavigate }: Props) {
   const [trends, setTrends] = useState<IRTrendPoint[]>([])
@@ -35,17 +29,7 @@ export function IRDashboardTab({ incidents, summary, onNavigate }: Props) {
 
   return (
     <div className="space-y-8">
-      {/* Stat strip */}
-      {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
-          {STAT_CARDS.map((card) => (
-            <div key={card.key} className="bg-zinc-900 px-5 py-5 flex flex-col">
-              <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{card.label}</div>
-              <div className={`text-3xl font-light font-mono mt-2 ${card.tone}`}>{summary[card.key]}</div>
-            </div>
-          ))}
-        </div>
-      )}
+      {summary && <IRStatHero summary={summary} />}
 
       {/* Weekly trends */}
       {trends.length > 0 && (
