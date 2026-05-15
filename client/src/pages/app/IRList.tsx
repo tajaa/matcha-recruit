@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search } from 'lucide-react'
+import { Download, Search } from 'lucide-react'
 import { api } from '../../api/client'
 import { Badge, Button, Input, Select } from '../../components/ui'
 import { IRCreateIncidentModal } from '../../components/ir/IRCreateIncidentModal'
@@ -8,6 +8,7 @@ import { IRDashboardTab } from '../../components/ir/IRDashboardTab'
 import { IRAnonymousReportingPanel } from '../../components/ir/IRAnonymousReportingPanel'
 import { IRRiskInsightsTab } from '../../components/ir/IRRiskInsightsTab'
 import { OshaLogsPanel } from '../../components/ir/OshaLogsPanel'
+import { IRExportModal } from '../../components/ir/IRExportModal'
 import type { IRIncident, IRIncidentType, IRAnalyticsSummary } from '../../types/ir'
 import {
   typeLabel, statusLabel, severityLabel,
@@ -41,6 +42,7 @@ export default function IRList() {
 
   const [summary, setSummary] = useState<IRAnalyticsSummary | null>(null)
   const [showForm, setShowForm] = useState(false)
+  const [showExport, setShowExport] = useState(false)
 
   useEffect(() => {
     setLoading(true)
@@ -83,7 +85,13 @@ export default function IRList() {
             Track and manage workplace incidents
           </p>
         </div>
-        <Button onClick={() => setShowForm(true)}>Report Incident</Button>
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={() => setShowExport(true)}>
+            <Download className="w-3.5 h-3.5" />
+            <span className="ml-2">Export</span>
+          </Button>
+          <Button onClick={() => setShowForm(true)}>Report Incident</Button>
+        </div>
       </div>
 
       <IRCreateIncidentModal
@@ -91,6 +99,8 @@ export default function IRList() {
         onClose={() => setShowForm(false)}
         onCreated={(inc) => { setShowForm(false); navigate(`/app/ir/${inc.id}`) }}
       />
+
+      <IRExportModal open={showExport} onClose={() => setShowExport(false)} />
 
       {/* Tab nav — pill style matching RiskAssessment */}
       <div className="flex gap-0 border border-zinc-700 rounded-xl overflow-hidden w-fit">

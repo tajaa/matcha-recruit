@@ -746,6 +746,187 @@ async def list_incidents(
 
 
 # ===========================================
+# Export — CSV / PDF report
+# ===========================================
+
+EXPORT_ROW_LIMIT = 5000
+
+
+@router.get("/export")
+async def export_incidents(
+    format: Literal["csv", "pdf"] = Query("csv"),
+    status: Optional[str] = None,
+    incident_type: Optional[str] = None,
+    severity: Optional[str] = None,
+    location_id: Optional[UUID] = None,
+    from_date: Optional[datetime] = None,
+    to_date: Optional[datetime] = None,
+    current_user=Depends(require_admin_or_client),
+):
+    """Export filtered incidents as CSV or PDF.
+
+    Filters mirror /ir/incidents (status, incident_type, severity,
+    location_id, from_date, to_date). Hard-capped at EXPORT_ROW_LIMIT rows
+    to keep response sizes sane.
+    """
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="No company scope")
+
+    async with get_connection() as conn:
+        conditions = [_company_filter(1)]
+        params: list = [company_id]
+        idx = 2
+
+        if status:
+            conditions.append(f"i.status = ${idx}")
+            params.append(status); idx += 1
+        if incident_type:
+            conditions.append(f"i.incident_type = ${idx}")
+            params.append(incident_type); idx += 1
+        if severity:
+            conditions.append(f"i.severity = ${idx}")
+            params.append(severity); idx += 1
+        if location_id:
+            conditions.append(f"i.location_id = ${idx}")
+            params.append(location_id); idx += 1
+        if from_date:
+            conditions.append(f"i.occurred_at >= ${idx}")
+            params.append(_to_naive_utc(from_date)); idx += 1
+        if to_date:
+            conditions.append(f"i.occurred_at <= ${idx}")
+            params.append(_to_naive_utc(to_date)); idx += 1
+
+        where_clause = " WHERE " + " AND ".join(conditions)
+
+        rows = await conn.fetch(
+            f"""
+            SELECT i.incident_number, i.title, i.description, i.incident_type,
+                   i.severity, i.status, i.location, i.occurred_at, i.created_at,
+                   i.injuries, i.witnesses,
+                   bl.name AS location_name, bl.city AS location_city, bl.state AS location_state
+            FROM ir_incidents i
+            LEFT JOIN business_locations bl ON bl.id = i.location_id
+            {where_clause}
+            ORDER BY i.occurred_at DESC NULLS LAST
+            LIMIT {EXPORT_ROW_LIMIT}
+            """,
+            *params,
+        )
+
+    def _loc(r) -> str:
+        if r["location_name"]:
+            place = ", ".join([p for p in (r["location_city"], r["location_state"]) if p])
+            return f"{r['location_name']}{f' — {place}' if place else ''}"
+        return r["location"] or "—"
+
+    def _fmt(d) -> str:
+        return d.strftime("%Y-%m-%d %H:%M") if d else ""
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    filename_base = f"incidents-{timestamp}"
+
+    if format == "csv":
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "Incident #", "Title", "Type", "Severity", "Status",
+            "Location", "Occurred At", "Created At",
+            "Injuries", "Description",
+        ])
+        for r in rows:
+            writer.writerow([
+                r["incident_number"] or "",
+                r["title"] or "",
+                r["incident_type"] or "",
+                r["severity"] or "",
+                r["status"] or "",
+                _loc(r),
+                _fmt(r["occurred_at"]),
+                _fmt(r["created_at"]),
+                "yes" if r["injuries"] else "no",
+                (r["description"] or "").replace("\n", " ").strip(),
+            ])
+        buf.seek(0)
+        return StreamingResponse(
+            iter([buf.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename_base}.csv"'},
+        )
+
+    # PDF — WeasyPrint render
+    try:
+        from weasyprint import HTML
+    except ImportError:
+        raise HTTPException(status_code=500, detail="PDF generation unavailable on server")
+
+    sev_color = {
+        "critical": "#dc2626", "high": "#ea580c",
+        "medium": "#ca8a04", "low": "#16a34a",
+    }
+    period_label = ""
+    if from_date or to_date:
+        f = from_date.date().isoformat() if from_date else "…"
+        t = to_date.date().isoformat() if to_date else "…"
+        period_label = f"{f} → {t}"
+
+    rows_html = "".join(
+        f"""
+        <tr>
+            <td class="num">{(r['incident_number'] or '')}</td>
+            <td>{(r['title'] or '').replace('<', '&lt;')}</td>
+            <td>{(r['incident_type'] or '').replace('_', ' ').title()}</td>
+            <td><span class="sev" style="color: {sev_color.get(r['severity'] or '', '#52525b')}">{(r['severity'] or '').upper()}</span></td>
+            <td>{(r['status'] or '').replace('_', ' ').title()}</td>
+            <td>{_loc(r)}</td>
+            <td class="num">{_fmt(r['occurred_at'])}</td>
+        </tr>
+        """
+        for r in rows
+    )
+    truncated_note = (
+        f"<p class='note'>Result set capped at {EXPORT_ROW_LIMIT} rows.</p>"
+        if len(rows) >= EXPORT_ROW_LIMIT else ""
+    )
+    html_str = f"""
+    <html><head><meta charset="utf-8"><style>
+        @page {{ size: Letter landscape; margin: 0.5in; }}
+        body {{ font-family: -apple-system, Helvetica, Arial, sans-serif; color: #18181b; font-size: 9pt; }}
+        h1 {{ font-size: 16pt; margin: 0 0 4px; }}
+        .meta {{ color: #71717a; font-size: 8pt; margin-bottom: 12px; }}
+        .meta strong {{ color: #18181b; }}
+        table {{ width: 100%; border-collapse: collapse; font-size: 8pt; }}
+        th, td {{ text-align: left; padding: 6px 8px; border-bottom: 1px solid #e4e4e7; vertical-align: top; }}
+        th {{ background: #f4f4f5; font-size: 7pt; text-transform: uppercase; letter-spacing: 0.05em; color: #52525b; }}
+        td.num {{ font-family: ui-monospace, "SF Mono", monospace; font-size: 7.5pt; color: #52525b; }}
+        .sev {{ font-weight: 700; font-size: 7pt; }}
+        .note {{ color: #71717a; font-size: 7pt; margin-top: 12px; font-style: italic; }}
+    </style></head><body>
+    <h1>Incident Report</h1>
+    <div class="meta">
+        <strong>{len(rows)}</strong> incident{'s' if len(rows) != 1 else ''} ·
+        Generated {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}
+        {f' · Period {period_label}' if period_label else ''}
+    </div>
+    <table>
+        <thead>
+            <tr><th>#</th><th>Title</th><th>Type</th><th>Severity</th><th>Status</th><th>Location</th><th>Occurred</th></tr>
+        </thead>
+        <tbody>{rows_html}</tbody>
+    </table>
+    {truncated_note}
+    </body></html>
+    """
+
+    pdf_bytes = await asyncio.to_thread(lambda: HTML(string=html_str).write_pdf())
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename_base}.pdf"'},
+    )
+
+
+# ===========================================
 # Anonymous Reporting Token Management
 # ===========================================
 
