@@ -89,7 +89,7 @@ async def resolve_company_id(
     return await get_client_company_id(current_user)
 
 
-@router.get("/jurisdictions")
+@lite_router.get("/jurisdictions")
 async def list_jurisdictions(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
@@ -130,7 +130,7 @@ async def list_jurisdictions(
     return result
 
 
-@router.post("/locations", response_model=dict)
+@lite_router.post("/locations", response_model=dict)
 async def create_location_endpoint(
     data: LocationCreate,
     background_tasks: BackgroundTasks,
@@ -273,7 +273,7 @@ async def get_locations_endpoint(
     return result
 
 
-@router.get("/locations/{location_id}", response_model=dict)
+@lite_router.get("/locations/{location_id}", response_model=dict)
 async def get_location_endpoint(
     location_id: str,
     company_id: Optional[str] = Query(None),
@@ -322,7 +322,7 @@ async def get_location_endpoint(
     }
 
 
-@router.put("/locations/{location_id}", response_model=dict)
+@lite_router.put("/locations/{location_id}", response_model=dict)
 async def update_location_endpoint(
     location_id: str,
     data: LocationUpdate,
@@ -359,7 +359,7 @@ async def update_location_endpoint(
     }
 
 
-@router.delete("/locations/{location_id}")
+@lite_router.delete("/locations/{location_id}")
 async def delete_location_endpoint(
     location_id: str,
     company_id: Optional[str] = Query(None),
@@ -1019,7 +1019,7 @@ async def search_requirements_endpoint(
     return results
 
 
-@router.patch("/locations/{location_id}/facility-attributes")
+@lite_router.patch("/locations/{location_id}/facility-attributes")
 async def update_facility_attributes_endpoint(
     location_id: str,
     data: FacilityAttributesUpdate,
@@ -1046,7 +1046,7 @@ async def update_facility_attributes_endpoint(
     return {"facility_attributes": result}
 
 
-@router.get("/locations/{location_id}/facility-attributes")
+@lite_router.get("/locations/{location_id}/facility-attributes")
 async def get_facility_attributes_endpoint(
     location_id: str,
     company_id: Optional[str] = Query(None),
