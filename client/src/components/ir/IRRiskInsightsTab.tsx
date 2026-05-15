@@ -205,6 +205,8 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
 
           <IRRiskMatrixHeatmap matrix={matrix} loading={matrixLoading} error={matrixError} />
 
+          <IRIncidentTrendChart />
+
           {wcMetrics && <IRWcMetricsCard metrics={wcMetrics} />}
 
           {wcMetrics?.premium_impact && <IRPremiumImpactCard metrics={wcMetrics} />}
@@ -212,8 +214,6 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
           {wcMetrics && wcMetrics.quarterly.length > 0 && (
             <IRQuarterlyRecordableChart quarterly={wcMetrics.quarterly} />
           )}
-
-          <IRIncidentTrendChart />
 
           <IRSeverityDonut summary={summary} />
 
