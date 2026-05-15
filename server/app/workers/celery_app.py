@@ -39,6 +39,7 @@ celery_app = Celery(
         "app.workers.tasks.hr_news_fetch",
         "app.workers.tasks.training_cadence",
         "app.workers.tasks.mention_email",
+        "app.workers.tasks.handbook_audit",
     ],
 )
 

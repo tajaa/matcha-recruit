@@ -52,6 +52,8 @@ import CalcTurnoverCost from './pages/landing/resources/calculators/TurnoverCost
 import CalcOvertime from './pages/landing/resources/calculators/Overtime'
 import CalcTotalComp from './pages/landing/resources/calculators/TotalComp'
 import ResourcesComplianceAudit from './pages/landing/resources/ComplianceAudit'
+import HandbookGapAnalyzer from './pages/landing/HandbookGapAnalyzer'
+import HandbookGapResult from './pages/landing/HandbookGapResult'
 import CategoryDetailPage from './pages/admin/CategoryDetailPage'
 import PolicyDetailPage from './pages/admin/PolicyDetailPage'
 import Dashboard from './pages/app/Dashboard'
@@ -138,6 +140,8 @@ export default function App() {
       <Route path="/resources/calculators/overtime" element={<CalcOvertime />} />
       <Route path="/resources/calculators/total-comp" element={<CalcTotalComp />} />
       <Route path="/resources/audit" element={<RequireBusinessAccount><ResourcesComplianceAudit /></RequireBusinessAccount>} />
+      <Route path="/handbook-gap-analyzer" element={<HandbookGapAnalyzer />} />
+      <Route path="/handbook-gap-analyzer/result/:reportId" element={<HandbookGapResult />} />
       <Route path="/signup" element={<SignupPicker />} />
       <Route path="/auth/resources-signup" element={<ResourcesSignup />} />
       <Route path="/auth/verify-email" element={<VerifyEmail />} />
