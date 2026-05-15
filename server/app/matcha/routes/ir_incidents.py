@@ -2081,6 +2081,7 @@ async def get_wc_metrics(
         raise HTTPException(status_code=400, detail="No company associated with user")
 
     period_start = _utc_now_naive() - timedelta(days=period_days)
+    prior_start = period_start - timedelta(days=period_days)
     annualization = 365.0 / period_days
 
     async with get_connection() as conn:
@@ -2090,10 +2091,11 @@ async def get_wc_metrics(
         )
         headcount = int(headcount_row) if headcount_row else 0
 
-        # Recordables in period
-        agg = await conn.fetchrow(
+        # Two windows in one trip: current period + prior period.
+        rows = await conn.fetch(
             """
             SELECT
+                CASE WHEN occurred_at >= $2 THEN 'current' ELSE 'prior' END AS bucket,
                 COUNT(*) AS recordable_cases,
                 COALESCE(SUM(CASE WHEN COALESCE(days_away_from_work, 0) > 0
                                    OR COALESCE(days_restricted_duty, 0) > 0
@@ -2104,9 +2106,10 @@ async def get_wc_metrics(
             FROM ir_incidents
             WHERE company_id = $1
               AND osha_recordable = true
-              AND occurred_at >= $2
+              AND occurred_at >= $3
+            GROUP BY bucket
             """,
-            company_id, period_start,
+            company_id, period_start, prior_start,
         )
 
         # All-time most recent recordable
@@ -2118,11 +2121,20 @@ async def get_wc_metrics(
             company_id,
         )
 
-    recordable_cases = int(agg["recordable_cases"])
-    dart_cases = int(agg["dart_cases"])
-    lost_days = int(agg["lost_days"])
-    restricted_days = int(agg["restricted_days"])
-    deaths = int(agg["deaths"])
+    cur = next((r for r in rows if r["bucket"] == "current"), None)
+    prv = next((r for r in rows if r["bucket"] == "prior"), None)
+
+    def _g(row, key):
+        return int(row[key]) if row else 0
+
+    recordable_cases = _g(cur, "recordable_cases")
+    dart_cases = _g(cur, "dart_cases")
+    lost_days = _g(cur, "lost_days")
+    restricted_days = _g(cur, "restricted_days")
+    deaths = _g(cur, "deaths")
+    prior_recordable = _g(prv, "recordable_cases")
+    prior_dart = _g(prv, "dart_cases")
+    prior_lost_days = _g(prv, "lost_days")
 
     # Approximate hours worked over the period.
     hours_worked = float(headcount) * 2000.0 / annualization if headcount > 0 else 0.0
@@ -2131,14 +2143,23 @@ async def get_wc_metrics(
     if hours_worked > 0:
         trir = round((recordable_cases * 200_000) / hours_worked, 2)
         dart_rate = round((dart_cases * 200_000) / hours_worked, 2)
+        prior_trir = round((prior_recordable * 200_000) / hours_worked, 2)
+        prior_dart_rate = round((prior_dart * 200_000) / hours_worked, 2)
     else:
         trir = None
         dart_rate = None
+        prior_trir = None
+        prior_dart_rate = None
 
     if last_recordable:
         days_since = (datetime.utcnow() - last_recordable).days
     else:
         days_since = None
+
+    def _delta_pct(curr, prior):
+        if prior is None or prior == 0:
+            return None
+        return round(((curr - prior) / prior) * 100, 1)
 
     return {
         "period_days": period_days,
@@ -2153,6 +2174,17 @@ async def get_wc_metrics(
         "dart_rate": dart_rate,
         "days_since_last_recordable": days_since,
         "ever_recordable": last_recordable is not None,
+        "prior": {
+            "recordable_cases": prior_recordable,
+            "dart_cases": prior_dart,
+            "lost_days": prior_lost_days,
+            "trir": prior_trir,
+            "dart_rate": prior_dart_rate,
+            "trir_delta_pct": _delta_pct(trir, prior_trir),
+            "dart_delta_pct": _delta_pct(dart_rate, prior_dart_rate),
+            "lost_days_delta_pct": _delta_pct(lost_days, prior_lost_days),
+            "recordable_delta_pct": _delta_pct(recordable_cases, prior_recordable),
+        },
         "data_quality": {
             "insufficient_population": insufficient,
             "headcount_missing": headcount == 0,

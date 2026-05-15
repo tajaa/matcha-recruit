@@ -1,4 +1,4 @@
-import { HelpCircle, Shield, Calendar, Activity, Heart } from 'lucide-react'
+import { HelpCircle, Shield, Calendar, Activity, Heart, TrendingDown, TrendingUp, Minus } from 'lucide-react'
 
 export type WcMetrics = {
   period_days: number
@@ -13,11 +13,36 @@ export type WcMetrics = {
   dart_rate: number | null
   days_since_last_recordable: number | null
   ever_recordable: boolean
+  prior: {
+    recordable_cases: number
+    dart_cases: number
+    lost_days: number
+    trir: number | null
+    dart_rate: number | null
+    trir_delta_pct: number | null
+    dart_delta_pct: number | null
+    lost_days_delta_pct: number | null
+    recordable_delta_pct: number | null
+  }
   data_quality: {
     insufficient_population: boolean
     headcount_missing: boolean
   }
   generated_at: string
+}
+
+function DeltaPill({ pct }: { pct: number | null }) {
+  if (pct === null) return null
+  const Icon = pct < -1 ? TrendingDown : pct > 1 ? TrendingUp : Minus
+  // Lower is better for incident metrics, so negative delta = good (emerald).
+  const tone = pct < -5 ? 'text-emerald-400' : pct > 5 ? 'text-red-400' : 'text-zinc-500'
+  const sign = pct > 0 ? '+' : ''
+  return (
+    <span className={`inline-flex items-center gap-1 text-[10px] font-mono ${tone}`}>
+      <Icon className="w-3 h-3" />
+      {sign}{pct.toFixed(0)}% vs prior
+    </span>
+  )
 }
 
 // US BLS private-industry medians (2023). Used as a coarse benchmark when
@@ -64,6 +89,17 @@ function streakTone(days: number | null): string {
   return 'text-red-400'
 }
 
+function streakDisplay(days: number | null): { value: string; unit: string } {
+  if (days === null) return { value: '∞', unit: 'no recordables ever' }
+  if (days < 60) return { value: String(days), unit: days === 1 ? 'day' : 'days' }
+  if (days < 730) {
+    const months = Math.floor(days / 30)
+    return { value: String(months), unit: months === 1 ? 'month' : 'months' }
+  }
+  const years = (days / 365).toFixed(1)
+  return { value: years, unit: 'years' }
+}
+
 export function IRWcMetricsCard({ metrics }: { metrics: WcMetrics }) {
   const { trir, dart_rate, lost_days, days_since_last_recordable, deaths, data_quality } = metrics
 
@@ -89,7 +125,7 @@ export function IRWcMetricsCard({ metrics }: { metrics: WcMetrics }) {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
         {/* TRIR */}
-        <div className="bg-zinc-900 p-6 flex flex-col justify-between">
+        <div className="bg-zinc-900 p-6 flex flex-col justify-between group">
           <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
             <Activity className="w-3 h-3" /> TRIR
             <HelpTooltip text="Total Recordable Incident Rate per 100 FTEs. OSHA standard: (recordable × 200,000) / hours worked. US private-industry median ≈ 2.7." />
@@ -105,10 +141,11 @@ export function IRWcMetricsCard({ metrics }: { metrics: WcMetrics }) {
               {rateLabel(trir, TRIR_MEDIAN)}
             </div>
           )}
+          <div className="mt-2"><DeltaPill pct={metrics.prior.trir_delta_pct} /></div>
         </div>
 
         {/* DART */}
-        <div className="bg-zinc-900 p-6 flex flex-col justify-between">
+        <div className="bg-zinc-900 p-6 flex flex-col justify-between group">
           <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
             <Activity className="w-3 h-3" /> DART
             <HelpTooltip text="Days Away, Restricted, or Transferred rate. Same formula as TRIR but only cases involving lost or restricted time. Workers-comp adjusters track this directly. US median ≈ 1.7." />
@@ -124,10 +161,11 @@ export function IRWcMetricsCard({ metrics }: { metrics: WcMetrics }) {
               {rateLabel(dart_rate, DART_MEDIAN)}
             </div>
           )}
+          <div className="mt-2"><DeltaPill pct={metrics.prior.dart_delta_pct} /></div>
         </div>
 
         {/* Lost days */}
-        <div className="bg-zinc-900 p-6 flex flex-col justify-between">
+        <div className="bg-zinc-900 p-6 flex flex-col justify-between group">
           <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
             <Calendar className="w-3 h-3" /> Lost Days
             <HelpTooltip text="Total days away from work across all OSHA-recordable incidents in this period. High totals push severity component of E-Mod up." />
@@ -143,24 +181,28 @@ export function IRWcMetricsCard({ metrics }: { metrics: WcMetrics }) {
               {deaths} fatality{deaths === 1 ? '' : 's'}
             </div>
           )}
+          <div className="mt-2"><DeltaPill pct={metrics.prior.lost_days_delta_pct} /></div>
         </div>
 
         {/* Claims-free streak */}
-        <div className="bg-zinc-900 p-6 flex flex-col justify-between">
+        <div className="bg-zinc-900 p-6 flex flex-col justify-between group">
           <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
             <Heart className="w-3 h-3" /> Claims-Free Streak
             <HelpTooltip text="Days since the last OSHA-recordable incident (any time). Long streaks support an E-Mod credit case at renewal." />
           </div>
-          <div className={`text-4xl font-light font-mono mt-2 ${streakTone(days_since_last_recordable)}`}>
-            {days_since_last_recordable === null ? '∞' : days_since_last_recordable}
-          </div>
-          <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-2 font-mono">
-            {days_since_last_recordable === null
-              ? 'no recordables ever'
-              : days_since_last_recordable === 1
-                ? 'day'
-                : 'days'}
-          </div>
+          {(() => {
+            const s = streakDisplay(days_since_last_recordable)
+            return (
+              <>
+                <div className={`text-4xl font-light font-mono mt-2 ${streakTone(days_since_last_recordable)}`}>
+                  {s.value}
+                </div>
+                <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-2 font-mono">
+                  {s.unit}
+                </div>
+              </>
+            )
+          })()}
           {days_since_last_recordable !== null && days_since_last_recordable >= 365 && (
             <div className="text-[10px] text-emerald-400 mt-1">
               E-Mod credit candidate

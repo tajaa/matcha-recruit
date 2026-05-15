@@ -72,7 +72,7 @@ export function IRRiskHeroCard({
               ? 'text-orange-400'
               : 'text-zinc-200'
           return (
-            <div key={key} className="bg-zinc-900 p-6 flex flex-col justify-between">
+            <div key={key} className="bg-zinc-900 p-6 flex flex-col justify-between group">
               <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
                 {IR_DIMENSION_LABELS[key]}
                 <HelpTooltip text={IR_DIMENSION_HELP[key]} />
