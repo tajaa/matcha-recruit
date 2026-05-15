@@ -23,8 +23,8 @@ from ..utils import get_db_connection
 
 logger = logging.getLogger(__name__)
 
-SECTION_EXTRACT_TIMEOUT = 90
-GAP_CHECK_TIMEOUT = 75
+SECTION_EXTRACT_TIMEOUT = 180
+GAP_CHECK_TIMEOUT = 120
 MAX_REQUIREMENTS_PER_STATE = 24  # cap per-state gemini call payload
 MAX_SECTIONS_FOR_PROMPT = 80     # truncate uploaded sections for the prompt
 SAMPLE_GAPS_COUNT = 2
@@ -280,7 +280,7 @@ async def _extract_sections_from_pdf(pdf_bytes: bytes) -> list[dict[str, Any]]:
             logger.exception("Could not build PDF Part: %s", exc)
             return []
 
-    model_name = os.getenv("HANDBOOK_AUDIT_MODEL", "gemini-3-flash-preview")
+    model_name = os.getenv("HANDBOOK_AUDIT_MODEL", "gemini-2.5-flash")
     try:
         response = await asyncio.wait_for(
             client.aio.models.generate_content(
@@ -372,7 +372,7 @@ async def _grade_state_coverage(
         "- Do not invent statutes; if no specific citation is reliable, use null."
     )
 
-    model_name = os.getenv("HANDBOOK_AUDIT_MODEL", "gemini-3-flash-preview")
+    model_name = os.getenv("HANDBOOK_AUDIT_MODEL", "gemini-2.5-flash")
     try:
         response = await asyncio.wait_for(
             client.aio.models.generate_content(
