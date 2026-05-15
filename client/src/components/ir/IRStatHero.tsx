@@ -3,13 +3,15 @@ import type { IRAnalyticsSummary } from '../../types/ir'
 
 type MiniKey = 'open' | 'investigating' | 'critical' | 'high' | 'closed'
 
-const MINIS: Array<{ key: MiniKey; label: string; tone: string; help: string }> = [
-  { key: 'open',          label: 'Open',          tone: 'text-amber-400',  help: 'Reported but not yet assigned to an investigator.' },
-  { key: 'investigating', label: 'Investigating', tone: 'text-orange-400', help: 'Active investigation underway.' },
-  { key: 'critical',      label: 'Critical',      tone: 'text-red-400',    help: 'Critical-severity incidents (any status).' },
-  { key: 'high',          label: 'High',          tone: 'text-orange-300', help: 'High-severity incidents (any status).' },
-  { key: 'closed',        label: 'Closed',        tone: 'text-zinc-300',   help: 'Closed or resolved incidents.' },
+const MINIS: Array<{ key: MiniKey; label: string; tone: string }> = [
+  { key: 'open',          label: 'Open',          tone: 'text-amber-400' },
+  { key: 'investigating', label: 'Investigating', tone: 'text-orange-400' },
+  { key: 'critical',      label: 'Critical',      tone: 'text-red-400' },
+  { key: 'high',          label: 'High',          tone: 'text-orange-300' },
+  { key: 'closed',        label: 'Closed',        tone: 'text-zinc-400' },
 ]
+
+const NUM = 'font-light tabular-nums'
 
 export function IRStatHero({ summary, captionLeft }: {
   summary: IRAnalyticsSummary
@@ -18,50 +20,49 @@ export function IRStatHero({ summary, captionLeft }: {
   const open = summary.open
   const critical = summary.critical
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-7 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+    <div className="grid grid-cols-1 lg:grid-cols-7 gap-px bg-white/[0.06] border border-white/[0.08] rounded-2xl overflow-hidden">
       {/* Big number — span 2 of 7 */}
-      <div className="lg:col-span-2 bg-zinc-900 p-8 flex flex-col justify-between">
-        <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
+      <div className="lg:col-span-2 bg-zinc-900 px-7 py-7 flex flex-col">
+        <div className="text-[10px] text-zinc-500 uppercase tracking-[0.16em]">
           {captionLeft ?? 'Total Incidents'}
         </div>
-        <div className="flex items-end gap-4 mt-4">
-          <span className="text-8xl font-light font-mono text-zinc-100">
+        <div className="mt-3 leading-none">
+          <span className={`text-7xl ${NUM} text-zinc-100`} style={{ fontStretch: '75%' }}>
             {summary.total}
           </span>
         </div>
-        <div className="mt-6 flex flex-wrap items-center gap-3 text-[11px]">
+        <div className="mt-auto pt-5 flex flex-wrap items-center gap-3 text-[11px]">
           {critical > 0 ? (
             <span className="inline-flex items-center gap-1.5 text-red-400">
-              <AlertTriangle className="w-3 h-3" />
-              {critical} critical
+              <AlertTriangle className="w-3 h-3" strokeWidth={1.6} />
+              <span className="tabular-nums">{critical}</span> critical
             </span>
           ) : (
             <span className="inline-flex items-center gap-1.5 text-zinc-600">
-              <Sparkles className="w-3 h-3" />
+              <Sparkles className="w-3 h-3" strokeWidth={1.6} />
               No critical incidents
             </span>
           )}
           {open > 0 && (
             <span className="inline-flex items-center gap-1.5 text-amber-400">
-              <Inbox className="w-3 h-3" />
-              {open} open
+              <Inbox className="w-3 h-3" strokeWidth={1.6} />
+              <span className="tabular-nums">{open}</span> open
             </span>
           )}
         </div>
       </div>
 
-      {/* 5 mini stats */}
+      {/* Mini stats */}
       {MINIS.map((m) => {
         const value = summary[m.key]
         const tone = value === 0 ? 'text-zinc-700' : m.tone
         return (
-          <div key={m.key} className="bg-zinc-900 p-6 flex flex-col justify-between" title={m.help}>
-            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">
+          <div key={m.key} className="bg-zinc-900 px-5 py-7 flex flex-col">
+            <div className="text-[9px] text-zinc-500 uppercase tracking-[0.16em]">
               {m.label}
             </div>
-            <div className={`text-3xl font-light font-mono mt-2 ${tone}`}>{value}</div>
-            <div className="text-[9px] text-zinc-700 uppercase tracking-widest mt-3">
-              {value === 0 ? 'none' : value === 1 ? 'incident' : 'incidents'}
+            <div className={`mt-3 text-3xl ${NUM} ${tone} leading-none`} style={{ fontStretch: '75%' }}>
+              {value}
             </div>
           </div>
         )
