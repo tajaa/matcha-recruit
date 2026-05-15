@@ -9,7 +9,12 @@ final class ChannelsWebSocket: NSObject {
     private var isConnecting = false
     private(set) var isConnected = false
     private var currentRoom: String?
-    private var backgroundRoomIds: Set<String> = []
+    /// Channels the client wants to be a member of. Replayed to the server as
+    /// `join_room` frames on every WS handshake (cold start + reconnect), so
+    /// server-side `room_members` always matches this set. Do NOT use this as
+    /// a "we've told the server" flag — that breaks when the frame is sent
+    /// before the WS is connected.
+    private var subscribedRooms: Set<String> = []
     private var roomNames: [String: String] = [:]
     private var pingTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
@@ -66,7 +71,7 @@ final class ChannelsWebSocket: NSObject {
         isConnected = false
         isConnecting = false
         currentRoom = nil
-        backgroundRoomIds = []
+        subscribedRooms = []
         roomNames = [:]
     }
 
@@ -77,9 +82,12 @@ final class ChannelsWebSocket: NSObject {
             currentRoomName = channelName
             roomNames[channelId] = channelName
         }
-        if !backgroundRoomIds.contains(channelId) {
+        subscribedRooms.insert(channelId)
+        if isConnected {
             send(["type": "join_room", "channel_id": channelId])
-            backgroundRoomIds.insert(channelId)
+        } else {
+            // didOpenWithProtocol will replay subscribedRooms once the handshake completes.
+            connect()
         }
     }
 
@@ -88,9 +96,15 @@ final class ChannelsWebSocket: NSObject {
     func joinBackgroundRooms(_ channels: [(id: String, name: String)]) {
         for ch in channels {
             roomNames[ch.id] = ch.name
-            guard !backgroundRoomIds.contains(ch.id) else { continue }
-            send(["type": "join_room", "channel_id": ch.id])
-            backgroundRoomIds.insert(ch.id)
+            subscribedRooms.insert(ch.id)
+        }
+        if isConnected {
+            for ch in channels {
+                send(["type": "join_room", "channel_id": ch.id])
+            }
+        } else {
+            // didOpenWithProtocol will replay subscribedRooms once the handshake completes.
+            connect()
         }
     }
 
@@ -124,11 +138,10 @@ final class ChannelsWebSocket: NSObject {
 
     func leaveRoom(channelId: String) {
         if currentRoom == channelId { currentRoom = nil }
-        // Drop from backgroundRoomIds too; otherwise a subsequent joinRoom
-        // will short-circuit and never re-subscribe on the server, leaving
-        // the user out of room_members and missing their own message echo.
-        backgroundRoomIds.remove(channelId)
-        send(["type": "leave_room", "channel_id": channelId])
+        subscribedRooms.remove(channelId)
+        if isConnected {
+            send(["type": "leave_room", "channel_id": channelId])
+        }
     }
 
     var onReactionUpdate: ((_ messageId: String, _ reactions: [ChannelReaction]) -> Void)?
@@ -308,24 +321,14 @@ final class ChannelsWebSocket: NSObject {
         task = nil
         let delay = reconnectDelay
         reconnectDelay = min(reconnectDelay * 2, 60)
-        let room = currentRoom
-        let bgRooms = backgroundRoomIds
-        let names = roomNames
-        // Clear tracking so reconnect re-subscribes from scratch
-        backgroundRoomIds = []
+        // subscribedRooms is intentionally kept — didOpenWithProtocol replays
+        // every entry as a join_room frame once the new handshake completes.
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard let self else { return }
             await MainActor.run {
                 self.reconnectTask = nil
-                self.roomNames = names
                 self.connect()
-                if let room { self.joinRoom(channelId: room) }
-                let activeSet: Set<String> = room.map { Set([$0]) } ?? []
-                let remaining = bgRooms.subtracting(activeSet)
-                self.joinBackgroundRooms(remaining.compactMap { id in
-                    names[id].map { (id: id, name: $0) }
-                })
             }
         }
     }
@@ -337,6 +340,13 @@ extension ChannelsWebSocket: URLSessionWebSocketDelegate {
             self.isConnected = true
             self.isConnecting = false
             self.reconnectDelay = 3.0
+            // Replay every channel the client wants to be in. Server reconciles
+            // room_members against this set — without this, joins sent before
+            // the handshake completed (cold start, scheduleReconnect) are lost
+            // and the user gets no broadcasts.
+            for roomId in self.subscribedRooms {
+                self.send(["type": "join_room", "channel_id": roomId])
+            }
         }
     }
 
