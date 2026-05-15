@@ -185,12 +185,38 @@ def _msg_query(where: str, order: str = "m.created_at DESC", limit_param: str | 
     return q
 
 
+# Channel categories — single source of truth, mirrored to TS + Swift.
+CHANNEL_CATEGORIES: tuple[str, ...] = (
+    "general",
+    "engineering",
+    "design",
+    "sales",
+    "support",
+    "operations",
+    "marketing",
+    "hr",
+    "announcements",
+)
+
+
+def _normalize_category(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    v = value.strip().lower()
+    if not v:
+        return None
+    if v not in CHANNEL_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {', '.join(CHANNEL_CATEGORIES)}")
+    return v
+
+
 class ChannelSummary(BaseModel):
     id: UUID
     name: str
     slug: str
     description: Optional[str] = None
     visibility: str = "public"
+    category: Optional[str] = None
     is_paid: bool = False
     price_cents: Optional[int] = None
     currency: Optional[str] = None
@@ -208,6 +234,7 @@ class ChannelDetail(BaseModel):
     slug: str
     description: Optional[str] = None
     visibility: str = "public"
+    category: Optional[str] = None
     is_paid: bool = False
     price_cents: Optional[int] = None
     currency: str = "usd"
@@ -232,6 +259,7 @@ class CreateChannelRequest(BaseModel):
     name: str
     description: Optional[str] = None
     visibility: str = "public"
+    category: Optional[str] = None
     paid_config: Optional[PaidChannelConfig] = None
 
 
@@ -293,6 +321,7 @@ async def list_channels(
             f"""
             SELECT ch.id, ch.name, ch.slug, ch.description,
                    COALESCE(ch.visibility, 'public') AS visibility,
+                   ch.category,
                    COALESCE(ch.is_paid, false) AS is_paid,
                    (SELECT COUNT(*) FROM channel_members WHERE channel_id = ch.id) AS member_count,
                    CASE WHEN cm.user_id IS NOT NULL THEN
@@ -330,6 +359,7 @@ async def list_channels(
                 slug=r["slug"],
                 description=r["description"],
                 visibility=r["visibility"],
+                category=r["category"],
                 is_paid=r["is_paid"],
                 member_count=r["member_count"],
                 unread_count=r["unread_count"],
@@ -342,6 +372,13 @@ async def list_channels(
         ]
 
 
+@router.get("/categories", response_model=list[str])
+async def list_channel_categories():
+    """Allowed category values for channel creation/filtering. Public so the
+    web + werk creation UIs can fetch the canonical list without hard-coding."""
+    return list(CHANNEL_CATEGORIES)
+
+
 # ---------------------------------------------------------------------------
 # Public discovery — paid + public channels across tenants
 # ---------------------------------------------------------------------------
@@ -350,6 +387,7 @@ async def list_channels(
 async def discover_public_channels(
     q: str = Query(default="", max_length=100),
     paid_only: bool = Query(default=False),
+    category: Optional[str] = Query(default=None),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Surface public channels from any tenant that the user can subscribe
@@ -376,11 +414,17 @@ async def discover_public_channels(
             params.append(f"%{q}%")
             search_idx = len(params)
             clauses.append(f"(ch.name ILIKE ${search_idx} OR ch.description ILIKE ${search_idx})")
+        normalized_category = _normalize_category(category) if category else None
+        if normalized_category:
+            params.append(normalized_category)
+            cat_idx = len(params)
+            clauses.append(f"ch.category = ${cat_idx}")
 
         rows = await conn.fetch(
             f"""
             SELECT ch.id, ch.name, ch.slug, ch.description,
                    COALESCE(ch.visibility, 'public') AS visibility,
+                   ch.category,
                    COALESCE(ch.is_paid, false) AS is_paid,
                    ch.price_cents,
                    COALESCE(ch.currency, 'usd') AS currency,
@@ -407,6 +451,7 @@ async def discover_public_channels(
                 slug=r["slug"],
                 description=r["description"],
                 visibility=r["visibility"],
+                category=r["category"],
                 is_paid=r["is_paid"],
                 price_cents=r["price_cents"],
                 currency=r["currency"],
@@ -541,6 +586,7 @@ async def create_channel(
             slug = f"{base_slug}-{suffix}"
 
         visibility = body.visibility if body.visibility in ("public", "private", "invite_only") else "public"
+        category = _normalize_category(body.category)
 
         # Handle paid channel setup
         is_paid = False
@@ -573,12 +619,12 @@ async def create_channel(
         # Insert channel first, then create Stripe product with real ID
         row = await conn.fetchrow(
             """
-            INSERT INTO channels (company_id, name, slug, description, created_by, visibility,
+            INSERT INTO channels (company_id, name, slug, description, created_by, visibility, category,
                 is_paid, price_cents, currency, inactivity_threshold_days, inactivity_warning_days)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-            RETURNING id, name, slug, description, is_archived, created_by, created_at, visibility
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            RETURNING id, name, slug, description, is_archived, created_by, created_at, visibility, category
             """,
-            company_id, name, slug, body.description, current_user.id, visibility,
+            company_id, name, slug, body.description, current_user.id, visibility, category,
             is_paid, price_cents, currency, inactivity_threshold_days, inactivity_warning_days,
         )
 
@@ -611,6 +657,7 @@ async def create_channel(
             slug=row["slug"],
             description=row["description"],
             visibility=row["visibility"] or "public",
+            category=row["category"],
             is_paid=is_paid,
             price_cents=price_cents,
             currency=currency,
@@ -1061,7 +1108,7 @@ async def get_channel(
 
     async with get_connection() as conn:
         ch = await conn.fetchrow(
-            "SELECT id, name, slug, description, is_archived, created_by, created_at, company_id, COALESCE(visibility, 'public') AS visibility, COALESCE(is_paid, false) AS is_paid, price_cents, COALESCE(currency, 'usd') AS currency FROM channels WHERE id = $1",
+            "SELECT id, name, slug, description, is_archived, created_by, created_at, company_id, COALESCE(visibility, 'public') AS visibility, category, COALESCE(is_paid, false) AS is_paid, price_cents, COALESCE(currency, 'usd') AS currency FROM channels WHERE id = $1",
             channel_id,
         )
         if not ch:
@@ -1129,6 +1176,7 @@ async def get_channel(
             slug=ch["slug"],
             description=ch["description"],
             visibility=ch["visibility"],
+            category=ch["category"],
             is_paid=ch["is_paid"],
             price_cents=ch["price_cents"],
             currency=ch["currency"],
@@ -1529,6 +1577,7 @@ class UpdateChannelRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     visibility: Optional[str] = None
+    category: Optional[str] = None
 
 
 @router.patch("/{channel_id}", response_model=ChannelSummary)
@@ -1585,6 +1634,14 @@ async def update_channel(
             params.append(body.visibility)
             idx += 1
 
+        if body.category is not None:
+            # Empty string clears the category back to NULL; non-empty must
+            # match the whitelist (raises 400 inside _normalize_category).
+            normalized = _normalize_category(body.category) if body.category.strip() else None
+            sets.append(f"category = ${idx}")
+            params.append(normalized)
+            idx += 1
+
         if not sets:
             raise HTTPException(status_code=400, detail="No updates provided")
 
@@ -1598,6 +1655,11 @@ async def update_channel(
         ch = await conn.fetchrow(
             """
             SELECT c.id, c.name, c.slug, c.description,
+                   COALESCE(c.visibility, 'public') AS visibility,
+                   c.category,
+                   COALESCE(c.is_paid, false) AS is_paid,
+                   c.price_cents,
+                   COALESCE(c.currency, 'usd') AS currency,
                    (SELECT COUNT(*) FROM channel_members WHERE channel_id = c.id) AS member_count,
                    0 AS unread_count,
                    NULL::timestamptz AS last_message_at,

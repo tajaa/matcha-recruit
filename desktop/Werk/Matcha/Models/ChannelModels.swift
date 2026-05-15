@@ -142,12 +142,44 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
     }
 }
 
+/// Channel categories — single source of truth on the client. Mirrors the
+/// `CHANNEL_CATEGORIES` tuple in `server/app/core/routes/channels.py`. Update
+/// both sides when adding.
+enum ChannelCategory: String, CaseIterable, Identifiable {
+    case general
+    case engineering
+    case design
+    case sales
+    case support
+    case operations
+    case marketing
+    case hr
+    case announcements
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .general: return "General"
+        case .engineering: return "Engineering"
+        case .design: return "Design"
+        case .sales: return "Sales"
+        case .support: return "Support"
+        case .operations: return "Operations"
+        case .marketing: return "Marketing"
+        case .hr: return "HR"
+        case .announcements: return "Announcements"
+        }
+    }
+}
+
 struct ChannelSummary: Codable, Identifiable, Hashable {
     let id: String
     let name: String
     let slug: String
     let description: String?
     let visibility: String
+    let category: String?
     let isPaid: Bool
     let priceCents: Int?
     let currency: String?
@@ -159,7 +191,7 @@ struct ChannelSummary: Codable, Identifiable, Hashable {
     let myRole: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, slug, description, visibility
+        case id, name, slug, description, visibility, category
         case isPaid = "is_paid"
         case priceCents = "price_cents"
         case currency
@@ -178,6 +210,7 @@ struct ChannelDetail: Codable, Identifiable, Hashable {
     let slug: String
     let description: String?
     let visibility: String
+    let category: String?
     let isPaid: Bool
     let priceCents: Int?
     let currency: String
@@ -191,7 +224,7 @@ struct ChannelDetail: Codable, Identifiable, Hashable {
     let messages: [ChannelMessage]
 
     enum CodingKeys: String, CodingKey {
-        case id, name, slug, description, visibility, currency, members, messages
+        case id, name, slug, description, visibility, category, currency, members, messages
         case isPaid = "is_paid"
         case priceCents = "price_cents"
         case isArchived = "is_archived"

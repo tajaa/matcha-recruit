@@ -19,7 +19,7 @@ class ChannelsService {
     /// Public + paid channels from any tenant the user is not yet a member of.
     /// Used by the cross-workspace discovery surface so personal-account users
     /// can find each other's paid channels.
-    func discoverChannels(query: String? = nil, paidOnly: Bool = false) async throws -> [ChannelSummary] {
+    func discoverChannels(query: String? = nil, paidOnly: Bool = false, category: String? = nil) async throws -> [ChannelSummary] {
         var components = URLComponents(string: "\(basePath)/discover")!
         var items: [URLQueryItem] = []
         if let query, !query.isEmpty {
@@ -27,6 +27,9 @@ class ChannelsService {
         }
         if paidOnly {
             items.append(URLQueryItem(name: "paid_only", value: "true"))
+        }
+        if let category, !category.isEmpty {
+            items.append(URLQueryItem(name: "category", value: category))
         }
         if !items.isEmpty {
             components.queryItems = items
@@ -89,16 +92,29 @@ class ChannelsService {
         let name: String
         let description: String?
         let visibility: String
+        let category: String?
         let paidConfig: PaidChannelConfig?
 
         enum CodingKeys: String, CodingKey {
-            case name, description, visibility
+            case name, description, visibility, category
             case paidConfig = "paid_config"
         }
     }
 
-    func createChannel(name: String, description: String?, visibility: String = "public", paidConfig: PaidChannelConfig? = nil) async throws -> ChannelDetail {
-        let body = CreateRequest(name: name, description: description, visibility: visibility, paidConfig: paidConfig)
+    func createChannel(
+        name: String,
+        description: String?,
+        visibility: String = "public",
+        category: String? = nil,
+        paidConfig: PaidChannelConfig? = nil
+    ) async throws -> ChannelDetail {
+        let body = CreateRequest(
+            name: name,
+            description: description,
+            visibility: visibility,
+            category: category,
+            paidConfig: paidConfig
+        )
         return try await client.request(method: "POST", path: basePath, body: body)
     }
 

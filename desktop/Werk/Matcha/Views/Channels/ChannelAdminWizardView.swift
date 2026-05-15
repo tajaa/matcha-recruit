@@ -28,6 +28,7 @@ struct ChannelAdminWizardView: View {
     @State private var name = ""
     @State private var description = ""
     @State private var visibility = "public"
+    @State private var category: ChannelCategory = .general
     @State private var isPaid = false
     @State private var priceDollars = "5"
     @State private var creating = false
@@ -186,6 +187,21 @@ struct ChannelAdminWizardView: View {
                         .font(.system(size: 13))
                         .foregroundColor(.white.opacity(0.9))
                         .lineLimit(1...3)
+                    Divider()
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("category").font(.system(size: 10)).foregroundColor(.white.opacity(0.4))
+                    Picker("", selection: $category) {
+                        ForEach(ChannelCategory.allCases) { cat in
+                            Text(cat.label).tag(cat)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    Text("helps people find this channel in browse")
+                        .font(.system(size: 10))
+                        .foregroundColor(.white.opacity(0.35))
                     Divider()
                 }
 
@@ -522,6 +538,7 @@ struct ChannelAdminWizardView: View {
                 name: name.trimmingCharacters(in: .whitespaces),
                 description: description.isEmpty ? nil : description,
                 visibility: visibility,
+                category: category.rawValue,
                 paidConfig: paidConfig
             )
             channel = created

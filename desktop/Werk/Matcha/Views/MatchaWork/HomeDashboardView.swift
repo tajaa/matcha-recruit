@@ -308,6 +308,11 @@ struct HomeDashboardView: View {
                             appState.selectedThreadId = item.refId
                             appState.selectedJournalId = nil
                             appState.showHome = false
+                        case "journal":
+                            appState.selectedJournalId = item.refId
+                            appState.selectedProjectId = nil
+                            appState.selectedThreadId = nil
+                            appState.showHome = false
                         default:
                             break
                         }
@@ -396,6 +401,7 @@ struct HomeDashboardView: View {
         case "project": return "folder.fill"
         case "task": return "checkmark.square"
         case "thread": return "bubble.left"
+        case "journal": return "book"
         default: return "circle"
         }
     }

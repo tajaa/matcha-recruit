@@ -13,6 +13,10 @@ class AppState {
     var showInbox: Bool = false
     var showPeople: Bool = false
     var showHome: Bool = false
+    /// Full-pane "Browse Channels" surface. Reached from the sidebar Channels
+    /// section header. Mutually exclusive with thread/project/channel/journal
+    /// selection — toggling on clears those.
+    var showChannelBrowse: Bool = false
     var onlineUsers: [MWOnlineUser] = []
     var unreadInboxCount: Int = 0
     var notificationsUnreadCount: Int = 0
@@ -159,6 +163,7 @@ class AppState {
         showInbox = false
         showPeople = false
         showHome = false
+        showChannelBrowse = false
         ChannelsWebSocket.shared.disconnect()
         ChannelStarStore.shared.bind(userId: nil)
         heartbeatTask?.cancel()

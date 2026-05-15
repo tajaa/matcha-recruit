@@ -80,6 +80,7 @@
 		DDDD0E0E0E0E0E0E01010003 /* InviteToBroadcastSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDDD0E0E0E0E0E0E01010004 /* InviteToBroadcastSheet.swift */; };
 		EEEE0J0J0J0J0J0J01010001 /* JournalDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE0J0J0J0J0J0J01010002 /* JournalDetailViewModel.swift */; };
 		CC11DD22EE33FF445566CC01 /* ChannelChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC11DD22EE33FF445566DD01 /* ChannelChatViewModel.swift */; };
+		CC11DD22EE33FF445566CC02 /* ChannelBrowseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC11DD22EE33FF445566DD02 /* ChannelBrowseView.swift */; };
 		EEEE0J0J0J0J0J0J01010003 /* JournalListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE0J0J0J0J0J0J01010004 /* JournalListView.swift */; };
 		EEEE0J0J0J0J0J0J01010005 /* JournalDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE0J0J0J0J0J0J01010006 /* JournalDetailView.swift */; };
 		EEEE0J0J0J0J0J0J01010007 /* NewJournalSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE0J0J0J0J0J0J01010008 /* NewJournalSheet.swift */; };
@@ -165,6 +166,7 @@
 		DDDD0E0E0E0E0E0E01010004 /* InviteToBroadcastSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteToBroadcastSheet.swift; sourceTree = "<group>"; };
 		EEEE0J0J0J0J0J0J01010002 /* JournalDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalDetailViewModel.swift; sourceTree = "<group>"; };
 		CC11DD22EE33FF445566DD01 /* ChannelChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelChatViewModel.swift; sourceTree = "<group>"; };
+		CC11DD22EE33FF445566DD02 /* ChannelBrowseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelBrowseView.swift; sourceTree = "<group>"; };
 		EEEE0J0J0J0J0J0J01010004 /* JournalListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalListView.swift; sourceTree = "<group>"; };
 		EEEE0J0J0J0J0J0J01010006 /* JournalDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalDetailView.swift; sourceTree = "<group>"; };
 		EEEE0J0J0J0J0J0J01010008 /* NewJournalSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewJournalSheet.swift; sourceTree = "<group>"; };
@@ -386,6 +388,7 @@
 			children = (
 				DD00EE11FF22334455770004 /* ChannelsSidebarView.swift */,
 				DD00EE11FF22334455770005 /* ChannelDetailView.swift */,
+				CC11DD22EE33FF445566DD02 /* ChannelBrowseView.swift */,
 				DD00EE11FF22334455770D11 /* InviteToChannelSheet.swift */,
 				DD00EE11FF22334455770D22 /* ChannelAdminWizardView.swift */,
 				DD00EE11FF22334455770D33 /* DiscoverChannelsSheet.swift */,
@@ -546,6 +549,7 @@
 				DD00EE11FF22334455660099 /* ChannelNotificationManager.swift in Sources */,
 				DD00EE11FF22334455660004 /* ChannelsSidebarView.swift in Sources */,
 				DD00EE11FF22334455660005 /* ChannelDetailView.swift in Sources */,
+				CC11DD22EE33FF445566CC02 /* ChannelBrowseView.swift in Sources */,
 				DD00EE11FF22334455660D11 /* InviteToChannelSheet.swift in Sources */,
 				DD00EE11FF22334455660D22 /* ChannelAdminWizardView.swift in Sources */,
 				DD00EE11FF22334455660D33 /* DiscoverChannelsSheet.swift in Sources */,

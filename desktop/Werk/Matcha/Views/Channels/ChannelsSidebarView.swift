@@ -172,6 +172,7 @@ struct ChannelsSidebarView: View {
         let isStarred = ChannelStarStore.shared.isStarred(channel.id)
         return Button {
             appState.selectedChannelId = channel.id
+            appState.showChannelBrowse = false
             appState.clearChannelUnread(channel.id)
             // Zero the API-sourced count locally so the badge stays cleared
             // after the user clicks elsewhere. Backend marks last_read_at on
@@ -318,6 +319,7 @@ struct CreateChannelSheet: View {
     @State private var name = ""
     @State private var description = ""
     @State private var visibility = "public"
+    @State private var category: ChannelCategory = .general
     @State private var isPaid = false
     @State private var priceDollars = "5"
     @State private var isSubmitting = false
@@ -357,6 +359,20 @@ struct CreateChannelSheet: View {
                     .font(.system(size: 13))
                     .foregroundColor(.white.opacity(0.9))
                     .lineLimit(1...3)
+                Divider()
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("category")
+                    .font(.system(size: 10))
+                    .foregroundColor(.white.opacity(0.4))
+                Picker("", selection: $category) {
+                    ForEach(ChannelCategory.allCases) { cat in
+                        Text(cat.label).tag(cat)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
                 Divider()
             }
 
@@ -477,6 +493,7 @@ struct CreateChannelSheet: View {
                 name: name.trimmingCharacters(in: .whitespaces),
                 description: description.isEmpty ? nil : description,
                 visibility: visibility,
+                category: category.rawValue,
                 paidConfig: paidConfig
             )
             onCreated(channel)

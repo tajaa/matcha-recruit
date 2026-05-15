@@ -6,6 +6,7 @@ export interface ChannelSummary {
   slug: string
   description: string | null
   visibility: string
+  category?: string | null
   member_count: number
   unread_count: number
   last_message_at: string | null
@@ -14,6 +15,32 @@ export interface ChannelSummary {
   is_paid?: boolean
   price_cents?: number | null
   currency?: string
+}
+
+/** Allowed channel categories (mirrors `CHANNEL_CATEGORIES` in
+ * `server/app/core/routes/channels.py`). Update both sides when adding. */
+export const CHANNEL_CATEGORIES = [
+  'general',
+  'engineering',
+  'design',
+  'sales',
+  'support',
+  'operations',
+  'marketing',
+  'hr',
+  'announcements',
+] as const
+export type ChannelCategory = typeof CHANNEL_CATEGORIES[number]
+export const CHANNEL_CATEGORY_LABELS: Record<ChannelCategory, string> = {
+  general: 'General',
+  engineering: 'Engineering',
+  design: 'Design',
+  sales: 'Sales',
+  support: 'Support',
+  operations: 'Operations',
+  marketing: 'Marketing',
+  hr: 'HR',
+  announcements: 'Announcements',
 }
 
 export interface ChannelMember {
@@ -58,6 +85,7 @@ export interface ChannelDetail {
   slug: string
   description: string | null
   visibility: string
+  category?: string | null
   is_paid: boolean
   price_cents: number | null
   currency: string
@@ -74,10 +102,11 @@ export interface ChannelDetail {
 export const listChannels = () =>
   api.get<ChannelSummary[]>('/channels')
 
-export const discoverChannels = (params?: { q?: string; paid_only?: boolean }) => {
+export const discoverChannels = (params?: { q?: string; paid_only?: boolean; category?: string }) => {
   const qs = new URLSearchParams()
   if (params?.q) qs.set('q', params.q)
   if (params?.paid_only) qs.set('paid_only', 'true')
+  if (params?.category) qs.set('category', params.category)
   const query = qs.toString()
   return api.get<ChannelSummary[]>(`/channels/discover${query ? '?' + query : ''}`)
 }
@@ -124,8 +153,16 @@ export interface ChannelRevenue {
 
 export const CHANNELS_CHANGED_EVENT = 'mw-channels-changed'
 
-export const createChannel = async (name: string, description?: string, visibility: string = 'public', paidConfig?: PaidChannelConfig) => {
-  const res = await api.post<ChannelDetail>('/channels', { name, description, visibility, paid_config: paidConfig })
+export const createChannel = async (
+  name: string,
+  description?: string,
+  visibility: string = 'public',
+  paidConfig?: PaidChannelConfig,
+  category?: string,
+) => {
+  const res = await api.post<ChannelDetail>('/channels', {
+    name, description, visibility, category, paid_config: paidConfig,
+  })
   window.dispatchEvent(new CustomEvent(CHANNELS_CHANGED_EVENT))
   return res
 }

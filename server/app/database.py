@@ -5441,6 +5441,13 @@ async def init_db():
         # Channel permissions columns (for existing tables)
         await conn.execute("ALTER TABLE channels ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) DEFAULT 'public'")
         await conn.execute("ALTER TABLE channel_members ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'member'")
+        # Category for channel browse/filter UX (matches Alembic migration zzzz8g9h0i1j2).
+        await conn.execute("ALTER TABLE channels ADD COLUMN IF NOT EXISTS category VARCHAR(50)")
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_channels_category
+                ON channels(company_id, category)
+                WHERE category IS NOT NULL
+        """)
         # Backfill: set channel creators as owners
         await conn.execute("""
             UPDATE channel_members cm SET role = 'owner'

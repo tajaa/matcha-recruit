@@ -3740,10 +3740,33 @@ async def list_recent_activity_endpoint(
                   AND th.updated_at > NOW() - INTERVAL '14 days'
                 ORDER BY th.updated_at DESC
                 LIMIT 30
+            ), recent_journals AS (
+                -- Surface the parent journal for any entry written or edited
+                -- in the last 14 days. Title comes from the journal so the
+                -- dashboard row links somewhere navigable; the entry timestamp
+                -- drives ordering so silent journals don't crowd the list.
+                SELECT 'journal'::text AS kind,
+                       j.id::text AS ref_id,
+                       NULL::text AS project_id,
+                       j.title,
+                       NULL::text AS project_type,
+                       MAX(GREATEST(j.updated_at, e.updated_at)) AS updated_at
+                FROM mw_journals j
+                LEFT JOIN mw_journal_entries e ON e.journal_id = j.id
+                WHERE j.company_id = $1
+                  AND j.status = 'active'
+                  AND (
+                    j.updated_at > NOW() - INTERVAL '14 days'
+                    OR e.updated_at > NOW() - INTERVAL '14 days'
+                  )
+                GROUP BY j.id, j.title
+                ORDER BY updated_at DESC
+                LIMIT 30
             )
             SELECT * FROM recent
             UNION ALL SELECT * FROM recent_tasks
             UNION ALL SELECT * FROM recent_threads
+            UNION ALL SELECT * FROM recent_journals
             ORDER BY updated_at DESC
             LIMIT 25
             """,

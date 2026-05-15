@@ -48,13 +48,15 @@ struct ContentView: View {
                                 appState.selectedChannelId == nil &&
                                 !appState.showInbox &&
                                 !appState.showPeople &&
-                                !appState.showSkills
+                                !appState.showSkills &&
+                                !appState.showChannelBrowse
                             )
                         ) {
                             appState.showHome = true
                             appState.showInbox = false
                             appState.showPeople = false
                             appState.showSkills = false
+                            appState.showChannelBrowse = false
                             appState.selectedThreadId = nil
                             appState.selectedProjectId = nil
                             appState.selectedChannelId = nil
@@ -71,7 +73,7 @@ struct ContentView: View {
                             trailing: {
                                 HStack(spacing: 4) {
                                     Button {
-                                        showDiscoverChannels = true
+                                        showChannelBrowse()
                                     } label: {
                                         Image(systemName: "magnifyingglass")
                                             .font(.system(size: 10, weight: .semibold))
@@ -81,7 +83,7 @@ struct ContentView: View {
                                             .cornerRadius(4)
                                     }
                                     .buttonStyle(.plain)
-                                    .help("Discover public channels")
+                                    .help("Browse public channels")
 
                                     Menu {
                                         Button("New channel") {
@@ -92,8 +94,8 @@ struct ContentView: View {
                                             showCreateChannel = true
                                         }
                                         Divider()
-                                        Button("Discover public channels") {
-                                            showDiscoverChannels = true
+                                        Button("Browse public channels") {
+                                            showChannelBrowse()
                                         }
                                         Divider()
                                         Button("Channel admin guide") {
@@ -300,6 +302,7 @@ struct ContentView: View {
                         appState.showInbox = true
                         appState.showPeople = false
                         appState.showHome = false
+                        appState.showChannelBrowse = false
                         appState.selectedThreadId = nil
                         appState.selectedProjectId = nil
                         appState.selectedChannelId = nil
@@ -316,6 +319,7 @@ struct ContentView: View {
                         appState.showPeople = true
                         appState.showInbox = false
                         appState.showHome = false
+                        appState.showChannelBrowse = false
                         appState.selectedThreadId = nil
                         appState.selectedProjectId = nil
                         appState.selectedChannelId = nil
@@ -342,6 +346,8 @@ struct ContentView: View {
                 JournalDetailView(journalId: journalId)
             } else if let channelId = appState.selectedChannelId {
                 ChannelDetailView(channelId: channelId)
+            } else if appState.showChannelBrowse {
+                ChannelBrowseView()
             } else if appState.showInbox {
                 InboxView()
             } else if appState.showPeople {
@@ -473,7 +479,21 @@ struct ContentView: View {
 
     // MARK: - Sidebar building blocks
 
-    @ViewBuilder
+    /// Navigate to the full-pane Channels browse view. Clears any active
+    /// thread/project/channel/journal/inbox selection so the detail pane
+    /// renders the browse surface unambiguously.
+    private func showChannelBrowse() {
+        appState.showChannelBrowse = true
+        appState.selectedThreadId = nil
+        appState.selectedProjectId = nil
+        appState.selectedChannelId = nil
+        appState.selectedJournalId = nil
+        appState.showInbox = false
+        appState.showPeople = false
+        appState.showSkills = false
+        appState.showHome = false
+    }
+
     private func sidebarSection<Content: View, Trailing: View>(
         title: String,
         icon: String,

@@ -174,6 +174,16 @@ struct ChannelDetailView: View {
                 Text(vm.channel?.name.lowercased() ?? "")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.white.opacity(0.95))
+                if let cat = vm.channel?.category, let parsed = ChannelCategory(rawValue: cat) {
+                    Text(parsed.label)
+                        .font(.system(size: 9, weight: .medium))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.white.opacity(0.08))
+                        .foregroundColor(.white.opacity(0.55))
+                        .cornerRadius(3)
+                        .padding(.leading, 6)
+                }
                 Spacer()
                 HStack(spacing: 6) {
                     if !vm.onlineUsers.isEmpty {
