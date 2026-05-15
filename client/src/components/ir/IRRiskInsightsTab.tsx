@@ -203,6 +203,8 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
         <>
           <IRRiskHeroCard assessment={assessment} periodDays={matrix?.period_days ?? days} />
 
+          <IRRiskMatrixHeatmap matrix={matrix} loading={matrixLoading} error={matrixError} />
+
           {wcMetrics && <IRWcMetricsCard metrics={wcMetrics} />}
 
           {wcMetrics?.premium_impact && <IRPremiumImpactCard metrics={wcMetrics} />}
@@ -216,8 +218,6 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
           <IRSeverityDonut summary={summary} />
 
           <IRDimensionsGrid assessment={assessment} />
-
-          <IRRiskMatrixHeatmap matrix={matrix} loading={matrixLoading} error={matrixError} />
 
           {/* AI Themes */}
           <section>
