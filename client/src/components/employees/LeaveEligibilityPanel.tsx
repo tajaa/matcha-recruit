@@ -153,11 +153,11 @@ export function LeaveEligibilityPanel({ employeeId }: { employeeId: string }) {
                   </Badge>
                 </div>
                 <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-zinc-500 mt-1">
-                  {p.paid && p.wage_replacement_pct > 0 && (
+                  {p.paid && (p.wage_replacement_pct ?? 0) > 0 && (
                     <span>Paid · {p.wage_replacement_pct}% wage replacement</span>
                   )}
                   {!p.paid && <span>Unpaid</span>}
-                  {p.max_weeks > 0 && <span>Up to {p.max_weeks} weeks</span>}
+                  {(p.max_weeks ?? 0) > 0 && <span>Up to {p.max_weeks} weeks</span>}
                   {p.job_protection && <span>Job-protected</span>}
                   {p.source_url && (
                     <a
