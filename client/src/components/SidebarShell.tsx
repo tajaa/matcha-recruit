@@ -77,7 +77,7 @@ function NavItemLink({ item, location, collapsed }: { item: NavItem; location: R
     <NavLink
       to={item.to}
       title={collapsed ? item.label : undefined}
-      className={`group relative flex items-center py-1.5 text-[12px] transition-colors duration-100 ${collapsed ? 'justify-center px-0' : 'gap-2.5 pl-3 pr-2'} ${
+      className={`group relative flex items-center py-2 text-[12px] transition-colors duration-100 ${collapsed ? 'justify-center px-0' : 'gap-2.5 pl-3 pr-2'} ${
         isActive
           ? 'text-zinc-50 font-normal'
           : 'text-zinc-500 hover:text-zinc-200 font-light'
@@ -139,7 +139,7 @@ function NavGroupSection({ group, location, collapsed }: { group: NavGroup; loca
         <ChevronDown className={`h-2.5 w-2.5 transition-transform duration-150 ${open ? '' : '-rotate-90'}`} strokeWidth={1.6} />
       </button>
       {open && (
-        <div className="space-y-px">
+        <div className="space-y-1">
           {group.items.map((item) => (
             <NavItemLink key={item.to} item={item} location={location} collapsed={collapsed} />
           ))}
@@ -174,7 +174,7 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
       )}
 
       {/* Navigation */}
-      <nav className={`flex-1 ${navPx} pt-2 overflow-y-auto overflow-x-hidden`}>
+      <nav className={`flex-1 ${navPx} pt-2 space-y-1 overflow-y-auto overflow-x-hidden`}>
         {nav.map((item) =>
           isGroup(item) ? (
             <NavGroupSection key={item.label} group={item} location={location} collapsed={sidebarCollapsed} />
