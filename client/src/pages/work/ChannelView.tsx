@@ -20,6 +20,62 @@ import type { OpenPostingSummary } from '../../api/channelJobPostings'
 import VoiceCallBar from '../../components/channels/VoiceCallBar'
 import { useVoiceCall } from '../../hooks/useVoiceCall'
 
+// @-mention rendering — splits message content into plain-text + mention-chip
+// nodes. Server stamps `mentioned_user_ids` on the broadcast payload so we can
+// confirm a handle resolved to a real channel member; unresolved `@foo`
+// substrings render as plain text.
+const MENTION_PATTERN = /(?:^|\s)(@[A-Za-z0-9._-]{2,32})\b/g
+
+function handleFromEmail(email: string): string {
+  return (email.split('@')[0] || '').toLowerCase()
+}
+
+function renderMessageContent(
+  content: string,
+  members: ChannelMember[],
+  mentionedUserIds: string[] | undefined,
+  currentUserId: string | undefined,
+): React.ReactNode {
+  if (!content) return null
+  const validHandles = new Set(
+    members
+      .filter((m) => !mentionedUserIds || mentionedUserIds.includes(m.user_id))
+      .map((m) => handleFromEmail(m.email || ''))
+      .filter(Boolean),
+  )
+  const parts: React.ReactNode[] = []
+  let lastIdx = 0
+  for (const match of content.matchAll(MENTION_PATTERN)) {
+    const fullMatch = match[0]
+    const handleToken = match[1]
+    const handle = handleToken.slice(1).toLowerCase()
+    const idx = match.index ?? 0
+    const tokenStart = idx + (fullMatch.length - handleToken.length)
+    if (tokenStart > lastIdx) parts.push(content.slice(lastIdx, tokenStart))
+    if (validHandles.has(handle)) {
+      const mentioned = members.find((m) => handleFromEmail(m.email || '') === handle)
+      const isMe = mentioned?.user_id === currentUserId
+      parts.push(
+        <span
+          key={`m-${tokenStart}`}
+          className={
+            isMe
+              ? 'inline-block px-1 rounded bg-yellow-500/25 text-yellow-200 font-medium'
+              : 'inline-block px-1 rounded bg-emerald-500/20 text-emerald-300 font-medium'
+          }
+        >
+          {handleToken}
+        </span>,
+      )
+    } else {
+      parts.push(handleToken)
+    }
+    lastIdx = idx + fullMatch.length
+  }
+  if (lastIdx < content.length) parts.push(content.slice(lastIdx))
+  return parts
+}
+
 export default function ChannelView() {
   const { channelId } = useParams<{ channelId: string }>()
   const navigate = useNavigate()
@@ -39,6 +95,9 @@ export default function ChannelView() {
   const [showAddMembers, setShowAddMembers] = useState(false)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [mentionCursor, setMentionCursor] = useState(0)
+  const inputTextareaRef = useRef<HTMLTextAreaElement>(null)
   const [paymentInfo, setPaymentInfo] = useState<ChannelPaymentInfo | null>(null)
   const [warningDismissed, setWarningDismissed] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
@@ -224,15 +283,87 @@ export default function ChannelView() {
     setInput('')
   }
 
-  function handleKeyDown(e: React.KeyboardEvent) {
+  // Autocomplete candidates for the active @-token. Empty when no token open.
+  const mentionMatches: ChannelMember[] = (() => {
+    if (mentionQuery === null || !channel) return []
+    const q = mentionQuery.toLowerCase()
+    return channel.members
+      .filter((m) => m.user_id !== userId)
+      .filter((m) => {
+        const handle = handleFromEmail(m.email || '')
+        const name = (m.name || '').toLowerCase()
+        return handle.startsWith(q) || name.startsWith(q)
+      })
+      .slice(0, 6)
+  })()
+
+  function applyMention(member: ChannelMember) {
+    const handle = handleFromEmail(member.email || '')
+    if (!handle || mentionQuery === null) return
+    // Replace the active "@partial" with "@handle " and place caret after.
+    const head = input.slice(0, mentionCursor)
+    const tail = input.slice(mentionCursor + mentionQuery.length)
+    const replaced = head + handle + ' ' + tail
+    setInput(replaced)
+    setMentionQuery(null)
+    requestAnimationFrame(() => {
+      const ta = inputTextareaRef.current
+      if (!ta) return
+      ta.focus()
+      const pos = head.length + handle.length + 1
+      ta.setSelectionRange(pos, pos)
+    })
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // When the mention dropdown is open, Tab/Enter selects the first match
+    // and Escape closes it.
+    if (mentionQuery !== null && mentionMatches.length > 0) {
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        applyMention(mentionMatches[0])
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setMentionQuery(null)
+        return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
     }
   }
 
+  function detectMentionToken(value: string, caret: number): { query: string; tokenStart: number } | null {
+    // Look back from caret to find the active @-token. A token starts at @ and
+    // is preceded by start-of-string or whitespace. Stops at first whitespace.
+    let i = caret - 1
+    while (i >= 0 && !/\s/.test(value[i])) {
+      if (value[i] === '@') {
+        const before = i === 0 ? '' : value[i - 1]
+        if (i === 0 || /\s/.test(before)) {
+          return { query: value.slice(i + 1, caret), tokenStart: i + 1 }
+        }
+        return null
+      }
+      i--
+    }
+    return null
+  }
+
   function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    setInput(e.target.value)
+    const value = e.target.value
+    setInput(value)
+    const caret = e.target.selectionStart ?? value.length
+    const token = detectMentionToken(value, caret)
+    if (token && token.query.length <= 32 && /^[A-Za-z0-9._-]*$/.test(token.query)) {
+      setMentionQuery(token.query)
+      setMentionCursor(token.tokenStart)
+    } else {
+      setMentionQuery(null)
+    }
     // Throttle typing indicator to once per 2s
     if (channelId && Date.now() - lastTypingSentRef.current > 2000) {
       socketRef.current?.sendTyping(channelId)
@@ -549,7 +680,12 @@ export default function ChannelView() {
                       </p>
                     ) : msg.content ? (
                       <p className="text-sm text-zinc-200 whitespace-pre-wrap break-words">
-                        {msg.content}
+                        {renderMessageContent(
+                          msg.content,
+                          channel?.members ?? [],
+                          msg.mentioned_user_ids,
+                          userId,
+                        )}
                       </p>
                     ) : null}
                   {!isDeleted && msg.attachments && msg.attachments.length > 0 && (
@@ -635,15 +771,39 @@ export default function ChannelView() {
                   e.target.value = ''
                 }}
               />
-              <textarea
-                value={input}
-                onChange={handleInputChange}
-                onKeyDown={handleKeyDown}
-                placeholder={`Message #${channel?.name ?? 'channel'}...`}
-                rows={1}
-                className="flex-1 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm placeholder:text-zinc-500 focus:outline-none focus:border-emerald-600 resize-none max-h-32"
-                style={{ minHeight: '38px' }}
-              />
+              <div className="flex-1 relative">
+                {mentionQuery !== null && mentionMatches.length > 0 && (
+                  <div className="absolute bottom-full left-0 mb-1 w-full max-w-xs bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-20 overflow-hidden">
+                    <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-zinc-500 border-b border-zinc-800">
+                      Mention a member
+                    </div>
+                    {mentionMatches.map((m, i) => {
+                      const handle = handleFromEmail(m.email || '')
+                      return (
+                        <button
+                          key={m.user_id}
+                          type="button"
+                          onMouseDown={(e) => { e.preventDefault(); applyMention(m) }}
+                          className={`w-full text-left px-3 py-1.5 text-sm flex items-center justify-between hover:bg-zinc-800 ${i === 0 ? 'bg-zinc-800/50' : ''}`}
+                        >
+                          <span className="text-zinc-200 truncate">{m.name}</span>
+                          <span className="text-emerald-400 text-xs ml-2 shrink-0">@{handle}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+                <textarea
+                  ref={inputTextareaRef}
+                  value={input}
+                  onChange={handleInputChange}
+                  onKeyDown={handleKeyDown}
+                  placeholder={`Message #${channel?.name ?? 'channel'}...`}
+                  rows={1}
+                  className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm placeholder:text-zinc-500 focus:outline-none focus:border-emerald-600 resize-none max-h-32"
+                  style={{ minHeight: '38px' }}
+                />
+              </div>
               <button
                 onClick={handleSend}
                 disabled={(!input.trim() && pendingFiles.length === 0) || uploading}

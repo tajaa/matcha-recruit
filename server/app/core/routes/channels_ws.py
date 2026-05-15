@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from ...database import get_connection
 from ..services.auth import decode_token
+from ..services.redis_cache import get_redis_cache
 from .voice_signaling import (
     handle_voice_join,
     handle_voice_leave,
@@ -21,6 +22,34 @@ from .voice_signaling import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Online presence — written on every WS receive (heartbeat), read by the
+# mention_email Celery worker to skip emails for users who are still active.
+# TTL is intentionally generous (60s) so a single dropped ping doesn't trigger
+# a false-offline email; manager.disconnect explicitly clears the key when the
+# last WS for a user closes.
+_ONLINE_KEY_PREFIX = "channels_ws:online:"
+_ONLINE_TTL_SECONDS = 60
+
+
+async def _mark_online(user_id: UUID) -> None:
+    redis = get_redis_cache()
+    if redis is None:
+        return
+    try:
+        await redis.setex(f"{_ONLINE_KEY_PREFIX}{user_id}", _ONLINE_TTL_SECONDS, "1")
+    except Exception:
+        pass
+
+
+async def _mark_offline(user_id: UUID) -> None:
+    redis = get_redis_cache()
+    if redis is None:
+        return
+    try:
+        await redis.delete(f"{_ONLINE_KEY_PREFIX}{user_id}")
+    except Exception:
+        pass
 
 router = APIRouter()
 
@@ -320,10 +349,12 @@ async def channel_websocket(
         return
 
     await manager.connect(websocket, user)
+    await _mark_online(user.id)
 
     try:
         while True:
             data = await websocket.receive_json()
+            await _mark_online(user.id)
             msg_type = data.get("type")
 
             if msg_type == "ping":
@@ -451,6 +482,19 @@ async def channel_websocket(
                                         "attachments": rp_atts,
                                     }
 
+                            # Parse + resolve @mentions BEFORE broadcasting so the
+                            # payload carries the resolved IDs for client-side chip
+                            # rendering. Email enqueue happens below; emails are
+                            # rate-limited and only send to offline users.
+                            from app.matcha.services.mentions import (
+                                parse_mentions, resolve_mentions,
+                            )
+                            mention_handles = parse_mentions(row["content"])
+                            mentioned_users = await resolve_mentions(
+                                conn, ch_uuid, mention_handles, exclude_user_id=user.id,
+                            ) if mention_handles else []
+                            mentioned_user_ids = [str(m["id"]) for m in mentioned_users]
+
                             await manager.broadcast_message(room_key, {
                                 "id": str(row["id"]),
                                 "channel_id": str(row["channel_id"]),
@@ -464,7 +508,25 @@ async def channel_websocket(
                                 "reactions": [],
                                 "created_at": row["created_at"].isoformat(),
                                 "edited_at": None,
+                                "mentioned_user_ids": mentioned_user_ids,
                             })
+
+                            # Off-load offline-email check to Celery so the WS
+                            # hot path stays fast. Worker re-checks online state
+                            # via Redis before sending.
+                            if mentioned_user_ids:
+                                try:
+                                    from app.workers.tasks.mention_email import send_mention_email
+                                    send_mention_email.delay(
+                                        message_id=str(row["id"]),
+                                        channel_id=str(row["channel_id"]),
+                                        sender_id=str(user.id),
+                                        sender_name=user.name,
+                                        content=row["content"] or "",
+                                        mentioned_user_ids=mentioned_user_ids,
+                                    )
+                                except Exception:
+                                    logger.exception("Failed to enqueue mention_email")
 
                             # In-app notifications for non-sender members
                             try:
@@ -534,3 +596,7 @@ async def channel_websocket(
         logger.error(f"[Channel WS] Error: {e}")
     finally:
         await manager.disconnect(websocket, user.id)
+        # Only clear the online key if this was the user's last active WS.
+        # manager.active_connections drops the user_id when the set goes empty.
+        if user.id not in manager.active_connections:
+            await _mark_offline(user.id)

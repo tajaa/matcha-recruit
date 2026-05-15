@@ -45,6 +45,11 @@ export interface ChannelMessage {
   edited_at: string | null
   deleted_at?: string | null
   deleted_by?: string | null
+  /** User IDs that the server resolved from @mentions in `content`. Optional —
+   * older REST-fetched messages from before the mention pipeline shipped will
+   * not have this field; renderers should treat absence as "no mentions
+   * resolved" but may still parse `@handle` patterns in `content` for display. */
+  mentioned_user_ids?: string[]
 }
 
 export interface ChannelDetail {

@@ -79,6 +79,7 @@
 		DDDD0E0E0E0E0E0E01010001 /* ManageMembersSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDDD0E0E0E0E0E0E01010002 /* ManageMembersSheet.swift */; };
 		DDDD0E0E0E0E0E0E01010003 /* InviteToBroadcastSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDDD0E0E0E0E0E0E01010004 /* InviteToBroadcastSheet.swift */; };
 		EEEE0J0J0J0J0J0J01010001 /* JournalDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE0J0J0J0J0J0J01010002 /* JournalDetailViewModel.swift */; };
+		CC11DD22EE33FF445566CC01 /* ChannelChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC11DD22EE33FF445566DD01 /* ChannelChatViewModel.swift */; };
 		EEEE0J0J0J0J0J0J01010003 /* JournalListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE0J0J0J0J0J0J01010004 /* JournalListView.swift */; };
 		EEEE0J0J0J0J0J0J01010005 /* JournalDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE0J0J0J0J0J0J01010006 /* JournalDetailView.swift */; };
 		EEEE0J0J0J0J0J0J01010007 /* NewJournalSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEEE0J0J0J0J0J0J01010008 /* NewJournalSheet.swift */; };
@@ -163,6 +164,7 @@
 		DDDD0E0E0E0E0E0E01010002 /* ManageMembersSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManageMembersSheet.swift; sourceTree = "<group>"; };
 		DDDD0E0E0E0E0E0E01010004 /* InviteToBroadcastSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteToBroadcastSheet.swift; sourceTree = "<group>"; };
 		EEEE0J0J0J0J0J0J01010002 /* JournalDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalDetailViewModel.swift; sourceTree = "<group>"; };
+		CC11DD22EE33FF445566DD01 /* ChannelChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelChatViewModel.swift; sourceTree = "<group>"; };
 		EEEE0J0J0J0J0J0J01010004 /* JournalListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalListView.swift; sourceTree = "<group>"; };
 		EEEE0J0J0J0J0J0J01010006 /* JournalDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalDetailView.swift; sourceTree = "<group>"; };
 		EEEE0J0J0J0J0J0J01010008 /* NewJournalSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewJournalSheet.swift; sourceTree = "<group>"; };
@@ -344,6 +346,7 @@
 				AA11BB22CC33DD44EE660001 /* ProjectDetailViewModel.swift */,
 				C0C0C0C0C0C0C0C001010004 /* ProjectPresenceViewModel.swift */,
 				EEEE0J0J0J0J0J0J01010002 /* JournalDetailViewModel.swift */,
+				CC11DD22EE33FF445566DD01 /* ChannelChatViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -564,6 +567,7 @@
 				DDDD0E0E0E0E0E0E01010001 /* ManageMembersSheet.swift in Sources */,
 				DDDD0E0E0E0E0E0E01010003 /* InviteToBroadcastSheet.swift in Sources */,
 				EEEE0J0J0J0J0J0J01010001 /* JournalDetailViewModel.swift in Sources */,
+				CC11DD22EE33FF445566CC01 /* ChannelChatViewModel.swift in Sources */,
 				EEEE0J0J0J0J0J0J01010003 /* JournalListView.swift in Sources */,
 				EEEE0J0J0J0J0J0J01010005 /* JournalDetailView.swift in Sources */,
 				EEEE0J0J0J0J0J0J01010007 /* NewJournalSheet.swift in Sources */,

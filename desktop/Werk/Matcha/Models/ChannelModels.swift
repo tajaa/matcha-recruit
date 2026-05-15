@@ -82,6 +82,11 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
     let editedAt: String?
     var deletedAt: String?
     var deletedBy: String?
+    /// User IDs the server resolved from @mentions in `content`. Only populated
+    /// on broadcasts from the live channels WS — older REST-fetched messages
+    /// won't carry this; renderers may still parse @handle patterns from
+    /// `content` for display.
+    let mentionedUserIds: [String]?
 
     enum CodingKeys: String, CodingKey {
         case id, content, attachments, reactions
@@ -95,13 +100,15 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
         case editedAt = "edited_at"
         case deletedAt = "deleted_at"
         case deletedBy = "deleted_by"
+        case mentionedUserIds = "mentioned_user_ids"
     }
 
     init(id: String, channelId: String, senderId: String, senderName: String,
          senderAvatarUrl: String?, content: String, attachments: [ChannelAttachment],
          replyToId: String? = nil, replyPreview: ReplyPreview? = nil,
          reactions: [ChannelReaction] = [],
-         createdAt: String, editedAt: String?) {
+         createdAt: String, editedAt: String?,
+         mentionedUserIds: [String]? = nil) {
         self.id = id
         self.channelId = channelId
         self.senderId = senderId
@@ -114,6 +121,7 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
         self.reactions = reactions
         self.createdAt = createdAt
         self.editedAt = editedAt
+        self.mentionedUserIds = mentionedUserIds
     }
 
     init(from decoder: Decoder) throws {
@@ -130,6 +138,7 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
         self.reactions = (try? c.decode([ChannelReaction].self, forKey: .reactions)) ?? []
         self.createdAt = try c.decode(String.self, forKey: .createdAt)
         self.editedAt = try c.decodeIfPresent(String.self, forKey: .editedAt)
+        self.mentionedUserIds = try? c.decodeIfPresent([String].self, forKey: .mentionedUserIds)
     }
 }
 

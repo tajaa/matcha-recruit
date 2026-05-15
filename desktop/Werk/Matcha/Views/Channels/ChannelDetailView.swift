@@ -15,14 +15,8 @@ struct ChannelDetailView: View {
     let channelId: String
 
     @Environment(AppState.self) private var appState
-    @State private var channel: ChannelDetail?
-    @State private var messages: [ChannelMessage] = []
+    @State private var vm = ChannelChatViewModel()
     @State private var inputText = ""
-    @State private var isLoading = true
-    @State private var errorMessage: String?
-    @State private var onlineUsers: [ChannelOnlineUser] = []
-    @State private var typingUsers: [String: String] = [:]
-    @State private var typingClearTask: Task<Void, Never>?
     @State private var pendingAttachments: [PendingAttachment] = []
     @State private var isUploading = false
     @State private var isDragOver = false
@@ -38,7 +32,7 @@ struct ChannelDetailView: View {
     @Environment(BroadcastService.self) private var broadcast: BroadcastService
 
     private var isAdmin: Bool {
-        let role = channel?.myRole ?? ""
+        let role = vm.channel?.myRole ?? ""
         let global = appState.currentUser?.role ?? ""
         return role == "owner" || role == "moderator" || global == "admin"
     }
@@ -56,13 +50,13 @@ struct ChannelDetailView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if isLoading {
+            if vm.isLoading {
                 Spacer()
                 Text("loading…")
                     .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.35))
                 Spacer()
-            } else if let errorMessage {
+            } else if let errorMessage = vm.errorMessage {
                 Spacer()
                 VStack(spacing: 10) {
                     Image(systemName: "exclamationmark.triangle")
@@ -75,8 +69,8 @@ struct ChannelDetailView: View {
                         .padding(.horizontal, 16)
                     Button {
                         Task {
-                            self.errorMessage = nil
-                            await loadChannel()
+                            vm.errorMessage = nil
+                            await vm.loadChannel(channelId: channelId)
                         }
                     } label: {
                         Text("Try again").font(.system(size: 11, weight: .medium))
@@ -90,9 +84,9 @@ struct ChannelDetailView: View {
                 if broadcast.channelId == channelId && broadcast.isConnected {
                     BroadcastPanelView(
                         channelId: channelId,
-                        channelName: channel?.name ?? "channel",
+                        channelName: vm.channel?.name ?? "channel",
                         isOwner: broadcast.isOwner,
-                        members: channel?.members ?? [],
+                        members: vm.channel?.members ?? [],
                         myUserId: appState.currentUser?.id ?? "",
                     )
                         .environment(broadcast)
@@ -115,10 +109,7 @@ struct ChannelDetailView: View {
             )
         )
         .task(id: channelId) {
-            await loadChannel()
-            wireWebSocket()
-            ws.connect()
-            ws.joinRoom(channelId: channelId)
+            await vm.start(channelId: channelId)
             // REST fallback so a viewer who navigates into the channel mid-stream
             // (or whose WS dropped before the broadcast.started fan-out) still
             // sees the Watch-feed banner without depending on the WS event.
@@ -129,23 +120,19 @@ struct ChannelDetailView: View {
             // joinBackgroundRooms so background message notifications still
             // arrive when the user is viewing a different channel/project.
             // The matching design intent is documented on joinRoom().
-            // The original leaveRoom-on-disappear desynced backgroundRoomIds
-            // (server forgot user, client cache still claimed subscription),
-            // and on re-entry joinRoom would skip and the user's own message
-            // would not echo back until a manual refresh.
-            ws.clearCallbacksIfRoomMatches(channelId)
+            vm.stop(channelId: channelId)
         }
         .sheet(isPresented: $showInviteSheet) {
             InviteToChannelSheet(
                 channelId: channelId,
-                channelName: channel?.name ?? "channel"
+                channelName: vm.channel?.name ?? "channel"
             ) { addedCount in
                 inviteToast = "Invited \(addedCount) member\(addedCount == 1 ? "" : "s")"
-                Task { await loadChannel() }
+                Task { await vm.loadChannel(channelId: channelId) }
             }
         }
         .sheet(isPresented: $showManageMembers) {
-            if let channel {
+            if let channel = vm.channel {
                 ManageMembersSheet(
                     channelId: channelId,
                     channelName: channel.name,
@@ -153,7 +140,7 @@ struct ChannelDetailView: View {
                     myUserId: appState.currentUser?.id ?? "",
                     myRole: channel.myRole ?? "member",
                     isGlobalAdmin: appState.currentUser?.role == "admin",
-                    onChanged: { Task { await loadChannel() } }
+                    onChanged: { Task { await vm.loadChannel(channelId: channelId) } }
                 )
             }
         }
@@ -184,20 +171,20 @@ struct ChannelDetailView: View {
                 Text("# ")
                     .font(.system(size: 13))
                     .foregroundColor(.white.opacity(0.4))
-                Text(channel?.name.lowercased() ?? "")
+                Text(vm.channel?.name.lowercased() ?? "")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.white.opacity(0.95))
                 Spacer()
                 HStack(spacing: 6) {
-                    if !onlineUsers.isEmpty {
+                    if !vm.onlineUsers.isEmpty {
                         Text("●")
                             .font(.system(size: 8))
                             .foregroundColor(Color.matcha500)
-                        Text("\(onlineUsers.count) online")
+                        Text("\(vm.onlineUsers.count) online")
                             .font(.system(size: 10))
                             .foregroundColor(.white.opacity(0.6))
                     }
-                    if let count = channel?.memberCount {
+                    if let count = vm.channel?.memberCount {
                         Text("·")
                             .font(.system(size: 10))
                             .foregroundColor(.white.opacity(0.25))
@@ -228,7 +215,7 @@ struct ChannelDetailView: View {
                     // actively broadcasting OR when an active broadcast in this
                     // channel was started by the current user from another
                     // session (orphan recovery — quit app mid-stream, etc.).
-                    if channel?.myRole == "owner" {
+                    if vm.channel?.myRole == "owner" {
                         let info = broadcast.activeBroadcasts[channelId]
                         let isOwnActive = info?.startedBy == appState.currentUser?.id && info != nil
                         let isLiveHere = broadcast.channelId == channelId && broadcast.isConnected
@@ -316,7 +303,7 @@ struct ChannelDetailView: View {
                     }
                 }
             }
-            if let desc = channel?.description, !desc.isEmpty {
+            if let desc = vm.channel?.description, !desc.isEmpty {
                 Text(desc)
                     .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.35))
@@ -340,7 +327,7 @@ struct ChannelDetailView: View {
     private var watchFeedBanner: some View {
         let info = broadcast.activeBroadcasts[channelId]
         let starterName = info.flatMap { id in
-            onlineUsers.first(where: { $0.id == id.startedBy })?.name
+            vm.onlineUsers.first(where: { $0.id == id.startedBy })?.name
         } ?? info?.title
         let title: String = {
             if let n = starterName { return "\(n) is live" }
@@ -390,14 +377,14 @@ struct ChannelDetailView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(messages, id: \.id) { msg in
+                    ForEach(vm.messages, id: \.id) { msg in
                         messageRow(msg).id(msg.id)
                     }
-                    if !typingUsers.isEmpty {
+                    if !vm.typingUsers.isEmpty {
                         HStack(alignment: .center, spacing: 6) {
                             Spacer().frame(width: senderColumnWidth + 16)
                             TypingBubbleView()
-                            Text(typingUsers.values.sorted().joined(separator: ", "))
+                            Text(vm.typingUsers.values.sorted().joined(separator: ", "))
                                 .font(.system(size: 10))
                                 .foregroundColor(.white.opacity(0.35))
                         }
@@ -408,8 +395,8 @@ struct ChannelDetailView: View {
                 .padding(.horizontal, 16)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .onChange(of: messages.count) {
-                if let last = messages.last {
+            .onChange(of: vm.messages.count) {
+                if let last = vm.messages.last {
                     withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
@@ -515,7 +502,7 @@ struct ChannelDetailView: View {
                             .foregroundColor(.secondary)
                             .italic()
                     } else if !msg.content.isEmpty {
-                        Text(msg.content)
+                        Text(mentionAttributedContent(msg))
                             .font(.system(size: 13))
                             .foregroundColor(.primary.opacity(0.9))
                             .textSelection(.enabled)
@@ -643,13 +630,13 @@ struct ChannelDetailView: View {
             do {
                 try await ChannelsService.shared.deleteMessage(channelId: channelId, messageId: msg.id)
                 await MainActor.run {
-                    if let idx = messages.firstIndex(where: { $0.id == msg.id }) {
-                        messages[idx].deletedAt = ISO8601DateFormatter().string(from: Date())
-                        messages[idx].deletedBy = appState.currentUser?.id ?? ""
+                    if let idx = vm.messages.firstIndex(where: { $0.id == msg.id }) {
+                        vm.messages[idx].deletedAt = ISO8601DateFormatter().string(from: Date())
+                        vm.messages[idx].deletedBy = appState.currentUser?.id ?? ""
                     }
                 }
             } catch {
-                errorMessage = "Delete failed: \(error.localizedDescription)"
+                vm.errorMessage = "Delete failed: \(error.localizedDescription)"
             }
         }
     }
@@ -661,7 +648,7 @@ struct ChannelDetailView: View {
                     channelId: channelId, messageId: messageId, emoji: emoji
                 )
             } catch {
-                errorMessage = "Reaction failed: \(error.localizedDescription)"
+                vm.errorMessage = "Reaction failed: \(error.localizedDescription)"
             }
         }
     }
@@ -816,6 +803,53 @@ struct ChannelDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            // Mention autocomplete — appears above the input when the user
+            // has an open @-token at the end of their text and there are
+            // matching channel members.
+            if activeMentionQuery != nil && !mentionMatches.isEmpty {
+                VStack(spacing: 0) {
+                    HStack {
+                        Text("MENTION")
+                            .font(.system(size: 9, weight: .semibold))
+                            .tracking(1.2)
+                            .foregroundColor(.white.opacity(0.35))
+                        Spacer()
+                        Text("Click to insert")
+                            .font(.system(size: 9))
+                            .foregroundColor(.white.opacity(0.25))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    Divider().opacity(0.3)
+                    ForEach(Array(mentionMatches.enumerated()), id: \.element.userId) { idx, member in
+                        let handle = member.email.split(separator: "@").first.map(String.init) ?? ""
+                        Button { applyMention(member) } label: {
+                            HStack {
+                                Text(member.name)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.white.opacity(0.9))
+                                Spacer()
+                                Text("@\(handle)")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(Color.matcha500)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(idx == 0 ? Color.white.opacity(0.05) : Color.clear)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .background(.regularMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .frame(maxWidth: 320, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             HStack(alignment: .center, spacing: 8) {
                 Text("\(userHandle)@\(channelSlug) ›")
                     .font(.system(size: 11))
@@ -917,7 +951,7 @@ struct ChannelDetailView: View {
     }
 
     private var channelSlug: String {
-        channel?.slug ?? channel?.name.lowercased().replacingOccurrences(of: " ", with: "-") ?? "channel"
+        vm.channel?.slug ?? vm.channel?.name.lowercased().replacingOccurrences(of: " ", with: "-") ?? "channel"
     }
 
     // MARK: - Actions
@@ -954,7 +988,7 @@ struct ChannelDetailView: View {
                 }
             } catch {
                 await MainActor.run {
-                    errorMessage = "Upload failed: \(error.localizedDescription)"
+                    vm.errorMessage = "Upload failed: \(error.localizedDescription)"
                     isUploading = false
                 }
             }
@@ -989,19 +1023,19 @@ struct ChannelDetailView: View {
     private func ingestFile(at url: URL) {
         let ext = url.pathExtension.lowercased()
         guard allowedExtensions.contains(ext) else {
-            errorMessage = "File type .\(ext) not allowed"
+            vm.errorMessage = "File type .\(ext) not allowed"
             return
         }
         guard pendingAttachments.count < maxAttachments else {
-            errorMessage = "Max \(maxAttachments) attachments per message"
+            vm.errorMessage = "Max \(maxAttachments) attachments per message"
             return
         }
         guard let data = try? Data(contentsOf: url) else {
-            errorMessage = "Could not read \(url.lastPathComponent)"
+            vm.errorMessage = "Could not read \(url.lastPathComponent)"
             return
         }
         guard data.count <= maxAttachmentBytes else {
-            errorMessage = "\(url.lastPathComponent) is too large (max 10 MB)"
+            vm.errorMessage = "\(url.lastPathComponent) is too large (max 10 MB)"
             return
         }
         let mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
@@ -1010,71 +1044,7 @@ struct ChannelDetailView: View {
         )
     }
 
-    private func loadChannel() async {
-        isLoading = true
-        errorMessage = nil
-        do {
-            let detail = try await ChannelsService.shared.getChannel(id: channelId)
-            channel = detail
-            ws.setCurrentRoomName(detail.name)
-            messages = detail.messages
-            isLoading = false
-        } catch {
-            errorMessage = error.localizedDescription
-            isLoading = false
-        }
-    }
-
-    private func wireWebSocket() {
-        ws.onMessage = { msg in
-            guard msg.channelId == channelId else { return }
-            if !messages.contains(where: { $0.id == msg.id }) {
-                messages.append(msg)
-            }
-        }
-        ws.onOnlineUsers = { users in
-            onlineUsers = users
-        }
-        ws.onUserJoined = { user in
-            if !onlineUsers.contains(where: { $0.id == user.id }) {
-                onlineUsers.append(user)
-            }
-        }
-        ws.onUserLeft = { user in
-            onlineUsers.removeAll { $0.id == user.id }
-        }
-        ws.onTyping = { userId, name in
-            typingUsers[userId] = handleFor(name)
-            typingClearTask?.cancel()
-            typingClearTask = Task { @MainActor in
-                try? await Task.sleep(for: .seconds(3))
-                typingUsers.removeValue(forKey: userId)
-            }
-        }
-        ws.onMessageDeleted = { messageId, deletedBy in
-            if let idx = messages.firstIndex(where: { $0.id == messageId }) {
-                messages[idx].deletedAt = ISO8601DateFormatter().string(from: Date())
-                messages[idx].deletedBy = deletedBy
-            }
-        }
-        ws.onReactionUpdate = { messageId, reactions in
-            if let idx = messages.firstIndex(where: { $0.id == messageId }) {
-                messages[idx].reactions = reactions
-            }
-        }
-        ws.onError = { msg in
-            errorMessage = msg
-        }
-        // Broadcast WS callbacks are wired GLOBALLY in AppState.didLogin so
-        // the singleton's callbacks aren't overwritten when this view tears
-        // down or another channel's view mounts. See app/AppState.swift.
-    }
-
     // MARK: - Formatting
-
-    private func handleFor(_ name: String) -> String {
-        name.lowercased().replacingOccurrences(of: " ", with: "_")
-    }
 
     private func formatTimestamp(_ iso: String) -> String {
         let formatter = ISO8601DateFormatter()
@@ -1084,6 +1054,94 @@ struct ChannelDetailView: View {
         let display = DateFormatter()
         display.dateFormat = "HH:mm"
         return display.string(from: date)
+    }
+
+    // MARK: - Mention rendering
+
+    private func mentionAttributedContent(_ msg: ChannelMessage) -> AttributedString {
+        var attributed = AttributedString(msg.content)
+        let members = vm.channel?.members ?? []
+        let myId = appState.currentUser?.id ?? ""
+        let resolved: Set<String> = msg.mentionedUserIds.map(Set.init) ?? Set()
+        // Build handle -> member map (handle = email local-part lowercased).
+        let memberByHandle: [String: ChannelMember] = Dictionary(
+            uniqueKeysWithValues: members.compactMap { m -> (String, ChannelMember)? in
+                let local = m.email.split(separator: "@").first.map(String.init) ?? ""
+                guard !local.isEmpty else { return nil }
+                return (local.lowercased(), m)
+            }
+        )
+        let pattern = #"(?<=^|\s)@([A-Za-z0-9._-]{2,32})\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return attributed }
+        let nsContent = msg.content as NSString
+        let matches = regex.matches(in: msg.content, range: NSRange(location: 0, length: nsContent.length))
+        for m in matches.reversed() {
+            // Use group 1 (handle) for lookup; style the full match (with @).
+            let handleRange = m.range(at: 1)
+            guard handleRange.location != NSNotFound else { continue }
+            let handle = nsContent.substring(with: handleRange).lowercased()
+            guard let member = memberByHandle[handle] else { continue }
+            // If the server stamped resolved IDs, only chip those; otherwise
+            // chip every membership-resolved handle (REST-fetched older msgs).
+            if !resolved.isEmpty && !resolved.contains(member.userId) { continue }
+            // Locate the @handle range in the AttributedString (group 0 starts
+            // at @ with possible leading whitespace; the match's range[0] is
+            // wider when whitespace prefix matched the lookbehind alternative).
+            let chipNSRange = NSRange(location: handleRange.location - 1, length: handleRange.length + 1)
+            guard chipNSRange.location >= 0,
+                  chipNSRange.location + chipNSRange.length <= nsContent.length,
+                  let stringRange = Range(chipNSRange, in: msg.content),
+                  let attrRange = Range(stringRange, in: attributed)
+            else { continue }
+            let isMe = member.userId == myId
+            attributed[attrRange].foregroundColor = isMe ? .yellow : Color.matcha500
+            attributed[attrRange].font = .system(size: 13, weight: .semibold)
+        }
+        return attributed
+    }
+
+    // MARK: - Mention autocomplete
+
+    /// Returns the active @-token under the cursor — caller passes the full
+    /// inputText since SwiftUI TextEditor doesn't expose selection. We fall
+    /// back to "the last @-token in the text" which is good enough for typing
+    /// at the end (the dominant case); editing mid-text won't trigger
+    /// autocomplete reliably but also won't misfire.
+    private var activeMentionQuery: (query: String, tokenStart: String.Index)? {
+        guard let atIdx = inputText.lastIndex(of: "@") else { return nil }
+        // Token must be at start-of-string or preceded by whitespace.
+        if atIdx > inputText.startIndex {
+            let prev = inputText[inputText.index(before: atIdx)]
+            if !prev.isWhitespace { return nil }
+        }
+        let after = inputText.index(after: atIdx)
+        let q = String(inputText[after...])
+        // Reject if any whitespace inside (token closed) or invalid char.
+        guard !q.contains(where: { $0.isWhitespace }) else { return nil }
+        guard q.count <= 32, q.allSatisfy({ $0.isLetter || $0.isNumber || "._-".contains($0) }) else { return nil }
+        return (q, after)
+    }
+
+    private var mentionMatches: [ChannelMember] {
+        guard let q = activeMentionQuery?.query.lowercased() else { return [] }
+        let myId = appState.currentUser?.id ?? ""
+        return (vm.channel?.members ?? [])
+            .filter { $0.userId != myId }
+            .filter { m in
+                let handle = m.email.split(separator: "@").first.map { $0.lowercased() } ?? ""
+                return handle.hasPrefix(q) || m.name.lowercased().hasPrefix(q)
+            }
+            .prefix(6)
+            .map { $0 }
+    }
+
+    private func applyMention(_ member: ChannelMember) {
+        guard let active = activeMentionQuery else { return }
+        let handle = member.email.split(separator: "@").first.map(String.init) ?? ""
+        guard !handle.isEmpty else { return }
+        let head = String(inputText[..<active.tokenStart])
+        let tail = String(inputText[inputText.index(active.tokenStart, offsetBy: active.query.count)...])
+        inputText = head + handle + " " + tail
     }
 }
 

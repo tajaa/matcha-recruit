@@ -38,6 +38,7 @@ celery_app = Celery(
         "app.workers.tasks.newsletter_scheduler",
         "app.workers.tasks.hr_news_fetch",
         "app.workers.tasks.training_cadence",
+        "app.workers.tasks.mention_email",
     ],
 )
 
