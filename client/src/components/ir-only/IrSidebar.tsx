@@ -1,4 +1,4 @@
-import { AlertTriangle, BookOpen, ClipboardList, FileText, TrendingUp } from 'lucide-react'
+import { AlertTriangle, BookOpen, Building2, ClipboardList, FileText, TrendingUp } from 'lucide-react'
 import SidebarShell from '../SidebarShell'
 import type { NavItem, NavGroup } from '../SidebarShell'
 import { useMe } from '../../hooks/useMe'
@@ -10,13 +10,13 @@ const nav: (NavItem | NavGroup)[] = [
   { to: '/app/ir/osha', icon: ClipboardList, label: 'OSHA Logs' },
   { to: '/app/handbooks', icon: FileText, label: 'Handbooks' },
   { to: '/app/resources', icon: BookOpen, label: 'Resources' },
+  { to: '/app/company', icon: Building2, label: 'Company' },
   // { to: '/app', icon: LayoutDashboard, label: 'Command Center' },
   // { to: '/app/ask-expert', icon: MessageCircleQuestion, label: 'Ask an Expert' },
   // { to: '/app/training', icon: GraduationCap, label: 'Training', feature: 'training' },
   // { to: '/app/compliance-calendar', icon: CalendarDays, label: 'Compliance Calendar' },
   // { to: '/app/locations', icon: MapPin, label: 'Locations' },
   // { to: '/app/employees', icon: Users, label: 'Employees', feature: 'employees' },
-  // { to: '/app/company', icon: Building2, label: 'Company' },
 ]
 
 export default function IrSidebar() {
