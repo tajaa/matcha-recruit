@@ -803,7 +803,7 @@ async def export_incidents(
             f"""
             SELECT i.incident_number, i.title, i.description, i.incident_type,
                    i.severity, i.status, i.location, i.occurred_at, i.created_at,
-                   i.injuries, i.witnesses,
+                   i.osha_recordable, i.reported_by_name,
                    bl.name AS location_name, bl.city AS location_city, bl.state AS location_state
             FROM ir_incidents i
             LEFT JOIN business_locations bl ON bl.id = i.location_id
@@ -831,8 +831,8 @@ async def export_incidents(
         writer = csv.writer(buf)
         writer.writerow([
             "Incident #", "Title", "Type", "Severity", "Status",
-            "Location", "Occurred At", "Created At",
-            "Injuries", "Description",
+            "Location", "Reported By", "Occurred At", "Created At",
+            "OSHA Recordable", "Description",
         ])
         for r in rows:
             writer.writerow([
@@ -842,9 +842,10 @@ async def export_incidents(
                 r["severity"] or "",
                 r["status"] or "",
                 _loc(r),
+                r["reported_by_name"] or "",
                 _fmt(r["occurred_at"]),
                 _fmt(r["created_at"]),
-                "yes" if r["injuries"] else "no",
+                "yes" if r["osha_recordable"] else "no",
                 (r["description"] or "").replace("\n", " ").strip(),
             ])
         buf.seek(0)
