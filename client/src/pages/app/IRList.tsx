@@ -6,8 +6,6 @@ import { Badge, Button, Input, Select } from '../../components/ui'
 import { IRCreateIncidentModal } from '../../components/ir/IRCreateIncidentModal'
 import { IRDashboardTab } from '../../components/ir/IRDashboardTab'
 import { IRAnonymousReportingPanel } from '../../components/ir/IRAnonymousReportingPanel'
-import { IRRiskInsightsTab } from '../../components/ir/IRRiskInsightsTab'
-import { OshaLogsPanel } from '../../components/ir/OshaLogsPanel'
 import { IRExportModal } from '../../components/ir/IRExportModal'
 import type { IRIncident, IRIncidentType, IRAnalyticsSummary } from '../../types/ir'
 import {
@@ -15,7 +13,7 @@ import {
   SEVERITY_BADGE, STATUS_BADGE, INCIDENT_TYPE_OPTIONS,
 } from '../../types/ir'
 
-type Tab = 'dashboard' | 'incidents' | 'risk' | 'osha'
+type Tab = 'dashboard' | 'incidents'
 type SeverityFilter = 'all' | 'low' | 'medium' | 'high' | 'critical'
 type StatusFilter = 'all' | 'reported' | 'investigating' | 'action_required' | 'closed'
 type TypeFilter = 'all' | IRIncidentType
@@ -104,7 +102,7 @@ export default function IRList() {
 
       {/* Tab nav — pill style matching RiskAssessment */}
       <div className="flex gap-0 border border-zinc-700 rounded-xl overflow-hidden w-fit">
-        {(['dashboard', 'incidents', 'risk', 'osha'] as const).map((t) => (
+        {(['dashboard', 'incidents'] as const).map((t) => (
           <button
             key={t}
             className={`px-5 py-2 text-[11px] uppercase tracking-widest font-bold transition-colors ${
@@ -114,7 +112,7 @@ export default function IRList() {
             }`}
             onClick={() => setTab(t)}
           >
-            {t === 'osha' ? 'OSHA Logs' : t === 'risk' ? 'Risk Insights' : t.charAt(0).toUpperCase() + t.slice(1)}
+            {t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
         ))}
       </div>
@@ -255,12 +253,6 @@ export default function IRList() {
           <IRAnonymousReportingPanel />
         </div>
       )}
-
-      {tab === 'risk' && (
-        <IRRiskInsightsTab onNavigateIncident={(id) => navigate(`/app/ir/${id}`)} />
-      )}
-
-      {tab === 'osha' && <OshaLogsPanel />}
     </div>
   )
 }
