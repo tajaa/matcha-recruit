@@ -1,7 +1,30 @@
 import { HelpCircle, Shield, Calendar, Activity, Heart, TrendingDown, TrendingUp, Minus } from 'lucide-react'
 
+export type WcBenchmark = {
+  sector: string
+  label: string
+  trir: number
+  dart: number
+}
+
+export type WcPremiumImpact = {
+  base_premium_estimate: number
+  mod_swing: number
+  annual_impact_dollars: number
+  direction: 'increase' | 'decrease' | 'neutral'
+}
+
+export type WcQuarter = {
+  quarter: string
+  recordable: number
+  dart: number
+  non_dart: number
+  lost_days: number
+}
+
 export type WcMetrics = {
   period_days: number
+  industry: string | null
   headcount: number | null
   hours_worked_assumed: number | null
   recordable_cases: number
@@ -13,6 +36,10 @@ export type WcMetrics = {
   dart_rate: number | null
   days_since_last_recordable: number | null
   ever_recordable: boolean
+  benchmark: WcBenchmark | null
+  premium_impact: WcPremiumImpact | null
+  severity_band: 'good' | 'fair' | 'at_risk' | 'critical' | 'unknown'
+  quarterly: WcQuarter[]
   prior: {
     recordable_cases: number
     dart_cases: number
@@ -45,11 +72,10 @@ function DeltaPill({ pct }: { pct: number | null }) {
   )
 }
 
-// US BLS private-industry medians (2023). Used as a coarse benchmark when
-// we don't know the company's NAICS class. Actual NCCI E-Mod expected
-// loss tables are class-specific — this is a directional indicator only.
-const TRIR_MEDIAN = 2.7
-const DART_MEDIAN = 1.7
+// National private-industry fallback when we can't infer a sector.
+const NATIONAL_TRIR_MEDIAN = 2.7
+const NATIONAL_DART_MEDIAN = 1.7
+const NATIONAL_LABEL = 'US private median'
 
 function HelpTooltip({ text }: { text: string }) {
   return (
@@ -101,7 +127,7 @@ function streakDisplay(days: number | null): { value: string; unit: string } {
 }
 
 export function IRWcMetricsCard({ metrics }: { metrics: WcMetrics }) {
-  const { trir, dart_rate, lost_days, days_since_last_recordable, deaths, data_quality } = metrics
+  const { trir, dart_rate, lost_days, days_since_last_recordable, deaths, data_quality, benchmark } = metrics
 
   // Suppress entirely if missing headcount AND no recordables — nothing
   // useful to say, hide the section to avoid confusion.
@@ -109,12 +135,19 @@ export function IRWcMetricsCard({ metrics }: { metrics: WcMetrics }) {
     return null
   }
 
+  const trirMedian = benchmark?.trir ?? NATIONAL_TRIR_MEDIAN
+  const dartMedian = benchmark?.dart ?? NATIONAL_DART_MEDIAN
+  const benchLabel = benchmark?.label ?? NATIONAL_LABEL
+
   return (
     <div>
-      <div className="flex items-end justify-between mb-3">
+      <div className="flex items-end justify-between mb-3 flex-wrap gap-2">
         <h2 className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold flex items-center gap-1.5">
           <Shield className="w-3 h-3" />
           Workers Comp Posture · trailing {Math.round(metrics.period_days / 30)} mo
+          <span className="text-[10px] text-zinc-600 normal-case tracking-normal font-mono ml-2">
+            benchmarks: {benchLabel}
+          </span>
         </h2>
         {data_quality.insufficient_population && (
           <span className="text-[10px] text-zinc-600 uppercase tracking-widest font-mono">
@@ -128,17 +161,17 @@ export function IRWcMetricsCard({ metrics }: { metrics: WcMetrics }) {
         <div className="bg-zinc-900 p-6 flex flex-col justify-between group">
           <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
             <Activity className="w-3 h-3" /> TRIR
-            <HelpTooltip text="Total Recordable Incident Rate per 100 FTEs. OSHA standard: (recordable × 200,000) / hours worked. US private-industry median ≈ 2.7." />
+            <HelpTooltip text={`Total Recordable Incident Rate per 100 FTEs. OSHA standard: (recordable × 200,000) / hours worked. ${benchLabel} median ≈ ${trirMedian}.`} />
           </div>
-          <div className={`text-4xl font-light font-mono mt-2 ${rateTone(trir, TRIR_MEDIAN)}`}>
+          <div className={`text-4xl font-light font-mono mt-2 ${rateTone(trir, trirMedian)}`}>
             {trir === null ? '—' : trir.toFixed(2)}
           </div>
           <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-2 font-mono">
-            {trir === null ? 'needs headcount' : `vs ${TRIR_MEDIAN} median`}
+            {trir === null ? 'needs headcount' : `vs ${trirMedian} median`}
           </div>
           {trir !== null && (
-            <div className={`text-[10px] mt-1 ${rateTone(trir, TRIR_MEDIAN)}`}>
-              {rateLabel(trir, TRIR_MEDIAN)}
+            <div className={`text-[10px] mt-1 ${rateTone(trir, trirMedian)}`}>
+              {rateLabel(trir, trirMedian)}
             </div>
           )}
           <div className="mt-2"><DeltaPill pct={metrics.prior.trir_delta_pct} /></div>
@@ -148,17 +181,17 @@ export function IRWcMetricsCard({ metrics }: { metrics: WcMetrics }) {
         <div className="bg-zinc-900 p-6 flex flex-col justify-between group">
           <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
             <Activity className="w-3 h-3" /> DART
-            <HelpTooltip text="Days Away, Restricted, or Transferred rate. Same formula as TRIR but only cases involving lost or restricted time. Workers-comp adjusters track this directly. US median ≈ 1.7." />
+            <HelpTooltip text={`Days Away, Restricted, or Transferred rate. Same formula as TRIR but only lost-time cases. ${benchLabel} median ≈ ${dartMedian}.`} />
           </div>
-          <div className={`text-4xl font-light font-mono mt-2 ${rateTone(dart_rate, DART_MEDIAN)}`}>
+          <div className={`text-4xl font-light font-mono mt-2 ${rateTone(dart_rate, dartMedian)}`}>
             {dart_rate === null ? '—' : dart_rate.toFixed(2)}
           </div>
           <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-2 font-mono">
-            {dart_rate === null ? 'needs headcount' : `vs ${DART_MEDIAN} median`}
+            {dart_rate === null ? 'needs headcount' : `vs ${dartMedian} median`}
           </div>
           {dart_rate !== null && (
-            <div className={`text-[10px] mt-1 ${rateTone(dart_rate, DART_MEDIAN)}`}>
-              {rateLabel(dart_rate, DART_MEDIAN)}
+            <div className={`text-[10px] mt-1 ${rateTone(dart_rate, dartMedian)}`}>
+              {rateLabel(dart_rate, dartMedian)}
             </div>
           )}
           <div className="mt-2"><DeltaPill pct={metrics.prior.dart_delta_pct} /></div>
@@ -212,8 +245,9 @@ export function IRWcMetricsCard({ metrics }: { metrics: WcMetrics }) {
       </div>
 
       <p className="text-[10px] text-zinc-600 mt-3 leading-relaxed">
-        Approximation. Hours worked assumed at headcount × 2,000 prorated to period. Benchmark medians from US BLS private industry,
-        not your specific NCCI class code. Verify any premium-impact conclusions with your broker.
+        Approximation. Hours worked assumed at headcount × 2,000 prorated to period.
+        Benchmarks are BLS sector medians ({benchLabel}), not your specific NCCI class code.
+        Verify any premium-impact conclusions with your broker.
       </p>
     </div>
   )

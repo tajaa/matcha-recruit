@@ -2074,69 +2074,78 @@ def _build_risk_scope_key(location_id: Optional[UUID], period_days: int) -> str:
     return f"loc={loc_part}:days={period_days}"
 
 
-@router.get("/analytics/wc-metrics")
-async def get_wc_metrics(
-    period_days: int = Query(365, ge=30, le=1095),
-    current_user=Depends(require_admin_or_client),
-):
-    """OSHA-style frequency + severity metrics for Workers Comp framing.
-
-    Returns TRIR (Total Recordable Incident Rate), DART rate, lost-day
-    totals, and claims-free streak. Used by P&C brokers to frame an
-    employer's E-Mod posture.
-
-    Formulas (NCCI/OSHA standard):
-        TRIR  = (recordable_cases * 200,000) / hours_worked
-        DART  = (dart_cases       * 200,000) / hours_worked
-    Hours_worked is approximated as headcount * 2000 prorated to the
-    requested period. Statistically meaningless for tiny populations —
-    `data_quality.insufficient_population` flips true when assumed
-    hours fall below 50,000 (≈25 FTE-years).
-    """
-    company_id = await get_client_company_id(current_user)
-    if company_id is None:
-        raise HTTPException(status_code=400, detail="No company associated with user")
+async def compute_wc_metrics(conn, company_id: UUID, period_days: int = 365) -> dict:
+    """Per-company Workers Comp metrics — extracted so the broker portfolio
+    endpoint can reuse the same calc per linked client."""
+    from ..services.wc_benchmarks import (
+        lookup_benchmark, estimate_premium_impact, severity_band,
+    )
 
     period_start = _utc_now_naive() - timedelta(days=period_days)
     prior_start = period_start - timedelta(days=period_days)
+    quarter_start = _utc_now_naive() - timedelta(days=730)  # 8 quarters back
     annualization = 365.0 / period_days
 
-    async with get_connection() as conn:
-        headcount_row = await conn.fetchval(
-            "SELECT headcount FROM company_handbook_profiles WHERE company_id = $1",
-            company_id,
-        )
-        headcount = int(headcount_row) if headcount_row else 0
+    profile = await conn.fetchrow(
+        """
+        SELECT comp.industry, hp.headcount
+        FROM companies comp
+        LEFT JOIN company_handbook_profiles hp ON hp.company_id = comp.id
+        WHERE comp.id = $1
+        """,
+        company_id,
+    )
+    headcount = int(profile["headcount"]) if profile and profile["headcount"] else 0
+    industry = profile["industry"] if profile else None
 
-        # Two windows in one trip: current period + prior period.
-        rows = await conn.fetch(
-            """
-            SELECT
-                CASE WHEN occurred_at >= $2 THEN 'current' ELSE 'prior' END AS bucket,
-                COUNT(*) AS recordable_cases,
-                COALESCE(SUM(CASE WHEN COALESCE(days_away_from_work, 0) > 0
-                                   OR COALESCE(days_restricted_duty, 0) > 0
-                                  THEN 1 ELSE 0 END), 0) AS dart_cases,
-                COALESCE(SUM(COALESCE(days_away_from_work, 0)), 0) AS lost_days,
-                COALESCE(SUM(COALESCE(days_restricted_duty, 0)), 0) AS restricted_days,
-                COALESCE(SUM(CASE WHEN osha_classification = 'death' THEN 1 ELSE 0 END), 0) AS deaths
-            FROM ir_incidents
-            WHERE company_id = $1
-              AND osha_recordable = true
-              AND occurred_at >= $3
-            GROUP BY bucket
-            """,
-            company_id, period_start, prior_start,
-        )
+    # Current + prior period totals.
+    rows = await conn.fetch(
+        """
+        SELECT
+            CASE WHEN occurred_at >= $2 THEN 'current' ELSE 'prior' END AS bucket,
+            COUNT(*) AS recordable_cases,
+            COALESCE(SUM(CASE WHEN COALESCE(days_away_from_work, 0) > 0
+                               OR COALESCE(days_restricted_duty, 0) > 0
+                              THEN 1 ELSE 0 END), 0) AS dart_cases,
+            COALESCE(SUM(COALESCE(days_away_from_work, 0)), 0) AS lost_days,
+            COALESCE(SUM(COALESCE(days_restricted_duty, 0)), 0) AS restricted_days,
+            COALESCE(SUM(CASE WHEN osha_classification = 'death' THEN 1 ELSE 0 END), 0) AS deaths
+        FROM ir_incidents
+        WHERE company_id = $1
+          AND osha_recordable = true
+          AND occurred_at >= $3
+        GROUP BY bucket
+        """,
+        company_id, period_start, prior_start,
+    )
 
-        # All-time most recent recordable
-        last_recordable = await conn.fetchval(
-            """
-            SELECT MAX(occurred_at) FROM ir_incidents
-            WHERE company_id = $1 AND osha_recordable = true
-            """,
-            company_id,
-        )
+    # Quarterly bucketing — 8 quarters trailing.
+    quarter_rows = await conn.fetch(
+        """
+        SELECT
+            DATE_TRUNC('quarter', occurred_at) AS quarter_start,
+            COUNT(*) AS recordable_cases,
+            COALESCE(SUM(CASE WHEN COALESCE(days_away_from_work, 0) > 0
+                               OR COALESCE(days_restricted_duty, 0) > 0
+                              THEN 1 ELSE 0 END), 0) AS dart_cases,
+            COALESCE(SUM(COALESCE(days_away_from_work, 0)), 0) AS lost_days
+        FROM ir_incidents
+        WHERE company_id = $1
+          AND osha_recordable = true
+          AND occurred_at >= $2
+        GROUP BY quarter_start
+        ORDER BY quarter_start
+        """,
+        company_id, quarter_start,
+    )
+
+    last_recordable = await conn.fetchval(
+        """
+        SELECT MAX(occurred_at) FROM ir_incidents
+        WHERE company_id = $1 AND osha_recordable = true
+        """,
+        company_id,
+    )
 
     cur = next((r for r in rows if r["bucket"] == "current"), None)
     prv = next((r for r in rows if r["bucket"] == "prior"), None)
@@ -2178,8 +2187,30 @@ async def get_wc_metrics(
             return None
         return round(((curr - prior) / prior) * 100, 1)
 
+    benchmark = lookup_benchmark(industry)
+    bench_trir = benchmark["trir"] if benchmark else None
+    bench_sector = benchmark["sector"] if benchmark else None
+
+    premium_impact = estimate_premium_impact(
+        trir=trir, benchmark_trir=bench_trir,
+        headcount=headcount or None, sector=bench_sector,
+    )
+
+    quarterly = []
+    for qrow in quarter_rows:
+        qstart = qrow["quarter_start"]
+        q_label = f"{qstart.year}-Q{((qstart.month - 1) // 3) + 1}"
+        quarterly.append({
+            "quarter": q_label,
+            "recordable": int(qrow["recordable_cases"]),
+            "dart": int(qrow["dart_cases"]),
+            "non_dart": int(qrow["recordable_cases"]) - int(qrow["dart_cases"]),
+            "lost_days": int(qrow["lost_days"]),
+        })
+
     return {
         "period_days": period_days,
+        "industry": industry,
         "headcount": headcount or None,
         "hours_worked_assumed": int(hours_worked) if hours_worked > 0 else None,
         "recordable_cases": recordable_cases,
@@ -2191,6 +2222,10 @@ async def get_wc_metrics(
         "dart_rate": dart_rate,
         "days_since_last_recordable": days_since,
         "ever_recordable": last_recordable is not None,
+        "benchmark": benchmark,
+        "premium_impact": premium_impact,
+        "severity_band": severity_band(trir, bench_trir),
+        "quarterly": quarterly,
         "prior": {
             "recordable_cases": prior_recordable,
             "dart_cases": prior_dart,
@@ -2208,6 +2243,25 @@ async def get_wc_metrics(
         },
         "generated_at": _utc_now_naive().isoformat(),
     }
+
+
+@router.get("/analytics/wc-metrics")
+async def get_wc_metrics(
+    period_days: int = Query(365, ge=30, le=1095),
+    current_user=Depends(require_admin_or_client),
+):
+    """OSHA-style frequency + severity metrics for Workers Comp framing.
+
+    Returns TRIR, DART rate, lost-day totals, claims-free streak, prior-period
+    deltas, NAICS-sector benchmark, premium-impact estimate, and trailing
+    8-quarter recordable bars. Used by P&C brokers to frame an employer's
+    E-Mod posture. See compute_wc_metrics() for the math + caveats.
+    """
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with user")
+    async with get_connection() as conn:
+        return await compute_wc_metrics(conn, company_id, period_days)
 
 
 @router.get("/analytics/risk-matrix", response_model=RiskMatrixResponse)

@@ -5,6 +5,7 @@ import { Button, Select } from '../ui'
 import type {
   IRRiskInsights,
   IRRiskMatrix,
+  IRAnalyticsSummary,
 } from '../../types/ir'
 import { synthesizeAssessment } from './risk/synth'
 import { IRRiskHeroCard } from './risk/IRRiskHeroCard'
@@ -13,6 +14,9 @@ import { IRRiskMatrixHeatmap } from './risk/IRRiskMatrixHeatmap'
 import { IRThemeCard } from './risk/IRThemeCard'
 import { IRWcMetricsCard, type WcMetrics } from './risk/IRWcMetricsCard'
 import { IRIncidentTrendChart } from './risk/IRIncidentTrendChart'
+import { IRPremiumImpactCard } from './risk/IRPremiumImpactCard'
+import { IRQuarterlyRecordableChart } from './risk/IRQuarterlyRecordableChart'
+import { IRSeverityDonut } from './risk/IRSeverityDonut'
 
 type LocationRow = {
   id: string
@@ -66,6 +70,7 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
   const [insightsError, setInsightsError] = useState<string | null>(null)
 
   const [wcMetrics, setWcMetrics] = useState<WcMetrics | null>(null)
+  const [summary, setSummary] = useState<IRAnalyticsSummary | null>(null)
 
   useEffect(() => {
     api.get<LocationRow[]>('/ir-onboarding/locations')
@@ -120,6 +125,9 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
     api.get<WcMetrics>('/ir/incidents/analytics/wc-metrics?period_days=365')
       .then(setWcMetrics)
       .catch(() => setWcMetrics(null))
+    api.get<IRAnalyticsSummary>('/ir/incidents/analytics/summary')
+      .then(setSummary)
+      .catch(() => setSummary(null))
   }, [])
 
   const locationOptions = useMemo(() => {
@@ -197,7 +205,15 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
 
           {wcMetrics && <IRWcMetricsCard metrics={wcMetrics} />}
 
+          {wcMetrics?.premium_impact && <IRPremiumImpactCard metrics={wcMetrics} />}
+
+          {wcMetrics && wcMetrics.quarterly.length > 0 && (
+            <IRQuarterlyRecordableChart quarterly={wcMetrics.quarterly} />
+          )}
+
           <IRIncidentTrendChart />
+
+          <IRSeverityDonut summary={summary} />
 
           <IRDimensionsGrid assessment={assessment} />
 

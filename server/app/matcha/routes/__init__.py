@@ -11,6 +11,7 @@ from .invitations import router as invitations_router
 from .offer_letters import router as offer_letters_router, candidate_router as offer_letters_candidate_router
 from .er_copilot import router as er_copilot_router, public_router as er_copilot_public_router
 from .ir_incidents import router as ir_incidents_router
+from .broker_portfolio import router as broker_portfolio_router
 from .ir_onboarding import router as ir_onboarding_router
 from .ir_surveys import router as ir_surveys_router
 from .accommodations import router as accommodations_router
@@ -70,6 +71,7 @@ matcha_router.include_router(accommodations_router, prefix="/accommodations", ta
                              dependencies=[Depends(require_feature("accommodations"))])
 matcha_router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
 matcha_router.include_router(brokers_router, prefix="/brokers", tags=["brokers"])
+matcha_router.include_router(broker_portfolio_router, prefix="/broker", tags=["broker-portfolio"])
 matcha_router.include_router(provisioning_router, prefix="/provisioning", tags=["provisioning"])
 matcha_router.include_router(
     matcha_work_router,
