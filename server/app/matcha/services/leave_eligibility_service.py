@@ -307,7 +307,11 @@ class LeaveEligibilityService:
                     "wage_replacement_pct": float(wage_pct) if wage_pct else None,
                     "job_protection": meta.get("job_prot", False),
                     "reasons": reasons,
-                    "notes": rule["description"],
+                    # current_value carries the human-readable summary
+                    # (e.g. "12 weeks, 67% pay, job protected, paid"); the
+                    # description column holds the raw JSON metadata blob and
+                    # is unsuitable for direct display.
+                    "notes": rule["current_value"],
                     "source_url": rule["source_url"],
                 })
 

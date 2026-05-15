@@ -4,13 +4,14 @@ import { Badge, Button, Card, Input, Select } from '../../components/ui'
 import { EmployeeStatusBadge } from '../../components/employees/EmployeeStatusBadge'
 import { OnboardingTaskList } from '../../components/employees/OnboardingTaskList'
 import { CredentialManager } from '../../components/employees/CredentialManager'
+import { LeaveEligibilityPanel } from '../../components/employees/LeaveEligibilityPanel'
 import SupervisorToggle from '../../components/employees/SupervisorToggle'
 import { useEmployeeDetail } from '../../hooks/employees/useEmployeeDetail'
 import { typeLabel, statusLabel } from '../../types/employee'
 
 const STATUS_OPTIONS = Object.entries(statusLabel).map(([value, label]) => ({ value, label }))
 
-type Tab = 'profile' | 'onboarding' | 'credentials'
+type Tab = 'profile' | 'onboarding' | 'credentials' | 'leave'
 
 type FieldOption = { value: string; label: string }
 type ProfileField = { key: string; label: string; type?: string; options?: FieldOption[] }
@@ -129,7 +130,7 @@ export default function EmployeeDetail() {
         <div className="col-span-2">
           {/* Tabs */}
           <div className="flex gap-1 mb-4">
-            {(['profile', 'onboarding', 'credentials'] as const).map((t) => (
+            {(['profile', 'onboarding', 'credentials', 'leave'] as const).map((t) => (
               <Button
                 key={t}
                 variant={tab === t ? 'primary' : 'ghost'}
@@ -205,6 +206,9 @@ export default function EmployeeDetail() {
             )}
             {tab === 'credentials' && (
               <CredentialManager employeeId={employeeId!} />
+            )}
+            {tab === 'leave' && (
+              <LeaveEligibilityPanel employeeId={employeeId!} />
             )}
           </Card>
         </div>
