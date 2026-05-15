@@ -348,7 +348,7 @@ export function severityLabel(s: string): string {
 // ── Badge variant maps ──
 
 export const SEVERITY_BADGE: Record<string, BadgeVariant> = {
-  critical: 'danger', high: 'danger', medium: 'warning', low: 'neutral',
+  critical: 'critical', high: 'high', medium: 'medium', low: 'low',
 }
 
 export const STATUS_BADGE: Record<string, BadgeVariant> = {
