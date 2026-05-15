@@ -11,6 +11,7 @@ import { IRRiskHeroCard } from './risk/IRRiskHeroCard'
 import { IRDimensionsGrid } from './risk/IRDimensionsGrid'
 import { IRRiskMatrixHeatmap } from './risk/IRRiskMatrixHeatmap'
 import { IRThemeCard } from './risk/IRThemeCard'
+import { IRWcMetricsCard, type WcMetrics } from './risk/IRWcMetricsCard'
 
 type LocationRow = {
   id: string
@@ -63,6 +64,8 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
   const [insightsLoading, setInsightsLoading] = useState(false)
   const [insightsError, setInsightsError] = useState<string | null>(null)
 
+  const [wcMetrics, setWcMetrics] = useState<WcMetrics | null>(null)
+
   useEffect(() => {
     api.get<LocationRow[]>('/ir-onboarding/locations')
       .then((rows) => setLocations(rows || []))
@@ -111,6 +114,12 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
     loadInsights()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locationFilter, days])
+
+  useEffect(() => {
+    api.get<WcMetrics>('/ir/incidents/analytics/wc-metrics?period_days=365')
+      .then(setWcMetrics)
+      .catch(() => setWcMetrics(null))
+  }, [])
 
   const locationOptions = useMemo(() => {
     const active = (locations || []).filter((l) => l.is_active)
@@ -184,6 +193,8 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
       ) : (
         <>
           <IRRiskHeroCard assessment={assessment} periodDays={matrix?.period_days ?? days} />
+
+          {wcMetrics && <IRWcMetricsCard metrics={wcMetrics} />}
 
           <IRDimensionsGrid assessment={assessment} />
 

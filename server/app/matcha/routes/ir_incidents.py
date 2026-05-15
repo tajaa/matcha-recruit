@@ -2057,6 +2057,110 @@ def _build_risk_scope_key(location_id: Optional[UUID], period_days: int) -> str:
     return f"loc={loc_part}:days={period_days}"
 
 
+@router.get("/analytics/wc-metrics")
+async def get_wc_metrics(
+    period_days: int = Query(365, ge=30, le=1095),
+    current_user=Depends(require_admin_or_client),
+):
+    """OSHA-style frequency + severity metrics for Workers Comp framing.
+
+    Returns TRIR (Total Recordable Incident Rate), DART rate, lost-day
+    totals, and claims-free streak. Used by P&C brokers to frame an
+    employer's E-Mod posture.
+
+    Formulas (NCCI/OSHA standard):
+        TRIR  = (recordable_cases * 200,000) / hours_worked
+        DART  = (dart_cases       * 200,000) / hours_worked
+    Hours_worked is approximated as headcount * 2000 prorated to the
+    requested period. Statistically meaningless for tiny populations —
+    `data_quality.insufficient_population` flips true when assumed
+    hours fall below 50,000 (≈25 FTE-years).
+    """
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with user")
+
+    period_start = _utc_now_naive() - timedelta(days=period_days)
+    annualization = 365.0 / period_days
+
+    async with get_connection() as conn:
+        headcount_row = await conn.fetchval(
+            "SELECT headcount FROM company_handbook_profiles WHERE company_id = $1",
+            company_id,
+        )
+        headcount = int(headcount_row) if headcount_row else 0
+
+        # Recordables in period
+        agg = await conn.fetchrow(
+            """
+            SELECT
+                COUNT(*) AS recordable_cases,
+                COALESCE(SUM(CASE WHEN COALESCE(days_away_from_work, 0) > 0
+                                   OR COALESCE(days_restricted_duty, 0) > 0
+                                  THEN 1 ELSE 0 END), 0) AS dart_cases,
+                COALESCE(SUM(COALESCE(days_away_from_work, 0)), 0) AS lost_days,
+                COALESCE(SUM(COALESCE(days_restricted_duty, 0)), 0) AS restricted_days,
+                COALESCE(SUM(CASE WHEN osha_classification = 'death' THEN 1 ELSE 0 END), 0) AS deaths
+            FROM ir_incidents
+            WHERE company_id = $1
+              AND osha_recordable = true
+              AND occurred_at >= $2
+            """,
+            company_id, period_start,
+        )
+
+        # All-time most recent recordable
+        last_recordable = await conn.fetchval(
+            """
+            SELECT MAX(occurred_at) FROM ir_incidents
+            WHERE company_id = $1 AND osha_recordable = true
+            """,
+            company_id,
+        )
+
+    recordable_cases = int(agg["recordable_cases"])
+    dart_cases = int(agg["dart_cases"])
+    lost_days = int(agg["lost_days"])
+    restricted_days = int(agg["restricted_days"])
+    deaths = int(agg["deaths"])
+
+    # Approximate hours worked over the period.
+    hours_worked = float(headcount) * 2000.0 / annualization if headcount > 0 else 0.0
+    insufficient = hours_worked < 50_000
+
+    if hours_worked > 0:
+        trir = round((recordable_cases * 200_000) / hours_worked, 2)
+        dart_rate = round((dart_cases * 200_000) / hours_worked, 2)
+    else:
+        trir = None
+        dart_rate = None
+
+    if last_recordable:
+        days_since = (datetime.utcnow() - last_recordable).days
+    else:
+        days_since = None
+
+    return {
+        "period_days": period_days,
+        "headcount": headcount or None,
+        "hours_worked_assumed": int(hours_worked) if hours_worked > 0 else None,
+        "recordable_cases": recordable_cases,
+        "dart_cases": dart_cases,
+        "lost_days": lost_days,
+        "restricted_days": restricted_days,
+        "deaths": deaths,
+        "trir": trir,
+        "dart_rate": dart_rate,
+        "days_since_last_recordable": days_since,
+        "ever_recordable": last_recordable is not None,
+        "data_quality": {
+            "insufficient_population": insufficient,
+            "headcount_missing": headcount == 0,
+        },
+        "generated_at": _utc_now_naive().isoformat(),
+    }
+
+
 @router.get("/analytics/risk-matrix", response_model=RiskMatrixResponse)
 async def get_analytics_risk_matrix(
     days: int = Query(90, ge=7, le=365),
