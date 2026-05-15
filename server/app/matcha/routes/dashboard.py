@@ -1022,12 +1022,39 @@ async def get_dashboard_flags(
         return DashboardFlagsResponse(total_flags=0, critical_count=0, flags=[])
 
     async with get_connection() as conn:
-        count = await conn.fetchval(
-            "SELECT COUNT(*) FROM mw_risk_flags WHERE company_id = $1", company_id
+        # Detect stale: any incident or ER case mutated after the last
+        # analyze, OR the table is empty. mw_risk_flags is cheap to
+        # rebuild (deterministic SQL, no AI), so we eat the cost on read.
+        stale_row = await conn.fetchrow(
+            """
+            WITH last_analyze AS (
+                SELECT MAX(analyzed_at) AS analyzed_at,
+                       COUNT(*) AS flag_count
+                FROM mw_risk_flags
+                WHERE company_id = $1
+            ),
+            last_incident AS (
+                SELECT GREATEST(MAX(created_at), MAX(updated_at)) AS touched_at
+                FROM ir_incidents
+                WHERE company_id = $1
+            )
+            SELECT
+                la.flag_count,
+                la.analyzed_at,
+                li.touched_at,
+                CASE
+                    WHEN la.flag_count = 0 THEN true
+                    WHEN la.analyzed_at IS NULL THEN true
+                    WHEN li.touched_at IS NOT NULL AND li.touched_at > la.analyzed_at THEN true
+                    ELSE false
+                END AS is_stale
+            FROM last_analyze la, last_incident li
+            """,
+            company_id,
         )
+        is_stale = bool(stale_row and stale_row["is_stale"])
 
-    # Auto-populate on first visit (no AI, just deterministic scan)
-    if count == 0:
+    if is_stale:
         await rebuild_flags_deterministic(company_id)
 
     async with get_connection() as conn:
