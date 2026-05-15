@@ -51,45 +51,45 @@ const CARDS: Card[] = [
 
 export default function AppResources() {
   return (
-    <div>
-      <div className="flex items-center gap-4 mb-8 flex-wrap">
-        <h1 className="text-2xl font-semibold text-vsc-text">Resources</h1>
-        <div className="flex items-center gap-2 ml-auto">
-          <div className="rounded-lg border border-vsc-border bg-vsc-panel px-4 py-2 flex items-center gap-3">
-            <p className="text-[10px] font-medium uppercase tracking-wider text-vsc-text/50">Templates</p>
-            <p className="text-xl font-bold text-vsc-text">14</p>
-          </div>
-          <div className="rounded-lg border border-vsc-border bg-vsc-panel px-4 py-2 flex items-center gap-3">
-            <p className="text-[10px] font-medium uppercase tracking-wider text-vsc-text/50">Job Descriptions</p>
-            <p className="text-xl font-bold text-vsc-text">62</p>
-          </div>
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-zinc-100">Resources</h1>
+          <p className="mt-1 text-[10px] text-zinc-500 font-mono uppercase tracking-wider">
+            Templates, calculators, audits, and references
+          </p>
         </div>
       </div>
 
       <PinnedResourcesPanel />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-        {CARDS.map(card => (
-          <Link
-            key={card.to}
-            to={card.to}
-            className="group rounded-xl border border-vsc-border bg-vsc-panel p-5 flex flex-col gap-3 hover:border-vsc-text/30 transition-colors"
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-md bg-vsc-bg flex items-center justify-center shrink-0">
-                  <card.icon className="w-4 h-4 text-vsc-text/60" />
+      {/* Cards grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {CARDS.map((card) => {
+          const Icon = card.icon
+          return (
+            <Link
+              key={card.to}
+              to={card.to}
+              className="group bg-zinc-900 border border-white/10 rounded-2xl p-5 flex flex-col gap-3 hover:border-white/20 hover:bg-zinc-800/50 transition-colors"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-zinc-950 border border-white/5 flex items-center justify-center shrink-0">
+                    <Icon className="w-4 h-4 text-zinc-400 group-hover:text-zinc-200 transition-colors" />
+                  </div>
+                  <p className="text-sm font-medium text-zinc-100 truncate">{card.title}</p>
                 </div>
-                <p className="text-sm font-medium text-vsc-text group-hover:text-white transition-colors">{card.title}</p>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">{card.count}</span>
+                  <ChevronRight className="w-3.5 h-3.5 text-zinc-700 group-hover:text-zinc-400 transition-colors" />
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-medium uppercase tracking-wider text-vsc-text/40">{card.count}</span>
-                <ChevronRight className="w-3.5 h-3.5 text-vsc-text/20 group-hover:text-vsc-text/50 transition-colors" />
-              </div>
-            </div>
-            <p className="text-xs text-vsc-text/50 leading-relaxed">{card.description}</p>
-          </Link>
-        ))}
+              <p className="text-[12px] text-zinc-500 leading-relaxed">{card.description}</p>
+            </Link>
+          )
+        })}
       </div>
     </div>
   )

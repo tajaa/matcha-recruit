@@ -105,13 +105,13 @@ export default function Handbooks() {
 
   function renderRow(hb: HandbookListItem) {
     return (
-      <div key={hb.id} className="px-4 py-3">
+      <div key={hb.id} className="border-t border-white/5 px-5 py-4 hover:bg-white/[0.02] transition-colors">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Link
                 to={`/app/handbook/${hb.id}`}
-                className="text-sm font-medium text-zinc-200 hover:text-emerald-400 truncate transition-colors"
+                className="text-[13px] font-medium text-zinc-100 hover:text-emerald-400 truncate transition-colors"
               >
                 {hb.title}
               </Link>
@@ -120,31 +120,31 @@ export default function Handbooks() {
                 <Badge variant="warning">{hb.pending_changes_count} pending</Badge>
               )}
             </div>
-            <div className="flex items-center gap-2 mt-1">
-              <span className="text-[11px] text-zinc-500">{MODE_LABEL[hb.mode]}</span>
-              <span className="text-[11px] text-zinc-700">&middot;</span>
-              <span className="text-[11px] text-zinc-500">{SOURCE_LABEL[hb.source_type]}</span>
-              <span className="text-[11px] text-zinc-700">&middot;</span>
-              <span className="text-[11px] text-zinc-500">v{hb.active_version}</span>
-              <span className="text-[11px] text-zinc-700">&middot;</span>
-              <span className="text-[11px] text-zinc-600">
-                Updated {new Date(hb.updated_at).toLocaleDateString()}
+            <div className="flex items-center gap-2 mt-1.5 flex-wrap text-[10px] font-mono uppercase tracking-widest text-zinc-500">
+              <span>{MODE_LABEL[hb.mode]}</span>
+              <span className="text-zinc-700">\u00b7</span>
+              <span>{SOURCE_LABEL[hb.source_type]}</span>
+              <span className="text-zinc-700">\u00b7</span>
+              <span>v{hb.active_version}</span>
+              <span className="text-zinc-700">\u00b7</span>
+              <span className="text-zinc-600">
+                upd {new Date(hb.updated_at).toLocaleDateString()}
               </span>
               {hb.published_at && (
                 <>
-                  <span className="text-[11px] text-zinc-700">&middot;</span>
-                  <span className="text-[11px] text-zinc-600">
-                    Published {new Date(hb.published_at).toLocaleDateString()}
+                  <span className="text-zinc-700">\u00b7</span>
+                  <span className="text-zinc-600">
+                    pub {new Date(hb.published_at).toLocaleDateString()}
                   </span>
                 </>
               )}
             </div>
             {hb.scope_states.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-1.5">
+              <div className="flex flex-wrap gap-1 mt-2">
                 {hb.scope_states.map((st) => (
                   <span
                     key={st}
-                    className="inline-block rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400"
+                    className="inline-block rounded bg-zinc-950 border border-white/5 px-1.5 py-0.5 text-[10px] font-mono text-zinc-400"
                   >
                     {st}
                   </span>
@@ -155,48 +155,25 @@ export default function Handbooks() {
 
           <div className="flex items-center gap-1 shrink-0">
             {hb.status !== 'archived' && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => navigate(`/app/handbook/${hb.id}/edit`)}
-              >
+              <Button size="sm" variant="ghost" onClick={() => navigate(`/app/handbook/${hb.id}/edit`)}>
                 Edit
               </Button>
             )}
             {hb.status === 'draft' && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => handlePublish(hb.id)}
-                disabled={actionLoading === hb.id}
-              >
+              <Button size="sm" variant="ghost" onClick={() => handlePublish(hb.id)} disabled={actionLoading === hb.id}>
                 Publish
               </Button>
             )}
             {hb.status === 'active' && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => handleArchive(hb.id)}
-                disabled={actionLoading === hb.id}
-              >
+              <Button size="sm" variant="ghost" onClick={() => handleArchive(hb.id)} disabled={actionLoading === hb.id}>
                 Archive
               </Button>
             )}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => handleDownload(hb.id, hb.title)}
-            >
+            <Button size="sm" variant="ghost" onClick={() => handleDownload(hb.id, hb.title)}>
               Download
             </Button>
             {hb.status === 'active' && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setDistributeId(hb.id)}
-                disabled={actionLoading === hb.id}
-              >
+              <Button size="sm" variant="ghost" onClick={() => setDistributeId(hb.id)} disabled={actionLoading === hb.id}>
                 Distribute
               </Button>
             )}
@@ -206,26 +183,36 @@ export default function Handbooks() {
     )
   }
 
-  if (loading) return <p className="text-sm text-zinc-500">Loading...</p>
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[40vh]">
+        <div className="text-xs text-zinc-500 uppercase tracking-widest font-mono animate-pulse">Loading handbooks\u2026</div>
+      </div>
+    )
+  }
 
   return (
-    <div>
+    <div className="space-y-8">
       {error && (
-        <div className="mb-4 p-3 rounded-lg border border-red-800/50 bg-red-900/20 text-sm text-red-400 flex items-center justify-between">
+        <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-3 text-sm text-red-400 flex items-center justify-between">
           <span>{error}</span>
           <button type="button" onClick={() => setError(null)} className="text-red-500 hover:text-red-300 text-xs">Dismiss</button>
         </div>
       )}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
+
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100">Handbooks</h1>
-          <p className="mt-1 text-sm text-zinc-500">Create, manage, and distribute employee handbooks.</p>
+          <p className="mt-1 text-[10px] text-zinc-500 font-mono uppercase tracking-wider">
+            Create, manage, and distribute employee handbooks
+          </p>
         </div>
-        <Button size="sm" onClick={() => navigate('/app/handbook/new')}>Create Handbook</Button>
+        <Button onClick={() => navigate('/app/handbook/new')}>Create Handbook</Button>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 mt-4 border-b border-zinc-800 overflow-x-auto whitespace-nowrap [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+      {/* Tabs \u2014 pill style */}
+      <div className="flex gap-0 border border-zinc-700 rounded-xl overflow-hidden w-fit">
         {(['all', 'active', 'draft', 'archived'] as Tab[]).map((t) => {
           const count = t === 'all' ? items.length : items.filter((h) => h.status === t).length
           return (
@@ -233,10 +220,10 @@ export default function Handbooks() {
               key={t}
               type="button"
               onClick={() => setTab(t)}
-              className={`px-3 py-2 text-xs font-medium capitalize transition-colors border-b-2 -mb-px ${
+              className={`px-5 py-2 text-[11px] uppercase tracking-widest font-bold transition-colors ${
                 tab === t
-                  ? 'border-emerald-500 text-zinc-100'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                  ? 'bg-zinc-800 text-zinc-50'
+                  : 'bg-zinc-900 text-zinc-500 hover:text-zinc-300'
               }`}
             >
               {t} ({count})
@@ -246,45 +233,42 @@ export default function Handbooks() {
       </div>
 
       {/* List */}
-      <div className="mt-3">
-        {filtered.length === 0 ? (
-          <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
-            <p className="text-sm text-zinc-600">
-              {tab === 'all' ? 'No handbooks yet. Create one to get started.' : `No ${tab} handbooks.`}
-            </p>
-          </div>
-        ) : useGrouping ? (
-          <div className="space-y-3">
-            {grouped.map(([key, hbs]) => {
-              const label = WORKBOOK_TYPE_LABELS[key as keyof typeof WORKBOOK_TYPE_LABELS] ?? key
-              const isCollapsed = !!collapsed[key]
-              return (
-                <div key={key} className="border border-zinc-800 rounded-lg overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => toggleGroup(key)}
-                    className="w-full flex items-center justify-between px-4 py-2.5 bg-zinc-800/40 hover:bg-zinc-800/60 transition-colors"
-                  >
-                    <span className="text-xs font-semibold text-zinc-300 tracking-wide uppercase">
-                      {label} ({hbs.length})
-                    </span>
-                    <span className="text-zinc-500 text-xs">{isCollapsed ? '+' : '\u2212'}</span>
-                  </button>
-                  {!isCollapsed && (
-                    <div className="divide-y divide-zinc-800">
-                      {hbs.map(renderRow)}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        ) : (
-          <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800">
-            {filtered.map(renderRow)}
-          </div>
-        )}
-      </div>
+      {filtered.length === 0 ? (
+        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-12 text-center">
+          <p className="text-sm text-zinc-400">
+            {tab === 'all' ? 'No handbooks yet.' : `No ${tab} handbooks.`}
+          </p>
+          <p className="text-[11px] text-zinc-600 mt-1">
+            {tab === 'all' ? 'Create one to get started.' : 'Switch tab or create a new handbook.'}
+          </p>
+        </div>
+      ) : useGrouping ? (
+        <div className="space-y-4">
+          {grouped.map(([key, hbs]) => {
+            const label = WORKBOOK_TYPE_LABELS[key as keyof typeof WORKBOOK_TYPE_LABELS] ?? key
+            const isCollapsed = !!collapsed[key]
+            return (
+              <div key={key} className="bg-zinc-900 border border-white/10 rounded-2xl overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(key)}
+                  className="w-full flex items-center justify-between px-5 py-3 bg-zinc-950/50 hover:bg-zinc-950/70 transition-colors"
+                >
+                  <span className="text-[10px] font-bold text-zinc-400 tracking-widest uppercase">
+                    {label} <span className="text-zinc-600 font-mono">({hbs.length})</span>
+                  </span>
+                  <span className="text-zinc-500 text-xs font-mono">{isCollapsed ? '+' : '\u2212'}</span>
+                </button>
+                {!isCollapsed && hbs.map(renderRow)}
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="bg-zinc-900 border border-white/10 rounded-2xl overflow-hidden">
+          {filtered.map(renderRow)}
+        </div>
+      )}
 
       {distributeId && (
         <HandbookDistributeModal

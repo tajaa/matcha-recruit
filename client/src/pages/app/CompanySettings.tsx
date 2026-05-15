@@ -299,18 +299,30 @@ export default function CompanySettings() {
   const selectedLoc = locations.find((l) => l.id === selectedId)
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-1">
+    <div className="space-y-8">
+      {/* Header */}
+      <div>
         <h1 className="text-2xl font-semibold text-zinc-100">Company</h1>
+        <p className="mt-1 text-[10px] text-zinc-500 font-mono uppercase tracking-wider">
+          Manage your company profile and locations
+        </p>
       </div>
-      <p className="text-sm text-zinc-500 mb-5">Manage your company profile and locations.</p>
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-5 overflow-x-auto whitespace-nowrap [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+      {/* Tabs — pill style */}
+      <div className="flex gap-0 border border-zinc-700 rounded-xl overflow-hidden w-fit">
         {(['profile', 'locations'] as const).map((t) => (
-          <Button key={t} variant={tab === t ? 'secondary' : 'ghost'} size="sm" onClick={() => setTab(t)}>
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={`px-5 py-2 text-[11px] uppercase tracking-widest font-bold transition-colors ${
+              tab === t
+                ? 'bg-zinc-800 text-zinc-50'
+                : 'bg-zinc-900 text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
             {t === 'profile' ? 'Profile' : `Locations${locations.length > 0 ? ` (${locations.length})` : ''}`}
-          </Button>
+          </button>
         ))}
       </div>
 

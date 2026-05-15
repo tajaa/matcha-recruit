@@ -92,16 +92,16 @@ export function OshaLogsPanel() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-8">
+      {/* Toolbar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <FileSpreadsheet size={18} className="text-zinc-400" />
-          <h3 className="text-sm font-medium text-zinc-200">OSHA 300/300A Logs</h3>
+          <FileSpreadsheet size={16} className="text-zinc-500" />
+          <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">OSHA 300/300A Logs</span>
           <select
             value={year}
             onChange={(e) => setYear(Number(e.target.value))}
-            className="bg-zinc-900 border border-zinc-700 rounded text-zinc-300 text-xs px-2 py-1"
+            className="bg-zinc-900 border border-white/10 rounded-lg text-zinc-200 text-xs px-2.5 py-1 font-mono"
           >
             {years.map((y) => (
               <option key={y} value={y}>{y}</option>
@@ -110,89 +110,92 @@ export function OshaLogsPanel() {
         </div>
         <div className="flex gap-2">
           <Button size="sm" variant="ghost" onClick={() => downloadCsv('300')}>
-            <Download size={12} className="mr-1" />
+            <Download size={12} className="mr-1.5" />
             300 CSV
           </Button>
           <Button size="sm" variant="ghost" onClick={() => downloadCsv('300a')}>
-            <Download size={12} className="mr-1" />
+            <Download size={12} className="mr-1.5" />
             300A CSV
           </Button>
         </div>
       </div>
 
-      {/* 300A Summary Card */}
+      {/* 300A Summary */}
       {summary && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
-            <p className="text-[10px] text-zinc-500 uppercase">Total Cases</p>
-            <p className="text-lg font-semibold text-zinc-100">{summary.total_cases}</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+          <div className="bg-zinc-900 px-5 py-5">
+            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Total Cases</div>
+            <div className="text-3xl font-light font-mono mt-2 text-zinc-100">{summary.total_cases}</div>
           </div>
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
-            <p className="text-[10px] text-zinc-500 uppercase">Deaths</p>
-            <p className={`text-lg font-semibold ${summary.total_deaths > 0 ? 'text-red-400' : 'text-zinc-100'}`}>{summary.total_deaths}</p>
+          <div className="bg-zinc-900 px-5 py-5">
+            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Deaths</div>
+            <div className={`text-3xl font-light font-mono mt-2 ${summary.total_deaths > 0 ? 'text-red-400' : 'text-zinc-700'}`}>{summary.total_deaths}</div>
           </div>
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
-            <p className="text-[10px] text-zinc-500 uppercase">Days Away</p>
-            <p className="text-lg font-semibold text-zinc-100">{summary.total_days_away}</p>
-            <p className="text-[10px] text-zinc-500">{summary.total_days_away_cases} cases</p>
+          <div className="bg-zinc-900 px-5 py-5">
+            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Days Away</div>
+            <div className="text-3xl font-light font-mono mt-2 text-amber-400">{summary.total_days_away}</div>
+            <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-1 font-mono">{summary.total_days_away_cases} cases</div>
           </div>
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
-            <p className="text-[10px] text-zinc-500 uppercase">Restricted Duty</p>
-            <p className="text-lg font-semibold text-zinc-100">{summary.total_days_restricted}</p>
-            <p className="text-[10px] text-zinc-500">{summary.total_restricted_cases} cases</p>
+          <div className="bg-zinc-900 px-5 py-5">
+            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Restricted Duty</div>
+            <div className="text-3xl font-light font-mono mt-2 text-orange-400">{summary.total_days_restricted}</div>
+            <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-1 font-mono">{summary.total_restricted_cases} cases</div>
           </div>
         </div>
       )}
 
       {/* 300 Log Table */}
-      {entries.length === 0 ? (
-        <div className="text-center py-12 text-zinc-500 text-sm">
-          No OSHA-recordable incidents for {year}.
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-xl border border-zinc-800">
-          <table className="w-full text-xs text-left">
-            <thead className="bg-zinc-900/50 text-zinc-400">
-              <tr>
-                <th className="px-3 py-2 font-medium">Case #</th>
-                <th className="px-3 py-2 font-medium">Employee</th>
-                <th className="px-3 py-2 font-medium">Job Title</th>
-                <th className="px-3 py-2 font-medium">Date</th>
-                <th className="px-3 py-2 font-medium">Location</th>
-                <th className="px-3 py-2 font-medium">Classification</th>
-                <th className="px-3 py-2 font-medium text-right">Days Away</th>
-                <th className="px-3 py-2 font-medium text-right">Days Restricted</th>
-                <th className="px-3 py-2 font-medium">Injury Type</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-800/60">
-              {entries.map((e) => (
-                <tr
-                  key={e.incident_id}
-                  className="text-zinc-300 hover:bg-white/[0.02] transition-colors cursor-pointer"
-                  onClick={() => navigate(`/app/ir/${e.incident_id}`)}
-                >
-                  <td className="px-3 py-2 font-mono">{e.case_number}</td>
-                  <td className="px-3 py-2">{e.employee_name}</td>
-                  <td className="px-3 py-2 text-zinc-500">{e.job_title || '—'}</td>
-                  <td className="px-3 py-2">{e.date_of_injury}</td>
-                  <td className="px-3 py-2 text-zinc-500">{e.location || '—'}</td>
-                  <td className="px-3 py-2">
-                    {e.classification ? (
-                      <Badge variant={classificationBadge[e.classification] ?? 'neutral'}>
-                        {classificationLabel[e.classification] ?? e.classification}
-                      </Badge>
-                    ) : '—'}
-                  </td>
-                  <td className="px-3 py-2 text-right">{e.days_away || '—'}</td>
-                  <td className="px-3 py-2 text-right">{e.days_restricted || '—'}</td>
-                  <td className="px-3 py-2 text-zinc-500">{e.injury_type || '—'}</td>
+      <div className="bg-zinc-900 border border-white/10 rounded-2xl overflow-hidden">
+        {entries.length === 0 ? (
+          <div className="p-12 text-center">
+            <p className="text-sm text-zinc-400">No OSHA-recordable incidents for {year}.</p>
+            <p className="text-[11px] text-zinc-600 mt-1">Mark an incident OSHA recordable from its detail page.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-zinc-950/50 text-zinc-500">
+                <tr>
+                  <th className="px-4 py-3 text-[10px] uppercase tracking-widest font-bold">Case #</th>
+                  <th className="px-4 py-3 text-[10px] uppercase tracking-widest font-bold">Employee</th>
+                  <th className="px-4 py-3 text-[10px] uppercase tracking-widest font-bold">Job Title</th>
+                  <th className="px-4 py-3 text-[10px] uppercase tracking-widest font-bold">Date</th>
+                  <th className="px-4 py-3 text-[10px] uppercase tracking-widest font-bold">Location</th>
+                  <th className="px-4 py-3 text-[10px] uppercase tracking-widest font-bold">Classification</th>
+                  <th className="px-4 py-3 text-[10px] uppercase tracking-widest font-bold text-right">Days Away</th>
+                  <th className="px-4 py-3 text-[10px] uppercase tracking-widest font-bold text-right">Days Restricted</th>
+                  <th className="px-4 py-3 text-[10px] uppercase tracking-widest font-bold">Injury Type</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {entries.map((e) => (
+                  <tr
+                    key={e.incident_id}
+                    className="border-t border-white/5 text-zinc-300 hover:bg-white/[0.02] transition-colors cursor-pointer"
+                    onClick={() => navigate(`/app/ir/${e.incident_id}`)}
+                  >
+                    <td className="px-4 py-3 font-mono text-[11px] text-zinc-500">{e.case_number}</td>
+                    <td className="px-4 py-3 text-[13px] text-zinc-100 font-medium">{e.employee_name}</td>
+                    <td className="px-4 py-3 text-[12px] text-zinc-500">{e.job_title || '—'}</td>
+                    <td className="px-4 py-3 text-[11px] text-zinc-400 font-mono">{e.date_of_injury}</td>
+                    <td className="px-4 py-3 text-[12px] text-zinc-400">{e.location || '—'}</td>
+                    <td className="px-4 py-3">
+                      {e.classification ? (
+                        <Badge variant={classificationBadge[e.classification] ?? 'neutral'}>
+                          {classificationLabel[e.classification] ?? e.classification}
+                        </Badge>
+                      ) : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono text-[12px] text-zinc-300">{e.days_away || '—'}</td>
+                    <td className="px-4 py-3 text-right font-mono text-[12px] text-zinc-300">{e.days_restricted || '—'}</td>
+                    <td className="px-4 py-3 text-[12px] text-zinc-500">{e.injury_type || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
