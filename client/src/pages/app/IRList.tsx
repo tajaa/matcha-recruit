@@ -20,7 +20,8 @@ type TypeFilter = 'all' | IRIncidentType
 
 type IncidentListResponse = { incidents: IRIncident[]; total: number }
 
-const STAT_CARDS: Array<{ key: keyof IRAnalyticsSummary; label: string; tone: string }> = [
+type SummaryNumKey = 'total' | 'open' | 'investigating' | 'critical'
+const STAT_CARDS: Array<{ key: SummaryNumKey; label: string; tone: string }> = [
   { key: 'total', label: 'Total', tone: 'text-zinc-100' },
   { key: 'open', label: 'Open', tone: 'text-amber-400' },
   { key: 'investigating', label: 'Investigating', tone: 'text-orange-400' },
