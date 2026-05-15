@@ -65,8 +65,8 @@ export function OshaLogsPanel() {
   useEffect(() => {
     setLoading(true)
     Promise.allSettled([
-      api.get<LogEntry[]>(`/ir/osha/300-log?year=${year}`).then(setEntries),
-      api.get<Summary300A>(`/ir/osha/300a?year=${year}`).then(setSummary),
+      api.get<LogEntry[]>(`/ir/incidents/osha/300-log?year=${year}`).then(setEntries),
+      api.get<Summary300A>(`/ir/incidents/osha/300a?year=${year}`).then(setSummary),
     ]).finally(() => setLoading(false))
   }, [year])
 
@@ -74,8 +74,8 @@ export function OshaLogsPanel() {
     const token = localStorage.getItem('matcha_access_token')
     const base = import.meta.env.VITE_API_URL || '/api'
     const url = type === '300'
-      ? `${base}/ir/osha/300-log/csv?year=${year}`
-      : `${base}/ir/osha/300a/csv?year=${year}`
+      ? `${base}/ir/incidents/osha/300-log/csv?year=${year}`
+      : `${base}/ir/incidents/osha/300a/csv?year=${year}`
     window.open(`${url}&_token=${token}`, '_blank')
   }
 
