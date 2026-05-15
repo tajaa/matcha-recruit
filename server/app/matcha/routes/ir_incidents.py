@@ -1915,27 +1915,44 @@ async def get_analytics_trends(
             SELECT
                 DATE_TRUNC('{date_trunc}', occurred_at) as period_start,
                 COUNT(*) as count,
-                incident_type
+                COALESCE(SUM(CASE WHEN osha_recordable = true THEN 1 ELSE 0 END), 0) AS recordable_count,
+                incident_type,
+                severity
             FROM ir_incidents
             WHERE {co_filter} AND occurred_at >= $1
-            GROUP BY period_start, incident_type
+            GROUP BY period_start, incident_type, severity
             ORDER BY period_start
             """,
             start_date,
             company_id,
         )
 
-        # Aggregate by period
-        data_map = {}
+        # Aggregate by period across both type + severity dims.
+        data_map: dict[str, dict] = {}
         for row in rows:
             date_str = row["period_start"].strftime("%Y-%m-%d")
-            if date_str not in data_map:
-                data_map[date_str] = {"count": 0, "by_type": {}}
-            data_map[date_str]["count"] += row["count"]
-            data_map[date_str]["by_type"][row["incident_type"]] = row["count"]
+            entry = data_map.setdefault(date_str, {
+                "count": 0,
+                "recordable_count": 0,
+                "by_type": {},
+                "by_severity": {},
+            })
+            cnt = int(row["count"])
+            entry["count"] += cnt
+            entry["recordable_count"] += int(row["recordable_count"] or 0)
+            t = row["incident_type"] or "other"
+            s = row["severity"] or "medium"
+            entry["by_type"][t] = entry["by_type"].get(t, 0) + cnt
+            entry["by_severity"][s] = entry["by_severity"].get(s, 0) + cnt
 
         data = [
-            TrendDataPoint(date=date, count=info["count"], by_type=info["by_type"])
+            TrendDataPoint(
+                date=date,
+                count=info["count"],
+                by_type=info["by_type"],
+                by_severity=info["by_severity"],
+                recordable_count=info["recordable_count"],
+            )
             for date, info in sorted(data_map.items())
         ]
 

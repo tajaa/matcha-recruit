@@ -12,6 +12,7 @@ import { IRDimensionsGrid } from './risk/IRDimensionsGrid'
 import { IRRiskMatrixHeatmap } from './risk/IRRiskMatrixHeatmap'
 import { IRThemeCard } from './risk/IRThemeCard'
 import { IRWcMetricsCard, type WcMetrics } from './risk/IRWcMetricsCard'
+import { IRIncidentTrendChart } from './risk/IRIncidentTrendChart'
 
 type LocationRow = {
   id: string
@@ -195,6 +196,8 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
           <IRRiskHeroCard assessment={assessment} periodDays={matrix?.period_days ?? days} />
 
           {wcMetrics && <IRWcMetricsCard metrics={wcMetrics} />}
+
+          <IRIncidentTrendChart />
 
           <IRDimensionsGrid assessment={assessment} />
 

@@ -364,6 +364,8 @@ class TrendDataPoint(BaseModel):
     date: str
     count: int
     by_type: Optional[dict[str, int]] = None
+    by_severity: Optional[dict[str, int]] = None
+    recordable_count: Optional[int] = None
 
 
 class TrendsAnalysis(BaseModel):

@@ -232,7 +232,13 @@ export type IRAnalyticsSummary = {
   by_type: Record<string, number>
 }
 
-export type IRTrendPoint = { date: string; count: number }
+export type IRTrendPoint = {
+  date: string
+  count: number
+  by_type?: Record<string, number>
+  by_severity?: Record<string, number>
+  recordable_count?: number
+}
 export type IRTrendsData = { interval: string; data: IRTrendPoint[] }
 export type IRLocationData = { location: string; count: number; severity_breakdown: Record<string, number> }
 
