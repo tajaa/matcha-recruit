@@ -81,8 +81,8 @@ export default function Discipline() {
   }, [records, search, employees])
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex items-start justify-between gap-4">
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold text-zinc-100">
             <Gavel className="w-5 h-5" />
@@ -92,7 +92,7 @@ export default function Discipline() {
             Issue progressive performance action records, track signatures, and manage escalation.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button variant="ghost" onClick={() => navigate('/app/discipline-settings')}>
             <Settings className="w-4 h-4" />
             <span className="ml-2">Settings</span>
@@ -130,7 +130,7 @@ export default function Discipline() {
 
       {error && <div className="text-sm text-red-400">{error}</div>}
 
-      <div className="rounded-lg border border-zinc-800 bg-zinc-950 overflow-hidden">
+      <div className="rounded-lg border border-zinc-800 bg-zinc-950 overflow-x-auto">
         {loading ? (
           <div className="p-8 flex items-center justify-center text-zinc-400">
             <Loader2 className="w-5 h-5 animate-spin" />
@@ -140,7 +140,7 @@ export default function Discipline() {
             No performance action records match the current filters.
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[700px]">
             <thead className="bg-zinc-900 text-zinc-400 text-xs uppercase tracking-wide">
               <tr>
                 <th className="text-left px-4 py-3">Employee</th>

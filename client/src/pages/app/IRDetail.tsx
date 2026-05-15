@@ -90,15 +90,15 @@ export default function IRDetail() {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-6">
         <Link to="/app/ir" className="text-zinc-500 hover:text-zinc-300 transition-colors">&larr;</Link>
         <span className="text-xs text-zinc-500 font-mono">{incident.incident_number}</span>
-        <h1 className="text-xl font-semibold text-zinc-100">{incident.title}</h1>
+        <h1 className="text-xl font-semibold text-zinc-100 min-w-0">{incident.title}</h1>
         <Badge variant={SEVERITY_BADGE[incident.severity] ?? 'neutral'}>{severityLabel(incident.severity)}</Badge>
         <Badge variant={STATUS_BADGE[incident.status] ?? 'neutral'}>{statusLabel(incident.status)}</Badge>
       </div>
 
-      <div className="grid grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
         {/* Main */}
         <div className="col-span-2">
           <div className="flex gap-1 mb-4">

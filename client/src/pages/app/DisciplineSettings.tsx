@@ -54,7 +54,7 @@ export default function DisciplineSettings() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <Button variant="ghost" onClick={() => navigate('/app/discipline')}>
         <ArrowLeft className="w-4 h-4" />
         <span className="ml-2">Back to performance action</span>

@@ -138,15 +138,15 @@ export default function IRList() {
           </div>
 
           {/* Search + type + severity filters */}
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 flex-wrap">
             <Input
               label=""
               placeholder="Search incidents..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="max-w-xs"
+              className="w-full sm:max-w-xs"
             />
-            <div className="w-36">
+            <div className="w-full sm:w-36">
               <Select
                 label=""
                 options={[{ value: 'all', label: 'All Types' }, ...INCIDENT_TYPE_OPTIONS]}

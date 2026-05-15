@@ -86,13 +86,13 @@ export default function DisciplineDetail() {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
       <Button variant="ghost" onClick={() => navigate('/app/discipline')}>
         <ArrowLeft className="w-4 h-4" />
         <span className="ml-2">Back to performance action</span>
       </Button>
 
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100">
             {LEVEL_LABEL[record.discipline_type]}

@@ -132,8 +132,8 @@ export default function ComplianceCalendar() {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="max-w-6xl mx-auto">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-semibold text-zinc-100">Compliance Calendar</h1>

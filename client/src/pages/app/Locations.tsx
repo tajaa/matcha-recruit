@@ -53,8 +53,8 @@ export default function Locations() {
   }
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex items-start justify-between gap-4">
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold text-zinc-100">
             <MapPin className="w-5 h-5" />
@@ -154,7 +154,7 @@ function AddLocationForm({ onAdded }: { onAdded: () => void }) {
     <form onSubmit={handleSubmit} className="space-y-3 bg-zinc-900 border border-zinc-800 rounded p-4">
       <Field label="Location name" value={name} onChange={setName} optional />
       <Field label="Address" value={address} onChange={setAddress} optional />
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Field label="City" value={city} onChange={setCity} />
         <Field label="State" value={state} onChange={setState} maxLength={2} />
         <Field label="ZIP" value={zipcode} onChange={setZipcode} />

@@ -81,7 +81,7 @@ export default function Training() {
         </Card>
       )}
 
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <Card className="p-4">
           <div className="text-xs text-zinc-500 uppercase tracking-wider">Requirements</div>
           <div className="text-2xl font-semibold text-zinc-100 mt-1">{requirements.length}</div>
@@ -118,7 +118,7 @@ export default function Training() {
           const overdueCount = summary?.overdue ?? 0
           return (
             <Card key={req.id} className="p-5">
-              <div className="flex items-start justify-between gap-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <Link
@@ -163,8 +163,8 @@ export default function Training() {
             <AlertTriangle className="w-4 h-4 text-amber-400" />
             Overdue
           </h2>
-          <Card className="overflow-hidden">
-            <table className="w-full text-sm">
+          <Card className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[500px]">
               <thead className="bg-zinc-900/50 text-xs uppercase text-zinc-500">
                 <tr>
                   <th className="text-left px-4 py-2 font-medium">Employee</th>
