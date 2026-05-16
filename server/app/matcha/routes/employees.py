@@ -1771,7 +1771,7 @@ async def download_bulk_upload_template(
 
     # Add example row (medical employee)
     writer.writerow({
-        'email': 'jane.doe@medcenter.com',
+        'email': 'jane.doe@hospital.test',
         'personal_email': 'jane.doe@gmail.com',
         'first_name': 'Jane',
         'last_name': 'Doe',
@@ -2256,7 +2256,7 @@ async def download_bulk_credentials_template(
     ])
     writer.writeheader()
     writer.writerow({
-        'email': 'jane.doe@medcenter.com',
+        'email': 'jane.doe@hospital.test',
         'license_type': 'RN',
         'license_number': 'RN123456',
         'license_state': 'CA',

@@ -255,6 +255,27 @@ cd server && python3 -m pytest tests/ -v
 - Before modifying any function, component, or class, you MUST identify and read all files that import or depend on it.
 - If a task involves data fetching, database schemas, or global state, you are required to load the entire schema and all relevant model files into your context *before* proposing or executing changes.
 
+## Test Data — Email Domains (CRITICAL)
+
+NEVER invent realistic-looking fake email domains for test data (e.g. `@medcenter.com`, `@acmecorp.io`, `@somehospital.org`). These resolve in DNS, Gmail attempts delivery, and bounce-storms flood the sender mailbox for 48 hours.
+
+ALWAYS use RFC 2606 / RFC 6761 reserved domains — guaranteed non-deliverable:
+
+- `@example.com`, `@example.org`, `@example.net`
+- `@<anything>.test` (e.g. `@acme.test`, `@hospital.test`)
+- `@<anything>.invalid`
+- `@<anything>.localhost`
+
+Examples:
+- `jane.doe@example.com` ✅
+- `nurse1@hospital.test` ✅
+- `admin@matcha.invalid` ✅
+- `jane.doe@medcenter.com` ❌ (real-looking, real bounces)
+
+This applies anywhere test data is generated: seed scripts, CSV templates, fixture files, mock data, demo employees, README examples, anything Claude writes into the codebase or types into the live UI.
+
+The server (`server/app/core/services/email.py`) hard-blocks sends to these reserved domains as a defense-in-depth guard, but the rule above is the primary mitigation — don't invent realistic fake domains in the first place.
+
 ## Dead References (ignore)
 
 These are legacy artifacts from a discontinued sister product. Do **not** propose changes, cleanup, or modifications to them unless explicitly asked:

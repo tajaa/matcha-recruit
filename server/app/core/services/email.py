@@ -19,6 +19,22 @@ logger = logging.getLogger(__name__)
 GMAIL_TOKEN_URI = "https://oauth2.googleapis.com/token"
 GMAIL_SEND_URI = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
 
+# RFC 2606 / RFC 6761 reserved domains — never deliverable, safe for test data.
+# Hard-blocked at send time so test rows ending up in prod cannot cause bounce storms.
+_RESERVED_EXAMPLE_DOMAINS = frozenset({"example.com", "example.org", "example.net"})
+_RESERVED_TLDS = (".test", ".invalid", ".localhost", ".example")
+
+
+def _is_reserved_test_domain(email_address: str) -> bool:
+    if not email_address or "@" not in email_address:
+        return False
+    domain = email_address.rsplit("@", 1)[-1].strip().lower().rstrip(".")
+    if not domain:
+        return False
+    if domain in _RESERVED_EXAMPLE_DOMAINS:
+        return True
+    return domain.endswith(_RESERVED_TLDS)
+
 
 class EmailService:
     """Service for sending emails via Gmail API."""
@@ -89,6 +105,14 @@ class EmailService:
         """
         if not self.is_configured():
             logger.warning("Gmail not configured — token.json missing or incomplete")
+            return False
+
+        if _is_reserved_test_domain(to_email):
+            logger.warning(
+                "Skipping send to reserved/test email domain: %s (subject=%r)",
+                to_email,
+                subject,
+            )
             return False
 
         try:

@@ -39,7 +39,7 @@ type MultiBatchModalProps = {
 
 export function MultiBatchModal({ open, onClose, onSuccess, departments }: MultiBatchModalProps) {
   const [rows, setRows] = useState<Row[]>([emptyRow()])
-  const [sendInvitations, setSendInvitations] = useState(true)
+  const [sendInvitations, setSendInvitations] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
 

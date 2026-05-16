@@ -163,8 +163,8 @@ WALSH: Just that this isn't the first time David has made people uncomfortable. 
 
 --- END OF TRANSCRIPT ---""",
 
-        "email_evidence": """From: David Kim <david.kim@acmecorp.com>
-To: Michael Torres <michael.torres@acmecorp.com>
+        "email_evidence": """From: David Kim <david.kim@acmecorp.test>
+To: Michael Torres <michael.torres@acmecorp.test>
 Date: December 5, 2024 11:42 AM
 Subject: LOL you have to see this
 
@@ -180,8 +180,8 @@ Let me know what you think!
 
 ---
 
-From: Michael Torres <michael.torres@acmecorp.com>
-To: David Kim <david.kim@acmecorp.com>
+From: Michael Torres <michael.torres@acmecorp.test>
+To: David Kim <david.kim@acmecorp.test>
 Date: December 5, 2024 2:15 PM
 Subject: RE: LOL you have to see this
 
@@ -193,8 +193,8 @@ Michael
 
 ---
 
-From: David Kim <david.kim@acmecorp.com>
-To: Michael Torres <michael.torres@acmecorp.com>
+From: David Kim <david.kim@acmecorp.test>
+To: Michael Torres <michael.torres@acmecorp.test>
 Date: December 5, 2024 2:22 PM
 Subject: RE: LOL you have to see this
 
@@ -202,8 +202,8 @@ Chill out dude, it's just a joke. Don't be so sensitive.
 
 -D""",
 
-        "email_complaint": """From: Michael Torres <michael.torres@acmecorp.com>
-To: Lisa Park <lisa.park@acmecorp.com>
+        "email_complaint": """From: Michael Torres <michael.torres@acmecorp.test>
+To: Lisa Park <lisa.park@acmecorp.test>
 Date: November 15, 2024 4:30 PM
 Subject: Concerns about David Kim's behavior
 
@@ -218,8 +218,8 @@ I'm not sure how to handle this and would appreciate your guidance.
 Thanks,
 Michael""",
 
-        "email_manager_response": """From: Lisa Park <lisa.park@acmecorp.com>
-To: Michael Torres <michael.torres@acmecorp.com>
+        "email_manager_response": """From: Lisa Park <lisa.park@acmecorp.test>
+To: Michael Torres <michael.torres@acmecorp.test>
 Date: November 16, 2024 9:15 AM
 Subject: RE: Concerns about David Kim's behavior
 
@@ -280,7 +280,7 @@ The following are NOT reimbursable:
 Submitting false or inflated expense claims is grounds for immediate termination and may result in legal action. Employees must certify that all submitted expenses are accurate and comply with this policy.
 
 9. REPORTING VIOLATIONS
-Suspected policy violations should be reported to HR or the Ethics Hotline at ethics@acmecorp.com.""",
+Suspected policy violations should be reported to HR or the Ethics Hotline at ethics@acmecorp.test.""",
 
         "transcript_accused": """INTERVIEW TRANSCRIPT
 Case: Expense Fraud Investigation
@@ -636,9 +636,9 @@ STEVENS: Rachel is trying to use the harassment claim as a shield to avoid accou
 
 --- END OF TRANSCRIPT ---""",
 
-        "email_performance_review": """From: Mark Stevens <mark.stevens@acmecorp.com>
-To: Rachel Green <rachel.green@acmecorp.com>
-CC: HR Department <hr@acmecorp.com>
+        "email_performance_review": """From: Mark Stevens <mark.stevens@acmecorp.test>
+To: Rachel Green <rachel.green@acmecorp.test>
+CC: HR Department <hr@acmecorp.test>
 Date: October 15, 2024
 Subject: Performance Improvement Plan
 
@@ -666,9 +666,9 @@ Marketing Manager
 
 ---
 
-From: Rachel Green <rachel.green@acmecorp.com>
-To: Mark Stevens <mark.stevens@acmecorp.com>
-CC: HR Department <hr@acmecorp.com>
+From: Rachel Green <rachel.green@acmecorp.test>
+To: Mark Stevens <mark.stevens@acmecorp.test>
+CC: HR Department <hr@acmecorp.test>
 Date: October 15, 2024
 Subject: RE: Performance Improvement Plan
 

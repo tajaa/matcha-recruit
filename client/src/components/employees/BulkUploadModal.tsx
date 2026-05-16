@@ -10,7 +10,7 @@ type BulkUploadModalProps = {
 }
 
 export function BulkUploadModal({ open, onClose, onSuccess }: BulkUploadModalProps) {
-  const [sendInvitations, setSendInvitations] = useState(true)
+  const [sendInvitations, setSendInvitations] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [result, setResult] = useState<BulkUploadResponse | null>(null)
   const [error, setError] = useState('')
