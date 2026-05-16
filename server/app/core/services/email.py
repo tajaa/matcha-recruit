@@ -12,7 +12,7 @@ from email import encoders
 from pathlib import Path
 from typing import Optional
 
-from ...config import get_settings
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
