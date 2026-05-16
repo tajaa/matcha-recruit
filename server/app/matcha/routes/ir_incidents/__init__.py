@@ -1,0 +1,31 @@
+"""IR Incidents router package — composed from per-domain submodules.
+
+External callers continue to do:
+
+    from app.matcha.routes.ir_incidents import router as ir_incidents_router
+
+Symbols imported by other routers (`broker_portfolio.py`, `inbound_email.py`)
+are re-exported here so those callers never need to know whether a helper
+currently lives in `_legacy.py` or its eventual submodule home. As helpers
+migrate out of `_legacy.py`, flip the corresponding `from ._legacy import`
+line below to point at the new module.
+
+Prefix and feature-gate are applied at the parent mount in
+`server/app/matcha/routes/__init__.py` — this router stays bare.
+"""
+# The package's exported `router` IS `_legacy.router`. New submodules will
+# be added via `router.include_router(...)` below as they arrive. Wrapping
+# `_legacy.router` inside a bare `APIRouter()` would break because `_legacy`
+# has routes registered with `path=""` (e.g. `@router.post("")`) — FastAPI
+# refuses to compose two empty path segments.
+from ._legacy import router  # noqa: F401  (package public symbol)
+
+# External re-exports. Keep `# noqa: F401` — these are package-level
+# re-exports, not local usages.
+from ._legacy import compute_wc_metrics  # noqa: F401  (used by broker_portfolio.py)
+from ._legacy import (  # noqa: F401  (used by inbound_email.py)
+    _parse_occurred_at,
+    generate_incident_number,
+    send_ir_notifications_task,
+)
+from ._legacy import _close_incident_via_copilot  # noqa: F401  (future cross-router use)
