@@ -37,7 +37,6 @@ export default function IRCopilotPanel({ incidentId, onIncidentChanged }: Props)
   const [streaming, setStreaming] = useState(false)
   const [busyCardMessageId, setBusyCardMessageId] = useState<string | null>(null)
   const [busyStage, setBusyStage] = useState<string | null>(null)
-  const [skippedCards, setSkippedCards] = useState<Set<string>>(new Set())
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -146,7 +145,6 @@ export default function IRCopilotPanel({ incidentId, onIncidentChanged }: Props)
     const text = input.trim()
     if (!text || streaming) return
     setInput('')
-    setSkippedCards(new Set())
     await streamRound(text)
   }
 
@@ -202,7 +200,6 @@ export default function IRCopilotPanel({ incidentId, onIncidentChanged }: Props)
           }
         }
       }
-      setSkippedCards(new Set())
       await refresh()
       if (didMutateIncident) onIncidentChanged?.()
     } catch (e) {
@@ -213,8 +210,20 @@ export default function IRCopilotPanel({ incidentId, onIncidentChanged }: Props)
     }
   }
 
-  function handleSkip(messageId: string) {
-    setSkippedCards(prev => new Set(prev).add(messageId))
+  async function handleSkip(messageId: string, cardId: string) {
+    setBusyCardMessageId(messageId)
+    setError(null)
+    try {
+      await api.post(`/ir/incidents/${incidentId}/copilot/skip`, {
+        message_id: messageId,
+        card_id: cardId,
+      })
+      await refresh()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Skip failed')
+    } finally {
+      setBusyCardMessageId(null)
+    }
   }
 
   const cardsByMessageId = useMemo(() => {
@@ -337,23 +346,21 @@ export default function IRCopilotPanel({ incidentId, onIncidentChanged }: Props)
         {/* Current actionable cards */}
         {currentCards.length > 0 && (
           <div className="space-y-2">
-            {currentCards
-              .filter((c) => !skippedCards.has(cardsByMessageId.get(c.id) || ''))
-              .map((c) => {
-                const mid = cardsByMessageId.get(c.id) || ''
-                const accepted = acceptedCardIds.has(c.id)
-                return (
-                  <IRCopilotCard
-                    key={c.id}
-                    messageId={mid}
-                    card={c}
-                    accepted={accepted}
-                    busy={busyCardMessageId === mid}
-                    onAccept={handleAccept}
-                    onSkip={handleSkip}
-                  />
-                )
-              })}
+            {currentCards.map((c) => {
+              const mid = cardsByMessageId.get(c.id) || ''
+              const accepted = acceptedCardIds.has(c.id)
+              return (
+                <IRCopilotCard
+                  key={c.id}
+                  messageId={mid}
+                  card={c}
+                  accepted={accepted}
+                  busy={busyCardMessageId === mid}
+                  onAccept={handleAccept}
+                  onSkip={(id) => void handleSkip(id, c.id)}
+                />
+              )
+            })}
           </div>
         )}
 

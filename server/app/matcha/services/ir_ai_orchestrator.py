@@ -216,7 +216,24 @@ between accounts, (b) intent or context materially affects the response
 (harassment, theft, retaliation), or (c) severity is high/critical.
 
 QUALITY RULES:
-- 1-4 cards. Don't pad. Skip cards if nothing useful applies.
+- AT MOST 1 primary card per round. A second card is allowed ONLY when it
+  represents a clear branch the user must choose between (e.g. set_field
+  severity vs escalate, or close_incident vs run_analysis root_cause).
+  NEVER offer two set_field cards for the same field in the same round
+  (e.g. two "Set status to action_required" cards is a bug — pick one).
+  If you have multiple ideas, pick the single best one and put the others
+  in open_questions.
+- COLD START (first round, no prior assistant message in RECENT
+  CONVERSATION): lead with (a) a 1-2 sentence summary explaining what the
+  incident is and how you'll help, (b) at most ONE primary action card —
+  the next concrete step (categorize / set severity / set status / interview
+  / close), and (c) up to 2 open_questions for what's unclear. Do NOT
+  generate multiple status updates or alternative paths in cold start.
+- ADVANCE on accept: if the most recent CARD/ACCEPTED entry in RECENT
+  CONVERSATION shows the user accepted a step, the next round MUST advance
+  to the next step in the workflow (status set → propose corrective_actions
+  or close_incident; categorized → propose severity or status; etc).
+  Re-offering the same step the user just accepted is a bug.
 - Sort cards by priority (high first).
 - summary always present, even when no cards.
 - Do NOT restate prior summaries. If the incident state hasn't materially
@@ -593,7 +610,60 @@ async def persist_assistant_round(
             },
         ))
 
+    # Supersede every prior unaccepted/non-skipped card row before persisting
+    # the new round's cards. Without this, _extract_current_cards keeps
+    # surfacing prior-round cards alongside the new ones whenever the
+    # assistant-text suppression path fires (no fresh text → no reset point),
+    # producing the "3× same card" bug.
+    await conn.execute(
+        """
+        UPDATE ir_incident_ai_messages
+        SET metadata = jsonb_set(
+                COALESCE(metadata, '{}'::jsonb),
+                '{superseded}',
+                'true'::jsonb,
+                true
+            )
+        WHERE incident_id = $1
+          AND role = 'assistant'
+          AND message_type = 'card'
+          AND COALESCE((metadata->>'accepted')::boolean, false) IS NOT TRUE
+          AND COALESCE((metadata->>'superseded')::boolean, false) IS NOT TRUE
+          AND COALESCE((metadata->>'skipped')::boolean, false) IS NOT TRUE
+        """,
+        incident_id,
+    )
+
+    # Dedupe within the new round: if the AI emits two cards with the same id
+    # OR the same (action.type, field_name, field_value) signature, keep only
+    # the first. Belt-and-suspenders against AI repeats.
+    seen_ids: set[str] = set()
+    seen_signatures: set[tuple] = set()
+    deduped_cards: list[dict[str, Any]] = []
     for card in guidance_payload.get("cards") or []:
+        if not isinstance(card, dict):
+            continue
+        cid = card.get("id")
+        action = card.get("action") or {}
+        sig = (
+            action.get("type"),
+            action.get("field_name"),
+            action.get("field_value"),
+            action.get("analysis_type"),
+        )
+        if isinstance(cid, str) and cid in seen_ids:
+            logger.info("IR copilot dedupe-within-round dropped card id=%s", cid)
+            continue
+        if any(sig) and sig in seen_signatures:
+            logger.info("IR copilot dedupe-within-round dropped card sig=%s", sig)
+            continue
+        if isinstance(cid, str):
+            seen_ids.add(cid)
+        if any(sig):
+            seen_signatures.add(sig)
+        deduped_cards.append(card)
+
+    for card in deduped_cards:
         inserted.append(await append_message(
             conn,
             incident_id=incident_id,

@@ -4490,8 +4490,8 @@ def _extract_current_cards(messages: list) -> list[IRCopilotCard]:
             md = _coerce_metadata_dict(m["metadata"] if isinstance(m, dict) else m.metadata) or {}
             card = md.get("card")
             if isinstance(card, dict):
-                # Only include cards that haven't been accepted or superseded.
-                if not md.get("accepted") and not md.get("superseded"):
+                # Only include cards that haven't been accepted, superseded, or skipped.
+                if not md.get("accepted") and not md.get("superseded") and not md.get("skipped"):
                     try:
                         cards.append(IRCopilotCard.model_validate(card))
                     except Exception:
@@ -4661,6 +4661,60 @@ def _validate_field_value(field: str, value):
         raise HTTPException(status_code=400, detail=f"Invalid severity: {value}")
     if field == "status" and value not in _VALID_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status: {value}")
+
+
+@router.post("/{incident_id}/copilot/skip")
+async def skip_copilot_card(
+    incident_id: UUID,
+    body: IRCopilotAcceptRequest,
+    current_user=Depends(require_admin_or_client),
+):
+    """Persist a Skip on a copilot card so it doesn't re-surface on refresh
+    or in the next round. Same body shape as /copilot/accept (message_id,
+    card_id) — accept and skip are sibling actions on the same card row."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        await _get_incident_with_company_check(conn, incident_id, current_user, columns="id")
+
+        row = await conn.fetchrow(
+            """
+            SELECT id, metadata
+            FROM ir_incident_ai_messages
+            WHERE id = $1 AND incident_id = $2 AND message_type = 'card'
+            """,
+            body.message_id, incident_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Card message not found")
+
+        meta = _coerce_metadata_dict(row["metadata"]) or {}
+        # Verify card_id matches what's stored — defense in depth.
+        stored_card = meta.get("card") or {}
+        if isinstance(stored_card, dict) and stored_card.get("id") != body.card_id:
+            raise HTTPException(status_code=400, detail="Card id mismatch")
+
+        meta["skipped"] = True
+        meta["skipped_at"] = _utc_now_naive().isoformat()
+
+        await conn.execute(
+            "UPDATE ir_incident_ai_messages SET metadata = $1::jsonb WHERE id = $2",
+            json.dumps(meta), body.message_id,
+        )
+
+        await log_audit(
+            conn,
+            incident_id=str(incident_id),
+            user_id=str(current_user.id),
+            action="copilot_skip",
+            entity_type="incident",
+            entity_id=str(incident_id),
+            details={"card_id": body.card_id, "message_id": str(body.message_id)},
+            ip_address=None,
+        )
+
+    _ = company_id  # company access already verified by _get_incident_with_company_check
+    return {"ok": True}
 
 
 @router.post("/{incident_id}/copilot/accept")
