@@ -38,7 +38,7 @@ from app.matcha.models.ir_incident import (
 )
 
 # Helpers still living in _legacy.py; will move to _shared.py in step 10.
-from ._legacy import (
+from ._shared import (
     _safe_json_loads,
     _utc_now_naive,
 )

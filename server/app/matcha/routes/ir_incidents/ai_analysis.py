@@ -43,7 +43,7 @@ from app.matcha.models.ir_incident import (
 # Helpers that still live in _legacy.py; will move to _shared.py in step 10.
 # (_auto_map_policy_violations and _get_handbook_policy_entries are defined
 # in this file; _legacy.py imports them lazily at call-time.)
-from ._legacy import (
+from ._shared import (
     ANALYSIS_TYPES,
     _get_incident_with_company_check,
     _safe_json_loads,

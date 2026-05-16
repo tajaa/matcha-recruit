@@ -55,7 +55,7 @@ router.include_router(_audit_log_router)
 # External re-exports. Keep `# noqa: F401` — these are package-level
 # re-exports, not local usages.
 from .analytics import compute_wc_metrics  # noqa: F401  (used by broker_portfolio.py)
-from ._legacy import (  # noqa: F401  (used by inbound_email.py)
+from ._shared import (  # noqa: F401  (used by inbound_email.py)
     _parse_occurred_at,
     generate_incident_number,
     send_ir_notifications_task,

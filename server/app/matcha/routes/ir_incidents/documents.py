@@ -13,7 +13,7 @@ from app.matcha.models.ir_incident import (
 )
 
 # log_audit currently lives in _legacy.py; will move to _shared.py in step 10.
-from ._legacy import log_audit
+from ._shared import log_audit
 
 logger = logging.getLogger(__name__)
 
