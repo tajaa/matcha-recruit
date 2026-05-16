@@ -123,8 +123,3 @@ class TrainingEmailMixin:
             attachments=[attachment],
         )
 
-
-# Singleton instance
-_email_service: Optional[EmailService] = None
-
-

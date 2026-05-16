@@ -404,6 +404,10 @@ Sent from Matcha Recruit contact form
             text_content=text_content,
         )
 
+# Singleton instance
+_email_service: Optional[EmailService] = None
+
+
 def get_email_service() -> EmailService:
     """Get the email service singleton."""
     global _email_service
