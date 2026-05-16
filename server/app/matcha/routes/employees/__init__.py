@@ -9,9 +9,9 @@ from ._legacy import (
     router,
     pto_admin_router,
     leave_admin_router,
-    _refresh_risk_assessment,
     EmployeeCreateRequest,
 )
+from ._shared import _refresh_risk_assessment
 
 __all__ = [
     "router",
