@@ -1,91 +1,51 @@
-"""IR (Incident Report) API Routes.
+"""CRUD endpoints for IR Incidents.
 
-Incident Report management for HR departments:
-- Incidents CRUD
-- Document upload
-- AI analysis (categorization, severity, root cause, recommendations)
-- Analytics dashboard
+Owns the collection-root and per-incident lifecycle:
+- POST   ""                       — create
+- GET    ""                       — list
+- GET    /export                  — CSV / PDF export
+- GET    /{incident_id}            — fetch
+- PUT    /{incident_id}            — update
+- DELETE /{incident_id}            — delete
+- GET    /{incident_id}/er-case    — linked ER case
+
+This module's `router` is the package's exported `router` (see
+`__init__.py`). All other submodules `include_router` into it. CRUD owns
+the empty-path collection routes (`@router.post("")`, `@router.get("")`)
+which is why it has to be the outermost — FastAPI refuses to compose
+two empty-prefix routers with empty-path children.
 """
-
+import asyncio
 import csv
 import io
 import json
 import logging
-import secrets
-import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Literal, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request, Query, BackgroundTasks
+from fastapi import (
+    APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request,
+)
 from fastapi.responses import StreamingResponse
 
 from app.database import get_connection
-from app.core.dependencies import require_admin
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
-from app.config import get_settings
-from app.core.services.storage import get_storage
-from app.core.services.email import get_email_service
 from app.matcha.models.ir_incident import (
-    IRCopilotAcceptRequest,
-    IRCopilotCard,
-    IRCopilotMessage,
-    IRCopilotStreamRequest,
-    IRCopilotTranscript,
     IRIncidentCreate,
-    IRIncidentUpdate,
-    IRIncidentResponse,
     IRIncidentListResponse,
-    IRDocumentResponse,
-    IRDocumentUploadResponse,
-    CategorizationAnalysis,
-    SeverityAnalysis,
-    RootCauseAnalysis,
-    RecommendationsAnalysis,
-    PrecedentMatch,
-    PrecedentAnalysis,
-    ActionProbability,
-    ConsistencyGuidance,
-    ConsistencyAnalytics,
-    PolicyMappingAnalysis,
-    AnalyticsSummary,
-    TrendsAnalysis,
-    TrendDataPoint,
-    LocationAnalysis,
-    LocationHotspot,
-    RiskMatrixCell,
-    RiskMatrixRow,
-    RiskMatrixResponse,
-    RiskTheme,
-    RiskInsightsResponse,
-    IRAuditLogEntry,
-    IRAuditLogResponse,
-    Witness,
-    OshaRecordabilityUpdate,
-    Osha300LogEntry,
-    Osha300ASummary,
-)
-from app.matcha.models.interview import (
-    InvestigationInterviewCreate,
-    InvestigationInterviewResponse,
-    InvestigationInterviewStart,
+    IRIncidentResponse,
+    IRIncidentUpdate,
 )
 
 from ._shared import (
-    ANALYSIS_TYPES,
     _auto_classify_incident_task,
     _company_filter,
-    _get_company_admin_contacts,
-    _get_incident_with_company_check,
     _parse_occurred_at,
     _resolve_employee_refs,
-    _safe_json_loads,
-    _sse,
     _to_naive_utc,
-    _utc_now_naive,
     generate_incident_number,
     log_audit,
-    parse_witnesses,
     row_to_response,
     send_ir_notifications_task,
 )

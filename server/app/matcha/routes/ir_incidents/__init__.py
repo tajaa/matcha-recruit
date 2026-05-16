@@ -13,12 +13,15 @@ line below to point at the new module.
 Prefix and feature-gate are applied at the parent mount in
 `server/app/matcha/routes/__init__.py` — this router stays bare.
 """
-# The package's exported `router` IS `_legacy.router`. New submodules will
-# be added via `router.include_router(...)` below as they arrive. Wrapping
-# `_legacy.router` inside a bare `APIRouter()` would break because `_legacy`
-# has routes registered with `path=""` (e.g. `@router.post("")`) — FastAPI
-# refuses to compose two empty path segments.
-from ._legacy import router  # noqa: F401  (package public symbol)
+# The package's exported `router` IS `crud.router`. CRUD owns the
+# empty-path collection routes (`@router.post("")`, `@router.get("")`).
+# Wrapping crud.router inside a fresh `APIRouter()` and including it
+# would error: FastAPI refuses to compose two empty-prefix routers with
+# empty-path children. By exposing crud.router directly, the only prefix
+# in play is the one applied at the parent mount in
+# `server/app/matcha/routes/__init__.py`. All other submodules append
+# their routes via `router.include_router(...)` below.
+from .crud import router  # noqa: F401  (package public symbol)
 
 # Submodules — each `include_router` appends its routes onto the package
 # router AFTER _legacy's routes have already been registered. That ordering
