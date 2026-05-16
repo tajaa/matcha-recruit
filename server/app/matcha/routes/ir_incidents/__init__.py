@@ -21,6 +21,14 @@ Prefix and feature-gate are applied at the parent mount in
 from ._legacy import router  # noqa: F401  (package public symbol)
 
 # Submodules — each `include_router` injects its routes into the package router.
+# Order matters: routers with static path prefixes (e.g. /anonymous-reporting,
+# /osha, /analytics) must be registered BEFORE any router that owns the
+# catch-all `/{incident_id}` path. _legacy.router currently owns the catch-all,
+# so static-prefix submodules go here ABOVE `from ._legacy import router`.
+# Audit-log path is `/{incident_id}/audit-log` (specific suffix) — safe.
+from .anonymous_reporting import router as _anonymous_reporting_router
+router.include_router(_anonymous_reporting_router)
+
 from .audit_log import router as _audit_log_router
 router.include_router(_audit_log_router)
 
