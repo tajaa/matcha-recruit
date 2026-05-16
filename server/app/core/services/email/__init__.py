@@ -15,5 +15,5 @@ original flat `email.py`.
 from ._legacy import (  # noqa: F401
     EmailService,
     get_email_service,
-    _is_reserved_test_domain,
 )
+from ._shared import _is_reserved_test_domain  # noqa: F401
