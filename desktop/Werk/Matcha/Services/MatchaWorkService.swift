@@ -1,11 +1,5 @@
 import Foundation
 
-private extension Data {
-    mutating func append(_ string: String) {
-        if let d = string.data(using: .utf8) { append(d) }
-    }
-}
-
 private struct MWCacheEntry<Value> {
     let value: Value
     let expiresAt: Date
@@ -208,23 +202,18 @@ class MatchaWorkService {
         threadId: String,
         images: [(data: Data, filename: String, mimeType: String)]
     ) async throws -> [String] {
-        let boundary = "Boundary-\(UUID().uuidString)"
-        var body = Data()
+        var multipart = MultipartUploadBuilder()
         for image in images {
-            body.append("--\(boundary)\r\n")
-            body.append("Content-Disposition: form-data; name=\"files\"; filename=\"\(image.filename)\"\r\n")
-            body.append("Content-Type: \(image.mimeType)\r\n\r\n")
-            body.append(image.data)
-            body.append("\r\n")
+            multipart.addFile(name: "files", filename: image.filename, mimeType: image.mimeType, data: image.data)
         }
-        body.append("--\(boundary)--\r\n")
+        let (body, contentType) = multipart.finalize()
 
         guard let url = URL(string: "\(client.baseURL)\(basePath)/threads/\(threadId)/images") else {
             throw APIError.invalidURL
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         if let token = client.accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -309,23 +298,18 @@ class MatchaWorkService {
         endpoint: String,
         files: [(data: Data, filename: String, mimeType: String)]
     ) async throws -> URLSession.AsyncBytes {
-        let boundary = "Boundary-\(UUID().uuidString)"
-        var body = Data()
+        var multipart = MultipartUploadBuilder()
         for file in files {
-            body.append("--\(boundary)\r\n")
-            body.append("Content-Disposition: form-data; name=\"files\"; filename=\"\(file.filename)\"\r\n")
-            body.append("Content-Type: \(file.mimeType)\r\n\r\n")
-            body.append(file.data)
-            body.append("\r\n")
+            multipart.addFile(name: "files", filename: file.filename, mimeType: file.mimeType, data: file.data)
         }
-        body.append("--\(boundary)--\r\n")
+        let (body, contentType) = multipart.finalize()
 
         guard let url = URL(string: "\(client.baseURL)\(basePath)/threads/\(threadId)/\(endpoint)") else {
             throw APIError.invalidURL
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         if let token = client.accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -605,20 +589,16 @@ class MatchaWorkService {
     func uploadDisciplinePhysicalSignature(projectId: String, fileURL: URL) async throws -> MWProject {
         let data = try Data(contentsOf: fileURL)
         let filename = fileURL.lastPathComponent
-        let boundary = "Boundary-\(UUID().uuidString)"
-        var body = Data()
-        body.append("--\(boundary)\r\n")
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n")
-        body.append("Content-Type: application/pdf\r\n\r\n")
-        body.append(data)
-        body.append("\r\n--\(boundary)--\r\n")
+        var multipart = MultipartUploadBuilder()
+        multipart.addFile(name: "file", filename: filename, mimeType: "application/pdf", data: data)
+        let (body, contentType) = multipart.finalize()
 
         guard let url = URL(string: "\(client.baseURL)\(basePath)/projects/\(projectId)/discipline/signature/upload-physical") else {
             throw APIError.invalidURL
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         if let token = client.accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -783,21 +763,16 @@ class MatchaWorkService {
         projectId: String,
         file: (data: Data, filename: String, mimeType: String)
     ) async throws -> MWProjectFile {
-        let boundary = "Boundary-\(UUID().uuidString)"
-        var body = Data()
-        body.append("--\(boundary)\r\n")
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(file.filename)\"\r\n")
-        body.append("Content-Type: \(file.mimeType)\r\n\r\n")
-        body.append(file.data)
-        body.append("\r\n")
-        body.append("--\(boundary)--\r\n")
+        var multipart = MultipartUploadBuilder()
+        multipart.addFile(name: "file", filename: file.filename, mimeType: file.mimeType, data: file.data)
+        let (body, contentType) = multipart.finalize()
 
         guard let url = URL(string: "\(client.baseURL)\(basePath)/projects/\(projectId)/files") else {
             throw APIError.invalidURL
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         if let token = client.accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -844,21 +819,16 @@ class MatchaWorkService {
         projectId: String,
         file: (data: Data, filename: String, mimeType: String)
     ) async throws -> BlogMediaUpload {
-        let boundary = "Boundary-\(UUID().uuidString)"
-        var body = Data()
-        body.append("--\(boundary)\r\n")
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(file.filename)\"\r\n")
-        body.append("Content-Type: \(file.mimeType)\r\n\r\n")
-        body.append(file.data)
-        body.append("\r\n")
-        body.append("--\(boundary)--\r\n")
+        var multipart = MultipartUploadBuilder()
+        multipart.addFile(name: "file", filename: file.filename, mimeType: file.mimeType, data: file.data)
+        let (body, contentType) = multipart.finalize()
 
         guard let url = URL(string: "\(client.baseURL)\(basePath)/projects/\(projectId)/blog-media") else {
             throw APIError.invalidURL
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         if let token = client.accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -968,23 +938,18 @@ class MatchaWorkService {
         projectId: String,
         files: [(data: Data, filename: String, mimeType: String)]
     ) async throws -> URLSession.AsyncBytes {
-        let boundary = "Boundary-\(UUID().uuidString)"
-        var body = Data()
+        var multipart = MultipartUploadBuilder()
         for file in files {
-            body.append("--\(boundary)\r\n")
-            body.append("Content-Disposition: form-data; name=\"files\"; filename=\"\(file.filename)\"\r\n")
-            body.append("Content-Type: \(file.mimeType)\r\n\r\n")
-            body.append(file.data)
-            body.append("\r\n")
+            multipart.addFile(name: "files", filename: file.filename, mimeType: file.mimeType, data: file.data)
         }
-        body.append("--\(boundary)--\r\n")
+        let (body, contentType) = multipart.finalize()
 
         guard let url = URL(string: "\(client.baseURL)\(basePath)/projects/\(projectId)/resume/upload") else {
             throw APIError.invalidURL
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         if let token = client.accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -1228,20 +1193,16 @@ class MatchaWorkService {
     func uploadJournalImage(
         journalId: String, data: Data, filename: String, mimeType: String,
     ) async throws -> String {
-        let boundary = "Boundary-\(UUID().uuidString)"
-        var body = Data()
-        body.append("--\(boundary)\r\n")
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n")
-        body.append("Content-Type: \(mimeType)\r\n\r\n")
-        body.append(data)
-        body.append("\r\n--\(boundary)--\r\n")
+        var multipart = MultipartUploadBuilder()
+        multipart.addFile(name: "file", filename: filename, mimeType: mimeType, data: data)
+        let (body, contentType) = multipart.finalize()
 
         guard let url = URL(string: "\(client.baseURL)\(basePath)/journals/\(journalId)/images") else {
             throw APIError.invalidURL
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         if let token = client.accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
