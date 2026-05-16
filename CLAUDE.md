@@ -100,7 +100,12 @@ server/
 │   │   └── services/
 │   ├── matcha/                     # Recruiting + HR domain (incl. matcha-work)
 │   │   ├── models/
-│   │   ├── routes/                 # ir_incidents, matcha_work, discipline, er_copilot, …
+│   │   ├── routes/                 # Router zoo — see routes/CLAUDE.md
+│   │   │   ├── ir_incidents/       # Package (split 2026-05-16) — see ir_incidents/CLAUDE.md
+│   │   │   ├── employees.py        # 5,425 lines (split candidate)
+│   │   │   ├── er_copilot.py       # 4,111 lines (split candidate)
+│   │   │   ├── matcha_work.py      # 8,902 lines (cohesive — not a split candidate)
+│   │   │   └── … 25 others
 │   │   ├── services/
 │   │   └── workers/
 │   ├── workers/                    # Celery app + scheduled tasks
@@ -200,7 +205,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 - **AI Chat** (`core/services/ai_chat.py`) — WebSocket chat with local Qwen model or Gemini.
 - **Matcha Work** (`matcha/routes/matcha_work.py` + `services/project_service.py`, `services/matcha_work_ai.py`) — projects, threads, channels, inbox, AI directives.
 - **Channels** (`matcha/services/channels_service.py`, `mw_channels*` tables) — real-time WebSocket messaging, paid channels, member presence.
-- **IR Incidents** (`matcha/routes/ir_incidents.py`) — safety/behavioral incident reporting + AI analysis. Public anonymous intake at `routes/inbound_email.py`.
+- **IR Incidents** (`matcha/routes/ir_incidents/` — 10-file package since 2026-05-16; see `ir_incidents/CLAUDE.md`) — safety/behavioral incident reporting + AI analysis. Public anonymous intake at `routes/inbound_email.py`.
 - **Discipline** (`matcha/routes/discipline.py` + `services/discipline_engine.py`, signature provider abstraction in `services/signature_provider.py`).
 - **ER Copilot** (`matcha/routes/er_copilot.py`) — employment-relations case mgmt.
 - **Risk Assessment** (`matcha/routes/risk_assessment.py`).
@@ -361,6 +366,41 @@ Quick lookup for frequently-touched code. Saves grepping the same things repeate
 - Backend route aggregator → `server/app/matcha/routes/__init__.py`
 - Frontend route registration → `client/src/App.tsx`
 - IR-incidents package router → `server/app/matcha/routes/ir_incidents/__init__.py` (re-exports `crud.router` as the package router)
+
+## Claude Code Setup
+
+This repo is configured for Claude Code with subtree docs, hooks, and project slash commands. The setup is captured in `CLAUDE_CODE_PLAN.md` at the repo root.
+
+### Subtree CLAUDE.md files (auto-load by directory)
+
+| Path | Loads when editing in… |
+|---|---|
+| `CLAUDE.md` (this file) | anywhere |
+| `server/CLAUDE.md` | `server/**` |
+| `server/app/matcha/routes/CLAUDE.md` | `server/app/matcha/routes/**` — the router-zoo index |
+| `server/app/matcha/routes/ir_incidents/CLAUDE.md` | inside the IR package — captures the 2026-05-16 split |
+| `client/CLAUDE.md` | `client/**` |
+
+Subtree docs compose with this root file. When working in a subtree, the nearer doc has the specific conventions; this root has the cross-cutting product/database/test-data rules.
+
+### Project slash commands (`/<name>`)
+
+Repo-shared scaffolding lives in `.claude/commands/*.md`:
+
+- `/add-feature-flag <name> <default>` — wires backend `DEFAULT_COMPANY_FEATURES` + CLAUDE.md table row + router/endpoint gate + `<FeatureGate>` + sidebar entry
+- `/new-router <slug>` — scaffolds a FastAPI router with tenant-isolation pattern + asyncpg + audit-log + Pydantic models + mount in `routes/__init__.py`
+- `/add-bulk-upload <entity>` — scaffolds the CSV-template + multipart upload pair. **Encodes the 2026-05-15 medcenter.com bounce-storm lessons**: defaults `send_invitations=False` on both backend and frontend, CSV template uses RFC 2606 reserved domains
+- Compliance research commands (`/research-jurisdiction`, `/fill-gaps`, etc.) — pre-existing, for jurisdiction data work
+
+### Post-edit hook
+
+`.claude/hooks/post-edit-python.sh` runs after every `Edit`/`Write`/`MultiEdit`. On `.py` files it runs `python3 -m py_compile` (silent on success, surfaces `SyntaxError` with file+line on failure) plus an optional `ruff check` if installed. No TypeScript check at the hook level — `npx tsc --noEmit` is too slow per-edit; run manually.
+
+Wired in `.claude/settings.json` (shared) — personal allowlist lives in `.claude/settings.local.json` (gitignored).
+
+### Tool-level ignore (`.claudeignore`)
+
+Explore/Grep agents skip generated/built/binary artifacts: `node_modules/`, `client/dist/`, `client/.vite/`, `__pycache__/`, `venv/`, `.pytest_cache/`, `client/src/generated/` (auto-regenerated), lock files, snapshots, Xcode build dirs, DaVinci cache, and secrets (`*.pem`, `*.env`, `token.json`).
 
 ## Dead References (ignore)
 
