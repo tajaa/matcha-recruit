@@ -20,6 +20,10 @@ Prefix and feature-gate are applied at the parent mount in
 # refuses to compose two empty path segments.
 from ._legacy import router  # noqa: F401  (package public symbol)
 
+# Submodules — each `include_router` injects its routes into the package router.
+from .audit_log import router as _audit_log_router
+router.include_router(_audit_log_router)
+
 # External re-exports. Keep `# noqa: F401` — these are package-level
 # re-exports, not local usages.
 from ._legacy import compute_wc_metrics  # noqa: F401  (used by broker_portfolio.py)
