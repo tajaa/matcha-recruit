@@ -18,21 +18,21 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, 
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
-from ...database import get_connection
-from ...core.dependencies import get_current_user
-from ..dependencies import require_admin_or_client, get_client_company_id, require_feature
-from ...core.models.auth import CurrentUser
-from ...core.services.compliance_service import ensure_location_for_employee
-from ...core.services.credential_crypto import encrypt_credential_fields, decrypt_credential_fields
-from ...core.services.storage import get_storage
-from ...core.services.email import get_email_service
-from ..services.onboarding_orchestrator import (
+from app.database import get_connection
+from app.core.dependencies import get_current_user
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id, require_feature
+from app.core.models.auth import CurrentUser
+from app.core.services.compliance_service import ensure_location_for_employee
+from app.core.services.credential_crypto import encrypt_credential_fields, decrypt_credential_fields
+from app.core.services.storage import get_storage
+from app.core.services.email import get_email_service
+from app.matcha.services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
     start_google_workspace_onboarding,
     start_slack_onboarding,
 )
-from ..services.risk_assessment_service import compute_risk_assessment, generate_recommendations, DEFAULT_WEIGHTS
+from app.matcha.services.risk_assessment_service import compute_risk_assessment, generate_recommendations, DEFAULT_WEIGHTS
 
 logger = logging.getLogger(__name__)
 
@@ -544,7 +544,7 @@ async def _refresh_risk_assessment(company_id: UUID) -> None:
 
     # Pass 2: update recommendations (best-effort, won't block violation updates)
     try:
-        from ...config import get_settings
+        from app.config import get_settings
         consultation = await generate_recommendations(result, get_settings())
         async with get_connection() as conn:
             await conn.execute(
@@ -571,7 +571,7 @@ async def _perform_oig_screening(
     last_name: str,
 ) -> None:
     """Background task: screen employee against OIG LEIE exclusion list."""
-    from ...core.services.oig_screening import get_oig_screening_service
+    from app.core.services.oig_screening import get_oig_screening_service
 
     try:
         svc = get_oig_screening_service()
@@ -1187,7 +1187,7 @@ async def create_employee(
 
         # Auto-create credential onboarding tasks based on job title + jurisdiction
         try:
-            from ...core.services.credential_template_service import (
+            from app.core.services.credential_template_service import (
                 resolve_credential_requirements,
                 assign_credential_requirements_to_employee,
             )
@@ -4064,7 +4064,7 @@ async def handle_leave_request(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Approve, deny, activate, or complete a leave request."""
-    from ..services.leave_agent import get_leave_agent
+    from app.matcha.services.leave_agent import get_leave_agent
 
     company_id = await get_client_company_id(current_user)
 
@@ -4111,7 +4111,7 @@ async def handle_leave_request(
 
             # Fire deadline creation task for the approved leave
             try:
-                from ...workers.tasks.leave_deadline_checks import create_leave_deadlines
+                from app.workers.tasks.leave_deadline_checks import create_leave_deadlines
                 create_leave_deadlines.delay(str(leave_id))
             except Exception:
                 logger.warning("Failed to enqueue leave deadline creation for %s", leave_id)
@@ -4258,7 +4258,7 @@ async def return_checkin(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Process a return-to-work check-in: returning, extending, or starting a new leave."""
-    from ..services.leave_agent import get_leave_agent
+    from app.matcha.services.leave_agent import get_leave_agent
 
     company_id = await get_client_company_id(current_user)
 
@@ -4364,7 +4364,7 @@ async def get_leave_eligibility(
     ``leave_requests.eligibility_data`` so repeated calls are fast.
     """
     import json
-    from ..services.leave_eligibility_service import LeaveEligibilityService
+    from app.matcha.services.leave_eligibility_service import LeaveEligibilityService
 
     company_id = await get_client_company_id(current_user)
 
@@ -4497,7 +4497,7 @@ async def create_leave_notice(
 
     Requires the ``compliance_plus`` feature flag.
     """
-    from ..services.leave_notices_service import LeaveNoticeService, VALID_NOTICE_TYPES
+    from app.matcha.services.leave_notices_service import LeaveNoticeService, VALID_NOTICE_TYPES
 
     if request.notice_type not in VALID_NOTICE_TYPES:
         raise HTTPException(
@@ -4524,7 +4524,7 @@ async def create_leave_notice(
                 org_id=company_id,
                 leave_request_id=leave_id,
             )
-            from ..services.leave_agent import get_leave_agent
+            from app.matcha.services.leave_agent import get_leave_agent
 
             background_tasks.add_task(get_leave_agent().on_leave_notice_ready, leave_id)
             return doc
@@ -4549,7 +4549,7 @@ async def get_employee_leave_eligibility(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Get FMLA + state program eligibility for an employee with job protection summary."""
-    from ..services.leave_eligibility_service import LeaveEligibilityService
+    from app.matcha.services.leave_eligibility_service import LeaveEligibilityService
 
     company_id = await get_client_company_id(current_user)
 
@@ -4585,7 +4585,7 @@ async def place_employee_on_leave(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Place an employee on leave directly (admin action, auto-approved). Updates employment_status."""
-    from ..services.leave_agent import get_leave_agent
+    from app.matcha.services.leave_agent import get_leave_agent
 
     company_id = await get_client_company_id(current_user)
 
@@ -5023,7 +5023,7 @@ def _cred_doc_from_row(row) -> dict:
 async def _run_credential_extraction(document_id: UUID, file_bytes: bytes, mime_type: str, document_type: str):
     """Background task: run Gemini extraction and update the DB row."""
     try:
-        from ...core.services.credential_extraction import extract_credential_info
+        from app.core.services.credential_extraction import extract_credential_info
         result = await extract_credential_info(file_bytes, mime_type, document_type)
         extraction_status = "extracted" if result.get("fields") else "failed"
         async with get_connection() as conn:
