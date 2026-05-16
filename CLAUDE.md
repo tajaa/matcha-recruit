@@ -276,6 +276,92 @@ This applies anywhere test data is generated: seed scripts, CSV templates, fixtu
 
 The server (`server/app/core/services/email.py`) hard-blocks sends to these reserved domains as a defense-in-depth guard, but the rule above is the primary mitigation — don't invent realistic fake domains in the first place.
 
+## Symbol Map — Where Things Live
+
+Quick lookup for frequently-touched code. Saves grepping the same things repeatedly. Format: `description → file_path:symbol`.
+
+### Auth + identity
+
+- JWT auth flow + token refresh → `client/src/api/client.ts`
+- User state + role/feature checks → `client/src/hooks/useMe.ts` (`useMe()`, `hasRole()`, `hasFeature()`)
+- Backend auth deps → `server/app/core/dependencies.py` (`require_admin`, `require_candidate`) + `server/app/matcha/dependencies.py` (`require_client`, `require_employee`, `require_admin_or_client`, `get_client_company_id`)
+- Public-token interview WS auth → `server/app/core/services/auth.py:create_interview_ws_token`
+- Tier helpers → `client/src/utils/tier.ts` (`isIrOnlyTier`, `isMatchaLitePending`, `isResourcesFreeTier`)
+- Sidebar dispatch (the only place that picks shell) → `client/src/components/TenantSidebar.tsx`
+
+### Email + notifications
+
+- Email service (Gmail API + MailerSend) → `server/app/core/services/email.py` (`EmailService`, `get_email_service()`)
+- Reserved-domain guard (blocks `@example.com` / `*.test` / `*.invalid`) → `server/app/core/services/email.py:_is_reserved_test_domain`
+- Employee invitation send → `server/app/core/services/email.py:send_employee_invitation_email` (callsite: `server/app/matcha/routes/employees.py:_send_invitation_with_conn`)
+- IR lifecycle notifications → `server/app/matcha/routes/ir_incidents/_shared.py:send_ir_notifications_task`
+- Onboarding reminder cron → `server/app/workers/tasks/onboarding_reminders.py`
+
+### Feature gating + tiers
+
+- Backend default flags → `server/app/core/feature_flags.py:DEFAULT_COMPANY_FEATURES`
+- Backend feature dep → `server/app/matcha/dependencies.py:require_feature`
+- Frontend gate → `client/src/components/FeatureGate.tsx` (renders `<UpgradeUpsellCard>` instead of 403)
+- Upgrade upsell card → `client/src/components/UpgradeUpsellCard.tsx`
+
+### IR (Incident Reporting)
+
+- Backend package overview → `server/app/matcha/routes/ir_incidents/CLAUDE.md`
+- IR orchestrator (Gemini prompt + intent detection) → `server/app/matcha/services/ir_ai_orchestrator.py:generate_guidance`
+- IR Copilot panel (frontend) → `client/src/components/ir/IRCopilotPanel.tsx`
+- IR Copilot card schema → `client/src/components/ir/IRCopilotCard.tsx:5` (`CopilotCardAction.type` union)
+- IR Copilot close-incident helper (server) → `server/app/matcha/routes/ir_incidents/copilot.py:_close_incident_via_copilot`
+- IR analysis runners (categorize / severity / root-cause / etc.) → `server/app/matcha/routes/ir_incidents/ai_analysis.py`
+- Policy mapping helpers → `server/app/matcha/routes/ir_incidents/ai_analysis.py:_auto_map_policy_violations` + `_get_handbook_policy_entries`
+- Anonymous IR intake → `server/app/matcha/routes/inbound_email.py` (public `/report/:token` endpoint)
+- Anonymous report token mgmt → `server/app/matcha/routes/ir_incidents/anonymous_reporting.py`
+- IR detail page → `client/src/pages/app/IRDetail.tsx`
+- Security survey question bank → `client/src/components/ir/data/security_survey_questions.ts` (IDs are persisted in `ir_surveys.responses` JSONB — keep stable)
+
+### Employees
+
+- Employee CRUD → `server/app/matcha/routes/employees.py` (5,425 lines — split candidate; see `server/app/matcha/routes/CLAUDE.md`)
+- Bulk CSV upload → `server/app/matcha/routes/employees.py:bulk_upload_employees_csv`
+- Send invitation → `server/app/matcha/routes/employees.py:_send_invitation_with_conn` (callable from single + bulk + multi-batch paths)
+- Auto-invitation toggle (per-company setting) → `onboarding_notification_settings.auto_send_invitation` column
+- Bulk upload modal (frontend) → `client/src/components/employees/BulkUploadModal.tsx`
+- Multi-batch add modal (frontend) → `client/src/components/employees/MultiBatchModal.tsx`
+
+### Billing + Stripe
+
+- Stripe checkout endpoints → `server/app/core/routes/resources.py` (matcha-lite) + `server/app/matcha/routes/billing.py` (matcha-work)
+- Stripe webhook handler → `server/app/matcha/routes/billing.py` (look for `checkout.session.completed`)
+- Personal Matcha-work checkout → `server/app/matcha/routes/billing.py:POST /api/checkout/personal`
+- Token packs → `server/app/matcha/routes/billing.py:POST /api/checkout`
+
+### Compliance + jurisdictions
+
+- Compliance check service → `server/app/core/services/compliance_service.py`
+- Jurisdiction-aware preemption logic → same file, search `preemption`
+- Compliance research worker → `server/app/workers/tasks/compliance_checks.py`
+- Legislation watch cron → `server/app/workers/tasks/legislation_watch.py`
+
+### Matcha-work (collaborative AI workspace)
+
+- Web surface → `client/src/pages/work/*` + `client/src/layouts/WorkLayout.tsx`
+- macOS desktop client → `desktop/Werk/` (SwiftUI, bundle `com.ahnimal.matcha`)
+- Backend routes → `server/app/matcha/routes/matcha_work.py` (8,902 lines — cohesive WS/AI surface, not a split candidate)
+- Project service → `server/app/matcha/services/project_service.py`
+- AI directives → `server/app/matcha/services/matcha_work_ai.py`
+- Channels (WS) → `server/app/matcha/services/channels_service.py` + `mw_channels*` tables
+
+### Database access
+
+- Connection pool helper → `server/app/database.py:get_connection`
+- Schema bootstrap (reference only — use Alembic for changes) → `server/app/database.py:init_db`
+- Alembic migrations → `server/alembic/versions/*`
+
+### Routing assembly
+
+- Backend route aggregator → `server/app/matcha/routes/__init__.py`
+- Frontend route registration → `client/src/App.tsx`
+- IR-incidents package router → `server/app/matcha/routes/ir_incidents/__init__.py` (re-exports `crud.router` as the package router)
+
 ## Dead References (ignore)
 
 These are legacy artifacts from a discontinued sister product. Do **not** propose changes, cleanup, or modifications to them unless explicitly asked:

@@ -1,0 +1,85 @@
+# Paths excluded from Claude Code search/grep/explore.
+# Goal: keep agent context tight by hiding generated/built/binary artifacts.
+
+# Build output
+client/dist/
+client/.vite/
+client/coverage/
+server/build/
+server/dist/
+
+# Dependencies
+node_modules/
+**/node_modules/
+.pnp/
+.pnp.*
+
+# Python caches
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+.venv/
+server/venv/
+server/.venv/
+ENV/
+
+# Generated frontend types — auto-regenerated, don't edit
+client/src/generated/
+
+# Lock files (big, not human-edited)
+package-lock.json
+yarn.lock
+**/poetry.lock
+**/Cargo.lock
+
+# Snapshots
+**/*.snap
+
+# Backup files
+*.bak
+*~
+
+# OS/IDE noise
+.DS_Store
+**/.DS_Store
+.idea/
+.vscode/
+
+# Logs
+*.log
+**/*.log
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+.coverage.*
+
+# Xcode build (desktop/Werk)
+desktop/Werk/**/build/
+desktop/Werk/**/*.xcuserstate
+desktop/Werk/**/xcuserdata/
+desktop/Werk/**/DerivedData/
+
+# DaVinci Resolve cache
+**/Resolve\ Cache/
+
+# Secrets (defense in depth — already in .gitignore but never expose to agent)
+*.pem
+.env
+.env.*
+client_secret*.json
+gmail_token.json
+token.json
+roonMT-arm.pem
+
+# Generated research artifacts (per .gitignore)
+server/scripts/*_gaps.md
+server/scripts/*_compliance.md
+server/scripts/*_research.md
