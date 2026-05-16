@@ -112,7 +112,11 @@ export default function IRDetail() {
           <Card className="p-5">
             {/* Copilot */}
             {tab === 'copilot' && (
-              <IRCopilotPanel incidentId={incidentId!} onIncidentChanged={refetch} />
+              <IRCopilotPanel
+                incidentId={incidentId!}
+                incidentStatus={incident.status}
+                onIncidentChanged={refetch}
+              />
             )}
 
             {/* Overview */}

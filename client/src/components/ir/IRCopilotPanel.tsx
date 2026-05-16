@@ -26,10 +26,11 @@ type Transcript = {
 
 interface Props {
   incidentId: string
+  incidentStatus?: string
   onIncidentChanged?: () => void
 }
 
-export default function IRCopilotPanel({ incidentId, onIncidentChanged }: Props) {
+export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentChanged }: Props) {
   const [messages, setMessages] = useState<CopilotMessage[]>([])
   const [currentCards, setCurrentCards] = useState<CopilotCard[]>([])
   const [openQuestions, setOpenQuestions] = useState<string[]>([])
@@ -39,7 +40,9 @@ export default function IRCopilotPanel({ incidentId, onIncidentChanged }: Props)
   const [busyStage, setBusyStage] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [closingIncident, setClosingIncident] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const incidentIsClosed = incidentStatus === 'closed' || incidentStatus === 'resolved'
 
   const refresh = useCallback(async () => {
     try {
@@ -210,6 +213,22 @@ export default function IRCopilotPanel({ incidentId, onIncidentChanged }: Props)
     }
   }
 
+  async function handleCloseIncident() {
+    if (closingIncident || streaming) return
+    if (!window.confirm('Close this incident? Open recommendations will be cleared.')) return
+    setClosingIncident(true)
+    setError(null)
+    try {
+      await api.post(`/ir/incidents/${incidentId}/copilot/close`, {})
+      await refresh()
+      onIncidentChanged?.()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Close failed')
+    } finally {
+      setClosingIncident(false)
+    }
+  }
+
   async function handleSkip(messageId: string, cardId: string) {
     setBusyCardMessageId(messageId)
     setError(null)
@@ -269,6 +288,25 @@ export default function IRCopilotPanel({ incidentId, onIncidentChanged }: Props)
           <span className="text-xs text-zinc-500 flex items-center gap-1">
             <Loader2 className="w-3 h-3 animate-spin" /> Thinking…
           </span>
+        )}
+        {!incidentIsClosed && (
+          <div className="ml-auto">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={closingIncident || streaming}
+              onClick={() => { void handleCloseIncident() }}
+            >
+              {closingIncident ? (
+                <span className="flex items-center gap-1">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Closing…
+                </span>
+              ) : (
+                'Close incident'
+              )}
+            </Button>
+          </div>
         )}
       </div>
 

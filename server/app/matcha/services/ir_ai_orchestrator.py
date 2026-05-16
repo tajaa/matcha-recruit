@@ -101,6 +101,57 @@ IR_FIELD_VALUE_ENUMS: dict[str, set[str]] = {
 }
 
 
+# User-message close-intent detection. When the user types "close it out" /
+# "documentation only" / similar, the copilot short-circuits the LLM and
+# surfaces a close_incident card directly. Cheap regex — false positives are
+# safer than false negatives here (user can still Skip the card).
+_CLOSE_INTENT_PATTERNS = re.compile(
+    r"\b("
+    r"close\s+(it|this)\s*(out|up)?"
+    r"|close\s+(the\s+)?(incident|case|report|ticket)"
+    r"|(just\s+)?(for\s+)?documentation\s+only"
+    r"|no\s+(further|more)\s+action"
+    r"|mark\s+(as\s+)?(closed|resolved|complete)"
+    r"|resolve\s+(this|the\s+incident)"
+    r"|wrap\s+(this\s+)?up"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _detect_close_intent(user_message: Optional[str]) -> bool:
+    if not user_message:
+        return False
+    return bool(_CLOSE_INTENT_PATTERNS.search(user_message))
+
+
+def _close_intent_payload(model_label: str = "intent-shortcircuit") -> dict[str, Any]:
+    return {
+        "summary": "You asked to close this incident. Confirm below to finalize.",
+        "open_questions": [],
+        "cards": [{
+            "id": "user_requested_close",
+            "title": "Close this incident",
+            "recommendation": "Mark this incident closed and clear other open recommendations.",
+            "rationale": "You said you wanted to close it out — confirm to finalize.",
+            "priority": "medium",
+            "blockers": [],
+            "action": {
+                "type": "close_incident",
+                "label": "Close incident",
+                "tab": None,
+                "analysis_type": None,
+                "search_query": None,
+                "field_name": None,
+                "field_value": None,
+            },
+            "interview_questions": None,
+        }],
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "model": model_label,
+    }
+
+
 def _is_valid_set_field(field_name: Optional[str], field_value: Any) -> bool:
     """True when field_name is settable AND field_value (if enum-constrained)
     matches the canonical lowercase enum. Free-text fields (root_cause,
@@ -354,6 +405,22 @@ async def generate_guidance(
     messages: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Run a single guidance round against the current incident state."""
+    # Short-circuit: when the user explicitly asks to close (and the incident
+    # isn't already closed/resolved), skip the LLM round entirely and surface
+    # a close_incident card directly. Avoids the case where the LLM gets the
+    # request as conversation noise and emits a generic request_info card.
+    last_user_text = next(
+        (m.get("content") for m in reversed(messages or [])
+         if m.get("role") == "user" and m.get("message_type") == "text"),
+        None,
+    )
+    incident_status = (incident or {}).get("status")
+    if (
+        _detect_close_intent(last_user_text)
+        and incident_status not in {"closed", "resolved"}
+    ):
+        return _close_intent_payload()
+
     rate_limiter = get_rate_limiter()
     await rate_limiter.check_limit("ir_analysis", "ir_copilot")
 
@@ -466,24 +533,44 @@ async def generate_guidance(
         # Minimal fallback — avoids returning empty payload.
         summary = "Review the incident and decide what to do next."
         if not cards and not open_questions:
-            cards = [{
-                "id": "review_basics",
-                "title": "Review the incident details",
-                "recommendation": "Open the incident and confirm the description, location, and witnesses are filled in.",
-                "rationale": "AI couldn't generate guidance — usually means the incident has too little info.",
-                "priority": "medium",
-                "blockers": [],
-                "action": {
-                    "type": "request_info",
-                    "label": "Add details",
-                    "tab": "overview",
-                    "analysis_type": None,
-                    "search_query": None,
-                    "field_name": None,
-                    "field_value": None,
+            cards = [
+                {
+                    "id": "review_basics",
+                    "title": "Review the incident details",
+                    "recommendation": "Open the incident and confirm the description, location, and witnesses are filled in.",
+                    "rationale": "AI couldn't generate guidance — usually means the incident has too little info.",
+                    "priority": "medium",
+                    "blockers": [],
+                    "action": {
+                        "type": "request_info",
+                        "label": "Add details",
+                        "tab": "overview",
+                        "analysis_type": None,
+                        "search_query": None,
+                        "field_name": None,
+                        "field_value": None,
+                    },
+                    "interview_questions": None,
                 },
-                "interview_questions": None,
-            }]
+                {
+                    "id": "fallback_close",
+                    "title": "Close as documentation only",
+                    "recommendation": "If this report needs no further action, close it now.",
+                    "rationale": "Documentation-only incidents can be closed without further analysis.",
+                    "priority": "low",
+                    "blockers": [],
+                    "action": {
+                        "type": "close_incident",
+                        "label": "Close incident",
+                        "tab": None,
+                        "analysis_type": None,
+                        "search_query": None,
+                        "field_name": None,
+                        "field_value": None,
+                    },
+                    "interview_questions": None,
+                },
+            ]
 
     return {
         "summary": summary,

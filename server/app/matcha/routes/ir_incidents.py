@@ -4717,6 +4717,124 @@ async def skip_copilot_card(
     return {"ok": True}
 
 
+async def _close_incident_via_copilot(
+    conn,
+    *,
+    incident_id: UUID,
+    source_card_id: Optional[UUID] = None,
+) -> dict:
+    """Close an incident and supersede any open card recommendations.
+
+    Called from both the card-accept path (with source_card_id set) and the
+    direct-button path (source_card_id None — supersede ALL open cards).
+    Idempotent: returns ``already_closed=True`` and skips writes when the
+    incident is already in 'closed' status.
+    """
+    prev_status = await conn.fetchval(
+        "SELECT status FROM ir_incidents WHERE id = $1", incident_id,
+    )
+    if prev_status == "closed":
+        return {"already_closed": True, "previous_value": prev_status, "new_value": "closed"}
+
+    await conn.execute(
+        "UPDATE ir_incidents SET status = 'closed', resolved_at = NOW(), "
+        "updated_at = NOW() WHERE id = $1",
+        incident_id,
+    )
+    if source_card_id is not None:
+        await conn.execute(
+            """
+            UPDATE ir_incident_ai_messages
+            SET metadata = jsonb_set(
+                COALESCE(metadata, '{}'::jsonb),
+                '{superseded}', 'true'::jsonb, true
+            )
+            WHERE incident_id = $1
+              AND message_type = 'card'
+              AND id != $2
+              AND COALESCE((metadata->>'accepted')::boolean, FALSE) = FALSE
+              AND COALESCE((metadata->>'superseded')::boolean, FALSE) = FALSE
+            """,
+            incident_id, source_card_id,
+        )
+    else:
+        await conn.execute(
+            """
+            UPDATE ir_incident_ai_messages
+            SET metadata = jsonb_set(
+                COALESCE(metadata, '{}'::jsonb),
+                '{superseded}', 'true'::jsonb, true
+            )
+            WHERE incident_id = $1
+              AND message_type = 'card'
+              AND COALESCE((metadata->>'accepted')::boolean, FALSE) = FALSE
+              AND COALESCE((metadata->>'superseded')::boolean, FALSE) = FALSE
+            """,
+            incident_id,
+        )
+
+    return {
+        "already_closed": False,
+        "previous_value": prev_status,
+        "new_value": "closed",
+        "field": "status",
+        "field_label": "Status",
+    }
+
+
+@router.post("/{incident_id}/copilot/close")
+async def close_incident_via_copilot(
+    incident_id: UUID,
+    request: Request,
+    current_user=Depends(require_admin_or_client),
+):
+    """Direct close — no card required. Used by the panel's Close button."""
+    from ..services.ir_ai_orchestrator import append_message
+
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        await _get_incident_with_company_check(
+            conn, incident_id, current_user, columns="id"
+        )
+        result = await _close_incident_via_copilot(
+            conn, incident_id=incident_id, source_card_id=None,
+        )
+        if result.get("already_closed"):
+            _ = company_id
+            return {"ok": True, "already_closed": True}
+
+        await append_message(
+            conn,
+            incident_id=incident_id,
+            role="system",
+            message_type="event",
+            content="Updated Status",
+            metadata={
+                "action": "close_incident",
+                "card_id": None,
+                "source": "direct_button",
+                "field": "status",
+                "field_label": "Status",
+                "previous_value": result["previous_value"],
+                "new_value": "closed",
+                "note": "Closed directly from copilot. Other recommendations cleared.",
+            },
+            created_by=current_user.id,
+        )
+        await log_audit(
+            conn,
+            incident_id=str(incident_id),
+            user_id=str(current_user.id),
+            action="copilot_close_direct",
+            entity_type="incident",
+            entity_id=str(incident_id),
+            details={"previous_status": result["previous_value"]},
+            ip_address=request.client.host if request.client else None,
+        )
+    _ = company_id
+    return {"ok": True, **result}
+
+
 @router.post("/{incident_id}/copilot/accept")
 async def accept_copilot_card(
     incident_id: UUID,
@@ -4855,34 +4973,16 @@ async def accept_copilot_card(
                         event_summary = "Marked for ER escalation — open ER Copilot to create the case."
 
                 elif action_type == "close_incident":
-                    prev_status = await conn.fetchval(
-                        "SELECT status FROM ir_incidents WHERE id = $1", incident_id,
-                    )
-                    await conn.execute(
-                        "UPDATE ir_incidents SET status = 'closed', resolved_at = NOW(), "
-                        "updated_at = NOW() WHERE id = $1",
-                        incident_id,
-                    )
-                    await conn.execute(
-                        """
-                        UPDATE ir_incident_ai_messages
-                        SET metadata = jsonb_set(
-                            COALESCE(metadata, '{}'::jsonb),
-                            '{superseded}', 'true'::jsonb, true
-                        )
-                        WHERE incident_id = $1
-                          AND message_type = 'card'
-                          AND id != $2
-                          AND COALESCE((metadata->>'accepted')::boolean, FALSE) = FALSE
-                          AND COALESCE((metadata->>'superseded')::boolean, FALSE) = FALSE
-                        """,
-                        incident_id, card_row["id"],
+                    close_result = await _close_incident_via_copilot(
+                        conn,
+                        incident_id=incident_id,
+                        source_card_id=card_row["id"],
                     )
                     event_summary = "Updated Status"
                     event_extra = {
                         "field": "status",
                         "field_label": "Status",
-                        "previous_value": prev_status,
+                        "previous_value": close_result["previous_value"],
                         "new_value": "closed",
                         "note": "Other recommendations cleared.",
                     }
