@@ -7,11 +7,11 @@ completes the extraction. External import path
 """
 from ._legacy import (
     router,
-    pto_admin_router,
     leave_admin_router,
     EmployeeCreateRequest,
 )
 from ._shared import _refresh_risk_assessment
+from .pto_admin import router as pto_admin_router
 
 __all__ = [
     "router",
