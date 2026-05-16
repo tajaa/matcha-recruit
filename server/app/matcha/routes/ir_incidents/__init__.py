@@ -41,12 +41,15 @@ router.include_router(_investigation_interviews_router)
 from .ai_analysis import router as _ai_analysis_router
 router.include_router(_ai_analysis_router)
 
+from .analytics import router as _analytics_router
+router.include_router(_analytics_router)
+
 from .audit_log import router as _audit_log_router
 router.include_router(_audit_log_router)
 
 # External re-exports. Keep `# noqa: F401` — these are package-level
 # re-exports, not local usages.
-from ._legacy import compute_wc_metrics  # noqa: F401  (used by broker_portfolio.py)
+from .analytics import compute_wc_metrics  # noqa: F401  (used by broker_portfolio.py)
 from ._legacy import (  # noqa: F401  (used by inbound_email.py)
     _parse_occurred_at,
     generate_incident_number,
