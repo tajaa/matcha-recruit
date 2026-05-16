@@ -35,6 +35,9 @@ router.include_router(_documents_router)
 from .osha import router as _osha_router
 router.include_router(_osha_router)
 
+from .investigation_interviews import router as _investigation_interviews_router
+router.include_router(_investigation_interviews_router)
+
 from .audit_log import router as _audit_log_router
 router.include_router(_audit_log_router)
 
