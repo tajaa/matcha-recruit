@@ -20,13 +20,13 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse
 
-from ...database import get_connection
-from ...core.dependencies import require_admin
-from ..dependencies import require_admin_or_client, get_client_company_id
-from ...config import get_settings
-from ...core.services.storage import get_storage
-from ...core.services.email import get_email_service
-from ..models.ir_incident import (
+from app.database import get_connection
+from app.core.dependencies import require_admin
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.config import get_settings
+from app.core.services.storage import get_storage
+from app.core.services.email import get_email_service
+from app.matcha.models.ir_incident import (
     IRCopilotAcceptRequest,
     IRCopilotCard,
     IRCopilotMessage,
@@ -65,7 +65,7 @@ from ..models.ir_incident import (
     Osha300LogEntry,
     Osha300ASummary,
 )
-from ..models.interview import (
+from app.matcha.models.interview import (
     InvestigationInterviewCreate,
     InvestigationInterviewResponse,
     InvestigationInterviewStart,
@@ -229,7 +229,7 @@ async def _auto_classify_incident_task(
     Any failure is logged and swallowed — never re-raised.
     """
     try:
-        from ..services.ir_analysis import get_ir_analyzer, IRAnalysisError
+        from app.matcha.services.ir_analysis import get_ir_analyzer, IRAnalysisError
     except Exception:  # pragma: no cover - import problems shouldn't crash submit
         logger.exception("[IR] Unable to import IRAnalyzer for auto-classify")
         return
@@ -2077,7 +2077,7 @@ def _build_risk_scope_key(location_id: Optional[UUID], period_days: int) -> str:
 async def compute_wc_metrics(conn, company_id: UUID, period_days: int = 365) -> dict:
     """Per-company Workers Comp metrics — extracted so the broker portfolio
     endpoint can reuse the same calc per linked client."""
-    from ..services.wc_benchmarks import (
+    from app.matcha.services.wc_benchmarks import (
         lookup_benchmark, estimate_premium_impact, severity_band,
     )
 
@@ -2408,7 +2408,7 @@ async def get_analytics_risk_insights(
     current_user=Depends(require_admin_or_client),
 ):
     """Gemini-driven theme detection across recent IR corpus. 24h cache."""
-    from ..services.ir_analysis import get_ir_analyzer
+    from app.matcha.services.ir_analysis import get_ir_analyzer
 
     company_id = await get_client_company_id(current_user)
     generated_at_iso = _utc_now_naive().isoformat()
@@ -2612,7 +2612,7 @@ async def get_analytics_consistency(
     current_user=Depends(require_admin_or_client),
 ):
     """Get company-wide consistency analytics across all resolved incidents."""
-    from ..services.ir_consistency import compute_consistency_analytics
+    from app.matcha.services.ir_consistency import compute_consistency_analytics
 
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -2769,7 +2769,7 @@ async def analyze_categorization(
     current_user=Depends(require_admin_or_client),
 ):
     """Auto-categorize an incident using AI."""
-    from ..services.ir_analysis import get_ir_analyzer, IRAnalysisError
+    from app.matcha.services.ir_analysis import get_ir_analyzer, IRAnalysisError
 
     async with get_connection() as conn:
         row = await _get_incident_with_company_check(
@@ -2857,7 +2857,7 @@ async def analyze_severity(
     current_user=Depends(require_admin_or_client),
 ):
     """Assess incident severity using AI."""
-    from ..services.ir_analysis import get_ir_analyzer, IRAnalysisError
+    from app.matcha.services.ir_analysis import get_ir_analyzer, IRAnalysisError
 
     async with get_connection() as conn:
         row = await _get_incident_with_company_check(conn, incident_id, current_user)
@@ -2945,7 +2945,7 @@ async def analyze_root_cause(
     current_user=Depends(require_admin_or_client),
 ):
     """Perform root cause analysis using AI (SSE stream)."""
-    from ..services.ir_analysis import get_ir_analyzer, IRAnalysisError
+    from app.matcha.services.ir_analysis import get_ir_analyzer, IRAnalysisError
 
     # Pre-fetch data before starting the stream (auth + data validation)
     async with get_connection() as conn:
@@ -3066,8 +3066,8 @@ async def analyze_recommendations(
     current_user=Depends(require_admin_or_client),
 ):
     """Generate corrective action recommendations using AI (SSE stream)."""
-    from ..services.ir_analysis import get_ir_analyzer, IRAnalysisError
-    from ..models.ir_incident import RecommendationItem
+    from app.matcha.services.ir_analysis import get_ir_analyzer, IRAnalysisError
+    from app.matcha.models.ir_incident import RecommendationItem
 
     # Pre-fetch all data before starting the stream
     async with get_connection() as conn:
@@ -3214,7 +3214,7 @@ async def analyze_similar_incidents(
     current_user=Depends(require_admin_or_client),
 ):
     """Find precedent incidents using hybrid similarity scoring (SSE stream)."""
-    from ..services.ir_precedent import find_precedents_stream
+    from app.matcha.services.ir_precedent import find_precedents_stream
 
     # Pre-fetch data before starting the stream
     async with get_connection() as conn:
@@ -3353,7 +3353,7 @@ async def _get_handbook_policy_entries(conn, company_id) -> list[dict]:
 async def _auto_map_policy_violations(incident_id: str, company_id: str):
     """Background task: auto-map incident to company policies."""
     try:
-        from ..services.ir_analysis import get_ir_analyzer
+        from app.matcha.services.ir_analysis import get_ir_analyzer
 
         async with get_connection() as conn:
             # Fetch incident
@@ -3427,7 +3427,7 @@ async def get_policy_mapping(
     current_user=Depends(require_admin_or_client),
 ):
     """Get policy violation mapping for an incident."""
-    from ..services.ir_analysis import get_ir_analyzer
+    from app.matcha.services.ir_analysis import get_ir_analyzer
 
     async with get_connection() as conn:
         inc = await _get_incident_with_company_check(conn, incident_id, current_user, columns="id, title, description, incident_type, severity, category_data, company_id")
@@ -3557,7 +3557,7 @@ async def get_consistency_guidance(
     current_user=Depends(require_admin_or_client),
 ):
     """Get consistency guidance based on precedent analysis for an incident."""
-    from ..services.ir_consistency import compute_outcome_distribution
+    from app.matcha.services.ir_consistency import compute_outcome_distribution
 
     async with get_connection() as conn:
         # Verify incident exists and belongs to company
@@ -3828,8 +3828,8 @@ async def create_investigation_interview(
 
     Generates questions, creates interview + junction row, returns ws_auth_token.
     """
-    from ..services.ir_interview_questions import generate_investigation_questions
-    from ...core.services.auth import create_interview_ws_token
+    from app.matcha.services.ir_interview_questions import generate_investigation_questions
+    from app.core.services.auth import create_interview_ws_token
 
     company_id = await get_client_company_id(current_user)
 
@@ -3983,8 +3983,8 @@ async def batch_create_investigation_interviews(
 
     Returns a summary of created/failed interviews.
     """
-    from ..services.ir_interview_questions import generate_investigation_questions
-    from ...core.services.auth import create_interview_ws_token
+    from app.matcha.services.ir_interview_questions import generate_investigation_questions
+    from app.core.services.auth import create_interview_ws_token
 
     if len(request_body) == 0:
         raise HTTPException(status_code=400, detail="At least one interview must be provided")
@@ -4556,7 +4556,7 @@ async def stream_copilot_round(
       - {type:'done'}
     Persists user message + assistant text + one row per card.
     """
-    from ..services.ir_ai_orchestrator import (
+    from app.matcha.services.ir_ai_orchestrator import (
         generate_guidance,
         load_incident_state,
         persist_assistant_round,
@@ -4579,7 +4579,7 @@ async def stream_copilot_round(
             # Append the user's message FIRST so the orchestrator includes it.
             user_msg = (body.message or "").strip()
             if user_msg:
-                from ..services.ir_ai_orchestrator import append_message
+                from app.matcha.services.ir_ai_orchestrator import append_message
                 user_row = await append_message(
                     conn,
                     incident_id=incident_id,
@@ -4789,7 +4789,7 @@ async def close_incident_via_copilot(
     current_user=Depends(require_admin_or_client),
 ):
     """Direct close — no card required. Used by the panel's Close button."""
-    from ..services.ir_ai_orchestrator import append_message
+    from app.matcha.services.ir_ai_orchestrator import append_message
 
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
@@ -4856,7 +4856,7 @@ async def accept_copilot_card(
       - {type:'done'}
       - {type:'error', detail:...}
     """
-    from ..services.ir_ai_orchestrator import (
+    from app.matcha.services.ir_ai_orchestrator import (
         _canonical_analysis_type,
         append_message,
         generate_guidance,
