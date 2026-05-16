@@ -18,6 +18,7 @@ from .leave_admin import router as leave_admin_router
 # /{employee_id} catch-all — preserves status quo.
 from .leave import router as _leave_router; router.include_router(_leave_router)
 from .incidents import router as _incidents_router; router.include_router(_incidents_router)
+from .credentials import router as _credentials_router; router.include_router(_credentials_router)
 from .oig import router as _oig_router; router.include_router(_oig_router)
 
 __all__ = [
