@@ -44,6 +44,9 @@ router.include_router(_ai_analysis_router)
 from .analytics import router as _analytics_router
 router.include_router(_analytics_router)
 
+from .copilot import router as _copilot_router
+router.include_router(_copilot_router)
+
 from .audit_log import router as _audit_log_router
 router.include_router(_audit_log_router)
 
@@ -55,4 +58,4 @@ from ._legacy import (  # noqa: F401  (used by inbound_email.py)
     generate_incident_number,
     send_ir_notifications_task,
 )
-from ._legacy import _close_incident_via_copilot  # noqa: F401  (future cross-router use)
+from .copilot import _close_incident_via_copilot  # noqa: F401  (future cross-router use)
