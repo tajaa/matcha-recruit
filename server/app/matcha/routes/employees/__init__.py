@@ -13,6 +13,11 @@ from ._shared import _refresh_risk_assessment
 from .pto_admin import router as pto_admin_router
 from .leave_admin import router as leave_admin_router
 
+# Submodules included into main router. Order matches original source so
+# 1-segment static routes (e.g. /oig-summary) remain shadowed by crud's
+# /{employee_id} catch-all — preserves status quo.
+from .oig import router as _oig_router; router.include_router(_oig_router)
+
 __all__ = [
     "router",
     "pto_admin_router",
