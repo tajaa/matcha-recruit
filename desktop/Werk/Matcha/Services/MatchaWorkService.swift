@@ -1,14 +1,5 @@
 import Foundation
 
-private struct MWCacheEntry<Value> {
-    let value: Value
-    let expiresAt: Date
-
-    var isValid: Bool {
-        expiresAt > Date()
-    }
-}
-
 class MatchaWorkService {
     static let shared = MatchaWorkService()
     private let client = APIClient.shared
@@ -20,7 +11,6 @@ class MatchaWorkService {
     private var versionsCache: [String: MWCacheEntry<[MWDocumentVersion]>] = [:]
     private var pdfCache: [String: MWCacheEntry<Data>] = [:]
     private var projectListCache: [String: MWCacheEntry<[MWProject]>] = [:]
-    private var journalListCache: [String: MWCacheEntry<[MWJournal]>] = [:]
     private init() {}
 
     private func cachedValue<Value>(_ entry: MWCacheEntry<Value>?) -> Value? {
@@ -49,7 +39,7 @@ class MatchaWorkService {
         versionsCache.removeAll()
         pdfCache.removeAll()
         projectListCache.removeAll()
-        journalListCache.removeAll()
+        JournalService.shared.invalidateLists()
     }
 
     /// Drop cached project lists. Call when project membership in any status
@@ -1044,176 +1034,80 @@ class MatchaWorkService {
         return try await client.request(method: "POST", path: "\(basePath)/projects/\(id)/blog/status", body: body)
     }
 
-    // MARK: - Journals
+    // MARK: - Journals (delegate to JournalService)
+    //
+    // Journal CRUD/entries/collaborators/images live in
+    // Services/MatchaWork/JournalService.swift. The facade keeps these
+    // delegating shims so the existing 23 callers see no API change.
+    // Sub-service owns its own list cache.
 
     func invalidateJournalLists() {
-        journalListCache.removeAll()
+        JournalService.shared.invalidateLists()
     }
 
     func listJournals(forceRefresh: Bool = false) async throws -> [MWJournal] {
-        let key = "all"
-        if !forceRefresh, let cached = cachedValue(journalListCache[key]) {
-            return cached
-        }
-        let journals: [MWJournal] = try await client.request(method: "GET", path: "\(basePath)/journals")
-        journalListCache[key] = MWCacheEntry(value: journals, expiresAt: Date().addingTimeInterval(cacheTTL))
-        return journals
+        try await JournalService.shared.listJournals(forceRefresh: forceRefresh)
     }
 
     func getJournal(id: String) async throws -> MWJournal {
-        try await client.request(method: "GET", path: "\(basePath)/journals/\(id)")
+        try await JournalService.shared.getJournal(id: id)
     }
 
     func createJournal(
-        title: String,
-        description: String? = nil,
-        color: String? = nil,
-        icon: String? = nil
+        title: String, description: String? = nil, color: String? = nil, icon: String? = nil
     ) async throws -> MWJournal {
-        struct Body: Codable {
-            let title: String
-            let description: String?
-            let color: String?
-            let icon: String?
-        }
-        let journal: MWJournal = try await client.request(
-            method: "POST",
-            path: "\(basePath)/journals",
-            body: Body(title: title, description: description, color: color, icon: icon),
-        )
-        invalidateJournalLists()
-        return journal
+        try await JournalService.shared.createJournal(title: title, description: description, color: color, icon: icon)
     }
 
     func updateJournal(
-        id: String,
-        title: String? = nil,
-        description: String? = nil,
-        color: String? = nil,
-        icon: String? = nil
+        id: String, title: String? = nil, description: String? = nil,
+        color: String? = nil, icon: String? = nil
     ) async throws -> MWJournal {
-        struct Body: Codable {
-            let title: String?
-            let description: String?
-            let color: String?
-            let icon: String?
-        }
-        let journal: MWJournal = try await client.request(
-            method: "PATCH",
-            path: "\(basePath)/journals/\(id)",
-            body: Body(title: title, description: description, color: color, icon: icon),
-        )
-        invalidateJournalLists()
-        return journal
+        try await JournalService.shared.updateJournal(id: id, title: title, description: description, color: color, icon: icon)
     }
 
     func archiveJournal(id: String) async throws {
-        _ = try await client.requestData(method: "DELETE", path: "\(basePath)/journals/\(id)")
-        invalidateJournalLists()
+        try await JournalService.shared.archiveJournal(id: id)
     }
 
     func listJournalEntries(
         journalId: String, before: String? = nil, limit: Int = 50
     ) async throws -> [MWJournalEntry] {
-        var path = "\(basePath)/journals/\(journalId)/entries?limit=\(limit)"
-        if let before { path += "&before=\(before)" }
-        return try await client.request(method: "GET", path: path)
+        try await JournalService.shared.listJournalEntries(journalId: journalId, before: before, limit: limit)
     }
 
     func createJournalEntry(
         journalId: String, title: String?, content: String, entryDate: String? = nil
     ) async throws -> MWJournalEntry {
-        struct Body: Codable {
-            let title: String?
-            let content: String
-            let entryDate: String?
-            enum CodingKeys: String, CodingKey {
-                case title, content
-                case entryDate = "entry_date"
-            }
-        }
-        let entry: MWJournalEntry = try await client.request(
-            method: "POST",
-            path: "\(basePath)/journals/\(journalId)/entries",
-            body: Body(title: title, content: content, entryDate: entryDate),
-        )
-        invalidateJournalLists()
-        return entry
+        try await JournalService.shared.createJournalEntry(journalId: journalId, title: title, content: content, entryDate: entryDate)
     }
 
     func updateJournalEntry(
         entryId: String, journalId: String,
         title: String? = nil, content: String? = nil, entryDate: String? = nil
     ) async throws -> MWJournalEntry {
-        struct Body: Codable {
-            let title: String?
-            let content: String?
-            let entryDate: String?
-            enum CodingKeys: String, CodingKey {
-                case title, content
-                case entryDate = "entry_date"
-            }
-        }
-        return try await client.request(
-            method: "PATCH",
-            path: "\(basePath)/journals/\(journalId)/entries/\(entryId)",
-            body: Body(title: title, content: content, entryDate: entryDate),
-        )
+        try await JournalService.shared.updateJournalEntry(entryId: entryId, journalId: journalId, title: title, content: content, entryDate: entryDate)
     }
 
     func deleteJournalEntry(entryId: String, journalId: String) async throws {
-        _ = try await client.requestData(
-            method: "DELETE",
-            path: "\(basePath)/journals/\(journalId)/entries/\(entryId)",
-        )
+        try await JournalService.shared.deleteJournalEntry(entryId: entryId, journalId: journalId)
     }
 
     func listJournalCollaborators(journalId: String) async throws -> [MWProjectCollaborator] {
-        try await client.request(method: "GET", path: "\(basePath)/journals/\(journalId)/collaborators")
+        try await JournalService.shared.listJournalCollaborators(journalId: journalId)
     }
 
     func addJournalCollaborators(journalId: String, userIds: [String]) async throws {
-        struct Body: Codable { let userIds: [String]; enum CodingKeys: String, CodingKey { case userIds = "user_ids" } }
-        _ = try await client.requestData(
-            method: "POST",
-            path: "\(basePath)/journals/\(journalId)/collaborators",
-            body: Body(userIds: userIds),
-        )
+        try await JournalService.shared.addJournalCollaborators(journalId: journalId, userIds: userIds)
     }
 
     func removeJournalCollaborator(journalId: String, userId: String) async throws {
-        _ = try await client.requestData(
-            method: "DELETE",
-            path: "\(basePath)/journals/\(journalId)/collaborators/\(userId)",
-        )
+        try await JournalService.shared.removeJournalCollaborator(journalId: journalId, userId: userId)
     }
 
-    /// Upload a single image for inline embedding in a journal entry.
-    /// Returns the public URL the markdown `![](url)` can point at.
     func uploadJournalImage(
         journalId: String, data: Data, filename: String, mimeType: String,
     ) async throws -> String {
-        var multipart = MultipartUploadBuilder()
-        multipart.addFile(name: "file", filename: filename, mimeType: mimeType, data: data)
-        let (body, contentType) = multipart.finalize()
-
-        guard let url = URL(string: "\(client.baseURL)\(basePath)/journals/\(journalId)/images") else {
-            throw APIError.invalidURL
-        }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
-        if let token = client.accessToken {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        request.httpBody = body
-
-        let (respData, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            let msg = String(data: respData, encoding: .utf8) ?? "Upload failed"
-            throw APIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0, msg)
-        }
-        struct ImageResponse: Decodable { let url: String }
-        return try JSONDecoder().decode(ImageResponse.self, from: respData).url
+        try await JournalService.shared.uploadJournalImage(journalId: journalId, data: data, filename: filename, mimeType: mimeType)
     }
 }
