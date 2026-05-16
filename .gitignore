@@ -115,6 +115,8 @@ desktop/Werk/build/
 .claude/*
 !.claude/commands/
 !.claude/CLAUDE.md
+!.claude/hooks/
+!.claude/settings.json
 /soc/
 
 # Scratch / working files
