@@ -32,6 +32,9 @@ router.include_router(_anonymous_reporting_router)
 from .documents import router as _documents_router
 router.include_router(_documents_router)
 
+from .osha import router as _osha_router
+router.include_router(_osha_router)
+
 from .audit_log import router as _audit_log_router
 router.include_router(_audit_log_router)
 
