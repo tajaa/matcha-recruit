@@ -5,9 +5,9 @@ into `EmailService` (see `client.py`) via multiple inheritance. Method
 bodies call `self.send_email(...)` / `self.is_configured()` / etc. —
 `self` is the composed `EmailService` at runtime.
 """
+import html
 import logging
-import os
-from datetime import date, datetime
+from datetime import datetime
 from typing import Optional
 
 logger = logging.getLogger(__name__)
