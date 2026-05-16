@@ -20,12 +20,14 @@ Prefix and feature-gate are applied at the parent mount in
 # refuses to compose two empty path segments.
 from ._legacy import router  # noqa: F401  (package public symbol)
 
-# Submodules — each `include_router` injects its routes into the package router.
-# Order matters: routers with static path prefixes (e.g. /anonymous-reporting,
-# /osha, /analytics) must be registered BEFORE any router that owns the
-# catch-all `/{incident_id}` path. _legacy.router currently owns the catch-all,
-# so static-prefix submodules go here ABOVE `from ._legacy import router`.
-# Audit-log path is `/{incident_id}/audit-log` (specific suffix) — safe.
+# Submodules — each `include_router` appends its routes onto the package
+# router AFTER _legacy's routes have already been registered. That ordering
+# is safe because no submodule shares both segment-count AND parameter
+# pattern with a _legacy catch-all: _legacy's `/{incident_id}` is 1-segment
+# while every submodule route is 2+ segments. If a future submodule adds a
+# 1-segment route (e.g. `@router.post("")`), it would be shadowed by
+# _legacy's collection-root routes and need to land in step 10 (CRUD
+# migration) where _legacy's empty-path routes also move out.
 from .anonymous_reporting import router as _anonymous_reporting_router
 router.include_router(_anonymous_reporting_router)
 
