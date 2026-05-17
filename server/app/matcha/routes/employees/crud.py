@@ -1,6 +1,25 @@
-"""
-Admin routes for employee management.
-Allows admins/clients to create, update, delete employees and send invitations.
+"""Employee CRUD + collection-root endpoints.
+
+Owns the package's main `router`. Other submodules (onboarding, offboarding,
+invitations, bulk_upload, leave, incidents, credentials, oig) append their
+routes via `router.include_router(...)` in the package `__init__.py`.
+
+Routes:
+  GET  /onboarding-progress             — bulk onboarding-progress summary
+  GET  ""                               — list employees (collection root)
+  GET  /departments                     — list distinct departments
+  GET  /locations                       — list distinct locations
+  GET  /by-uid/{uid}                    — lookup by HR-internal uid
+  POST ""                               — create employee (collection root)
+  GET  /{employee_id}                   — get employee (catch-all 1-segment GET)
+  PUT  /{employee_id}                   — update employee
+  PUT  /{employee_id}/status            — update employment_status
+  DELETE /{employee_id}                 — delete employee
+
+`GET /{employee_id}` (and PUT/DELETE) catch any 1-segment static GETs in
+sibling submodules (e.g. /oig-summary, /incident-counts, /onboarding-draft) —
+shadow is preserved by registering this router BEFORE submodule
+`include_router` calls.
 """
 import asyncio
 import csv
@@ -34,11 +53,7 @@ from app.matcha.services.onboarding_orchestrator import (
 )
 from app.matcha.services.risk_assessment_service import compute_risk_assessment, generate_recommendations, DEFAULT_WEIGHTS
 
-logger = logging.getLogger(__name__)
-
-router = APIRouter()
-
-from app.matcha.routes.employees._shared import (
+from ._shared import (
     INVITATION_SEND_FAILED_DETAIL,
     _json_object,
     _coerce_bool,
@@ -58,6 +73,10 @@ from app.matcha.routes.employees._shared import (
     _run_provisioning_and_notify,
     _send_provisioning_email,
 )
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
 # Request/Response Models
 class EmployeeCreateRequest(BaseModel):
     email: Optional[EmailStr] = None  # Legacy alias for work_email

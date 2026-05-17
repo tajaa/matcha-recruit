@@ -7,7 +7,7 @@
 | Router file | Prefix | Owns |
 |---|---|---|
 | `companies.py` | `/companies` | Company CRUD + admin tooling |
-| `employees.py` | `/employees` | Employee CRUD, bulk upload, invitations, pto/leave admin (5,425 lines — split candidate) |
+| `employees/` | `/employees` (+ `/employees/pto`, `/employees/leave`) | Employee CRUD, bulk upload, invitations, onboarding, offboarding, credentials, OIG, leave, incidents, pto/leave admin — **package** (split 2026-05-16; see `employees/CLAUDE.md`) |
 | `employee_portal.py` | `/v1/portal` | Employee-facing self-service portal |
 | `onboarding.py` | `/onboarding` | New-hire onboarding tasks + notification settings |
 | `invitations.py` | `/invitations` | Token-based invite acceptance |
@@ -67,8 +67,9 @@ Use the `ir_incidents/` package (see `ir_incidents/CLAUDE.md`) as the template. 
 - Edits regularly require reading unrelated sections
 
 Current strong candidates (per `CLAUDE_CODE_PLAN.md`):
-- `employees.py` (5,425 lines) — CRUD + bulk + invitations + credentials + onboarding
 - `er_copilot.py` (4,111 lines) — CRUD + AI analysis + interviews + risk + reports
+
+Completed splits: `ir_incidents/` (2026-05-16), `employees/` (2026-05-16).
 
 Reuse the IR pattern: `git mv` to `_legacy.py`, split into per-domain submodules, flip package router to the one owning empty-path collection routes, delete `_legacy.py`.
 
