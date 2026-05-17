@@ -222,6 +222,20 @@ def on_worker_ready(**kwargs):
 
 @worker_process_init.connect
 def _install_error_reporter(**kwargs):
+    # Bootstrap settings for the worker process BEFORE anything else.
+    # Without this, the first task that touches get_settings() (storage,
+    # gemini client, stripe service, etc.) raises
+    # "Settings not initialized. Call load_settings() first." — the failure
+    # mode customers see on the handbook audit result page when the worker
+    # dies mid-task (storage.get_storage() runs before any per-task
+    # load_settings() fallback can fire).
+    try:
+        from app.config import load_settings
+        load_settings()
+        print("[Worker] Settings loaded")
+    except Exception as e:
+        print(f"[Worker] Failed to load settings: {e}")
+
     try:
         from app.core.services.error_reporter import install_error_logging
         install_error_logging(source="celery")
