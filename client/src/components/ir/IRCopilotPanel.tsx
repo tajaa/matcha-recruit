@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Send, Sparkles } from 'lucide-react'
 import { Button } from '../ui'
-import IRCopilotCard, { type CopilotCard } from './IRCopilotCard'
+import IRCopilotCard, { type CopilotCard, type AcceptPayload } from './IRCopilotCard'
 import { api } from '../../api/client'
 
 const BASE = (import.meta.env.VITE_API_URL ?? '/api').replace(/\/$/, '')
@@ -151,19 +151,23 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
     await streamRound(text)
   }
 
-  async function handleAccept(messageId: string, cardId: string) {
+  async function handleAccept(messageId: string, cardId: string, payload?: AcceptPayload) {
     setBusyCardMessageId(messageId)
     setBusyStage('Starting…')
     setError(null)
     try {
       const token = localStorage.getItem('matcha_access_token')
+      const body: Record<string, unknown> = { message_id: messageId, card_id: cardId }
+      if (payload?.selected_value !== undefined) body.selected_value = payload.selected_value
+      if (payload?.numeric_value !== undefined) body.numeric_value = payload.numeric_value
+      if (payload?.notes !== undefined) body.notes = payload.notes
       const res = await fetch(`${BASE}/ir/incidents/${incidentId}/copilot/accept`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ message_id: messageId, card_id: cardId }),
+        body: JSON.stringify(body),
       })
       if (!res.ok || !res.body) {
         throw new Error(`Accept failed (${res.status})`)
@@ -190,7 +194,16 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
               else if (data.stage === 'thinking') setBusyStage('Generating next steps…')
             } else if (data.type === 'event') {
               setBusyStage(data.text)
-              if (data.action === 'set_field' || data.action === 'close_incident') {
+              // Any action that writes to ir_incidents columns should bubble
+              // up so the parent re-fetches the incident header (severity
+              // badge, status pill, OSHA recordable indicator, etc.).
+              if (
+                data.action === 'set_field' ||
+                data.action === 'close_incident' ||
+                data.action === 'quick_reply' ||
+                data.action === 'numeric_input' ||
+                data.action === 'osha_emergency_alert'
+              ) {
                 didMutateIncident = true
               }
             } else if (data.type === 'error') {
@@ -257,6 +270,14 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
     return map
   }, [messages])
 
+  // Emergency block: an un-accepted osha_emergency_alert card pauses intake.
+  // Close button + chat input are disabled until the user submits the
+  // confirmation-notes textarea on the alert card.
+  const emergencyAlertActive = useMemo(
+    () => currentCards.some((c) => c.action?.type === 'osha_emergency_alert'),
+    [currentCards],
+  )
+
   const acceptedCardIds = useMemo(() => {
     const set = new Set<string>()
     for (const m of messages) {
@@ -294,7 +315,8 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
             <Button
               variant="ghost"
               size="sm"
-              disabled={closingIncident || streaming}
+              disabled={closingIncident || streaming || emergencyAlertActive}
+              title={emergencyAlertActive ? 'Acknowledge the OSHA reporting alert first.' : undefined}
               onClick={() => { void handleCloseIncident() }}
             >
               {closingIncident ? (
@@ -347,7 +369,14 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
             const newValue = md.new_value
             const prevValue = md.previous_value
             const note = typeof md.note === 'string' ? md.note : null
-            if ((action === 'set_field' || action === 'close_incident') && fieldLabel) {
+            const fieldUpdateActions = new Set([
+              'set_field',
+              'close_incident',
+              'quick_reply',
+              'numeric_input',
+              'osha_emergency_alert',
+            ])
+            if (action && fieldUpdateActions.has(action) && fieldLabel) {
               const fmt = (v: unknown): string => {
                 if (v === null || v === undefined || v === '') return '—'
                 if (typeof v === 'string') return v
@@ -424,8 +453,10 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
           <input
             type="text"
             value={input}
-            disabled={streaming}
-            placeholder="Reply to copilot or ask a question…"
+            disabled={streaming || emergencyAlertActive}
+            placeholder={emergencyAlertActive
+              ? 'Acknowledge the OSHA reporting alert above to resume…'
+              : 'Reply to copilot or ask a question…'}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
@@ -433,11 +464,11 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
                 void handleSubmitInput()
               }
             }}
-            className="flex-1 rounded-md bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+            className="flex-1 rounded-md bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500 disabled:opacity-60"
           />
           <Button
             variant="primary"
-            disabled={streaming || !input.trim()}
+            disabled={streaming || !input.trim() || emergencyAlertActive}
             onClick={() => { void handleSubmitInput() }}
           >
             <Send className="w-4 h-4" />

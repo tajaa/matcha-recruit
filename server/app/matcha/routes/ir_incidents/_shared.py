@@ -6,6 +6,7 @@ the original flat `ir_incidents.py` during the package split.
 import asyncio
 import json
 import logging
+import re
 import secrets
 from datetime import datetime, timezone
 from typing import Literal, Optional
@@ -27,6 +28,57 @@ ANALYSIS_TYPES = Literal[
     "categorization", "severity", "root_cause", "recommendations",
     "similar", "consistency", "company_consistency", "policy_mapping",
 ]
+
+
+# OSHA 300 form M-column injury/illness type values. Stashed in
+# ir_incidents.osha_form_301_data->>'injury_type' so 300A aggregation
+# can group on them without an Alembic migration.
+OSHA_INJURY_TYPES = {
+    "injury", "skin_disorder", "respiratory",
+    "poisoning", "hearing_loss", "other_illness",
+}
+
+OSHA_INJURY_TYPE_LABELS = {
+    "injury": "Standard Injury",
+    "skin_disorder": "Skin Disorder",
+    "respiratory": "Respiratory Condition",
+    "poisoning": "Poisoning",
+    "hearing_loss": "Hearing Loss",
+    "other_illness": "All Other",
+}
+
+
+# Severe keywords that mandate an immediate OSHA reportable-event call
+# (8 hours for fatality, 24 hours for amputation / lost eye / in-patient
+# hospitalization — 29 CFR 1904.39). Detection runs on incident creation
+# against the title+description; a hit flips severity to critical and
+# pushes the emergency alert card into the Copilot transcript.
+_OSHA_REPORTABLE_KEYWORD_RE = re.compile(
+    r"\b("
+    r"fatalit(?:y|ies)"
+    r"|passed\s+away"
+    r"|(?:was|were)\s+killed"
+    r"|(?:was|were|has)\s+died"
+    r"|amputat(?:e|ed|ion|ing)"
+    r"|lost\s+(?:an?\s+|his\s+|her\s+|their\s+)?eye"
+    r"|hospitali[sz]ed"
+    r"|hospitali[sz]ation"
+    r"|in-?patient\s+admission"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _detect_osha_reportable_keywords(text: Optional[str]) -> bool:
+    """True if text mentions a 29 CFR 1904.39 reportable-event term.
+
+    False on None / empty / no match. Boundary-anchored so false-friends
+    like "studied" or "skilled" don't match (no overlap with the pattern
+    anyway, but the word boundary keeps it safe against future additions).
+    """
+    if not text:
+        return False
+    return bool(_OSHA_REPORTABLE_KEYWORD_RE.search(text))
 
 
 def _sse(event: dict) -> str:
@@ -379,6 +431,212 @@ def parse_witnesses(witnesses_json) -> list[Witness]:
     except (json.JSONDecodeError, TypeError, ValueError, KeyError) as e:
         logger.warning(f"Failed to parse witnesses: {e}")
         return []
+
+
+# ===========================================
+# OSHA emergency alert helpers
+# ===========================================
+
+OSHA_EMERGENCY_ALERT_CARD_ID = "osha_emergency_alert"
+OSHA_EMERGENCY_HOTLINE = "1-800-321-6742"
+OSHA_REPORTING_WINDOW = "8 to 24 hours"
+
+
+def build_osha_emergency_alert_card() -> dict:
+    """Build the static emergency alert card payload (29 CFR 1904.39).
+
+    Same shape every emit so the frontend can render it with a fixed
+    component. ``content`` is the title (used as message_type='card'
+    content column); the full card sits under ``metadata.card`` per the
+    transcript convention.
+    """
+    return {
+        "id": OSHA_EMERGENCY_ALERT_CARD_ID,
+        "title": "⚠️ CRITICAL: OSHA Reporting Required",
+        "recommendation": (
+            "Based on the severity of this incident, you may be legally "
+            "required to report this directly to OSHA within "
+            f"{OSHA_REPORTING_WINDOW}."
+        ),
+        "rationale": (
+            "29 CFR 1904.39 mandates calling OSHA within 8 hours for any "
+            "work-related fatality and within 24 hours for any in-patient "
+            "hospitalization, amputation, or loss of an eye."
+        ),
+        "priority": "high",
+        "blockers": [],
+        "action": {
+            "type": "osha_emergency_alert",
+            "label": "I've reported it",
+            "phone": OSHA_EMERGENCY_HOTLINE,
+            "deadline": OSHA_REPORTING_WINDOW,
+        },
+    }
+
+
+def build_osha_recordable_query_card() -> dict:
+    """Yes/No: does the incident qualify as an OSHA recordable event?"""
+    return {
+        "id": "osha_recordable_query",
+        "title": "OSHA Recordable Event",
+        "recommendation": "Does this qualify as an OSHA recordable event?",
+        "rationale": (
+            "Treatment beyond on-site first aid generally makes an injury "
+            "OSHA recordable (29 CFR 1904.7). Confirm so we can populate "
+            "the OSHA 300/300A logs."
+        ),
+        "priority": "high",
+        "blockers": [],
+        "action": {
+            "type": "quick_reply",
+            "label": "Choose one",
+            "quick_reply_kind": "osha_recordable_query",
+            "choices": [
+                {"label": "Yes", "value": "yes"},
+                {"label": "No", "value": "no"},
+            ],
+        },
+    }
+
+
+def build_osha_days_type_query_card() -> dict:
+    """Days Away / Job Restriction / Neither — drives osha_classification."""
+    return {
+        "id": "osha_days_type_query",
+        "title": "OSHA Case Classification",
+        "recommendation": (
+            "Did this result in days away from work or a temporary job restriction?"
+        ),
+        "rationale": (
+            "Drives column J/K/L on OSHA Form 300 (case classification). "
+            "Pick Neither for medical-treatment-only cases."
+        ),
+        "priority": "high",
+        "blockers": [],
+        "action": {
+            "type": "quick_reply",
+            "label": "Choose one",
+            "quick_reply_kind": "osha_days_type_query",
+            "choices": [
+                {"label": "Days Away", "value": "days_away"},
+                {"label": "Job Restriction", "value": "restricted_duty"},
+                {"label": "Neither", "value": "neither"},
+            ],
+        },
+    }
+
+
+def build_osha_days_count_card(*, target_field: str, pending_classification: str) -> dict:
+    """Numeric input: how many days away / restricted?"""
+    label_word = "away from work" if target_field == "days_away_from_work" else "on job restriction"
+    return {
+        "id": f"osha_days_count__{pending_classification}",
+        "title": f"Days {label_word.title()}",
+        "recommendation": f"How many days {label_word}?",
+        "rationale": "Enter the total days (1-365). This populates the OSHA 300 day-count columns.",
+        "priority": "high",
+        "blockers": [],
+        "action": {
+            "type": "numeric_input",
+            "label": "Save",
+            "target_field": target_field,
+            "pending_classification": pending_classification,
+            "input_label": "Days",
+            "input_min": 1,
+            "input_max": 365,
+        },
+    }
+
+
+def build_osha_injury_type_query_card() -> dict:
+    """6-button picker — OSHA 300 M-column injury/illness type."""
+    return {
+        "id": "osha_injury_type_query",
+        "title": "Injury / Illness Type",
+        "recommendation": "How would you classify this injury?",
+        "rationale": (
+            "Drives the M-columns on OSHA Form 300A (Injury / Skin Disorder / "
+            "Respiratory / Poisoning / Hearing Loss / All Other Illnesses)."
+        ),
+        "priority": "high",
+        "blockers": [],
+        "action": {
+            "type": "quick_reply",
+            "label": "Choose one",
+            "quick_reply_kind": "osha_injury_type_query",
+            "choices": [
+                {"label": OSHA_INJURY_TYPE_LABELS[k], "value": k}
+                for k in ("injury", "skin_disorder", "respiratory", "poisoning", "hearing_loss", "other_illness")
+            ],
+        },
+    }
+
+
+def build_osha_close_confirmation_card() -> dict:
+    """Final close card after the OSHA chain completes."""
+    return {
+        "id": "osha_close_confirmation",
+        "title": "Close incident",
+        "recommendation": "OSHA capture complete. Close this incident?",
+        "rationale": "All OSHA 300 fields recorded. You can close the incident now.",
+        "priority": "high",
+        "blockers": [],
+        "action": {
+            "type": "close_incident",
+            "label": "Close incident",
+        },
+    }
+
+
+async def _persist_osha_emergency_alert(conn, incident_id: str, current_user) -> None:
+    """Flip severity to critical, mark the alert active in category_data,
+    and persist the emergency card to the Copilot transcript.
+
+    Idempotent: a second call on the same incident skips re-persisting the
+    card if one already exists (e.g. background classifier re-triggered).
+    """
+    await conn.execute(
+        """
+        UPDATE ir_incidents
+        SET severity = 'critical',
+            category_data = jsonb_set(
+                COALESCE(category_data, '{}'::jsonb),
+                '{osha_emergency_alert_active}',
+                'true'::jsonb,
+                true
+            )
+        WHERE id = $1
+        """,
+        incident_id,
+    )
+
+    existing = await conn.fetchval(
+        """
+        SELECT 1 FROM ir_incident_ai_messages
+        WHERE incident_id = $1
+          AND message_type = 'card'
+          AND metadata->'card'->>'id' = $2
+        LIMIT 1
+        """,
+        incident_id,
+        OSHA_EMERGENCY_ALERT_CARD_ID,
+    )
+    if existing:
+        return
+
+    card = build_osha_emergency_alert_card()
+    metadata = {"card": card, "accepted": False}
+    await conn.execute(
+        """
+        INSERT INTO ir_incident_ai_messages
+          (incident_id, role, message_type, content, metadata, created_by)
+        VALUES ($1, 'assistant', 'card', $2, $3::jsonb, $4)
+        """,
+        incident_id,
+        card["title"],
+        json.dumps(metadata),
+        str(current_user.id) if current_user and getattr(current_user, "id", None) else None,
+    )
 
 
 def row_to_response(row, document_count: int = 0) -> IRIncidentResponse:

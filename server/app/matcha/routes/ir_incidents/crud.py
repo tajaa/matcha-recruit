@@ -41,7 +41,9 @@ from app.matcha.models.ir_incident import (
 from ._shared import (
     _auto_classify_incident_task,
     _company_filter,
+    _detect_osha_reportable_keywords,
     _parse_occurred_at,
+    _persist_osha_emergency_alert,
     _resolve_employee_refs,
     _to_naive_utc,
     generate_incident_number,
@@ -199,6 +201,20 @@ async def create_incident(
             {"title": effective_title, "type": effective_type},
             request.client.host if request.client else None,
         )
+
+        # OSHA reportable-event (29 CFR 1904.39) emergency detection. If the
+        # initial title/description mentions a fatality, amputation, in-patient
+        # hospitalization, or eye loss, flip severity to critical and drop the
+        # emergency alert card into the Copilot transcript so the user sees the
+        # call-OSHA-within-8-to-24-hours guidance immediately. The card is
+        # blocking — the close-via-copilot path will refuse to close the
+        # incident until the user acknowledges with notes.
+        if _detect_osha_reportable_keywords(f"{effective_title}\n{incident.description or ''}"):
+            await _persist_osha_emergency_alert(conn, str(row["id"]), current_user)
+            row = await conn.fetchrow(
+                "SELECT * FROM ir_incidents WHERE id = $1",
+                row["id"],
+            )
 
         # Build response with context
         response_row = dict(row)

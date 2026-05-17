@@ -118,7 +118,12 @@ def test_accept_request_validates_uuid():
 
 def test_action_type_set_complete():
     """All emitted action types match the dispatch whitelist in the route."""
-    expected = {"run_analysis", "set_field", "request_info", "escalate", "close_incident"}
+    expected = {
+        "run_analysis", "set_field", "request_info", "escalate", "close_incident",
+        # OSHA recordable chain: backend-emitted card types accepted by the
+        # dispatch handler and surfaced through the transcript filter.
+        "quick_reply", "numeric_input", "osha_emergency_alert",
+    }
     assert IR_ACTION_TYPES == expected
 
 

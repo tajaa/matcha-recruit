@@ -268,6 +268,10 @@ async def get_osha_300a_summary(
                 total_hours_worked=cached["total_hours_worked"],
             )
 
+        # M-column injury/illness type is stashed in osha_form_301_data->>'injury_type'
+        # (set by the IR Copilot OSHA recordable chain — see _shared.OSHA_INJURY_TYPES).
+        # When the value is NULL we fall back to "injury" so legacy rows still get counted
+        # under the Standard Injury column rather than vanishing from totals.
         agg = await conn.fetchrow(
             """
             SELECT
@@ -277,7 +281,13 @@ async def get_osha_300a_summary(
                 COALESCE(SUM(CASE WHEN osha_classification = 'restricted_duty' THEN 1 ELSE 0 END), 0) AS total_restricted_cases,
                 COALESCE(SUM(CASE WHEN osha_classification NOT IN ('death','days_away','restricted_duty') THEN 1 ELSE 0 END), 0) AS total_other_recordable,
                 COALESCE(SUM(days_away_from_work), 0) AS total_days_away,
-                COALESCE(SUM(days_restricted_duty), 0) AS total_days_restricted
+                COALESCE(SUM(days_restricted_duty), 0) AS total_days_restricted,
+                COALESCE(SUM(CASE WHEN COALESCE(osha_form_301_data->>'injury_type','injury') = 'injury' THEN 1 ELSE 0 END), 0) AS total_injuries,
+                COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'skin_disorder' THEN 1 ELSE 0 END), 0) AS total_skin_disorders,
+                COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'respiratory' THEN 1 ELSE 0 END), 0) AS total_respiratory,
+                COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'poisoning' THEN 1 ELSE 0 END), 0) AS total_poisonings,
+                COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'hearing_loss' THEN 1 ELSE 0 END), 0) AS total_hearing_loss,
+                COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'other_illness' THEN 1 ELSE 0 END), 0) AS total_other_illnesses
             FROM ir_incidents
             WHERE company_id = $1
               AND osha_recordable = true
@@ -300,12 +310,12 @@ async def get_osha_300a_summary(
             total_other_recordable=agg["total_other_recordable"],
             total_days_away=agg["total_days_away"],
             total_days_restricted=agg["total_days_restricted"],
-            total_injuries=agg["total_cases"],
-            total_skin_disorders=0,
-            total_respiratory=0,
-            total_poisonings=0,
-            total_hearing_loss=0,
-            total_other_illnesses=0,
+            total_injuries=agg["total_injuries"],
+            total_skin_disorders=agg["total_skin_disorders"],
+            total_respiratory=agg["total_respiratory"],
+            total_poisonings=agg["total_poisonings"],
+            total_hearing_loss=agg["total_hearing_loss"],
+            total_other_illnesses=agg["total_other_illnesses"],
             average_employees=None,
             total_hours_worked=None,
         )

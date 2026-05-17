@@ -71,12 +71,19 @@ def _canonical_analysis_type(raw: Optional[str]) -> Optional[str]:
     return None
 
 # Action types the orchestrator may emit and the accept endpoint dispatches.
+# The last three (quick_reply, numeric_input, osha_emergency_alert) are
+# emitted by the backend OSHA recordable chain — not by Gemini — but live
+# in the allowlist so the response filter keeps them when round-tripped
+# through transcript fetches.
 IR_ACTION_TYPES = {
     "run_analysis",
     "set_field",
     "request_info",
     "escalate",
     "close_incident",
+    "quick_reply",
+    "numeric_input",
+    "osha_emergency_alert",
 }
 
 
@@ -91,6 +98,10 @@ IR_SETTABLE_FIELDS = {
     "status",
     "root_cause",
     "corrective_actions",
+    # JSONB-stashed OSHA intake flag — captured early so the close-time
+    # OSHA recordable chain knows whether to fire. Stored under
+    # ir_incidents.category_data->>'treatment_beyond_first_aid' (true/false).
+    "treatment_beyond_first_aid",
 }
 
 IR_FIELD_VALUE_ENUMS: dict[str, set[str]] = {
@@ -98,6 +109,7 @@ IR_FIELD_VALUE_ENUMS: dict[str, set[str]] = {
     "category": {"safety", "behavioral", "property", "near_miss", "other"},
     "severity": {"critical", "high", "medium", "low"},
     "status": {"reported", "investigating", "action_required", "resolved", "closed"},
+    "treatment_beyond_first_aid": {"true", "false"},
 }
 
 
@@ -223,6 +235,9 @@ instead. Backend rejects unknown values and the user sees an error.
 - status: "reported" | "investigating" | "action_required" | "resolved" | "closed"
 - root_cause: free text (1-3 sentences)
 - corrective_actions: free text (1-3 sentences)
+- treatment_beyond_first_aid: "true" | "false" — OSHA recordability gate.
+  Set ONLY after the user has answered the on-site first aid question (see
+  OSHA INJURY GATE below). Persists to category_data->>'treatment_beyond_first_aid'.
 
 ACTION RULES:
 - run_analysis: pick analysis_type from IR's valid set. Don't recommend an
@@ -240,7 +255,24 @@ ACTION RULES:
 - escalate: recommend when severity is high/critical OR when an investigation
   would benefit from ER Copilot case management.
 - close_incident: recommend when status is action_required and a corrective
-  action plan exists.
+  action plan exists. HOLD if OSHA INJURY GATE applies (see below) — the
+  backend will intercept and emit the OSHA recordable chain instead.
+
+OSHA INJURY GATE — When the description mentions a physical injury
+(cut, fall, slip, trip, sprain, strain, burn, struck, hit, fell, twisted,
+laceration, bruise, fracture, scratched, pinched, caught in, crushed) AND
+the value of category_data.treatment_beyond_first_aid is missing or null,
+ask in your summary text: "Was any treatment provided beyond basic on-site
+first aid?" Keep the question conversational — do NOT emit a card for this
+question. When the user answers (yes / no / details), the NEXT round emits
+ONE set_field card with field_name="treatment_beyond_first_aid" and
+field_value of "true" or "false". After that gate is set, proceed with
+normal guidance. Skip the gate entirely when the user already supplied
+the answer in their initial description (e.g. "she went to the ER",
+"first aid only, no doctor"). When treatment_beyond_first_aid is true and
+osha_recordable is null, the backend will intercept any close_incident
+card with the OSHA recordable chain — you do not need to handle that
+chain yourself.
 
 INVESTIGATION-VS-ACTION DECISION:
 When the incident facts are clear and the policy violation is unambiguous

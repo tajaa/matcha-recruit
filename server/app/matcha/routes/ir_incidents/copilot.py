@@ -32,9 +32,17 @@ from app.matcha.models.ir_incident import (
 
 # Helpers that still live in _legacy.py; will move to _shared.py in step 10.
 from ._shared import (
+    OSHA_INJURY_TYPES,
+    OSHA_INJURY_TYPE_LABELS,
     _get_incident_with_company_check,
     _safe_json_loads,
     _sse,
+    _utc_now_naive,
+    build_osha_close_confirmation_card,
+    build_osha_days_count_card,
+    build_osha_days_type_query_card,
+    build_osha_injury_type_query_card,
+    build_osha_recordable_query_card,
     log_audit,
 )
 
@@ -293,6 +301,16 @@ async def skip_copilot_card(
         if isinstance(stored_card, dict) and stored_card.get("id") != body.card_id:
             raise HTTPException(status_code=400, detail="Card id mismatch")
 
+        # The OSHA reportable-event alert is non-skippable. The card itself
+        # represents a regulatory disclosure obligation; users acknowledge
+        # via the accept path with confirmation notes.
+        stored_action = (stored_card.get("action") or {}) if isinstance(stored_card, dict) else {}
+        if stored_action.get("type") == "osha_emergency_alert":
+            raise HTTPException(
+                status_code=400,
+                detail="The OSHA reporting alert cannot be skipped. Acknowledge with confirmation notes instead.",
+            )
+
         meta["skipped"] = True
         meta["skipped_at"] = _utc_now_naive().isoformat()
 
@@ -316,11 +334,32 @@ async def skip_copilot_card(
     return {"ok": True}
 
 
+async def _emit_chain_card(conn, *, incident_id: UUID, card: dict, created_by=None) -> dict:
+    """Append a single assistant card row to the transcript and return the inserted row.
+
+    Used by the OSHA recordable chain to drop the next step's card after the
+    user accepts the previous one (or after the close-time guard redirects).
+    Shape matches what ``persist_assistant_round`` writes for AI-emitted cards.
+    """
+    from app.matcha.services.ir_ai_orchestrator import append_message
+
+    return await append_message(
+        conn,
+        incident_id=incident_id,
+        role="assistant",
+        message_type="card",
+        content=card.get("title") or "Recommendation",
+        metadata={"card": card, "accepted": False},
+        created_by=created_by,
+    )
+
+
 async def _close_incident_via_copilot(
     conn,
     *,
     incident_id: UUID,
     source_card_id: Optional[UUID] = None,
+    current_user=None,
 ) -> dict:
     """Close an incident and supersede any open card recommendations.
 
@@ -328,12 +367,81 @@ async def _close_incident_via_copilot(
     direct-button path (source_card_id None — supersede ALL open cards).
     Idempotent: returns ``already_closed=True`` and skips writes when the
     incident is already in 'closed' status.
+
+    Two pre-close guards run first:
+
+    1. **OSHA emergency block** — if ``category_data.osha_emergency_alert_active``
+       is true, the reportable-event alert hasn't been acknowledged. Return
+       ``{blocked_by_emergency: True}``; callers should surface a 400 to the
+       user. They can clear the block by accepting the ``osha_emergency_alert``
+       card with confirmation notes.
+
+    2. **OSHA recordable chain redirect** — if ``treatment_beyond_first_aid``
+       is true AND ``osha_recordable`` is null, the OSHA 300 capture chain
+       hasn't run. Emit the first chain card (``osha_recordable_query``) and
+       return ``{redirected_to_osha_chain: True, redirect_card: <inserted row>}``
+       without changing status. Callers should NOT mark close successful.
+
+    Returns the normal close result dict when no guard trips.
     """
-    prev_status = await conn.fetchval(
-        "SELECT status FROM ir_incidents WHERE id = $1", incident_id,
+    row = await conn.fetchrow(
+        """
+        SELECT status, osha_recordable, category_data
+        FROM ir_incidents WHERE id = $1
+        """,
+        incident_id,
     )
+    prev_status = row["status"] if row else None
     if prev_status == "closed":
         return {"already_closed": True, "previous_value": prev_status, "new_value": "closed"}
+
+    category_data = _safe_json_loads(row["category_data"] if row else None, {}) or {}
+    if category_data.get("osha_emergency_alert_active"):
+        return {
+            "blocked_by_emergency": True,
+            "previous_value": prev_status,
+            "new_value": prev_status,
+        }
+
+    treatment_flag = category_data.get("treatment_beyond_first_aid")
+    if treatment_flag in (True, "true") and row["osha_recordable"] is None:
+        card = build_osha_recordable_query_card()
+        # Idempotency: if a prior close attempt already emitted the
+        # recordable query and the user hasn't answered or skipped, reuse
+        # that row instead of inserting a duplicate (a double-click on the
+        # Close button would otherwise stack identical cards in the
+        # transcript).
+        existing = await conn.fetchrow(
+            """
+            SELECT id FROM ir_incident_ai_messages
+            WHERE incident_id = $1
+              AND message_type = 'card'
+              AND metadata->'card'->>'id' = $2
+              AND COALESCE((metadata->>'accepted')::boolean, FALSE) = FALSE
+              AND COALESCE((metadata->>'superseded')::boolean, FALSE) = FALSE
+              AND COALESCE((metadata->>'skipped')::boolean, FALSE) = FALSE
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            incident_id, card["id"],
+        )
+        if existing:
+            message_id = str(existing["id"])
+        else:
+            inserted = await _emit_chain_card(
+                conn,
+                incident_id=incident_id,
+                card=card,
+                created_by=current_user.id if current_user else None,
+            )
+            message_id = str(inserted["id"])
+        return {
+            "redirected_to_osha_chain": True,
+            "redirect_card": card,
+            "redirect_message_id": message_id,
+            "previous_value": prev_status,
+            "new_value": prev_status,
+        }
 
     await conn.execute(
         "UPDATE ir_incidents SET status = 'closed', resolved_at = NOW(), "
@@ -397,10 +505,29 @@ async def close_incident_via_copilot(
         )
         result = await _close_incident_via_copilot(
             conn, incident_id=incident_id, source_card_id=None,
+            current_user=current_user,
         )
         if result.get("already_closed"):
             _ = company_id
             return {"ok": True, "already_closed": True}
+        if result.get("blocked_by_emergency"):
+            _ = company_id
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "OSHA reporting alert is unacknowledged. Open the alert "
+                    "card in the Copilot, confirm reporting notes, then try "
+                    "again."
+                ),
+            )
+        if result.get("redirected_to_osha_chain"):
+            _ = company_id
+            return {
+                "ok": True,
+                "redirected_to_osha_chain": True,
+                "redirect_card": result["redirect_card"],
+                "redirect_message_id": result["redirect_message_id"],
+            }
 
         await append_message(
             conn,
@@ -432,6 +559,219 @@ async def close_incident_via_copilot(
         )
     _ = company_id
     return {"ok": True, **result}
+
+
+async def _handle_quick_reply(
+    conn,
+    *,
+    incident_id: UUID,
+    action: dict,
+    body: IRCopilotAcceptRequest,
+    current_user,
+) -> dict:
+    """Dispatch quick_reply card accepts by ``quick_reply_kind``.
+
+    Returns a dict with optional ``error``, ``event_summary``, ``event_extra``,
+    ``next_card`` (raw card dict to surface to the user), and
+    ``next_message_id`` (the transcript row id of the inserted card).
+
+    Three kinds handled:
+      * ``osha_recordable_query`` — Yes/No → write ``osha_recordable``
+      * ``osha_days_type_query`` — Days Away / Restriction / Neither → write
+        ``osha_classification`` and dispatch the next card
+      * ``osha_injury_type_query`` — 6-option picker → write injury type to
+        ``osha_form_301_data->>'injury_type'``
+    """
+    kind = (action.get("quick_reply_kind") or "").strip()
+    selected = (body.selected_value or "").strip().lower()
+    if not selected:
+        return {"error": "Pick an option to continue."}
+
+    allowed_by_kind = {
+        "osha_recordable_query": {"yes", "no"},
+        "osha_days_type_query": {"days_away", "restricted_duty", "neither"},
+        "osha_injury_type_query": OSHA_INJURY_TYPES,
+    }
+    if kind not in allowed_by_kind:
+        return {"error": f"Unknown quick_reply kind: {kind}"}
+    if selected not in allowed_by_kind[kind]:
+        return {"error": f"Invalid selection '{selected}' for {kind}"}
+
+    if kind == "osha_recordable_query":
+        bool_value = selected == "yes"
+        await conn.execute(
+            "UPDATE ir_incidents SET osha_recordable = $1, updated_at = NOW() WHERE id = $2",
+            bool_value, incident_id,
+        )
+        event_summary = (
+            "Marked as OSHA recordable" if bool_value else "Marked as not OSHA recordable"
+        )
+        event_extra = {
+            "field": "osha_recordable",
+            "field_label": "OSHA recordable",
+            "previous_value": None,
+            "new_value": bool_value,
+        }
+        if bool_value:
+            next_card = build_osha_days_type_query_card()
+        else:
+            # Not recordable — surface the close confirmation card.
+            next_card = build_osha_close_confirmation_card()
+        inserted = await _emit_chain_card(
+            conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
+        )
+        return {
+            "event_summary": event_summary,
+            "event_extra": event_extra,
+            "next_card": next_card,
+            "next_message_id": str(inserted["id"]),
+        }
+
+    if kind == "osha_days_type_query":
+        if selected == "days_away":
+            next_card = build_osha_days_count_card(
+                target_field="days_away_from_work",
+                pending_classification="days_away",
+            )
+            inserted = await _emit_chain_card(
+                conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
+            )
+            return {
+                "event_summary": "Captured: Days Away",
+                "event_extra": {
+                    "field": "osha_classification_pending",
+                    "field_label": "OSHA case classification",
+                    "previous_value": None,
+                    "new_value": "days_away",
+                },
+                "next_card": next_card,
+                "next_message_id": str(inserted["id"]),
+            }
+        if selected == "restricted_duty":
+            next_card = build_osha_days_count_card(
+                target_field="days_restricted_duty",
+                pending_classification="restricted_duty",
+            )
+            inserted = await _emit_chain_card(
+                conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
+            )
+            return {
+                "event_summary": "Captured: Job Restriction",
+                "event_extra": {
+                    "field": "osha_classification_pending",
+                    "field_label": "OSHA case classification",
+                    "previous_value": None,
+                    "new_value": "restricted_duty",
+                },
+                "next_card": next_card,
+                "next_message_id": str(inserted["id"]),
+            }
+        # Neither — straight to injury-type picker.
+        await conn.execute(
+            "UPDATE ir_incidents SET osha_classification = 'medical_treatment', "
+            "updated_at = NOW() WHERE id = $1",
+            incident_id,
+        )
+        next_card = build_osha_injury_type_query_card()
+        inserted = await _emit_chain_card(
+            conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
+        )
+        return {
+            "event_summary": "Captured: Medical treatment only",
+            "event_extra": {
+                "field": "osha_classification",
+                "field_label": "OSHA case classification",
+                "previous_value": None,
+                "new_value": "medical_treatment",
+            },
+            "next_card": next_card,
+            "next_message_id": str(inserted["id"]),
+        }
+
+    # osha_injury_type_query
+    await conn.execute(
+        """
+        UPDATE ir_incidents
+        SET osha_form_301_data = jsonb_set(
+            COALESCE(osha_form_301_data, '{}'::jsonb),
+            '{injury_type}',
+            to_jsonb($1::text),
+            true
+        ),
+        updated_at = NOW()
+        WHERE id = $2
+        """,
+        selected, incident_id,
+    )
+    next_card = build_osha_close_confirmation_card()
+    inserted = await _emit_chain_card(
+        conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
+    )
+    return {
+        "event_summary": f"Captured injury type: {OSHA_INJURY_TYPE_LABELS[selected]}",
+        "event_extra": {
+            "field": "osha_form_301_data.injury_type",
+            "field_label": "OSHA injury type",
+            "previous_value": None,
+            "new_value": selected,
+        },
+        "next_card": next_card,
+        "next_message_id": str(inserted["id"]),
+    }
+
+
+async def _handle_numeric_input(
+    conn,
+    *,
+    incident_id: UUID,
+    action: dict,
+    body: IRCopilotAcceptRequest,
+    current_user,
+) -> dict:
+    """Validate and persist a numeric_input card.
+
+    Writes ``action.target_field`` (must be days_away_from_work or
+    days_restricted_duty) and sets ``osha_classification`` to the carried
+    ``pending_classification`` so the 300-log filter picks it up. Emits the
+    injury-type picker as the next chain card.
+    """
+    target = (action.get("target_field") or "").strip()
+    pending_classification = (action.get("pending_classification") or "").strip()
+    allowed_targets = {"days_away_from_work", "days_restricted_duty"}
+    if target not in allowed_targets:
+        return {"error": f"Invalid target_field: {target}"}
+    if pending_classification not in {"days_away", "restricted_duty"}:
+        return {"error": f"Invalid pending_classification: {pending_classification}"}
+
+    if body.numeric_value is None:
+        return {"error": "Enter a number of days."}
+    days = int(body.numeric_value)
+    lo = int(action.get("input_min") or 1)
+    hi = int(action.get("input_max") or 365)
+    if days < lo or days > hi:
+        return {"error": f"Days must be between {lo} and {hi}."}
+
+    await conn.execute(
+        f"UPDATE ir_incidents SET {target} = $1, osha_classification = $2, "
+        "updated_at = NOW() WHERE id = $3",
+        days, pending_classification, incident_id,
+    )
+    next_card = build_osha_injury_type_query_card()
+    inserted = await _emit_chain_card(
+        conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
+    )
+    field_label = "Days away from work" if target == "days_away_from_work" else "Days on job restriction"
+    return {
+        "event_summary": f"Captured: {field_label} = {days}",
+        "event_extra": {
+            "field": target,
+            "field_label": field_label,
+            "previous_value": None,
+            "new_value": days,
+        },
+        "next_card": next_card,
+        "next_message_id": str(inserted["id"]),
+    }
 
 
 @router.post("/{incident_id}/copilot/accept")
@@ -496,6 +836,11 @@ async def accept_copilot_card(
             action_type = action.get("type")
             event_summary = ""
             event_extra: dict = {}
+            # When the OSHA recordable chain dispatches its own next card,
+            # the helpers populate these and the post-dispatch block streams
+            # the card directly to the client instead of running an AI round.
+            next_card: Optional[dict] = None
+            next_message_id: Optional[str] = None
 
             yield _sse({"type": "status", "stage": "starting", "action_type": action_type})
 
@@ -503,30 +848,69 @@ async def accept_copilot_card(
                 if action_type == "set_field":
                     raw_field = (action.get("field_name") or "").strip()
                     new_value = action.get("field_value")
-                    if raw_field not in _FIELD_WHITELIST:
-                        yield _sse({"type": "error", "detail": "Field not editable via copilot"})
-                        return
-                    db_field = _FIELD_WHITELIST[raw_field]
-                    try:
-                        _validate_field_value(db_field, new_value)
-                    except HTTPException as exc:
-                        yield _sse({"type": "error", "detail": exc.detail})
-                        return
-                    prev = await conn.fetchval(
-                        f"SELECT {db_field} FROM ir_incidents WHERE id = $1", incident_id,
-                    )
-                    await conn.execute(
-                        f"UPDATE ir_incidents SET {db_field} = $1, updated_at = NOW() WHERE id = $2",
-                        new_value, incident_id,
-                    )
-                    field_label = _FIELD_LABELS.get(db_field, db_field.replace("_", " ").title())
-                    event_summary = f"Updated {field_label}"
-                    event_extra = {
-                        "field": db_field,
-                        "field_label": field_label,
-                        "previous_value": prev,
-                        "new_value": new_value,
-                    }
+                    # treatment_beyond_first_aid is stashed in category_data
+                    # JSONB, not a real column. Handles the OSHA injury gate
+                    # without an Alembic migration.
+                    if raw_field == "treatment_beyond_first_aid":
+                        normalized = str(new_value).strip().lower()
+                        if normalized not in {"true", "false"}:
+                            yield _sse({
+                                "type": "error",
+                                "detail": "treatment_beyond_first_aid must be true or false",
+                            })
+                            return
+                        bool_value = normalized == "true"
+                        await conn.execute(
+                            """
+                            UPDATE ir_incidents
+                            SET category_data = jsonb_set(
+                                COALESCE(category_data, '{}'::jsonb),
+                                '{treatment_beyond_first_aid}',
+                                $1::jsonb,
+                                true
+                            ),
+                            updated_at = NOW()
+                            WHERE id = $2
+                            """,
+                            "true" if bool_value else "false",
+                            incident_id,
+                        )
+                        event_summary = (
+                            "Recorded: treatment beyond on-site first aid"
+                            if bool_value
+                            else "Recorded: on-site first aid only"
+                        )
+                        event_extra = {
+                            "field": "treatment_beyond_first_aid",
+                            "field_label": "Treatment beyond first aid",
+                            "previous_value": None,
+                            "new_value": bool_value,
+                        }
+                    else:
+                        if raw_field not in _FIELD_WHITELIST:
+                            yield _sse({"type": "error", "detail": "Field not editable via copilot"})
+                            return
+                        db_field = _FIELD_WHITELIST[raw_field]
+                        try:
+                            _validate_field_value(db_field, new_value)
+                        except HTTPException as exc:
+                            yield _sse({"type": "error", "detail": exc.detail})
+                            return
+                        prev = await conn.fetchval(
+                            f"SELECT {db_field} FROM ir_incidents WHERE id = $1", incident_id,
+                        )
+                        await conn.execute(
+                            f"UPDATE ir_incidents SET {db_field} = $1, updated_at = NOW() WHERE id = $2",
+                            new_value, incident_id,
+                        )
+                        field_label = _FIELD_LABELS.get(db_field, db_field.replace("_", " ").title())
+                        event_summary = f"Updated {field_label}"
+                        event_extra = {
+                            "field": db_field,
+                            "field_label": field_label,
+                            "previous_value": prev,
+                            "new_value": new_value,
+                        }
 
                 elif action_type == "run_analysis":
                     analysis_type = _canonical_analysis_type(action.get("analysis_type"))
@@ -600,7 +984,38 @@ async def accept_copilot_card(
                         conn,
                         incident_id=incident_id,
                         source_card_id=card_row["id"],
+                        current_user=current_user,
                     )
+                    if close_result.get("blocked_by_emergency"):
+                        yield _sse({
+                            "type": "error",
+                            "detail": (
+                                "Acknowledge the OSHA reporting alert before "
+                                "closing this incident."
+                            ),
+                        })
+                        return
+                    if close_result.get("redirected_to_osha_chain"):
+                        # Mark THIS card accepted so the redirect chain card
+                        # surfaces alone in the transcript. Stream the new
+                        # card down to the client and skip the follow-up
+                        # guidance round (chain is deterministic).
+                        new_md = dict(md)
+                        new_md["accepted"] = True
+                        new_md["accepted_at"] = _utc_now_naive().isoformat()
+                        new_md["accepted_by"] = str(current_user.id)
+                        new_md["redirected_to_osha_chain"] = True
+                        await conn.execute(
+                            "UPDATE ir_incident_ai_messages SET metadata = $1::jsonb WHERE id = $2",
+                            json.dumps(new_md), card_row["id"],
+                        )
+                        yield _sse({
+                            "type": "card",
+                            "card": close_result["redirect_card"],
+                            "message_id": close_result["redirect_message_id"],
+                        })
+                        yield _sse({"type": "done", "model": "osha_chain"})
+                        return
                     event_summary = "Updated Status"
                     event_extra = {
                         "field": "status",
@@ -612,6 +1027,74 @@ async def accept_copilot_card(
 
                 elif action_type == "request_info":
                     event_summary = "Request acknowledged — answer in chat below."
+
+                elif action_type == "quick_reply":
+                    chain_result = await _handle_quick_reply(
+                        conn,
+                        incident_id=incident_id,
+                        action=action,
+                        body=body,
+                        current_user=current_user,
+                    )
+                    if chain_result.get("error"):
+                        yield _sse({"type": "error", "detail": chain_result["error"]})
+                        return
+                    event_summary = chain_result.get("event_summary") or ""
+                    event_extra = chain_result.get("event_extra") or {}
+                    next_card = chain_result.get("next_card")
+                    next_message_id = chain_result.get("next_message_id")
+
+                elif action_type == "numeric_input":
+                    chain_result = await _handle_numeric_input(
+                        conn,
+                        incident_id=incident_id,
+                        action=action,
+                        body=body,
+                        current_user=current_user,
+                    )
+                    if chain_result.get("error"):
+                        yield _sse({"type": "error", "detail": chain_result["error"]})
+                        return
+                    event_summary = chain_result.get("event_summary") or ""
+                    event_extra = chain_result.get("event_extra") or {}
+                    next_card = chain_result.get("next_card")
+                    next_message_id = chain_result.get("next_message_id")
+
+                elif action_type == "osha_emergency_alert":
+                    if not body.notes or not body.notes.strip():
+                        yield _sse({
+                            "type": "error",
+                            "detail": "Add confirmation notes before clearing this alert.",
+                        })
+                        return
+                    notes_clean = body.notes.strip()[:2000]
+                    await conn.execute(
+                        """
+                        UPDATE ir_incidents
+                        SET category_data = jsonb_set(
+                            jsonb_set(
+                                COALESCE(category_data, '{}'::jsonb),
+                                '{osha_emergency_alert_active}',
+                                'false'::jsonb,
+                                true
+                            ),
+                            '{reported_to_osha_notes}',
+                            to_jsonb($1::text),
+                            true
+                        ),
+                        updated_at = NOW()
+                        WHERE id = $2
+                        """,
+                        notes_clean, incident_id,
+                    )
+                    event_summary = "OSHA reporting alert acknowledged"
+                    event_extra = {
+                        "field": "osha_emergency_alert_active",
+                        "field_label": "OSHA alert",
+                        "previous_value": True,
+                        "new_value": False,
+                        "notes": notes_clean,
+                    }
 
                 else:
                     yield _sse({"type": "error", "detail": f"Unknown action type: {action_type}"})
@@ -649,6 +1132,21 @@ async def accept_copilot_card(
                     details={"card_id": body.card_id, "action_type": action_type},
                     ip_address=request.client.host if request.client else None,
                 )
+
+                # OSHA recordable chain: when a quick_reply / numeric_input
+                # step has emitted its own next card, stream that to the
+                # client and stop. Skip the AI guidance round entirely —
+                # the chain is deterministic and an extra Gemini call here
+                # would risk overlaying an unrelated suggestion on top of
+                # the chain step the user must answer next.
+                if next_card is not None:
+                    yield _sse({
+                        "type": "card",
+                        "card": next_card,
+                        "message_id": next_message_id,
+                    })
+                    yield _sse({"type": "done", "model": "osha_chain"})
+                    return
 
                 # Re-run guidance with fresh state
                 yield _sse({"type": "status", "stage": "thinking"})

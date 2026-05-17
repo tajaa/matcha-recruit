@@ -524,7 +524,13 @@ IRCopilotRole = Literal["user", "assistant", "system"]
 IRCopilotMessageType = Literal["text", "card", "event"]
 IRCopilotActionType = Literal[
     "run_analysis", "set_field", "request_info", "escalate", "close_incident",
+    "quick_reply", "numeric_input", "osha_emergency_alert",
 ]
+
+
+class IRCopilotChoice(BaseModel):
+    label: str
+    value: str
 
 
 class IRCopilotCardAction(BaseModel):
@@ -535,6 +541,20 @@ class IRCopilotCardAction(BaseModel):
     field_name: Optional[str] = None
     field_value: Optional[Any] = None
     search_query: Optional[str] = None
+    # quick_reply: button picker. quick_reply_kind discriminates the OSHA chain step.
+    choices: Optional[list[IRCopilotChoice]] = None
+    quick_reply_kind: Optional[str] = None
+    # numeric_input: validated number field. target_field names the incident column
+    # to write to; pending_classification carries the osha_classification value to
+    # set alongside (days_away vs restricted_duty).
+    target_field: Optional[str] = None
+    pending_classification: Optional[str] = None
+    input_label: Optional[str] = None
+    input_min: Optional[int] = None
+    input_max: Optional[int] = None
+    # osha_emergency_alert: informational + acknowledgment.
+    phone: Optional[str] = None
+    deadline: Optional[str] = None
 
 
 class IRCopilotCard(BaseModel):
@@ -573,3 +593,9 @@ class IRCopilotStreamRequest(BaseModel):
 class IRCopilotAcceptRequest(BaseModel):
     message_id: UUID
     card_id: str
+    # quick_reply: which choice the user picked.
+    selected_value: Optional[str] = None
+    # numeric_input: the validated number the user typed.
+    numeric_value: Optional[int] = None
+    # osha_emergency_alert: user's confirmation notes (required to clear the block).
+    notes: Optional[str] = Field(default=None, max_length=2000)
