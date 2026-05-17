@@ -21,57 +21,36 @@ sibling submodules (e.g. /oig-summary, /incident-counts, /onboarding-draft) —
 shadow is preserved by registering this router BEFORE submodule
 `include_router` calls.
 """
-import asyncio
-import csv
-import io
-import json
 import logging
-import re
-import secrets
-from datetime import datetime, date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Body, BackgroundTasks
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from pydantic import BaseModel, EmailStr, model_validator
 
-from app.database import get_connection
-from app.core.dependencies import get_current_user
-from app.matcha.dependencies import require_admin_or_client, get_client_company_id, require_feature
 from app.core.models.auth import CurrentUser
-from app.core.services.compliance_service import ensure_location_for_employee
-from app.core.services.credential_crypto import encrypt_credential_fields, decrypt_credential_fields
-from app.core.services.storage import get_storage
-from app.core.services.email import get_email_service
+from app.database import get_connection
+from app.matcha.dependencies import get_client_company_id, require_admin_or_client
 from app.matcha.services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
-    start_google_workspace_onboarding,
-    start_slack_onboarding,
 )
-from app.matcha.services.risk_assessment_service import compute_risk_assessment, generate_recommendations, DEFAULT_WEIGHTS
 
 from ._shared import (
-    INVITATION_SEND_FAILED_DETAIL,
-    _json_object,
+    _auto_send_invitation,
     _coerce_bool,
-    _exception_message,
-    _parse_csv_date,
     _column_exists,
     _employee_compensation_fields_available,
-    _employee_status_fields_available,
-    _employee_org_fields_available,
-    _sync_employee_location_for_compliance,
     _employee_compensation_values,
-    send_single_invitation,
-    _send_invitation_with_conn,
-    _auto_send_invitation,
-    _refresh_risk_assessment,
+    _employee_org_fields_available,
+    _employee_status_fields_available,
+    _json_object,
     _perform_oig_screening,
+    _refresh_risk_assessment,
     _run_provisioning_and_notify,
-    _send_provisioning_email,
+    _sync_employee_location_for_compliance,
 )
 
 logger = logging.getLogger(__name__)

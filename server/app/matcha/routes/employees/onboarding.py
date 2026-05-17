@@ -18,7 +18,7 @@ Routes (admin-scoped onboarding-draft, 1-segment paths shadowed by crud's
 """
 import json
 import logging
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import List, Optional
 from uuid import UUID
 
