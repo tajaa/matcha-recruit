@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { Loader2, ShieldAlert, FileSearch, MapPin, UploadCloud, Lock } from 'lucide-react'
 
 import MarketingNav from './MarketingNav'
@@ -14,9 +14,9 @@ const DISPLAY = 'var(--font-display)'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 const MAX_PDF_BYTES = 10 * 1024 * 1024
-const MAX_STATES = 6
 const SIGNUP_HREF = '/auth/resources-signup?next=%2Fhandbook-gap-analyzer'
 const LOGIN_HREF = '/login?next=%2Fhandbook-gap-analyzer'
+const EMBEDDED_PATH = '/app/resources/handbook-audit'
 
 const STATES: { code: string; name: string }[] = [
   { code: 'AL', name: 'Alabama' }, { code: 'AK', name: 'Alaska' }, { code: 'AZ', name: 'Arizona' },
@@ -48,8 +48,36 @@ const INDUSTRIES = [
   { value: 'tech', label: 'Tech / Software' },
 ]
 
-export default function HandbookGapAnalyzer() {
+interface HandbookGapAnalyzerProps {
+  embedded?: boolean
+}
+
+export default function HandbookGapAnalyzer({ embedded = false }: HandbookGapAnalyzerProps) {
   const { me, loading } = useMe()
+
+  if (!embedded && !loading && me) {
+    return <Navigate to={EMBEDDED_PATH} replace />
+  }
+
+  if (embedded) {
+    return (
+      <div className="max-w-[1100px] mx-auto px-6 sm:px-10 py-10">
+        <EmbeddedHero />
+        <div className="grid lg:grid-cols-3 gap-6 mb-10">
+          <Pillar icon={UploadCloud} title="Upload" body="Drop in your current handbook PDF. Up to 10MB, kept private." />
+          <Pillar icon={MapPin} title="Scope" body="Pick one state. Run again for additional locations." />
+          <Pillar icon={FileSearch} title="Diagnose" body="Get a per-clause gap list. Severity, citation, what good looks like." />
+        </div>
+        {loading ? (
+          <div className="text-center py-12" style={{ color: MUTED }}>
+            <Loader2 className="w-5 h-5 animate-spin inline" />
+          </div>
+        ) : (
+          <UploaderForm embedded />
+        )}
+      </div>
+    )
+  }
 
   return (
     <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen">
@@ -60,7 +88,7 @@ export default function HandbookGapAnalyzer() {
 
         <div className="grid lg:grid-cols-3 gap-6 mb-12">
           <Pillar icon={UploadCloud} title="Upload" body="Drop in your current handbook PDF. Up to 10MB, kept private." />
-          <Pillar icon={MapPin} title="Scope" body="Pick the states you operate in. Each is graded independently." />
+          <Pillar icon={MapPin} title="Scope" body="Pick one state. Run again for additional locations." />
           <Pillar icon={FileSearch} title="Diagnose" body="Get a per-clause gap list. Severity, citation, what good looks like." />
         </div>
 
@@ -68,8 +96,6 @@ export default function HandbookGapAnalyzer() {
           <div className="text-center py-12" style={{ color: MUTED }}>
             <Loader2 className="w-5 h-5 animate-spin inline" />
           </div>
-        ) : me ? (
-          <UploaderForm />
         ) : (
           <SignupGate />
         )}
@@ -77,6 +103,23 @@ export default function HandbookGapAnalyzer() {
 
       <MarketingFooter />
     </div>
+  )
+}
+
+function EmbeddedHero() {
+  return (
+    <header className="mb-10">
+      <h1
+        className="tracking-tight mb-3"
+        style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: 'clamp(1.6rem, 3vw, 2.4rem)', color: INK }}
+      >
+        Handbook Audit
+      </h1>
+      <p className="text-[15px] leading-relaxed max-w-[680px]" style={{ color: MUTED }}>
+        Upload your handbook PDF and pick a state. We grade each section against
+        that state's required policies and return a clause-by-clause gap list.
+      </p>
+    </header>
   )
 }
 
@@ -100,7 +143,7 @@ function Hero({ authed }: { authed: boolean }) {
         style={{ color: MUTED }}
       >
         {authed
-          ? 'Upload your handbook, pick your states, get a gap report a lawyer would charge $2k–$5k for.'
+          ? 'Upload your handbook, pick a state, get a gap report a lawyer would charge $2k–$5k for.'
           : 'Compare your handbook against the actual jurisdiction-by-jurisdiction policy requirements your team is on the hook for. A free Matcha account unlocks the audit.'}
       </p>
     </header>
@@ -154,11 +197,11 @@ interface QuotaState {
   resets_at: string
 }
 
-function UploaderForm() {
+function UploaderForm({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate()
   const [pdfFile, setPdfFile] = useState<File | null>(null)
   const [industry, setIndustry] = useState('general')
-  const [selectedStates, setSelectedStates] = useState<string[]>([])
+  const [selectedState, setSelectedState] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [quota, setQuota] = useState<QuotaState | null>(null)
@@ -177,14 +220,6 @@ function UploaderForm() {
   }, [])
 
   const quotaExhausted = quota ? quota.remaining <= 0 : false
-
-  function toggleState(code: string) {
-    setSelectedStates((prev) => {
-      if (prev.includes(code)) return prev.filter((c) => c !== code)
-      if (prev.length >= MAX_STATES) return prev
-      return [...prev, code]
-    })
-  }
 
   function handleFile(file: File | null) {
     setError(null)
@@ -210,8 +245,8 @@ function UploaderForm() {
       setError('Pick the PDF first.')
       return
     }
-    if (selectedStates.length === 0) {
-      setError('Pick at least one state.')
+    if (!selectedState) {
+      setError('Pick a state.')
       return
     }
 
@@ -219,7 +254,7 @@ function UploaderForm() {
     try {
       const fd = new FormData()
       fd.append('pdf', pdfFile)
-      fd.append('states', selectedStates.join(','))
+      fd.append('states', selectedState)
       fd.append('industry', industry)
       const token = localStorage.getItem('matcha_access_token')
       const res = await fetch(`${BASE}/resources/handbook-gap-analyzer/analyze`, {
@@ -233,7 +268,10 @@ function UploaderForm() {
         setSubmitting(false)
         return
       }
-      navigate(`/handbook-gap-analyzer/result/${data.report_id}`)
+      const resultPath = embedded
+        ? `${EMBEDDED_PATH}/result/${data.report_id}`
+        : `/handbook-gap-analyzer/result/${data.report_id}`
+      navigate(resultPath)
     } catch {
       setError('Network error. Try again.')
       setSubmitting(false)
@@ -317,23 +355,24 @@ function UploaderForm() {
 
       <div className="mb-7">
         <SectionLabel>
-          States you operate in
+          State for this audit
           <span className="ml-2 normal-case tracking-normal" style={{ color: MUTED, fontFamily: 'var(--font-mono)' }}>
-            {selectedStates.length} / {MAX_STATES}
+            {selectedState ?? '—'}
           </span>
         </SectionLabel>
+        <p className="text-[12px] mb-3" style={{ color: MUTED }}>
+          Each audit covers one state. Run another for your other locations.
+        </p>
         <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
           {STATES.map((s) => {
-            const isOn = selectedStates.includes(s.code)
-            const disabled = !isOn && selectedStates.length >= MAX_STATES
+            const isOn = selectedState === s.code
             return (
               <button
                 key={s.code}
                 type="button"
-                disabled={disabled}
-                onClick={() => toggleState(s.code)}
+                onClick={() => setSelectedState(s.code)}
                 title={s.name}
-                className="h-9 rounded-md text-[12px] font-medium tracking-wide transition-colors disabled:opacity-40"
+                className="h-9 rounded-md text-[12px] font-medium tracking-wide transition-colors"
                 style={{
                   backgroundColor: isOn ? INK : 'rgba(31,29,26,0.04)',
                   color: isOn ? BG : INK,
@@ -380,7 +419,7 @@ function UploaderForm() {
 
       <button
         type="submit"
-        disabled={submitting || !pdfFile || selectedStates.length === 0 || quotaExhausted}
+        disabled={submitting || !pdfFile || !selectedState || quotaExhausted}
         className="w-full md:w-auto inline-flex items-center justify-center gap-2 px-7 h-12 rounded-full text-[14px] font-medium transition-opacity hover:opacity-90 disabled:opacity-50"
         style={{ backgroundColor: INK, color: BG }}
       >

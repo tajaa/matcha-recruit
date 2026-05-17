@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertTriangle, BookOpen, Calculator, ClipboardCheck, FileText, Home, Library } from 'lucide-react'
+import { AlertTriangle, BookOpen, Calculator, ClipboardCheck, FileText, Home, Library, ShieldAlert } from 'lucide-react'
 import SidebarShell from '../SidebarShell'
 import type { NavItem, NavGroup } from '../SidebarShell'
 import { useMe } from '../../hooks/useMe'
@@ -47,6 +47,7 @@ export default function ResourcesFreeSidebar() {
         { to: '/app/resources/templates/job-descriptions', icon: Library, label: 'Job Descriptions' },
         { to: '/app/resources/calculators', icon: Calculator, label: 'Calculators' },
         { to: '/app/resources/audit', icon: ClipboardCheck, label: 'Compliance Audit' },
+        { to: '/app/resources/handbook-audit', icon: ShieldAlert, label: 'Handbook Audit' },
         { to: '/app/resources/glossary', icon: BookOpen, label: 'HR Glossary' },
       ],
     },

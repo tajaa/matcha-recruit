@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 MAX_PDF_BYTES = 10 * 1024 * 1024  # 10 MiB
-MAX_STATES_PER_REPORT = 6
+MAX_STATES_PER_REPORT = 1
 MAX_AUDITS_PER_ACCOUNT_PER_MONTH = 2  # hard cap; resets at the start of each calendar month
 IP_RATE_LIMIT_KEY = "handbook_gap_analyzer:ip"
 IP_RATE_LIMIT_PER_DAY = 12  # belt-and-suspenders against one IP fanning out via many accounts
@@ -217,7 +217,7 @@ async def submit_handbook_for_analysis(
     if len(state_list) > MAX_STATES_PER_REPORT:
         raise HTTPException(
             status_code=400,
-            detail=f"Pick at most {MAX_STATES_PER_REPORT} states for a single audit",
+            detail="Pick exactly one state per audit",
         )
 
     content_type = (pdf.content_type or "").lower()

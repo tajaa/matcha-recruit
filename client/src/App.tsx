@@ -245,6 +245,8 @@ export default function App() {
         <Route path="resources/calculators/overtime" element={<RequireBusinessAccount><CalcOvertime embedded /></RequireBusinessAccount>} />
         <Route path="resources/calculators/total-comp" element={<RequireBusinessAccount><CalcTotalComp embedded /></RequireBusinessAccount>} />
         <Route path="resources/audit" element={<RequireBusinessAccount><ResourcesComplianceAudit embedded /></RequireBusinessAccount>} />
+        <Route path="resources/handbook-audit" element={<RequireBusinessAccount><HandbookGapAnalyzer embedded /></RequireBusinessAccount>} />
+        <Route path="resources/handbook-audit/result/:reportId" element={<RequireBusinessAccount><HandbookGapResult embedded /></RequireBusinessAccount>} />
         <Route path="resources/glossary" element={<ResourcesGlossary embedded />} />
         <Route path="resources/glossary/:slug" element={<ResourcesGlossaryTerm embedded />} />
         <Route path="inbox" element={<Inbox />} />

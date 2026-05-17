@@ -217,9 +217,12 @@ def _pick_sample_gaps(gaps: list[dict[str, Any]], n: int) -> list[dict[str, Any]
 def _gemini_client():
     """Build a google-genai client using the same env wiring as gemini_compliance."""
     from google import genai
-    from app.config import get_settings
+    from app.config import get_settings, load_settings
 
-    settings = get_settings()
+    try:
+        settings = get_settings()
+    except RuntimeError:
+        settings = load_settings()
     if settings.use_vertex:
         return genai.Client(
             vertexai=True,

@@ -53,7 +53,11 @@ interface ReportPayload {
   completed_at?: string | null
 }
 
-export default function HandbookGapResult() {
+interface HandbookGapResultProps {
+  embedded?: boolean
+}
+
+export default function HandbookGapResult({ embedded = false }: HandbookGapResultProps) {
   const { reportId } = useParams<{ reportId: string }>()
   const { me, loading: meLoading } = useMe()
   const [report, setReport] = useState<ReportPayload | null>(null)
@@ -99,8 +103,27 @@ export default function HandbookGapResult() {
   }, [reportId, me])
 
   if (!meLoading && !me) {
-    const next = encodeURIComponent(`/handbook-gap-analyzer/result/${reportId}`)
+    const nextPath = embedded
+      ? `/app/resources/handbook-audit/result/${reportId}`
+      : `/handbook-gap-analyzer/result/${reportId}`
+    const next = encodeURIComponent(nextPath)
     return <Navigate to={`/login?next=${next}`} replace />
+  }
+
+  const body = (
+    <>
+      {(meLoading || (!report && !error)) && <Loading />}
+      {error && <ErrorBlock message={error} embedded={embedded} />}
+      {report && report.status === 'failed' && (
+        <ErrorBlock message={report.error || 'The audit did not complete successfully.'} embedded={embedded} />
+      )}
+      {report && report.status === 'processing' && <Processing />}
+      {report && report.status === 'ready' && <ResultBody report={report} />}
+    </>
+  )
+
+  if (embedded) {
+    return <div className="max-w-[1100px] mx-auto px-6 sm:px-10 py-10">{body}</div>
   }
 
   return (
@@ -108,13 +131,7 @@ export default function HandbookGapResult() {
       <MarketingNav />
 
       <main className="max-w-[1100px] mx-auto px-6 sm:px-10 pt-28 pb-24">
-        {(meLoading || (!report && !error)) && <Loading />}
-        {error && <ErrorBlock message={error} />}
-        {report && report.status === 'failed' && (
-          <ErrorBlock message={report.error || 'The audit did not complete successfully.'} />
-        )}
-        {report && report.status === 'processing' && <Processing />}
-        {report && report.status === 'ready' && <ResultBody report={report} />}
+        {body}
       </main>
 
       <MarketingFooter />
@@ -149,7 +166,8 @@ function Processing() {
   )
 }
 
-function ErrorBlock({ message }: { message: string }) {
+function ErrorBlock({ message, embedded }: { message: string; embedded?: boolean }) {
+  const retryTo = embedded ? '/app/resources/handbook-audit' : '/handbook-gap-analyzer'
   return (
     <div
       className="rounded-2xl p-8 text-center"
@@ -158,7 +176,7 @@ function ErrorBlock({ message }: { message: string }) {
       <AlertOctagon className="w-7 h-7 mx-auto mb-4" style={{ color: '#8a4a3a' }} />
       <h2 className="text-lg mb-2" style={{ fontFamily: DISPLAY, color: INK }}>Something went wrong.</h2>
       <p className="text-sm" style={{ color: MUTED }}>{message}</p>
-      <Link to="/handbook-gap-analyzer" className="inline-block mt-5 underline text-sm" style={{ color: INK }}>
+      <Link to={retryTo} className="inline-block mt-5 underline text-sm" style={{ color: INK }}>
         Try again
       </Link>
     </div>
