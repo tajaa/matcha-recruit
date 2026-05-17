@@ -524,7 +524,7 @@ IRCopilotRole = Literal["user", "assistant", "system"]
 IRCopilotMessageType = Literal["text", "card", "event"]
 IRCopilotActionType = Literal[
     "run_analysis", "set_field", "request_info", "escalate", "close_incident",
-    "quick_reply", "numeric_input", "osha_emergency_alert",
+    "quick_reply", "numeric_input", "text_input", "osha_emergency_alert",
 ]
 
 
@@ -544,14 +544,18 @@ class IRCopilotCardAction(BaseModel):
     # quick_reply: button picker. quick_reply_kind discriminates the OSHA chain step.
     choices: Optional[list[IRCopilotChoice]] = None
     quick_reply_kind: Optional[str] = None
-    # numeric_input: validated number field. target_field names the incident column
-    # to write to; pending_classification carries the osha_classification value to
-    # set alongside (days_away vs restricted_duty).
+    # numeric_input / text_input: validated input field. target_field names
+    # the incident column or JSONB key to write to; pending_classification
+    # carries the osha_classification value to set alongside (days_away vs
+    # restricted_duty). text_input also uses prompt_text + input_rows for
+    # the textarea label + height.
     target_field: Optional[str] = None
     pending_classification: Optional[str] = None
     input_label: Optional[str] = None
     input_min: Optional[int] = None
     input_max: Optional[int] = None
+    prompt_text: Optional[str] = None
+    input_rows: Optional[int] = None
     # osha_emergency_alert: informational + acknowledgment.
     phone: Optional[str] = None
     deadline: Optional[str] = None
@@ -597,5 +601,7 @@ class IRCopilotAcceptRequest(BaseModel):
     selected_value: Optional[str] = None
     # numeric_input: the validated number the user typed.
     numeric_value: Optional[int] = None
+    # text_input: free-text answer (root-cause interview steps).
+    text_value: Optional[str] = Field(default=None, max_length=4000)
     # osha_emergency_alert: user's confirmation notes (required to clear the block).
     notes: Optional[str] = Field(default=None, max_length=2000)

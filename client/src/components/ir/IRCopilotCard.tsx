@@ -10,6 +10,7 @@ export type CopilotCardActionType =
   | 'close_incident'
   | 'quick_reply'
   | 'numeric_input'
+  | 'text_input'
   | 'osha_emergency_alert'
 
 export type CopilotCardChoice = {
@@ -28,12 +29,14 @@ export type CopilotCardAction = {
   // quick_reply: button picker.
   choices?: CopilotCardChoice[]
   quick_reply_kind?: string
-  // numeric_input: validated number field.
+  // numeric_input / text_input: validated input field.
   target_field?: string
   pending_classification?: string
   input_label?: string
   input_min?: number
   input_max?: number
+  prompt_text?: string
+  input_rows?: number
   // osha_emergency_alert: informational + acknowledgment.
   phone?: string
   deadline?: string
@@ -53,6 +56,7 @@ export type CopilotCard = {
 export type AcceptPayload = {
   selected_value?: string
   numeric_value?: number
+  text_value?: string
   notes?: string
 }
 
@@ -94,6 +98,7 @@ export default function IRCopilotCard({ messageId, card, accepted, busy, onAccep
 
   const isQuickReply = card.action.type === 'quick_reply' && Array.isArray(card.action.choices)
   const isNumericInput = card.action.type === 'numeric_input'
+  const isTextInput = card.action.type === 'text_input'
 
   return (
     <div
@@ -143,6 +148,13 @@ export default function IRCopilotCard({ messageId, card, accepted, busy, onAccep
               />
             ) : isNumericInput ? (
               <NumericInputControl
+                messageId={messageId}
+                card={card}
+                busy={busy}
+                onAccept={onAccept}
+              />
+            ) : isTextInput ? (
+              <TextInputControl
                 messageId={messageId}
                 card={card}
                 busy={busy}
@@ -262,6 +274,63 @@ function NumericInputControl({
     </div>
   )
 }
+
+function TextInputControl({
+  messageId,
+  card,
+  busy,
+  onAccept,
+}: {
+  messageId: string
+  card: CopilotCard
+  busy: boolean
+  onAccept: (messageId: string, cardId: string, payload?: AcceptPayload) => void
+}) {
+  const [value, setValue] = useState('')
+  const rows = card.action.input_rows ?? 3
+  const valid = value.trim().length > 0
+  return (
+    <div className="flex flex-col gap-2 w-full">
+      {card.action.prompt_text && (
+        <label className="text-xs text-zinc-400">{card.action.prompt_text}</label>
+      )}
+      <textarea
+        rows={rows}
+        maxLength={4000}
+        value={value}
+        disabled={busy}
+        placeholder="Type your answer…"
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && valid && !busy) {
+            e.preventDefault()
+            onAccept(messageId, card.id, { text_value: value.trim() })
+          }
+        }}
+        className="w-full rounded-md bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500 resize-y"
+      />
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={busy || !valid}
+          onClick={() => onAccept(messageId, card.id, { text_value: value.trim() })}
+        >
+          {busy ? (
+            <span className="flex items-center gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Saving…
+            </span>
+          ) : (
+            card.action.label || 'Save'
+          )}
+        </Button>
+        <span className="text-[11px] text-zinc-500">⌘+Enter to save</span>
+      </div>
+    </div>
+  )
+}
+
 
 function OshaEmergencyAlertCard({
   messageId,

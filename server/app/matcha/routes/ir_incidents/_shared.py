@@ -572,6 +572,114 @@ def build_osha_injury_type_query_card() -> dict:
     }
 
 
+# ===========================================
+# Root-cause interview chain (replaces AI-driven run_analysis root_cause)
+# ===========================================
+#
+# The orchestrator used to recommend `run_analysis root_cause`, but the
+# analyzer only sees the initial title+description and produces generic
+# guesses (or stale failures). Per customer feedback, the Copilot now
+# captures root cause via a structured 3-question interview: Hazard /
+# Why / Prevention. Answers persist verbatim — no AI synthesis.
+
+ROOT_CAUSE_INTERVIEW_STEPS: tuple[str, ...] = ("hazard", "why", "prevention")
+
+ROOT_CAUSE_PROMPTS = {
+    "hazard": "What was the hazard?",
+    "why": "Why did it happen?",
+    "prevention": "How can we prevent it?",
+}
+
+ROOT_CAUSE_PLAINTEXT_LABELS = {
+    "hazard": "Hazard",
+    "why": "Why it happened",
+    "prevention": "Prevention",
+}
+
+
+def build_log_root_cause_query_card() -> dict:
+    """Yes/No: kick off the root-cause interview chain."""
+    return {
+        "id": "log_root_cause_query",
+        "title": "Log Root Cause",
+        "recommendation": "Would you like to log the root cause?",
+        "rationale": (
+            "Capture the hazard, why it happened, and how to prevent it in "
+            "your own words. We save the answers verbatim — no AI guesses."
+        ),
+        "priority": "medium",
+        "blockers": [],
+        "action": {
+            "type": "quick_reply",
+            "label": "Choose one",
+            "quick_reply_kind": "log_root_cause_query",
+            "choices": [
+                {"label": "Yes", "value": "yes"},
+                {"label": "No", "value": "no"},
+            ],
+        },
+    }
+
+
+def build_root_cause_text_card(*, step: str) -> dict:
+    """One text_input card per interview step. ``step`` must be in
+    ROOT_CAUSE_INTERVIEW_STEPS — the dispatcher reads it from action.target_field
+    to know which JSONB key to write and which step is next."""
+    if step not in ROOT_CAUSE_INTERVIEW_STEPS:
+        raise ValueError(f"Unknown root-cause step: {step}")
+    prompt = ROOT_CAUSE_PROMPTS[step]
+    return {
+        "id": f"root_cause_interview__{step}",
+        "title": f"Root cause — {ROOT_CAUSE_PLAINTEXT_LABELS[step]}",
+        "recommendation": prompt,
+        "rationale": (
+            "Type your answer in your own words. Saved exactly as written."
+        ),
+        "priority": "medium",
+        "blockers": [],
+        "action": {
+            "type": "text_input",
+            "label": "Save",
+            "target_field": step,
+            "prompt_text": prompt,
+            "input_label": "Answer",
+            "input_rows": 3,
+        },
+    }
+
+
+def build_root_cause_logged_ack_card() -> dict:
+    """Final 'Root cause logged' ack — informational, no further action."""
+    return {
+        "id": "root_cause_logged",
+        "title": "Root cause logged",
+        "recommendation": "Saved your hazard / why / prevention answers.",
+        "rationale": (
+            "The combined entry is now on the incident and feeds the OSHA 301 "
+            "form, broker reports, and the AI Analysis tab."
+        ),
+        "priority": "low",
+        "blockers": [],
+        "action": {
+            "type": "request_info",
+            "label": "Got it",
+        },
+    }
+
+
+def compose_root_cause_text(interview: dict) -> str:
+    """Render the three interview answers into the plain-text format we
+    write to ir_incidents.root_cause TEXT. Missing steps surface as empty
+    blocks rather than silently dropping — keeps the schema consistent.
+    """
+    parts: list[str] = []
+    for step in ROOT_CAUSE_INTERVIEW_STEPS:
+        answer = (interview or {}).get(step) or ""
+        label = ROOT_CAUSE_PLAINTEXT_LABELS[step]
+        parts.append(f"{label}: {answer.strip()}")
+    return "\n\n".join(parts)
+
+
 def build_osha_close_confirmation_card() -> dict:
     """Final close card after the OSHA chain completes."""
     return {

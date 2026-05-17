@@ -160,6 +160,7 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
       const body: Record<string, unknown> = { message_id: messageId, card_id: cardId }
       if (payload?.selected_value !== undefined) body.selected_value = payload.selected_value
       if (payload?.numeric_value !== undefined) body.numeric_value = payload.numeric_value
+      if (payload?.text_value !== undefined) body.text_value = payload.text_value
       if (payload?.notes !== undefined) body.notes = payload.notes
       const res = await fetch(`${BASE}/ir/incidents/${incidentId}/copilot/accept`, {
         method: 'POST',
@@ -202,6 +203,7 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
                 data.action === 'close_incident' ||
                 data.action === 'quick_reply' ||
                 data.action === 'numeric_input' ||
+                data.action === 'text_input' ||
                 data.action === 'osha_emergency_alert'
               ) {
                 didMutateIncident = true
@@ -374,6 +376,7 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
               'close_incident',
               'quick_reply',
               'numeric_input',
+              'text_input',
               'osha_emergency_alert',
             ])
             if (action && fieldUpdateActions.has(action) && fieldLabel) {

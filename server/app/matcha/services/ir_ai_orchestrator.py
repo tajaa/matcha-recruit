@@ -83,6 +83,7 @@ IR_ACTION_TYPES = {
     "close_incident",
     "quick_reply",
     "numeric_input",
+    "text_input",
     "osha_emergency_alert",
 }
 
@@ -242,6 +243,16 @@ instead. Backend rejects unknown values and the user sees an error.
 ACTION RULES:
 - run_analysis: pick analysis_type from IR's valid set. Don't recommend an
   analysis that's already in CACHED ANALYSES unless re-running adds value.
+  NEVER emit `run_analysis` with `analysis_type="root_cause"`. Root cause is
+  captured via a structured 3-question user interview (Hazard / Why /
+  Prevention) — not by AI inference. If you would otherwise have proposed
+  RCA, emit ONE `quick_reply` card instead with
+  `quick_reply_kind="log_root_cause_query"` and choices
+  `[{{"label":"Yes","value":"yes"}},{{"label":"No","value":"no"}}]`. The
+  backend chains the follow-up text_input cards and writes the user's
+  verbatim answers to ir_incidents.root_cause. Skip the prompt entirely
+  when the incident's root_cause field is already non-empty OR
+  category_data.root_cause_declined is true (user said No earlier).
 - set_field: when you can confidently propose a value (e.g. incident_type
   from description), pre-fill field_name + field_value. The user clicks
   accept and the system writes it. field_value MUST be from SET_FIELD
@@ -291,8 +302,11 @@ ACTION cards over INVESTIGATION cards:
     - request_info / "Interview the employee for their statement" cards —
       attendance is cut and dry; the employee's reason rarely changes the
       corrective step.
-    - run_analysis root_cause / similar — overkill for routine policy
-      violations with a single obvious cause.
+    - run_analysis similar — overkill for routine policy violations with
+      a single obvious cause. (run_analysis root_cause is forbidden
+      entirely — see ACTION RULES above; emit log_root_cause_query only
+      for complex or high-severity cases where the user wants to capture
+      the cause in their own words.)
 
 Only recommend interviewing the subject when (a) facts are disputed
 between accounts, (b) intent or context materially affects the response
@@ -301,7 +315,7 @@ between accounts, (b) intent or context materially affects the response
 QUALITY RULES:
 - AT MOST 1 primary card per round. A second card is allowed ONLY when it
   represents a clear branch the user must choose between (e.g. set_field
-  severity vs escalate, or close_incident vs run_analysis root_cause).
+  severity vs escalate).
   NEVER offer two set_field cards for the same field in the same round
   (e.g. two "Set status to action_required" cards is a bug — pick one).
   If you have multiple ideas, pick the single best one and put the others
@@ -517,13 +531,70 @@ async def generate_guidance(
                 title = raw.get("title") if isinstance(raw.get("title"), str) else ""
                 normalized_id = _guidance_card_id(raw.get("id"), title, idx)
                 raw_cards_by_id[normalized_id] = raw
+    # Resolve the root-cause skip signals once per round so the safety-net
+    # rewrite can drop / shortcut without re-parsing JSONB per card. Both
+    # "already logged" (root_cause non-empty) and "user said no last round"
+    # (category_data.root_cause_declined) mean we must NOT re-prompt with
+    # the interview kick-off card.
+    existing_root_cause = (incident.get("root_cause") or "").strip()
+    raw_category_data = incident.get("category_data") or {}
+    if isinstance(raw_category_data, str):
+        try:
+            raw_category_data = json.loads(raw_category_data)
+        except json.JSONDecodeError:
+            raw_category_data = {}
+    root_cause_declined = bool(raw_category_data.get("root_cause_declined")) if isinstance(raw_category_data, dict) else False
+    suppress_root_cause_card = bool(existing_root_cause) or root_cause_declined
+
     filtered_cards: list[dict[str, Any]] = []
+    saw_log_root_cause_query = False
     for card in cards:
         raw = raw_cards_by_id.get(card["id"]) or {}
         raw_action = raw.get("action") or {}
         raw_type = raw_action.get("type")
         raw_analysis = raw_action.get("analysis_type")
         canonical_analysis = _canonical_analysis_type(raw_analysis)
+        # Safety net: if the AI emits run_analysis root_cause despite the
+        # prompt rule forbidding it, rewrite the card in-place to the
+        # log_root_cause_query interview kick-off. The analyzer-driven path
+        # only has the initial title+description and produces unhelpful
+        # output for thin reports; the customer feedback that drove this
+        # change ("system shouldn't be running root cause") is preserved
+        # even when the AI doesn't comply with prompt instructions.
+        if raw_type == "run_analysis" and canonical_analysis == "root_cause":
+            from app.matcha.routes.ir_incidents._shared import build_log_root_cause_query_card
+            if suppress_root_cause_card:
+                # Already logged or user already declined — drop entirely,
+                # do not re-prompt. Prevents the No-then-AI-re-emits loop.
+                logger.info(
+                    "IR copilot dropped root_cause card %s (existing=%s declined=%s)",
+                    card["id"], bool(existing_root_cause), root_cause_declined,
+                )
+                continue
+            if saw_log_root_cause_query:
+                logger.info(
+                    "IR copilot dropped duplicate log_root_cause_query rewrite for card %s",
+                    card["id"],
+                )
+                continue
+            replacement = build_log_root_cause_query_card()
+            card["id"] = replacement["id"]
+            card["title"] = replacement["title"]
+            card["recommendation"] = replacement["recommendation"]
+            card["rationale"] = replacement["rationale"]
+            card["priority"] = replacement["priority"]
+            card["blockers"] = replacement["blockers"]
+            card["action"] = dict(replacement["action"])
+            raw_type = card["action"]["type"]
+            raw_action = card["action"]
+            raw_analysis = None
+            canonical_analysis = None
+            saw_log_root_cause_query = True
+            filtered_cards.append(card)
+            logger.info(
+                "IR copilot rewrote run_analysis root_cause card to log_root_cause_query"
+            )
+            continue
         if raw_type not in IR_ACTION_TYPES:
             logger.warning(
                 "IR copilot dropped card %s: unsupported action_type=%r",

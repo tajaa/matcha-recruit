@@ -34,15 +34,19 @@ from app.matcha.models.ir_incident import (
 from ._shared import (
     OSHA_INJURY_TYPES,
     OSHA_INJURY_TYPE_LABELS,
+    ROOT_CAUSE_INTERVIEW_STEPS,
     _get_incident_with_company_check,
     _safe_json_loads,
     _sse,
     _utc_now_naive,
+    build_log_root_cause_query_card,
     build_osha_close_confirmation_card,
     build_osha_days_count_card,
     build_osha_days_type_query_card,
     build_osha_injury_type_query_card,
     build_osha_recordable_query_card,
+    build_root_cause_text_card,
+    compose_root_cause_text,
     log_audit,
 )
 
@@ -309,6 +313,15 @@ async def skip_copilot_card(
             raise HTTPException(
                 status_code=400,
                 detail="The OSHA reporting alert cannot be skipped. Acknowledge with confirmation notes instead.",
+            )
+        # Root-cause interview steps (text_input) are part of a chain the
+        # user already opted into by clicking Yes on log_root_cause_query.
+        # Skipping mid-chain leaves the JSONB partially populated; route
+        # users back to answering or starting over.
+        if stored_action.get("type") == "text_input":
+            raise HTTPException(
+                status_code=400,
+                detail="Finish the root cause interview or type 'no' on a fresh prompt instead.",
             )
 
         meta["skipped"] = True
@@ -591,11 +604,64 @@ async def _handle_quick_reply(
         "osha_recordable_query": {"yes", "no"},
         "osha_days_type_query": {"days_away", "restricted_duty", "neither"},
         "osha_injury_type_query": OSHA_INJURY_TYPES,
+        "log_root_cause_query": {"yes", "no"},
     }
     if kind not in allowed_by_kind:
         return {"error": f"Unknown quick_reply kind: {kind}"}
     if selected not in allowed_by_kind[kind]:
         return {"error": f"Invalid selection '{selected}' for {kind}"}
+
+    if kind == "log_root_cause_query":
+        # Skip-if-answered: a non-empty existing root_cause means the user
+        # already filled this in (manual edit or prior interview round).
+        existing = await conn.fetchval(
+            "SELECT NULLIF(TRIM(root_cause), '') FROM ir_incidents WHERE id = $1",
+            incident_id,
+        )
+        if existing:
+            return {
+                "event_summary": "Root cause already on file — skipping the interview.",
+                "event_extra": {},
+            }
+        if selected == "yes":
+            first = build_root_cause_text_card(step="hazard")
+            inserted = await _emit_chain_card(
+                conn, incident_id=incident_id, card=first, created_by=current_user.id,
+            )
+            return {
+                "event_summary": "Starting root cause interview.",
+                "event_extra": {},
+                "next_card": first,
+                "next_message_id": str(inserted["id"]),
+            }
+        # No: stamp category_data.root_cause_declined so the next guidance
+        # round's safety-net rewrite skips re-prompting. Otherwise the AI
+        # sees an empty root_cause and re-emits run_analysis root_cause,
+        # which we'd just rewrite back to the same Yes/No card — an
+        # infinite loop from the user's perspective.
+        await conn.execute(
+            """
+            UPDATE ir_incidents
+            SET category_data = jsonb_set(
+                COALESCE(category_data, '{}'::jsonb),
+                '{root_cause_declined}',
+                'true'::jsonb,
+                true
+            ),
+            updated_at = NOW()
+            WHERE id = $1
+            """,
+            incident_id,
+        )
+        return {
+            "event_summary": "Noted — no root cause logged.",
+            "event_extra": {
+                "field": "root_cause_declined",
+                "field_label": "Root cause",
+                "previous_value": None,
+                "new_value": "declined",
+            },
+        }
 
     if kind == "osha_recordable_query":
         bool_value = selected == "yes"
@@ -771,6 +837,108 @@ async def _handle_numeric_input(
         },
         "next_card": next_card,
         "next_message_id": str(inserted["id"]),
+    }
+
+
+async def _handle_text_input(
+    conn,
+    *,
+    incident_id: UUID,
+    action: dict,
+    body: IRCopilotAcceptRequest,
+    current_user,
+) -> dict:
+    """Persist one root-cause interview answer and emit the next chain step.
+
+    ``action.target_field`` carries the step name (hazard / why / prevention).
+    Each answer lands in ``ir_incidents.category_data->'root_cause_interview'->>step``
+    (JSONB). After the third step we compose all three into the existing
+    ``root_cause`` TEXT column so the OSHA 301 printable form, broker readers,
+    and the AI Analysis tab see a populated value.
+    """
+    step = (action.get("target_field") or "").strip()
+    if step not in ROOT_CAUSE_INTERVIEW_STEPS:
+        return {"error": f"Invalid text_input target_field: {step}"}
+
+    raw = body.text_value or ""
+    answer = raw.strip()
+    if not answer:
+        return {"error": "Answer can't be empty. Type your response and Save."}
+    if len(answer) > 4000:
+        answer = answer[:4000]
+
+    # Postgres jsonb_set does NOT auto-create intermediate object keys —
+    # for a fresh incident with category_data='{}', writing the nested
+    # path ['root_cause_interview', step] in one call silently returns
+    # the original unchanged. Two-step: ensure the parent key exists as
+    # an object, then write the leaf.
+    await conn.execute(
+        """
+        UPDATE ir_incidents
+        SET category_data = jsonb_set(
+            jsonb_set(
+                COALESCE(category_data, '{}'::jsonb),
+                '{root_cause_interview}',
+                COALESCE(category_data->'root_cause_interview', '{}'::jsonb),
+                true
+            ),
+            ARRAY['root_cause_interview', $1],
+            to_jsonb($2::text),
+            true
+        ),
+        updated_at = NOW()
+        WHERE id = $3
+        """,
+        step, answer, incident_id,
+    )
+
+    step_idx = ROOT_CAUSE_INTERVIEW_STEPS.index(step)
+    event_summary = f"Captured root cause — {step}"
+    event_extra = {
+        "field": f"root_cause_interview.{step}",
+        "field_label": f"Root cause · {step}",
+        "previous_value": None,
+        "new_value": answer,
+    }
+
+    if step_idx + 1 < len(ROOT_CAUSE_INTERVIEW_STEPS):
+        next_step = ROOT_CAUSE_INTERVIEW_STEPS[step_idx + 1]
+        next_card = build_root_cause_text_card(step=next_step)
+        inserted = await _emit_chain_card(
+            conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
+        )
+        return {
+            "event_summary": event_summary,
+            "event_extra": event_extra,
+            "next_card": next_card,
+            "next_message_id": str(inserted["id"]),
+        }
+
+    # Final step — compose the combined text and write to root_cause column.
+    # No follow-up ack card: the event row ("Updated Root cause" with the
+    # combined text in the diff UI) already tells the user it landed, and
+    # adding a second "Got it" card would be friction. Returning without
+    # next_card lets the post-dispatch flow run a normal AI guidance round
+    # so the Copilot picks the next concrete step (e.g. corrective_actions).
+    row = await conn.fetchrow(
+        "SELECT category_data FROM ir_incidents WHERE id = $1",
+        incident_id,
+    )
+    cd = _safe_json_loads(row["category_data"] if row else None, {}) or {}
+    interview = cd.get("root_cause_interview") or {}
+    combined = compose_root_cause_text(interview)
+    await conn.execute(
+        "UPDATE ir_incidents SET root_cause = $1, updated_at = NOW() WHERE id = $2",
+        combined, incident_id,
+    )
+    return {
+        "event_summary": "Root cause logged",
+        "event_extra": {
+            "field": "root_cause",
+            "field_label": "Root cause",
+            "previous_value": None,
+            "new_value": combined,
+        },
     }
 
 
@@ -1046,6 +1214,22 @@ async def accept_copilot_card(
 
                 elif action_type == "numeric_input":
                     chain_result = await _handle_numeric_input(
+                        conn,
+                        incident_id=incident_id,
+                        action=action,
+                        body=body,
+                        current_user=current_user,
+                    )
+                    if chain_result.get("error"):
+                        yield _sse({"type": "error", "detail": chain_result["error"]})
+                        return
+                    event_summary = chain_result.get("event_summary") or ""
+                    event_extra = chain_result.get("event_extra") or {}
+                    next_card = chain_result.get("next_card")
+                    next_message_id = chain_result.get("next_message_id")
+
+                elif action_type == "text_input":
+                    chain_result = await _handle_text_input(
                         conn,
                         incident_id=incident_id,
                         action=action,
