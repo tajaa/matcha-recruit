@@ -558,6 +558,29 @@ async def accept_copilot_card(
                         except Exception as exc:
                             logger.exception("policy_mapping failed for incident %s", incident_id)
                             event_summary = f"Policy mapping failed: {exc}"
+                    elif analysis_type == "root_cause":
+                        yield _sse({
+                            "type": "status",
+                            "stage": "running_analysis",
+                            "analysis_type": "root_cause",
+                            "label": "Running root cause analysis…",
+                        })
+                        try:
+                            from .ai_analysis import run_root_cause_inline
+                            await run_root_cause_inline(
+                                incident_id,
+                                current_user,
+                                ip_address=request.client.host if request.client else None,
+                            )
+                            yield _sse({
+                                "type": "status",
+                                "stage": "analysis_complete",
+                                "analysis_type": "root_cause",
+                            })
+                            event_summary = "Root cause analysis complete. Open the AI Analysis tab to review."
+                        except Exception as exc:
+                            logger.exception("root_cause analysis failed for incident %s", incident_id)
+                            event_summary = f"Root cause analysis failed: {exc}"
                     else:
                         event_summary = (
                             f"Open the AI Analysis tab and click Run on '{analysis_type.replace('_', ' ').title()}'."

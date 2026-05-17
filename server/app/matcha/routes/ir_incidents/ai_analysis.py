@@ -19,6 +19,7 @@ step 10.
 import asyncio
 import json
 import logging
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -233,20 +234,115 @@ async def analyze_severity(
         )
 
 
+async def run_root_cause_inline(
+    incident_id: UUID,
+    current_user,
+    *,
+    ip_address: Optional[str] = None,
+    use_cache: bool = True,
+) -> RootCauseAnalysis:
+    """Run root cause analysis without SSE wrapping. Returns the result.
+
+    Callable from the IR Copilot accept handler (or anywhere else that
+    needs the analysis to actually happen, not just stream progress).
+
+    Persists to ``ir_incident_analysis`` + audit-logs identically to the
+    SSE endpoint. Raises ``IRAnalysisError`` if the LLM fails AND no
+    cached row exists.
+    """
+    from app.matcha.services.ir_analysis import get_ir_analyzer, IRAnalysisError
+
+    async with get_connection() as conn:
+        row = await _get_incident_with_company_check(conn, incident_id, current_user)
+        row = dict(row)
+
+        cached = None
+        if use_cache:
+            cached = await conn.fetchrow(
+                """
+                SELECT analysis_data FROM ir_incident_analysis
+                WHERE incident_id = $1 AND analysis_type = 'root_cause'
+                ORDER BY generated_at DESC LIMIT 1
+                """,
+                str(incident_id),
+            )
+
+    if cached:
+        result = _safe_json_loads(cached["analysis_data"])
+        return RootCauseAnalysis(
+            primary_cause=result["primary_cause"],
+            contributing_factors=result["contributing_factors"],
+            prevention_suggestions=result["prevention_suggestions"],
+            reasoning=result["reasoning"],
+            generated_at=result["generated_at"],
+            from_cache=True,
+        )
+
+    category_data = json.loads(row["category_data"]) if isinstance(row.get("category_data"), str) else row.get("category_data")
+    witnesses = parse_witnesses(row.get("witnesses"))
+
+    try:
+        analyzer = get_ir_analyzer()
+        result = await analyzer.analyze_root_cause(
+            title=row["title"],
+            description=row["description"],
+            incident_type=row["incident_type"],
+            severity=row["severity"],
+            location=row["location"],
+            category_data=category_data,
+            witnesses=[w.model_dump() for w in witnesses],
+        )
+    except IRAnalysisError:
+        logger.exception("Root-cause analysis failed for incident %s", incident_id)
+        raise
+
+    async with get_connection() as conn2:
+        await conn2.execute(
+            """
+            INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
+            VALUES ($1, 'root_cause', $2)
+            """,
+            str(incident_id),
+            json.dumps(result),
+        )
+        await log_audit(
+            conn2,
+            str(incident_id),
+            str(current_user.id),
+            "analysis_run",
+            "analysis",
+            None,
+            {"type": "root_cause"},
+            ip_address,
+        )
+
+    return RootCauseAnalysis(
+        primary_cause=result["primary_cause"],
+        contributing_factors=result["contributing_factors"],
+        prevention_suggestions=result["prevention_suggestions"],
+        reasoning=result["reasoning"],
+        generated_at=result["generated_at"],
+    )
+
+
 @router.post("/{incident_id}/analyze/root-cause")
 async def analyze_root_cause(
     incident_id: UUID,
     request: Request,
     current_user=Depends(require_admin_or_client),
 ):
-    """Perform root cause analysis using AI (SSE stream)."""
-    from app.matcha.services.ir_analysis import get_ir_analyzer, IRAnalysisError
+    """Perform root cause analysis using AI (SSE stream).
 
-    # Pre-fetch data before starting the stream (auth + data validation)
+    Streams phase events for the UI. Core work delegates to
+    ``run_root_cause_inline`` so the IR Copilot accept handler can invoke
+    the same logic without SSE wrapping.
+    """
+    from app.matcha.services.ir_analysis import IRAnalysisError
+
+    # Pre-fetch for auth + cached probe (mirrors run_root_cause_inline's
+    # cached path so the SSE can report from_cache without re-querying).
     async with get_connection() as conn:
-        row = await _get_incident_with_company_check(conn, incident_id, current_user)
-        row = dict(row)
-
+        await _get_incident_with_company_check(conn, incident_id, current_user)
         cached = await conn.fetchrow(
             """
             SELECT analysis_data FROM ir_incident_analysis
@@ -256,6 +352,8 @@ async def analyze_root_cause(
             str(incident_id),
         )
 
+    ip_address = request.client.host if request.client else None
+
     async def event_stream():
         yield _sse({"type": "phase", "step": "loading_incident", "message": "Loading incident data..."})
         await asyncio.sleep(0.05)
@@ -264,15 +362,7 @@ async def analyze_root_cause(
         await asyncio.sleep(0.05)
 
         if cached:
-            result = _safe_json_loads(cached["analysis_data"])
-            rc = RootCauseAnalysis(
-                primary_cause=result["primary_cause"],
-                contributing_factors=result["contributing_factors"],
-                prevention_suggestions=result["prevention_suggestions"],
-                reasoning=result["reasoning"],
-                generated_at=result["generated_at"],
-                from_cache=True,
-            )
+            rc = await run_root_cause_inline(incident_id, current_user, ip_address=ip_address)
             yield _sse({"type": "cached", "message": "Using cached analysis result", "result": rc.model_dump(mode='json')})
             yield "data: [DONE]\n\n"
             return
@@ -280,37 +370,11 @@ async def analyze_root_cause(
         yield _sse({"type": "phase", "step": "preparing_context", "message": "Preparing incident context for AI..."})
         await asyncio.sleep(0.05)
 
-        category_data = json.loads(row["category_data"]) if isinstance(row.get("category_data"), str) else row.get("category_data")
-        witnesses = parse_witnesses(row.get("witnesses"))
-
         yield _sse({"type": "phase", "step": "analyzing", "message": "AI analyzing root cause..."})
 
         try:
-            analyzer = get_ir_analyzer()
-            result = await analyzer.analyze_root_cause(
-                title=row["title"],
-                description=row["description"],
-                incident_type=row["incident_type"],
-                severity=row["severity"],
-                location=row["location"],
-                category_data=category_data,
-                witnesses=[w.model_dump() for w in witnesses],
-            )
+            rc = await run_root_cause_inline(incident_id, current_user, ip_address=ip_address)
         except IRAnalysisError as e:
-            if cached:
-                result_data = _safe_json_loads(cached["analysis_data"])
-                rc = RootCauseAnalysis(
-                    primary_cause=result_data["primary_cause"],
-                    contributing_factors=result_data["contributing_factors"],
-                    prevention_suggestions=result_data["prevention_suggestions"],
-                    reasoning=result_data["reasoning"],
-                    generated_at=result_data["generated_at"],
-                    from_cache=True,
-                    cache_reason=str(e),
-                )
-                yield _sse({"type": "cached", "message": f"AI failed, using stale cache: {e}", "result": rc.model_dump(mode='json')})
-                yield "data: [DONE]\n\n"
-                return
             logger.error(f"AI analysis failed for incident {incident_id}: {e}")
             yield _sse({"type": "error", "message": "Analysis temporarily unavailable. Please try again later."})
             yield "data: [DONE]\n\n"
@@ -321,33 +385,6 @@ async def analyze_root_cause(
 
         yield _sse({"type": "phase", "step": "caching", "message": "Caching analysis result..."})
 
-        async with get_connection() as conn2:
-            await conn2.execute(
-                """
-                INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
-                VALUES ($1, 'root_cause', $2)
-                """,
-                str(incident_id),
-                json.dumps(result),
-            )
-            await log_audit(
-                conn2,
-                str(incident_id),
-                str(current_user.id),
-                "analysis_run",
-                "analysis",
-                None,
-                {"type": "root_cause"},
-                request.client.host if request.client else None,
-            )
-
-        rc = RootCauseAnalysis(
-            primary_cause=result["primary_cause"],
-            contributing_factors=result["contributing_factors"],
-            prevention_suggestions=result["prevention_suggestions"],
-            reasoning=result["reasoning"],
-            generated_at=result["generated_at"],
-        )
         yield _sse({"type": "complete", "result": rc.model_dump(mode='json')})
         yield "data: [DONE]\n\n"
 
