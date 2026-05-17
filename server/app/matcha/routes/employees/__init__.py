@@ -16,6 +16,7 @@ from .leave_admin import router as leave_admin_router
 # Submodules included into main router. Order matches original source so
 # 1-segment static routes (e.g. /oig-summary) remain shadowed by crud's
 # /{employee_id} catch-all — preserves status quo.
+from .onboarding import router as _onboarding_router; router.include_router(_onboarding_router)
 from .offboarding import router as _offboarding_router; router.include_router(_offboarding_router)
 from .invitations import router as _invitations_router; router.include_router(_invitations_router)
 from .bulk_upload import router as _bulk_upload_router; router.include_router(_bulk_upload_router)
