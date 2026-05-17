@@ -9,11 +9,14 @@ company-wide dashboard tasks surfaced via /tasks). Board state is tracked in
 - toggling status complete ↔ moves column to 'done' / 'todo' accordingly
 """
 
+import logging
 from datetime import date as _date, datetime, timezone
 from typing import Optional
 from uuid import UUID
 
 from ...database import get_connection
+
+logger = logging.getLogger(__name__)
 
 
 _ALLOWED_COLUMNS = {"todo", "in_progress", "review", "done"}
@@ -69,6 +72,7 @@ async def create_project_task(
     due_date: Optional[_date] = None,
     assigned_to: Optional[UUID] = None,
     progress_note: Optional[str] = None,
+    project_title: Optional[str] = None,
 ) -> dict:
     if board_column not in _ALLOWED_COLUMNS:
         raise ValueError(f"Invalid board_column: {board_column}")
@@ -97,14 +101,65 @@ async def create_project_task(
             due_date, priority, status, board_column, assigned_to,
             completed_at, progress_note,
         )
+
+    if assigned_to is not None and assigned_to != created_by:
+        await _notify_task_assigned(
+            assigned_to=assigned_to,
+            company_id=company_id,
+            actor_user_id=created_by,
+            project_id=project_id,
+            project_title=project_title,
+            task_id=row["id"],
+            task_title=title.strip(),
+        )
+
     return _row_to_task(dict(row))
 
 
-async def update_project_task(project_id: UUID, task_id: UUID, patch: dict) -> Optional[dict]:
+async def _notify_task_assigned(
+    *,
+    assigned_to: UUID,
+    company_id: UUID,
+    actor_user_id: UUID,
+    project_id: UUID,
+    project_title: Optional[str],
+    task_id: UUID,
+    task_title: str,
+) -> None:
+    """Dispatch a `task_assigned` bell notification to the assignee."""
+    from . import notification_service as notif_svc
+
+    body = f"in {project_title}" if project_title else None
+    try:
+        await notif_svc.create_notification(
+            user_id=assigned_to,
+            company_id=company_id,
+            type="task_assigned",
+            title=f"Assigned: {task_title}",
+            body=body,
+            link=f"/work?project={project_id}&task={task_id}",
+            metadata={
+                "project_id": str(project_id),
+                "task_id": str(task_id),
+                "assigned_by": str(actor_user_id),
+            },
+        )
+    except Exception as e:
+        logger.warning("Failed to notify task assignment %s -> %s: %s", task_id, assigned_to, e)
+
+
+async def update_project_task(
+    project_id: UUID,
+    task_id: UUID,
+    patch: dict,
+    *,
+    actor_user_id: Optional[UUID] = None,
+    project_title: Optional[str] = None,
+) -> Optional[dict]:
     """Partial update. Enforces status↔board_column sync rules."""
     async with get_connection() as conn:
         current = await conn.fetchrow(
-            "SELECT board_column, status FROM mw_tasks WHERE id = $1 AND project_id = $2",
+            "SELECT board_column, status, assigned_to, company_id FROM mw_tasks WHERE id = $1 AND project_id = $2",
             task_id, project_id,
         )
         if not current:
@@ -192,6 +247,25 @@ async def update_project_task(project_id: UUID, task_id: UUID, patch: dict) -> O
             "progress_note" in patch,     # $14
             progress_note,                # $15
         )
+
+    if row and "assigned_to" in patch:
+        new_assignee = row["assigned_to"]
+        old_assignee = current["assigned_to"]
+        if (
+            new_assignee is not None
+            and new_assignee != old_assignee
+            and new_assignee != actor_user_id
+        ):
+            await _notify_task_assigned(
+                assigned_to=new_assignee,
+                company_id=current["company_id"],
+                actor_user_id=actor_user_id or new_assignee,
+                project_id=project_id,
+                project_title=project_title,
+                task_id=task_id,
+                task_title=row["title"],
+            )
+
     return _row_to_task(dict(row)) if row else None
 
 

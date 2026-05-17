@@ -71,7 +71,7 @@ struct KanbanBoardView: View {
             }
         }
         .sheet(item: $editingTask) { task in
-            TaskEditorSheet(task: task) { patch in
+            TaskEditorSheet(task: task, collaborators: viewModel.collaborators) { patch in
                 Task {
                     await viewModel.updateTask(id: task.id, patch: patch)
                     editingTask = nil
@@ -162,11 +162,12 @@ struct KanbanBoardView: View {
             ScrollView {
                 LazyVStack(spacing: 6) {
                     ForEach(colTasks) { task in
-                        KanbanCardView(task: task) {
-                            editingTask = task
-                        } onToggle: {
-                            Task { await viewModel.toggleTaskComplete(id: task.id) }
-                        }
+                        KanbanCardView(
+                            task: task,
+                            onTap: { editingTask = task },
+                            onToggle: { Task { await viewModel.toggleTaskComplete(id: task.id) } },
+                            onMoveColumn: { col in Task { await viewModel.moveTask(id: task.id, toColumn: col) } }
+                        )
                         .draggable(task.id)
                     }
                 }
@@ -282,6 +283,7 @@ private struct KanbanCardView: View {
     let task: MWProjectTask
     let onTap: () -> Void
     let onToggle: () -> Void
+    let onMoveColumn: (String) -> Void
 
     private var priorityColor: Color {
         switch task.priority {
@@ -290,6 +292,15 @@ private struct KanbanCardView: View {
         case "medium": return .yellow
         default: return .secondary
         }
+    }
+
+    private var currentColumnLabel: String {
+        kanbanColumns.first(where: { $0.key == task.boardColumn })?.label ?? task.boardColumn
+    }
+
+    private var assigneeInitial: String? {
+        guard let name = task.assignedName, !name.isEmpty else { return nil }
+        return String(name.prefix(1)).uppercased()
     }
 
     var body: some View {
@@ -324,12 +335,49 @@ private struct KanbanCardView: View {
 
                 HStack(spacing: 5) {
                     Circle().fill(priorityColor).frame(width: 5, height: 5)
-                    if let name = task.assignedName, !name.isEmpty {
+
+                    Menu {
+                        ForEach(kanbanColumns, id: \.key) { c in
+                            Button {
+                                if c.key != task.boardColumn { onMoveColumn(c.key) }
+                            } label: {
+                                if c.key == task.boardColumn {
+                                    Label(c.label, systemImage: "checkmark")
+                                } else {
+                                    Text(c.label)
+                                }
+                            }
+                        }
+                    } label: {
+                        Text(currentColumnLabel)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.8))
+                            .tracking(0.3)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.white.opacity(0.12))
+                            .cornerRadius(8)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+
+                    if let initial = assigneeInitial, let name = task.assignedName {
+                        Circle()
+                            .fill(Color.white.opacity(0.12))
+                            .frame(width: 14, height: 14)
+                            .overlay(
+                                Text(initial)
+                                    .font(.system(size: 8, weight: .semibold))
+                                    .foregroundColor(.white)
+                            )
                         Text(name)
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
                             .lineLimit(1)
+                            .truncationMode(.tail)
                     }
+
                     if let due = task.dueDate, !due.isEmpty {
                         Image(systemName: "calendar")
                             .font(.system(size: 9))
@@ -351,6 +399,7 @@ private struct KanbanCardView: View {
 
 private struct TaskEditorSheet: View {
     let task: MWProjectTask
+    let collaborators: [MWProjectCollaborator]
     let onSave: (MatchaWorkService.ProjectTaskPatch) -> Void
     let onDelete: () -> Void
     let onClose: () -> Void
@@ -361,14 +410,17 @@ private struct TaskEditorSheet: View {
     @State private var dueDate: String
     @State private var boardColumn: String
     @State private var progressNote: String
+    @State private var assignedTo: String?
 
     init(
         task: MWProjectTask,
+        collaborators: [MWProjectCollaborator],
         onSave: @escaping (MatchaWorkService.ProjectTaskPatch) -> Void,
         onDelete: @escaping () -> Void,
         onClose: @escaping () -> Void
     ) {
         self.task = task
+        self.collaborators = collaborators
         self.onSave = onSave
         self.onDelete = onDelete
         self.onClose = onClose
@@ -378,6 +430,7 @@ private struct TaskEditorSheet: View {
         _dueDate = State(initialValue: task.dueDate.map { String($0.prefix(10)) } ?? "")
         _boardColumn = State(initialValue: task.boardColumn)
         _progressNote = State(initialValue: task.progressNote ?? "")
+        _assignedTo = State(initialValue: task.assignedTo)
     }
 
     var body: some View {
@@ -450,6 +503,14 @@ private struct TaskEditorSheet: View {
                 .pickerStyle(.menu)
             }
 
+            Picker("Assignee", selection: $assignedTo) {
+                Text("Unassigned").tag(Optional<String>.none)
+                ForEach(collaborators) { c in
+                    Text(c.name).tag(Optional(c.userId))
+                }
+            }
+            .pickerStyle(.menu)
+
             TextField("Due date (YYYY-MM-DD, optional)", text: $dueDate)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
@@ -471,12 +532,17 @@ private struct TaskEditorSheet: View {
                 Spacer()
 
                 Button("Save") {
+                    // assigned_to: send UUID to assign, empty string to clear
+                    // (backend `UUID(v) if v else None` nulls falsy). nil would
+                    // skip the field entirely via encodeIfPresent.
+                    let assigneeWire: String = assignedTo ?? ""
                     let patch = MatchaWorkService.ProjectTaskPatch(
                         title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                         description: description,
                         boardColumn: boardColumn,
                         priority: priority,
                         dueDate: dueDate.isEmpty ? nil : dueDate,
+                        assignedTo: assigneeWire,
                         progressNote: progressNote
                     )
                     onSave(patch)

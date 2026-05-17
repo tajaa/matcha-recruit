@@ -3816,6 +3816,7 @@ async def create_project_task_endpoint(
             due_date=due_date,
             assigned_to=assigned_to,
             progress_note=body.get("progress_note"),
+            project_title=project.get("title"),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -3832,7 +3833,7 @@ async def update_project_task_endpoint(
     from datetime import date as _date
     from ..services import project_task_service as pt_svc
 
-    await _verify_project_access(project_id, current_user)
+    project, _role = await _verify_project_access(project_id, current_user)
 
     patch: dict = {}
     for key in ("title", "description", "priority", "board_column", "status", "progress_note"):
@@ -3854,7 +3855,13 @@ async def update_project_task_endpoint(
         patch["assigned_to"] = UUID(v) if v else None
 
     try:
-        result = await pt_svc.update_project_task(project_id, task_id, patch)
+        result = await pt_svc.update_project_task(
+            project_id,
+            task_id,
+            patch,
+            actor_user_id=current_user.id,
+            project_title=project.get("title"),
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if not result:

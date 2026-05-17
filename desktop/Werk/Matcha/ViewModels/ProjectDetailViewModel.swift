@@ -19,6 +19,7 @@ class ProjectDetailViewModel {
     var isLoadingTasks = false
     var files: [MWProjectFile] = []
     var isLoadingFiles = false
+    var collaborators: [MWProjectCollaborator] = []
     /// Per-session activity log surfaced in the collab Overview panel. Capped
     /// at 20 entries; FIFO eviction. In-memory only — survives panel switches
     /// but not project switches or app relaunches. Backend feed is a follow-up.
@@ -75,6 +76,7 @@ class ProjectDetailViewModel {
             if proj.projectType == "collab" {
                 Task { await self.loadTasks() }
                 Task { await self.loadFiles() }
+                Task { await self.loadCollaborators() }
             }
         } catch is CancellationError {
             // Rapid project switch cancelled the in-flight load. Don't show
@@ -455,11 +457,12 @@ class ProjectDetailViewModel {
         }
     }
 
-    func addTask(title: String, column: String = "todo", priority: String = "medium") async {
+    func addTask(title: String, column: String = "todo", priority: String = "medium", assignedTo: String? = nil) async {
         guard let pid = project?.id else { return }
         do {
             let task = try await service.createProjectTask(
-                projectId: pid, title: title, boardColumn: column, priority: priority
+                projectId: pid, title: title, boardColumn: column, priority: priority,
+                assignedTo: assignedTo
             )
             await MainActor.run {
                 tasks.insert(task, at: 0)
@@ -467,6 +470,22 @@ class ProjectDetailViewModel {
             }
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func loadCollaborators() async {
+        guard let pid = project?.id else { return }
+        do {
+            let list = try await service.listCollaborators(projectId: pid)
+            await MainActor.run { collaborators = list }
+        } catch is CancellationError {
+            return
+        } catch {
+            let nsErr = error as NSError
+            if nsErr.domain == NSURLErrorDomain && nsErr.code == NSURLErrorCancelled {
+                return
+            }
+            // Silent — picker just shows "Unassigned"; don't red-banner.
         }
     }
 
