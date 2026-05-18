@@ -15,6 +15,17 @@ os.environ.setdefault("XDG_CACHE_HOME", "/tmp")
 os.environ.setdefault("HOME", "/tmp")
 os.environ.setdefault("FONTCONFIG_PATH", "/etc/fonts")
 
+# Configure the root logger so `logger = logging.getLogger(__name__)` calls
+# inside app modules actually surface their INFO output. Uvicorn only sets
+# up its own uvicorn / uvicorn.access loggers; without basicConfig here,
+# every `logger.info` in services/routes falls through to the root logger
+# at WARNING and gets silently dropped. Override with LOG_LEVEL env.
+_log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, _log_level, logging.INFO),
+    format="%(asctime)s %(name)s [%(levelname)s] %(message)s",
+)
+
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
