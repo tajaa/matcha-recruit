@@ -6,6 +6,7 @@ struct ProjectFilesView: View {
     @Bindable var viewModel: ProjectDetailViewModel
     @State private var isDragOver = false
     @State private var uploadingName: String?
+    @State private var previewFile: MWProjectFile?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,6 +48,9 @@ struct ProjectFilesView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .mwCollabFilesBrowse)) { _ in
             browse()
+        }
+        .sheet(item: $previewFile) { file in
+            AttachmentPreviewSheet(file: file)
         }
     }
 
@@ -184,8 +188,7 @@ struct ProjectFilesView: View {
     }
 
     private func openFile(_ file: MWProjectFile) {
-        guard let url = URL(string: file.storageUrl) else { return }
-        NSWorkspace.shared.open(url)
+        previewFile = file
     }
 }
 
