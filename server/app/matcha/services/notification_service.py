@@ -172,11 +172,18 @@ async def _send_notification_email(
 
     email_svc = get_email_service()
     if not email_svc.is_configured():
+        logger.warning(
+            "Email service not configured — skipping email to %s subject=%r",
+            user_id, subject,
+        )
         return
 
     async with get_connection() as conn:
         user = await conn.fetchrow("SELECT email, name FROM users WHERE id = $1", user_id)
     if not user:
+        logger.warning(
+            "User %s not found — skipping email subject=%r", user_id, subject,
+        )
         return
 
     html_body = f"<h3>{title}</h3>"

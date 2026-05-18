@@ -227,14 +227,24 @@ async def _notify_task_column_transition(
         logger.warning("Failed to load collaborators for project %s: %s", project_id, e)
         return
 
+    recipients = [
+        c for c in collaborators
+        if actor_user_id is None or c["user_id"] != actor_user_id
+    ]
+    logger.info(
+        "task_progress notify: task=%s project=%s new_column=%s actor=%s "
+        "collab_total=%d recipients=%d emails=%s",
+        task_id, project_id, new_column, actor_user_id,
+        len(collaborators), len(recipients),
+        [c["email"] for c in recipients],
+    )
+
     where = f"in {project_title}" if project_title else "in this project"
     body = f"{actor_name} {tpl['verb']} “{task_title}” {where}."
     subject = tpl["subject"].format(title=task_title)
     link = f"/work?project={project_id}&task={task_id}"
 
-    for c in collaborators:
-        if actor_user_id is not None and c["user_id"] == actor_user_id:
-            continue
+    for c in recipients:
         try:
             await notif_svc.create_notification(
                 user_id=c["user_id"],
