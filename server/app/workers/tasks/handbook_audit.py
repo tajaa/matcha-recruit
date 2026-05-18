@@ -104,19 +104,25 @@ async def _analyze_async(report_id: str) -> None:
     all_gaps: list[dict[str, Any]] = []
     state_summaries: dict[str, dict[str, int]] = {}
 
-    from app.database import get_connection as _app_get_connection
+    # _fetch_state_requirements only needs a Connection — give it a raw
+    # asyncpg connection (workers can't safely reuse app.database's pool
+    # because the pool's event loop is created per-task by asyncio.run()
+    # and dies between tasks, raising "Database pool not initialized" or
+    # "another operation is in progress" on the next task).
     from app.core.services.handbook_service import _fetch_state_requirements
 
     for state in states:
-        async with _app_get_connection() as conn:
-            try:
-                req_map = await _fetch_state_requirements(
-                    conn,
-                    [{"state": state, "city": None, "zipcode": None, "location_id": None}],
-                )
-            except Exception as exc:
-                logger.warning("fetch_state_requirements failed for %s: %s", state, exc)
-                req_map = {}
+        req_conn = await get_db_connection()
+        try:
+            req_map = await _fetch_state_requirements(
+                req_conn,
+                [{"state": state, "city": None, "zipcode": None, "location_id": None}],
+            )
+        except Exception as exc:
+            logger.warning("fetch_state_requirements failed for %s: %s", state, exc)
+            req_map = {}
+        finally:
+            await req_conn.close()
         state_requirements = req_map.get(state, [])
         if not state_requirements:
             logger.info("No jurisdiction requirements for %s; skipping", state)

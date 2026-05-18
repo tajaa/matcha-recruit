@@ -236,6 +236,15 @@ def _install_error_reporter(**kwargs):
     except Exception as e:
         print(f"[Worker] Failed to load settings: {e}")
 
+    # NOTE: deliberately do NOT call app.database.init_pool() here.
+    # Celery tasks each run via asyncio.run() which creates a NEW event
+    # loop per task; an asyncpg pool bound to one loop can't be reused
+    # from another, and the next task would fail with
+    # "another operation is in progress" or hang. Worker tasks that need
+    # DB access should use workers/utils.get_db_connection (raw asyncpg
+    # connection opened inside the task's own loop). The pool stays
+    # process-level for FastAPI's lifespan; workers stay pool-free.
+
     try:
         from app.core.services.error_reporter import install_error_logging
         install_error_logging(source="celery")
