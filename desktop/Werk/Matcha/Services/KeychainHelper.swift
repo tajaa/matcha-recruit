@@ -1,6 +1,17 @@
 import Foundation
 import Security
 
+/// Stores JWT access + refresh tokens in the macOS Keychain.
+///
+/// Previously had a `#if DEBUG` branch that fell back to UserDefaults to
+/// work around a stale simulator-era issue. That branch wrote tokens to
+/// `~/Library/Preferences/com.ahnimal.matcha.plist` as plaintext — any
+/// debug build leaked them. Removed 2026-05-18; Keychain works fine in
+/// debug builds.
+///
+/// Migration for older debug builds: `AppState.migrateKeychainTokens()`
+/// reads any legacy UserDefaults entries on launch, copies them into
+/// Keychain, then wipes the UserDefaults keys.
 enum KeychainHelper {
     enum Keys {
         static let accessToken = "matcha.accessToken"
@@ -8,10 +19,7 @@ enum KeychainHelper {
     }
 
     static func save(key: String, value: String) {
-        #if DEBUG
-        UserDefaults.standard.set(value, forKey: key)
-        #else
-        let data = value.data(using: .utf8)!
+        guard let data = value.data(using: .utf8) else { return }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
@@ -20,13 +28,9 @@ enum KeychainHelper {
         ]
         SecItemDelete(query as CFDictionary)
         SecItemAdd(query as CFDictionary, nil)
-        #endif
     }
 
     static func load(key: String) -> String? {
-        #if DEBUG
-        return UserDefaults.standard.string(forKey: key)
-        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
@@ -41,18 +45,13 @@ enum KeychainHelper {
             return nil
         }
         return string
-        #endif
     }
 
     static func delete(key: String) {
-        #if DEBUG
-        UserDefaults.standard.removeObject(forKey: key)
-        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key
         ]
         SecItemDelete(query as CFDictionary)
-        #endif
     }
 }

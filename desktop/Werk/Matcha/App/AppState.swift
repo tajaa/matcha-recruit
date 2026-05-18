@@ -60,8 +60,28 @@ class AppState {
                 self.didLogout()
             }
         }
+        Self.migrateLegacyKeychainTokens()
         Task {
             await restoreSession()
+        }
+    }
+
+    /// One-shot migration for users on older DEBUG builds that wrote JWT
+    /// tokens to UserDefaults instead of the Keychain. Reads any legacy
+    /// values, copies them into Keychain (the only path the post-2026-05-18
+    /// `KeychainHelper` reads from), then clears the UserDefaults keys so
+    /// the plaintext copy stops sitting on disk.
+    private static func migrateLegacyKeychainTokens() {
+        let defaults = UserDefaults.standard
+        let keys = [KeychainHelper.Keys.accessToken, KeychainHelper.Keys.refreshToken]
+        for key in keys {
+            guard let legacy = defaults.string(forKey: key), !legacy.isEmpty else {
+                continue
+            }
+            if KeychainHelper.load(key: key) == nil {
+                KeychainHelper.save(key: key, value: legacy)
+            }
+            defaults.removeObject(forKey: key)
         }
     }
 
