@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from .auth import router as auth_router
 from .admin import router as admin_router
+from .admin_onboarding import router as admin_onboarding_router
 from .blog import router as blog_router
 from .policies import router as policies_router
 from .handbooks import router as handbooks_router
@@ -42,6 +43,7 @@ core_router = APIRouter()
 # Mount sub-routers
 core_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 core_router.include_router(admin_router, prefix="/admin", tags=["admin"])
+core_router.include_router(admin_onboarding_router, prefix="/admin", tags=["admin-onboarding"])
 core_router.include_router(admin_handbook_references_router, tags=["admin-handbooks"])
 core_router.include_router(blog_router, prefix="/blogs", tags=["blog"])
 core_router.include_router(policies_router, tags=["policies"],

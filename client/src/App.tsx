@@ -28,6 +28,8 @@ import Brokers from './pages/admin/Brokers'
 import ComplianceManagement from './pages/admin/ComplianceManagement'
 import Individuals from './pages/admin/Individuals'
 import Customers from './pages/admin/Customers'
+import AdminOnboarding from './pages/admin/AdminOnboarding'
+import AdminOnboardingWizard from './pages/admin/AdminOnboardingWizard'
 import ClientErrors from './pages/admin/ClientErrors'
 import ServerErrors from './pages/admin/ServerErrors'
 import NewsletterAdmin from './pages/admin/Newsletter'
@@ -168,6 +170,8 @@ export default function App() {
       <Route path="/admin" element={<AppLayout sidebar={<AdminSidebar />} logoLabel="Matcha Admin" />}>
         <Route index element={<Navigate to="customers" replace />} />
         <Route path="customers" element={<Customers />} />
+        <Route path="onboarding" element={<AdminOnboarding />} />
+        <Route path="onboarding/:sessionId" element={<AdminOnboardingWizard />} />
         <Route path="companies" element={<Companies />} />
         <Route path="companies/:companyId" element={<AdminCompanyDetail />} />
         <Route path="individuals" element={<Individuals />} />
