@@ -1,4 +1,6 @@
 import SwiftUI
+import UniformTypeIdentifiers
+import AppKit
 
 private let kanbanColumns: [(key: String, label: String)] = [
     ("todo", "Todo"),
@@ -71,7 +73,7 @@ struct KanbanBoardView: View {
             }
         }
         .sheet(item: $editingTask) { task in
-            TaskEditorSheet(task: task, collaborators: viewModel.collaborators) { patch in
+            TaskEditorSheet(task: task, viewModel: viewModel) { patch in
                 Task {
                     await viewModel.updateTask(id: task.id, patch: patch)
                     editingTask = nil
@@ -164,6 +166,7 @@ struct KanbanBoardView: View {
                     ForEach(colTasks) { task in
                         KanbanCardView(
                             task: task,
+                            attachments: viewModel.taskFiles[task.id] ?? [],
                             onTap: { editingTask = task },
                             onToggle: { Task { await viewModel.toggleTaskComplete(id: task.id) } },
                             onMoveColumn: { col in Task { await viewModel.moveTask(id: task.id, toColumn: col) } }
@@ -281,9 +284,13 @@ struct KanbanBoardView: View {
 
 private struct KanbanCardView: View {
     let task: MWProjectTask
+    let attachments: [MWProjectFile]
     let onTap: () -> Void
     let onToggle: () -> Void
     let onMoveColumn: (String) -> Void
+
+    private var imageAttachments: [MWProjectFile] { attachments.filter { $0.isImage } }
+    private var nonImageCount: Int { attachments.count - imageAttachments.count }
 
     private var priorityColor: Color {
         switch task.priority {
@@ -387,6 +394,10 @@ private struct KanbanCardView: View {
                             .foregroundColor(.secondary)
                     }
                 }
+
+                if !attachments.isEmpty {
+                    attachmentStrip
+                }
             }
             Spacer(minLength: 0)
         }
@@ -395,11 +406,50 @@ private struct KanbanCardView: View {
         .cornerRadius(6)
         .onTapGesture(perform: onTap)
     }
+
+    @ViewBuilder
+    private var attachmentStrip: some View {
+        if imageAttachments.isEmpty {
+            HStack(spacing: 4) {
+                Image(systemName: "paperclip")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                Text("\(attachments.count)")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+        } else {
+            HStack(spacing: 4) {
+                ForEach(imageAttachments.prefix(3)) { f in
+                    AsyncImage(url: URL(string: f.storageUrl)) { phase in
+                        switch phase {
+                        case .success(let img):
+                            img.resizable().aspectRatio(contentMode: .fill)
+                        default:
+                            Rectangle().fill(Color.white.opacity(0.08))
+                        }
+                    }
+                    .frame(width: 24, height: 24)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+                }
+                let extras = (imageAttachments.count - 3) + nonImageCount
+                if extras > 0 {
+                    Text("+\(extras)")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(3)
+                }
+            }
+        }
+    }
 }
 
 private struct TaskEditorSheet: View {
     let task: MWProjectTask
-    let collaborators: [MWProjectCollaborator]
+    @Bindable var viewModel: ProjectDetailViewModel
     let onSave: (MatchaWorkService.ProjectTaskPatch) -> Void
     let onDelete: () -> Void
     let onClose: () -> Void
@@ -411,16 +461,18 @@ private struct TaskEditorSheet: View {
     @State private var boardColumn: String
     @State private var progressNote: String
     @State private var assignedTo: String?
+    @State private var uploadingName: String?
+    @State private var isDragOverAttachments = false
 
     init(
         task: MWProjectTask,
-        collaborators: [MWProjectCollaborator],
+        viewModel: ProjectDetailViewModel,
         onSave: @escaping (MatchaWorkService.ProjectTaskPatch) -> Void,
         onDelete: @escaping () -> Void,
         onClose: @escaping () -> Void
     ) {
         self.task = task
-        self.collaborators = collaborators
+        self.viewModel = viewModel
         self.onSave = onSave
         self.onDelete = onDelete
         self.onClose = onClose
@@ -432,6 +484,9 @@ private struct TaskEditorSheet: View {
         _progressNote = State(initialValue: task.progressNote ?? "")
         _assignedTo = State(initialValue: task.assignedTo)
     }
+
+    private var collaborators: [MWProjectCollaborator] { viewModel.collaborators }
+    private var attachments: [MWProjectFile] { viewModel.taskFiles[task.id] ?? [] }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -519,6 +574,8 @@ private struct TaskEditorSheet: View {
                 .background(Color.zinc800)
                 .cornerRadius(6)
 
+            attachmentsSection
+
             HStack {
                 Button {
                     onDelete()
@@ -554,5 +611,165 @@ private struct TaskEditorSheet: View {
         .padding(16)
         .frame(width: 420)
         .background(Color.appBackground)
+        .task { await viewModel.loadTaskFiles(taskId: task.id) }
+    }
+
+    @ViewBuilder
+    private var attachmentsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "paperclip")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Text("ATTACHMENTS")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .tracking(0.5)
+                if !attachments.isEmpty {
+                    Text("\(attachments.count)")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.zinc800)
+                        .cornerRadius(4)
+                }
+                Spacer()
+                if let name = uploadingName {
+                    Text("Uploading \(name)…")
+                        .font(.system(size: 10))
+                        .foregroundColor(.matcha500)
+                        .lineLimit(1)
+                } else {
+                    Button("Add") { browseForAttachment() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10))
+                        .foregroundColor(.matcha500)
+                }
+            }
+
+            if attachments.isEmpty {
+                HStack {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    Text("Drop files here or click Add")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 10)
+                .background(isDragOverAttachments ? Color.matcha500.opacity(0.08) : Color.zinc800.opacity(0.4))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(isDragOverAttachments ? Color.matcha500 : Color.white.opacity(0.1),
+                                style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                )
+                .cornerRadius(6)
+            } else {
+                VStack(spacing: 3) {
+                    ForEach(attachments) { f in
+                        AttachmentRow(file: f) {
+                            openAttachment(f)
+                        } onDelete: {
+                            Task { await viewModel.deleteTaskFile(taskId: task.id, fileId: f.id) }
+                        }
+                    }
+                }
+            }
+        }
+        .onDrop(of: [.fileURL], isTargeted: $isDragOverAttachments) { providers in
+            handleAttachmentDrop(providers)
+            return true
+        }
+    }
+
+    private func openAttachment(_ file: MWProjectFile) {
+        guard let url = URL(string: file.storageUrl) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    private func browseForAttachment() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.begin { response in
+            guard response == .OK else { return }
+            for url in panel.urls {
+                uploadURL(url)
+            }
+        }
+    }
+
+    private func handleAttachmentDrop(_ providers: [NSItemProvider]) {
+        for provider in providers {
+            provider.loadItem(forTypeIdentifier: "public.file-url") { item, _ in
+                guard let data = item as? Data,
+                      let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
+                Task { @MainActor in uploadURL(url) }
+            }
+        }
+    }
+
+    private func uploadURL(_ url: URL) {
+        guard let data = try? Data(contentsOf: url) else { return }
+        let ext = url.pathExtension.lowercased()
+        let mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
+        let name = url.lastPathComponent
+        Task { @MainActor in uploadingName = name }
+        Task {
+            await viewModel.uploadTaskFile(
+                taskId: task.id, data: data, filename: name, mimeType: mime
+            )
+            await MainActor.run { uploadingName = nil }
+        }
+    }
+}
+
+private struct AttachmentRow: View {
+    let file: MWProjectFile
+    let onOpen: () -> Void
+    let onDelete: () -> Void
+    @State private var isHovered = false
+
+    private var sizeLabel: String {
+        let bytes = Double(file.fileSize)
+        if bytes < 1024 { return "\(file.fileSize) B" }
+        if bytes < 1024 * 1024 { return String(format: "%.1f KB", bytes / 1024) }
+        return String(format: "%.1f MB", bytes / 1024 / 1024)
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: file.isImage ? "photo" : "doc")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+            Text(file.filename)
+                .font(.system(size: 11))
+                .foregroundColor(.white)
+                .lineLimit(1)
+            Text(sizeLabel)
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+            Spacer()
+            if isHovered {
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 10))
+                        .foregroundColor(.red.opacity(0.8))
+                }
+                .buttonStyle(.plain)
+                .help("Delete")
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(isHovered ? Color.zinc800 : Color.zinc800.opacity(0.5))
+        .cornerRadius(4)
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
+        .onTapGesture(perform: onOpen)
     }
 }

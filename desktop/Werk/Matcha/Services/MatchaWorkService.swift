@@ -783,6 +783,50 @@ class MatchaWorkService {
         )
     }
 
+    // MARK: - Task file attachments
+
+    func listTaskFiles(projectId: String, taskId: String) async throws -> [MWProjectFile] {
+        try await client.request(
+            method: "GET",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/files"
+        )
+    }
+
+    func uploadTaskFile(
+        projectId: String,
+        taskId: String,
+        file: (data: Data, filename: String, mimeType: String)
+    ) async throws -> MWProjectFile {
+        var multipart = MultipartUploadBuilder()
+        multipart.addFile(name: "file", filename: file.filename, mimeType: file.mimeType, data: file.data)
+        let (body, contentType) = multipart.finalize()
+
+        guard let url = URL(string: "\(client.baseURL)\(basePath)/projects/\(projectId)/tasks/\(taskId)/files") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        if let token = client.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = body
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let msg = String(data: data, encoding: .utf8) ?? "Upload failed"
+            throw APIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0, msg)
+        }
+        return try JSONDecoder().decode(MWProjectFile.self, from: data)
+    }
+
+    func deleteTaskFile(projectId: String, taskId: String, fileId: String) async throws {
+        _ = try await client.requestData(
+            method: "DELETE",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/files/\(fileId)"
+        )
+    }
+
     struct BlogSubmitResult: Codable {
         let id: String
         let slug: String

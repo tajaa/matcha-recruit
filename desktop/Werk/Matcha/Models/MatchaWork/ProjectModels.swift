@@ -94,6 +94,7 @@ enum MWProjectType: String, Codable {
 struct MWProjectFile: Codable, Identifiable, Hashable {
     let id: String
     var projectId: String?
+    var taskId: String?
     var uploadedBy: String?
     var filename: String
     var storageUrl: String
@@ -104,11 +105,18 @@ struct MWProjectFile: Codable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, filename
         case projectId = "project_id"
+        case taskId = "task_id"
         case uploadedBy = "uploaded_by"
         case storageUrl = "storage_url"
         case contentType = "content_type"
         case fileSize = "file_size"
         case createdAt = "created_at"
+    }
+
+    var isImage: Bool {
+        if let ct = contentType, ct.lowercased().hasPrefix("image/") { return true }
+        let ext = (filename as NSString).pathExtension.lowercased()
+        return ["png", "jpg", "jpeg", "gif", "webp", "heic", "svg"].contains(ext)
     }
 }
 
@@ -127,9 +135,10 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
     var createdAt: String?
     var updatedAt: String?
     var progressNote: String?
+    var attachments: [MWProjectFile]?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, description, priority, status
+        case id, title, description, priority, status, attachments
         case projectId = "project_id"
         case boardColumn = "board_column"
         case assignedTo = "assigned_to"

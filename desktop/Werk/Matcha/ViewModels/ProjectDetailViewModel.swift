@@ -20,6 +20,9 @@ class ProjectDetailViewModel {
     var files: [MWProjectFile] = []
     var isLoadingFiles = false
     var collaborators: [MWProjectCollaborator] = []
+    /// Attachments per task, keyed by task id. Seeded by `loadTasks`
+    /// (server embeds `attachments` per task) and updated by add/delete.
+    var taskFiles: [String: [MWProjectFile]] = [:]
     /// Per-session activity log surfaced in the collab Overview panel. Capped
     /// at 20 entries; FIFO eviction. In-memory only — survives panel switches
     /// but not project switches or app relaunches. Backend feed is a follow-up.
@@ -439,6 +442,11 @@ class ProjectDetailViewModel {
             let list = try await service.listProjectTasks(projectId: pid)
             await MainActor.run {
                 tasks = list
+                var seeded: [String: [MWProjectFile]] = [:]
+                for t in list {
+                    if let atts = t.attachments { seeded[t.id] = atts }
+                }
+                taskFiles = seeded
                 isLoadingTasks = false
             }
         } catch is CancellationError {
@@ -470,6 +478,55 @@ class ProjectDetailViewModel {
             }
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    // MARK: - Collab: task file attachments
+
+    func loadTaskFiles(taskId: String) async {
+        guard let pid = project?.id else { return }
+        do {
+            let list = try await service.listTaskFiles(projectId: pid, taskId: taskId)
+            await MainActor.run { taskFiles[taskId] = list }
+        } catch is CancellationError {
+            return
+        } catch {
+            let nsErr = error as NSError
+            if nsErr.domain == NSURLErrorDomain && nsErr.code == NSURLErrorCancelled { return }
+        }
+    }
+
+    func uploadTaskFile(taskId: String, data: Data, filename: String, mimeType: String) async {
+        guard let pid = project?.id else { return }
+        do {
+            let uploaded = try await service.uploadTaskFile(
+                projectId: pid, taskId: taskId,
+                file: (data: data, filename: filename, mimeType: mimeType)
+            )
+            await MainActor.run {
+                var existing = taskFiles[taskId] ?? []
+                existing.insert(uploaded, at: 0)
+                taskFiles[taskId] = existing
+                logActivity("paperclip", "attached \(filename)")
+            }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func deleteTaskFile(taskId: String, fileId: String) async {
+        guard let pid = project?.id else { return }
+        let snapshot = taskFiles[taskId]
+        await MainActor.run {
+            taskFiles[taskId] = (taskFiles[taskId] ?? []).filter { $0.id != fileId }
+        }
+        do {
+            try await service.deleteTaskFile(projectId: pid, taskId: taskId, fileId: fileId)
+        } catch {
+            await MainActor.run {
+                if let snap = snapshot { taskFiles[taskId] = snap }
+                errorMessage = error.localizedDescription
+            }
         }
     }
 

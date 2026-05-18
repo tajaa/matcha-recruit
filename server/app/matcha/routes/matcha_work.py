@@ -3640,10 +3640,34 @@ async def list_project_tasks_endpoint(
     project_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """List all kanban tasks for a project."""
+    """List all kanban tasks for a project. Embeds attachments per task so
+    the kanban card can render thumbnails without N+1 follow-up requests."""
     from ..services import project_task_service as pt_svc
+    from ..services import project_file_service
     await _verify_project_access(project_id, current_user)
-    return await pt_svc.list_project_tasks(project_id)
+    tasks = await pt_svc.list_project_tasks(project_id)
+    if not tasks:
+        return tasks
+    task_ids = [UUID(t["id"]) for t in tasks if t.get("id")]
+    grouped = await project_file_service.list_files_for_tasks(project_id, task_ids)
+    for t in tasks:
+        files = grouped.get(t["id"], [])
+        t["attachments"] = _serialize_files_for_wire(files)
+    return tasks
+
+
+def _serialize_files_for_wire(files: list[dict]) -> list[dict]:
+    """Convert UUIDs/datetimes to strings for JSON wire format."""
+    out = []
+    for f in files:
+        d = dict(f)
+        for k in ("id", "project_id", "task_id", "uploaded_by"):
+            if d.get(k) is not None:
+                d[k] = str(d[k])
+        if d.get("created_at") is not None:
+            d["created_at"] = d["created_at"].isoformat()
+        out.append(d)
+    return out
 
 
 @router.get("/tasks/open")
@@ -3879,6 +3903,92 @@ async def delete_project_task_endpoint(
     await _verify_project_access(project_id, current_user)
     if not await pt_svc.delete_project_task(project_id, task_id):
         raise HTTPException(status_code=404, detail="Task not found")
+    return {"deleted": True}
+
+
+async def _verify_task_belongs_to_project(project_id: UUID, task_id: UUID) -> None:
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM mw_tasks WHERE id = $1 AND project_id = $2",
+            task_id, project_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}/files")
+async def upload_task_file_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Upload an attachment scoped to a single kanban task."""
+    from ..services import project_file_service
+
+    project, _role = await _verify_project_access(project_id, current_user)
+    await _verify_task_belongs_to_project(project_id, task_id)
+    company_id = project.get("company_id") or await get_client_company_id(current_user)
+
+    fname = file.filename or "file"
+    ext = os.path.splitext(fname)[1].lower()
+    if ext not in ALLOWED_PROJECT_FILE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
+
+    content = await file.read()
+    if len(content) > PROJECT_FILE_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="File exceeds 10 MB limit")
+
+    storage_url = await get_storage().upload_file(
+        content, fname,
+        prefix=f"matcha-work/{company_id}/{project_id}/tasks/{task_id}/files",
+        content_type=file.content_type,
+    )
+
+    record = await project_file_service.add_project_file(
+        project_id=project_id,
+        uploaded_by=current_user.id,
+        filename=fname,
+        storage_url=storage_url,
+        content_type=file.content_type,
+        file_size=len(content),
+        task_id=task_id,
+    )
+    return record
+
+
+@router.get("/projects/{project_id}/tasks/{task_id}/files")
+async def list_task_files_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    from ..services import project_file_service
+    await _verify_project_access(project_id, current_user)
+    await _verify_task_belongs_to_project(project_id, task_id)
+    return await project_file_service.list_task_files(project_id, task_id)
+
+
+@router.delete("/projects/{project_id}/tasks/{task_id}/files/{file_id}")
+async def delete_task_file_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    file_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    from ..services import project_file_service
+
+    await _verify_project_access(project_id, current_user)
+    record = await project_file_service.get_task_file(file_id, project_id, task_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        await get_storage().delete_file(record["storage_url"])
+    except Exception:
+        pass
+
+    await project_file_service.delete_project_file(file_id, project_id)
     return {"deleted": True}
 
 
