@@ -197,6 +197,17 @@ struct ChannelsSidebarView: View {
                             .font(.system(size: 13, weight: (selected || unread > 0) ? .semibold : .regular))
                             .foregroundColor(selected ? .primary : .primary.opacity(0.9))
                             .lineLimit(1)
+                        if channel.projectId != nil {
+                            Text("collab")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundColor(Color.matcha500)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .fill(Color.matcha500.opacity(0.15))
+                                )
+                        }
                         Spacer(minLength: 4)
                         if unread > 0 {
                             Text(unread > 99 ? "99+" : "\(unread)")

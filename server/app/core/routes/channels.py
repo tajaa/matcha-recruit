@@ -226,6 +226,11 @@ class ChannelSummary(BaseModel):
     last_message_preview: Optional[str] = None
     is_member: bool = True
     my_role: Optional[str] = None  # current user's channel_role (owner/moderator/member)
+    # Populated when the channel is the auto-created discussion channel for a
+    # matcha-work collab project (linked via mw_projects.project_data
+    # ->>'discussion_channel_id'). Sidebar surfaces a "collab" badge.
+    project_id: Optional[UUID] = None
+    project_title: Optional[str] = None
 
 
 class ChannelDetail(BaseModel):
@@ -336,9 +341,13 @@ async def list_channels(
                     WHERE msg3.channel_id = ch.id
                     ORDER BY msg3.created_at DESC LIMIT 1) AS last_message_preview,
                    cm.user_id IS NOT NULL AS is_member,
-                   cm.role AS my_role
+                   cm.role AS my_role,
+                   proj.id AS project_id,
+                   proj.title AS project_title
             FROM channels ch
             LEFT JOIN channel_members cm ON cm.channel_id = ch.id AND cm.user_id = $1
+            LEFT JOIN mw_projects proj
+                   ON proj.project_data->>'discussion_channel_id' = ch.id::text
             WHERE ch.is_archived = false
               AND (
                 -- Channels in the user's current tenant (excluding private ones they're not in)
@@ -367,6 +376,8 @@ async def list_channels(
                 last_message_preview=r["last_message_preview"],
                 is_member=r["is_member"],
                 my_role=r["my_role"],
+                project_id=r["project_id"],
+                project_title=r["project_title"],
             )
             for r in rows
         ]
