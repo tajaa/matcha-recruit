@@ -1,7 +1,67 @@
+import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import urlparse
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
+
+
+def _load_secrets_from_aws(secret_id: str) -> None:
+    """Merge a JSON blob from AWS Secrets Manager into os.environ.
+
+    Existing env vars win — letting devs override a key locally without
+    touching the shared secret. Only runs when `AWS_SECRETS_MANAGER_SECRET_ID`
+    is set, so dev sessions without AWS creds skip this entirely.
+
+    Any failure (missing boto3, IAM denial, network, malformed JSON) is
+    fatal. Silent fallback is dangerous here because production .env
+    will have removed bare `JWT_SECRET_KEY` in favour of Secrets Manager
+    — falling back would generate a random JWT key, invalidating every
+    user's session on each restart.
+    """
+    import boto3  # boto3 is a hard dep (`server/requirements.txt`)
+
+    region = os.getenv("AWS_REGION", "us-east-1")
+    client = boto3.client("secretsmanager", region_name=region)
+    resp = client.get_secret_value(SecretId=secret_id)
+    payload = json.loads(resp["SecretString"])
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"Secret {secret_id!r} must be a JSON object of env vars, got {type(payload).__name__}"
+        )
+    loaded = 0
+    for key, value in payload.items():
+        if key not in os.environ:
+            os.environ[key] = str(value)
+            loaded += 1
+    logger.info(
+        "Loaded %d secret(s) from AWS Secrets Manager (%s)", loaded, secret_id
+    )
+
+
+def _warn_if_db_unencrypted(database_url: str, database_ssl: str) -> None:
+    """Flag a connection to a remote Postgres without TLS as risky.
+
+    Local dev runs against `127.0.0.1` (SSH tunnel) where the connection is
+    plaintext but the tunnel itself is encrypted — that's fine. Anything
+    else with `database_ssl=disable` is wire-cleartext to a remote host.
+    """
+    if database_ssl != "disable":
+        return
+    try:
+        host = urlparse(database_url).hostname or ""
+    except Exception:
+        return
+    if host in ("", "localhost", "127.0.0.1", "::1"):
+        return
+    logger.warning(
+        "DATABASE_SSL=disable for non-local host %r — connection is plaintext. "
+        "Set DATABASE_SSL=require in production.",
+        host,
+    )
 
 
 @dataclass
@@ -127,6 +187,15 @@ def load_settings() -> Settings:
     global _settings
     load_dotenv()
 
+    # AWS Secrets Manager override: when AWS_SECRETS_MANAGER_SECRET_ID is set,
+    # pull the JSON-encoded secret blob and merge it into os.environ BEFORE
+    # any other settings read. Production .env then only needs the
+    # AWS_SECRETS_MANAGER_SECRET_ID pointer; the bare JWT/Stripe keys can
+    # live in Secrets Manager only.
+    secret_id = os.getenv("AWS_SECRETS_MANAGER_SECRET_ID")
+    if secret_id:
+        _load_secrets_from_aws(secret_id)
+
     # Ensure GOOGLE_APPLICATION_CREDENTIALS is set for Vertex AI
     creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
     if creds_path:
@@ -160,9 +229,13 @@ def load_settings() -> Settings:
         chat_jwt_secret_key = secrets.token_urlsafe(32)
         print("[WARNING] CHAT_JWT_SECRET_KEY not set. Using random key (chat sessions won't persist across restarts)")
 
+    database_url_clean = database_url.strip().strip('"')
+    database_ssl = os.getenv("DATABASE_SSL", "disable")
+    _warn_if_db_unencrypted(database_url_clean, database_ssl)
+
     _settings = Settings(
-        database_url=database_url.strip().strip('"'),
-        database_ssl=os.getenv("DATABASE_SSL", "disable"),
+        database_url=database_url_clean,
+        database_ssl=database_ssl,
         gemini_api_key=api_key if api_key else None,
         vertex_project=vertex_project,
         vertex_location=os.getenv("VERTEX_LOCATION", "us-central1"),
