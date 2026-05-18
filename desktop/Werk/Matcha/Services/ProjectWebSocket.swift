@@ -74,14 +74,24 @@ final class ProjectWebSocket: NSObject {
     override private init() { super.init() }
 
     func connect() {
-        guard !isConnecting && !isConnected else { return }
-        guard let token = APIClient.shared.accessToken else { return }
+        guard !isConnecting && !isConnected else {
+            print("[ProjectWS] connect skipped — isConnecting=\(isConnecting) isConnected=\(isConnected)")
+            return
+        }
+        guard let token = APIClient.shared.accessToken else {
+            print("[ProjectWS] connect skipped — no access token")
+            return
+        }
         let base = APIClient.shared.baseURL
         let wsBase = base
             .replacingOccurrences(of: "http://", with: "ws://")
             .replacingOccurrences(of: "https://", with: "wss://")
             .replacingOccurrences(of: "/api", with: "")
-        guard let url = URL(string: "\(wsBase)/ws/projects?token=\(token)") else { return }
+        guard let url = URL(string: "\(wsBase)/ws/projects?token=\(token)") else {
+            print("[ProjectWS] connect skipped — invalid URL base=\(base)")
+            return
+        }
+        print("[ProjectWS] connect initiated → \(url.absoluteString.prefix(80))…")
         isConnecting = true
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         self.session = session
@@ -109,6 +119,7 @@ final class ProjectWebSocket: NSObject {
     /// Idempotent on the same (project, page) pair — useful when SwiftUI
     /// re-fires .task blocks.
     func joinProject(projectId: String, pageKey: String) {
+        print("[ProjectWS] join_project project=\(projectId) page=\(pageKey)")
         currentProjectId = projectId
         currentPageKey = pageKey
         send(["type": "join_project", "project_id": projectId, "page_key": pageKey])
@@ -199,6 +210,12 @@ final class ProjectWebSocket: NSObject {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = obj["type"] as? String else { return }
 
+        if type != "pong" && type != "cursor" && type != "caret" {
+            // Skip pong/cursor/caret to keep the log readable. Everything
+            // else (presence, task.*, error) prints once per event.
+            print("[ProjectWS] recv type=\(type)")
+        }
+
         switch type {
         case "pong": break
         case "presence":
@@ -238,10 +255,10 @@ final class ProjectWebSocket: NSObject {
                 onTaskDeleted?(taskId, task["actor_id"] as? String)
             }
         case "error":
-            // Server sent {"type":"error","message":"..."} — fail silently;
+            // Server sent {"type":"error","message":"..."}.
             // join_project gates on membership so a permission error here
             // means we shouldn't retry, just stay disconnected on the page.
-            break
+            print("[ProjectWS] server error: \(obj["message"] ?? "<no message>")")
         default: break
         }
     }
@@ -274,6 +291,7 @@ final class ProjectWebSocket: NSObject {
 
     private func scheduleReconnect() {
         guard reconnectTask == nil else { return }
+        print("[ProjectWS] schedule reconnect — delay=\(reconnectDelay)s")
         isConnected = false
         isConnecting = false
         pingTask?.cancel(); pingTask = nil

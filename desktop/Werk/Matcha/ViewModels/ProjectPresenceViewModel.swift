@@ -97,6 +97,7 @@ final class ProjectPresenceViewModel {
     }
 
     func stop() {
+        print("[PresenceVM] stop — clearing ProjectWS callbacks")
         let ws = ProjectWebSocket.shared
         if let pid = projectId { ws.leaveProject(projectId: pid) }
         ws.clearCallbacks()

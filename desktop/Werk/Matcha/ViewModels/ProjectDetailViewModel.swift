@@ -491,23 +491,30 @@ class ProjectDetailViewModel {
     /// echoes from our own create / update / delete don't double-apply.
     @MainActor
     func attachTaskRealtime(currentUserId: String?) {
+        print("[ProjectVM] attachTaskRealtime user=\(currentUserId ?? "nil")")
         self.currentUserId = currentUserId
         let ws = ProjectWebSocket.shared
         ws.onTaskCreated = { [weak self] dict in
+            print("[ProjectVM] onTaskCreated task=\(dict["id"] ?? "?") actor=\(dict["actor_id"] ?? "?")")
             guard let self else { return }
             let actorId = dict["actor_id"] as? String
-            if let actorId, actorId == self.currentUserId { return }
+            if let actorId, actorId == self.currentUserId {
+                print("[ProjectVM] onTaskCreated suppressed — self-echo")
+                return
+            }
             if let task = Self.decodeTask(dict) {
                 Task { @MainActor in self.applyTaskCreated(task) }
             }
         }
         ws.onTaskUpdated = { [weak self] dict in
+            print("[ProjectVM] onTaskUpdated task=\(dict["id"] ?? "?") actor=\(dict["actor_id"] ?? "?") column=\(dict["board_column"] ?? "?")")
             guard let self else { return }
             if let task = Self.decodeTask(dict) {
                 Task { @MainActor in self.applyTaskUpdated(task) }
             }
         }
         ws.onTaskDeleted = { [weak self] taskId, actorId in
+            print("[ProjectVM] onTaskDeleted task=\(taskId) actor=\(actorId ?? "?")")
             guard let self else { return }
             if let actorId, actorId == self.currentUserId { return }
             Task { @MainActor in self.applyTaskDeleted(taskId) }

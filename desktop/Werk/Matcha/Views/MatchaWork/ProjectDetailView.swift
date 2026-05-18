@@ -63,18 +63,16 @@ struct ProjectDetailView: View {
             }
         }
         .task(id: projectId) {
-            // Don't fetch the thread inline here — onChange(activeChatId) below
-            // is the single source of truth and fires on initial nil→value.
-            // SwiftUI auto-cancels this .task block when projectId changes.
+            // Single .task: wire realtime callbacks → connect/join WS →
+            // then load the project. Sequencing matters: the previous
+            // two-block layout relied on SwiftUI's "best effort" ordering
+            // between adjacent .task modifiers, which sometimes raced the
+            // first task.updated event into a window where callbacks
+            // weren't attached yet. SwiftUI auto-cancels this block when
+            // projectId changes.
             viewModel.attachTaskRealtime(currentUserId: appState.currentUser?.id)
-            await viewModel.loadProject(id: projectId)
-        }
-        .task(id: projectId) {
-            // Connect to the presence WebSocket once the project is identified.
-            // We always join (not just collab) so the pill works on all
-            // matcha-work projects; cursor traffic is page-scoped server-side
-            // so it stays cheap for sub-tabs that don't render cursors.
             presenceVM.start(projectId: projectId, pageKey: collabPanel.rawValue)
+            await viewModel.loadProject(id: projectId)
         }
         .onChange(of: collabPanel) { _, newPanel in
             presenceVM.setPage(newPanel.rawValue)

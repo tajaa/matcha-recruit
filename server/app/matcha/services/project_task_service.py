@@ -38,6 +38,7 @@ async def _broadcast_task_event_safe(project_id: UUID, event: str, payload: dict
     """
     try:
         from ..routes.project_ws import broadcast_task_event
+        logger.info("dispatching %s for project=%s", event, project_id)
         await broadcast_task_event(project_id, event, payload)
     except Exception as e:
         logger.warning("Failed to broadcast %s for project %s: %s", event, project_id, e)

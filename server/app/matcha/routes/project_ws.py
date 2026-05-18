@@ -270,6 +270,13 @@ async def broadcast_task_event(project_id: UUID, event: str, payload: dict) -> N
     Best-effort: any send failure is swallowed by `_broadcast_to_project`'s
     per-conn dead-list handling; callers should still wrap in try/except.
     """
+    async with project_manager.lock:
+        room = list(project_manager.project_rooms.get(project_id, set()))
+    logger.info(
+        "broadcast %s project=%s room_size=%d members=%s",
+        event, project_id, len(room),
+        [str(uid) for uid in room],
+    )
     await project_manager._broadcast_to_project(project_id, {
         "type": event,
         "project_id": str(project_id),
