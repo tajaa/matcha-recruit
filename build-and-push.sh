@@ -42,6 +42,13 @@ BUILD_GUMMLOCAL_BACKEND=false
 BUILD_GUMMLOCAL_FRONTEND=false
 BUILD_AGENT=false
 LANDING_BUILD_VERSION="0"
+# Captured once in main() before any build runs. Both build_image and
+# push_image reference this so a commit that lands mid-run (e.g. user
+# bumps a file + commits while the parallel docker builds are still
+# going) cannot cause the push step to look for a tag that was never
+# built. Previously each step called `git rev-parse --short HEAD`
+# independently, which raced when HEAD moved between build and push.
+GIT_SHA=""
 
 ################################################################################
 # Helper Functions
@@ -360,9 +367,9 @@ build_image() {
     log_info "Dockerfile: $dockerfile_path"
     log_info "Platform: $PLATFORM"
 
-    # Generate Git commit SHA for tagging
-    local git_sha
-    git_sha=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    # Use the SHA captured at script start so build + push tag with the
+    # same value even if HEAD moves mid-run.
+    local git_sha="${GIT_SHA:-unknown}"
 
     local tags=(
         "${image_uri}:latest"
@@ -450,13 +457,36 @@ push_image() {
 
     log_section "Pushing $name Image to ECR"
 
-    local git_sha
-    git_sha=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    # Same SHA as the build step — captured once at script start so a
+    # mid-run commit can't desync build and push tags.
+    local git_sha="${GIT_SHA:-unknown}"
 
     local tags=(
         "${image_uri}:latest"
         "${image_uri}:${git_sha}"
     )
+
+    # Sanity-check every tag exists locally BEFORE attempting any push.
+    # Without this, a silent build failure (e.g. parallel buildx --load
+    # race, docker prune between build and push, manual interruption)
+    # surfaces as the cryptic "tag does not exist" docker error in the
+    # middle of the push phase. With this, we fail early with a clear
+    # message pointing to the build phase as the culprit.
+    local missing_tags=()
+    for tag in "${tags[@]}"; do
+        if ! docker image inspect "$tag" >/dev/null 2>&1; then
+            missing_tags+=("$tag")
+        fi
+    done
+    if [ ${#missing_tags[@]} -gt 0 ]; then
+        log_error "Build phase did not produce expected local tag(s) for $name:"
+        for tag in "${missing_tags[@]}"; do
+            log_error "  missing: $tag"
+        done
+        log_error "Re-run the script — see the build phase output above for the underlying error."
+        log_error "(Common cause: a HEAD-moving commit landed mid-run, or a parallel buildx --load race on Docker Desktop.)"
+        exit 1
+    fi
 
     for tag in "${tags[@]}"; do
         log_info "Pushing: $tag"
@@ -552,6 +582,24 @@ main() {
     log_info "Push to ECR: $PUSH_TO_ECR"
     log_info "Trigger Deploy: $TRIGGER_DEPLOY"
 
+    # Capture the commit SHA ONCE up front. Build + push both reference
+    # this through the GIT_SHA global so a mid-run commit cannot tag the
+    # build with one SHA and push under another.
+    GIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    log_info "Git SHA: ${GIT_SHA}"
+
+    # Warn (don't block) if the working tree has uncommitted changes —
+    # the build runs against the working tree (Dockerfile COPYs from
+    # the filesystem, not from git), but the tag is the committed SHA.
+    # An image labeled ${GIT_SHA} can therefore contain code that isn't
+    # in that commit. Surface that loudly so a re-run with uncommitted
+    # fixes doesn't quietly produce a misleading tag.
+    if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+        log_warning "Working tree has uncommitted changes."
+        log_warning "Image will be tagged ${GIT_SHA} but contents include uncommitted edits."
+        log_warning "Commit first if you want the tag to actually match what's deployed."
+    fi
+
     # Validate environment
     validate_tools
     validate_env
@@ -625,6 +673,17 @@ main() {
     if [ "$failed" = true ]; then
         log_error "One or more builds failed"
         exit 1
+    fi
+
+    # Drift check: if HEAD moved between start and now, the build tags
+    # are still pinned to the captured GIT_SHA (which is what we want)
+    # but the user should know so they can re-run for the new commit.
+    local head_now
+    head_now=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    if [ "$head_now" != "${GIT_SHA}" ]; then
+        log_warning "HEAD moved during build: started ${GIT_SHA}, now ${head_now}."
+        log_warning "Images will be pushed tagged ${GIT_SHA} (the SHA they were built from)."
+        log_warning "Re-run the script if you want ${head_now} on ECR."
     fi
 
     # Push images (only after all builds succeed to preserve atomicity)

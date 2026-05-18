@@ -406,6 +406,7 @@ Explore/Grep agents skip generated/built/binary artifacts: `node_modules/`, `cli
 
 These are legacy artifacts from a discontinued sister product. Do **not** propose changes, cleanup, or modifications to them unless explicitly asked:
 
-- `scripts/dev.sh` and `build-and-push.sh` — reference a `gummfit-agency/` directory that no longer exists. Use `scripts/dev-remote.sh` instead.
+- `scripts/dev.sh` — references a `gummfit-agency/` directory that no longer exists. Use `scripts/dev-remote.sh` instead.
+- `build-and-push.sh` — **still in active daily use** by the user for ECR pushes. The gumfit/gumm-local optional targets in it are dead, but the matcha backend/frontend/agent paths are live. Don't propose deleting it.
 - `gumfit_admin` role in `server/app/core/models/auth.py` `UserRole` literal — kept for historical type safety; no live users.
 - Any `Gummfit` / `gumfit` string in scripts, docs, or config.
