@@ -705,9 +705,9 @@ async def generate_guidance(
                 },
                 {
                     "id": "fallback_close",
-                    "title": "Close as documentation only",
-                    "recommendation": "If this report needs no further action, close it now.",
-                    "rationale": "Documentation-only incidents can be closed without further analysis.",
+                    "title": "Close incident",
+                    "recommendation": "Close this incident if everything is wrapped up.",
+                    "rationale": "Use this once any remaining guidance has been addressed.",
                     "priority": "low",
                     "blockers": [],
                     "action": {
