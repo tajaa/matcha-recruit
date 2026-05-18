@@ -177,6 +177,33 @@ class EmailService(
             logger.exception("Error sending email to %s", to_email)
             return False
 
+    async def send_email_with_fallback(
+        self,
+        to_email: str,
+        to_name: Optional[str],
+        subject: str,
+        html_content: str,
+        text_content: Optional[str] = None,
+    ) -> bool:
+        """Public send wrapper: Gmail first, MailerSend on Gmail failure.
+
+        Use this for transactional emails where reliability matters and
+        the payload doesn't need Gmail-specific features (no `attachments`,
+        no `extra_headers` like List-Unsubscribe — those require Gmail
+        because MailerSend's basic JSON payload doesn't carry them).
+
+        Same body as the legacy `_send_with_fallback` — kept under both
+        names so existing internal callers in `email/auth.py` etc. keep
+        working without churn.
+        """
+        return await self._send_with_fallback(
+            to_email=to_email,
+            to_name=to_name,
+            subject=subject,
+            html_content=html_content,
+            text_content=text_content,
+        )
+
     async def _send_with_fallback(
         self,
         to_email: str,

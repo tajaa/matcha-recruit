@@ -193,7 +193,12 @@ async def _send_notification_email(
         full_link = link if link.startswith("http") else f"https://matcharecruit.com{link}"
         html_body += f'<p><a href="{full_link}">View in Matcha Work</a></p>'
 
-    await email_svc.send_email(
+    # Use the fallback wrapper (Gmail → MailerSend on failure). Direct
+    # `send_email` is Gmail-only and silently returns False when the
+    # Gmail OAuth token has degraded, which is why matcha-lite signup
+    # emails (which use the fallback) arrive but kanban transition
+    # bell-emails didn't.
+    await email_svc.send_email_with_fallback(
         to_email=user["email"],
         to_name=user.get("name"),
         subject=subject,
