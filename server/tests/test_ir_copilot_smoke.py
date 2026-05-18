@@ -237,6 +237,80 @@ def test_generate_guidance_drops_invalid_cards(monkeypatch):
             assert _is_valid_set_field(card["action"]["field_name"], card["action"]["field_value"])
 
 
+def test_generate_guidance_preserves_quick_reply_choices(monkeypatch):
+    """Regression: the AI emits a quick_reply log_root_cause_query card with
+    choices + quick_reply_kind. The orchestrator's filter loop used to strip
+    those extensions because _normalize_guidance_cards only knew the base
+    action schema, leaving the persisted card with action.type='quick_reply'
+    but no choices array — frontend then fell through to the default
+    Accept/Skip branch, sent an empty selected_value, and the backend
+    dispatcher returned "Pick an option to continue." Now the loop
+    explicitly re-attaches IR-only extension fields for quick_reply,
+    numeric_input, text_input, and osha_emergency_alert.
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.matcha.services import ir_ai_orchestrator
+
+    payload_json = json.dumps({
+        "summary": "Capture the root cause if you like.",
+        "open_questions": [],
+        "cards": [
+            {
+                "id": "log_root_cause_query",
+                "title": "Log Root Cause",
+                "recommendation": "Would you like to log the root cause?",
+                "rationale": "Capture hazard / why / prevention in your own words.",
+                "priority": "medium",
+                "action": {
+                    "type": "quick_reply",
+                    "label": "Choose one",
+                    "quick_reply_kind": "log_root_cause_query",
+                    "choices": [
+                        {"label": "Yes", "value": "yes"},
+                        {"label": "No", "value": "no"},
+                    ],
+                },
+            },
+        ],
+    })
+
+    async def fake_generate_content(*args, **kwargs):
+        return SimpleNamespace(text=payload_json)
+
+    fake_analyzer = SimpleNamespace(
+        client=SimpleNamespace(
+            aio=SimpleNamespace(
+                models=SimpleNamespace(generate_content=fake_generate_content),
+            ),
+        ),
+        model="fake-model",
+        _parse_json_response=lambda raw: json.loads(raw),
+    )
+    monkeypatch.setattr(ir_ai_orchestrator, "get_ir_analyzer", lambda: fake_analyzer)
+
+    class FakeRateLimiter:
+        async def check_limit(self, *args, **kwargs):
+            return None
+    monkeypatch.setattr(ir_ai_orchestrator, "get_rate_limiter", lambda: FakeRateLimiter())
+
+    incident = {"id": "00000000-0000-0000-0000-000000000000", "title": "Test"}
+    result = asyncio.run(
+        ir_ai_orchestrator.generate_guidance(
+            incident=incident, analyses=[], messages=[],
+        )
+    )
+
+    assert len(result["cards"]) == 1
+    action = result["cards"][0]["action"]
+    assert action["type"] == "quick_reply"
+    assert action.get("quick_reply_kind") == "log_root_cause_query"
+    choices = action.get("choices")
+    assert isinstance(choices, list) and len(choices) == 2
+    assert {c["value"] for c in choices} == {"yes", "no"}
+
+
 def test_canonical_analysis_type_aliases():
     """AI commonly emits abbreviated names. Aliases must resolve to canonical."""
     from app.matcha.services.ir_ai_orchestrator import _canonical_analysis_type

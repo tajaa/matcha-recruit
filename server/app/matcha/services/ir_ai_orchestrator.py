@@ -629,6 +629,29 @@ async def generate_guidance(
         card["action"]["analysis_type"] = canonical_analysis
         card["action"]["field_name"] = raw_field_name if isinstance(raw_field_name, str) else None
         card["action"]["field_value"] = normalized_value if isinstance(normalized_value, (str, type(None))) else None
+        # _normalize_guidance_cards strips IR-only payload extensions
+        # (choices, quick_reply_kind, target_field, etc.) because it
+        # was built for the ER router and only knows the base action
+        # schema. Without this re-attach an AI-emitted log_root_cause_query
+        # card ends up with action.type='quick_reply' but no choices —
+        # frontend falls through to Accept/Skip, sends no selected_value,
+        # backend dispatcher returns "Pick an option to continue."
+        if raw_type in {"quick_reply", "numeric_input", "text_input", "osha_emergency_alert"}:
+            for ext_key in (
+                "choices",
+                "quick_reply_kind",
+                "target_field",
+                "pending_classification",
+                "input_label",
+                "input_min",
+                "input_max",
+                "prompt_text",
+                "input_rows",
+                "phone",
+                "deadline",
+            ):
+                if ext_key in raw_action:
+                    card["action"][ext_key] = raw_action[ext_key]
         filtered_cards.append(card)
     cards = filtered_cards
 
