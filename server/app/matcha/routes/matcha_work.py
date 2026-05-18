@@ -3406,7 +3406,7 @@ async def reject_project_section_revision_endpoint(
 
 ALLOWED_PROJECT_FILE_EXTENSIONS = {
     ".pdf", ".docx", ".doc", ".txt", ".csv", ".xlsx", ".xls",
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".heic", ".heif",
     ".pptx", ".md",
 }
 PROJECT_FILE_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
@@ -3651,21 +3651,23 @@ async def list_project_tasks_endpoint(
     task_ids = [UUID(t["id"]) for t in tasks if t.get("id")]
     grouped = await project_file_service.list_files_for_tasks(project_id, task_ids)
     for t in tasks:
-        files = grouped.get(t["id"], [])
-        t["attachments"] = _serialize_files_for_wire(files)
+        t["attachments"] = _resolve_file_urls(grouped.get(t["id"], []))
     return tasks
 
 
-def _serialize_files_for_wire(files: list[dict]) -> list[dict]:
-    """Convert UUIDs/datetimes to strings for JSON wire format."""
+def _resolve_file_urls(files: list[dict]) -> list[dict]:
+    """Rewrite s3:// storage_url values to short-lived presigned https URLs so
+    the desktop client's AsyncImage + NSWorkspace.open can fetch them. CloudFront
+    URLs pass through unchanged. FastAPI handles UUID/datetime serialization."""
+    storage = get_storage()
     out = []
     for f in files:
         d = dict(f)
-        for k in ("id", "project_id", "task_id", "uploaded_by"):
-            if d.get(k) is not None:
-                d[k] = str(d[k])
-        if d.get("created_at") is not None:
-            d["created_at"] = d["created_at"].isoformat()
+        url = d.get("storage_url") or ""
+        if url.startswith("s3://"):
+            signed = storage.get_presigned_download_url(url, expires_in=3600)
+            if signed:
+                d["storage_url"] = signed
         out.append(d)
     return out
 
@@ -3954,7 +3956,7 @@ async def upload_task_file_endpoint(
         file_size=len(content),
         task_id=task_id,
     )
-    return record
+    return _resolve_file_urls([record])[0]
 
 
 @router.get("/projects/{project_id}/tasks/{task_id}/files")
@@ -3966,7 +3968,8 @@ async def list_task_files_endpoint(
     from ..services import project_file_service
     await _verify_project_access(project_id, current_user)
     await _verify_task_belongs_to_project(project_id, task_id)
-    return await project_file_service.list_task_files(project_id, task_id)
+    files = await project_file_service.list_task_files(project_id, task_id)
+    return _resolve_file_urls(files)
 
 
 @router.delete("/projects/{project_id}/tasks/{task_id}/files/{file_id}")

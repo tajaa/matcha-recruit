@@ -611,7 +611,11 @@ private struct TaskEditorSheet: View {
         .padding(16)
         .frame(width: 420)
         .background(Color.appBackground)
-        .task { await viewModel.loadTaskFiles(taskId: task.id) }
+        .task {
+            if viewModel.taskFiles[task.id] == nil {
+                await viewModel.loadTaskFiles(taskId: task.id)
+            }
+        }
     }
 
     @ViewBuilder
