@@ -126,10 +126,25 @@ async def _notify_task_assigned(
     task_id: UUID,
     task_title: str,
 ) -> None:
-    """Dispatch a `task_assigned` bell notification to the assignee."""
+    """Dispatch a `task_assigned` bell notification + email to the assignee."""
     from . import notification_service as notif_svc
 
-    body = f"in {project_title}" if project_title else None
+    assigner_name = "Someone"
+    try:
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                "SELECT name FROM users WHERE id = $1", actor_user_id
+            )
+        if row and row["name"]:
+            assigner_name = row["name"]
+    except Exception as e:
+        logger.warning("Failed to look up assigner %s name: %s", actor_user_id, e)
+
+    if project_title:
+        body = f"{assigner_name} assigned this to you in {project_title}."
+    else:
+        body = f"{assigner_name} assigned this to you."
+
     try:
         await notif_svc.create_notification(
             user_id=assigned_to,
@@ -143,6 +158,8 @@ async def _notify_task_assigned(
                 "task_id": str(task_id),
                 "assigned_by": str(actor_user_id),
             },
+            send_email=True,
+            email_subject=f"You were assigned: {task_title}",
         )
     except Exception as e:
         logger.warning("Failed to notify task assignment %s -> %s: %s", task_id, assigned_to, e)
