@@ -268,22 +268,32 @@ class AppState {
         promptForNotificationsIfNeeded()
     }
 
-    /// Surface the notification-permission prompt on every app open. macOS
-    /// only shows the OS dialog once per app install, so denied users see
-    /// our in-app banner instead. Authorized users see nothing.
+    /// Surface the notification-permission prompt on every app open when
+    /// status is anything other than `.authorized`. macOS only shows the
+    /// OS dialog once per install, so the in-app alert is the only way to
+    /// nudge denied / provisional / ephemeral users. The user can mute the
+    /// alert permanently via "Don't ask again".
     /// Called from both `didLogin` (cold launch: restoreSession → didLogin
     /// completes after scenePhase fires, so onSceneActive's early-return
     /// would otherwise miss the check) and `onSceneActive` (warm reopen).
     @MainActor
     private func promptForNotificationsIfNeeded() {
+        guard !ChannelNotificationManager.shared.promptSuppressed else { return }
         ChannelNotificationManager.shared.checkAuthorizationStatus { [weak self] status in
+            guard let self else { return }
             switch status {
+            case .authorized:
+                return
             case .notDetermined:
+                // First-ever launch: fire OS dialog only. The in-app alert
+                // would double-nag legitimate users who immediately click
+                // Allow. If macOS Focus/MDM/DND suppresses the OS dialog,
+                // the next scene activation reads back .denied and the
+                // alert fires then.
                 ChannelNotificationManager.shared.requestPermission()
-            case .denied:
-                self?.showNotificationReprompt = true
             default:
-                break
+                // .denied, .provisional, .ephemeral — all show the alert
+                self.showNotificationReprompt = true
             }
         }
     }

@@ -371,9 +371,12 @@ struct ContentView: View {
             Button("Open Settings") {
                 ChannelNotificationManager.shared.openSystemNotificationSettings()
             }
+            Button("Don't ask again", role: .destructive) {
+                ChannelNotificationManager.shared.promptSuppressed = true
+            }
             Button("Not now", role: .cancel) { }
         } message: {
-            Text("Notifications are off. Turn them on in System Settings → Notifications → Matcha so you don't miss channel mentions and inbox messages.")
+            Text("Notifications are off. Turn them on in System Settings → Notifications → Matcha so you don't miss channel mentions, task assignments, and project updates.")
         }
         .sheet(isPresented: $showCreateChannel) {
             CreateChannelSheet { newChannel in

@@ -6,8 +6,17 @@ final class ChannelNotificationManager {
     static let shared = ChannelNotificationManager()
     static let enabledKey = "mw-channel-notifications-enabled"
     static let appNotificationsEnabledKey = "mw-app-notifications-enabled"
+    static let promptSuppressedKey = "mw-notification-prompt-suppressed"
 
     private init() {}
+
+    /// Set when the user clicks "Don't ask again" on the in-app permission
+    /// alert. The alert re-fires on every cold launch + scene activation
+    /// otherwise — this flag is the only way to mute it.
+    var promptSuppressed: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.promptSuppressedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.promptSuppressedKey) }
+    }
 
     /// Master toggle for non-channel-chat notifications (task assignments,
     /// mentions, project events). Separate from `isEnabled` which gates the
