@@ -35,6 +35,7 @@ TYPES = {
     "discipline_refused": "Discipline Signature Refused",
     "discipline_physical_uploaded": "Discipline Signature Uploaded",
     "task_assigned": "Task Assigned",
+    "task_progress": "Task Update",
 }
 
 

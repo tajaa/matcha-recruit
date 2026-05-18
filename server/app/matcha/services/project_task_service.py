@@ -22,6 +22,14 @@ logger = logging.getLogger(__name__)
 _ALLOWED_COLUMNS = {"todo", "in_progress", "review", "done"}
 _ALLOWED_PRIORITIES = {"critical", "high", "medium", "low"}
 
+# Email + bell templates for forward-only column transitions. Destinations
+# other than these (e.g. moving back to 'todo') intentionally fire nothing.
+_TRANSITION_TEMPLATES: dict[str, dict[str, str]] = {
+    "in_progress": {"subject": "Task started: {title}",     "verb": "started"},
+    "review":      {"subject": "Ready for review: {title}", "verb": "moved to review"},
+    "done":        {"subject": "Task completed: {title}",   "verb": "completed"},
+}
+
 
 async def _broadcast_task_event_safe(project_id: UUID, event: str, payload: dict) -> None:
     """Wrapped broadcast — never fails the caller; logs at warning level.
@@ -180,6 +188,77 @@ async def _notify_task_assigned(
         logger.warning("Failed to notify task assignment %s -> %s: %s", task_id, assigned_to, e)
 
 
+async def _notify_task_column_transition(
+    *,
+    project_id: UUID,
+    company_id: UUID,
+    actor_user_id: Optional[UUID],
+    task_id: UUID,
+    task_title: str,
+    new_column: str,
+    project_title: Optional[str],
+) -> None:
+    """Email + bell every active project collaborator (minus the actor) when
+    a task crosses into in_progress / review / done. Transitions back to
+    'todo' (or any other destination) are intentionally silent.
+    """
+    tpl = _TRANSITION_TEMPLATES.get(new_column)
+    if tpl is None:
+        return
+
+    from .project_service import list_collaborators
+    from . import notification_service as notif_svc
+
+    actor_name = "Someone"
+    if actor_user_id is not None:
+        try:
+            async with get_connection() as conn:
+                row = await conn.fetchrow(
+                    "SELECT name FROM users WHERE id = $1", actor_user_id
+                )
+            if row and row["name"]:
+                actor_name = row["name"]
+        except Exception as e:
+            logger.warning("Failed to look up actor %s name: %s", actor_user_id, e)
+
+    try:
+        collaborators = await list_collaborators(project_id)
+    except Exception as e:
+        logger.warning("Failed to load collaborators for project %s: %s", project_id, e)
+        return
+
+    where = f"in {project_title}" if project_title else "in this project"
+    body = f"{actor_name} {tpl['verb']} “{task_title}” {where}."
+    subject = tpl["subject"].format(title=task_title)
+    link = f"/work?project={project_id}&task={task_id}"
+
+    for c in collaborators:
+        if actor_user_id is not None and c["user_id"] == actor_user_id:
+            continue
+        try:
+            await notif_svc.create_notification(
+                user_id=c["user_id"],
+                company_id=company_id,
+                type="task_progress",
+                title=subject,
+                body=body,
+                link=link,
+                metadata={
+                    "project_id": str(project_id),
+                    "task_id": str(task_id),
+                    "to_column": new_column,
+                    "actor_id": str(actor_user_id) if actor_user_id else None,
+                },
+                send_email=True,
+                email_subject=subject,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed task-progress notify task=%s recipient=%s: %s",
+                task_id, c["user_id"], e,
+            )
+
+
 async def update_project_task(
     project_id: UUID,
     task_id: UUID,
@@ -297,6 +376,17 @@ async def update_project_task(
                 task_id=task_id,
                 task_title=row["title"],
             )
+
+    if row and new_column != current["board_column"]:
+        await _notify_task_column_transition(
+            project_id=project_id,
+            company_id=current["company_id"],
+            actor_user_id=actor_user_id,
+            task_id=task_id,
+            task_title=row["title"],
+            new_column=new_column,
+            project_title=project_title,
+        )
 
     if row:
         task_payload = _row_to_task(dict(row))
