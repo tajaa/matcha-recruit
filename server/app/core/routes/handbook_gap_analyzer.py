@@ -21,7 +21,7 @@ from datetime import timedelta
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 
 from ...database import get_connection
 from ..models.auth import CurrentUser
@@ -205,6 +205,7 @@ async def get_audit_quota(
 @router.post("/analyze")
 async def submit_handbook_for_analysis(
     request: Request,
+    background_tasks: BackgroundTasks,
     pdf: UploadFile = File(...),
     states: str = Form(...),
     industry: Optional[str] = Form(None),
@@ -301,21 +302,17 @@ async def submit_handbook_for_analysis(
         )
     report_id = str(row["id"])
 
-    try:
-        from app.workers.tasks.handbook_audit import analyze_handbook_audit
-        analyze_handbook_audit.delay(report_id)
-    except Exception as exc:
-        logger.exception("Could not enqueue handbook audit task: %s", exc)
-        async with get_connection() as conn:
-            await conn.execute(
-                "UPDATE handbook_audit_reports SET status='failed', error_text=$2 WHERE id=$1",
-                report_id,
-                f"Worker enqueue failed: {exc}"[:1000],
-            )
-        raise HTTPException(
-            status_code=503,
-            detail="The audit worker is unavailable. Try again in a few minutes.",
-        )
+    # Run inline via FastAPI's BackgroundTasks instead of dispatching to a
+    # Celery worker. The handbook audit is interactive (frontend polls the
+    # report row every 2.5s while the user waits on the result page) so the
+    # same-event-loop + same-process model avoids a whole class of bugs:
+    # no per-worker load_settings() bootstrap, no asyncpg-pool-per-loop
+    # plumbing, no get_storage() singleton drift, no worker-unavailable
+    # 503 surface area. A stalled run (uvicorn restart, OOM, unhandled
+    # exception) is detected by the frontend after 5 minutes of no
+    # progress and surfaces a Retry banner.
+    from app.core.services.handbook_audit_service import run_handbook_audit
+    background_tasks.add_task(run_handbook_audit, report_id)
 
     return {"report_id": report_id, "status": "processing"}
 

@@ -117,7 +117,9 @@ export default function HandbookGapResult({ embedded = false }: HandbookGapResul
       {report && report.status === 'failed' && (
         <ErrorBlock message={report.error || 'The audit did not complete successfully.'} embedded={embedded} />
       )}
-      {report && report.status === 'processing' && <Processing />}
+      {report && report.status === 'processing' && (
+        <Processing report={report} embedded={embedded} />
+      )}
       {report && report.status === 'ready' && <ResultBody report={report} />}
     </>
   )
@@ -148,7 +150,39 @@ function Loading() {
   )
 }
 
-function Processing() {
+// 5 minutes — well past the 30-90s typical run. A stalled audit (uvicorn
+// restart mid-job, OOM, unhandled exception in the inline service) leaves
+// status='processing' on the report row indefinitely; once the user has
+// waited past this threshold without progress, surface a Retry affordance.
+const STALL_THRESHOLD_MS = 5 * 60 * 1000
+
+function Processing({ report, embedded }: { report: ReportPayload; embedded?: boolean }) {
+  const retryTo = embedded ? '/app/resources/handbook-audit' : '/handbook-gap-analyzer'
+  const createdAt = report.created_at ? new Date(report.created_at).getTime() : null
+  const elapsedMs = createdAt ? Date.now() - createdAt : 0
+  const stalled = createdAt !== null && elapsedMs > STALL_THRESHOLD_MS
+
+  if (stalled) {
+    return (
+      <div
+        className="rounded-2xl p-8 text-center max-w-xl mx-auto"
+        style={{ backgroundColor: 'rgba(206,145,120,0.08)', border: '1px solid rgba(206,145,120,0.3)' }}
+      >
+        <AlertOctagon className="w-7 h-7 mx-auto mb-4" style={{ color: '#8a4a3a' }} />
+        <h2 className="text-lg mb-2" style={{ fontFamily: DISPLAY, color: INK }}>
+          Audit appears stalled.
+        </h2>
+        <p className="text-sm" style={{ color: MUTED }}>
+          This run has been processing for over five minutes. Most audits
+          finish in 30–90 seconds. The backend may have restarted mid-run.
+        </p>
+        <Link to={retryTo} className="inline-block mt-5 underline text-sm" style={{ color: INK }}>
+          Start a new audit
+        </Link>
+      </div>
+    )
+  }
+
   return (
     <div className="text-center py-24">
       <Loader2 className="w-8 h-8 animate-spin mx-auto mb-5" style={{ color: INK }} />
