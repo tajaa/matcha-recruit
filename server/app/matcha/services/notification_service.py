@@ -179,7 +179,18 @@ async def _send_notification_email(
         return
 
     async with get_connection() as conn:
-        user = await conn.fetchrow("SELECT email, name FROM users WHERE id = $1", user_id)
+        user = await conn.fetchrow(
+            """
+            SELECT u.email,
+                   COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
+            FROM users u
+            LEFT JOIN clients c ON c.user_id = u.id
+            LEFT JOIN employees e ON e.user_id = u.id
+            LEFT JOIN admins a ON a.user_id = u.id
+            WHERE u.id = $1
+            """,
+            user_id,
+        )
     if not user:
         logger.warning(
             "User %s not found — skipping email subject=%r", user_id, subject,

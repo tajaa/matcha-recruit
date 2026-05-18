@@ -157,7 +157,14 @@ async def _notify_task_assigned(
     try:
         async with get_connection() as conn:
             row = await conn.fetchrow(
-                "SELECT name FROM users WHERE id = $1", actor_user_id
+                """
+                    SELECT COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
+                    FROM users u
+                    LEFT JOIN clients c ON c.user_id = u.id
+                    LEFT JOIN employees e ON e.user_id = u.id
+                    LEFT JOIN admins a ON a.user_id = u.id
+                    WHERE u.id = $1
+                    """, actor_user_id
             )
         if row and row["name"]:
             assigner_name = row["name"]
@@ -215,7 +222,14 @@ async def _notify_task_column_transition(
         try:
             async with get_connection() as conn:
                 row = await conn.fetchrow(
-                    "SELECT name FROM users WHERE id = $1", actor_user_id
+                    """
+                    SELECT COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
+                    FROM users u
+                    LEFT JOIN clients c ON c.user_id = u.id
+                    LEFT JOIN employees e ON e.user_id = u.id
+                    LEFT JOIN admins a ON a.user_id = u.id
+                    WHERE u.id = $1
+                    """, actor_user_id
                 )
             if row and row["name"]:
                 actor_name = row["name"]
