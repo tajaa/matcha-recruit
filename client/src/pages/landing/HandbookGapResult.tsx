@@ -28,6 +28,8 @@ interface Gap {
   citation?: string | null
   what_good_looks_like?: string
   matched_section_title?: string | null
+  also_covers?: string[]
+  also_jurisdictions?: Array<{ name?: string | null; level?: string | null; source_url?: string | null }>
 }
 
 interface ReportPayload {
@@ -517,10 +519,29 @@ function GapCard({ gap }: { gap: Gap }) {
           {gap.severity}
         </span>
       </div>
-      {(gap.citation || gap.matched_section_title) && (
+      {gap.also_covers && gap.also_covers.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {gap.also_covers.map((title, i) => (
+            <span
+              key={i}
+              className="text-[10.5px] uppercase tracking-[0.15em] px-2 py-0.5 rounded"
+              style={{ color: MUTED, fontFamily: 'var(--font-mono)', border: `1px solid ${LINE}` }}
+            >
+              also: {title}
+            </span>
+          ))}
+        </div>
+      )}
+      {(gap.citation || gap.matched_section_title || (gap.also_jurisdictions && gap.also_jurisdictions.length > 0)) && (
         <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 text-[11px]" style={{ color: MUTED }}>
           {gap.citation && <span>cite · {gap.citation}</span>}
           {gap.matched_section_title && <span>matched · {gap.matched_section_title}</span>}
+          {gap.also_jurisdictions && gap.also_jurisdictions.length > 0 && (
+            <span>
+              + {gap.also_jurisdictions.length} related jurisdiction
+              {gap.also_jurisdictions.length === 1 ? '' : 's'}
+            </span>
+          )}
         </div>
       )}
     </div>

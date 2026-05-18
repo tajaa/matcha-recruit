@@ -39,6 +39,168 @@ MAX_REQUIREMENTS_PER_STATE = 24
 MAX_SECTIONS_FOR_PROMPT = 80
 SAMPLE_GAPS_COUNT = 2
 
+_SEVERITY_RANK = {"critical": 0, "important": 1, "recommended": 2}
+
+
+def _collapse_same_level_jurisdictions(
+    requirements: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """For each (category, rate_type, jurisdiction_level) group, keep ONE
+    representative row and stash the rest under ``also_jurisdictions``.
+
+    The handbook wizard preserves per-city rows on purpose (its output is
+    a multi-jurisdiction addendum). The audit doesn't — Gemini grades the
+    same topic once and the duplicates just become near-identical gaps.
+    Rows with no ``category`` pass through unchanged.
+
+    Representative selection within a group:
+      1. Most recent ``effective_date`` (None sorts last).
+      2. Tie-break: longest ``description``.
+      3. Tie-break: input order (stable).
+
+    Representative is a SHALLOW COPY with a new key ``also_jurisdictions``
+    listing ``{name, level, source_url}`` for the dropped siblings (empty
+    when group has one row). Caller's dicts are never mutated.
+    """
+    if not requirements:
+        return []
+
+    # Track group composition + insertion order so identical inputs
+    # return identical outputs.
+    groups: dict[tuple, list[dict[str, Any]]] = {}
+    group_order: list[tuple] = []
+    ungrouped_passthrough: list[dict[str, Any]] = []
+
+    for req in requirements:
+        category = (req.get("category") or "").strip().lower()
+        if not category:
+            ungrouped_passthrough.append(req)
+            continue
+        rate_type = req.get("rate_type")
+        level = (req.get("jurisdiction_level") or "").strip().lower()
+        key = (category, rate_type, level)
+        if key not in groups:
+            groups[key] = []
+            group_order.append(key)
+        groups[key].append(req)
+
+    def _rank(req: dict[str, Any]) -> tuple:
+        # Larger key wins under max(): present dates beat absent, newer
+        # dates beat older, longer descriptions beat shorter.
+        eff = req.get("effective_date")
+        if eff is None:
+            eff_key: tuple = (0,)
+        else:
+            try:
+                eff_key = (1, eff.toordinal())
+            except AttributeError:
+                eff_key = (1, 0)
+        desc_len = len(req.get("description") or "")
+        return (eff_key, desc_len)
+
+    result: list[dict[str, Any]] = []
+    for key in group_order:
+        rows = groups[key]
+        if len(rows) == 1:
+            rep = dict(rows[0])
+            rep["also_jurisdictions"] = []
+            result.append(rep)
+            continue
+        primary = max(rows, key=_rank)
+        siblings = [r for r in rows if r is not primary]
+        rep = dict(primary)
+        rep["also_jurisdictions"] = [
+            {
+                "name": s.get("jurisdiction_name"),
+                "level": s.get("jurisdiction_level"),
+                "source_url": s.get("source_url"),
+            }
+            for s in siblings
+        ]
+        result.append(rep)
+
+    # Ungrouped rows (no category) tacked on at end — preserves their
+    # presence in the audit without grouping them.
+    for req in ungrouped_passthrough:
+        rep = dict(req)
+        rep.setdefault("also_jurisdictions", [])
+        result.append(rep)
+
+    return result
+
+
+def _merge_duplicate_gaps_for_state(
+    state: str,
+    gaps: list[dict[str, Any]],
+    per_state: dict[str, int],
+) -> list[dict[str, Any]]:
+    """Bucket gaps by ``(state, requirement_key)``. On collision, MERGE
+    rather than append: stash the secondary's ``requirement_title`` under
+    primary.``also_covers`` and promote severity to the max of the group.
+
+    Mutates ``per_state`` in place (decrements old severity, increments new
+    severity, bumps ``covered`` for covered gaps). Returns the deduped
+    list of uncovered gaps in first-seen order.
+
+    Bucket excludes severity intentionally — rate-type-split rows can come
+    back from Gemini with different severities, and bucketing on severity
+    would let them slip past the merge.
+    """
+    buckets: dict[tuple[str, str], dict[str, Any]] = {}
+    order: list[tuple[str, str]] = []
+
+    for gap in gaps:
+        gap["state"] = state
+        if gap.get("covered"):
+            per_state["covered"] = per_state.get("covered", 0) + 1
+            continue
+
+        sev = (gap.get("severity") or "recommended").lower()
+        if sev not in _SEVERITY_RANK:
+            sev = "recommended"
+        gap["severity"] = sev
+
+        key = (state, gap.get("requirement_key") or gap.get("requirement_title") or "")
+        existing = buckets.get(key)
+        if existing is None:
+            # Initialize merge-target fields so frontend sees them present.
+            gap.setdefault("also_covers", [])
+            gap.setdefault("also_jurisdictions", gap.get("also_jurisdictions") or [])
+            per_state[sev] = per_state.get(sev, 0) + 1
+            buckets[key] = gap
+            order.append(key)
+            continue
+
+        # Merge into existing primary.
+        new_title = (gap.get("requirement_title") or "").strip()
+        if new_title:
+            existing_titles_lower = {
+                (existing.get("requirement_title") or "").strip().lower(),
+                *((t or "").strip().lower() for t in existing.get("also_covers", [])),
+            }
+            if new_title.lower() not in existing_titles_lower:
+                existing.setdefault("also_covers", []).append(new_title)
+
+        existing_jurisdictions = existing.setdefault("also_jurisdictions", [])
+        existing_seen = {
+            (j.get("name"), j.get("level"))
+            for j in existing_jurisdictions
+        }
+        for j in gap.get("also_jurisdictions") or []:
+            sig = (j.get("name"), j.get("level"))
+            if sig not in existing_seen:
+                existing_jurisdictions.append(j)
+                existing_seen.add(sig)
+
+        # Severity promotion: lower rank = higher severity.
+        prev_sev = (existing.get("severity") or "recommended").lower()
+        if _SEVERITY_RANK[sev] < _SEVERITY_RANK[prev_sev]:
+            existing["severity"] = sev
+            per_state[prev_sev] = max(per_state.get(prev_sev, 0) - 1, 0)
+            per_state[sev] = per_state.get(sev, 0) + 1
+
+    return [buckets[k] for k in order]
+
 
 async def run_handbook_audit(report_id: str) -> None:
     """Public entry point — wraps ``_analyze`` with a top-level error
@@ -122,6 +284,12 @@ async def _analyze(report_id: str) -> None:
             state_summaries[state] = {"critical": 0, "important": 0, "recommended": 0, "covered": 0}
             continue
 
+        # Pre-Gemini collapse: same-(category, rate_type, level) groups
+        # become ONE prompt entry with siblings stashed on
+        # also_jurisdictions. Drops near-identical gaps at the source so
+        # the 24-row Gemini budget buys distinct topics.
+        state_requirements = _collapse_same_level_jurisdictions(state_requirements)
+
         gaps = await _grade_state_coverage(
             state=state,
             industry=industry,
@@ -133,16 +301,8 @@ async def _analyze(report_id: str) -> None:
             continue
 
         per_state = {"critical": 0, "important": 0, "recommended": 0, "covered": 0}
-        for g in gaps:
-            g["state"] = state
-            if g.get("covered"):
-                per_state["covered"] += 1
-                continue
-            sev = (g.get("severity") or "recommended").lower()
-            if sev not in per_state:
-                sev = "recommended"
-            per_state[sev] += 1
-            all_gaps.append(g)
+        gaps_for_state = _merge_duplicate_gaps_for_state(state, gaps, per_state)
+        all_gaps.extend(gaps_for_state)
         state_summaries[state] = per_state
 
     gap_counts = {
@@ -392,17 +552,27 @@ async def _grade_state_coverage(
     if not isinstance(results, list):
         return None
 
+    # Filter non-dict junk before pairing so index drift can't slip past.
+    dict_results = [r for r in results if isinstance(r, dict)]
+    if len(dict_results) != len(requirements):
+        logger.warning(
+            "Gap-grading length mismatch for %s: %d reqs vs %d results",
+            state, len(requirements), len(dict_results),
+        )
+
     cleaned: list[dict[str, Any]] = []
-    for r in results:
-        if not isinstance(r, dict):
-            continue
+    for req, r in zip(requirements, dict_results):
+        # Use the source category as the stable requirement_key — Gemini's
+        # echo can drift in wording. Title falls back to req.title so an
+        # empty Gemini title doesn't surface as a blank gap card.
         cleaned.append({
-            "requirement_key": (r.get("requirement_key") or "")[:120],
-            "requirement_title": (r.get("requirement_title") or "")[:240],
+            "requirement_key": (req.get("category") or req.get("title") or "")[:120],
+            "requirement_title": (r.get("requirement_title") or req.get("title") or "")[:240],
             "covered": bool(r.get("covered")),
             "severity": (r.get("severity") or "recommended").lower(),
             "citation": r.get("citation"),
             "what_good_looks_like": (r.get("what_good_looks_like") or "")[:600],
             "matched_section_title": r.get("matched_section_title"),
+            "also_jurisdictions": req.get("also_jurisdictions") or [],
         })
     return cleaned
