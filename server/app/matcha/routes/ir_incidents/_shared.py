@@ -732,6 +732,38 @@ async def _persist_osha_emergency_alert(conn, incident_id: str, current_user) ->
     if existing:
         return
 
+    # Inline assistant directive — must precede the card insert so
+    # _extract_current_cards in copilot.py treats the alert as part of
+    # the current round (it walks messages and only includes assistant
+    # cards after the most recent assistant text marker). Without this
+    # text the panel sees a transcript with no active round and renders
+    # the alert card with no guidance copy above it — looks inert.
+    user_id_str = (
+        str(current_user.id) if current_user and getattr(current_user, "id", None) else None
+    )
+    directive_text = (
+        "Severity flipped to critical because the report describes a "
+        "potential OSHA reportable event (29 CFR 1904.39). Acknowledge "
+        "the alert below with your reporting notes, then we'll capture "
+        "the OSHA recordable details for the 300 log."
+    )
+    directive_metadata = {
+        "open_questions": [],
+        "model": "osha_emergency_inline",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await conn.execute(
+        """
+        INSERT INTO ir_incident_ai_messages
+          (incident_id, role, message_type, content, metadata, created_by)
+        VALUES ($1, 'assistant', 'text', $2, $3::jsonb, $4)
+        """,
+        incident_id,
+        directive_text,
+        json.dumps(directive_metadata),
+        user_id_str,
+    )
+
     card = build_osha_emergency_alert_card()
     metadata = {"card": card, "accepted": False}
     await conn.execute(
@@ -743,7 +775,7 @@ async def _persist_osha_emergency_alert(conn, incident_id: str, current_user) ->
         incident_id,
         card["title"],
         json.dumps(metadata),
-        str(current_user.id) if current_user and getattr(current_user, "id", None) else None,
+        user_id_str,
     )
 
 

@@ -278,12 +278,15 @@ first aid?" Keep the question conversational — do NOT emit a card for this
 question. When the user answers (yes / no / details), the NEXT round emits
 ONE set_field card with field_name="treatment_beyond_first_aid" and
 field_value of "true" or "false". After that gate is set, proceed with
-normal guidance. Skip the gate entirely when the user already supplied
-the answer in their initial description (e.g. "she went to the ER",
-"first aid only, no doctor"). When treatment_beyond_first_aid is true and
-osha_recordable is null, the backend will intercept any close_incident
-card with the OSHA recordable chain — you do not need to handle that
-chain yourself.
+normal guidance. Skip the gate entirely when the value of
+category_data.treatment_beyond_first_aid is already set (true or false)
+OR when the user already supplied the answer in their initial description
+(e.g. "she went to the ER", "first aid only, no doctor"). Never re-ask
+the question — conversationally or as a card — once
+category_data.treatment_beyond_first_aid has any value. When
+treatment_beyond_first_aid is true and osha_recordable is null, the
+backend will intercept any close_incident card with the OSHA recordable
+chain — you do not need to handle that chain yourself.
 
 INVESTIGATION-VS-ACTION DECISION:
 When the incident facts are clear and the policy violation is unambiguous
@@ -545,6 +548,10 @@ async def generate_guidance(
             raw_category_data = {}
     root_cause_declined = bool(raw_category_data.get("root_cause_declined")) if isinstance(raw_category_data, dict) else False
     suppress_root_cause_card = bool(existing_root_cause) or root_cause_declined
+    treatment_already_set = (
+        isinstance(raw_category_data, dict)
+        and raw_category_data.get("treatment_beyond_first_aid") not in (None, "")
+    )
 
     filtered_cards: list[dict[str, Any]] = []
     saw_log_root_cause_query = False
@@ -599,6 +606,24 @@ async def generate_guidance(
             logger.warning(
                 "IR copilot dropped card %s: unsupported action_type=%r",
                 card["id"], raw_type,
+            )
+            continue
+        # Safety net for the OSHA INJURY GATE: drop any set_field card the
+        # AI emits for treatment_beyond_first_aid when category_data already
+        # has a value. The prompt rule asks for one gate prompt + one
+        # set_field card per incident, but Gemini routinely re-emits the
+        # same card on subsequent rounds (especially after severity is
+        # upgraded to critical). User-facing symptom: "treatment beyond
+        # first aid?" asked twice with no chain progress between asks.
+        if (
+            raw_type == "set_field"
+            and raw_action.get("field_name") == "treatment_beyond_first_aid"
+            and treatment_already_set
+        ):
+            logger.info(
+                "IR copilot dropped duplicate set_field treatment_beyond_first_aid"
+                " (value already %r)",
+                raw_category_data.get("treatment_beyond_first_aid"),
             )
             continue
         if raw_type == "run_analysis" and canonical_analysis is None:

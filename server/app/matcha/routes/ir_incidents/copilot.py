@@ -367,6 +367,83 @@ async def _emit_chain_card(conn, *, incident_id: UUID, card: dict, created_by=No
     )
 
 
+async def _should_emit_osha_recordable_chain(conn, incident_id) -> bool:
+    """Pure check (no writes). True when the OSHA recordable chain hasn't
+    run yet and the incident is OSHA-flagged via the emergency alert
+    keyword scan or severity=critical.
+
+    Used as the gate for the safety-net call sites that emit the
+    recordable chain proactively when otherwise the AI fallback would
+    suggest "close for documentation only" on a reportable injury.
+    """
+    row = await conn.fetchrow(
+        "SELECT severity, osha_recordable, category_data "
+        "FROM ir_incidents WHERE id = $1",
+        incident_id,
+    )
+    if row is None or row["osha_recordable"] is not None:
+        return False
+    cd = _safe_json_loads(row["category_data"], {}) or {}
+    flagged = (
+        row["severity"] == "critical"
+        or cd.get("osha_emergency_alert_active") in (True, "true")
+        or "reported_to_osha_notes" in cd  # alert was acked, flag now false
+    )
+    if not flagged:
+        return False
+    if cd.get("osha_recordable_chain_started") is True:
+        return False
+    # Mirror the dedup at _close_incident_via_copilot:427-440 so a
+    # repeat poll while a recordable_query card is already pending
+    # doesn't stack identical cards in the transcript.
+    existing = await conn.fetchval(
+        """
+        SELECT 1 FROM ir_incident_ai_messages
+        WHERE incident_id = $1
+          AND message_type = 'card'
+          AND metadata->'card'->>'id' = 'osha_recordable_query'
+          AND COALESCE((metadata->>'accepted')::boolean, FALSE) = FALSE
+          AND COALESCE((metadata->>'superseded')::boolean, FALSE) = FALSE
+          AND COALESCE((metadata->>'skipped')::boolean, FALSE) = FALSE
+        LIMIT 1
+        """,
+        incident_id,
+    )
+    return existing is None
+
+
+async def _emit_osha_recordable_chain(conn, *, incident_id, current_user):
+    """Insert the osha_recordable_query card, stamp the chain-started
+    flag on category_data, and return (card_dict, message_id_str).
+
+    The caller must mark the triggering card accepted (if any) and skip
+    the AI guidance round so the deterministic chain doesn't compete
+    with an overlapping Gemini suggestion.
+    """
+    card = build_osha_recordable_query_card()
+    inserted = await _emit_chain_card(
+        conn,
+        incident_id=incident_id,
+        card=card,
+        created_by=current_user.id if current_user else None,
+    )
+    await conn.execute(
+        """
+        UPDATE ir_incidents
+        SET category_data = jsonb_set(
+            COALESCE(category_data, '{}'::jsonb),
+            '{osha_recordable_chain_started}',
+            'true'::jsonb,
+            true
+        ),
+            updated_at = NOW()
+        WHERE id = $1
+        """,
+        incident_id,
+    )
+    return card, str(inserted["id"])
+
+
 async def _close_incident_via_copilot(
     conn,
     *,
@@ -915,11 +992,11 @@ async def _handle_text_input(
         }
 
     # Final step — compose the combined text and write to root_cause column.
-    # No follow-up ack card: the event row ("Updated Root cause" with the
-    # combined text in the diff UI) already tells the user it landed, and
-    # adding a second "Got it" card would be friction. Returning without
-    # next_card lets the post-dispatch flow run a normal AI guidance round
-    # so the Copilot picks the next concrete step (e.g. corrective_actions).
+    # If the incident is OSHA-flagged (severity=critical or emergency-alert
+    # markers in category_data) and the recordable chain hasn't started,
+    # emit osha_recordable_query as next_card so the deterministic chain
+    # takes over from here. Otherwise leave next_card unset so the
+    # post-dispatch flow runs a normal AI guidance round.
     row = await conn.fetchrow(
         "SELECT category_data FROM ir_incidents WHERE id = $1",
         incident_id,
@@ -931,14 +1008,25 @@ async def _handle_text_input(
         "UPDATE ir_incidents SET root_cause = $1, updated_at = NOW() WHERE id = $2",
         combined, incident_id,
     )
+    event_extra = {
+        "field": "root_cause",
+        "field_label": "Root cause",
+        "previous_value": None,
+        "new_value": combined,
+    }
+    if await _should_emit_osha_recordable_chain(conn, incident_id):
+        chain_card, chain_message_id = await _emit_osha_recordable_chain(
+            conn, incident_id=incident_id, current_user=current_user,
+        )
+        return {
+            "event_summary": "Root cause logged",
+            "event_extra": event_extra,
+            "next_card": chain_card,
+            "next_message_id": chain_message_id,
+        }
     return {
         "event_summary": "Root cause logged",
-        "event_extra": {
-            "field": "root_cause",
-            "field_label": "Root cause",
-            "previous_value": None,
-            "new_value": combined,
-        },
+        "event_extra": event_extra,
     }
 
 
@@ -1279,6 +1367,18 @@ async def accept_copilot_card(
                         "new_value": False,
                         "notes": notes_clean,
                     }
+                    # Safety net: kick off the OSHA recordable chain
+                    # immediately after the alert is acked. Without this,
+                    # a user who acks but never logs root cause (eye
+                    # injuries often have an obvious cause) hits the
+                    # same dormancy that fix 2A addresses for the
+                    # root-cause path.
+                    if await _should_emit_osha_recordable_chain(conn, incident_id):
+                        chain_card, chain_message_id = await _emit_osha_recordable_chain(
+                            conn, incident_id=incident_id, current_user=current_user,
+                        )
+                        next_card = chain_card
+                        next_message_id = chain_message_id
 
                 else:
                     yield _sse({"type": "error", "detail": f"Unknown action type: {action_type}"})

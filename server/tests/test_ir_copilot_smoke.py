@@ -311,6 +311,158 @@ def test_generate_guidance_preserves_quick_reply_choices(monkeypatch):
     assert {c["value"] for c in choices} == {"yes", "no"}
 
 
+def test_generate_guidance_drops_treatment_set_field_when_already_set(monkeypatch):
+    """OSHA INJURY GATE prompt rule says to emit one set_field
+    treatment_beyond_first_aid card per incident. Gemini routinely
+    re-emits the same card on subsequent rounds (esp. after severity
+    upgrades to critical). Backend filter must drop the duplicate when
+    category_data already has a value — user-facing symptom was
+    "treatment beyond first aid?" asked twice in adjacent rounds.
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.matcha.services import ir_ai_orchestrator
+
+    payload_json = json.dumps({
+        "summary": "Continue.",
+        "open_questions": [],
+        "cards": [
+            {
+                "id": "good_set_corrective",
+                "title": "Set corrective actions",
+                "recommendation": "Document the corrective plan.",
+                "rationale": "Action plan required before close.",
+                "priority": "high",
+                "action": {
+                    "type": "set_field",
+                    "label": "Set corrective actions",
+                    "field_name": "corrective_actions",
+                    "field_value": "Coach employee on lockout/tagout procedure.",
+                },
+            },
+            {
+                "id": "duplicate_treatment_gate",
+                "title": "Treatment beyond first aid",
+                "recommendation": "Was treatment beyond first aid provided?",
+                "rationale": "OSHA INJURY GATE.",
+                "priority": "high",
+                "action": {
+                    "type": "set_field",
+                    "label": "Set treatment beyond first aid",
+                    "field_name": "treatment_beyond_first_aid",
+                    "field_value": "true",
+                },
+            },
+        ],
+    })
+
+    async def fake_generate_content(*args, **kwargs):
+        return SimpleNamespace(text=payload_json)
+
+    fake_analyzer = SimpleNamespace(
+        client=SimpleNamespace(
+            aio=SimpleNamespace(
+                models=SimpleNamespace(generate_content=fake_generate_content),
+            ),
+        ),
+        model="fake-model",
+        _parse_json_response=lambda raw: json.loads(raw),
+    )
+    monkeypatch.setattr(ir_ai_orchestrator, "get_ir_analyzer", lambda: fake_analyzer)
+
+    class FakeRateLimiter:
+        async def check_limit(self, *args, **kwargs):
+            return None
+    monkeypatch.setattr(ir_ai_orchestrator, "get_rate_limiter", lambda: FakeRateLimiter())
+
+    incident = {
+        "id": "00000000-0000-0000-0000-000000000000",
+        "title": "Worker injured",
+        "category_data": {"treatment_beyond_first_aid": "true"},
+    }
+    result = asyncio.run(
+        ir_ai_orchestrator.generate_guidance(
+            incident=incident, analyses=[], messages=[],
+        )
+    )
+
+    field_names = {
+        c["action"].get("field_name")
+        for c in result["cards"]
+        if c["action"].get("type") == "set_field"
+    }
+    assert "treatment_beyond_first_aid" not in field_names
+    # The other valid set_field card should still survive.
+    assert "corrective_actions" in field_names
+
+
+def test_generate_guidance_keeps_treatment_set_field_when_unset(monkeypatch):
+    """Inverse of the dedup test — if the gate hasn't been answered yet,
+    the set_field card MUST survive so the user can answer."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.matcha.services import ir_ai_orchestrator
+
+    payload_json = json.dumps({
+        "summary": "Gate.",
+        "open_questions": [],
+        "cards": [
+            {
+                "id": "treatment_gate",
+                "title": "Treatment beyond first aid",
+                "recommendation": "Was treatment beyond first aid provided?",
+                "rationale": "OSHA INJURY GATE.",
+                "priority": "high",
+                "action": {
+                    "type": "set_field",
+                    "label": "Set treatment beyond first aid",
+                    "field_name": "treatment_beyond_first_aid",
+                    "field_value": "true",
+                },
+            },
+        ],
+    })
+
+    async def fake_generate_content(*args, **kwargs):
+        return SimpleNamespace(text=payload_json)
+
+    fake_analyzer = SimpleNamespace(
+        client=SimpleNamespace(
+            aio=SimpleNamespace(
+                models=SimpleNamespace(generate_content=fake_generate_content),
+            ),
+        ),
+        model="fake-model",
+        _parse_json_response=lambda raw: json.loads(raw),
+    )
+    monkeypatch.setattr(ir_ai_orchestrator, "get_ir_analyzer", lambda: fake_analyzer)
+
+    class FakeRateLimiter:
+        async def check_limit(self, *args, **kwargs):
+            return None
+    monkeypatch.setattr(ir_ai_orchestrator, "get_rate_limiter", lambda: FakeRateLimiter())
+
+    incident = {
+        "id": "00000000-0000-0000-0000-000000000000",
+        "title": "Worker injured",
+        "category_data": {},
+    }
+    result = asyncio.run(
+        ir_ai_orchestrator.generate_guidance(
+            incident=incident, analyses=[], messages=[],
+        )
+    )
+
+    field_names = {
+        c["action"].get("field_name")
+        for c in result["cards"]
+        if c["action"].get("type") == "set_field"
+    }
+    assert "treatment_beyond_first_aid" in field_names
+
+
 def test_canonical_analysis_type_aliases():
     """AI commonly emits abbreviated names. Aliases must resolve to canonical."""
     from app.matcha.services.ir_ai_orchestrator import _canonical_analysis_type
