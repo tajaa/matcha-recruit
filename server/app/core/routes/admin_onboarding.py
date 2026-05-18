@@ -23,6 +23,7 @@ Wire of routes to plan deliverables:
 * ``POST   /admin/onboarding/sessions/{id}/abandon``       — soft close
 """
 
+import asyncio
 import json
 import logging
 import secrets
@@ -435,6 +436,18 @@ async def expand_session_scope(
         try:
             ai_scope_raw = await ai_expand_scope(
                 basics=basics, locations=locations, conn=conn,
+            )
+        except asyncio.TimeoutError:
+            # Surface the actionable retry message rather than the generic
+            # 5xx fallback in the API client. 504 over 502 because we DID
+            # reach Gemini — the upstream just took too long to respond.
+            logger.warning("expand_scope timed out for session %s", session_id)
+            raise HTTPException(
+                status_code=504,
+                detail=(
+                    "AI scope expansion is taking longer than expected. "
+                    "Click 'Run AI scope expansion' again to retry."
+                ),
             )
         except Exception as exc:
             logger.exception("expand_scope failed for session %s", session_id)
