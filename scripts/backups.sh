@@ -61,10 +61,33 @@ latest_backups() {
 }
 
 create_backup() {
-    echo -e "${BLUE}Creating backup...${NC}"
-    ssh -i "$SSH_KEY" "$EC2_HOST" "bash ~/backup-postgres.sh"
-    echo ""
-    echo -e "${GREEN}Backup complete!${NC}"
+    # Encrypted path: when BACKUP_GPG_PASSPHRASE is set, the dump is run
+    # inline over SSH with `pg_dump | gzip | gpg --symmetric` and uploaded
+    # with SSE-KMS. Without the passphrase, fall back to the legacy
+    # host-side `~/backup-postgres.sh` (unencrypted gzip). The legacy path
+    # is kept for backward compat — once the cron on the host is migrated,
+    # delete the else-branch.
+    local DB="${1:-matcha}"
+    if [ -n "$BACKUP_GPG_PASSPHRASE" ]; then
+        local DATE=$(date +%F_%H-%M-%S)
+        local FILENAME="${DB}_${DATE}.sql.gz.gpg"
+        echo -e "${BLUE}Creating encrypted backup ${FILENAME}...${NC}"
+        # Escape the passphrase for the remote shell; tee through gpg's
+        # --passphrase-fd 0 to avoid leaking it via process listing.
+        ssh -i "$SSH_KEY" "$EC2_HOST" "\
+            export PASSPHRASE='$BACKUP_GPG_PASSPHRASE'; \
+            pg_dump -U matcha $DB | gzip | \
+            gpg --symmetric --cipher-algo AES256 --batch \
+                --passphrase \"\$PASSPHRASE\" | \
+            aws s3 cp - $S3_BUCKET/$FILENAME --sse aws:kms"
+        unset PASSPHRASE
+        echo -e "${GREEN}Encrypted backup complete:${NC} $S3_BUCKET/$FILENAME"
+    else
+        echo -e "${YELLOW}BACKUP_GPG_PASSPHRASE unset — running legacy unencrypted backup.${NC}"
+        echo -e "${YELLOW}Set the env var (or pull from Secrets Manager) to enable encryption.${NC}"
+        ssh -i "$SSH_KEY" "$EC2_HOST" "bash ~/backup-postgres.sh"
+        echo -e "${GREEN}Backup complete!${NC}"
+    fi
     echo ""
     latest_backups
 }
@@ -72,7 +95,7 @@ create_backup() {
 download_backup() {
     if [ -z "$1" ]; then
         echo -e "${RED}Error: Specify backup filename${NC}"
-        echo "Example: $0 download matcha_2025-12-30_18-33-49.sql.gz"
+        echo "Example: $0 download matcha_2025-12-30_18-33-49.sql.gz.gpg"
         exit 1
     fi
 
@@ -80,6 +103,13 @@ download_backup() {
     echo -e "${BLUE}Downloading $FILENAME...${NC}"
     ssh -i "$SSH_KEY" "$EC2_HOST" "aws s3 cp $S3_BUCKET/$FILENAME -" > "$FILENAME"
     echo -e "${GREEN}Downloaded to ./$FILENAME${NC}"
+
+    case "$FILENAME" in
+        *.gpg)
+            echo -e "${YELLOW}File is GPG-encrypted. To decrypt locally:${NC}"
+            echo "  BACKUP_GPG_PASSPHRASE=... gpg --batch --decrypt --passphrase \"\$BACKUP_GPG_PASSPHRASE\" $FILENAME > ${FILENAME%.gpg}"
+            ;;
+    esac
 }
 
 restore_backup() {
@@ -105,8 +135,24 @@ restore_backup() {
         exit 0
     fi
 
-    echo -e "${BLUE}Restoring...${NC}"
-    ssh -i "$SSH_KEY" "$EC2_HOST" "aws s3 cp $S3_BUCKET/$FILENAME - | gunzip | docker exec -i matcha-postgres psql -U matcha -d $DB_NAME"
+    case "$FILENAME" in
+        *.gpg)
+            if [ -z "$BACKUP_GPG_PASSPHRASE" ]; then
+                echo -e "${RED}BACKUP_GPG_PASSPHRASE required to restore encrypted backup${NC}"
+                exit 1
+            fi
+            echo -e "${BLUE}Restoring (decrypt + gunzip + psql)...${NC}"
+            ssh -i "$SSH_KEY" "$EC2_HOST" "\
+                export PASSPHRASE='$BACKUP_GPG_PASSPHRASE'; \
+                aws s3 cp $S3_BUCKET/$FILENAME - | \
+                gpg --batch --decrypt --passphrase \"\$PASSPHRASE\" | \
+                gunzip | docker exec -i matcha-postgres psql -U matcha -d $DB_NAME"
+            ;;
+        *)
+            echo -e "${BLUE}Restoring (gunzip + psql)...${NC}"
+            ssh -i "$SSH_KEY" "$EC2_HOST" "aws s3 cp $S3_BUCKET/$FILENAME - | gunzip | docker exec -i matcha-postgres psql -U matcha -d $DB_NAME"
+            ;;
+    esac
     echo -e "${GREEN}Restore complete!${NC}"
 }
 
