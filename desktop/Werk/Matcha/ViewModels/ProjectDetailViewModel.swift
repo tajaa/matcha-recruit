@@ -29,6 +29,9 @@ class ProjectDetailViewModel {
     var recentActivity: [CollabActivityItem] = []
 
     private let service = MatchaWorkService.shared
+    /// Logged-in user — used to suppress self-echoes from the project WS
+    /// task event fan-out (we already applied the change optimistically).
+    var currentUserId: String?
 
     func logActivity(_ icon: String, _ text: String) {
         recentActivity.insert(
@@ -479,6 +482,66 @@ class ProjectDetailViewModel {
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }
+    }
+
+    // MARK: - Collab: realtime task fan-out (project WS task.created/updated/deleted)
+
+    /// Wire the project WS task event callbacks to apply* methods. Call once
+    /// per loadProject. `currentUserId` (from AppState) is captured so self-
+    /// echoes from our own create / update / delete don't double-apply.
+    @MainActor
+    func attachTaskRealtime(currentUserId: String?) {
+        self.currentUserId = currentUserId
+        let ws = ProjectWebSocket.shared
+        ws.onTaskCreated = { [weak self] dict in
+            guard let self else { return }
+            let actorId = dict["actor_id"] as? String
+            if let actorId, actorId == self.currentUserId { return }
+            if let task = Self.decodeTask(dict) {
+                Task { @MainActor in self.applyTaskCreated(task) }
+            }
+        }
+        ws.onTaskUpdated = { [weak self] dict in
+            guard let self else { return }
+            if let task = Self.decodeTask(dict) {
+                Task { @MainActor in self.applyTaskUpdated(task) }
+            }
+        }
+        ws.onTaskDeleted = { [weak self] taskId, actorId in
+            guard let self else { return }
+            if let actorId, actorId == self.currentUserId { return }
+            Task { @MainActor in self.applyTaskDeleted(taskId) }
+        }
+    }
+
+    private static func decodeTask(_ dict: [String: Any]) -> MWProjectTask? {
+        guard let data = try? JSONSerialization.data(withJSONObject: dict) else { return nil }
+        return try? JSONDecoder().decode(MWProjectTask.self, from: data)
+    }
+
+    @MainActor
+    private func applyTaskCreated(_ t: MWProjectTask) {
+        // Dedupe by id — guards against the post-optimistic-create echo when
+        // actor_id was missing for any reason.
+        if tasks.contains(where: { $0.id == t.id }) { return }
+        tasks.insert(t, at: 0)
+        if let atts = t.attachments { taskFiles[t.id] = atts }
+    }
+
+    @MainActor
+    private func applyTaskUpdated(_ t: MWProjectTask) {
+        if let i = tasks.firstIndex(where: { $0.id == t.id }) {
+            tasks[i] = t
+        } else {
+            tasks.insert(t, at: 0)
+        }
+        if let atts = t.attachments { taskFiles[t.id] = atts }
+    }
+
+    @MainActor
+    private func applyTaskDeleted(_ id: String) {
+        tasks.removeAll { $0.id == id }
+        taskFiles.removeValue(forKey: id)
     }
 
     // MARK: - Collab: task file attachments

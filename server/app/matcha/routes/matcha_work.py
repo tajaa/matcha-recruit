@@ -3903,7 +3903,9 @@ async def delete_project_task_endpoint(
 ):
     from ..services import project_task_service as pt_svc
     await _verify_project_access(project_id, current_user)
-    if not await pt_svc.delete_project_task(project_id, task_id):
+    if not await pt_svc.delete_project_task(
+        project_id, task_id, actor_user_id=current_user.id
+    ):
         raise HTTPException(status_code=404, detail="Task not found")
     return {"deleted": True}
 

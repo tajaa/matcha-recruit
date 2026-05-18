@@ -260,6 +260,23 @@ class ProjectConnectionManager:
 project_manager = ProjectConnectionManager()
 
 
+async def broadcast_task_event(project_id: UUID, event: str, payload: dict) -> None:
+    """Fan a task lifecycle event out to every connected member of a project room.
+
+    `event` must be one of: "task.created", "task.updated", "task.deleted".
+    `payload` is the task row dict (or `{"id": ...}` for delete). Caller stamps
+    actor_id so clients can suppress their own optimistic-write echoes.
+
+    Best-effort: any send failure is swallowed by `_broadcast_to_project`'s
+    per-conn dead-list handling; callers should still wrap in try/except.
+    """
+    await project_manager._broadcast_to_project(project_id, {
+        "type": event,
+        "project_id": str(project_id),
+        "task": payload,
+    })
+
+
 async def _authenticate(token: str) -> Optional[ProjectUser]:
     payload = decode_token(token, expected_type="access")
     if not payload:

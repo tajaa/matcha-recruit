@@ -51,6 +51,7 @@ class AppState {
     private var heartbeatTask: Task<Void, Never>?
     private var inboxPollTask: Task<Void, Never>?
     private var notificationPollTask: Task<Void, Never>?
+    private var newNotificationObserver: NSObjectProtocol?
 
     init() {
         APIClient.shared.onUnauthorized = { [weak self] in
@@ -125,6 +126,49 @@ class AppState {
                                             canPublish: event.canPublish)
             }
         }
+
+        subscribeNewNotificationObserver()
+    }
+
+    /// Wire the `.mwNewNotification` push fan-out — fired by ChannelsWebSocket
+    /// when the server pushes a `notification` event. Bumps the bell count,
+    /// reconciles via a single REST refetch (handles missed pushes during
+    /// reconnect), and fires a macOS UNNotification toast for non-channel
+    /// types (channel-chat toasts still go through the starred-channel path
+    /// in onMessageGlobal to avoid double-notifying).
+    @MainActor
+    private func subscribeNewNotificationObserver() {
+        if let token = newNotificationObserver {
+            NotificationCenter.default.removeObserver(token)
+        }
+        newNotificationObserver = NotificationCenter.default.addObserver(
+            forName: .mwNewNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self else { return }
+            let n = note.userInfo?["notification"] as? [String: Any]
+            let type = n?["type"] as? String ?? ""
+            // Channel-message rows are inserted for every non-sender member on
+            // every channel message — surfacing each one in the bell flood
+            // would double-count chat traffic that's already tracked via
+            // `channelUnreadOverrides` and the in-app sound / starred-channel
+            // toast path in `onMessageGlobal`. Skip the bell entirely for them.
+            if type == "channel_message" { return }
+            Task { @MainActor in
+                self.notificationsUnreadCount += 1
+                await self.refreshNotificationsCount()
+                NotificationCenter.default.post(name: .mwNotificationsRefresh, object: nil)
+                // Channel-* toasts are owned by the starred-channel path in
+                // onMessageGlobal — skip here to avoid double-notifying.
+                let isChannel = type.hasPrefix("channel_")
+                if !self.isSceneActive && !isChannel {
+                    let title = n?["title"] as? String ?? "Notification"
+                    let body = n?["body"] as? String
+                    ChannelNotificationManager.shared.postSystem(title: title, body: body)
+                }
+            }
+        }
     }
 
     @MainActor
@@ -173,6 +217,10 @@ class AppState {
         notificationPollTask?.cancel()
         notificationPollTask = nil
         notificationsUnreadCount = 0
+        if let token = newNotificationObserver {
+            NotificationCenter.default.removeObserver(token)
+            newNotificationObserver = nil
+        }
         betaFeatures = [:]
         ChannelsWebSocket.shared.onMessageGlobal = nil
         ChannelsWebSocket.shared.onBroadcastStarted = nil

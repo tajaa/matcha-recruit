@@ -23,6 +23,18 @@ _ALLOWED_COLUMNS = {"todo", "in_progress", "review", "done"}
 _ALLOWED_PRIORITIES = {"critical", "high", "medium", "low"}
 
 
+async def _broadcast_task_event_safe(project_id: UUID, event: str, payload: dict) -> None:
+    """Wrapped broadcast — never fails the caller; logs at warning level.
+
+    Lazy import dodges the routes→services circular at module load time.
+    """
+    try:
+        from ..routes.project_ws import broadcast_task_event
+        await broadcast_task_event(project_id, event, payload)
+    except Exception as e:
+        logger.warning("Failed to broadcast %s for project %s: %s", event, project_id, e)
+
+
 def _row_to_task(row: dict) -> dict:
     d = dict(row)
     for key in ("id", "project_id", "created_by", "assigned_to"):
@@ -113,6 +125,9 @@ async def create_project_task(
             task_title=title.strip(),
         )
 
+    task_payload = _row_to_task(dict(row))
+    task_payload["actor_id"] = str(created_by)
+    await _broadcast_task_event_safe(project_id, "task.created", task_payload)
     return _row_to_task(dict(row))
 
 
@@ -283,16 +298,30 @@ async def update_project_task(
                 task_title=row["title"],
             )
 
+    if row:
+        task_payload = _row_to_task(dict(row))
+        if actor_user_id is not None:
+            task_payload["actor_id"] = str(actor_user_id)
+        await _broadcast_task_event_safe(project_id, "task.updated", task_payload)
+
     return _row_to_task(dict(row)) if row else None
 
 
-async def delete_project_task(project_id: UUID, task_id: UUID) -> bool:
+async def delete_project_task(
+    project_id: UUID, task_id: UUID, *, actor_user_id: Optional[UUID] = None
+) -> bool:
     async with get_connection() as conn:
         result = await conn.execute(
             "DELETE FROM mw_tasks WHERE id = $1 AND project_id = $2",
             task_id, project_id,
         )
-    return result.endswith(" 1")
+    deleted = result.endswith(" 1")
+    if deleted:
+        payload: dict = {"id": str(task_id)}
+        if actor_user_id is not None:
+            payload["actor_id"] = str(actor_user_id)
+        await _broadcast_task_event_safe(project_id, "task.deleted", payload)
+    return deleted
 
 
 async def mark_project_complete(project_id: UUID) -> dict:

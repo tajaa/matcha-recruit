@@ -66,6 +66,7 @@ struct ProjectDetailView: View {
             // Don't fetch the thread inline here — onChange(activeChatId) below
             // is the single source of truth and fires on initial nil→value.
             // SwiftUI auto-cancels this .task block when projectId changes.
+            viewModel.attachTaskRealtime(currentUserId: appState.currentUser?.id)
             await viewModel.loadProject(id: projectId)
         }
         .task(id: projectId) {

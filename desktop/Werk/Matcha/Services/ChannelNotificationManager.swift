@@ -5,8 +5,38 @@ import UserNotifications
 final class ChannelNotificationManager {
     static let shared = ChannelNotificationManager()
     static let enabledKey = "mw-channel-notifications-enabled"
+    static let appNotificationsEnabledKey = "mw-app-notifications-enabled"
 
     private init() {}
+
+    /// Master toggle for non-channel-chat notifications (task assignments,
+    /// mentions, project events). Separate from `isEnabled` which gates the
+    /// starred-channel chat toast path so we can independently mute either.
+    var appNotificationsEnabled: Bool {
+        UserDefaults.standard.object(forKey: Self.appNotificationsEnabledKey) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: Self.appNotificationsEnabledKey)
+    }
+
+    /// Post a generic system notification — used by the bell-push path for
+    /// task assignments, mentions, and anything else routed through
+    /// `mw_notifications`. Channel-chat toasts still go through `post(...)`.
+    func postSystem(title: String, body: String?) {
+        guard appNotificationsEnabled else { return }
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized else { return }
+            let note = UNMutableNotificationContent()
+            note.title = title
+            if let body, !body.isEmpty { note.body = body }
+            note.sound = .default
+            let req = UNNotificationRequest(
+                identifier: UUID().uuidString,
+                content: note,
+                trigger: nil
+            )
+            UNUserNotificationCenter.current().add(req)
+        }
+    }
 
     func requestPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }

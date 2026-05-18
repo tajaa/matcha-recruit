@@ -292,6 +292,14 @@ final class ChannelsWebSocket: NSObject {
                     liveKitUrl: liveKitUrl, canPublish: canPublish
                 ))
             }
+        case "notification":
+            if let n = obj["notification"] as? [String: Any] {
+                NotificationCenter.default.post(
+                    name: .mwNewNotification,
+                    object: nil,
+                    userInfo: ["notification": n]
+                )
+            }
         case "error":
             if let msg = obj["message"] as? String { onError?(msg) }
         default:
@@ -332,6 +340,14 @@ final class ChannelsWebSocket: NSObject {
             }
         }
     }
+}
+
+extension Notification.Name {
+    /// Posted when the server pushes a new bell notification over the channels WS.
+    /// userInfo["notification"] holds the raw notification dict (id/type/title/body/link/metadata/created_at).
+    static let mwNewNotification = Notification.Name("mw-new-notification")
+    /// Posted by AppState after a push lands; the popover refetches when visible.
+    static let mwNotificationsRefresh = Notification.Name("mw-notifications-refresh")
 }
 
 extension ChannelsWebSocket: URLSessionWebSocketDelegate {

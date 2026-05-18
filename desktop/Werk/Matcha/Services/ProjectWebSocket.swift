@@ -42,6 +42,12 @@ final class ProjectWebSocket: NSObject {
     var onUserLeft: ((_ userId: String) -> Void)?
     var onCursor: ((CursorPayload) -> Void)?
     var onCaret: ((CaretPayload) -> Void)?
+    /// task.created / task.updated server events. Payload dict is the raw
+    /// task row plus `actor_id` for self-echo suppression.
+    var onTaskCreated: (([String: Any]) -> Void)?
+    var onTaskUpdated: (([String: Any]) -> Void)?
+    /// task.deleted payload — only `{"id": ..., "actor_id": ...}` shape.
+    var onTaskDeleted: ((_ taskId: String, _ actorId: String?) -> Void)?
 
     struct PresenceMember: Identifiable, Equatable {
         let id: String
@@ -152,6 +158,9 @@ final class ProjectWebSocket: NSObject {
         onUserLeft = nil
         onCursor = nil
         onCaret = nil
+        onTaskCreated = nil
+        onTaskUpdated = nil
+        onTaskDeleted = nil
     }
 
     private func send(_ payload: [String: Any]) {
@@ -218,6 +227,15 @@ final class ProjectWebSocket: NSObject {
                let anchor = obj["anchor"] as? Int,
                let head = obj["head"] as? Int {
                 onCaret?(CaretPayload(userId: userId, sectionId: sectionId, anchor: anchor, head: head))
+            }
+        case "task.created":
+            if let task = obj["task"] as? [String: Any] { onTaskCreated?(task) }
+        case "task.updated":
+            if let task = obj["task"] as? [String: Any] { onTaskUpdated?(task) }
+        case "task.deleted":
+            if let task = obj["task"] as? [String: Any],
+               let taskId = task["id"] as? String {
+                onTaskDeleted?(taskId, task["actor_id"] as? String)
             }
         case "error":
             // Server sent {"type":"error","message":"..."} — fail silently;

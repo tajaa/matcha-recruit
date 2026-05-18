@@ -62,6 +62,9 @@ struct NotificationsPopoverView: View {
         .frame(width: 340, height: 380)
         .background(Color.appBackground)
         .task { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: .mwNotificationsRefresh)) { _ in
+            Task { await load() }
+        }
     }
 
     private func load() async {
