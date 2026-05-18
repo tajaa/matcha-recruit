@@ -345,11 +345,12 @@ async def create_company(
                 company_wide_location_id=sentinel["id"],
             )
 
-        # Provision new company.
+        # Provision new company. companies table has only created_at —
+        # no updated_at column (verified in app/database.py:764).
         company_row = await conn.fetchrow(
             """
-            INSERT INTO companies (name, signup_source, status, approved_at, approved_by, created_at, updated_at)
-            VALUES ($1, 'admin_onboarding_wizard', 'approved', NOW(), $2, NOW(), NOW())
+            INSERT INTO companies (name, signup_source, status, approved_at, approved_by, created_at)
+            VALUES ($1, 'admin_onboarding_wizard', 'approved', NOW(), $2, NOW())
             RETURNING id
             """,
             basics["business_name"], current_user.id,
