@@ -34,7 +34,7 @@ router = APIRouter()
 
 MAX_PDF_BYTES = 10 * 1024 * 1024  # 10 MiB
 MAX_STATES_PER_REPORT = 1
-MAX_AUDITS_PER_ACCOUNT_PER_MONTH = 2  # hard cap; resets at the start of each calendar month
+MAX_AUDITS_PER_ACCOUNT_PER_MONTH = 7  # hard cap; resets at the start of each calendar month
 IP_RATE_LIMIT_KEY = "handbook_gap_analyzer:ip"
 IP_RATE_LIMIT_PER_DAY = 12  # belt-and-suspenders against one IP fanning out via many accounts
 STATE_CODE_RE = re.compile(r"^[A-Z]{2}$")
@@ -232,9 +232,9 @@ async def submit_handbook_for_analysis(
     if len(pdf_bytes) > MAX_PDF_BYTES:
         raise HTTPException(status_code=413, detail="PDF must be 10MB or smaller")
 
-    # Hard per-account cap: 2 audits per calendar month. Counts every attempt
-    # (success or failure) so a user gets exactly one retry if the first run
-    # errored. Resets at the first of the next month.
+    # Hard per-account cap (MAX_AUDITS_PER_ACCOUNT_PER_MONTH) per calendar
+    # month. Counts every attempt (success or failure) so a user gets retry
+    # headroom if a run errored. Resets at the first of the next month.
     async with get_connection() as conn:
         used_this_month = await conn.fetchval(
             """

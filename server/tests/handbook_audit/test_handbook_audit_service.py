@@ -338,3 +338,27 @@ class TestMergeDuplicateGapsForState:
         assert len(result) == 1
         # Duplicate title doesn't enter also_covers — it matches primary.
         assert result[0]["also_covers"] == []
+
+    def test_none_also_jurisdictions_does_not_crash(self):
+        # Defensive: legacy gap rows could land with also_jurisdictions=None.
+        # The merge path must coerce to [] rather than blow up on .append.
+        gaps = [
+            {"requirement_key": "k", "requirement_title": "A", "covered": False,
+             "severity": "critical", "also_jurisdictions": None,
+             "also_covers": None},
+            {"requirement_key": "k", "requirement_title": "B", "covered": False,
+             "severity": "important",
+             "also_jurisdictions": [{"name": "LA", "level": "city"}]},
+        ]
+        per = self._empty_counts()
+        result = _merge_duplicate_gaps_for_state("CA", gaps, per)
+        assert len(result) == 1
+        assert result[0]["severity"] == "critical"
+        assert result[0]["also_covers"] == ["B"]
+        names = [j["name"] for j in result[0]["also_jurisdictions"]]
+        assert names == ["LA"]
+
+    def test_empty_input(self):
+        per = self._empty_counts()
+        assert _merge_duplicate_gaps_for_state("CA", [], per) == []
+        assert per == self._empty_counts()

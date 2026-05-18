@@ -163,25 +163,34 @@ def _merge_duplicate_gaps_for_state(
         key = (state, gap.get("requirement_key") or gap.get("requirement_title") or "")
         existing = buckets.get(key)
         if existing is None:
-            # Initialize merge-target fields so frontend sees them present.
-            gap.setdefault("also_covers", [])
-            gap.setdefault("also_jurisdictions", gap.get("also_jurisdictions") or [])
+            # Initialize merge-target fields with non-None lists so the
+            # merge path can safely .append / iterate. setdefault alone
+            # would leave a pre-existing None in place.
+            if not isinstance(gap.get("also_covers"), list):
+                gap["also_covers"] = []
+            if not isinstance(gap.get("also_jurisdictions"), list):
+                gap["also_jurisdictions"] = []
             per_state[sev] = per_state.get(sev, 0) + 1
             buckets[key] = gap
             order.append(key)
             continue
 
         # Merge into existing primary.
+        if not isinstance(existing.get("also_covers"), list):
+            existing["also_covers"] = []
+        if not isinstance(existing.get("also_jurisdictions"), list):
+            existing["also_jurisdictions"] = []
+
         new_title = (gap.get("requirement_title") or "").strip()
         if new_title:
             existing_titles_lower = {
                 (existing.get("requirement_title") or "").strip().lower(),
-                *((t or "").strip().lower() for t in existing.get("also_covers", [])),
+                *((t or "").strip().lower() for t in existing["also_covers"]),
             }
             if new_title.lower() not in existing_titles_lower:
-                existing.setdefault("also_covers", []).append(new_title)
+                existing["also_covers"].append(new_title)
 
-        existing_jurisdictions = existing.setdefault("also_jurisdictions", [])
+        existing_jurisdictions = existing["also_jurisdictions"]
         existing_seen = {
             (j.get("name"), j.get("level"))
             for j in existing_jurisdictions
