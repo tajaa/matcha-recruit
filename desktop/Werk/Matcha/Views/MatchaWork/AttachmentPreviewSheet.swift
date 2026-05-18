@@ -5,8 +5,9 @@ import AppKit
 /// Modal preview for task / project attachments. Images render inline via
 /// `AsyncImage`, PDFs via the existing `PDFKitView` (defined in
 /// `OfferLetterPreview.swift`), and everything else shows metadata plus an
-/// "Open in default app" fallback. Used by `KanbanBoardView` and
-/// `ProjectFilesView` so clicking an attachment no longer punts to Safari.
+/// "Open in default app" fallback. Used by `TaskViewerSheet`,
+/// `TaskEditorSheet`, and `ProjectFilesView` so clicking an attachment no
+/// longer punts to Safari.
 struct AttachmentPreviewSheet: View {
     let file: MWProjectFile
     @Environment(\.dismiss) private var dismiss
@@ -38,10 +39,15 @@ struct AttachmentPreviewSheet: View {
 
                 Spacer()
 
-                Text(file.filename)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                VStack(spacing: 2) {
+                    Text(file.filename)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text(sizeLabel)
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
 
                 Spacer()
 
@@ -56,12 +62,14 @@ struct AttachmentPreviewSheet: View {
                 }
             }
             .padding(12)
+            .background(Color.appBackground.opacity(0.95))
 
             Divider()
 
             content
-                .frame(minWidth: 600, minHeight: 480)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(minWidth: 900, minHeight: 700)
     }
 
     @ViewBuilder
@@ -70,38 +78,33 @@ struct AttachmentPreviewSheet: View {
             AsyncImage(url: url) { phase in
                 switch phase {
                 case .empty:
-                    ProgressView()
+                    ProgressView().tint(.white)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 case .success(let img):
                     img
                         .resizable()
                         .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 case .failure:
-                    VStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.system(size: 32))
-                            .foregroundColor(.secondary)
-                        Text("Failed to load image").foregroundColor(.secondary)
-                    }
+                    centeredMessage(icon: "exclamationmark.triangle",
+                                    text: "Failed to load image")
                 @unknown default:
                     EmptyView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(16)
+            .background(Color.black)
         } else if isPDF {
             if let data = pdfData {
                 PDFKitView(data: data)
-            } else if let err = loadError {
-                VStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.system(size: 32))
-                        .foregroundColor(.secondary)
-                    Text(err).foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
+            } else if let err = loadError {
+                centeredMessage(icon: "exclamationmark.triangle", text: err)
+            } else {
+                ProgressView().tint(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
                     .task { await loadPDF() }
             }
         } else {
@@ -125,6 +128,17 @@ struct AttachmentPreviewSheet: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(32)
         }
+    }
+
+    private func centeredMessage(icon: String, text: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 32))
+                .foregroundColor(.secondary)
+            Text(text).foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
     }
 
     private func loadPDF() async {

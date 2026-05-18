@@ -12,6 +12,10 @@ private let kanbanColumns: [(key: String, label: String)] = [
 struct KanbanBoardView: View {
     @Bindable var viewModel: ProjectDetailViewModel
     @State private var editingTask: MWProjectTask?
+    /// Read-only viewer modal. Tapping a card opens this first; the user
+    /// clicks "Edit" inside the viewer to escalate to `editingTask`. Keeps
+    /// passive viewing from accidentally entering edit mode.
+    @State private var viewingTask: MWProjectTask?
     /// Inline-add: which column has its inline TextField visible. Set by the
     /// `+` button on the column header; cleared by Esc / blur / submit.
     @State private var inlineAddColumn: String?
@@ -21,11 +25,6 @@ struct KanbanBoardView: View {
     /// inline path is the default.
     @State private var newTaskColumn: String?
     @State private var newTaskTitle: String = ""
-    /// Hoisted out of `TaskEditorSheet` so the attachment preview sheet
-    /// presents over the board, not nested inside the task-editor sheet.
-    /// Nested `.sheet(item:)` can cascade-dismiss the parent editor on
-    /// some macOS versions, losing user edits.
-    @State private var previewFile: MWProjectFile?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -77,11 +76,28 @@ struct KanbanBoardView: View {
                 await viewModel.loadTasks()
             }
         }
+        .sheet(item: $viewingTask) { task in
+            TaskViewerSheet(
+                task: task,
+                viewModel: viewModel,
+                onEdit: {
+                    // Open editor on the next runloop turn so SwiftUI
+                    // processes the viewer-dismiss before the editor-set
+                    // — otherwise the new sheet can race the dismiss
+                    // animation and flicker.
+                    let target = task
+                    viewingTask = nil
+                    DispatchQueue.main.async {
+                        editingTask = target
+                    }
+                },
+                onClose: { viewingTask = nil }
+            )
+        }
         .sheet(item: $editingTask) { task in
             TaskEditorSheet(
                 task: task,
                 viewModel: viewModel,
-                previewFile: $previewFile,
                 onSave: { patch in
                     Task {
                         await viewModel.updateTask(id: task.id, patch: patch)
@@ -101,9 +117,6 @@ struct KanbanBoardView: View {
         }
         .sheet(isPresented: Binding(get: { newTaskColumn != nil }, set: { if !$0 { newTaskColumn = nil; newTaskTitle = "" } })) {
             newTaskSheet
-        }
-        .sheet(item: $previewFile) { file in
-            AttachmentPreviewSheet(file: file)
         }
     }
 
@@ -182,7 +195,7 @@ struct KanbanBoardView: View {
                         KanbanCardView(
                             task: task,
                             attachments: viewModel.taskFiles[task.id] ?? [],
-                            onTap: { editingTask = task },
+                            onTap: { viewingTask = task },
                             onToggle: { Task { await viewModel.toggleTaskComplete(id: task.id) } },
                             onMoveColumn: { col in Task { await viewModel.moveTask(id: task.id, toColumn: col) } }
                         )
@@ -465,9 +478,6 @@ private struct KanbanCardView: View {
 private struct TaskEditorSheet: View {
     let task: MWProjectTask
     @Bindable var viewModel: ProjectDetailViewModel
-    /// Bound to KanbanBoardView's preview-sheet state so the modal presents
-    /// over the board, not nested inside this editor sheet.
-    @Binding var previewFile: MWProjectFile?
     let onSave: (MatchaWorkService.ProjectTaskPatch) -> Void
     let onDelete: () -> Void
     let onClose: () -> Void
@@ -481,18 +491,21 @@ private struct TaskEditorSheet: View {
     @State private var assignedTo: String?
     @State private var uploadingName: String?
     @State private var isDragOverAttachments = false
+    /// Local state. The attachment preview presents nested over this editor
+    /// sheet — hoisting it out causes sibling-sheet conflict (only one
+    /// `.sheet` per view on macOS) and the preview never shows until the
+    /// editor dismisses.
+    @State private var previewFile: MWProjectFile?
 
     init(
         task: MWProjectTask,
         viewModel: ProjectDetailViewModel,
-        previewFile: Binding<MWProjectFile?>,
         onSave: @escaping (MatchaWorkService.ProjectTaskPatch) -> Void,
         onDelete: @escaping () -> Void,
         onClose: @escaping () -> Void
     ) {
         self.task = task
         self.viewModel = viewModel
-        self._previewFile = previewFile
         self.onSave = onSave
         self.onDelete = onDelete
         self.onClose = onClose
@@ -635,6 +648,9 @@ private struct TaskEditorSheet: View {
             if viewModel.taskFiles[task.id] == nil {
                 await viewModel.loadTaskFiles(taskId: task.id)
             }
+        }
+        .sheet(item: $previewFile) { file in
+            AttachmentPreviewSheet(file: file)
         }
     }
 
