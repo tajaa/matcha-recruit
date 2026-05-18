@@ -76,7 +76,7 @@ class AppState {
         startNotificationPolling()
         Task { await refreshSubscription() }
         Task { await refreshBetaFeatures() }
-        ChannelNotificationManager.shared.requestPermission()
+        promptForNotificationsIfNeeded()
         ChannelsWebSocket.shared.onMessageGlobal = { [weak self] msg in
             guard let self else { return }
             // Ignore own messages
@@ -265,10 +265,17 @@ class AppState {
             }
         }
         Task { await refreshNotificationsCount() }
-        // Check notification permission. If denied, surface our own prompt
-        // (macOS only shows the system dialog once — denied users need to
-        // re-enable via System Settings). If notDetermined, trigger the
-        // OS dialog directly.
+        promptForNotificationsIfNeeded()
+    }
+
+    /// Surface the notification-permission prompt on every app open. macOS
+    /// only shows the OS dialog once per app install, so denied users see
+    /// our in-app banner instead. Authorized users see nothing.
+    /// Called from both `didLogin` (cold launch: restoreSession → didLogin
+    /// completes after scenePhase fires, so onSceneActive's early-return
+    /// would otherwise miss the check) and `onSceneActive` (warm reopen).
+    @MainActor
+    private func promptForNotificationsIfNeeded() {
         ChannelNotificationManager.shared.checkAuthorizationStatus { [weak self] status in
             switch status {
             case .notDetermined:
