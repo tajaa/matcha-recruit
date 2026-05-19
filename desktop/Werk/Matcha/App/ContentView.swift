@@ -20,6 +20,7 @@ struct ContentView: View {
     @State private var isCreatingProject = false
     @State private var projectCreateError: String?
     @State private var showNotifications = false
+    @State private var orderStore = SidebarSectionOrderStore.shared
 
     private struct GlassWindowModifier: ViewModifier {
         func body(content: Content) -> some View {
@@ -66,225 +67,45 @@ struct ContentView: View {
                         .padding(.top, 8)
                         .padding(.bottom, 4)
 
-                        sidebarSection(
-                            title: "Channels",
-                            icon: "number",
-                            isOpen: $channelsSectionOpen,
-                            trailing: {
-                                HStack(spacing: 4) {
-                                    Button {
-                                        showChannelBrowse()
-                                    } label: {
-                                        Image(systemName: "magnifyingglass")
-                                            .font(.system(size: 10, weight: .semibold))
-                                            .foregroundColor(.secondary)
-                                            .frame(width: 18, height: 18)
-                                            .background(Color.zinc800)
-                                            .cornerRadius(4)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("Browse public channels")
-
-                                    Menu {
-                                        Button("New channel") {
-                                            appState.channelAdminWizardMode = .create
-                                            appState.showChannelAdminWizard = true
-                                        }
-                                        Button("Quick create (no guide)") {
-                                            showCreateChannel = true
-                                        }
-                                        Divider()
-                                        Button("Browse public channels") {
-                                            showChannelBrowse()
-                                        }
-                                        Divider()
-                                        Button("Channel admin guide") {
-                                            if let id = appState.selectedChannelId {
-                                                appState.channelAdminWizardMode = .manage(channelId: id)
-                                            } else {
-                                                appState.channelAdminWizardMode = .create
-                                            }
-                                            appState.showChannelAdminWizard = true
-                                        }
-                                    } label: {
-                                        Image(systemName: "plus")
-                                            .font(.system(size: 10, weight: .semibold))
-                                            .foregroundColor(.secondary)
-                                            .frame(width: 18, height: 18)
-                                            .background(Color.zinc800)
-                                            .cornerRadius(4)
-                                    }
-                                    .menuStyle(.borderlessButton)
-                                    .menuIndicator(.hidden)
-                                    .frame(width: 22, height: 18)
-                                    .help("New channel · admin guide")
-                                }
-                            }
-                        ) {
-                            ChannelsSidebarView(showHeader: false)
-                                .frame(height: 220)
-                        }
-
-                        Divider().opacity(0.2)
-
-                        if appState.mwBetaLite {
-                        sidebarSection(
-                            title: "Projects",
-                            icon: "folder",
-                            isOpen: $projectsSectionOpen,
-                            trailing: {
-                                Button { showProjectTypePicker = true } label: {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 10, weight: .semibold))
-                                        .foregroundColor(.secondary)
-                                        .frame(width: 18, height: 18)
-                                        .background(Color.zinc800)
-                                        .cornerRadius(4)
-                                }
-                                .buttonStyle(.plain)
-                                .help("New project")
-                                .disabled(isCreatingProject)
-                                .popover(isPresented: $showProjectTypePicker) {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text("New Project").font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
-                                            .padding(.bottom, 4)
-                                        ForEach(["general", "presentation", "recruiting", "collab"], id: \.self) { type in
-                                            Button {
-                                                showProjectTypePicker = false
-                                                if type == "collab" {
-                                                    appState.collabProjectWizardMode = .create
-                                                    appState.showCollabProjectWizard = true
-                                                } else {
-                                                    createProject(type: type)
-                                                }
-                                            } label: {
-                                                HStack {
-                                                    Image(systemName: iconForProjectType(type))
-                                                        .font(.system(size: 11))
-                                                        .frame(width: 16)
-                                                    Text(labelForProjectType(type))
-                                                        .font(.system(size: 12))
-                                                }
-                                                .frame(maxWidth: .infinity, alignment: .leading)
-                                                .padding(.vertical, 4)
-                                            }
-                                            .buttonStyle(.plain)
-                                            .foregroundColor(.white)
-                                        }
-                                        Button {
-                                            showProjectTypePicker = false
-                                            showNewBlog = true
-                                        } label: {
-                                            HStack {
-                                                Image(systemName: "doc.richtext")
-                                                    .font(.system(size: 11))
-                                                    .frame(width: 16)
-                                                Text("Blog Post")
-                                                    .font(.system(size: 12))
-                                            }
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .padding(.vertical, 4)
-                                        }
-                                        .buttonStyle(.plain)
-                                        .foregroundColor(.white)
-                                    }
-                                    .padding(12)
-                                    .frame(width: 180)
-                                }
-                                .sheet(isPresented: $showNewBlog) {
-                                    NewBlogSheet { proj in
-                                        appState.selectedProjectId = proj.id
-                                        appState.selectedThreadId = nil
-                                        appState.selectedChannelId = nil
-                                        appState.selectedJournalId = nil
-                                        appState.projectsListGeneration &+= 1
-                                    }
-                                }
-                            }
-                        ) {
-                            VStack(alignment: .leading, spacing: 0) {
-                                if let err = projectCreateError {
-                                    HStack(alignment: .top, spacing: 6) {
-                                        Image(systemName: "exclamationmark.triangle.fill")
-                                            .font(.system(size: 9))
-                                            .foregroundColor(.red)
-                                        Text(err)
-                                            .font(.system(size: 10))
-                                            .foregroundColor(.red)
-                                            .lineLimit(3)
-                                        Spacer()
-                                        Button { projectCreateError = nil } label: {
-                                            Image(systemName: "xmark")
-                                                .font(.system(size: 8))
-                                                .foregroundColor(.secondary)
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(Color.red.opacity(0.1))
-                                }
-                                ProjectListView(showHeader: false)
-                                    .frame(height: 220)
+                        // Sidebar sections render in user-customised order.
+                        // Order persists per-user via SidebarSectionOrderStore.
+                        // Each section is drag-droppable onto another to
+                        // swap positions; right-click → Move up/down for a
+                        // keyboard-free fallback.
+                        let _ = orderStore.generation
+                        let visibleSections = orderStore.order.filter { section in
+                            switch section {
+                            case .projects, .journals: return appState.mwBetaLite
+                            default: return true
                             }
                         }
-
-                        Divider().opacity(0.2)
-
-                        sidebarSection(
-                            title: "Journals",
-                            icon: "book.closed",
-                            isOpen: $journalsSectionOpen,
-                            trailing: {
-                                Button { showNewJournal = true } label: {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 10, weight: .semibold))
-                                        .foregroundColor(.secondary)
-                                        .frame(width: 18, height: 18)
-                                        .background(Color.zinc800)
-                                        .cornerRadius(4)
+                        ForEach(Array(visibleSections.enumerated()), id: \.element) { idx, section in
+                            sidebarSectionView(for: section)
+                                .draggable(section.rawValue) {
+                                    sectionDragPreview(section)
                                 }
-                                .buttonStyle(.plain)
-                                .help("New journal")
-                                .sheet(isPresented: $showNewJournal) {
-                                    NewJournalSheet { journal in
-                                        appState.selectedJournalId = journal.id
-                                        appState.selectedThreadId = nil
-                                        appState.selectedProjectId = nil
-                                        appState.selectedChannelId = nil
-                                        appState.journalsListGeneration &+= 1
+                                .dropDestination(for: String.self) { items, _ in
+                                    guard let raw = items.first,
+                                          let dragged = SidebarSectionOrderStore.Section(rawValue: raw),
+                                          dragged != section else {
+                                        return false
+                                    }
+                                    orderStore.move(dragged, before: section)
+                                    return true
+                                }
+                                .contextMenu {
+                                    Button("Move up") { orderStore.moveUp(section) }
+                                        .disabled(idx == 0)
+                                    Button("Move down") { orderStore.moveDown(section) }
+                                        .disabled(idx == visibleSections.count - 1)
+                                    Divider()
+                                    Button("Reset sidebar order") {
+                                        orderStore.resetToDefault()
                                     }
                                 }
+                            if idx < visibleSections.count - 1 {
+                                Divider().opacity(0.2)
                             }
-                        ) {
-                            JournalListView(showHeader: false)
-                                .frame(height: 220)
-                        }
-
-                        Divider().opacity(0.2)
-                        } // end mwBetaLite
-
-                        sidebarSection(
-                            title: "Threads",
-                            icon: "bubble.left.and.bubble.right",
-                            isOpen: $threadsSectionOpen,
-                            trailing: {
-                                Button {
-                                    NotificationCenter.default.post(name: .mwCreateNewThread, object: nil)
-                                } label: {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 10, weight: .semibold))
-                                        .foregroundColor(.secondary)
-                                        .frame(width: 18, height: 18)
-                                        .background(Color.zinc800)
-                                        .cornerRadius(4)
-                                }
-                                .buttonStyle(.plain)
-                                .help("New thread")
-                            }
-                        ) {
-                            ThreadListView(viewModel: threadListVM, showHeader: false)
-                                .frame(height: 280)
                         }
                     }
                 }
@@ -484,6 +305,257 @@ struct ContentView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Sidebar sections (drag-droppable)
+
+    @ViewBuilder
+    private func sidebarSectionView(for section: SidebarSectionOrderStore.Section) -> some View {
+        switch section {
+        case .channels: channelsSidebarSection
+        case .projects: projectsSidebarSection
+        case .journals: journalsSidebarSection
+        case .threads:  threadsSidebarSection
+        }
+    }
+
+    private func sectionDragPreview(_ section: SidebarSectionOrderStore.Section) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: section.iconName)
+                .font(.system(size: 11))
+            Text(section.displayName)
+                .font(.system(size: 12, weight: .semibold))
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.zinc800)
+        .cornerRadius(6)
+    }
+
+    @ViewBuilder
+    private var channelsSidebarSection: some View {
+        sidebarSection(
+            title: "Channels",
+            icon: "number",
+            isOpen: $channelsSectionOpen,
+            trailing: {
+                HStack(spacing: 4) {
+                    Button {
+                        showChannelBrowse()
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .frame(width: 18, height: 18)
+                            .background(Color.zinc800)
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Browse public channels")
+
+                    Menu {
+                        Button("New channel") {
+                            appState.channelAdminWizardMode = .create
+                            appState.showChannelAdminWizard = true
+                        }
+                        Button("Quick create (no guide)") {
+                            showCreateChannel = true
+                        }
+                        Divider()
+                        Button("Browse public channels") {
+                            showChannelBrowse()
+                        }
+                        Divider()
+                        Button("Channel admin guide") {
+                            if let id = appState.selectedChannelId {
+                                appState.channelAdminWizardMode = .manage(channelId: id)
+                            } else {
+                                appState.channelAdminWizardMode = .create
+                            }
+                            appState.showChannelAdminWizard = true
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .frame(width: 18, height: 18)
+                            .background(Color.zinc800)
+                            .cornerRadius(4)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .frame(width: 22, height: 18)
+                    .help("New channel · admin guide")
+                }
+            }
+        ) {
+            ChannelsSidebarView(showHeader: false)
+                .frame(height: 220)
+        }
+    }
+
+    @ViewBuilder
+    private var projectsSidebarSection: some View {
+        sidebarSection(
+            title: "Projects",
+            icon: "folder",
+            isOpen: $projectsSectionOpen,
+            trailing: {
+                Button { showProjectTypePicker = true } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 18, height: 18)
+                        .background(Color.zinc800)
+                        .cornerRadius(4)
+                }
+                .buttonStyle(.plain)
+                .help("New project")
+                .disabled(isCreatingProject)
+                .popover(isPresented: $showProjectTypePicker) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("New Project").font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
+                            .padding(.bottom, 4)
+                        ForEach(["general", "presentation", "recruiting", "collab"], id: \.self) { type in
+                            Button {
+                                showProjectTypePicker = false
+                                if type == "collab" {
+                                    appState.collabProjectWizardMode = .create
+                                    appState.showCollabProjectWizard = true
+                                } else {
+                                    createProject(type: type)
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: iconForProjectType(type))
+                                        .font(.system(size: 11))
+                                        .frame(width: 16)
+                                    Text(labelForProjectType(type))
+                                        .font(.system(size: 12))
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundColor(.white)
+                        }
+                        Button {
+                            showProjectTypePicker = false
+                            showNewBlog = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "doc.richtext")
+                                    .font(.system(size: 11))
+                                    .frame(width: 16)
+                                Text("Blog Post")
+                                    .font(.system(size: 12))
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.white)
+                    }
+                    .padding(12)
+                    .frame(width: 180)
+                }
+                .sheet(isPresented: $showNewBlog) {
+                    NewBlogSheet { proj in
+                        appState.selectedProjectId = proj.id
+                        appState.selectedThreadId = nil
+                        appState.selectedChannelId = nil
+                        appState.selectedJournalId = nil
+                        appState.projectsListGeneration &+= 1
+                    }
+                }
+            }
+        ) {
+            VStack(alignment: .leading, spacing: 0) {
+                if let err = projectCreateError {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 9))
+                            .foregroundColor(.red)
+                        Text(err)
+                            .font(.system(size: 10))
+                            .foregroundColor(.red)
+                            .lineLimit(3)
+                        Spacer()
+                        Button { projectCreateError = nil } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8))
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.red.opacity(0.1))
+                }
+                ProjectListView(showHeader: false)
+                    .frame(height: 220)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var journalsSidebarSection: some View {
+        sidebarSection(
+            title: "Journals",
+            icon: "book.closed",
+            isOpen: $journalsSectionOpen,
+            trailing: {
+                Button { showNewJournal = true } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 18, height: 18)
+                        .background(Color.zinc800)
+                        .cornerRadius(4)
+                }
+                .buttonStyle(.plain)
+                .help("New journal")
+                .sheet(isPresented: $showNewJournal) {
+                    NewJournalSheet { journal in
+                        appState.selectedJournalId = journal.id
+                        appState.selectedThreadId = nil
+                        appState.selectedProjectId = nil
+                        appState.selectedChannelId = nil
+                        appState.journalsListGeneration &+= 1
+                    }
+                }
+            }
+        ) {
+            JournalListView(showHeader: false)
+                .frame(height: 220)
+        }
+    }
+
+    @ViewBuilder
+    private var threadsSidebarSection: some View {
+        sidebarSection(
+            title: "Threads",
+            icon: "bubble.left.and.bubble.right",
+            isOpen: $threadsSectionOpen,
+            trailing: {
+                Button {
+                    NotificationCenter.default.post(name: .mwCreateNewThread, object: nil)
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 18, height: 18)
+                        .background(Color.zinc800)
+                        .cornerRadius(4)
+                }
+                .buttonStyle(.plain)
+                .help("New thread")
+            }
+        ) {
+            ThreadListView(viewModel: threadListVM, showHeader: false)
+                .frame(height: 280)
         }
     }
 
