@@ -333,8 +333,10 @@ private struct KanbanCardView: View {
         kanbanColumns.first(where: { $0.key == task.boardColumn })?.label ?? task.boardColumn
     }
 
+    private var assigneeDisplay: String? { task.displayAssignee }
+
     private var assigneeInitial: String? {
-        guard let name = task.assignedName, !name.isEmpty else { return nil }
+        guard let name = assigneeDisplay, !name.isEmpty else { return nil }
         return String(name.prefix(1)).uppercased()
     }
 
@@ -397,7 +399,7 @@ private struct KanbanCardView: View {
                     .menuIndicator(.hidden)
                     .fixedSize()
 
-                    if let initial = assigneeInitial, let name = task.assignedName {
+                    if let initial = assigneeInitial, let name = assigneeDisplay {
                         Circle()
                             .fill(Color.white.opacity(0.12))
                             .frame(width: 14, height: 14)

@@ -59,6 +59,8 @@ struct TaskHistoryTimeline: View {
         case "created": return "plus.circle.fill"
         case "column_change": return "arrow.right.circle"
         case "assignee_change": return "person.circle"
+        case "description_change": return "text.alignleft"
+        case "progress_note_change": return "note.text"
         case "deleted": return "trash.circle"
         default: return "circle"
         }
@@ -69,6 +71,8 @@ struct TaskHistoryTimeline: View {
         case "created": return .matcha500
         case "column_change": return .matcha500
         case "assignee_change": return .blue
+        case "description_change": return .matcha500
+        case "progress_note_change": return .matcha500
         case "deleted": return .red
         default: return .secondary
         }
@@ -88,6 +92,10 @@ struct TaskHistoryTimeline: View {
                 return "\(who) unassigned this task"
             }
             return "\(who) updated the assignee"
+        case "description_change":
+            return "\(who) updated the description"
+        case "progress_note_change":
+            return "\(who) updated where we're at"
         case "deleted":
             return "\(who) deleted this task"
         default:

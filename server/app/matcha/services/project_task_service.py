@@ -97,9 +97,17 @@ async def list_project_tasks(project_id: UUID) -> list[dict]:
             SELECT t.id, t.project_id, t.company_id, t.created_by, t.title, t.description,
                    t.due_date, t.priority, t.status, t.board_column, t.assigned_to,
                    t.completed_at, t.created_at, t.updated_at, t.progress_note,
-                   COALESCE(a.name, u.email) AS assigned_name
+                   -- Split assignee fields so the client can pick a
+                   -- human-readable name and never fall back to showing
+                   -- a raw email in cards / tooltips. Older callsites
+                   -- expected `assigned_name` to fall back to email; that
+                   -- behavior moves to the client via AssigneeDisplay.
+                   COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name) AS assigned_name,
+                   u.email AS assigned_email
             FROM mw_tasks t
             LEFT JOIN users u ON u.id = t.assigned_to
+            LEFT JOIN clients c ON c.user_id = t.assigned_to
+            LEFT JOIN employees e ON e.user_id = t.assigned_to
             LEFT JOIN admins a ON a.user_id = t.assigned_to
             WHERE t.project_id = $1 AND t.status != 'cancelled'
             ORDER BY
@@ -347,7 +355,11 @@ async def update_project_task(
     """Partial update. Enforces status↔board_column sync rules."""
     async with get_connection() as conn:
         current = await conn.fetchrow(
-            "SELECT board_column, status, assigned_to, company_id FROM mw_tasks WHERE id = $1 AND project_id = $2",
+            """
+            SELECT board_column, status, assigned_to, company_id,
+                   description, progress_note
+            FROM mw_tasks WHERE id = $1 AND project_id = $2
+            """,
             task_id, project_id,
         )
         if not current:
@@ -455,6 +467,34 @@ async def update_project_task(
                 event_type="assignee_change",
                 from_value=str(current["assigned_to"]) if current["assigned_to"] else None,
                 to_value=str(patch["assigned_to"]) if patch.get("assigned_to") else None,
+            )
+        # Surface description / "where we're at" edits in the task viewer
+        # timeline so collaborators see when someone added new info.
+        # Short previews land in metadata; the full text is already on
+        # the task row itself so a follow-up read can pull it.
+        if row and "description" in patch and (description or "") != (current["description"] or ""):
+            await _log_task_history(
+                conn,
+                task_id=task_id,
+                project_id=project_id,
+                actor_user_id=actor_user_id,
+                event_type="description_change",
+                metadata={
+                    "from_preview": (current["description"] or "")[:120],
+                    "to_preview": (description or "")[:120],
+                },
+            )
+        if row and "progress_note" in patch and (progress_note or "") != (current["progress_note"] or ""):
+            await _log_task_history(
+                conn,
+                task_id=task_id,
+                project_id=project_id,
+                actor_user_id=actor_user_id,
+                event_type="progress_note_change",
+                metadata={
+                    "from_preview": (current["progress_note"] or "")[:120],
+                    "to_preview": (progress_note or "")[:120],
+                },
             )
 
     if row and "assigned_to" in patch:

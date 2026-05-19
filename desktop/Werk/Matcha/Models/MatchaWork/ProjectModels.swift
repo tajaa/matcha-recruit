@@ -188,6 +188,7 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
     var status: String
     var assignedTo: String?
     var assignedName: String?
+    var assignedEmail: String?
     var dueDate: String?
     var completedAt: String?
     var createdAt: String?
@@ -201,11 +202,34 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
         case boardColumn = "board_column"
         case assignedTo = "assigned_to"
         case assignedName = "assigned_name"
+        case assignedEmail = "assigned_email"
         case dueDate = "due_date"
         case completedAt = "completed_at"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case progressNote = "progress_note"
+    }
+}
+
+extension MWProjectTask {
+    /// Human-readable assignee label, or nil when no assignee is set.
+    /// Prefers the server-provided `assignedName` when it's a real name
+    /// (not an email). When the server falls back to email (legacy rows
+    /// without a name in clients/employees/admins), derives a name from
+    /// the local-part: "jane.doe@…" → "Jane Doe".
+    var displayAssignee: String? {
+        if let n = assignedName?.trimmingCharacters(in: .whitespaces),
+           !n.isEmpty, !n.contains("@") {
+            return n
+        }
+        let raw = assignedEmail ?? assignedName
+        guard let local = raw?.split(separator: "@").first.map(String.init),
+              !local.isEmpty
+        else { return nil }
+        return local
+            .replacingOccurrences(of: ".", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+            .capitalized
     }
 }
 
