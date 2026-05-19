@@ -34,5 +34,13 @@ struct MatchaApp: App {
         .commands {
             CommandGroup(replacing: .newItem) { }
         }
+
+        // macOS Settings scene — opened via Cmd+, or
+        // "Werk → Settings…" in the menu bar.
+        Settings {
+            SettingsView()
+                .environment(appState)
+                .preferredColorScheme(.dark)
+        }
     }
 }

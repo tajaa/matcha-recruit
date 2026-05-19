@@ -9,7 +9,9 @@ struct ChannelsSidebarView: View {
     @State private var showDiscover = false
     @State private var errorMessage: String?
     @State private var channelPendingDelete: ChannelSummary?
+    @State private var channelPendingLeave: ChannelSummary?
     @State private var isDeleting = false
+    @State private var isLeaving = false
     @AppStorage("channel-admin-wizard-shown-v1") private var hasSeenWizard = false
 
     var body: some View {
@@ -61,6 +63,28 @@ struct ChannelsSidebarView: View {
                     ? "This will archive the channel, cancel all active paid subscriptions, and notify members. This cannot be undone."
                     : "This will archive the channel and notify members. This cannot be undone.")
             }
+            .confirmationDialog(
+                channelPendingLeave.map { "Leave #\($0.name)?" } ?? "Leave channel?",
+                isPresented: leaveDialogBinding,
+                titleVisibility: .visible,
+                presenting: channelPendingLeave
+            ) { channel in
+                Button("Leave", role: .destructive) {
+                    Task { await leave(channel) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { channel in
+                Text(channel.isPaid
+                    ? "You'll stop receiving messages in this channel and your paid subscription will be canceled at the period end."
+                    : "You'll stop receiving messages in this channel. Rejoining later requires a re-invite if it's private.")
+            }
+    }
+
+    private var leaveDialogBinding: Binding<Bool> {
+        Binding(
+            get: { channelPendingLeave != nil },
+            set: { if !$0 { channelPendingLeave = nil } }
+        )
     }
 
     @ViewBuilder
@@ -251,6 +275,17 @@ struct ChannelsSidebarView: View {
             }
             let role = channel.myRole ?? ""
             let isAdmin = (appState.currentUser?.role ?? "") == "admin"
+            // Members (and owners after they transfer) can leave. Owners
+            // see Delete instead — leaving while owning the channel is
+            // rejected server-side anyway.
+            if !role.isEmpty && role != "owner" {
+                Divider()
+                Button(role: .destructive) {
+                    channelPendingLeave = channel
+                } label: {
+                    Label("Leave channel", systemImage: "arrow.right.square")
+                }
+            }
             if role == "owner" || isAdmin {
                 Divider()
                 Button(role: .destructive) {
@@ -259,6 +294,20 @@ struct ChannelsSidebarView: View {
                     Label("Delete channel", systemImage: "trash")
                 }
             }
+        }
+    }
+
+    private func leave(_ channel: ChannelSummary) async {
+        isLeaving = true
+        defer { isLeaving = false }
+        do {
+            try await ChannelsService.shared.leaveChannel(id: channel.id)
+            if appState.selectedChannelId == channel.id {
+                appState.selectedChannelId = nil
+            }
+            appState.channelsListGeneration &+= 1
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
