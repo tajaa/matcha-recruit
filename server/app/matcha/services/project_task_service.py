@@ -9,6 +9,7 @@ company-wide dashboard tasks surfaced via /tasks). Board state is tracked in
 - toggling status complete ↔ moves column to 'done' / 'todo' accordingly
 """
 
+import json
 import logging
 from datetime import date as _date, datetime, timezone
 from typing import Optional
@@ -17,6 +18,38 @@ from uuid import UUID
 from ...database import get_connection
 
 logger = logging.getLogger(__name__)
+
+
+async def _log_task_history(
+    conn,
+    *,
+    task_id: UUID,
+    project_id: UUID,
+    actor_user_id: Optional[UUID],
+    event_type: str,
+    from_value: Optional[str] = None,
+    to_value: Optional[str] = None,
+    metadata: Optional[dict] = None,
+) -> None:
+    """Insert a row into mw_task_history. Best-effort — if the table
+    doesn't exist yet (migration not run), warn and continue so the
+    underlying task write still succeeds.
+    """
+    try:
+        await conn.execute(
+            """
+            INSERT INTO mw_task_history
+                (task_id, project_id, actor_user_id, event_type, from_value, to_value, metadata)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+            """,
+            task_id, project_id, actor_user_id, event_type,
+            from_value, to_value, json.dumps(metadata or {}),
+        )
+    except Exception as e:
+        logger.warning(
+            "Failed to log task history task=%s event=%s: %s",
+            task_id, event_type, e,
+        )
 
 
 _ALLOWED_COLUMNS = {"todo", "in_progress", "review", "done"}
@@ -122,6 +155,25 @@ async def create_project_task(
             due_date, priority, status, board_column, assigned_to,
             completed_at, progress_note,
         )
+
+        await _log_task_history(
+            conn,
+            task_id=row["id"],
+            project_id=project_id,
+            actor_user_id=created_by,
+            event_type="created",
+            to_value=board_column,
+            metadata={"title": title.strip()},
+        )
+        if assigned_to is not None:
+            await _log_task_history(
+                conn,
+                task_id=row["id"],
+                project_id=project_id,
+                actor_user_id=created_by,
+                event_type="assignee_change",
+                to_value=str(assigned_to),
+            )
 
     if assigned_to is not None and assigned_to != created_by:
         await _notify_task_assigned(
@@ -384,6 +436,27 @@ async def update_project_task(
             progress_note,                # $15
         )
 
+        if row and new_column != current["board_column"]:
+            await _log_task_history(
+                conn,
+                task_id=task_id,
+                project_id=project_id,
+                actor_user_id=actor_user_id,
+                event_type="column_change",
+                from_value=current["board_column"],
+                to_value=new_column,
+            )
+        if row and "assigned_to" in patch and patch.get("assigned_to") != current["assigned_to"]:
+            await _log_task_history(
+                conn,
+                task_id=task_id,
+                project_id=project_id,
+                actor_user_id=actor_user_id,
+                event_type="assignee_change",
+                from_value=str(current["assigned_to"]) if current["assigned_to"] else None,
+                to_value=str(patch["assigned_to"]) if patch.get("assigned_to") else None,
+            )
+
     if row and "assigned_to" in patch:
         new_assignee = row["assigned_to"]
         old_assignee = current["assigned_to"]
@@ -426,11 +499,29 @@ async def delete_project_task(
     project_id: UUID, task_id: UUID, *, actor_user_id: Optional[UUID] = None
 ) -> bool:
     async with get_connection() as conn:
+        existing = await conn.fetchrow(
+            "SELECT title FROM mw_tasks WHERE id = $1 AND project_id = $2",
+            task_id, project_id,
+        )
+        if existing:
+            # Log BEFORE the delete so the FK still resolves. ON DELETE
+            # SET NULL on task_id then nulls the reference when the task
+            # row is gone — leaving the history row in place with the
+            # title cached in metadata so the activity feed can still
+            # render "X deleted Task Y".
+            await _log_task_history(
+                conn,
+                task_id=task_id,
+                project_id=project_id,
+                actor_user_id=actor_user_id,
+                event_type="deleted",
+                metadata={"title": existing["title"]},
+            )
         result = await conn.execute(
             "DELETE FROM mw_tasks WHERE id = $1 AND project_id = $2",
             task_id, project_id,
         )
-    deleted = result.endswith(" 1")
+        deleted = result.endswith(" 1")
     if deleted:
         payload: dict = {"id": str(task_id)}
         if actor_user_id is not None:
