@@ -10,6 +10,7 @@ import { Loader2 } from 'lucide-react'
 
 import {
   adminOnboarding,
+  type AIScope,
   type BasicsPayload,
   type GapCheckResult,
   type LocationInput,
@@ -17,6 +18,22 @@ import {
   type ResolvedScopeMissing,
   type SizePayload,
 } from '../../api/adminOnboarding'
+
+// True when the AI scope expansion came back essentially blank — no
+// NAICS sector and no items in any of the four lists. Means Gemini
+// either refused to infer or returned malformed JSON that fell back
+// to the route's empty-AIScope() default. Frontend uses this to swap
+// the "Check our database" CTA for a "re-run expansion" prompt.
+function isScopeEmpty(s: AIScope | null | undefined): boolean {
+  if (!s) return true
+  return (
+    !s.naics_sector
+    && (s.compliance_categories?.length || 0) === 0
+    && (s.required_certifications?.length || 0) === 0
+    && (s.required_licenses?.length || 0) === 0
+    && (s.applicable_jurisdictions?.length || 0) === 0
+  )
+}
 
 // ── Shared ──────────────────────────────────────────────────────────────
 
@@ -480,7 +497,7 @@ export function Step4Scope({ session, onUpdated, onNext }: StepProps) {
     <div className="max-w-3xl">
       <h2 className="text-base font-medium text-zinc-100 mb-1">AI scope expansion</h2>
       <p className="text-sm text-zinc-400 mb-6">
-        Gemini reads industry + specialty + locations and proposes compliance categories, certifications, and licenses. You'll review what's in the shared bank and what needs research next.
+        Gemini reads industry + specialty + locations and proposes compliance categories, certifications, and licenses. Next you'll see which ones we already have data for and which need new research.
       </p>
       <ErrorBox message={error} />
 
@@ -498,18 +515,35 @@ export function Step4Scope({ session, onUpdated, onNext }: StepProps) {
           <ScopeList title="Licenses" items={scope.required_licenses.map((l) => l.name)} />
           <ScopeList title="Applicable jurisdictions" items={scope.applicable_jurisdictions.map((j) => `${j.state || 'US'}${j.county ? ` · ${j.county}` : ''}${j.city ? ` · ${j.city}` : ''}`)} />
 
-          <div className="mt-6 flex items-center gap-2">
-            <PrimaryButton busy={busy} onClick={() => void resolve()}>
-              Reconcile with bank
-            </PrimaryButton>
-            <button
-              onClick={() => void expand()}
-              disabled={busy}
-              className="px-3 h-9 text-xs text-zinc-400 hover:text-zinc-100 disabled:opacity-50"
-            >
-              Re-run AI expand
-            </button>
-          </div>
+          {isScopeEmpty(scope) ? (
+            <div className="mt-2 mb-4 rounded border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-200">
+              <div className="font-medium">AI couldn't infer scope from your inputs.</div>
+              <div className="mt-1 text-amber-200/80">
+                Try expanding the company description in Step 1 (industry, services, specialties) or re-run the expansion. If this keeps happening, the AI may be timing out.
+              </div>
+              <button
+                onClick={() => void expand()}
+                disabled={busy}
+                className="mt-3 inline-flex items-center gap-2 px-3 h-9 text-xs rounded bg-amber-500/90 hover:bg-amber-500 text-zinc-950 disabled:opacity-50"
+              >
+                {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Re-run AI scope expansion
+              </button>
+            </div>
+          ) : (
+            <div className="mt-6 flex items-center gap-2">
+              <PrimaryButton busy={busy} onClick={() => void resolve()}>
+                Check our database
+              </PrimaryButton>
+              <button
+                onClick={() => void expand()}
+                disabled={busy}
+                className="px-3 h-9 text-xs text-zinc-400 hover:text-zinc-100 disabled:opacity-50"
+              >
+                Re-run AI expand
+              </button>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -591,16 +625,16 @@ export function Step5Gaps({ session, onUpdated, onNext }: StepProps) {
 
   return (
     <div className="max-w-3xl">
-      <h2 className="text-base font-medium text-zinc-100 mb-1">Bank gaps</h2>
+      <h2 className="text-base font-medium text-zinc-100 mb-1">Coverage check</h2>
       <p className="text-sm text-zinc-400 mb-6">
-        {existing.length} item{existing.length === 1 ? '' : 's'} match the shared bank. {missing.length} need research. Approve the missing items the AI got right — only those dispatch.
+        We already have data for {existing.length} of these requirement{existing.length === 1 ? '' : 's'}. {missing.length} {missing.length === 1 ? 'is' : 'are'} new — check the ones you want our background workers to research now. Anything you leave unchecked is skipped.
       </p>
       <ErrorBox message={error} />
 
       {existing.length > 0 && (
         <div className="mb-6">
           <div className="text-[11px] uppercase tracking-wider text-emerald-400 mb-1">
-            In bank · {existing.length}
+            Already covered · {existing.length}
           </div>
           <ul className="text-sm text-zinc-200 space-y-0.5 max-h-48 overflow-auto">
             {existing.map((e) => (
@@ -615,7 +649,7 @@ export function Step5Gaps({ session, onUpdated, onNext }: StepProps) {
       {missing.length > 0 && (
         <div className="mb-6">
           <div className="text-[11px] uppercase tracking-wider text-amber-400 mb-1">
-            Missing · {missing.length}
+            Needs research · {missing.length}
           </div>
           <ul className="text-sm text-zinc-200 space-y-1.5 max-h-72 overflow-auto">
             {missing.map((m) => {
@@ -645,7 +679,7 @@ export function Step5Gaps({ session, onUpdated, onNext }: StepProps) {
           </ul>
           {dispatchedCount !== null && (
             <div className="mt-2 text-xs text-emerald-300">
-              Dispatched {dispatchedCount} research job{dispatchedCount === 1 ? '' : 's'}.
+              {dispatchedCount} research job{dispatchedCount === 1 ? '' : 's'} started in the background. They'll write to our compliance database when finished.
             </div>
           )}
         </div>
@@ -659,7 +693,7 @@ export function Step5Gaps({ session, onUpdated, onNext }: StepProps) {
             className="inline-flex items-center gap-2 px-4 h-10 rounded-md bg-amber-500/90 hover:bg-amber-500 text-zinc-950 text-sm font-medium disabled:opacity-50"
           >
             {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-            Dispatch research ({approved.size})
+            Start research ({approved.size})
           </button>
         )}
         <PrimaryButton busy={busy} onClick={() => void advance()}>

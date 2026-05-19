@@ -463,6 +463,21 @@ async def expand_session_scope(
             logger.warning("AI scope failed Pydantic validation: %s", exc)
             ai_scope = AIScope()  # surface empty scope; admin retries
 
+        # Flag fully-empty scopes for observability. Frontend surfaces a
+        # "re-run" banner in this case; the log helps us see how often
+        # Gemini whiffs on a given industry/locations shape.
+        if (
+            not ai_scope.compliance_categories
+            and not ai_scope.required_certifications
+            and not ai_scope.required_licenses
+            and not ai_scope.applicable_jurisdictions
+        ):
+            logger.warning(
+                "expand_scope produced fully empty scope for session %s "
+                "(industry=%r locations=%d) — check Gemini output",
+                session_id, basics.get("industry"), len(locations),
+            )
+
         # Re-expand invalidates any prior bank reconciliation: clearing
         # resolved_scope here prevents the gaps UI from showing stale
         # existing/missing lists keyed to a previous AI run.
