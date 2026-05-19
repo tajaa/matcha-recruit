@@ -3910,6 +3910,133 @@ async def delete_project_task_endpoint(
     return {"deleted": True}
 
 
+def _serialize_history_row(r) -> dict:
+    d = dict(r)
+    for k in ("id", "task_id", "actor_user_id"):
+        if d.get(k) is not None:
+            d[k] = str(d[k])
+    if d.get("created_at") is not None:
+        d["created_at"] = d["created_at"].isoformat()
+    if isinstance(d.get("metadata"), str):
+        import json as _json
+        try:
+            d["metadata"] = _json.loads(d["metadata"])
+        except Exception:
+            d["metadata"] = {}
+    return d
+
+
+@router.get("/projects/{project_id}/tasks/{task_id}/history")
+async def get_task_history_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Audit-trail timeline for one task — who/when at each transition."""
+    await _verify_project_access(project_id, current_user)
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT h.id, h.task_id, h.event_type, h.from_value, h.to_value,
+                   h.metadata, h.created_at, h.actor_user_id,
+                   COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS actor_name
+            FROM mw_task_history h
+            LEFT JOIN users u ON u.id = h.actor_user_id
+            LEFT JOIN clients c ON c.user_id = h.actor_user_id
+            LEFT JOIN employees e ON e.user_id = h.actor_user_id
+            LEFT JOIN admins a ON a.user_id = h.actor_user_id
+            WHERE h.task_id = $1
+            ORDER BY h.created_at ASC
+            """,
+            task_id,
+        )
+    return [_serialize_history_row(r) for r in rows]
+
+
+def _serialize_activity_row(r) -> dict:
+    d = dict(r)
+    if d.get("actor_user_id") is not None:
+        d["actor_user_id"] = str(d["actor_user_id"])
+    if d.get("created_at") is not None:
+        d["created_at"] = d["created_at"].isoformat()
+    if isinstance(d.get("payload"), str):
+        import json as _json
+        try:
+            d["payload"] = _json.loads(d["payload"])
+        except Exception:
+            d["payload"] = {}
+    return d
+
+
+@router.get("/projects/{project_id}/activity")
+async def get_project_activity_endpoint(
+    project_id: UUID,
+    limit: int = 50,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Cross-domain activity feed for the Overview tab.
+
+    UNIONs:
+    - `mw_task_history` (task lifecycle events — created / column_change / assignee_change / deleted)
+    - `mw_project_files` (uploads)
+    - `mw_project_collaborators` (new members)
+
+    Newest-first, capped at `limit`.
+    """
+    await _verify_project_access(project_id, current_user)
+    limit = max(1, min(int(limit), 100))
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            WITH events AS (
+                SELECT 'task_history'::text AS source, h.created_at, h.actor_user_id,
+                       jsonb_build_object(
+                         'event_type', h.event_type,
+                         'task_id', h.task_id,
+                         'task_title', COALESCE(t.title, h.metadata->>'title'),
+                         'from_value', h.from_value,
+                         'to_value', h.to_value
+                       ) AS payload
+                FROM mw_task_history h
+                LEFT JOIN mw_tasks t ON t.id = h.task_id
+                WHERE h.project_id = $1
+
+                UNION ALL
+
+                SELECT 'file_upload'::text, f.created_at, f.uploaded_by,
+                       jsonb_build_object(
+                         'file_id', f.id::text,
+                         'filename', f.filename,
+                         'task_id', f.task_id::text
+                       )
+                FROM mw_project_files f
+                WHERE f.project_id = $1
+
+                UNION ALL
+
+                SELECT 'collaborator_added'::text, pc.created_at, pc.invited_by,
+                       jsonb_build_object(
+                         'user_id', pc.user_id::text,
+                         'role', pc.role
+                       )
+                FROM mw_project_collaborators pc
+                WHERE pc.project_id = $1 AND pc.status = 'active'
+            )
+            SELECT e.source, e.created_at, e.actor_user_id, e.payload,
+                   COALESCE(c.name, CONCAT(em.first_name, ' ', em.last_name), a.name, u.email) AS actor_name
+            FROM events e
+            LEFT JOIN users u ON u.id = e.actor_user_id
+            LEFT JOIN clients c ON c.user_id = e.actor_user_id
+            LEFT JOIN employees em ON em.user_id = e.actor_user_id
+            LEFT JOIN admins a ON a.user_id = e.actor_user_id
+            ORDER BY e.created_at DESC
+            LIMIT $2
+            """,
+            project_id, limit,
+        )
+    return [_serialize_activity_row(r) for r in rows]
+
+
 async def _verify_task_belongs_to_project(project_id: UUID, task_id: UUID) -> None:
     async with get_connection() as conn:
         row = await conn.fetchrow(
