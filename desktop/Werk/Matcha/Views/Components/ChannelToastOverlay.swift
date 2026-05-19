@@ -15,9 +15,26 @@ final class ChannelToastCenter {
         let channelName: String
         let senderName: String
         let content: String
+        /// True when the source message has attachments but no text. Used
+        /// to swap an empty content body for an "📎 sent an attachment"
+        /// hint so the toast doesn't render a blank line.
+        let isAttachmentOnly: Bool
+
+        /// Text rendered for the body. Falls back to an attachment hint
+        /// when the message itself was attachment-only.
+        var displayContent: String {
+            if content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return isAttachmentOnly ? "📎 sent an attachment" : ""
+            }
+            return content
+        }
     }
 
     private(set) var toasts: [Toast] = []
+
+    /// Toast IDs the user is currently hovering. Paused toasts skip the
+    /// auto-dismiss so a long read isn't yanked away mid-sentence.
+    private var hoveredIds: Set<UUID> = []
 
     /// Push a toast onto the stack. Newest renders at the top. Older
     /// toasts pushed off the bottom when count exceeds 3.
@@ -30,7 +47,30 @@ final class ChannelToastCenter {
         let id = t.id
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(5))
-            dismiss(id: id)
+            if !hoveredIds.contains(id) {
+                dismiss(id: id)
+            } else {
+                // User is hovering — re-arm a longer timer once they
+                // move away. The hover-end path triggers the second
+                // dismiss attempt.
+            }
+        }
+    }
+
+    @MainActor
+    func setHover(_ id: UUID, _ hovering: Bool) {
+        if hovering {
+            hoveredIds.insert(id)
+        } else {
+            hoveredIds.remove(id)
+            // Restart a short timer after hover ends so the toast still
+            // disappears eventually.
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                if !hoveredIds.contains(id) {
+                    dismiss(id: id)
+                }
+            }
         }
     }
 
@@ -106,10 +146,12 @@ private struct ChannelToastView: View {
             Text(toast.senderName)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(.white)
-            Text(toast.content)
-                .font(.system(size: 11))
-                .foregroundColor(.white.opacity(0.85))
-                .lineLimit(2)
+            if !toast.displayContent.isEmpty {
+                Text(toast.displayContent)
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.85))
+                    .lineLimit(2)
+            }
         }
         .padding(10)
         .frame(width: 280, alignment: .leading)
@@ -124,7 +166,10 @@ private struct ChannelToastView: View {
                 .shadow(color: .black.opacity(0.3), radius: 12, x: 0, y: 4)
         )
         .contentShape(Rectangle())
-        .onHover { isHovered = $0 }
+        .onHover { hovering in
+            isHovered = hovering
+            ChannelToastCenter.shared.setHover(toast.id, hovering)
+        }
         .onTapGesture(perform: onTap)
     }
 }

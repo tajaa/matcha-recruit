@@ -116,6 +116,9 @@ class AppState {
                 // the only visible-cue path while the user is in Werk.
                 if ChannelNotificationManager.shared.appNotificationsEnabled,
                    self.isSceneActive {
+                    let isAttachmentOnly =
+                        msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        && !msg.attachments.isEmpty
                     Task { @MainActor in
                         ChannelToastCenter.shared.push(
                             ChannelToastCenter.Toast(
@@ -123,6 +126,7 @@ class AppState {
                                 channelName: channelName,
                                 senderName: msg.senderName,
                                 content: msg.content,
+                                isAttachmentOnly: isAttachmentOnly,
                             )
                         )
                     }
@@ -134,11 +138,21 @@ class AppState {
             // fires for every channel so collaborators can't miss DMs
             // just because they didn't star the channel. The global
             // app-notifications toggle in Settings still mutes everything.
+            //
+            // Empty-content (image-only) messages fall back to a
+            // "📎 sent an attachment" body so the OS toast doesn't
+            // render a blank line under the sender's name.
             if !self.isSceneActive
                 && ChannelNotificationManager.shared.appNotificationsEnabled {
+                let bodyText: String
+                if msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    bodyText = msg.attachments.isEmpty ? "" : "📎 sent an attachment"
+                } else {
+                    bodyText = msg.content
+                }
                 ChannelNotificationManager.shared.post(
                     senderName: msg.senderName,
-                    content: msg.content,
+                    content: bodyText,
                     channelName: channelName,
                 )
             }
