@@ -476,7 +476,8 @@ async def _close_incident_via_copilot(
     """
     row = await conn.fetchrow(
         """
-        SELECT status, osha_recordable, category_data
+        SELECT status, osha_recordable, category_data, root_cause,
+               incident_type, severity
         FROM ir_incidents WHERE id = $1
         """,
         incident_id,
@@ -489,6 +490,64 @@ async def _close_incident_via_copilot(
     if category_data.get("osha_emergency_alert_active"):
         return {
             "blocked_by_emergency": True,
+            "previous_value": prev_status,
+            "new_value": prev_status,
+        }
+
+    # Pre-close root-cause prompt: for safety / near-miss / high-severity
+    # incidents, require the user to either log a root cause or
+    # explicitly decline before closing. Otherwise the wizard could let a
+    # safety incident close with no investigation captured — which the
+    # user reported as a regression. Skipped when:
+    #   - root_cause is non-empty (already logged)
+    #   - category_data.root_cause_declined is true (user said No)
+    #   - category_data.root_cause_interview has any keys (mid-interview)
+    incident_type_lower = (row["incident_type"] or "").strip().lower() if row else ""
+    severity_lower = (row["severity"] or "").strip().lower() if row else ""
+    rc_existing = (row["root_cause"] or "").strip() if row else ""
+    rc_declined = category_data.get("root_cause_declined") in (True, "true")
+    rc_interview = bool(category_data.get("root_cause_interview"))
+    needs_root_cause_prompt = (
+        not rc_existing
+        and not rc_declined
+        and not rc_interview
+        and (
+            incident_type_lower in {"safety", "near_miss"}
+            or severity_lower in {"high", "critical"}
+        )
+    )
+    if needs_root_cause_prompt:
+        card = build_log_root_cause_query_card()
+        # Idempotency: reuse a pending log_root_cause_query if one is
+        # already in the transcript (e.g. double-click on Close).
+        existing = await conn.fetchrow(
+            """
+            SELECT id FROM ir_incident_ai_messages
+            WHERE incident_id = $1
+              AND message_type = 'card'
+              AND metadata->'card'->>'id' = $2
+              AND COALESCE((metadata->>'accepted')::boolean, FALSE) = FALSE
+              AND COALESCE((metadata->>'superseded')::boolean, FALSE) = FALSE
+              AND COALESCE((metadata->>'skipped')::boolean, FALSE) = FALSE
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            incident_id, card["id"],
+        )
+        if existing:
+            message_id = str(existing["id"])
+        else:
+            inserted = await _emit_chain_card(
+                conn,
+                incident_id=incident_id,
+                card=card,
+                created_by=current_user.id if current_user else None,
+            )
+            message_id = str(inserted["id"])
+        return {
+            "redirected_to_root_cause": True,
+            "redirect_card": card,
+            "redirect_message_id": message_id,
             "previous_value": prev_status,
             "new_value": prev_status,
         }
@@ -615,6 +674,14 @@ async def close_incident_via_copilot(
             return {
                 "ok": True,
                 "redirected_to_osha_chain": True,
+                "redirect_card": result["redirect_card"],
+                "redirect_message_id": result["redirect_message_id"],
+            }
+        if result.get("redirected_to_root_cause"):
+            _ = company_id
+            return {
+                "ok": True,
+                "redirected_to_root_cause": True,
                 "redirect_card": result["redirect_card"],
                 "redirect_message_id": result["redirect_message_id"],
             }
@@ -1271,6 +1338,27 @@ async def accept_copilot_card(
                             "message_id": close_result["redirect_message_id"],
                         })
                         yield _sse({"type": "done", "model": "osha_chain"})
+                        return
+                    if close_result.get("redirected_to_root_cause"):
+                        # Same pattern as the OSHA chain redirect — mark
+                        # the close card accepted so the log_root_cause_query
+                        # surfaces alone, stream the redirect card, and skip
+                        # the AI guidance round (chain is deterministic).
+                        new_md = dict(md)
+                        new_md["accepted"] = True
+                        new_md["accepted_at"] = _utc_now_naive().isoformat()
+                        new_md["accepted_by"] = str(current_user.id)
+                        new_md["redirected_to_root_cause"] = True
+                        await conn.execute(
+                            "UPDATE ir_incident_ai_messages SET metadata = $1::jsonb WHERE id = $2",
+                            json.dumps(new_md), card_row["id"],
+                        )
+                        yield _sse({
+                            "type": "card",
+                            "card": close_result["redirect_card"],
+                            "message_id": close_result["redirect_message_id"],
+                        })
+                        yield _sse({"type": "done", "model": "root_cause_chain"})
                         return
                     event_summary = "Updated Status"
                     event_extra = {
