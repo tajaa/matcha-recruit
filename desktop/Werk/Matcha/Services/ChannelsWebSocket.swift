@@ -322,6 +322,7 @@ final class ChannelsWebSocket: NSObject {
 
     private func scheduleReconnect() {
         guard reconnectTask == nil else { return }
+        print("[ChannelsWS] schedule reconnect — delay=\(reconnectDelay)s")
         isConnected = false
         isConnecting = false
         pingTask?.cancel(); pingTask = nil
@@ -334,6 +335,13 @@ final class ChannelsWebSocket: NSObject {
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard let self else { return }
+            // Refresh access token before reconnect. A stale token causes
+            // a silent 4001 close that traps us in an exponential-backoff
+            // loop until something else (a REST 401) refreshes the token —
+            // which is why "click out + click back in" recovers the chat
+            // stream. Matches the ProjectWebSocket fix in b653ddd.
+            let refreshed = await AuthService.shared.refreshIfNeeded()
+            print("[ChannelsWS] reconnect token refresh=\(refreshed)")
             await MainActor.run {
                 self.reconnectTask = nil
                 self.connect()
@@ -353,6 +361,7 @@ extension Notification.Name {
 extension ChannelsWebSocket: URLSessionWebSocketDelegate {
     nonisolated func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
         Task { @MainActor in
+            print("[ChannelsWS] connected — replaying \(self.subscribedRooms.count) join_room frames")
             self.isConnected = true
             self.isConnecting = false
             self.reconnectDelay = 3.0
@@ -367,7 +376,9 @@ extension ChannelsWebSocket: URLSessionWebSocketDelegate {
     }
 
     nonisolated func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        let codeRaw = closeCode.rawValue
         Task { @MainActor in
+            print("[ChannelsWS] WS closed code=\(codeRaw)")
             self.scheduleReconnect()
         }
     }

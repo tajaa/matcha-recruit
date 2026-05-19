@@ -100,9 +100,17 @@ class AppState {
         promptForNotificationsIfNeeded()
         ChannelsWebSocket.shared.onMessageGlobal = { [weak self] msg in
             guard let self else { return }
-            // Ignore own messages — sender already sees their own send.
-            guard msg.senderId != self.currentUser?.id else { return }
+            let isSelf = msg.senderId == self.currentUser?.id
             let isCurrentChannel = self.selectedChannelId == msg.channelId
+            let active = self.isSceneActive
+            let enabled = ChannelNotificationManager.shared.appNotificationsEnabled
+            print(
+                "[AppState] onMessageGlobal channel=\(msg.channelId) "
+                + "self=\(isSelf) current=\(isCurrentChannel) "
+                + "sceneActive=\(active) enabled=\(enabled)"
+            )
+            // Ignore own messages — sender already sees their own send.
+            guard !isSelf else { return }
             let channelName = ChannelsWebSocket.shared.roomName(for: msg.channelId) ?? "channel"
 
             if !isCurrentChannel {
@@ -117,6 +125,7 @@ class AppState {
                 // the only visible-cue path while the user is in Werk.
                 if ChannelNotificationManager.shared.appNotificationsEnabled,
                    self.isSceneActive {
+                    print("[AppState] pushing channel toast — \(msg.senderName) in \(channelName)")
                     let isAttachmentOnly =
                         msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         && !msg.attachments.isEmpty
