@@ -125,19 +125,22 @@ class ProjectDetailViewModel {
                 activeChatId = proj.chats?.first?.id
                 isLoading = false
             }
-            // Collab projects open into a 5-tab layout where the user often
-            // taps Kanban or Files seconds after landing. Kick off both fetches
-            // in parallel right now so the panels are populated before the
-            // user even clicks. Errors per-task surface via existing flows.
+            // Prefetch tasks/files/collaborators on every project open,
+            // regardless of `project_type`. Earlier the prefetch was gated
+            // on `projectType == "collab"`, which left Overview's UP NEXT
+            // card stuck on "No open tasks" for projects whose row had a
+            // legacy or NULL project_type — even though Kanban renders the
+            // same tasks fine via its own .task block. Cost: one GET per
+            // surface; server returns empty arrays for project types that
+            // have no rows so the payload is zero-bytes.
             //
-            // Use Task { } not `async let _ = ...` — `async let` requires an
-            // await before scope exit; without it Swift implicitly cancels
-            // the child task and the network request never completes.
-            if proj.projectType == "collab" {
-                Task { await self.loadTasks() }
-                Task { await self.loadFiles() }
-                Task { await self.loadCollaborators() }
-            }
+            // Use Task { } not `async let _ = ...` — `async let` requires
+            // an await before scope exit; without it Swift implicitly
+            // cancels the child task and the network request never
+            // completes.
+            Task { await self.loadTasks() }
+            Task { await self.loadFiles() }
+            Task { await self.loadCollaborators() }
         } catch is CancellationError {
             // Rapid project switch cancelled the in-flight load. Don't show
             // a red banner — the new project's .task is already loading.

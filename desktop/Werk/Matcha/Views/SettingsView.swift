@@ -1,5 +1,7 @@
 import SwiftUI
 import UserNotifications
+import UniformTypeIdentifiers
+import AppKit
 
 /// Macos Settings scene — opened via Cmd+, or the "Werk → Settings…"
 /// menu. Three tabs: Notifications, Account, About. Surfaces toggles
@@ -110,9 +112,48 @@ private struct NotificationsSettingsTab: View {
 private struct AccountSettingsTab: View {
     @Environment(AppState.self) private var appState
     @State private var loggingOut = false
+    @State private var uploadingAvatar = false
+    @State private var avatarError: String?
 
     var body: some View {
         Form {
+            Section {
+                HStack(spacing: 12) {
+                    SettingsAvatarThumbnail(
+                        url: appState.currentUser?.avatarUrl,
+                        seed: appState.currentUser?.email ?? "?"
+                    )
+                    .frame(width: 56, height: 56)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Profile picture")
+                            .font(.system(size: 12, weight: .medium))
+                        HStack(spacing: 8) {
+                            Button {
+                                pickAvatar()
+                            } label: {
+                                HStack(spacing: 6) {
+                                    if uploadingAvatar {
+                                        ProgressView().controlSize(.small)
+                                    }
+                                    Text(uploadingAvatar ? "Uploading…" : "Change picture…")
+                                }
+                            }
+                            .disabled(uploadingAvatar)
+                        }
+                        if let err = avatarError {
+                            Text(err).font(.system(size: 10)).foregroundColor(.red)
+                        } else {
+                            Text("PNG / JPG / HEIC. Max ~5MB.")
+                                .font(.system(size: 10)).foregroundColor(.secondary)
+                        }
+                    }
+                    Spacer()
+                }
+            } header: {
+                Text("Picture").font(.subheadline).bold()
+            }
+
             Section {
                 LabeledContent("Signed in as") {
                     Text(appState.currentUser?.email ?? "—")
@@ -156,6 +197,82 @@ private struct AccountSettingsTab: View {
         try? await AuthService.shared.logout()
         await MainActor.run {
             appState.didLogout()
+        }
+    }
+
+    private func pickAvatar() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.begin { response in
+            guard response == .OK, let url = panel.urls.first else { return }
+            guard let data = try? Data(contentsOf: url) else {
+                Task { @MainActor in avatarError = "Couldn't read \(url.lastPathComponent)" }
+                return
+            }
+            let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "image/jpeg"
+            Task { await uploadAvatar(data: data, filename: url.lastPathComponent, mime: mime) }
+        }
+    }
+
+    private func uploadAvatar(data: Data, filename: String, mime: String) async {
+        await MainActor.run {
+            uploadingAvatar = true
+            avatarError = nil
+        }
+        defer { Task { @MainActor in uploadingAvatar = false } }
+        do {
+            let newUrl = try await AuthService.shared.uploadAvatar(
+                data: data, filename: filename, mimeType: mime
+            )
+            await MainActor.run {
+                appState.currentUser?.avatarUrl = newUrl
+            }
+        } catch {
+            await MainActor.run {
+                avatarError = "Upload failed: \(error.localizedDescription)"
+            }
+        }
+    }
+}
+
+/// Small avatar thumbnail used in Settings. Renders a remote image when
+/// `url` is set, otherwise a colored initials circle.
+private struct SettingsAvatarThumbnail: View {
+    let url: String?
+    let seed: String
+
+    private var initial: String {
+        String(seed.first.map(String.init) ?? "?").uppercased()
+    }
+
+    var body: some View {
+        Group {
+            if let s = url, let u = URL(string: s) {
+                AsyncImage(url: u) { phase in
+                    switch phase {
+                    case .empty: Color.zinc800
+                    case .success(let img): img.resizable().scaledToFill()
+                    case .failure: initialsCircle
+                    @unknown default: initialsCircle
+                    }
+                }
+            } else {
+                initialsCircle
+            }
+        }
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Color.white.opacity(0.1), lineWidth: 1))
+    }
+
+    private var initialsCircle: some View {
+        ZStack {
+            Color.matcha500
+            Text(initial)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(.white)
         }
     }
 }

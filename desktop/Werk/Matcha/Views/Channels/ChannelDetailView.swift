@@ -425,6 +425,18 @@ struct ChannelDetailView: View {
                     withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
+            // Initial render scroll-to-bottom. .onChange above fires when
+            // the REST load flips messages.count 0→N, but proxy.scrollTo
+            // runs in the same SwiftUI commit as the LazyVStack's cell
+            // build — the target id isn't tracked yet so the scroll
+            // silently no-ops. A 50ms yield lets the cells materialise
+            // first. Re-fires when the user switches channels.
+            .task(id: vm.channel?.id) {
+                try? await Task.sleep(for: .milliseconds(50))
+                if let last = vm.messages.last {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
+            }
         }
         .overlay(
             Group {
