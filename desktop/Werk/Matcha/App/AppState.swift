@@ -99,25 +99,47 @@ class AppState {
         promptForNotificationsIfNeeded()
         ChannelsWebSocket.shared.onMessageGlobal = { [weak self] msg in
             guard let self else { return }
-            // Ignore own messages
+            // Ignore own messages — sender already sees their own send.
             guard msg.senderId != self.currentUser?.id else { return }
             let isCurrentChannel = self.selectedChannelId == msg.channelId
+            let channelName = ChannelsWebSocket.shared.roomName(for: msg.channelId) ?? "channel"
+
             if !isCurrentChannel {
                 Task { @MainActor in
                     self.channelUnreadOverrides[msg.channelId, default: 0] += 1
                 }
                 ChannelNotificationManager.shared.playInAppSound()
+
+                // In-app toast — pops in the top-right when the user is on
+                // another channel / view but the app is active. macOS won't
+                // raise a system notification for an active app, so this is
+                // the only visible-cue path while the user is in Werk.
+                if ChannelNotificationManager.shared.appNotificationsEnabled,
+                   self.isSceneActive {
+                    Task { @MainActor in
+                        ChannelToastCenter.shared.push(
+                            ChannelToastCenter.Toast(
+                                channelId: msg.channelId,
+                                channelName: channelName,
+                                senderName: msg.senderName,
+                                content: msg.content,
+                            )
+                        )
+                    }
+                }
             }
-            // OS push notifications only fire for starred channels — keeps
-            // them surfacing the people the user marked as friends without
-            // hammering the user's notification center for every busy
-            // channel. In-app sound + unread badge above are unconditional
-            // so quiet channels still register passively.
-            if !self.isSceneActive && ChannelStarStore.shared.isStarred(msg.channelId) {
+
+            // macOS system notification — fires when Werk is in the
+            // background. Previously gated on starred-channel only; now
+            // fires for every channel so collaborators can't miss DMs
+            // just because they didn't star the channel. The global
+            // app-notifications toggle in Settings still mutes everything.
+            if !self.isSceneActive
+                && ChannelNotificationManager.shared.appNotificationsEnabled {
                 ChannelNotificationManager.shared.post(
                     senderName: msg.senderName,
                     content: msg.content,
-                    channelName: ChannelsWebSocket.shared.roomName(for: msg.channelId)
+                    channelName: channelName,
                 )
             }
         }

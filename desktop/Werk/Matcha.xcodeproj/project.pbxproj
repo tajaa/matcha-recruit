@@ -52,6 +52,7 @@
 		AA11BB22CC33DD44EE5500F2 /* TaskViewerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE6600F2 /* TaskViewerSheet.swift */; };
 		AA11BB22CC33DD44EE5500F3 /* TaskHistoryTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE6600F3 /* TaskHistoryTimeline.swift */; };
 		AA11BB22CC33DD44EE5500F4 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE6600F4 /* SettingsView.swift */; };
+		AA11BB22CC33DD44EE5500F5 /* ChannelToastOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE6600F5 /* ChannelToastOverlay.swift */; };
 		AA11BB22CC33DD44EE55000D /* MarkdownTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66000D /* MarkdownTextEditor.swift */; };
 		AA11BB22CC33DD44EE550099 /* CollabProjectWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660099 /* CollabProjectWizardView.swift */; };
 		AA11BB22CC33DD44EE5500E1 /* TaskProgressBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE6600E1 /* TaskProgressBar.swift */; };
@@ -161,6 +162,7 @@
 		AA11BB22CC33DD44EE6600F2 /* TaskViewerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskViewerSheet.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE6600F3 /* TaskHistoryTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskHistoryTimeline.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE6600F4 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE6600F5 /* ChannelToastOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelToastOverlay.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE66000D /* MarkdownTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTextEditor.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660099 /* CollabProjectWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollabProjectWizardView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE6600E1 /* TaskProgressBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskProgressBar.swift; sourceTree = "<group>"; };
@@ -264,6 +266,7 @@
 			children = (
 				FAD09F509367E88989F2B765 /* StatusBadge.swift */,
 				B13338371A8BC76142D4A946 /* LoadingDots.swift */,
+				AA11BB22CC33DD44EE6600F5 /* ChannelToastOverlay.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -663,6 +666,7 @@
 				AA11BB22CC33DD44EE5500F2 /* TaskViewerSheet.swift in Sources */,
 				AA11BB22CC33DD44EE5500F3 /* TaskHistoryTimeline.swift in Sources */,
 				AA11BB22CC33DD44EE5500F4 /* SettingsView.swift in Sources */,
+				AA11BB22CC33DD44EE5500F5 /* ChannelToastOverlay.swift in Sources */,
 				AA11BB22CC33DD44EE55000D /* MarkdownTextEditor.swift in Sources */,
 				AA11BB22CC33DD44EE5500E1 /* TaskProgressBar.swift in Sources */,
 				AA11BB22CC33DD44EE5500E2 /* HomeDashboardView.swift in Sources */,

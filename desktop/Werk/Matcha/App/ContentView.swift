@@ -409,6 +409,13 @@ struct ContentView: View {
         }) {
             CollabProjectWizardView(mode: appState.collabProjectWizardMode)
         }
+        .overlay(alignment: .topTrailing) {
+            // In-app toast banner for inbound channel messages. Stacks
+            // up to 3, auto-dismisses each after 5s, tap to switch to
+            // the channel. Sits above all view content via .overlay so
+            // it doesn't push the layout around.
+            ChannelToastOverlay()
+        }
         .toolbar {
             ToolbarItem(placement: .status) {
                 if let user = appState.currentUser {
