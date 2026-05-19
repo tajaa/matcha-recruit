@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 from ...database import get_connection
 from ...core.services.auth import decode_token
+from ...core.services.redis_cache import get_redis_cache
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,26 @@ _RATE_LIMIT_WINDOW = 1.0
 # Hard cap on caret section_id payload size — incoming msg fans out to
 # all subscribers, so a giant blob would amplify into a DoS.
 _MAX_SECTION_ID_LEN = 64
+
+# Redis pub/sub channel used to fan-out project broadcasts across uvicorn
+# workers. Same architectural fix as channels_ws.py: with --workers 2 the
+# in-process ProjectConnectionManager dicts would otherwise silo presence
+# per worker, so collaborators on different workers wouldn't see each
+# other in the project header pill.
+_FANOUT_CHANNEL = "projects:fanout"
+# Redis hash key prefix storing the cross-worker membership snapshot used
+# by `get_project_presence` so a late-joiner sees members connected to
+# other workers, not just the one their socket landed on.
+#
+# TTL is generous (1h) on purpose: the hash is only refreshed on join /
+# page_change / leave_project (HSET re-bumps EXPIRE), NOT on cursor or
+# caret events. A user who's connected and typing but never changes
+# sub-tab would otherwise vanish from the snapshot after a short TTL,
+# even though they're still actively present. Graceful disconnect
+# always issues an explicit HDEL, so the long TTL only matters for
+# crashed workers — those stale entries die after at most 1h.
+_PRESENCE_KEY_PREFIX = "mw:presence:"
+_PRESENCE_TTL_SECONDS = 3600
 
 
 class ProjectUser(BaseModel):
@@ -114,6 +135,10 @@ class ProjectConnectionManager:
                         del self.page_rooms[key]
             self.rate_history.pop((user_id, project_id), None)
 
+        # Drop the cross-worker snapshot entry so other workers' next
+        # `get_project_presence` doesn't return a ghost.
+        await self._presence_hdel(project_id, user_id)
+
         if user:
             await self._broadcast_to_project(project_id, {
                 "type": "user_left_project",
@@ -127,13 +152,19 @@ class ProjectConnectionManager:
             self.project_rooms.setdefault(project_id, set()).add(user_id)
             self.page_rooms.setdefault((project_id, page_key), set()).add(user_id)
             self.user_pages.setdefault(user_id, {})[project_id] = page_key
+            user = self.users.get(user_id)
+
+        # Cross-worker snapshot bookkeeping. Write BEFORE the broadcast so a
+        # peer's subsequent `get_project_presence` call sees this user.
+        if user is not None:
+            await self._presence_hset(project_id, user, page_key)
 
         # Notify others in the project that this user joined.
-        if user_id in self.users:
+        if user is not None:
             await self._broadcast_to_project(project_id, {
                 "type": "user_joined_project",
                 "project_id": str(project_id),
-                "user": self.users[user_id].model_dump(mode='json'),
+                "user": user.model_dump(mode='json'),
                 "page_key": page_key,
             }, exclude_user=user_id)
 
@@ -151,6 +182,11 @@ class ProjectConnectionManager:
                         del self.page_rooms[old_key]
             self.page_rooms.setdefault((project_id, new_page_key), set()).add(user_id)
             self.user_pages.setdefault(user_id, {})[project_id] = new_page_key
+            user = self.users.get(user_id)
+
+        # Update the cross-worker snapshot with the new page_key.
+        if user is not None:
+            await self._presence_hset(project_id, user, new_page_key)
 
         await self._broadcast_to_project(project_id, {
             "type": "presence_update",
@@ -201,7 +237,28 @@ class ProjectConnectionManager:
         }, exclude_user=user_id)
 
     async def get_project_presence(self, project_id: UUID) -> list:
-        """Snapshot of who's in this project, with their current page_key."""
+        """Snapshot of who's in this project, with their current page_key.
+
+        Reads the cross-worker Redis hash so a late-joiner sees members
+        connected to any worker, not just the one their socket landed on.
+        Falls back to local in-process state when Redis is absent (dev)
+        — in that case the snapshot only covers same-worker peers, which
+        matches the pre-pubsub behavior.
+        """
+        redis = get_redis_cache()
+        if redis is not None:
+            try:
+                raw = await redis.hgetall(f"{_PRESENCE_KEY_PREFIX}{project_id}")
+                if raw:
+                    members = []
+                    for _uid_str, value in raw.items():
+                        try:
+                            members.append(json.loads(value))
+                        except Exception:
+                            continue
+                    return members
+            except Exception:
+                logger.exception("Redis HGETALL failed in get_project_presence; using local fallback")
         async with self.lock:
             members = []
             for uid in self.project_rooms.get(project_id, set()):
@@ -214,7 +271,55 @@ class ProjectConnectionManager:
                     })
             return members
 
+    async def _presence_hset(self, project_id: UUID, user: "ProjectUser", page_key: str) -> None:
+        """Record this user's presence in the cross-worker Redis hash so
+        snapshot reads on any worker include them."""
+        redis = get_redis_cache()
+        if redis is None:
+            return
+        value = json.dumps({
+            **user.model_dump(mode='json'),
+            "page_key": page_key,
+        }, default=str)
+        key = f"{_PRESENCE_KEY_PREFIX}{project_id}"
+        try:
+            await redis.hset(key, str(user.id), value)
+            await redis.expire(key, _PRESENCE_TTL_SECONDS)
+        except Exception:
+            logger.exception("Redis HSET failed in _presence_hset")
+
+    async def _presence_hdel(self, project_id: UUID, user_id: UUID) -> None:
+        redis = get_redis_cache()
+        if redis is None:
+            return
+        try:
+            await redis.hdel(f"{_PRESENCE_KEY_PREFIX}{project_id}", str(user_id))
+        except Exception:
+            logger.exception("Redis HDEL failed in _presence_hdel")
+
     async def _broadcast_to_project(self, project_id: UUID, message: dict, exclude_user: Optional[UUID] = None):
+        """Fan a project-scope event out to every connected member across all
+        uvicorn workers. Publishes to Redis; per-worker subscriber dispatches
+        to its local sockets. Falls back to in-process when Redis is absent."""
+        redis = get_redis_cache()
+        if redis is None:
+            await self._local_broadcast_to_project(project_id, message, exclude_user=exclude_user)
+            return
+        envelope = {
+            "kind": "project",
+            "project_id": str(project_id),
+            "message": message,
+            "exclude_user": str(exclude_user) if exclude_user else None,
+        }
+        try:
+            await redis.publish(_FANOUT_CHANNEL, json.dumps(envelope, default=str))
+        except Exception:
+            logger.exception("Redis publish failed in _broadcast_to_project; using local fallback")
+            await self._local_broadcast_to_project(project_id, message, exclude_user=exclude_user)
+
+    async def _local_broadcast_to_project(self, project_id: UUID, message: dict, exclude_user: Optional[UUID] = None):
+        """Direct write to this worker's local sockets. Called by the
+        subscriber loop and as the Redis-down fallback."""
         async with self.lock:
             members = self.project_rooms.get(project_id, set())
             targets: list[tuple[UUID, set]] = []
@@ -227,6 +332,26 @@ class ProjectConnectionManager:
         await self._send_to_targets(targets, message)
 
     async def _broadcast_to_page(self, project_id: UUID, page_key: str, message: dict, exclude_user: Optional[UUID] = None):
+        """Fan a page-scope event (cursor/caret) out to every member on the
+        same sub-tab across all workers."""
+        redis = get_redis_cache()
+        if redis is None:
+            await self._local_broadcast_to_page(project_id, page_key, message, exclude_user=exclude_user)
+            return
+        envelope = {
+            "kind": "page",
+            "project_id": str(project_id),
+            "page_key": page_key,
+            "message": message,
+            "exclude_user": str(exclude_user) if exclude_user else None,
+        }
+        try:
+            await redis.publish(_FANOUT_CHANNEL, json.dumps(envelope, default=str))
+        except Exception:
+            logger.exception("Redis publish failed in _broadcast_to_page; using local fallback")
+            await self._local_broadcast_to_page(project_id, page_key, message, exclude_user=exclude_user)
+
+    async def _local_broadcast_to_page(self, project_id: UUID, page_key: str, message: dict, exclude_user: Optional[UUID] = None):
         async with self.lock:
             members = self.page_rooms.get((project_id, page_key), set())
             targets: list[tuple[UUID, set]] = []
@@ -258,6 +383,105 @@ class ProjectConnectionManager:
 
 
 project_manager = ProjectConnectionManager()
+
+
+# ---------------------------------------------------------------------------
+# Cross-worker pub/sub subscriber
+# ---------------------------------------------------------------------------
+
+_project_subscriber_task: Optional[asyncio.Task] = None
+
+
+async def _project_subscriber_loop() -> None:
+    """Long-running per-worker task. Subscribes to projects:fanout and
+    dispatches each envelope to this worker's local sockets via
+    _local_broadcast_to_project / _local_broadcast_to_page.
+
+    Self-healing: on any exception, sleeps 2s and re-subscribes. Cancellation
+    exits cleanly.
+    """
+    while True:
+        pubsub = None
+        try:
+            redis = get_redis_cache()
+            if redis is None:
+                await asyncio.sleep(5)
+                continue
+            pubsub = redis.pubsub()
+            await pubsub.subscribe(_FANOUT_CHANNEL)
+            logger.info("[Project WS] Subscribed to %s", _FANOUT_CHANNEL)
+            async for raw in pubsub.listen():
+                if raw is None or raw.get("type") != "message":
+                    continue
+                payload = raw.get("data")
+                if not payload:
+                    continue
+                try:
+                    envelope = json.loads(payload)
+                except Exception:
+                    logger.warning("[Project WS] Malformed fanout envelope; dropping")
+                    continue
+                kind = envelope.get("kind")
+                msg = envelope.get("message")
+                if msg is None:
+                    continue
+                exclude_raw = envelope.get("exclude_user")
+                exclude_user: Optional[UUID] = None
+                if exclude_raw:
+                    try:
+                        exclude_user = UUID(exclude_raw)
+                    except (ValueError, TypeError):
+                        exclude_user = None
+                project_raw = envelope.get("project_id")
+                if not project_raw:
+                    continue
+                try:
+                    project_id = UUID(project_raw)
+                except (ValueError, TypeError):
+                    continue
+                if kind == "project":
+                    await project_manager._local_broadcast_to_project(
+                        project_id, msg, exclude_user=exclude_user,
+                    )
+                elif kind == "page":
+                    page_key = envelope.get("page_key")
+                    if not page_key:
+                        continue
+                    await project_manager._local_broadcast_to_page(
+                        project_id, page_key, msg, exclude_user=exclude_user,
+                    )
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.exception("[Project WS] Subscriber loop error; restarting in 2s")
+            await asyncio.sleep(2)
+        finally:
+            if pubsub is not None:
+                try:
+                    await pubsub.unsubscribe(_FANOUT_CHANNEL)
+                    await pubsub.aclose()
+                except Exception:
+                    pass
+
+
+def start_project_fanout_subscriber() -> None:
+    """Start the per-worker Redis pub/sub subscriber. Idempotent."""
+    global _project_subscriber_task
+    if _project_subscriber_task and not _project_subscriber_task.done():
+        return
+    _project_subscriber_task = asyncio.create_task(_project_subscriber_loop())
+
+
+async def stop_project_fanout_subscriber() -> None:
+    """Cancel the subscriber task on shutdown."""
+    global _project_subscriber_task
+    if _project_subscriber_task is not None:
+        _project_subscriber_task.cancel()
+        try:
+            await _project_subscriber_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        _project_subscriber_task = None
 
 
 async def broadcast_task_event(project_id: UUID, event: str, payload: dict) -> None:

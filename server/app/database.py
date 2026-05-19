@@ -5423,6 +5423,18 @@ async def init_db():
         await conn.execute("""
             ALTER TABLE channel_messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES channel_messages(id) ON DELETE SET NULL
         """)
+        # Server-side idempotency on (sender_id, client_message_id). Partial
+        # unique index lets legacy rows stay NULL without colliding. See
+        # alembic/versions/zzzz_b03_channel_messages_cmid.py for the prod
+        # migration; this mirrors the schema for fresh init_db bootstraps.
+        await conn.execute("""
+            ALTER TABLE channel_messages ADD COLUMN IF NOT EXISTS client_message_id UUID
+        """)
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_channel_messages_sender_cmid
+            ON channel_messages (sender_id, client_message_id)
+            WHERE client_message_id IS NOT NULL
+        """)
         # Reactions
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS channel_reactions (

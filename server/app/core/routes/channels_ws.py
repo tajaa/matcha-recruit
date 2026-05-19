@@ -621,6 +621,15 @@ async def channel_websocket(
                 # Clients append a pending message locally with this ID; on echo,
                 # they replace the pending entry instead of duplicating it.
                 client_message_id = data.get("client_message_id")
+                # Parse cmid to UUID for server-side idempotency. Bad/missing
+                # cmid -> None -> INSERT skips the partial unique index and
+                # proceeds as a fresh row (legacy behavior).
+                cmid_uuid: Optional[UUID] = None
+                if client_message_id:
+                    try:
+                        cmid_uuid = UUID(str(client_message_id))
+                    except (ValueError, TypeError):
+                        cmid_uuid = None
                 if channel_id and (content or attachments) and len(content) <= 4000:
                     try:
                         ch_uuid = UUID(channel_id)
@@ -642,23 +651,47 @@ async def channel_websocket(
                             ch_uuid, user.id,
                         )
                         if is_member:
+                            # ON CONFLICT path makes the INSERT idempotent on
+                            # (sender_id, client_message_id) so a retried send
+                            # returns the original row instead of inserting a
+                            # second one. The unique index is partial (only
+                            # rows with non-null cmid), so the conflict target
+                            # `WHERE client_message_id IS NOT NULL` matches it
+                            # for inference. DO UPDATE SET id = id is a no-op
+                            # that makes RETURNING return the existing row.
                             row = await conn.fetchrow(
                                 """
-                                INSERT INTO channel_messages (channel_id, sender_id, content, attachments, reply_to_id)
-                                VALUES ($1, $2, $3, $4::jsonb, $5)
-                                RETURNING id, channel_id, sender_id, content, attachments, reply_to_id, created_at, edited_at
+                                INSERT INTO channel_messages
+                                    (channel_id, sender_id, content, attachments, reply_to_id, client_message_id)
+                                VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+                                ON CONFLICT (sender_id, client_message_id)
+                                    WHERE client_message_id IS NOT NULL
+                                    DO UPDATE SET id = channel_messages.id
+                                RETURNING id, channel_id, sender_id, content, attachments,
+                                          reply_to_id, client_message_id, created_at, edited_at,
+                                          -- xmax = 0 iff this row was just inserted (no conflict).
+                                          -- Lets us skip duplicate side-effects (mention email,
+                                          -- in-app notification, activity-timestamp updates) when
+                                          -- a retried send hits the ON CONFLICT branch.
+                                          (xmax = 0) AS inserted
                                 """,
-                                ch_uuid, user.id, content or "", attachments_json, reply_uuid,
+                                ch_uuid, user.id, content or "", attachments_json, reply_uuid, cmid_uuid,
                             )
-                            # Update channel + member activity timestamps
-                            await conn.execute(
-                                "UPDATE channels SET updated_at = NOW() WHERE id = $1",
-                                ch_uuid,
-                            )
-                            await conn.execute(
-                                "UPDATE channel_members SET last_contributed_at = NOW() WHERE channel_id = $1 AND user_id = $2",
-                                ch_uuid, user.id,
-                            )
+                            is_new_message = bool(row["inserted"])
+                            # Update channel + member activity timestamps only
+                            # on the fresh-insert path. A retried duplicate
+                            # send shouldn't bump activity (otherwise a flaky
+                            # client could keep a channel appearing "active"
+                            # via repeated cmid retries).
+                            if is_new_message:
+                                await conn.execute(
+                                    "UPDATE channels SET updated_at = NOW() WHERE id = $1",
+                                    ch_uuid,
+                                )
+                                await conn.execute(
+                                    "UPDATE channel_members SET last_contributed_at = NOW() WHERE channel_id = $1 AND user_id = $2",
+                                    ch_uuid, user.id,
+                                )
 
                             broadcast_attachments = _json.loads(row["attachments"]) if row["attachments"] else []
                             # Build reply preview for broadcast
@@ -721,8 +754,9 @@ async def channel_websocket(
 
                             # Off-load offline-email check to Celery so the WS
                             # hot path stays fast. Worker re-checks online state
-                            # via Redis before sending.
-                            if mentioned_user_ids:
+                            # via Redis before sending. Gated on is_new_message
+                            # so a retry doesn't queue a second mention email.
+                            if mentioned_user_ids and is_new_message:
                                 try:
                                     from app.workers.tasks.mention_email import send_mention_email
                                     send_mention_email.delay(
@@ -736,38 +770,40 @@ async def channel_websocket(
                                 except Exception:
                                     logger.exception("Failed to enqueue mention_email")
 
-                            # In-app notifications for non-sender members
-                            try:
-                                from ...matcha.services import notification_service as _notif_svc
-                                _ch_name = await conn.fetchval(
-                                    "SELECT name FROM channels WHERE id = $1", ch_uuid
-                                )
-                                _members = await conn.fetch(
-                                    """
-                                    SELECT cm.user_id, COALESCE(c.company_id, e.org_id) AS company_id
-                                    FROM channel_members cm
-                                    JOIN users u ON u.id = cm.user_id
-                                    LEFT JOIN clients c ON c.user_id = u.id
-                                    LEFT JOIN employees e ON e.user_id = u.id
-                                    WHERE cm.channel_id = $1 AND cm.user_id != $2
-                                      AND cm.removed_for_inactivity IS NOT TRUE
-                                    """,
-                                    ch_uuid, user.id,
-                                )
-                                _preview = (row["content"] or "")[:80]
-                                import asyncio as _aio
-                                for _m in _members:
-                                    if _m["company_id"]:
-                                        _aio.create_task(_notif_svc.create_notification(
-                                            user_id=_m["user_id"],
-                                            company_id=_m["company_id"],
-                                            type="channel_message",
-                                            title=f"#{_ch_name}",
-                                            body=f"{user.name}: {_preview}",
-                                            link="/work",
-                                        ))
-                            except Exception:
-                                pass
+                            # In-app notifications for non-sender members.
+                            # Skip on duplicate retry to avoid double-notify.
+                            if is_new_message:
+                                try:
+                                    from ...matcha.services import notification_service as _notif_svc
+                                    _ch_name = await conn.fetchval(
+                                        "SELECT name FROM channels WHERE id = $1", ch_uuid
+                                    )
+                                    _members = await conn.fetch(
+                                        """
+                                        SELECT cm.user_id, COALESCE(c.company_id, e.org_id) AS company_id
+                                        FROM channel_members cm
+                                        JOIN users u ON u.id = cm.user_id
+                                        LEFT JOIN clients c ON c.user_id = u.id
+                                        LEFT JOIN employees e ON e.user_id = u.id
+                                        WHERE cm.channel_id = $1 AND cm.user_id != $2
+                                          AND cm.removed_for_inactivity IS NOT TRUE
+                                        """,
+                                        ch_uuid, user.id,
+                                    )
+                                    _preview = (row["content"] or "")[:80]
+                                    import asyncio as _aio
+                                    for _m in _members:
+                                        if _m["company_id"]:
+                                            _aio.create_task(_notif_svc.create_notification(
+                                                user_id=_m["user_id"],
+                                                company_id=_m["company_id"],
+                                                type="channel_message",
+                                                title=f"#{_ch_name}",
+                                                body=f"{user.name}: {_preview}",
+                                                link="/work",
+                                            ))
+                                except Exception:
+                                    pass
                         else:
                             await websocket.send_json({
                                 "type": "error",

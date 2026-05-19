@@ -153,6 +153,15 @@ async def lifespan(app: FastAPI):
     start_server_ping_loop()
     print("[Matcha] Channels WS fanout subscriber + keepalive ping started")
 
+    # Same pattern for the matcha-work project presence WS — without this,
+    # collaborators on different uvicorn workers don't see each other in the
+    # project header pill (in-process ProjectConnectionManager dicts).
+    from .matcha.routes.project_ws import (
+        start_project_fanout_subscriber, stop_project_fanout_subscriber,
+    )
+    start_project_fanout_subscriber()
+    print("[Matcha] Project WS fanout subscriber started")
+
     # Start channel inactivity checker (runs every 12h)
     from .core.services.inactivity_worker import start_inactivity_scheduler
     inactivity_task = await start_inactivity_scheduler()
@@ -165,6 +174,7 @@ async def lifespan(app: FastAPI):
 
     await stop_fanout_subscriber()
     await stop_server_ping_loop()
+    await stop_project_fanout_subscriber()
 
     # Cleanup
     await close_redis_cache()
