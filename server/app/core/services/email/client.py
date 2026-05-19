@@ -248,7 +248,12 @@ class EmailService(
                     logger.info("Sent email to %s via MailerSend fallback", to_email)
                     return True
                 else:
-                    logger.warning("MailerSend fallback failed for %s: %s", to_email, response.status_code)
+                    logger.warning(
+                        "MailerSend fallback failed for %s: status=%s from=%r body=%s",
+                        to_email, response.status_code,
+                        self.mailersend_from_email,
+                        response.text[:500],
+                    )
                     return False
         except Exception:
             logger.exception("MailerSend fallback error for %s", to_email)
