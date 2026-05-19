@@ -185,7 +185,25 @@ export default function ChannelView() {
 
     const handleMessage = (msg: ChannelMessage) => {
       if (msg.channel_id !== channelId) return
-      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]))
+      setMessages((prev) => {
+        // Reconcile optimistic-pending entries first. The sender's own echo
+        // carries the client_message_id we generated on send; replace the
+        // pending row (whose `id` is the client UUID) with the server-
+        // confirmed one so the row keeps its position but flips pending=false
+        // and gets the real server id + timestamp.
+        if (msg.client_message_id) {
+          const idx = prev.findIndex(
+            (m) => m.client_message_id === msg.client_message_id && m.pending,
+          )
+          if (idx >= 0) {
+            const next = prev.slice()
+            next[idx] = msg
+            return next
+          }
+        }
+        // Normal dedup by server id (reconnect replays, other senders).
+        return prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]
+      })
       // Auto-scroll if near bottom
       const container = messagesContainerRef.current
       if (container) {
@@ -279,7 +297,36 @@ export default function ChannelView() {
       setPendingFiles([])
     }
 
-    socketRef.current?.sendMessage(channelId, content, attachments)
+    const cmid = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `cmid-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    if (me?.user) {
+      const optimistic: ChannelMessage = {
+        id: cmid,
+        channel_id: channelId,
+        sender_id: me.user.id,
+        sender_name: me.profile?.name ?? me.user.email,
+        sender_avatar_url: me.user.avatar_url ?? null,
+        content,
+        attachments: attachments ?? [],
+        created_at: new Date().toISOString(),
+        edited_at: null,
+        client_message_id: cmid,
+        pending: true,
+      }
+      setMessages((prev) => {
+        // Loopback race: WS echo may resolve before this updater runs. If a
+        // message with our cmid is already present, don't append a duplicate.
+        if (prev.some((m) => m.client_message_id === cmid)) return prev
+        return [...prev, optimistic]
+      })
+      const container = messagesContainerRef.current
+      if (container) {
+        const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150
+        if (nearBottom) setTimeout(scrollToBottom, 50)
+      }
+    }
+    socketRef.current?.sendMessage(channelId, content, attachments, cmid)
     setInput('')
   }
 
@@ -648,8 +695,12 @@ export default function ChannelView() {
               const isOwn = msg.sender_id === userId
               const isDeleted = !!msg.deleted_at
               const canDelete = !isDeleted && (isOwn || canModerate)
+              // Stable key across the optimistic→confirmed swap: pending row and
+              // its server echo share `client_message_id`, so React keeps the
+              // DOM node instead of unmounting/remounting on echo.
+              const rowKey = msg.client_message_id ? `cmid:${msg.client_message_id}` : `id:${msg.id}`
               return (
-                <div key={msg.id} className={`${showAuthor && i > 0 ? 'mt-3' : ''} flex gap-2.5 group`}>
+                <div key={rowKey} className={`${showAuthor && i > 0 ? 'mt-3' : ''} flex gap-2.5 group ${msg.pending ? 'opacity-60' : ''}`}>
                   {showAuthor ? (
                     msg.sender_avatar_url ? (
                       <img src={msg.sender_avatar_url} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 mt-0.5" />

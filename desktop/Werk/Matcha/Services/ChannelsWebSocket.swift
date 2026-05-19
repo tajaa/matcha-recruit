@@ -146,13 +146,14 @@ final class ChannelsWebSocket: NSObject {
 
     var onReactionUpdate: ((_ messageId: String, _ reactions: [ChannelReaction]) -> Void)?
 
-    func sendMessage(channelId: String, content: String, attachments: [ChannelAttachment] = [], replyToId: String? = nil) {
+    func sendMessage(channelId: String, content: String, attachments: [ChannelAttachment] = [], replyToId: String? = nil, clientMessageId: String? = nil) {
         var payload: [String: Any] = [
             "type": "message",
             "channel_id": channelId,
             "content": content,
         ]
         if let replyToId { payload["reply_to_id"] = replyToId }
+        if let clientMessageId { payload["client_message_id"] = clientMessageId }
         if !attachments.isEmpty {
             payload["attachments"] = attachments.map { att in
                 [
@@ -213,6 +214,10 @@ final class ChannelsWebSocket: NSObject {
         switch type {
         case "pong":
             break
+        case "server_ping":
+            // Server-initiated keepalive. Echo a lightweight ack so the server's
+            // send_text doesn't fail and drop us from active_connections.
+            send(["type": "pong"])
         case "message":
             if let msgDict = obj["message"] as? [String: Any],
                let msgData = try? JSONSerialization.data(withJSONObject: msgDict),

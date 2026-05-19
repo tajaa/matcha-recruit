@@ -12,8 +12,40 @@ final class ChannelChatViewModel {
 
     private(set) var channelId: String?
     private var typingClearTask: Task<Void, Never>?
+    /// Pending-message failure timers, keyed by client_message_id. Started in
+    /// `schedulePendingTimeout(...)` when the view does an optimistic append;
+    /// cancelled in the WS `onMessage` reconciliation path. After 8s with no
+    /// echo, flips the message to `failed=true, pending=false` so the user
+    /// sees a clear "didn't send" affordance instead of an opacity-dim row
+    /// that hangs forever.
+    private var pendingFailureTasks: [String: Task<Void, Never>] = [:]
+    private static let pendingFailureSeconds: UInt64 = 8
     private let ws = ChannelsWebSocket.shared
     private let service = ChannelsService.shared
+
+    /// Called by ChannelDetailView right after an optimistic-pending entry is
+    /// appended to `messages`. Starts an 8s timer; if the WS echo doesn't
+    /// arrive first, marks the row failed.
+    func schedulePendingTimeout(clientMessageId cmid: String) {
+        pendingFailureTasks[cmid]?.cancel()
+        pendingFailureTasks[cmid] = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Int(Self.pendingFailureSeconds)))
+            guard let self, !Task.isCancelled else { return }
+            self.markPendingAsFailed(cmid: cmid)
+            self.pendingFailureTasks.removeValue(forKey: cmid)
+        }
+    }
+
+    private func cancelPendingTimeout(clientMessageId cmid: String) {
+        pendingFailureTasks.removeValue(forKey: cmid)?.cancel()
+    }
+
+    private func markPendingAsFailed(cmid: String) {
+        if let idx = messages.firstIndex(where: { $0.clientMessageId == cmid && $0.pending }) {
+            messages[idx].pending = false
+            messages[idx].failed = true
+        }
+    }
 
     func start(channelId: String) async {
         // Wipe any stale closure from a prior channel BEFORE the await on
@@ -22,6 +54,7 @@ final class ChannelChatViewModel {
         // fire during this view's REST fetch and append a stale-channel
         // message into the just-replaced `messages` array.
         ws.clearCallbacks()
+        cancelAllPendingTimeouts()
         self.channelId = channelId
         await loadChannel(channelId: channelId)
         wireCallbacks(channelId: channelId)
@@ -31,6 +64,12 @@ final class ChannelChatViewModel {
 
     func stop(channelId: String) {
         ws.clearCallbacksIfRoomMatches(channelId)
+        cancelAllPendingTimeouts()
+    }
+
+    private func cancelAllPendingTimeouts() {
+        for task in pendingFailureTasks.values { task.cancel() }
+        pendingFailureTasks.removeAll()
     }
 
     func loadChannel(channelId: String) async {
@@ -53,6 +92,19 @@ final class ChannelChatViewModel {
         // to the live SwiftUI view via @Observable tracking.
         ws.onMessage = { [weak self] msg in
             guard let self, msg.channelId == channelId else { return }
+            // Reconcile optimistic-pending entries first. The sender's own echo
+            // carries the client_message_id we generated on send; replace the
+            // pending struct (whose `id` was the client UUID) with the
+            // server-confirmed one so the row keeps its position but flips
+            // pending=false and gets the real server id + timestamp.
+            if let cmid = msg.clientMessageId, !cmid.isEmpty,
+               let idx = self.messages.firstIndex(where: { $0.clientMessageId == cmid && ($0.pending || $0.failed) }) {
+                self.cancelPendingTimeout(clientMessageId: cmid)
+                self.messages[idx] = msg
+                return
+            }
+            // Normal dedup by server id (handles reconnect replays and other
+            // senders' messages).
             if !self.messages.contains(where: { $0.id == msg.id }) {
                 self.messages.append(msg)
             }

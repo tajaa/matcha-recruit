@@ -392,7 +392,7 @@ struct ChannelDetailView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(vm.messages, id: \.id) { msg in
+                    ForEach(vm.messages, id: \.stableKey) { msg in
                         ChannelMessageRowView(
                             msg: msg,
                             members: vm.channel?.members ?? [],
@@ -403,7 +403,8 @@ struct ChannelDetailView: View {
                             onToggleReaction: toggleReaction,
                             onRequestDelete: { pendingMessageDelete = $0 }
                         )
-                        .id(msg.id)
+                        .opacity((msg.pending || msg.failed) ? 0.55 : 1.0)
+                        .id(msg.stableKey)
                     }
                     if !vm.typingUsers.isEmpty {
                         HStack(alignment: .center, spacing: 6) {
@@ -422,7 +423,7 @@ struct ChannelDetailView: View {
             }
             .onChange(of: vm.messages.count) {
                 if let last = vm.messages.last {
-                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                    withAnimation { proxy.scrollTo(last.stableKey, anchor: .bottom) }
                 }
             }
             // Initial render scroll-to-bottom. .onChange above fires when
@@ -434,7 +435,7 @@ struct ChannelDetailView: View {
             .task(id: vm.channel?.id) {
                 try? await Task.sleep(for: .milliseconds(50))
                 if let last = vm.messages.last {
-                    proxy.scrollTo(last.id, anchor: .bottom)
+                    proxy.scrollTo(last.stableKey, anchor: .bottom)
                 }
             }
         }
@@ -507,9 +508,23 @@ struct ChannelDetailView: View {
         guard !isUploading else { return }
 
         let replyId = replyingTo?.id
+        let replyPreviewForOptimistic = replyingTo.map { ReplyPreview(
+            id: $0.id,
+            senderName: $0.senderName,
+            content: $0.content,
+            attachments: $0.attachments,
+        ) }
 
         if attachmentsToSend.isEmpty {
-            ws.sendMessage(channelId: channelId, content: trimmed, replyToId: replyId)
+            let cmid = UUID().uuidString
+            appendOptimisticMessage(
+                clientMessageId: cmid,
+                content: trimmed,
+                attachments: [],
+                replyToId: replyId,
+                replyPreview: replyPreviewForOptimistic,
+            )
+            ws.sendMessage(channelId: channelId, content: trimmed, replyToId: replyId, clientMessageId: cmid)
             inputText = ""
             replyingTo = nil
             return
@@ -524,7 +539,15 @@ struct ChannelDetailView: View {
                     channelId: channelId, files: files
                 )
                 await MainActor.run {
-                    ws.sendMessage(channelId: channelId, content: content, attachments: uploaded, replyToId: replyId)
+                    let cmid = UUID().uuidString
+                    appendOptimisticMessage(
+                        clientMessageId: cmid,
+                        content: content,
+                        attachments: uploaded,
+                        replyToId: replyId,
+                        replyPreview: replyPreviewForOptimistic,
+                    )
+                    ws.sendMessage(channelId: channelId, content: content, attachments: uploaded, replyToId: replyId, clientMessageId: cmid)
                     inputText = ""
                     replyingTo = nil
                     pendingAttachments.removeAll()
@@ -537,6 +560,35 @@ struct ChannelDetailView: View {
                 }
             }
         }
+    }
+
+    private func appendOptimisticMessage(
+        clientMessageId: String,
+        content: String,
+        attachments: [ChannelAttachment],
+        replyToId: String?,
+        replyPreview: ReplyPreview?,
+    ) {
+        guard let me = appState.currentUser else { return }
+        let pending = ChannelMessage(
+            id: clientMessageId,
+            channelId: channelId,
+            senderId: me.id,
+            senderName: me.name ?? me.email,
+            senderAvatarUrl: me.avatarUrl,
+            content: content,
+            attachments: attachments,
+            replyToId: replyToId,
+            replyPreview: replyPreview,
+            reactions: [],
+            createdAt: ISO8601DateFormatter().string(from: Date()),
+            editedAt: nil,
+            mentionedUserIds: nil,
+            clientMessageId: clientMessageId,
+            pending: true,
+        )
+        vm.messages.append(pending)
+        vm.schedulePendingTimeout(clientMessageId: clientMessageId)
     }
 
     // MARK: - File picker + drop

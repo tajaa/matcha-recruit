@@ -97,6 +97,11 @@ export class ChannelSocket {
       try {
         const data = JSON.parse(event.data)
         switch (data.type) {
+          case 'server_ping':
+            // Server-initiated keepalive. Echo a pong so the server's send
+            // doesn't fail and drop us from active_connections.
+            this._send({ type: 'pong' })
+            break
           case 'message':
             this._dispatchMessage(data.message)
             break
@@ -178,8 +183,19 @@ export class ChannelSocket {
     this.joinedRooms.delete(channelId)
   }
 
-  sendMessage(channelId: string, content: string, attachments?: { url: string; filename: string; content_type: string; size: number }[]) {
-    this._send({ type: 'message', channel_id: channelId, content, ...(attachments?.length ? { attachments } : {}) })
+  sendMessage(
+    channelId: string,
+    content: string,
+    attachments?: { url: string; filename: string; content_type: string; size: number }[],
+    clientMessageId?: string,
+  ) {
+    this._send({
+      type: 'message',
+      channel_id: channelId,
+      content,
+      ...(attachments?.length ? { attachments } : {}),
+      ...(clientMessageId ? { client_message_id: clientMessageId } : {}),
+    })
   }
 
   sendTyping(channelId: string) {

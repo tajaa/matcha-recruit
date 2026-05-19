@@ -84,6 +84,20 @@ struct ChannelMessageRowView: View {
                         Text(formatTimestamp(msg.createdAt))
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
+                        if msg.failed {
+                            HStack(spacing: 3) {
+                                Image(systemName: "exclamationmark.circle.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.red)
+                                Text("not sent")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundColor(.red)
+                            }
+                        } else if msg.pending {
+                            Text("sending…")
+                                .font(.system(size: 10))
+                                .foregroundColor(.white.opacity(0.4))
+                        }
                     }
                     if msg.deletedAt != nil {
                         Text("message deleted")
@@ -144,7 +158,10 @@ struct ChannelMessageRowView: View {
         )
         .onHover { hovering in hoveredMessageId = hovering ? msg.id : nil }
         .overlay(alignment: .topTrailing) {
-            if hoveredMessageId == msg.id && msg.deletedAt == nil {
+            // Hide hover actions (reply, react) on pending/failed rows — they'd
+            // route a request keyed by the client UUID and 404 server-side.
+            if hoveredMessageId == msg.id && msg.deletedAt == nil
+                && !msg.pending && !msg.failed {
                 HStack(spacing: 2) {
                     Button { onReply(msg) } label: {
                         Image(systemName: "arrowshape.turn.up.left")
@@ -201,8 +218,13 @@ struct ChannelMessageRowView: View {
             // Author can delete their own; channel owner / moderator (or
             // global admin) can delete anyone's. `isAdmin` already covers
             // those three roles. `deletedAt` gates redundant delete on
-            // already-tombstoned messages.
-            let canDelete = (msg.senderId == currentUserId || isAdmin) && msg.deletedAt == nil
+            // already-tombstoned messages. Pending/failed rows have no
+            // server-side row to delete (msg.id is the client UUID until
+            // the echo reconciles), so the DELETE would 404.
+            let canDelete = (msg.senderId == currentUserId || isAdmin)
+                && msg.deletedAt == nil
+                && !msg.pending
+                && !msg.failed
             if canDelete {
                 Divider()
                 Button(role: .destructive) {

@@ -77,6 +77,13 @@ export interface ChannelMessage {
    * not have this field; renderers should treat absence as "no mentions
    * resolved" but may still parse `@handle` patterns in `content` for display. */
   mentioned_user_ids?: string[]
+  /** Client-generated correlation ID echoed by the server on broadcast. The
+   * sender appends an optimistic-pending message with this ID before the WS
+   * echo arrives; on echo the pending entry is replaced rather than duplicated. */
+  client_message_id?: string | null
+  /** Local-only flag set by the optimistic-send path. Never present in
+   * server-broadcast or REST-fetched messages. */
+  pending?: boolean
 }
 
 export interface ChannelDetail {

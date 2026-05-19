@@ -87,6 +87,19 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
     /// won't carry this; renderers may still parse @handle patterns from
     /// `content` for display.
     let mentionedUserIds: [String]?
+    /// Client-generated correlation ID used to reconcile optimistic-pending
+    /// entries with their server echo. Round-trips through the WS payload.
+    let clientMessageId: String?
+    /// Local-only flag: true while a sent message is awaiting server echo.
+    /// Not encoded; the custom decoder always sets this to false. Mutable
+    /// so the failure-timeout in ChannelChatViewModel can flip it off when
+    /// promoting a stuck pending entry to `failed`.
+    var pending: Bool
+    /// Local-only flag: set to true when an optimistic-pending message has
+    /// not received its server echo within the failure timeout. Renderer
+    /// shows a red error affordance; delete is disabled in this state too.
+    /// Not encoded.
+    var failed: Bool
 
     enum CodingKeys: String, CodingKey {
         case id, content, attachments, reactions
@@ -101,6 +114,7 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
         case deletedAt = "deleted_at"
         case deletedBy = "deleted_by"
         case mentionedUserIds = "mentioned_user_ids"
+        case clientMessageId = "client_message_id"
     }
 
     init(id: String, channelId: String, senderId: String, senderName: String,
@@ -108,7 +122,10 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
          replyToId: String? = nil, replyPreview: ReplyPreview? = nil,
          reactions: [ChannelReaction] = [],
          createdAt: String, editedAt: String?,
-         mentionedUserIds: [String]? = nil) {
+         mentionedUserIds: [String]? = nil,
+         clientMessageId: String? = nil,
+         pending: Bool = false,
+         failed: Bool = false) {
         self.id = id
         self.channelId = channelId
         self.senderId = senderId
@@ -122,6 +139,9 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
         self.createdAt = createdAt
         self.editedAt = editedAt
         self.mentionedUserIds = mentionedUserIds
+        self.clientMessageId = clientMessageId
+        self.pending = pending
+        self.failed = failed
     }
 
     init(from decoder: Decoder) throws {
@@ -139,6 +159,20 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
         self.createdAt = try c.decode(String.self, forKey: .createdAt)
         self.editedAt = try c.decodeIfPresent(String.self, forKey: .editedAt)
         self.mentionedUserIds = try? c.decodeIfPresent([String].self, forKey: .mentionedUserIds)
+        self.clientMessageId = try? c.decodeIfPresent(String.self, forKey: .clientMessageId)
+        self.pending = false
+        self.failed = false
+    }
+
+    /// SwiftUI ForEach key that stays stable across the optimistic→confirmed
+    /// swap. Sender's pending row and its server echo share the same
+    /// `clientMessageId`, so the row keeps its identity (no flicker / scroll
+    /// jump) when the pending struct is replaced by the server version.
+    /// Falls back to `id` for non-optimistic messages (REST-fetched history,
+    /// other senders).
+    var stableKey: String {
+        if let cmid = clientMessageId, !cmid.isEmpty { return "cmid:\(cmid)" }
+        return "id:\(id)"
     }
 }
 

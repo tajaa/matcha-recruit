@@ -140,6 +140,19 @@ async def lifespan(app: FastAPI):
     await init_redis_cache(settings.redis_url)
     print("[Matcha] Redis cache initialized")
 
+    # Start cross-worker channels-WS fanout subscriber + server-side keepalive.
+    # Must run after init_redis_cache so the subscriber can immediately
+    # connect. Both are per-worker tasks; with uvicorn --workers N they run
+    # N times across the cluster, which is correct (each worker subscribes
+    # and dispatches to its own local sockets).
+    from .core.routes.channels_ws import (
+        start_fanout_subscriber, start_server_ping_loop,
+        stop_fanout_subscriber, stop_server_ping_loop,
+    )
+    start_fanout_subscriber()
+    start_server_ping_loop()
+    print("[Matcha] Channels WS fanout subscriber + keepalive ping started")
+
     # Start channel inactivity checker (runs every 12h)
     from .core.services.inactivity_worker import start_inactivity_scheduler
     inactivity_task = await start_inactivity_scheduler()
@@ -149,6 +162,9 @@ async def lifespan(app: FastAPI):
     # Cancel background tasks
     if inactivity_task:
         inactivity_task.cancel()
+
+    await stop_fanout_subscriber()
+    await stop_server_ping_loop()
 
     # Cleanup
     await close_redis_cache()

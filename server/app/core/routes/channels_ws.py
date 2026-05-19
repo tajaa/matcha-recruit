@@ -31,6 +31,14 @@ logger = logging.getLogger(__name__)
 _ONLINE_KEY_PREFIX = "channels_ws:online:"
 _ONLINE_TTL_SECONDS = 60
 
+# Redis pub/sub channel used to fan-out broadcasts across uvicorn workers.
+# Production runs --workers 2, so an in-process broadcast on worker A would
+# never reach a WS client connected to worker B. Each worker subscribes to
+# this channel on startup and re-dispatches incoming envelopes to its own
+# local sockets via _local_broadcast_to_room / _local_send_to_user.
+_FANOUT_CHANNEL = "channels:fanout"
+_SERVER_PING_INTERVAL_SECONDS = 25
+
 
 async def _mark_online(user_id: UUID) -> None:
     redis = get_redis_cache()
@@ -179,7 +187,26 @@ class ChannelConnectionManager:
             ]
 
     async def send_to_user(self, user_id: UUID, message: dict):
-        """Send a message to a specific user (all their connections)."""
+        """Send a message to a specific user (all their connections, on any worker)."""
+        redis = get_redis_cache()
+        if redis is None:
+            await self._local_send_to_user(user_id, message)
+            return
+        envelope = {
+            "kind": "user",
+            "user_id": str(user_id),
+            "message": message,
+        }
+        try:
+            await redis.publish(_FANOUT_CHANNEL, json.dumps(envelope, default=str))
+        except Exception:
+            logger.exception("Redis publish failed in send_to_user; using local fallback")
+            await self._local_send_to_user(user_id, message)
+
+    async def _local_send_to_user(self, user_id: UUID, message: dict):
+        """Direct write to this worker's local sockets for a user. Called by
+        the subscriber loop when a fanout envelope targets this user, and as
+        a fallback when Redis is unavailable."""
         async with self.lock:
             conns = set(self.active_connections.get(user_id, set()))
         if not conns:
@@ -197,6 +224,31 @@ class ChannelConnectionManager:
                     self.active_connections.get(user_id, set()).discard(ws)
 
     async def _broadcast_to_room(self, room_key: str, message: dict, exclude_user: UUID = None):
+        """Fan-out to every WS member of a room across all uvicorn workers.
+
+        Publishes to Redis so other workers' subscribers can deliver to their
+        own local sockets. If Redis is unavailable (e.g. dev without Redis),
+        falls back to local-only fanout so single-process dev still works.
+        """
+        redis = get_redis_cache()
+        if redis is None:
+            await self._local_broadcast_to_room(room_key, message, exclude_user=exclude_user)
+            return
+        envelope = {
+            "kind": "room",
+            "room": room_key,
+            "message": message,
+            "exclude_user": str(exclude_user) if exclude_user else None,
+        }
+        try:
+            await redis.publish(_FANOUT_CHANNEL, json.dumps(envelope, default=str))
+        except Exception:
+            logger.exception("Redis publish failed in _broadcast_to_room; using local fallback")
+            await self._local_broadcast_to_room(room_key, message, exclude_user=exclude_user)
+
+    async def _local_broadcast_to_room(self, room_key: str, message: dict, exclude_user: UUID = None):
+        """Direct write to this worker's local sockets for a room. Called by
+        the subscriber loop and as a Redis-down fallback."""
         if room_key not in self.room_members:
             return
         data = json.dumps(message, default=str)
@@ -215,6 +267,157 @@ class ChannelConnectionManager:
 
 
 manager = ChannelConnectionManager()
+
+
+# ---------------------------------------------------------------------------
+# Cross-worker pub/sub subscriber + server-side keepalive ping
+# ---------------------------------------------------------------------------
+
+_subscriber_task: Optional[asyncio.Task] = None
+_server_ping_task: Optional[asyncio.Task] = None
+
+
+async def _fanout_subscriber_loop() -> None:
+    """Long-running per-worker task. Subscribes to the Redis fanout channel
+    and dispatches incoming envelopes to this worker's local sockets.
+
+    Self-healing: on any exception, sleeps 2s and re-subscribes. Cancellation
+    exits cleanly.
+    """
+    while True:
+        pubsub = None
+        try:
+            redis = get_redis_cache()
+            if redis is None:
+                # Dev without Redis — nothing to subscribe to; sleep then retry.
+                await asyncio.sleep(5)
+                continue
+            pubsub = redis.pubsub()
+            await pubsub.subscribe(_FANOUT_CHANNEL)
+            logger.info("[Channels WS] Subscribed to %s", _FANOUT_CHANNEL)
+            async for raw in pubsub.listen():
+                if raw is None or raw.get("type") != "message":
+                    continue
+                payload = raw.get("data")
+                if not payload:
+                    continue
+                try:
+                    envelope = json.loads(payload)
+                except Exception:
+                    logger.warning("[Channels WS] Malformed fanout envelope; dropping")
+                    continue
+                kind = envelope.get("kind")
+                msg = envelope.get("message")
+                if msg is None:
+                    continue
+                if kind == "room":
+                    room_key = envelope.get("room")
+                    if not room_key:
+                        continue
+                    exclude_raw = envelope.get("exclude_user")
+                    exclude_user = None
+                    if exclude_raw:
+                        try:
+                            exclude_user = UUID(exclude_raw)
+                        except (ValueError, TypeError):
+                            exclude_user = None
+                    await manager._local_broadcast_to_room(
+                        room_key, msg, exclude_user=exclude_user,
+                    )
+                elif kind == "user":
+                    uid_raw = envelope.get("user_id")
+                    if not uid_raw:
+                        continue
+                    try:
+                        uid = UUID(uid_raw)
+                    except (ValueError, TypeError):
+                        continue
+                    await manager._local_send_to_user(uid, msg)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.exception("[Channels WS] Subscriber loop error; restarting in 2s")
+            await asyncio.sleep(2)
+        finally:
+            if pubsub is not None:
+                try:
+                    await pubsub.unsubscribe(_FANOUT_CHANNEL)
+                    await pubsub.aclose()
+                except Exception:
+                    pass
+
+
+async def _server_ping_loop() -> None:
+    """Periodic keepalive push from server to every connected WS. Prevents
+    Nginx / intermediaries from silently killing idle connections and gives
+    the server early detection of dead sockets (a failed send drops the WS
+    from active_connections)."""
+    while True:
+        try:
+            await asyncio.sleep(_SERVER_PING_INTERVAL_SECONDS)
+            # Snapshot the per-user connection map under the lock so we don't
+            # iterate while disconnect() mutates it.
+            async with manager.lock:
+                snapshot: list[tuple[UUID, list[WebSocket]]] = [
+                    (uid, list(conns)) for uid, conns in manager.active_connections.items()
+                ]
+            ping_payload = json.dumps({"type": "server_ping"})
+            for user_id, conns in snapshot:
+                dead: list[WebSocket] = []
+                for ws in conns:
+                    try:
+                        await ws.send_text(ping_payload)
+                    except Exception:
+                        dead.append(ws)
+                if dead:
+                    async with manager.lock:
+                        bucket = manager.active_connections.get(user_id)
+                        if bucket is not None:
+                            for ws in dead:
+                                bucket.discard(ws)
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            logger.exception("[Channels WS] Server ping loop error; continuing")
+
+
+def start_fanout_subscriber() -> None:
+    """Start the per-worker Redis pub/sub subscriber. Idempotent."""
+    global _subscriber_task
+    if _subscriber_task and not _subscriber_task.done():
+        return
+    _subscriber_task = asyncio.create_task(_fanout_subscriber_loop())
+
+
+def start_server_ping_loop() -> None:
+    """Start the per-worker server-side ping loop. Idempotent."""
+    global _server_ping_task
+    if _server_ping_task and not _server_ping_task.done():
+        return
+    _server_ping_task = asyncio.create_task(_server_ping_loop())
+
+
+async def stop_fanout_subscriber() -> None:
+    """Cancel the subscriber task on shutdown."""
+    global _subscriber_task
+    if _subscriber_task is not None:
+        _subscriber_task.cancel()
+        try:
+            await _subscriber_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        _subscriber_task = None
+
+
+async def stop_server_ping_loop() -> None:
+    global _server_ping_task
+    if _server_ping_task is not None:
+        _server_ping_task.cancel()
+        try:
+            await _server_ping_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        _server_ping_task = None
 
 
 async def broadcast_message_deleted(
@@ -414,6 +617,10 @@ async def channel_websocket(
                 content = (data.get("content") or "").strip()
                 attachments = data.get("attachments") or []
                 reply_to_id = data.get("reply_to_id")
+                # Client-generated correlation ID for optimistic UI reconciliation.
+                # Clients append a pending message locally with this ID; on echo,
+                # they replace the pending entry instead of duplicating it.
+                client_message_id = data.get("client_message_id")
                 if channel_id and (content or attachments) and len(content) <= 4000:
                     try:
                         ch_uuid = UUID(channel_id)
@@ -509,6 +716,7 @@ async def channel_websocket(
                                 "created_at": row["created_at"].isoformat(),
                                 "edited_at": None,
                                 "mentioned_user_ids": mentioned_user_ids,
+                                "client_message_id": client_message_id,
                             })
 
                             # Off-load offline-email check to Celery so the WS
