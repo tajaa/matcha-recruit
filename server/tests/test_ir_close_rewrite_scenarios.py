@@ -263,3 +263,72 @@ def test_critical_severity_rewrites_close(monkeypatch):
     result = _run(incident)
     kinds = [c["action"].get("quick_reply_kind") for c in result["cards"]]
     assert "log_root_cause_query" in kinds
+
+
+# ---------------------------------------------------------------------------
+# Fallback-cards block (AI returned empty payload → orchestrator inserts two
+# hard-coded cards: review_basics + fallback_close). Block runs AFTER the
+# per-card filter loop so it bypasses the close_incident rewrite branch.
+# Bug confirmed via transcript of incident 0d4fc4d6 on 2026-05-19.
+# ---------------------------------------------------------------------------
+
+
+def test_fallback_close_swapped_for_rcq_on_safety(monkeypatch):
+    """AI returns empty + safety/high incident → fallback inserts
+    review_basics + log_root_cause_query (NOT fallback_close)."""
+    _wire(monkeypatch, {})  # empty payload — triggers fallback
+    incident = {
+        "id": "00000000-0000-0000-0000-00000000000a",
+        "title": "Forklift incident",
+        "incident_type": "safety",
+        "severity": "high",
+        "root_cause": None,
+        "category_data": {},
+    }
+    result = _run(incident)
+    ids = [c["id"] for c in result["cards"]]
+    types = [c["action"]["type"] for c in result["cards"]]
+    kinds = [c["action"].get("quick_reply_kind") for c in result["cards"]]
+    assert "review_basics" in ids, ids
+    assert "fallback_close" not in ids, ids
+    assert "close_incident" not in types, types
+    assert "log_root_cause_query" in kinds, kinds
+
+
+def test_fallback_close_kept_on_behavioral_low(monkeypatch):
+    """AI returns empty + behavioral/low incident → fallback_close kept
+    (gate doesn't trip for non-safety / non-high-severity)."""
+    _wire(monkeypatch, {})
+    incident = {
+        "id": "00000000-0000-0000-0000-00000000000b",
+        "title": "Tardiness",
+        "incident_type": "behavioral",
+        "severity": "low",
+        "root_cause": None,
+        "category_data": {},
+    }
+    result = _run(incident)
+    ids = [c["id"] for c in result["cards"]]
+    types = [c["action"]["type"] for c in result["cards"]]
+    assert "review_basics" in ids
+    assert "fallback_close" in ids, ids
+    assert "close_incident" in types, types
+
+
+def test_fallback_close_kept_when_root_cause_logged(monkeypatch):
+    """AI returns empty + safety/high + root_cause already set →
+    suppress_root_cause_card flips on, gate skips, fallback_close kept."""
+    _wire(monkeypatch, {})
+    incident = {
+        "id": "00000000-0000-0000-0000-00000000000c",
+        "title": "Slip",
+        "incident_type": "safety",
+        "severity": "high",
+        "root_cause": "Wet floor — coffee spill, no sign placed.",
+        "category_data": {},
+    }
+    result = _run(incident)
+    ids = [c["id"] for c in result["cards"]]
+    types = [c["action"]["type"] for c in result["cards"]]
+    assert "fallback_close" in ids, ids
+    assert "close_incident" in types, types

@@ -797,7 +797,20 @@ async def generate_guidance(
                     },
                     "interview_questions": None,
                 },
-                {
+            ]
+            # When the root-cause gate trips (safety / near_miss / high /
+            # critical without logged or declined root cause), surface the
+            # interview kick-off instead of fallback_close. The fallback
+            # block runs AFTER the per-card filter loop, so close_incident
+            # would otherwise bypass the gate that the filter applies to
+            # AI-emitted close cards. Bug confirmed via transcript of
+            # incident 0d4fc4d6 on 2026-05-19 — fallback fired on a
+            # safety/high incident and surfaced close before root cause.
+            if root_cause_required_before_close:
+                from app.matcha.routes.ir_incidents._shared import build_log_root_cause_query_card
+                cards.append(build_log_root_cause_query_card())
+            else:
+                cards.append({
                     "id": "fallback_close",
                     "title": "Close incident",
                     "recommendation": "Close this incident if everything is wrapped up.",
@@ -814,8 +827,7 @@ async def generate_guidance(
                         "field_value": None,
                     },
                     "interview_questions": None,
-                },
-            ]
+                })
 
     return {
         "summary": summary,
