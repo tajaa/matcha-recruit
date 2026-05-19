@@ -484,9 +484,8 @@ async def map_to_bank(
     cat_id_by_slug: dict[str, str] = {r["slug"]: str(r["id"]) for r in cat_rows}
 
     # Resolve jurisdictions: walk (state, county, city) tuples.
-    # state-only: jurisdictions.code matches state OR jurisdictions.name matches state code at level='state'.
-    # county: parent state has a child at level='county' matching county name.
-    # city: parent county has a child at level='city' matching city name.
+    # jurisdictions is denormalized — state/county/city are stored on every
+    # row, so we filter on those columns directly per level.
     juris_resolutions: list[dict[str, Any]] = []
     ambiguous: list[dict[str, Any]] = []
     for j in jurisdictions:
@@ -514,8 +513,12 @@ async def map_to_bank(
             continue
 
         if county is None and city is None:
+            # jurisdictions is denormalized: state/county/city are stored on
+            # every row, so the state row is just level='state' + matching
+            # state code. No parent_id walk needed.
             row = await conn.fetchrow(
-                "SELECT id FROM jurisdictions WHERE level='state' AND code = $1 LIMIT 2",
+                "SELECT id FROM jurisdictions "
+                "WHERE level='state' AND state = $1 LIMIT 2",
                 state.upper(),
             )
             juris_resolutions.append({
@@ -527,13 +530,9 @@ async def map_to_bank(
 
         if city is None and county is not None:
             rows = await conn.fetch(
-                """
-                SELECT j.id
-                FROM jurisdictions j
-                JOIN jurisdictions p ON j.parent_id = p.id
-                WHERE j.level='county' AND j.name ILIKE $1 AND p.code = $2
-                """,
-                county, state.upper(),
+                "SELECT id FROM jurisdictions "
+                "WHERE level='county' AND state = $1 AND county ILIKE $2",
+                state.upper(), county,
             )
             if len(rows) > 1:
                 ambiguous.append({
@@ -551,14 +550,9 @@ async def map_to_bank(
         # city (with state, optional county)
         if city is not None:
             rows = await conn.fetch(
-                """
-                SELECT j.id
-                FROM jurisdictions j
-                JOIN jurisdictions p ON j.parent_id = p.id
-                JOIN jurisdictions gp ON p.parent_id = gp.id
-                WHERE j.level='city' AND j.name ILIKE $1 AND gp.code = $2
-                """,
-                city, state.upper(),
+                "SELECT id FROM jurisdictions "
+                "WHERE level='city' AND state = $1 AND city ILIKE $2",
+                state.upper(), city,
             )
             if len(rows) > 1:
                 ambiguous.append({

@@ -338,6 +338,53 @@ class TestMapToBank:
         assert result["existing"][0]["requirement_id"] == req_id
         assert result["existing"][0]["scope_level"] == "federal"
 
+    def test_jurisdictions_queries_use_actual_columns(self):
+        """Regression: jurisdictions table has no 'code' or 'name' column.
+        Queries must filter on state/county/city directly. Bug 2026-05-19:
+        500 UndefinedColumnError on /admin/onboarding/.../resolve."""
+        captured: list[str] = []
+
+        class CapturingConn:
+            async def fetch(self, q, *p):
+                captured.append(q)
+                if "FROM compliance_categories" in q:
+                    return [{"id": "x" * 36, "slug": "osha_general"}]
+                return []
+
+            async def fetchrow(self, q, *p):
+                captured.append(q)
+                return None
+
+        scope = {
+            "compliance_categories": [
+                {"category_slug": "osha_general", "scope": "state"},
+            ],
+            "applicable_jurisdictions": [
+                {"state": "CA", "county": None, "city": None},
+                {"state": "CA", "county": "Los Angeles", "city": None},
+                {"state": "CA", "county": "Los Angeles", "city": "Long Beach"},
+            ],
+        }
+        asyncio.run(map_to_bank(scope, CapturingConn()))
+        juris_sql = [
+            s for s in captured
+            if "FROM jurisdictions" in s and "compliance_categories" not in s
+        ]
+        assert juris_sql, "expected at least one jurisdictions query"
+        for s in juris_sql:
+            assert "code = " not in s, f"stale 'code' column ref: {s}"
+            assert " j.name " not in s and "j.name " not in s, f"stale 'name' column ref: {s}"
+            assert "p.code" not in s and "gp.code" not in s, f"stale parent code ref: {s}"
+        # State branch filters by state column; county/city branches by
+        # their own columns.
+        assert any("level='state'" in s and "state = $1" in s for s in juris_sql), juris_sql
+        assert any(
+            "level='county'" in s and "county ILIKE" in s for s in juris_sql
+        ), juris_sql
+        assert any(
+            "level='city'" in s and "city ILIKE" in s for s in juris_sql
+        ), juris_sql
+
 
 # ── Few-shot examples ──────────────────────────────────────────────────
 
