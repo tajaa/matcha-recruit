@@ -304,6 +304,12 @@ final class ProjectWebSocket: NSObject {
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard let self else { return }
+            // Refresh the access token before reconnecting so a stale one
+            // doesn't cause the server to 4001-close the upgrade and trap
+            // us in a backoff loop forever. Shared singleton task in
+            // AuthService dedups with any concurrent REST refresh.
+            let refreshed = await AuthService.shared.refreshIfNeeded()
+            print("[ProjectWS] reconnect token refresh=\(refreshed)")
             await MainActor.run {
                 self.reconnectTask = nil
                 self.connect()

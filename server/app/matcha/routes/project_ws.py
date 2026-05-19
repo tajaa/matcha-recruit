@@ -287,6 +287,7 @@ async def broadcast_task_event(project_id: UUID, event: str, payload: dict) -> N
 async def _authenticate(token: str) -> Optional[ProjectUser]:
     payload = decode_token(token, expected_type="access")
     if not payload:
+        logger.warning("project_ws authenticate failed — invalid/expired token")
         return None
     user_id = UUID(payload.sub)
     async with get_connection() as conn:
@@ -382,6 +383,10 @@ async def project_websocket(
                 page_key = data.get("page_key") or "sections"
                 async with get_connection() as conn:
                     ok = await _can_access_project(conn, user, project_id)
+                logger.info(
+                    "join_project attempt user=%s project=%s access=%s page=%s",
+                    user.id, project_id, ok, page_key,
+                )
                 if not ok:
                     await websocket.send_json({
                         "type": "error",
@@ -389,6 +394,12 @@ async def project_websocket(
                     })
                     continue
                 await project_manager.join_project(user.id, project_id, page_key)
+                async with project_manager.lock:
+                    room_size_now = len(project_manager.project_rooms.get(project_id, set()))
+                logger.info(
+                    "join_project ok user=%s project=%s room_size_now=%d",
+                    user.id, project_id, room_size_now,
+                )
                 members = await project_manager.get_project_presence(project_id)
                 await websocket.send_json({
                     "type": "presence",
@@ -447,6 +458,7 @@ async def project_websocket(
                 )
 
             elif msg_type == "leave_project":
+                logger.info("leave_project user=%s project=%s", user.id, project_id)
                 await project_manager.leave_project(user.id, project_id)
 
     except WebSocketDisconnect:
@@ -454,4 +466,5 @@ async def project_websocket(
     except Exception as e:
         logger.error(f"[Project WS] Error: {e}", exc_info=True)
     finally:
+        logger.info("project_ws disconnect user=%s", user.id)
         await project_manager.disconnect(websocket, user.id)

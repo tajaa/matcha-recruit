@@ -61,6 +61,19 @@ class AuthService {
         KeychainHelper.delete(key: KeychainHelper.Keys.refreshToken)
     }
 
+    /// Best-effort refresh callable from WebSocket reconnect paths.
+    /// Returns true if a fresh access token is now in Keychain. Swallows
+    /// the refresh error (caller can decide to proceed with the old token
+    /// or skip the reconnect attempt).
+    func refreshIfNeeded() async -> Bool {
+        do {
+            _ = try await refresh()
+            return true
+        } catch {
+            return false
+        }
+    }
+
     func restoreSession() async -> UserInfo? {
         guard KeychainHelper.load(key: KeychainHelper.Keys.refreshToken) != nil else {
             return nil
