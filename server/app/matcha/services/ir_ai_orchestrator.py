@@ -562,9 +562,23 @@ async def generate_guidance(
         isinstance(raw_category_data, dict)
         and raw_category_data.get("treatment_beyond_first_aid") not in (None, "")
     )
+    # Mirror the close-time gate at copilot.py:_close_incident_via_copilot —
+    # for safety / near-miss / high / critical incidents, the user must log
+    # or decline root cause before close. Trips the rewrite below so the AI
+    # cannot front-load a close_incident card before that prompt.
+    incident_type_lower = (incident.get("incident_type") or "").strip().lower()
+    severity_lower = (incident.get("severity") or "").strip().lower()
+    root_cause_required_before_close = (
+        not suppress_root_cause_card
+        and (
+            incident_type_lower in {"safety", "near_miss"}
+            or severity_lower in {"high", "critical"}
+        )
+    )
 
     filtered_cards: list[dict[str, Any]] = []
     saw_log_root_cause_query = False
+    rewrote_close_to_root_cause = False
     for card in cards:
         raw = raw_cards_by_id.get(card["id"]) or {}
         raw_action = raw.get("action") or {}
@@ -612,6 +626,42 @@ async def generate_guidance(
                 "IR copilot rewrote run_analysis root_cause card to log_root_cause_query"
             )
             continue
+        # Safety net: AI may emit close_incident for a safety / near-miss /
+        # high-severity incident before any root-cause prompt has surfaced
+        # (prompt rule at line 312-314 lets Gemini judge log_root_cause_query
+        # optional, so it skips it on routine reports). User-facing symptom
+        # is "prompting me to close without prompting for root cause."
+        # Rewrite to the interview kick-off so the close card never reaches
+        # the transcript until root_cause is logged or declined. Backend
+        # close-time check at copilot.py:497-553 stays as defense-in-depth.
+        if raw_type == "close_incident" and root_cause_required_before_close:
+            rewrote_close_to_root_cause = True
+            if saw_log_root_cause_query:
+                logger.info(
+                    "IR copilot dropped close_incident card %s "
+                    "(root cause not yet logged, type=%s sev=%s)",
+                    card["id"], incident_type_lower, severity_lower,
+                )
+                continue
+            from app.matcha.routes.ir_incidents._shared import build_log_root_cause_query_card
+            replacement = build_log_root_cause_query_card()
+            card["id"] = replacement["id"]
+            card["title"] = replacement["title"]
+            card["recommendation"] = replacement["recommendation"]
+            card["rationale"] = replacement["rationale"]
+            card["priority"] = replacement["priority"]
+            card["blockers"] = replacement["blockers"]
+            card["action"] = dict(replacement["action"])
+            raw_type = card["action"]["type"]
+            raw_action = card["action"]
+            saw_log_root_cause_query = True
+            filtered_cards.append(card)
+            logger.info(
+                "IR copilot rewrote close_incident to log_root_cause_query "
+                "(type=%s sev=%s)",
+                incident_type_lower, severity_lower,
+            )
+            continue
         if raw_type not in IR_ACTION_TYPES:
             logger.warning(
                 "IR copilot dropped card %s: unsupported action_type=%r",
@@ -646,14 +696,23 @@ async def generate_guidance(
         if (
             raw_type == "quick_reply"
             and raw_action.get("quick_reply_kind") == "log_root_cause_query"
-            and suppress_root_cause_card
+            and (suppress_root_cause_card or saw_log_root_cause_query)
         ):
             logger.info(
                 "IR copilot dropped duplicate log_root_cause_query "
-                "(existing=%s declined=%s interview=%s)",
-                bool(existing_root_cause), root_cause_declined, root_cause_interview_started,
+                "(existing=%s declined=%s interview=%s saw=%s)",
+                bool(existing_root_cause), root_cause_declined,
+                root_cause_interview_started, saw_log_root_cause_query,
             )
             continue
+        # Track a direct AI-emitted log_root_cause_query so a subsequent
+        # close_incident rewrite in the same round drops instead of
+        # duplicating the kick-off card.
+        if (
+            raw_type == "quick_reply"
+            and raw_action.get("quick_reply_kind") == "log_root_cause_query"
+        ):
+            saw_log_root_cause_query = True
         if raw_type == "run_analysis" and canonical_analysis is None:
             logger.warning(
                 "IR copilot dropped card %s: run_analysis without valid analysis_type=%r",
@@ -707,6 +766,13 @@ async def generate_guidance(
                     card["action"][ext_key] = raw_action[ext_key]
         filtered_cards.append(card)
     cards = filtered_cards
+
+    # Summary cohesion: if a close_incident card got rewritten to the
+    # root-cause kick-off, the AI's summary likely still says "ready to
+    # close" — which contradicts the card the user actually sees. Prepend
+    # a short note so the transcript reads consistently.
+    if rewrote_close_to_root_cause and summary:
+        summary = "Before closing, let's capture root cause. " + summary
 
     if not summary:
         # Minimal fallback — avoids returning empty payload.

@@ -586,12 +586,62 @@ async def update_incident(
     async with get_connection() as conn:
         # Check exists and belongs to company
         existing = await conn.fetchrow(
-            f"SELECT id, status FROM ir_incidents WHERE id = $1 AND {company_clause}",
+            f"SELECT id, status, root_cause, incident_type, severity, category_data "
+            f"FROM ir_incidents WHERE id = $1 AND {company_clause}",
             str(incident_id),
             company_id,
         )
         if not existing:
             raise HTTPException(status_code=404, detail="Incident not found")
+
+        # Root-cause gate on direct PUT close: mirror the copilot-time check
+        # at copilot.py:_close_incident_via_copilot:497 so a REST client (SDK,
+        # curl, integration) cannot close a safety / near-miss / high /
+        # critical incident without logging or declining root cause. UI uses
+        # /copilot/close so doesn't trip this; this is defense-in-depth for
+        # surfaces the orchestrator filter never reaches.
+        if (
+            incident.status == "closed"
+            and existing["status"] != "closed"
+        ):
+            from ._shared import _safe_json_loads
+            existing_cd = _safe_json_loads(existing["category_data"], {}) or {}
+            incoming_cd = incident.category_data if incident.category_data is not None else {}
+            effective_root_cause = (
+                (incident.root_cause if incident.root_cause is not None else existing["root_cause"]) or ""
+            ).strip()
+            effective_declined = (
+                incoming_cd.get("root_cause_declined", existing_cd.get("root_cause_declined"))
+                in (True, "true")
+            )
+            effective_interview = bool(
+                incoming_cd.get("root_cause_interview", existing_cd.get("root_cause_interview"))
+            )
+            effective_type = (
+                (incident.incident_type or existing["incident_type"]) or ""
+            ).strip().lower()
+            effective_sev = (
+                (incident.severity or existing["severity"]) or ""
+            ).strip().lower()
+            gate_trips = (
+                not effective_root_cause
+                and not effective_declined
+                and not effective_interview
+                and (
+                    effective_type in {"safety", "near_miss"}
+                    or effective_sev in {"high", "critical"}
+                )
+            )
+            if gate_trips:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Log a root cause before closing this incident, or "
+                        "set category_data.root_cause_declined=true to skip. "
+                        "Required for incident_type=safety/near_miss or "
+                        "severity=high/critical."
+                    ),
+                )
 
         # Build update query dynamically
         updates = []
