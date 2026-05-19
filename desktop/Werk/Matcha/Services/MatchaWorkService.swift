@@ -783,6 +783,26 @@ class MatchaWorkService {
         )
     }
 
+    // MARK: - Task history + activity feed
+
+    /// Audit-trail timeline for a single kanban task. Newest-last (server
+    /// returns ASC) so the timeline reads top-to-bottom chronologically.
+    func fetchTaskHistory(projectId: String, taskId: String) async throws -> [MWTaskHistoryEntry] {
+        try await client.request(
+            method: "GET",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/history"
+        )
+    }
+
+    /// Project-scoped activity feed for the Overview tab. Mixed sources
+    /// (task history, file uploads, collaborator joins). Newest-first.
+    func fetchProjectActivity(projectId: String, limit: Int = 50) async throws -> [MWProjectActivityEntry] {
+        try await client.request(
+            method: "GET",
+            path: "\(basePath)/projects/\(projectId)/activity?limit=\(limit)"
+        )
+    }
+
     // MARK: - Task file attachments
 
     func listTaskFiles(projectId: String, taskId: String) async throws -> [MWProjectFile] {

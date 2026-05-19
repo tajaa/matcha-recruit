@@ -21,6 +21,12 @@ struct CollabOverviewView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
         }
+        .task(id: viewModel.project?.id) {
+            // Pull server-side activity (task history + file uploads +
+            // collaborator joins) and seed `recentActivity`. In-session
+            // logActivity() calls keep working as optimistic prepends.
+            await viewModel.loadProjectActivity()
+        }
     }
 
     private func overviewHeader(project: MWProject) -> some View {

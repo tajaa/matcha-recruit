@@ -120,6 +120,64 @@ struct MWProjectFile: Codable, Identifiable, Hashable {
     }
 }
 
+/// One row from `mw_task_history` — appears in the TaskViewerSheet
+/// timeline. `eventType` is one of: created | column_change |
+/// assignee_change | deleted.
+struct MWTaskHistoryEntry: Codable, Identifiable, Hashable {
+    let id: String
+    let taskId: String?
+    let actorUserId: String?
+    let actorName: String?
+    let eventType: String
+    let fromValue: String?
+    let toValue: String?
+    let metadata: [String: String]?
+    let createdAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case taskId = "task_id"
+        case actorUserId = "actor_user_id"
+        case actorName = "actor_name"
+        case eventType = "event_type"
+        case fromValue = "from_value"
+        case toValue = "to_value"
+        case metadata
+        case createdAt = "created_at"
+    }
+}
+
+/// One row from the project-scoped activity feed
+/// (`/projects/{id}/activity`). `source` discriminates the payload
+/// shape: task_history | file_upload | collaborator_added.
+struct MWProjectActivityEntry: Codable, Identifiable {
+    let source: String
+    let actorUserId: String?
+    let actorName: String?
+    let createdAt: String
+    let payload: [String: AnyCodable]
+
+    var id: String { "\(source)-\(createdAt)-\(actorUserId ?? "?")" }
+
+    enum CodingKeys: String, CodingKey {
+        case source
+        case actorUserId = "actor_user_id"
+        case actorName = "actor_name"
+        case createdAt = "created_at"
+        case payload
+    }
+
+    /// Best-effort string accessor for payload keys. Most values arrive
+    /// as String / Int from PG's jsonb_build_object; fall back to a
+    /// cast via NSString-coercion for anything else.
+    func string(_ key: String) -> String? {
+        guard let v = payload[key]?.value else { return nil }
+        if let s = v as? String { return s }
+        if v is NSNull { return nil }
+        return "\(v)"
+    }
+}
+
 struct MWProjectTask: Codable, Identifiable, Hashable {
     let id: String
     var projectId: String?

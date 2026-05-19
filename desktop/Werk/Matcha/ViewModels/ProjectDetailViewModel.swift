@@ -43,6 +43,60 @@ class ProjectDetailViewModel {
         }
     }
 
+    /// Pull recent project activity from the server feed (task history,
+    /// file uploads, collaborator joins) and replace the in-session list.
+    /// Called on project open in addition to the existing in-session
+    /// `logActivity(...)` calls (which still drive optimistic UI for the
+    /// actor's own moves).
+    @MainActor
+    func loadProjectActivity() async {
+        guard let pid = project?.id else { return }
+        if let rows = try? await service.fetchProjectActivity(projectId: pid, limit: 20) {
+            recentActivity = rows.compactMap(Self.mapActivity)
+        }
+    }
+
+    private static func mapActivity(_ row: MWProjectActivityEntry) -> CollabActivityItem? {
+        let who = row.actorName?.isEmpty == false ? row.actorName! : "Someone"
+        let date = parseMWDate(row.createdAt) ?? Date()
+        switch row.source {
+        case "task_history":
+            let event = row.string("event_type") ?? ""
+            let title = row.string("task_title") ?? "a task"
+            switch event {
+            case "created":
+                return .init(icon: "plus.circle", text: "\(who) created \(title)", timestamp: date)
+            case "column_change":
+                let from = row.string("from_value")?.replacingOccurrences(of: "_", with: " ").capitalized ?? "?"
+                let to = row.string("to_value")?.replacingOccurrences(of: "_", with: " ").capitalized ?? "?"
+                return .init(icon: "arrow.right.circle",
+                             text: "\(who) moved \(title): \(from) → \(to)",
+                             timestamp: date)
+            case "assignee_change":
+                return .init(icon: "person.circle",
+                             text: "\(who) reassigned \(title)",
+                             timestamp: date)
+            case "deleted":
+                return .init(icon: "trash.circle",
+                             text: "\(who) deleted \(title)",
+                             timestamp: date)
+            default:
+                return .init(icon: "circle", text: "\(who) \(event) \(title)", timestamp: date)
+            }
+        case "file_upload":
+            let filename = row.string("filename") ?? "a file"
+            return .init(icon: "paperclip",
+                         text: "\(who) uploaded \(filename)",
+                         timestamp: date)
+        case "collaborator_added":
+            return .init(icon: "person.badge.plus",
+                         text: "\(who) was added to the project",
+                         timestamp: date)
+        default:
+            return nil
+        }
+    }
+
     func loadProject(id: String) async {
         // Clear per-project caches before fetching. The VM is persistent
         // @State on ProjectDetailView and gets reused across projects, so

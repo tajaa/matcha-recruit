@@ -14,6 +14,7 @@ struct TaskViewerSheet: View {
     let onClose: () -> Void
 
     @State private var previewFile: MWProjectFile?
+    @State private var history: [MWTaskHistoryEntry] = []
 
     private var attachments: [MWProjectFile] {
         viewModel.taskFiles[task.id] ?? []
@@ -89,6 +90,10 @@ struct TaskViewerSheet: View {
                 .cornerRadius(6)
             }
 
+            if !history.isEmpty {
+                TaskHistoryTimeline(entries: history)
+            }
+
             if !attachments.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) {
@@ -132,9 +137,19 @@ struct TaskViewerSheet: View {
             if viewModel.taskFiles[task.id] == nil {
                 await viewModel.loadTaskFiles(taskId: task.id)
             }
+            await loadHistory()
         }
         .sheet(item: $previewFile) { file in
             AttachmentPreviewSheet(file: file)
+        }
+    }
+
+    private func loadHistory() async {
+        guard let pid = viewModel.project?.id else { return }
+        if let rows = try? await MatchaWorkService.shared.fetchTaskHistory(
+            projectId: pid, taskId: task.id
+        ) {
+            history = rows
         }
     }
 
