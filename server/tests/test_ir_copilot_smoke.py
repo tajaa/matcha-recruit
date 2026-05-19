@@ -463,6 +463,160 @@ def test_generate_guidance_keeps_treatment_set_field_when_unset(monkeypatch):
     assert "treatment_beyond_first_aid" in field_names
 
 
+def test_generate_guidance_drops_log_root_cause_query_when_interview_in_progress(monkeypatch):
+    """Once the root-cause interview is underway (any keys in
+    category_data.root_cause_interview), the AI must not re-emit the
+    log_root_cause_query kick-off card. Symptom otherwise: "begin root
+    cause?" asked twice before the first interview prompt.
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.matcha.services import ir_ai_orchestrator
+
+    payload_json = json.dumps({
+        "summary": "Continue.",
+        "open_questions": [],
+        "cards": [
+            {
+                "id": "good_set_corrective",
+                "title": "Set corrective actions",
+                "recommendation": "Document the corrective plan.",
+                "rationale": "Action plan required.",
+                "priority": "high",
+                "action": {
+                    "type": "set_field",
+                    "label": "Set corrective actions",
+                    "field_name": "corrective_actions",
+                    "field_value": "Coach employee.",
+                },
+            },
+            {
+                "id": "duplicate_log_root_cause",
+                "title": "Log Root Cause",
+                "recommendation": "Would you like to log the root cause?",
+                "rationale": "Capture hazard / why / prevention.",
+                "priority": "medium",
+                "action": {
+                    "type": "quick_reply",
+                    "label": "Choose one",
+                    "quick_reply_kind": "log_root_cause_query",
+                    "choices": [
+                        {"label": "Yes", "value": "yes"},
+                        {"label": "No", "value": "no"},
+                    ],
+                },
+            },
+        ],
+    })
+
+    async def fake_generate_content(*args, **kwargs):
+        return SimpleNamespace(text=payload_json)
+
+    fake_analyzer = SimpleNamespace(
+        client=SimpleNamespace(
+            aio=SimpleNamespace(
+                models=SimpleNamespace(generate_content=fake_generate_content),
+            ),
+        ),
+        model="fake-model",
+        _parse_json_response=lambda raw: json.loads(raw),
+    )
+    monkeypatch.setattr(ir_ai_orchestrator, "get_ir_analyzer", lambda: fake_analyzer)
+
+    class FakeRateLimiter:
+        async def check_limit(self, *args, **kwargs):
+            return None
+    monkeypatch.setattr(ir_ai_orchestrator, "get_rate_limiter", lambda: FakeRateLimiter())
+
+    incident = {
+        "id": "00000000-0000-0000-0000-000000000000",
+        "title": "Worker injured",
+        "category_data": {"root_cause_interview": {"hazard": "loose floor mat"}},
+    }
+    result = asyncio.run(
+        ir_ai_orchestrator.generate_guidance(
+            incident=incident, analyses=[], messages=[],
+        )
+    )
+
+    kinds = {
+        c["action"].get("quick_reply_kind")
+        for c in result["cards"]
+        if c["action"].get("type") == "quick_reply"
+    }
+    assert "log_root_cause_query" not in kinds
+
+
+def test_generate_guidance_keeps_log_root_cause_query_when_no_interview(monkeypatch):
+    """Inverse: when no interview has started and no root_cause is on
+    file, the kick-off card MUST survive so the user can opt in."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.matcha.services import ir_ai_orchestrator
+
+    payload_json = json.dumps({
+        "summary": "Capture root cause.",
+        "open_questions": [],
+        "cards": [
+            {
+                "id": "log_root_cause_query",
+                "title": "Log Root Cause",
+                "recommendation": "Would you like to log the root cause?",
+                "rationale": "Capture hazard / why / prevention.",
+                "priority": "medium",
+                "action": {
+                    "type": "quick_reply",
+                    "label": "Choose one",
+                    "quick_reply_kind": "log_root_cause_query",
+                    "choices": [
+                        {"label": "Yes", "value": "yes"},
+                        {"label": "No", "value": "no"},
+                    ],
+                },
+            },
+        ],
+    })
+
+    async def fake_generate_content(*args, **kwargs):
+        return SimpleNamespace(text=payload_json)
+
+    fake_analyzer = SimpleNamespace(
+        client=SimpleNamespace(
+            aio=SimpleNamespace(
+                models=SimpleNamespace(generate_content=fake_generate_content),
+            ),
+        ),
+        model="fake-model",
+        _parse_json_response=lambda raw: json.loads(raw),
+    )
+    monkeypatch.setattr(ir_ai_orchestrator, "get_ir_analyzer", lambda: fake_analyzer)
+
+    class FakeRateLimiter:
+        async def check_limit(self, *args, **kwargs):
+            return None
+    monkeypatch.setattr(ir_ai_orchestrator, "get_rate_limiter", lambda: FakeRateLimiter())
+
+    incident = {
+        "id": "00000000-0000-0000-0000-000000000000",
+        "title": "Worker injured",
+        "category_data": {},
+    }
+    result = asyncio.run(
+        ir_ai_orchestrator.generate_guidance(
+            incident=incident, analyses=[], messages=[],
+        )
+    )
+
+    kinds = {
+        c["action"].get("quick_reply_kind")
+        for c in result["cards"]
+        if c["action"].get("type") == "quick_reply"
+    }
+    assert "log_root_cause_query" in kinds
+
+
 def test_canonical_analysis_type_aliases():
     """AI commonly emits abbreviated names. Aliases must resolve to canonical."""
     from app.matcha.services.ir_ai_orchestrator import _canonical_analysis_type

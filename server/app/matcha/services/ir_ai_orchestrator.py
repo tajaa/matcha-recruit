@@ -252,7 +252,9 @@ ACTION RULES:
   backend chains the follow-up text_input cards and writes the user's
   verbatim answers to ir_incidents.root_cause. Skip the prompt entirely
   when the incident's root_cause field is already non-empty OR
-  category_data.root_cause_declined is true (user said No earlier).
+  category_data.root_cause_declined is true (user said No earlier) OR
+  category_data.root_cause_interview has any keys (interview already
+  in progress — never re-prompt mid-interview).
 - set_field: when you can confidently propose a value (e.g. incident_type
   from description), pre-fill field_name + field_value. The user clicks
   accept and the system writes it. field_value MUST be from SET_FIELD
@@ -547,7 +549,15 @@ async def generate_guidance(
         except json.JSONDecodeError:
             raw_category_data = {}
     root_cause_declined = bool(raw_category_data.get("root_cause_declined")) if isinstance(raw_category_data, dict) else False
-    suppress_root_cause_card = bool(existing_root_cause) or root_cause_declined
+    root_cause_interview_started = (
+        isinstance(raw_category_data, dict)
+        and bool(raw_category_data.get("root_cause_interview"))
+    )
+    suppress_root_cause_card = (
+        bool(existing_root_cause)
+        or root_cause_declined
+        or root_cause_interview_started
+    )
     treatment_already_set = (
         isinstance(raw_category_data, dict)
         and raw_category_data.get("treatment_beyond_first_aid") not in (None, "")
@@ -624,6 +634,24 @@ async def generate_guidance(
                 "IR copilot dropped duplicate set_field treatment_beyond_first_aid"
                 " (value already %r)",
                 raw_category_data.get("treatment_beyond_first_aid"),
+            )
+            continue
+        # Safety net for the root-cause interview: drop direct AI-emitted
+        # quick_reply log_root_cause_query cards when suppression applies
+        # (interview is in progress, root_cause already logged, or user
+        # already declined). The run_analysis-root_cause rewrite branch
+        # above handles the indirect path; this handles the direct one.
+        # User-facing symptom: "begin root cause?" asked twice before the
+        # first interview question is shown.
+        if (
+            raw_type == "quick_reply"
+            and raw_action.get("quick_reply_kind") == "log_root_cause_query"
+            and suppress_root_cause_card
+        ):
+            logger.info(
+                "IR copilot dropped duplicate log_root_cause_query "
+                "(existing=%s declined=%s interview=%s)",
+                bool(existing_root_cause), root_cause_declined, root_cause_interview_started,
             )
             continue
         if raw_type == "run_analysis" and canonical_analysis is None:
