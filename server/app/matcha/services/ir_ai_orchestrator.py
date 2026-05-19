@@ -87,6 +87,17 @@ IR_ACTION_TYPES = {
     "osha_emergency_alert",
 }
 
+# Mirrors copilot.py:_handle_quick_reply allowed_by_kind. Filter uses
+# this to drop or rewrite quick_reply cards whose kind the backend
+# dispatcher doesn't route — surfacing them would just trigger the
+# "Unknown quick_reply kind:" banner when the user clicks an option.
+IR_VALID_QUICK_REPLY_KINDS = {
+    "osha_recordable_query",
+    "osha_days_type_query",
+    "osha_injury_type_query",
+    "log_root_cause_query",
+}
+
 
 # Mirror the route's _FIELD_WHITELIST + enum sets so the orchestrator can drop
 # cards with hallucinated field_values (e.g. AI proposing
@@ -668,6 +679,56 @@ async def generate_guidance(
                 card["id"], raw_type,
             )
             continue
+        # Safety net for quick_reply hallucinations: Gemini sometimes emits
+        # a quick_reply card with Yes/No choices but no quick_reply_kind
+        # (or an invented kind the dispatcher doesn't route). User-facing
+        # symptom is the "Unknown quick_reply kind:" banner on accept.
+        # When the title or recommendation clearly signals root-cause
+        # intent, rewrite via the canonical builder. Otherwise drop —
+        # surfacing the broken card is worse than no card.
+        if raw_type == "quick_reply":
+            qrk = (raw_action.get("quick_reply_kind") or "").strip()
+            if qrk not in IR_VALID_QUICK_REPLY_KINDS:
+                title_lower = (card.get("title") or "").lower()
+                rec_lower = (card.get("recommendation") or "").lower()
+                looks_like_rc = (
+                    "root cause" in title_lower
+                    or "root cause" in rec_lower
+                    or "root_cause" in qrk.lower()
+                )
+                if looks_like_rc and not suppress_root_cause_card:
+                    if saw_log_root_cause_query:
+                        logger.info(
+                            "IR copilot dropped duplicate quick_reply card "
+                            "%s (already rewrote a root cause card)",
+                            card["id"],
+                        )
+                        continue
+                    from app.matcha.routes.ir_incidents._shared import build_log_root_cause_query_card
+                    replacement = build_log_root_cause_query_card()
+                    card["id"] = replacement["id"]
+                    card["title"] = replacement["title"]
+                    card["recommendation"] = replacement["recommendation"]
+                    card["rationale"] = replacement["rationale"]
+                    card["priority"] = replacement["priority"]
+                    card["blockers"] = replacement["blockers"]
+                    card["action"] = dict(replacement["action"])
+                    raw_type = card["action"]["type"]
+                    raw_action = card["action"]
+                    saw_log_root_cause_query = True
+                    filtered_cards.append(card)
+                    logger.info(
+                        "IR copilot rewrote quick_reply with invalid "
+                        "kind=%r to log_root_cause_query (title=%r)",
+                        qrk, card.get("title"),
+                    )
+                    continue
+                logger.warning(
+                    "IR copilot dropped quick_reply card %s with unknown "
+                    "kind=%r (title=%r)",
+                    card["id"], qrk, card.get("title"),
+                )
+                continue
         # Safety net for the OSHA INJURY GATE: drop any set_field card the
         # AI emits for treatment_beyond_first_aid when category_data already
         # has a value. The prompt rule asks for one gate prompt + one

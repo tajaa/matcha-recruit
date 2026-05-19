@@ -332,3 +332,157 @@ def test_fallback_close_kept_when_root_cause_logged(monkeypatch):
     types = [c["action"]["type"] for c in result["cards"]]
     assert "fallback_close" in ids, ids
     assert "close_incident" in types, types
+
+
+# ---------------------------------------------------------------------------
+# quick_reply hallucination scrubbing. Gemini sometimes emits a quick_reply
+# card with Yes/No choices but no quick_reply_kind (or an invented kind that
+# the dispatcher at copilot.py:_handle_quick_reply doesn't route). User-
+# facing symptom: red "Unknown quick_reply kind:" banner on accept. Bug
+# confirmed via transcript of incident fd496e59 on 2026-05-19 21:06.
+# ---------------------------------------------------------------------------
+
+
+def _quick_reply_card(*, card_id, title, quick_reply_kind=None, recommendation="Pick one."):
+    action = {
+        "type": "quick_reply",
+        "label": "Choose",
+        "choices": [
+            {"label": "Yes", "value": "yes"},
+            {"label": "No", "value": "no"},
+        ],
+    }
+    if quick_reply_kind is not None:
+        action["quick_reply_kind"] = quick_reply_kind
+    return {
+        "id": card_id,
+        "title": title,
+        "recommendation": recommendation,
+        "rationale": "AI-emitted quick_reply.",
+        "priority": "high",
+        "action": action,
+    }
+
+
+def test_quick_reply_missing_kind_root_cause_intent_rewritten(monkeypatch):
+    """quick_reply with title='Start Root Cause...' but no kind →
+    rewrite to canonical log_root_cause_query card."""
+    _wire(monkeypatch, {
+        "summary": "Begin root cause analysis.",
+        "open_questions": [],
+        "cards": [
+            _quick_reply_card(
+                card_id="start-root-cause-analysis",
+                title="Start Root Cause Analysis Interview",
+                recommendation="Initiate the structured interview.",
+            ),
+        ],
+    })
+    incident = {
+        "id": "00000000-0000-0000-0000-00000000000d",
+        "title": "Slip",
+        "incident_type": "safety",
+        "severity": "high",
+        "root_cause": None,
+        "category_data": {},
+    }
+    result = _run(incident)
+    kinds = [c["action"].get("quick_reply_kind") for c in result["cards"]]
+    assert "log_root_cause_query" in kinds, kinds
+    # All quick_reply cards must have a recognized kind.
+    for c in result["cards"]:
+        if c["action"]["type"] == "quick_reply":
+            assert c["action"].get("quick_reply_kind") in {
+                "osha_recordable_query", "osha_days_type_query",
+                "osha_injury_type_query", "log_root_cause_query",
+            }, c["action"]
+
+
+def test_quick_reply_missing_kind_no_intent_dropped(monkeypatch):
+    """quick_reply with no kind AND no root-cause keyword → drop."""
+    _wire(monkeypatch, {
+        "summary": "Pick a flavor.",
+        "open_questions": [],
+        "cards": [
+            _quick_reply_card(
+                card_id="flavor-pick",
+                title="Pick a flavor",
+                recommendation="Vanilla or chocolate?",
+            ),
+        ],
+    })
+    incident = {
+        "id": "00000000-0000-0000-0000-00000000000e",
+        "title": "Slip",
+        "incident_type": "safety",
+        "severity": "high",
+        "root_cause": None,
+        "category_data": {},
+    }
+    result = _run(incident)
+    types = [c["action"]["type"] for c in result["cards"]]
+    # The broken quick_reply got dropped. Other safety-net cards may have
+    # been inserted by close-rewrite or fallback, but no quick_reply with
+    # the bad kind should remain.
+    assert "flavor-pick" not in [c["id"] for c in result["cards"]]
+    for c in result["cards"]:
+        if c["action"]["type"] == "quick_reply":
+            assert c["action"].get("quick_reply_kind") in {
+                "osha_recordable_query", "osha_days_type_query",
+                "osha_injury_type_query", "log_root_cause_query",
+            }
+
+
+def test_quick_reply_unknown_kind_root_cause_keyword_rewritten(monkeypatch):
+    """quick_reply with invented kind but 'root cause' in title → rewrite."""
+    _wire(monkeypatch, {
+        "summary": "Root cause time.",
+        "open_questions": [],
+        "cards": [
+            _quick_reply_card(
+                card_id="rc-prompt",
+                title="Root Cause Prompt",
+                quick_reply_kind="custom_rc_thing",
+            ),
+        ],
+    })
+    incident = {
+        "id": "00000000-0000-0000-0000-00000000000f",
+        "title": "Slip",
+        "incident_type": "safety",
+        "severity": "high",
+        "root_cause": None,
+        "category_data": {},
+    }
+    result = _run(incident)
+    kinds = [c["action"].get("quick_reply_kind") for c in result["cards"]]
+    assert "log_root_cause_query" in kinds, kinds
+
+
+def test_quick_reply_valid_kind_passes_through(monkeypatch):
+    """quick_reply with a recognized kind passes through unchanged."""
+    _wire(monkeypatch, {
+        "summary": "OSHA classification needed.",
+        "open_questions": [],
+        "cards": [
+            _quick_reply_card(
+                card_id="osha-q",
+                title="OSHA Recordable Event",
+                quick_reply_kind="osha_recordable_query",
+            ),
+        ],
+    })
+    incident = {
+        "id": "00000000-0000-0000-0000-000000000010",
+        "title": "Slip",
+        "incident_type": "safety",
+        "severity": "high",
+        "root_cause": "Already logged.",  # suppress rewrite branches
+        "category_data": {},
+    }
+    result = _run(incident)
+    qr_cards = [c for c in result["cards"] if c["action"]["type"] == "quick_reply"]
+    assert any(
+        c["action"].get("quick_reply_kind") == "osha_recordable_query"
+        for c in qr_cards
+    ), [c["action"] for c in qr_cards]
