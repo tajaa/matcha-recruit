@@ -36,7 +36,7 @@ const STEP_LABELS: Record<OnboardingStep, string> = {
   size: 'Headcount',
   locations: 'Locations',
   scope: 'AI Scope',
-  gaps: 'Bank Gaps',
+  gaps: 'Coverage',
   review: 'Review',
   done: 'Done',
 }

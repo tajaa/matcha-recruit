@@ -487,7 +487,7 @@ export function Step4Scope({ session, onUpdated, onNext }: StepProps) {
       onUpdated(refreshed)
       onNext()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Bank resolution failed')
+      setError(e instanceof Error ? e.message : 'Coverage check failed')
     } finally {
       setBusy(false)
     }
@@ -603,7 +603,7 @@ export function Step5Gaps({ session, onUpdated, onNext }: StepProps) {
       const res = await adminOnboarding.dispatchResearch(session.id, Array.from(approved))
       setDispatchedCount(res.dispatched.length)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Dispatch failed')
+      setError(e instanceof Error ? e.message : "Couldn't start research")
     } finally {
       setBusy(false)
     }
@@ -771,7 +771,7 @@ export function Step6Review({ session, onUpdated }: StepProps) {
       <SummaryRow label="Industry" value={`${basics.industry || '—'}${basics.specialty ? ` · ${basics.specialty}` : ''}`} />
       <SummaryRow label="Owner" value={basics.owner_email || '—'} />
       <SummaryRow label="Locations" value={`${session.locations.length} location${session.locations.length === 1 ? '' : 's'}`} />
-      <SummaryRow label="In-bank requirements" value={`${resolved?.existing.length ?? 0}`} />
+      <SummaryRow label="Already covered" value={`${resolved?.existing.length ?? 0}`} />
       <SummaryRow label="Certifications" value={`${ai?.required_certifications.length ?? 0}`} />
       <SummaryRow label="Licenses" value={`${ai?.required_licenses.length ?? 0}`} />
 
