@@ -220,6 +220,41 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
+def _unwrap_excgroup(exc: BaseException) -> BaseException:
+    """Unwrap nested BaseExceptionGroup to the deepest non-group inner.
+
+    Starlette BaseHTTPMiddleware wraps downstream errors via
+    anyio.create_task_group, so a TimeoutError from a route handler
+    surfaces as BaseExceptionGroup([TimeoutError(...)]). Without this
+    unwrap, error logs read `error_type=ExceptionGroup` with a
+    traceback consisting entirely of Starlette/anyio plumbing — the
+    real frames live inside `exc.exceptions[*]`.
+
+    Falls back to the input if there is no group structure.
+    """
+    seen: set[int] = set()
+    current: BaseException = exc
+    while isinstance(current, BaseExceptionGroup) and current.exceptions:
+        if id(current) in seen:
+            break
+        seen.add(id(current))
+        current = current.exceptions[0]
+    return current
+
+
+def _format_exc_chain(exc: BaseException) -> str:
+    """Format the unwrapped exception's traceback.
+
+    Mirrors `traceback.format_exc()` for plain exceptions (the unwrap
+    is a no-op there) and substitutes the inner exception's frames
+    when ``exc`` is a BaseExceptionGroup.
+    """
+    inner = _unwrap_excgroup(exc)
+    if inner is exc:
+        return tb_module.format_exc()
+    return "".join(tb_module.format_exception(type(inner), inner, inner.__traceback__))
+
+
 @app.middleware("http")
 async def capture_errors(request: Request, call_next):
     """Log unhandled exceptions to both the legacy error_logs table and the
@@ -233,7 +268,8 @@ async def capture_errors(request: Request, call_next):
         user_id = getattr(request.state, "user_id", None)
         user_role = getattr(request.state, "user_role", None)
         company_id = getattr(request.state, "company_id", None)
-        traceback_str = tb_module.format_exc()
+        real_exc = _unwrap_excgroup(exc)
+        traceback_str = _format_exc_chain(exc)
         # Legacy error_logs insert (keeps existing admin page working)
         try:
             async with get_connection() as conn:
@@ -244,8 +280,8 @@ async def capture_errors(request: Request, call_next):
                        VALUES ($1, $2, 500, $3, $4, $5, $6, $7, $8, $9)""",
                     request.method,
                     str(request.url.path),
-                    type(exc).__name__,
-                    str(exc)[:2000],
+                    type(real_exc).__name__,
+                    str(real_exc)[:2000],
                     traceback_str[:8000],
                     user_id,
                     user_role,
@@ -257,8 +293,8 @@ async def capture_errors(request: Request, call_next):
         # New structured reporter
         report_server_error(
             kind="http_error",
-            message=f"{type(exc).__name__}: {exc}",
-            exception=exc,
+            message=f"{type(real_exc).__name__}: {real_exc}",
+            exception=real_exc,
             traceback_str=traceback_str,
             source="api",
             request_method=request.method,
@@ -279,8 +315,9 @@ async def capture_errors(request: Request, call_next):
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """Persist unhandled exceptions and return 500."""
-    traceback_str = tb_module.format_exc()
-    logger.error("Unhandled %s on %s %s: %s", type(exc).__name__, request.method, request.url.path, exc)
+    real_exc = _unwrap_excgroup(exc)
+    traceback_str = _format_exc_chain(exc)
+    logger.error("Unhandled %s on %s %s: %s", type(real_exc).__name__, request.method, request.url.path, real_exc)
     try:
         async with get_connection() as conn:
             await conn.execute(
@@ -290,8 +327,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
                    VALUES ($1, $2, 500, $3, $4, $5, $6)""",
                 request.method,
                 str(request.url.path),
-                type(exc).__name__,
-                str(exc)[:2000],
+                type(real_exc).__name__,
+                str(real_exc)[:2000],
                 traceback_str[:8000],
                 str(request.url.query) if request.url.query else None,
             )
@@ -299,8 +336,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         logger.warning("Failed to persist error log", exc_info=True)
     report_server_error(
         kind="http_error",
-        message=f"{type(exc).__name__}: {exc}",
-        exception=exc,
+        message=f"{type(real_exc).__name__}: {real_exc}",
+        exception=real_exc,
         traceback_str=traceback_str,
         source="api",
         request_method=request.method,
