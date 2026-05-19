@@ -169,18 +169,19 @@ class AppState {
             guard let self else { return }
             let n = note.userInfo?["notification"] as? [String: Any]
             let type = n?["type"] as? String ?? ""
-            // Channel-message rows are inserted for every non-sender member on
-            // every channel message — surfacing each one in the bell flood
-            // would double-count chat traffic that's already tracked via
-            // `channelUnreadOverrides` and the in-app sound / starred-channel
-            // toast path in `onMessageGlobal`. Skip the bell entirely for them.
-            if type == "channel_message" { return }
             Task { @MainActor in
+                // Bell badge ticks for every notification type so kanban
+                // moves, channel messages, mentions all show up. Refresh
+                // the count from server to stay in sync if the user
+                // dismissed something on another device.
                 self.notificationsUnreadCount += 1
                 await self.refreshNotificationsCount()
                 NotificationCenter.default.post(name: .mwNotificationsRefresh, object: nil)
-                // Channel-* toasts are owned by the starred-channel path in
-                // onMessageGlobal — skip here to avoid double-notifying.
+                // OS toast is owned by the starred-channel path in
+                // `onMessageGlobal` for channel_* events — skip those here
+                // to avoid double-toasting on chat. Non-channel events
+                // (task_assigned, task_progress, mentions, etc.) get the
+                // toast directly from the bell-push.
                 let isChannel = type.hasPrefix("channel_")
                 if !self.isSceneActive && !isChannel {
                     let title = n?["title"] as? String ?? "Notification"

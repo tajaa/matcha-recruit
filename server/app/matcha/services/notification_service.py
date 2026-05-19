@@ -67,39 +67,32 @@ async def create_notification(
     # desktop / web clients. Best-effort: a WS hiccup must never fail the
     # bell-row insert. Clients fall back to the existing 60s REST poll.
     #
-    # Skip `channel_message` — a row is inserted for every non-sender member
-    # on every chat message (see channels_ws.py). The chat is already
-    # delivered over the channels WS `message` event with its own unread
-    # tracking; pushing the bell row too would flood high-traffic channels.
-    if type != "channel_message":
-        try:
-            from ...core.routes.channels_ws import manager as _ch_manager
-            # Probe connection count before sending so the log surfaces the
-            # offline case (no `/ws/channels` open for the recipient). This
-            # is the canonical path for "tell user X about event Y regardless
-            # of where they are in the app" — works as long as the user has
-            # Werk open and is logged in.
-            async with _ch_manager.lock:
-                conn_count = len(_ch_manager.active_connections.get(user_id, set()))
-            logger.info(
-                "notify push type=%s user=%s ws_conns=%d title=%r",
-                type, user_id, conn_count, title,
-            )
-            await _ch_manager.send_to_user(user_id, {
-                "type": "notification",
-                "notification": {
-                    "id": str(row["id"]),
-                    "type": row["type"],
-                    "title": row["title"],
-                    "body": row["body"],
-                    "link": row["link"],
-                    "metadata": row["metadata"],
-                    "is_read": False,
-                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-                },
-            })
-        except Exception as e:
-            logger.warning("Failed to push notification to %s: %s", user_id, e)
+    # All types push, including channel_message. Client handles deduping
+    # toasts (chat WS already toasts starred channels; the bell observer
+    # only ticks the badge for channel_message — see AppState).
+    try:
+        from ...core.routes.channels_ws import manager as _ch_manager
+        async with _ch_manager.lock:
+            conn_count = len(_ch_manager.active_connections.get(user_id, set()))
+        logger.info(
+            "notify push type=%s user=%s ws_conns=%d title=%r",
+            type, user_id, conn_count, title,
+        )
+        await _ch_manager.send_to_user(user_id, {
+            "type": "notification",
+            "notification": {
+                "id": str(row["id"]),
+                "type": row["type"],
+                "title": row["title"],
+                "body": row["body"],
+                "link": row["link"],
+                "metadata": row["metadata"],
+                "is_read": False,
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            },
+        })
+    except Exception as e:
+        logger.warning("Failed to push notification to %s: %s", user_id, e)
 
     if send_email:
         try:
