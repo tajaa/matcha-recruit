@@ -148,19 +148,19 @@ location-timer keyed).
 
 ## Gaps to resolve in the design (decisions for review)
 
-**Gap A — the dossier doesn't capture policies or non-cert credentials
-yet.** `ai_scope` today = categories + certifications + licenses +
-jurisdictions only. To ingest "policies, creds, etc." the wizard's Step-4
-scope expansion (`onboarding_scope_ai.py:expand_scope` prompt) must be
-extended to also surface (a) required **policies** and (b) **credentials**
-distinct from certs/licenses — OR we derive policy nodes from category
-nodes via `policy_suggestion_service`. Decision needed.
+**Gap A — DONE (commit 8eee8dc).** `ai_scope` + the dossier now capture
+`required_policies` + `required_credentials`. Scope expansion
+(`onboarding_scope_ai.py:expand_scope`) emits both; dossier renders
+Policies + Credentials sections. Policy nodes can now seed from the
+dossier in P3.
 
-**Gap B — "credential" vs "certification/license".** Define the
-distinction: company-level certs/licenses (have them today) vs
-employee-level credentials (BCBA, RBT, etc. — relevant for an ABA
-company). The graph should model employee-credential *requirements* at the
-company level; actual per-employee tracking is a separate surface.
+**Gap B — DONE (commit 8eee8dc).** Distinction settled: company-level
+certs/licenses stay in `required_certifications` / `required_licenses`;
+employee/professional credentials (BCBA, RBT, …) live in
+`required_credentials` with an `applies_to_role`, and Gemini **infers
+them from the staff roles named in the company description**. Verified
+live on the ABA company (BCBA + RBT inferred). Per-employee tracking
+remains a separate surface (company-level *requirement* only here).
 
 **Gap C — graph versioning on re-onboard.** Re-finalize / re-run → new
 `cc_graph.version` (immutable history) vs in-place update. Recommend
@@ -202,6 +202,62 @@ weight.
 
 ## Out of scope
 
-- Owner-invite loop (token → account, currently unwired).
+- Owner-invite loop (token → account, currently unwired) — see backlog.
 - Migrating existing companies onto the graph (Gap D — later).
 - Per-employee credential tracking (company-level requirement only here).
+
+## Remaining gaps / backlog (work later)
+
+Inventory of everything still open, so we can pick up cold. Roughly
+priority-ordered.
+
+### Design decisions still open (block the graph build)
+- **Gap C — graph versioning on re-onboard.** Versioned snapshot
+  (`cc_graph.version`, immutable history) vs in-place update. Recommend
+  versioned. Decide before P1.
+- **Gap D — legacy coexistence.** Dual-write `company_compliance_scope`
+  + new `cc_graph` during the build; cutover (stop dual-writing + migrate
+  existing companies onto the graph) deferred until P1–P3 prove the
+  graph. Decide cutover trigger.
+
+### The graph build itself (the main remaining work)
+- **P1** — `cc_*` tables (migration) + `build_company_compliance_graph`
+  (dossier → jurisdiction + category + credential nodes) + read API +
+  graph view. (Policies seed here too now that Gap A is done.)
+- **P2** — ingestion dispatcher + `cc_requirement` research, per-node
+  status.
+- **P3** — credential + policy ingestion.
+- **P4** — freshness loop + versioning.
+
+### Onboarding wizard wiring (independent of the graph)
+- **Owner-invite loop unwired (high impact).** `finalize_session` mints
+  `onboarding_sessions.invite_token` but **nothing consumes it** — no
+  acceptance route, no email send. The onboarded owner currently has no
+  way into the platform. Needs: an acceptance route that reads the
+  token → creates the owner user (role=client) bound to the company, +
+  an email send (reuse `EmailService`). `admin_onboarding.py:finalize_session`.
+- **`dispatch-research` is a stub.** `admin_onboarding.py` ~line 577
+  logs a TODO and enqueues nothing. To make the wizard's "research these
+  gaps" button real: for each approved `(category_slug, jurisdiction)`
+  gap, resolve `jurisdiction_id` + enqueue the right worker
+  (`run_medical_compliance_research` / `run_oncology_research` /
+  `run_compliance_check_task(..., allow_live_research=True)`), then
+  re-resolve + attach. (Largely subsumed by P2 ingestion if we go
+  graph-first.)
+- **Scheduled checks never research** (`compliance_checks.py:26`,
+  `allow_live_research=False`). Deliberate cost gate; means gaps fill
+  only via manual `/fill-gaps`. Leave off unless we want auto-research.
+
+### Cleanup / smaller
+- **`ResolvedScopeAmbiguous` model drift.** Pydantic/TS type requires
+  `category_slug`, but `map_to_bank` builds ambiguous items without it
+  (`onboarding_scope_ai.py` ~539, ~564). Runtime-safe today (report
+  doesn't read it). Either emit `category_slug` on ambiguous items or
+  relax the model.
+- **No catalog enum for policy/credential slugs.** Gemini free-picks, so
+  two companies may coin different slugs for the same cert (`bcba` vs
+  `bacb_bcba`). Matters once the graph dedups/researches across
+  companies — consider a slug-normalization or a catalog table.
+- **Migration `zzzz_b04` (gap_analysis column) must run before
+  finalize** on any environment, else finalize 500s. Operational
+  reminder, not code.
