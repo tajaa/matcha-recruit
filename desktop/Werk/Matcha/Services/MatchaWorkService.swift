@@ -1240,7 +1240,7 @@ class MatchaWorkService {
     // MARK: - Project Invites
 
     func listPendingInvites() async throws -> [MWProjectInvite] {
-        try await client.request(method: "GET", path: "/project-invites")
+        try await client.request(method: "GET", path: "\(basePath)/project-invites")
     }
 
     func acceptProjectInvite(projectId: String) async throws {
