@@ -143,6 +143,14 @@ export default function AdminOnboarding() {
                         {s.owner_email}
                       </div>
                     )}
+                    {s.status === 'finalized' && (
+                      <Link
+                        to={`/admin/onboarding/${s.id}/report`}
+                        className="text-[11px] text-zinc-400 hover:text-emerald-300 hover:underline"
+                      >
+                        Gap analysis →
+                      </Link>
+                    )}
                   </td>
                   <td className="px-4 py-2 text-zinc-300">{s.industry || '—'}</td>
                   <td className="px-4 py-2 text-zinc-300">{s.step}</td>

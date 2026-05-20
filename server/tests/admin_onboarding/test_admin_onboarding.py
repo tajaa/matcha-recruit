@@ -613,3 +613,120 @@ class TestExpandScopeUnwrap:
         # but enough to catch a regression to dumping the FEW_SHOT_EXAMPLES
         # list directly).
         assert '"input": {' not in prompt or "EXPECTED OUTPUT" in prompt
+
+
+# ── Gap-analysis dossier assembler ──────────────────────────────────────
+
+from app.core.services.onboarding_dossier import (
+    build_gap_analysis_dossier,
+    _dossier_to_markdown,
+    _dossier_to_html,
+)
+
+
+def _sample_session():
+    return {
+        "id": "00000000-0000-0000-0000-0000000000aa",
+        "status": "finalized",
+        "basics": {
+            "business_name": "400 Behavioral Health",
+            "industry": "healthcare",
+            "specialty": "behavioral_health",
+            "description": "ABA clinic",
+            "entity_type": "llc",
+            "owner_name": "Tess",
+            "owner_email": "owner@example.com",
+        },
+        "size": {"full_time": 40, "part_time": 5, "contractor": 2, "unknown": 0, "source": "manual"},
+        "locations": [
+            {"name": "Corp", "city": "Los Angeles", "county": None, "state": "CA"},
+        ],
+        "ai_scope": {
+            "naics_sector": "62",
+            "compliance_categories": [{"category_slug": "hipaa_privacy", "scope": "federal"}],
+            "required_certifications": [
+                {"slug": "clia", "name": "CLIA Waiver", "issuing_authority": "CMS", "scope_level": "federal", "renewal_period_months": 24},
+            ],
+            "required_licenses": [
+                {"slug": "ca_bh", "name": "CA BH License", "issuing_authority": "DHCS", "scope_level": "state", "renewal_period_months": 12},
+            ],
+            "applicable_jurisdictions": [{"state": "CA", "county": None, "city": None}],
+        },
+        "resolved_scope": {
+            "existing": [
+                {"requirement_id": "r1", "category_slug": "hipaa_privacy", "canonical_key": "hipaa", "title": "HIPAA Privacy", "scope_level": "federal", "state": None, "county": None, "city": None},
+            ],
+            "missing": [
+                {"category_slug": "ca_aba_billing", "scope_level": "state", "state": "CA", "county": None, "city": None, "reason": "no bank row"},
+            ],
+            "ambiguous": [
+                {"candidates": [{"jurisdiction_id": "j1"}, {"jurisdiction_id": "j2"}], "why": "Springfield x2"},
+            ],
+            "gap_check": {
+                "suggested_compliance_categories": [{"category_slug": "telehealth", "scope": "federal", "reason": "ABA telehealth"}],
+                "suggested_certifications": [],
+                "suggested_licenses": [],
+                "suggested_jurisdictions": [],
+                "summary": "Mostly comprehensive; add telehealth.",
+            },
+        },
+    }
+
+
+class TestGapAnalysisDossier:
+    def test_build_dossier_full(self):
+        d = build_gap_analysis_dossier(_sample_session())
+        assert d["company"]["name"] == "400 Behavioral Health"
+        assert d["scope"]["naics_sector"] == "62"
+        assert d["counts"] == {
+            "covered": 1, "gaps": 1, "ambiguous": 1,
+            "certifications": 1, "licenses": 1, "suggestions": 1,
+        }
+        assert d["coverage"]["gaps"][0]["category_slug"] == "ca_aba_billing"
+        assert d["ai_suggestions"]["summary"].startswith("Mostly")
+        assert d["generated_at"]  # iso timestamp present
+
+    def test_build_dossier_empty_resolved(self):
+        session = _sample_session()
+        session["resolved_scope"] = None
+        session["ai_scope"] = None
+        d = build_gap_analysis_dossier(session)
+        assert d["counts"]["covered"] == 0
+        assert d["counts"]["gaps"] == 0
+        assert d["coverage"]["gaps"] == []
+        assert d["scope"]["compliance_categories"] == []
+        # The /report endpoint renders this exact empty shape for an
+        # in-progress session opened before resolve runs — must not crash.
+        md = _dossier_to_markdown(d)
+        assert "## Gaps — need research" in md
+        html = _dossier_to_html(d)
+        assert "Gaps — need research" in html
+        assert "Jurisdictions in scope" in html
+
+    def test_markdown_contains_gaps(self):
+        d = build_gap_analysis_dossier(_sample_session())
+        md = _dossier_to_markdown(d)
+        assert "# Onboarding Gap Analysis — 400 Behavioral Health" in md
+        assert "## Gaps — need research" in md
+        assert "ca_aba_billing" in md
+        assert "## AI suggestions" in md
+        assert "telehealth" in md
+        # Jurisdictions section renders the AI-expanded list (CA here).
+        assert "## Jurisdictions in scope" in md
+
+    def test_html_renders_gaps_and_escapes(self):
+        session = _sample_session()
+        session["basics"]["business_name"] = "Tess & <b>Co</b>"
+        d = build_gap_analysis_dossier(session)
+        html = _dossier_to_html(d)
+        assert "Gaps — need research" in html
+        assert "ca_aba_billing" in html
+        # HTML-escaped company name (no raw injected tag).
+        assert "Tess &amp; &lt;b&gt;Co&lt;/b&gt;" in html
+        assert "<b>Co</b>" not in html
+
+    def test_federal_jurisdiction_label(self):
+        d = build_gap_analysis_dossier(_sample_session())
+        # The covered HIPAA row has no state/county/city → "Federal".
+        md = _dossier_to_markdown(d)
+        assert "Federal" in md

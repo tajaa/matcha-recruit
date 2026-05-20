@@ -138,6 +138,7 @@ export type OnboardingSessionDetail = {
   locations: LocationInput[]
   ai_scope?: AIScope | null
   resolved_scope?: ResolvedScope | null
+  gap_analysis?: GapAnalysisDossier | null
   created_at: string
   updated_at: string
 }
@@ -207,6 +208,44 @@ export type FinalizeResponse = {
   licenses_written: number
 }
 
+export type GapAnalysisDossier = {
+  generated_at?: string | null
+  session_id?: string | null
+  status?: string | null
+  company: {
+    name?: string | null
+    industry?: string | null
+    specialty?: string | null
+    description?: string | null
+    entity_type?: string | null
+    owner_name?: string | null
+    owner_email?: string | null
+  }
+  headcount: Record<string, unknown>
+  locations: Array<Record<string, unknown>>
+  scope: {
+    naics_sector?: string | null
+    compliance_categories?: AIScopeCategory[]
+    required_certifications?: AIScopeCertification[]
+    required_licenses?: AIScopeLicense[]
+    applicable_jurisdictions?: AIScopeJurisdiction[]
+  }
+  coverage: {
+    covered: Array<Record<string, unknown>>
+    gaps: ResolvedScopeMissing[]
+    ambiguous: ResolvedScopeAmbiguous[]
+  }
+  ai_suggestions: Partial<GapCheckResult>
+  counts: {
+    covered: number
+    gaps: number
+    ambiguous: number
+    certifications: number
+    licenses: number
+    suggestions: number
+  }
+}
+
 const BASE = '/admin/onboarding'
 
 export const adminOnboarding = {
@@ -255,6 +294,15 @@ export const adminOnboarding = {
 
   finalize: (id: string) =>
     api.post<FinalizeResponse>(`${BASE}/sessions/${id}/finalize`),
+
+  getReport: (id: string) =>
+    api.get<GapAnalysisDossier>(`${BASE}/sessions/${id}/report`),
+
+  downloadReportPdf: (id: string, filename?: string) =>
+    api.download(`${BASE}/sessions/${id}/report.pdf`, filename),
+
+  downloadReportMarkdown: (id: string, filename?: string) =>
+    api.download(`${BASE}/sessions/${id}/report.md`, filename),
 
   abandon: (id: string) =>
     api.post(`${BASE}/sessions/${id}/abandon`),

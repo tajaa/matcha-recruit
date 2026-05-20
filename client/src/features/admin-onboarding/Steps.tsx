@@ -6,6 +6,7 @@
  * mostly multiply boilerplate.
  */
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 
 import {
@@ -809,6 +810,14 @@ export function Step6Review({ session, onUpdated }: StepProps) {
                 <code className="text-xs text-zinc-100 break-all">{finalized.invite_token}</code>
               </div>
             )}
+            <div className="pt-2 border-t border-emerald-500/20">
+              <Link
+                to={`/admin/onboarding/${session.id}/report`}
+                className="text-sm text-emerald-300 hover:underline font-medium"
+              >
+                View full gap analysis →
+              </Link>
+            </div>
           </div>
         ) : (
           <>

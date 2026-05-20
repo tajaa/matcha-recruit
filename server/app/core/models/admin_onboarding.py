@@ -205,6 +205,7 @@ class OnboardingSessionDetail(BaseModel):
     locations: list[dict[str, Any]] = Field(default_factory=list)
     ai_scope: Optional[dict[str, Any]] = None
     resolved_scope: Optional[dict[str, Any]] = None
+    gap_analysis: Optional[dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
 
@@ -306,3 +307,47 @@ class DispatchResearchResponse(BaseModel):
     session_id: UUID
     dispatched: list[str] = Field(default_factory=list)
     skipped: list[str] = Field(default_factory=list)
+
+
+# ── Gap-analysis dossier ────────────────────────────────────────────────
+
+
+class DossierCompany(BaseModel):
+    name: Optional[str] = None
+    industry: Optional[str] = None
+    specialty: Optional[str] = None
+    description: Optional[str] = None
+    entity_type: Optional[str] = None
+    owner_name: Optional[str] = None
+    owner_email: Optional[str] = None
+
+
+class DossierCounts(BaseModel):
+    covered: int = 0
+    gaps: int = 0
+    ambiguous: int = 0
+    certifications: int = 0
+    licenses: int = 0
+    suggestions: int = 0
+
+
+class DossierCoverage(BaseModel):
+    # Loose dicts — coverage items vary by scope_level; the assembler is
+    # the source of truth and the frontend renders defensively.
+    covered: list[dict[str, Any]] = Field(default_factory=list)
+    gaps: list[dict[str, Any]] = Field(default_factory=list)
+    ambiguous: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class GapAnalysisDossier(BaseModel):
+    """Assembled, durable onboarding gap analysis — the team's handoff doc."""
+    generated_at: Optional[str] = None
+    session_id: Optional[str] = None
+    status: Optional[str] = None
+    company: DossierCompany = Field(default_factory=DossierCompany)
+    headcount: dict[str, Any] = Field(default_factory=dict)
+    locations: list[dict[str, Any]] = Field(default_factory=list)
+    scope: dict[str, Any] = Field(default_factory=dict)
+    coverage: DossierCoverage = Field(default_factory=DossierCoverage)
+    ai_suggestions: dict[str, Any] = Field(default_factory=dict)
+    counts: DossierCounts = Field(default_factory=DossierCounts)

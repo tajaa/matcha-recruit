@@ -31,6 +31,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
 
 from app.database import get_connection
 from app.core.dependencies import require_admin
@@ -43,6 +44,7 @@ from app.core.models.admin_onboarding import (
     DispatchResearchResponse,
     ExpandScopeResponse,
     FinalizeResponse,
+    GapAnalysisDossier,
     GapCheckResponse,
     GapCheckResult,
     OnboardingSessionDetail,
@@ -50,6 +52,11 @@ from app.core.models.admin_onboarding import (
     PatchSessionRequest,
     ResolveScopeResponse,
     ResolvedScope,
+)
+from app.core.services.onboarding_dossier import (
+    build_gap_analysis_dossier,
+    _dossier_to_html,
+    _dossier_to_markdown,
 )
 from app.core.services.onboarding_scope_ai import (
     INDUSTRY_SPECIALTIES,
@@ -127,6 +134,8 @@ def _row_to_detail(row) -> OnboardingSessionDetail:
         locations=_safe_jsonb(row["locations"], []),
         ai_scope=_safe_jsonb(row["ai_scope"], None) if row["ai_scope"] else None,
         resolved_scope=_safe_jsonb(row["resolved_scope"], None) if row["resolved_scope"] else None,
+        # row.get tolerates a pre-migration DB (column absent) — degrades to None.
+        gap_analysis=_safe_jsonb(row.get("gap_analysis"), None) if row.get("gap_analysis") else None,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -140,6 +149,28 @@ async def _load_session_or_404(conn, session_id: UUID):
     if not row:
         raise HTTPException(status_code=404, detail="Onboarding session not found")
     return row
+
+
+def _dossier_from_row(row) -> dict:
+    """Assemble the gap-analysis dossier for a session row.
+
+    Returns the frozen ``gap_analysis`` snapshot if finalize wrote one;
+    otherwise assembles live from the current JSONB columns so an
+    in-progress session is still reviewable. JSONB is parsed via
+    ``_safe_jsonb`` first — the assembler takes pre-parsed dicts.
+    """
+    snapshot = _safe_jsonb(row.get("gap_analysis"), None) if row.get("gap_analysis") else None
+    if snapshot:
+        return snapshot
+    return build_gap_analysis_dossier({
+        "id": row["id"],
+        "status": row["status"],
+        "basics": _safe_jsonb(row["basics"], {}),
+        "size": _safe_jsonb(row["size"], {}),
+        "locations": _safe_jsonb(row["locations"], []),
+        "ai_scope": _safe_jsonb(row["ai_scope"], {}),
+        "resolved_scope": _safe_jsonb(row["resolved_scope"], {}),
+    })
 
 
 # ── Catalog endpoint ────────────────────────────────────────────────────
@@ -822,14 +853,26 @@ async def finalize_session(
         # so they can hand it off manually for now.
         invite_token = row["invite_token"] or secrets.token_urlsafe(32)
 
+        # Freeze the full gap-analysis dossier as-finalized. resolved/ai_scope
+        # are already parsed above; basics/size/locations come off the row.
+        dossier = build_gap_analysis_dossier({
+            "id": session_id,
+            "status": "finalized",
+            "basics": _safe_jsonb(row["basics"], {}),
+            "size": _safe_jsonb(row["size"], {}),
+            "locations": _safe_jsonb(row["locations"], []),
+            "ai_scope": ai_scope,
+            "resolved_scope": resolved,
+        })
+
         await conn.execute(
             """
             UPDATE onboarding_sessions
             SET status = 'finalized', step = 'done',
-                invite_token = $1, updated_at = NOW()
-            WHERE id = $2
+                invite_token = $1, gap_analysis = $2::jsonb, updated_at = NOW()
+            WHERE id = $3
             """,
-            invite_token, session_id,
+            invite_token, json.dumps(dossier), session_id,
         )
 
     return FinalizeResponse(
@@ -839,6 +882,88 @@ async def finalize_session(
         scope_rows_written=scope_rows_written,
         certifications_written=certifications_written,
         licenses_written=licenses_written,
+    )
+
+
+# ── Gap-analysis report (view + export) ─────────────────────────────────
+
+
+async def _load_owned_session(conn, session_id: UUID, current_user):
+    """Load a session + enforce the per-creator 403 guard used elsewhere."""
+    row = await _load_session_or_404(conn, session_id)
+    if row["created_by"] != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your onboarding session")
+    return row
+
+
+def _dossier_filename(dossier: dict, ext: str) -> str:
+    name = ((dossier.get("company") or {}).get("name") or "onboarding").strip()
+    slug = "".join(c if c.isalnum() else "-" for c in name).strip("-").lower() or "onboarding"
+    return f"gap-analysis-{slug}.{ext}"
+
+
+@router.get(
+    "/onboarding/sessions/{session_id}/report",
+    response_model=GapAnalysisDossier,
+)
+async def get_session_report(
+    session_id: UUID,
+    current_user: CurrentUser = Depends(require_master_admin),
+):
+    """The assembled gap-analysis dossier. Returns the frozen snapshot if
+    finalized, else assembles live so in-progress sessions are reviewable."""
+    async with get_connection() as conn:
+        row = await _load_owned_session(conn, session_id, current_user)
+        return _dossier_from_row(row)
+
+
+@router.get("/onboarding/sessions/{session_id}/report.md")
+async def get_session_report_markdown(
+    session_id: UUID,
+    current_user: CurrentUser = Depends(require_master_admin),
+):
+    """Markdown export of the dossier."""
+    async with get_connection() as conn:
+        row = await _load_owned_session(conn, session_id, current_user)
+        dossier = _dossier_from_row(row)
+    md = _dossier_to_markdown(dossier)
+    return Response(
+        content=md,
+        media_type="text/markdown",
+        headers={"Content-Disposition": f'attachment; filename="{_dossier_filename(dossier, "md")}"'},
+    )
+
+
+@router.get("/onboarding/sessions/{session_id}/report.pdf")
+async def get_session_report_pdf(
+    session_id: UUID,
+    current_user: CurrentUser = Depends(require_master_admin),
+):
+    """PDF export of the dossier (WeasyPrint, rendered inline)."""
+    async with get_connection() as conn:
+        row = await _load_owned_session(conn, session_id, current_user)
+        dossier = _dossier_from_row(row)
+
+    full_html = _dossier_to_html(dossier)
+    try:
+        from weasyprint import HTML
+    except ImportError as ie:
+        logger.error("weasyprint import failed: %s", ie)
+        raise HTTPException(
+            status_code=501,
+            detail="PDF generation not available — install weasyprint on the server (`pip install weasyprint`).",
+        )
+    try:
+        pdf_bytes = await asyncio.wait_for(
+            asyncio.to_thread(lambda: HTML(string=full_html).write_pdf()),
+            timeout=60,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="PDF render timed out.")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{_dossier_filename(dossier, "pdf")}"'},
     )
 
 
