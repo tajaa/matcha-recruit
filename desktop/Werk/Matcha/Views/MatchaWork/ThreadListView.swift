@@ -16,6 +16,7 @@ struct ThreadListView: View {
     @Environment(AppState.self) private var appState
     @Bindable var viewModel: ThreadListViewModel
     var showHeader: Bool = true
+    var searchText: String = ""
     @State private var isCreating = false
     @State private var threadToDelete: MWThread?
     @State private var showDeleteConfirm = false
@@ -36,14 +37,14 @@ struct ThreadListView: View {
                 HStack {
                     Text("Matcha Work")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
 
                     // Online users
                     if !appState.onlineUsers.isEmpty {
                         HStack(spacing: -4) {
                             ForEach(appState.onlineUsers.prefix(5)) { user in
                                 Circle()
-                                    .fill(Color.matcha500)
+                                    .fill(appState.themeAccent)
                                     .frame(width: 18, height: 18)
                                     .overlay(
                                         Text(String(user.name.prefix(1)).uppercased())
@@ -51,21 +52,21 @@ struct ThreadListView: View {
                                             .foregroundColor(.white)
                                     )
                                     .overlay(
-                                        Circle().stroke(Color.appBackground, lineWidth: 1.5)
+                                        Circle().stroke(appState.themeBg, lineWidth: 1.5)
                                     )
                                     .help(user.name)
                             }
                             if appState.onlineUsers.count > 5 {
                                 Circle()
-                                    .fill(Color.zinc800)
+                                    .fill(appState.themeCard)
                                     .frame(width: 18, height: 18)
                                     .overlay(
                                         Text("+\(appState.onlineUsers.count - 5)")
                                             .font(.system(size: 7, weight: .bold))
-                                            .foregroundColor(.secondary)
+                                            .foregroundColor(appState.themeTextSecondary)
                                     )
                                     .overlay(
-                                        Circle().stroke(Color.appBackground, lineWidth: 1.5)
+                                        Circle().stroke(appState.themeBg, lineWidth: 1.5)
                                     )
                             }
                         }
@@ -82,9 +83,9 @@ struct ThreadListView: View {
                         } else {
                             Image(systemName: "plus")
                                 .font(.system(size: 12, weight: .medium))
-                                .foregroundColor(.secondary)
+                                .foregroundColor(appState.themeTextSecondary)
                                 .frame(width: 24, height: 24)
-                                .background(Color.zinc800)
+                                .background(appState.themeCard)
                                 .cornerRadius(6)
                         }
                     }
@@ -94,7 +95,7 @@ struct ThreadListView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
 
-                Divider().opacity(0.3)
+                Divider().background(appState.themeBorder)
             }
 
             // Filter
@@ -109,8 +110,8 @@ struct ThreadListView: View {
                                 .font(.system(size: 11, weight: .medium))
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
-                                .background(viewModel.filterStatus == option.value ? Color.matcha600 : Color.zinc800)
-                                .foregroundColor(viewModel.filterStatus == option.value ? .white : .secondary)
+                                .background(viewModel.filterStatus == option.value ? appState.themeAccent : appState.themeCard)
+                                .foregroundColor(viewModel.filterStatus == option.value ? .white : appState.themeTextSecondary)
                                 .cornerRadius(5)
                         }
                         .buttonStyle(.plain)
@@ -120,7 +121,7 @@ struct ThreadListView: View {
                 .padding(.vertical, 8)
             }
 
-            Divider().opacity(0.3)
+            Divider().background(appState.themeBorder)
 
             // Thread list
             if viewModel.isLoading {
@@ -131,16 +132,19 @@ struct ThreadListView: View {
                 VStack(spacing: 8) {
                     Image(systemName: "bubble.left")
                         .font(.system(size: 28))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
                     Text("No threads yet")
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
                         .font(.system(size: 11))
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.vertical, 16)
             } else {
+                let filtered = viewModel.filteredThreads.filter {
+                    searchText.isEmpty || $0.title.localizedCaseInsensitiveContains(searchText)
+                }
                 LazyVStack(spacing: 0) {
-                    ForEach(viewModel.filteredThreads, id: \.id) { thread in
+                    ForEach(filtered, id: \.id) { thread in
                         let selected = appState.selectedThreadId == thread.id
                         Button {
                             appState.selectedThreadId = thread.id
@@ -191,10 +195,10 @@ struct ThreadListView: View {
                 }
             }
         }
-        .background(Color.appBackground)
+        .background(Color.clear)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
-                Divider().opacity(0.15)
+                Divider().background(appState.themeBorder.opacity(0.5))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 4)
                 Button {
@@ -210,11 +214,11 @@ struct ThreadListView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "bolt.fill")
                             .font(.system(size: 11))
-                            .foregroundColor(appState.showSkills ? .matcha500 : .secondary)
+                            .foregroundColor(appState.showSkills ? appState.themeAccent : appState.themeTextSecondary)
                             .frame(width: 16)
                         Text("Skills")
                             .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(appState.showSkills ? .white : .secondary)
+                            .foregroundColor(appState.showSkills ? appState.themeText : appState.themeTextSecondary)
                         Spacer()
                     }
                     .padding(.horizontal, 12)
@@ -224,7 +228,7 @@ struct ThreadListView: View {
                 }
                 .buttonStyle(.plain)
             }
-            .background(Color.appBackground)
+            .background(Color.clear)
         }
         .task { await viewModel.loadThreads() }
         .onReceive(NotificationCenter.default.publisher(for: .mwCreateNewThread)) { _ in
@@ -268,6 +272,7 @@ struct ThreadListView: View {
 
 extension Notification.Name {
     static let mwCreateNewThread = Notification.Name("mwCreateNewThread")
+    static let mwThreadsChanged = Notification.Name("mwThreadsChanged")
     static let mwProjectDataChanged = Notification.Name("mwProjectDataChanged")
     /// Fires immediately on a project title rename so the sidebar can patch
     /// the row in place without waiting for the full project-list refetch
@@ -285,6 +290,7 @@ struct MWProjectTitlePatch {
 }
 
 struct ThreadRowView: View {
+    @Environment(AppState.self) private var appState
     let thread: MWThread
     let onDelete: () -> Void
     var onTogglePin: (() -> Void)? = nil
@@ -296,11 +302,11 @@ struct ThreadRowView: View {
                 if thread.isPinned {
                     Image(systemName: "star.fill")
                         .font(.system(size: 9))
-                        .foregroundColor(.matcha500)
+                        .foregroundColor(appState.themeAccent)
                 }
                 Text(thread.title)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.white)
+                    .foregroundColor(appState.themeText)
                     .lineLimit(1)
                 Spacer()
                 if isHovered {
@@ -309,14 +315,14 @@ struct ThreadRowView: View {
                     } label: {
                         Image(systemName: thread.isPinned ? "star.fill" : "star")
                             .font(.system(size: 11))
-                            .foregroundColor(thread.isPinned ? .matcha500 : .secondary)
+                            .foregroundColor(thread.isPinned ? appState.themeAccent : appState.themeTextSecondary)
                     }
                     .buttonStyle(.plain)
                     .help(thread.isPinned ? "Unstar" : "Star")
                     Button(action: onDelete) {
                         Image(systemName: "trash")
                             .font(.system(size: 11))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeTextSecondary)
                     }
                     .buttonStyle(.plain)
                     .help("Delete")
@@ -325,7 +331,7 @@ struct ThreadRowView: View {
             HStack(spacing: 4) {
                 Text("\(thread.resolvedTaskType.label) · v\(thread.version) · \(formatThreadDate(thread.lastActivityAt))")
                     .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(appState.themeTextSecondary)
                     .lineLimit(1)
                 if thread.nodeMode {
                     Text("Node")

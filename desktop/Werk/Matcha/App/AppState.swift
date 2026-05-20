@@ -1,5 +1,6 @@
 import Foundation
 import UserNotifications
+import SwiftUI
 
 @Observable
 class AppState {
@@ -32,6 +33,73 @@ class AppState {
     var channelAdminWizardMode: ChannelAdminWizardMode = .create
     var showCollabProjectWizard: Bool = false
     var collabProjectWizardMode: CollabProjectWizardMode = .create
+
+    // Theme storage and properties
+    var appTheme: String = UserDefaults.standard.string(forKey: "mw-theme") ??
+        (UserDefaults.standard.bool(forKey: "mw-chat-theme") ? "light" : "dark") {
+        didSet {
+            UserDefaults.standard.set(appTheme, forKey: "mw-theme")
+            UserDefaults.standard.set(appTheme == "light", forKey: "mw-chat-theme")
+        }
+    }
+
+    var themeBg: Color {
+        switch appTheme {
+        case "light": return Color(white: 0.96)
+        case "cappuchin": return Color.cappuchinDark
+        default: return Color.zinc950
+        }
+    }
+
+    var themeCard: Color {
+        switch appTheme {
+        case "light": return Color.white
+        case "cappuchin": return Color.cappuchinCard
+        default: return Color.zinc900
+        }
+    }
+
+    var themeBorder: Color {
+        switch appTheme {
+        case "light": return Color.black.opacity(0.08)
+        case "cappuchin": return Color.cappuchinAccent.opacity(0.15)
+        default: return Color.white.opacity(0.1)
+        }
+    }
+
+    var themeAccent: Color {
+        switch appTheme {
+        case "cappuchin": return Color.cappuchinAccent
+        default: return Color.matcha500
+        }
+    }
+
+    var themeAccentDark: Color {
+        switch appTheme {
+        case "cappuchin": return Color.cappuchinAccentDark
+        default: return Color.matcha600
+        }
+    }
+
+    var themeText: Color {
+        switch appTheme {
+        case "light": return Color.black
+        case "cappuchin": return Color.cappuchinText
+        default: return Color.white
+        }
+    }
+
+    var themeTextSecondary: Color {
+        switch appTheme {
+        case "light": return Color.gray
+        case "cappuchin": return Color.cappuchinSecondary
+        default: return Color.secondary
+        }
+    }
+
+    var lightMode: Bool {
+        return appTheme == "light"
+    }
 
     var mwBetaLite: Bool {
         betaFeatures["matcha_work_beta_lite"] == true || betaFeatures["matcha_work_beta_full"] == true

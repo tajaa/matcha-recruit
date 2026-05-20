@@ -3,6 +3,7 @@ import SwiftUI
 struct ChannelsSidebarView: View {
     @Environment(AppState.self) private var appState
     var showHeader: Bool = true
+    var searchText: String = ""
     @State private var channels: [ChannelSummary] = []
     @State private var isLoading = true
     @State private var showCreate = false
@@ -16,7 +17,7 @@ struct ChannelsSidebarView: View {
 
     var body: some View {
         content
-            .background(Color.appBackground)
+            .background(Color.clear)
             .task { await load() }
             .onReceive(NotificationCenter.default.publisher(for: .mwChannelCreated)) { note in
                 // Selection-only side effect. The reload is driven by the
@@ -122,7 +123,7 @@ struct ChannelsSidebarView: View {
             } label: {
                 Text("Create one")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(Color.matcha500)
+                    .foregroundColor(appState.themeAccent)
             }
             .buttonStyle(.plain)
         }
@@ -131,8 +132,11 @@ struct ChannelsSidebarView: View {
     }
 
     private var channelList: some View {
-        LazyVStack(spacing: 0) {
-            ForEach(channels, id: \.id) { channel in
+        let filtered = channels.filter {
+            searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(searchText)
+        }
+        return LazyVStack(spacing: 0) {
+            ForEach(filtered, id: \.id) { channel in
                 row(for: channel)
             }
         }
@@ -207,23 +211,23 @@ struct ChannelsSidebarView: View {
             HStack(alignment: .center, spacing: 8) {
                 Image(systemName: isStarred ? "star.fill" : "number")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(isStarred ? .yellow : (selected ? Color.matcha500 : .secondary))
+                    .foregroundColor(isStarred ? .yellow : (selected ? appState.themeAccent : appState.themeTextSecondary))
                     .frame(width: 14)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(channel.name)
                             .font(.system(size: 13, weight: (selected || unread > 0) ? .semibold : .regular))
-                            .foregroundColor(selected ? .primary : .primary.opacity(0.9))
+                            .foregroundColor(selected ? appState.themeText : appState.themeText.opacity(0.9))
                             .lineLimit(1)
                         if channel.projectId != nil {
                             Text("collab")
                                 .font(.system(size: 8, weight: .semibold))
-                                .foregroundColor(Color.matcha500)
+                                .foregroundColor(appState.themeAccent)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 1)
                                 .background(
                                     RoundedRectangle(cornerRadius: 3)
-                                        .fill(Color.matcha500.opacity(0.15))
+                                        .fill(appState.themeAccent.opacity(0.15))
                                 )
                         }
                         Spacer(minLength: 4)
@@ -233,13 +237,13 @@ struct ChannelsSidebarView: View {
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 2)
-                                .background(Capsule().fill(Color.matcha500))
+                                .background(Capsule().fill(appState.themeAccent))
                         }
                     }
                     if let preview = channel.lastMessagePreview, !preview.isEmpty {
                         Text(preview)
                             .font(.system(size: 10))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeTextSecondary)
                             .lineLimit(1)
                     }
                 }

@@ -4,6 +4,7 @@ import AppKit
 struct ProjectListView: View {
     @Environment(AppState.self) private var appState
     var showHeader: Bool = true
+    var searchText: String = ""
 
     @State private var projects: [MWProject] = []
     @State private var isLoading = true
@@ -28,7 +29,10 @@ struct ProjectListView: View {
     // MARK: - Grouping
 
     private func recomputeGroups() {
-        let active = projects.filter { $0.status != "archived" }
+        let matchesSearch: (MWProject) -> Bool = { p in
+            searchText.isEmpty || p.title.localizedCaseInsensitiveContains(searchText)
+        }
+        let active = projects.filter { $0.status != "archived" && matchesSearch($0) }
         blogs = active.filter { $0.projectType == "blog" }.pinnedFirst()
         collabs = active.filter {
             $0.projectType == "collab" || $0.collaboratorRole == "collaborator"
@@ -40,7 +44,7 @@ struct ProjectListView: View {
             return !excluded.contains(t) && p.collaboratorRole != "collaborator"
         }.pinnedFirst()
         archivedProjects = projects
-            .filter { $0.status == "archived" }
+            .filter { $0.status == "archived" && matchesSearch($0) }
             .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
     }
 
@@ -146,8 +150,11 @@ struct ProjectListView: View {
                 .padding(.vertical, 4)
             }
         }
-        .background(Color.appBackground)
+        .background(Color.clear)
         .task(id: appState.projectsListGeneration) { await load() }
+        .onChange(of: searchText) { _, _ in
+            recomputeGroups()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .mwProjectTitlePatched)) { note in
             guard let patch = note.object as? MWProjectTitlePatch else { return }
             if let i = projects.firstIndex(where: { $0.id == patch.id }) {
@@ -400,11 +407,11 @@ struct ProjectListView: View {
                 if p.isPinned ?? false {
                     Image(systemName: "star.fill")
                         .font(.system(size: 9))
-                        .foregroundColor(.matcha500)
+                        .foregroundColor(appState.themeAccent)
                 }
                 Text(p.title)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.white)
+                    .foregroundColor(appState.themeText)
                     .lineLimit(1)
                 Spacer()
                 Button {
@@ -412,7 +419,7 @@ struct ProjectListView: View {
                 } label: {
                     Image(systemName: (p.isPinned ?? false) ? "star.fill" : "star")
                         .font(.system(size: 11))
-                        .foregroundColor((p.isPinned ?? false) ? .matcha500 : .secondary)
+                        .foregroundColor((p.isPinned ?? false) ? appState.themeAccent : appState.themeTextSecondary)
                 }
                 .buttonStyle(.plain)
                 .help((p.isPinned ?? false) ? "Unstar" : "Star")
@@ -563,6 +570,7 @@ private extension Array where Element == MWProject {
 // MARK: - Collaborator summary
 
 struct CollaboratorRowSummary: View {
+    @Environment(AppState.self) private var appState
     let others: [MWProjectCollaborator]
     private let maxNames = 2
 
@@ -584,14 +592,14 @@ struct CollaboratorRowSummary: View {
         HStack(spacing: 3) {
             Image(systemName: "person.2.fill")
                 .font(.system(size: 8))
-                .foregroundColor(.secondary)
+                .foregroundColor(appState.themeTextSecondary)
             Text(displayText)
                 .font(.system(size: 10))
-                .foregroundColor(.secondary)
+                .foregroundColor(appState.themeTextSecondary)
                 .lineLimit(1)
         }
         .padding(.horizontal, 5).padding(.vertical, 1)
-        .background(Color.matcha500.opacity(0.08))
+        .background(appState.themeAccent.opacity(0.08))
         .cornerRadius(3)
         .help(tooltip)
     }

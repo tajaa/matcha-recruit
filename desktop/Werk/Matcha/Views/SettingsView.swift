@@ -13,12 +13,40 @@ struct SettingsView: View {
         TabView {
             NotificationsSettingsTab()
                 .tabItem { Label("Notifications", systemImage: "bell") }
+            AppearanceSettingsTab()
+                .tabItem { Label("Appearance", systemImage: "paintpalette") }
             AccountSettingsTab()
                 .tabItem { Label("Account", systemImage: "person.circle") }
             AboutSettingsTab()
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
         .frame(width: 480, height: 360)
+    }
+}
+
+// MARK: - Appearance
+
+private struct AppearanceSettingsTab: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        @Bindable var appState = appState
+        Form {
+            Section {
+                Picker("Theme", selection: $appState.appTheme) {
+                    Text("Dark").tag("dark")
+                    Text("Light").tag("light")
+                    Text("Cappuchin").tag("cappuchin")
+                }
+                .pickerStyle(.radioGroup)
+            } header: {
+                Text("UI Theme").font(.subheadline).bold()
+            } footer: {
+                Text("Choose your preferred workspace color theme. Cappuchin provides a cozy warm coffee atmosphere.")
+                    .font(.caption).foregroundColor(.secondary)
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 

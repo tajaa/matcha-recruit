@@ -22,6 +22,13 @@ struct ContentView: View {
     @State private var showNotifications = false
     @State private var orderStore = SidebarSectionOrderStore.shared
 
+    // Search and Starred states
+    @State private var searchText = ""
+    @AppStorage("mw-sidebar-starred-open") private var starredSectionOpen = true
+    @State private var starredChannels: [ChannelSummary] = []
+    @State private var starredProjects: [MWProject] = []
+    @State private var starredThreads: [MWThread] = []
+
     private struct GlassWindowModifier: ViewModifier {
         func body(content: Content) -> some View {
             if #available(macOS 15.0, *) {
@@ -36,127 +43,7 @@ struct ContentView: View {
         @Bindable var appState = appState
 
         NavigationSplitView {
-            VStack(spacing: 0) {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        sidebarFooterButton(
-                            icon: "house",
-                            label: "Home",
-                            badge: 0,
-                            isActive: appState.showHome || (
-                                appState.selectedThreadId == nil &&
-                                appState.selectedProjectId == nil &&
-                                appState.selectedChannelId == nil &&
-                                !appState.showInbox &&
-                                !appState.showPeople &&
-                                !appState.showSkills &&
-                                !appState.showChannelBrowse
-                            )
-                        ) {
-                            appState.showHome = true
-                            appState.showInbox = false
-                            appState.showPeople = false
-                            appState.showSkills = false
-                            appState.showChannelBrowse = false
-                            appState.selectedThreadId = nil
-                            appState.selectedProjectId = nil
-                            appState.selectedChannelId = nil
-                            appState.selectedJournalId = nil
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.top, 8)
-                        .padding(.bottom, 4)
-
-                        // Sidebar sections render in user-customised order.
-                        // Order persists per-user via SidebarSectionOrderStore.
-                        // Each section is drag-droppable onto another to
-                        // swap positions; right-click → Move up/down for a
-                        // keyboard-free fallback.
-                        let _ = orderStore.generation
-                        let visibleSections = orderStore.order.filter { section in
-                            switch section {
-                            case .projects, .journals: return appState.mwBetaLite
-                            default: return true
-                            }
-                        }
-                        ForEach(Array(visibleSections.enumerated()), id: \.element) { idx, section in
-                            sidebarSectionView(for: section)
-                                .draggable(section.rawValue) {
-                                    sectionDragPreview(section)
-                                }
-                                .dropDestination(for: String.self) { items, _ in
-                                    guard let raw = items.first,
-                                          let dragged = SidebarSectionOrderStore.Section(rawValue: raw),
-                                          dragged != section else {
-                                        return false
-                                    }
-                                    orderStore.move(dragged, before: section)
-                                    return true
-                                }
-                                .contextMenu {
-                                    Button("Move up") { orderStore.moveUp(section) }
-                                        .disabled(idx == 0)
-                                    Button("Move down") { orderStore.moveDown(section) }
-                                        .disabled(idx == visibleSections.count - 1)
-                                    Divider()
-                                    Button("Reset sidebar order") {
-                                        orderStore.resetToDefault()
-                                    }
-                                }
-                            if idx < visibleSections.count - 1 {
-                                Divider().opacity(0.2)
-                            }
-                        }
-                    }
-                }
-
-                Divider().opacity(0.3)
-
-                // Footer — Inbox + People always-visible buttons with live badges
-                HStack(spacing: 6) {
-                    sidebarFooterButton(
-                        icon: "envelope",
-                        label: "Inbox",
-                        badge: appState.unreadInboxCount,
-                        isActive: appState.showInbox
-                    ) {
-                        appState.showInbox = true
-                        appState.showPeople = false
-                        appState.showHome = false
-                        appState.showChannelBrowse = false
-                        appState.selectedThreadId = nil
-                        appState.selectedProjectId = nil
-                        appState.selectedChannelId = nil
-                        appState.selectedJournalId = nil
-                        appState.showSkills = false
-                    }
-
-                    sidebarFooterButton(
-                        icon: "person.2",
-                        label: "People",
-                        badge: pendingConnectionsCount,
-                        isActive: appState.showPeople
-                    ) {
-                        appState.showPeople = true
-                        appState.showInbox = false
-                        appState.showHome = false
-                        appState.showChannelBrowse = false
-                        appState.selectedThreadId = nil
-                        appState.selectedProjectId = nil
-                        appState.selectedChannelId = nil
-                        appState.selectedJournalId = nil
-                        appState.showSkills = false
-                    }
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 8)
-                .background(Color.appBackground.opacity(0.5))
-            }
-            .background(Color.appBackground)
-            .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 380)
-            .task {
-                await refreshPendingConnections()
-            }
+            sidebarColumn
         } detail: {
             if let threadId = appState.selectedThreadId {
                 ThreadDetailView(threadId: threadId)
@@ -308,6 +195,189 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - Sidebar column
+
+    @ViewBuilder
+    private var sidebarColumn: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 0) {
+                    sidebarHomeButton
+                    sidebarSearchBar
+                    starredSidebarSection
+                    sidebarOrderedSections
+                }
+            }
+
+            Divider().background(appState.themeBorder)
+
+            // Footer — Inbox + People always-visible buttons with live badges
+            HStack(spacing: 6) {
+                sidebarFooterButton(
+                    icon: "envelope",
+                    label: "Inbox",
+                    badge: appState.unreadInboxCount,
+                    isActive: appState.showInbox
+                ) {
+                    appState.showInbox = true
+                    appState.showPeople = false
+                    appState.showHome = false
+                    appState.showChannelBrowse = false
+                    appState.selectedThreadId = nil
+                    appState.selectedProjectId = nil
+                    appState.selectedChannelId = nil
+                    appState.selectedJournalId = nil
+                    appState.showSkills = false
+                }
+
+                sidebarFooterButton(
+                    icon: "person.2",
+                    label: "People",
+                    badge: pendingConnectionsCount,
+                    isActive: appState.showPeople
+                ) {
+                    appState.showPeople = true
+                    appState.showInbox = false
+                    appState.showHome = false
+                    appState.showChannelBrowse = false
+                    appState.selectedThreadId = nil
+                    appState.selectedProjectId = nil
+                    appState.selectedChannelId = nil
+                    appState.selectedJournalId = nil
+                    appState.showSkills = false
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 8)
+            .background(appState.themeBg.opacity(0.5))
+        }
+        .background(sidebarBackground)
+        .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 380)
+        .task {
+            await refreshPendingConnections()
+            await loadStarredItems()
+        }
+        .onChange(of: appState.channelsListGeneration) { _, _ in
+            Task { await loadStarredItems() }
+        }
+        .onChange(of: appState.projectsListGeneration) { _, _ in
+            Task { await loadStarredItems() }
+        }
+        .onChange(of: ChannelStarStore.shared.generation) { _, _ in
+            Task { await loadStarredItems() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mwThreadsChanged)) { _ in
+            Task { await loadStarredItems() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mwProjectDataChanged)) { _ in
+            Task { await loadStarredItems() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mwProjectTitlePatched)) { _ in
+            Task { await loadStarredItems() }
+        }
+    }
+
+    @ViewBuilder
+    private var sidebarHomeButton: some View {
+        let isHomeActive = appState.showHome || (
+            appState.selectedThreadId == nil &&
+            appState.selectedProjectId == nil &&
+            appState.selectedChannelId == nil &&
+            !appState.showInbox &&
+            !appState.showPeople &&
+            !appState.showSkills &&
+            !appState.showChannelBrowse
+        )
+        sidebarFooterButton(icon: "house", label: "Home", badge: 0, isActive: isHomeActive) {
+            appState.showHome = true
+            appState.showInbox = false
+            appState.showPeople = false
+            appState.showSkills = false
+            appState.showChannelBrowse = false
+            appState.selectedThreadId = nil
+            appState.selectedProjectId = nil
+            appState.selectedChannelId = nil
+            appState.selectedJournalId = nil
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
+    @ViewBuilder
+    private var sidebarSearchBar: some View {
+        HStack {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(appState.themeTextSecondary)
+                .font(.system(size: 11))
+            TextField("Filter sidebar...", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundColor(appState.themeText)
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(appState.themeTextSecondary)
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(appState.themeCard.opacity(appState.appTheme == "light" ? 0.8 : 0.4))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(appState.themeBorder, lineWidth: 1)
+        )
+        .padding(.horizontal, 8)
+        .padding(.bottom, 8)
+    }
+
+    @ViewBuilder
+    private var sidebarOrderedSections: some View {
+        let _ = orderStore.generation
+        let visibleSections = orderStore.order.filter { section in
+            switch section {
+            case .projects, .journals: return appState.mwBetaLite
+            default: return true
+            }
+        }
+        ForEach(Array(visibleSections.enumerated()), id: \.element) { idx, section in
+            sidebarSectionView(for: section)
+                .draggable(section.rawValue) {
+                    sectionDragPreview(section)
+                }
+                .dropDestination(for: String.self) { items, _ in
+                    guard let raw = items.first,
+                          let dragged = SidebarSectionOrderStore.Section(rawValue: raw),
+                          dragged != section else {
+                        return false
+                    }
+                    orderStore.move(dragged, before: section)
+                    return true
+                }
+                .contextMenu {
+                    Button("Move up") { orderStore.moveUp(section) }
+                        .disabled(idx == 0)
+                    Button("Move down") { orderStore.moveDown(section) }
+                        .disabled(idx == visibleSections.count - 1)
+                    Divider()
+                    Button("Reset sidebar order") {
+                        orderStore.resetToDefault()
+                    }
+                }
+            if idx < visibleSections.count - 1 {
+                Divider().background(appState.themeBorder)
+            }
+        }
+    }
+
     // MARK: - Sidebar sections (drag-droppable)
 
     @ViewBuilder
@@ -391,7 +461,7 @@ struct ContentView: View {
                 }
             }
         ) {
-            ChannelsSidebarView(showHeader: false)
+            ChannelsSidebarView(showHeader: false, searchText: searchText)
         }
     }
 
@@ -493,7 +563,7 @@ struct ContentView: View {
                     .padding(.vertical, 6)
                     .background(Color.red.opacity(0.1))
                 }
-                ProjectListView(showHeader: false)
+                ProjectListView(showHeader: false, searchText: searchText)
             }
         }
     }
@@ -526,7 +596,7 @@ struct ContentView: View {
                 }
             }
         ) {
-            JournalListView(showHeader: false)
+            JournalListView(showHeader: false, searchText: searchText)
         }
     }
 
@@ -551,7 +621,7 @@ struct ContentView: View {
                 .help("New thread")
             }
         ) {
-            ThreadListView(viewModel: threadListVM, showHeader: false)
+            ThreadListView(viewModel: threadListVM, showHeader: false, searchText: searchText)
         }
     }
 
@@ -625,17 +695,17 @@ struct ContentView: View {
             HStack(spacing: 6) {
                 Image(systemName: icon)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(isActive ? .white : .secondary)
+                    .foregroundColor(isActive ? .white : appState.themeTextSecondary)
                 Text(label)
                     .font(.system(size: 12, weight: isActive ? .semibold : .regular))
-                    .foregroundColor(isActive ? .white : .primary.opacity(0.85))
+                    .foregroundColor(isActive ? .white : appState.themeText.opacity(0.85))
                 if badge > 0 {
                     Text("\(badge)")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background(Color.matcha500)
+                        .background(appState.themeAccent)
                         .clipShape(Capsule())
                 }
                 Spacer()
@@ -644,7 +714,7 @@ struct ContentView: View {
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(isActive ? Color.matcha500.opacity(0.8) : Color.zinc800.opacity(0.5))
+                    .fill(isActive ? appState.themeAccent.opacity(0.8) : appState.themeCard.opacity(0.5))
             )
         }
         .buttonStyle(.plain)
@@ -723,19 +793,290 @@ struct ContentView: View {
             }
         }
     }
+
+    // MARK: - Starred section & theme background helpers
+
+    @ViewBuilder
+    private var sidebarBackground: some View {
+        switch appState.appTheme {
+        case "cappuchin":
+            VisualEffectView(material: .sidebar)
+                .overlay(Color.cappuchinDark.opacity(0.85))
+        case "light":
+            VisualEffectView(material: .sidebar)
+                .overlay(Color(white: 0.96).opacity(0.6))
+        default:
+            VisualEffectView(material: .sidebar)
+                .overlay(Color.zinc950.opacity(0.45))
+        }
+    }
+
+    @ViewBuilder
+    private var starredSidebarSection: some View {
+        let visibleChannels = starredChannels.filter { channel in
+            searchText.isEmpty || channel.name.localizedCaseInsensitiveContains(searchText)
+        }
+        let visibleProjects = starredProjects.filter { project in
+            searchText.isEmpty || project.title.localizedCaseInsensitiveContains(searchText)
+        }
+        let visibleThreads = starredThreads.filter { thread in
+            searchText.isEmpty || thread.title.localizedCaseInsensitiveContains(searchText)
+        }
+
+        let totalCount = visibleChannels.count + visibleProjects.count + visibleThreads.count
+
+        if totalCount > 0 {
+            sidebarSection(
+                title: "Starred",
+                icon: "star",
+                isOpen: $starredSectionOpen
+            ) {
+                VStack(spacing: 0) {
+                    ForEach(visibleChannels, id: \.id) { channel in
+                        starredChannelRow(channel)
+                    }
+                    ForEach(visibleProjects, id: \.id) { project in
+                        starredProjectRow(project)
+                    }
+                    ForEach(visibleThreads, id: \.id) { thread in
+                        starredThreadRow(thread)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    private func starredChannelRow(_ channel: ChannelSummary) -> some View {
+        let selected = appState.selectedChannelId == channel.id
+        let unread = channel.unreadCount + (appState.channelUnreadOverrides[channel.id] ?? 0)
+
+        return Button {
+            appState.selectedChannelId = channel.id
+            appState.showChannelBrowse = false
+            appState.clearChannelUnread(channel.id)
+            appState.selectedThreadId = nil
+            appState.selectedProjectId = nil
+            appState.selectedJournalId = nil
+            appState.showInbox = false
+            appState.showSkills = false
+        } label: {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.yellow)
+                    .frame(width: 14)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(channel.name)
+                            .font(.system(size: 13, weight: (selected || unread > 0) ? .semibold : .regular))
+                            .foregroundColor(selected ? .primary : appState.themeText.opacity(0.9))
+                            .lineLimit(1)
+                        if channel.projectId != nil {
+                            Text("collab")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundColor(appState.themeAccent)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 3)
+                                        .fill(appState.themeAccent.opacity(0.15))
+                                )
+                        }
+                        Spacer(minLength: 4)
+                        if unread > 0 {
+                            Text(unread > 99 ? "99+" : "\(unread)")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(appState.themeAccent))
+                        }
+                    }
+                    if let preview = channel.lastMessagePreview, !preview.isEmpty {
+                        Text(preview)
+                            .font(.system(size: 10))
+                            .foregroundColor(appState.themeTextSecondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .sidebarRowStyle(isSelected: selected)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button {
+                ChannelStarStore.shared.toggle(channel.id)
+                appState.channelsListGeneration &+= 1
+            } label: {
+                Label("Unstar channel", systemImage: "star.slash")
+            }
+        }
+    }
+
+    private func starredProjectRow(_ p: MWProject) -> some View {
+        let selected = appState.selectedProjectId == p.id
+        return Button {
+            appState.selectedProjectId = p.id
+            appState.selectedThreadId = nil
+            appState.selectedJournalId = nil
+            appState.selectedChannelId = nil
+            appState.showInbox = false
+            appState.showSkills = false
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 4) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 9))
+                        .foregroundColor(appState.themeAccent)
+                    Text(p.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(appState.themeText)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                let s = p.sections?.count ?? 0
+                let c = p.chatCount ?? 0
+                Text("\(s) section\(s == 1 ? "" : "s") · \(c) chat\(c == 1 ? "" : "s")")
+                    .font(.system(size: 10))
+                    .foregroundColor(appState.themeTextSecondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .sidebarRowStyle(isSelected: selected)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Unstar") {
+                Task {
+                    await toggleProjectPin(project: p)
+                }
+            }
+        }
+    }
+
+    private func toggleProjectPin(project: MWProject) async {
+        do {
+            _ = try await MatchaWorkService.shared.setProjectPinned(id: project.id, pinned: false)
+            await MainActor.run {
+                appState.projectsListGeneration &+= 1
+            }
+        } catch {
+            print("[ContentView] toggleProjectPin failed: \(error)")
+        }
+    }
+
+    private func starredThreadRow(_ thread: MWThread) -> some View {
+        let selected = appState.selectedThreadId == thread.id
+        return Button {
+            appState.selectedThreadId = thread.id
+            appState.selectedProjectId = nil
+            appState.selectedChannelId = nil
+            appState.selectedJournalId = nil
+            appState.showInbox = false
+            appState.showPeople = false
+            appState.showHome = false
+            appState.showSkills = false
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .top) {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 9))
+                        .foregroundColor(appState.themeAccent)
+                    Text(thread.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(appState.themeText)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                Text("\(thread.resolvedTaskType.label) · v\(thread.version) · \(formatThreadDate(thread.lastActivityAt))")
+                    .font(.system(size: 10))
+                    .foregroundColor(appState.themeTextSecondary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .sidebarRowStyle(isSelected: selected)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Unpin") {
+                Task {
+                    do {
+                        _ = try await MatchaWorkService.shared.setPinned(id: thread.id, pinned: false)
+                        await MainActor.run {
+                            NotificationCenter.default.post(name: .mwThreadsChanged, object: nil)
+                        }
+                    } catch {
+                        print("[ContentView] unpin thread failed: \(error)")
+                    }
+                }
+            }
+        }
+    }
+
+    private func loadStarredItems() async {
+        do {
+            let channelList = try await ChannelsService.shared.listChannels()
+            let stars = ChannelStarStore.shared
+            let favChannels = channelList.filter { stars.isStarred($0.id) }
+
+            let projectList = try await MatchaWorkService.shared.listProjects()
+            let favProjects = projectList.filter { $0.isPinned ?? false }
+
+            let threadList = try await MatchaWorkService.shared.listThreads(status: nil)
+            let favThreads = threadList.filter { $0.isPinned }
+
+            await MainActor.run {
+                self.starredChannels = favChannels
+                self.starredProjects = favProjects
+                self.starredThreads = favThreads
+            }
+        } catch {
+            print("[ContentView] loadStarredItems failed: \(error)")
+        }
+    }
+}
+
+// MARK: - Mac Native Visual Effect View
+
+struct VisualEffectView: NSViewRepresentable {
+    var material: NSVisualEffectView.Material
+    var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = material
+        nsView.blendingMode = blendingMode
+    }
 }
 
 struct SidebarRowModifier: ViewModifier {
     let isSelected: Bool
+    @Environment(AppState.self) private var appState
     @State private var isHovered = false
 
     func body(content: Content) -> some View {
+        let activeTheme = appState.appTheme
         content
             .background(
                 RoundedRectangle(cornerRadius: 6)
                     .fill(isSelected
-                          ? Color.matcha500.opacity(0.15)
-                          : (isHovered ? Color.white.opacity(0.04) : Color.clear))
+                          ? appState.themeAccent.opacity(activeTheme == "light" ? 0.25 : 0.15)
+                          : (isHovered ? (activeTheme == "light" ? Color.black.opacity(0.04) : Color.white.opacity(0.04)) : Color.clear))
                     .padding(.horizontal, 6)
             )
             .onHover { hovering in
@@ -750,6 +1091,18 @@ extension View {
     func sidebarRowStyle(isSelected: Bool) -> some View {
         self.modifier(SidebarRowModifier(isSelected: isSelected))
     }
+}
+
+private let threadListOutputFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateStyle = .medium
+    formatter.timeStyle = .none
+    return formatter
+}()
+
+private func formatThreadDate(_ iso: String) -> String {
+    guard let date = parseMWDate(iso) else { return iso }
+    return threadListOutputFormatter.string(from: date)
 }
 
 

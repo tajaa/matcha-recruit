@@ -7,6 +7,7 @@ import SwiftUI
 struct JournalListView: View {
     @Environment(AppState.self) private var appState
     var showHeader: Bool = true
+    var searchText: String = ""
 
     @State private var journals: [MWJournal] = []
     @State private var isLoading = true
@@ -43,14 +44,18 @@ struct JournalListView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.vertical, 16)
             } else {
+                let filtered = journals.filter {
+                    searchText.isEmpty || $0.title.localizedCaseInsensitiveContains(searchText)
+                }
                 LazyVStack(spacing: 0) {
-                    ForEach(journals) { j in
+                    ForEach(filtered) { j in
                         row(j)
                     }
                 }
                 .padding(.vertical, 4)
             }
         }
+        .background(Color.clear)
         .task { await load() }
         .onChange(of: appState.journalsListGeneration) { _, _ in
             Task { await load() }
@@ -75,12 +80,12 @@ struct JournalListView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(j.title)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.white.opacity(0.9))
+                        .foregroundColor(appState.themeText.opacity(0.9))
                         .lineLimit(1)
                     if let n = j.entryCount, n > 0 {
                         Text("\(n) entr\(n == 1 ? "y" : "ies")")
                             .font(.system(size: 9))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeTextSecondary)
                     }
                 }
                 Spacer()
@@ -101,8 +106,8 @@ struct JournalListView: View {
         case "blue": return .blue
         case "purple": return .purple
         case "pink": return .pink
-        case "matcha", nil, "": return Color.matcha500
-        default: return Color.matcha500
+        case "matcha", nil, "": return appState.themeAccent
+        default: return appState.themeAccent
         }
     }
 
