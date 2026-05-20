@@ -787,19 +787,30 @@ struct ContentView: View {
 
     // MARK: - Starred section & theme background helpers
 
+    /// Tint strength layered over the sidebar vibrancy. Cappuchin needs the
+    /// most (neutral frost → warm espresso); dark the least (let vibrancy read).
+    private var sidebarTintOpacity: Double {
+        switch appState.appTheme {
+        case "cappuchin": return 0.72
+        case "light": return 0.55
+        default: return 0.40
+        }
+    }
+
     @ViewBuilder
     private var sidebarBackground: some View {
-        switch appState.appTheme {
-        case "cappuchin":
-            // Solid espresso — no desktop bleed-through.
-            Color.cappuchinDark
-        case "light":
-            // Solid light gray panel.
-            Color.grayBg
-        default:
-            // Dark mode keeps the native vibrancy.
-            VisualEffectView(material: .sidebar)
-                .overlay(Color.zinc950.opacity(0.45))
+        if #available(macOS 26.0, *) {
+            // Liquid Glass: system glass, tinted to the theme.
+            Rectangle()
+                .fill(appState.themeBg.opacity(sidebarTintOpacity * 0.5))
+                .glassEffect(.regular.tint(appState.themeBg.opacity(0.28)), in: Rectangle())
+        } else {
+            // Frosted vibrancy that blends with the desktop behind the window,
+            // tinted to keep the theme's identity in all three themes.
+            ZStack {
+                VisualEffectView(material: .sidebar, blendingMode: .behindWindow)
+                appState.themeBg.opacity(sidebarTintOpacity)
+            }
         }
     }
 
@@ -1053,6 +1064,62 @@ struct VisualEffectView: NSViewRepresentable {
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
         nsView.material = material
         nsView.blendingMode = blendingMode
+    }
+}
+
+// MARK: - Glass panels (Liquid Glass on macOS 26, vibrancy material on 14/15)
+
+/// A premium translucent floating surface. On macOS 26+ it renders true
+/// Liquid Glass via `glassEffect`; on macOS 14/15 it falls back to a tinted
+/// `NSVisualEffectView` material so it still looks frosted today. The theme
+/// `tint` (layered over the frost) keeps each theme's identity and preserves
+/// text contrast — the old full-window `.ultraThinMaterial` washout is avoided
+/// by scoping this to discrete chrome / floating surfaces only.
+struct GlassPanelModifier: ViewModifier {
+    var cornerRadius: CGFloat = 12
+    var material: NSVisualEffectView.Material = .menu
+    var blending: NSVisualEffectView.BlendingMode = .withinWindow
+    var tint: Color
+    var tintOpacity: Double = 0.5
+    var stroke: Color = .white.opacity(0.10)
+    var shadow: Bool = true
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        if #available(macOS 26.0, *) {
+            content
+                .glassEffect(.regular.tint(tint.opacity(min(tintOpacity, 0.35))), in: shape)
+        } else {
+            content
+                .background {
+                    ZStack {
+                        VisualEffectView(material: material, blendingMode: blending)
+                        tint.opacity(tintOpacity)
+                    }
+                    .clipShape(shape)
+                }
+                .overlay(shape.stroke(stroke, lineWidth: 1))
+                .shadow(color: shadow ? .black.opacity(0.20) : .clear,
+                        radius: shadow ? 14 : 0, y: shadow ? 6 : 0)
+        }
+    }
+}
+
+extension View {
+    /// Frosted floating panel — see `GlassPanelModifier`.
+    func glassPanel(
+        cornerRadius: CGFloat = 12,
+        material: NSVisualEffectView.Material = .menu,
+        blending: NSVisualEffectView.BlendingMode = .withinWindow,
+        tint: Color,
+        tintOpacity: Double = 0.5,
+        stroke: Color = .white.opacity(0.10),
+        shadow: Bool = true
+    ) -> some View {
+        modifier(GlassPanelModifier(
+            cornerRadius: cornerRadius, material: material, blending: blending,
+            tint: tint, tintOpacity: tintOpacity, stroke: stroke, shadow: shadow))
     }
 }
 

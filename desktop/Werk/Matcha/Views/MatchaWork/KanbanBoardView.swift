@@ -230,8 +230,9 @@ struct KanbanBoardView: View {
         }
         .frame(width: columnWidth)
         .animation(.easeOut(duration: 0.15), value: columnWidth)
-        .background(Color.zinc900.opacity(0.5))
-        .cornerRadius(8)
+        .glassPanel(cornerRadius: 8, material: .underWindowBackground,
+                    tint: Color.cardBackground, tintOpacity: 0.40,
+                    stroke: Color.borderColor.opacity(0.5), shadow: false)
         .onHover { hovering in
             // Only react when the column is empty — populated columns don't
             // need to expand.
@@ -387,7 +388,8 @@ private struct TaskComposeContent: View {
         }
         .padding(16)
         .frame(width: 420)
-        .background(Color.appBackground)
+        .glassPanel(cornerRadius: 0, material: .hudWindow, blending: .behindWindow,
+                    tint: Color.appBackground, tintOpacity: 0.62, shadow: false)
     }
 }
 

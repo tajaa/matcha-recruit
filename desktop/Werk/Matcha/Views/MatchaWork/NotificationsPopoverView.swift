@@ -63,7 +63,8 @@ struct NotificationsPopoverView: View {
             }
         }
         .frame(width: 340, height: 380)
-        .background(Color.appBackground)
+        .glassPanel(cornerRadius: 0, material: .popover, blending: .behindWindow,
+                    tint: appState.themeBg, tintOpacity: 0.62, shadow: false)
         .task { await load() }
         .onReceive(NotificationCenter.default.publisher(for: .mwNotificationsRefresh)) { _ in
             Task { await load() }
