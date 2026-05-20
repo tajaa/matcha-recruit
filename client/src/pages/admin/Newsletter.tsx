@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Loader2, Plus, Send, Trash2, FileText, Search, Tag as TagIcon, Layout, Calendar, Upload, X, BarChart3, ChevronDown, UserPlus } from 'lucide-react'
 import { api } from '../../api/client'
@@ -911,6 +911,7 @@ function TagsTab({ tags, onChange, subscribers }: {
   const [desc, setDesc] = useState('')
   const [expandedTag, setExpandedTag] = useState<string | null>(null)
   const [tagMembers, setTagMembers] = useState<Record<string, { id: string; email: string; name: string | null; status: string }[]>>({})
+  const [loadingMembers, setLoadingMembers] = useState<Set<string>>(new Set())
   const [addSearch, setAddSearch] = useState<Record<string, string>>({})
 
   async function add() {
@@ -930,12 +931,15 @@ function TagsTab({ tags, onChange, subscribers }: {
   async function expandTag(tagId: string) {
     if (expandedTag === tagId) { setExpandedTag(null); return }
     setExpandedTag(tagId)
-    if (!tagMembers[tagId]) {
+    if (tagMembers[tagId] === undefined) {
+      setLoadingMembers(prev => new Set(prev).add(tagId))
       try {
         const res = await api.get<{ subscribers: { id: string; email: string; name: string | null; status: string }[] }>(`/admin/newsletter/tags/${tagId}/subscribers`)
         setTagMembers(prev => ({ ...prev, [tagId]: res.subscribers }))
       } catch {
         setTagMembers(prev => ({ ...prev, [tagId]: [] }))
+      } finally {
+        setLoadingMembers(prev => { const s = new Set(prev); s.delete(tagId); return s })
       }
     }
   }
@@ -995,9 +999,8 @@ function TagsTab({ tags, onChange, subscribers }: {
                   ).slice(0, 6)
                 : []
               return (
-                <>
+                <React.Fragment key={t.id}>
                   <tr
-                    key={t.id}
                     className="border-b border-zinc-800/50 hover:bg-zinc-800/20 cursor-pointer"
                     onClick={() => expandTag(t.id)}
                   >
@@ -1022,12 +1025,12 @@ function TagsTab({ tags, onChange, subscribers }: {
                     </td>
                   </tr>
                   {expandedTag === t.id && (
-                    <tr key={`${t.id}-members`}>
+                    <tr>
                       <td colSpan={5} className="px-4 py-3 bg-zinc-900/40 border-b border-zinc-800/50">
-                        {members.length === 0 && !tagMembers[t.id] && (
-                          <p className="text-[11px] text-zinc-500 mb-2">Loading…</p>
+                        {loadingMembers.has(t.id) && (
+                          <p className="text-[11px] text-zinc-500 mb-2 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Loading…</p>
                         )}
-                        {tagMembers[t.id] && members.length === 0 && (
+                        {!loadingMembers.has(t.id) && tagMembers[t.id] !== undefined && members.length === 0 && (
                           <p className="text-[11px] text-zinc-500 mb-2">No members yet.</p>
                         )}
                         {members.length > 0 && (
@@ -1081,7 +1084,7 @@ function TagsTab({ tags, onChange, subscribers }: {
                       </td>
                     </tr>
                   )}
-                </>
+                </React.Fragment>
               )
             })}
             {tags.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-500">No tags yet.</td></tr>}
