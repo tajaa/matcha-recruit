@@ -407,30 +407,30 @@ build_image() {
     elif [ "$PUSH_TO_ECR" = true ]; then
         local current_branch
         current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-        # Sanitize branch name for Docker tag (slashes, etc → '-')
+        # Sanitize branch name for Docker tag (slashes, etc → '-').
+        # printf, not echo: echo appends a newline that `tr -c` would turn
+        # into a trailing '-' (e.g. buildcache-mybranch-).
         local branch_tag
-        branch_tag=$(echo "$current_branch" | tr '/' '-' | tr -c 'A-Za-z0-9._-' '-')
+        branch_tag=$(printf '%s' "$current_branch" | tr '/' '-' | tr -c 'A-Za-z0-9._-' '-')
 
-        # Read from BOTH the branch-specific cache (incremental, fast on
-        # repeat builds of the same branch) AND the shared main cache
-        # (covers first build of a fresh branch).
-        build_args+=(--cache-from "type=registry,ref=${image_uri}:buildcache-${branch_tag}")
+        # Read the shared base cache first (every branch's warm start) plus
+        # the legacy branch-scoped tag (back-compat for tags already in ECR;
+        # cheap parallel read).
         build_args+=(--cache-from "type=registry,ref=${image_uri}:buildcache")
-        log_info "Cache reads: buildcache-${branch_tag}, buildcache"
+        build_args+=(--cache-from "type=registry,ref=${image_uri}:buildcache-${branch_tag}")
+        log_info "Cache reads: buildcache, buildcache-${branch_tag}"
 
-        # Always write back to a branch-scoped cache tag so subsequent
-        # builds of THIS branch are incremental. mode=max preserves
-        # intermediate layers — bigger cache, much higher hit rate than
-        # mode=min on the typical multi-stage Dockerfile.
-        # Main branch ALSO updates the shared :buildcache tag that other
-        # branches read on first build.
-        local cache_to_targets="type=registry,ref=${image_uri}:buildcache-${branch_tag},mode=max,image-manifest=true,oci-mediatypes=true"
-        build_args+=(--cache-to "$cache_to_targets")
-        log_info "Cache write: buildcache-${branch_tag} (mode=max)"
-        if [[ "$current_branch" == "main" || "$current_branch" == "master" ]]; then
-            build_args+=(--cache-to "type=registry,ref=${image_uri}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true")
-            log_info "Cache write: buildcache (shared, main branch)"
-        fi
+        # Write the shared :buildcache that EVERY branch reads as its base
+        # on first build. This used to be gated to main/master, but the
+        # workflow rarely builds main, so the shared tag never existed and
+        # every fresh branch cold-started (full pip install / npm ci).
+        # Writing it on every build keeps it warm with the latest layers —
+        # the ideal base for the next branch cut. zstd compresses the
+        # mode=max upload faster than the default gzip. One cache-to target
+        # = same upload count as the old single branch target, not double.
+        local cache_to="type=registry,ref=${image_uri}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,compression=zstd,compression-level=3"
+        build_args+=(--cache-to "$cache_to")
+        log_info "Cache write: buildcache (shared, zstd mode=max)"
     else
         log_info "Local build - using default Docker cache"
     fi

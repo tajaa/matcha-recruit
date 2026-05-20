@@ -180,7 +180,7 @@ struct InboxThreadView: View {
                         Text("You've been invited to join this project")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.white)
-                        Text("Invited by \(invite.invitedByName) (\(invite.invitedByEmail))")
+                        Text("Invited by \(invite.invitedBy)")
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
                     }
