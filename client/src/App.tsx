@@ -194,6 +194,7 @@ export default function App() {
         <Route path="newsletter/composer" element={<NewsletterAdmin />} />
         <Route path="landing-media" element={<LandingMediaAdmin />} />
         <Route path="blogs" element={<Blogs />} />
+        <Route path="blogs/composer" element={<Blogs />} />
       </Route>
       <Route path="/broker" element={<AppLayout sidebar={<BrokerSidebar />} logoLabel="Matcha Broker" />}>
         <Route index element={<BrokerDashboard />} />
