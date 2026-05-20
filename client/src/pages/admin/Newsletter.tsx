@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { Loader2, Plus, Send, Trash2, FileText, Search, Tag as TagIcon, Layout, Calendar, Upload, X, BarChart3 } from 'lucide-react'
 import { api } from '../../api/client'
 import SectionEditor from '../../components/matcha-work/SectionEditor'
@@ -68,9 +68,10 @@ async function uploadNewsletterMedia(file: File): Promise<string | null> {
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
-export default function NewsletterAdmin({ initialTab }: { initialTab?: Tab } = {}) {
+export default function NewsletterAdmin() {
   const navigate = useNavigate()
-  const [tab, setTab] = useState<Tab>(initialTab ?? 'subscribers')
+  const location = useLocation()
+  const [tab, setTab] = useState<Tab>('subscribers')
   const [subscribers, setSubs] = useState<Subscriber[]>([])
   const [stats, setStats] = useState<SubStats | null>(null)
   const [newsletters, setNewsletters] = useState<Newsletter[]>([])
@@ -112,6 +113,16 @@ export default function NewsletterAdmin({ initialTab }: { initialTab?: Tab } = {
   const [importOpen, setImportOpen] = useState(false)
 
   useEffect(() => { loadData() }, [])
+
+  // Sync tab with route: /admin/newsletter/composer → compose tab
+  useEffect(() => {
+    if (location.pathname.endsWith('/composer')) {
+      setTab('compose')
+      setEditingId(null)
+      setComposeTitle(''); setComposeSubject(''); setComposePreheader(''); setComposeHtml('')
+      setIsDirty(false); setSaveStatus('saved')
+    }
+  }, [location.pathname])
 
   async function loadData() {
     setLoading(true)
@@ -175,7 +186,7 @@ export default function NewsletterAdmin({ initialTab }: { initialTab?: Tab } = {
             title: composeTitle.trim(), subject: composeSubject.trim(),
           })
           setEditingId(nl.id)
-          setNewsletters((prev) => [nl, ...prev])
+          setNewsletters((prev) => prev.some(n => n.id === nl.id) ? prev : [nl, ...prev])
           if (composeHtml || composePreheader) {
             await api.put(`/admin/newsletter/newsletters/${nl.id}`, {
               title: composeTitle.trim(), subject: composeSubject.trim(),
@@ -216,7 +227,7 @@ export default function NewsletterAdmin({ initialTab }: { initialTab?: Tab } = {
         title: composeTitle.trim(), subject: composeSubject.trim(),
       })
       setEditingId(nl.id)
-      setNewsletters((prev) => [nl, ...prev])
+      setNewsletters((prev) => prev.some(n => n.id === nl.id) ? prev : [nl, ...prev])
       setIsDirty(false); setSaveStatus('saved')
     } catch {}
     setSaving(false)
@@ -391,8 +402,6 @@ export default function NewsletterAdmin({ initialTab }: { initialTab?: Tab } = {
         <button
           onClick={() => {
             if (isDirty && !confirm('Discard unsaved changes?')) return
-            setEditingId(null); setComposeTitle(''); setComposeSubject(''); setComposePreheader(''); setComposeHtml('')
-            setIsDirty(false); setSaveStatus('saved')
             navigate('/admin/newsletter/composer')
           }}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors"

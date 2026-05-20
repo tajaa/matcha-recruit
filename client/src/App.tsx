@@ -191,7 +191,7 @@ export default function App() {
         <Route path="brokers" element={<Brokers />} />
         <Route path="compliance-mgmt" element={<ComplianceManagement />} />
         <Route path="newsletter" element={<NewsletterAdmin />} />
-        <Route path="newsletter/composer" element={<NewsletterAdmin initialTab="compose" />} />
+        <Route path="newsletter/composer" element={<NewsletterAdmin />} />
         <Route path="landing-media" element={<LandingMediaAdmin />} />
         <Route path="blogs" element={<Blogs />} />
       </Route>
