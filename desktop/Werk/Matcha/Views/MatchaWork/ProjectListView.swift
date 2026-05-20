@@ -81,55 +81,69 @@ struct ProjectListView: View {
                 }
                 Spacer()
             } else {
-                List(selection: selectionBinding) {
+                VStack(spacing: 4) {
                     if !blogs.isEmpty {
-                        Section(isExpanded: $blogsOpen) {
-                            ForEach(blogs) { p in
-                                blogRow(p).tag(p.id)
+                        VStack(spacing: 0) {
+                            projectSectionHeader(title: "Blogs", icon: "doc.richtext", count: blogs.count, isExpanded: $blogsOpen)
+                            if blogsOpen {
+                                VStack(spacing: 0) {
+                                    ForEach(blogs) { p in
+                                        blogRow(p)
+                                    }
+                                }
                             }
-                        } header: {
-                            sectionHeader("Blogs", icon: "doc.richtext", count: blogs.count)
                         }
                     }
                     if !collabs.isEmpty {
-                        Section(isExpanded: $collabsOpen) {
-                            ForEach(collabs) { p in
-                                collabRow(p).tag(p.id)
+                        VStack(spacing: 0) {
+                            projectSectionHeader(title: "Collabs", icon: "person.2", count: collabs.count, isExpanded: $collabsOpen)
+                            if collabsOpen {
+                                VStack(spacing: 0) {
+                                    ForEach(collabs) { p in
+                                        collabRow(p)
+                                    }
+                                }
                             }
-                        } header: {
-                            sectionHeader("Collabs", icon: "person.2", count: collabs.count)
                         }
                     }
                     if !discipline.isEmpty {
-                        Section(isExpanded: $disciplineOpen) {
-                            ForEach(discipline) { p in
-                                genericRow(p, subtitle: sectionSubtitle(p)).tag(p.id)
+                        VStack(spacing: 0) {
+                            projectSectionHeader(title: "Discipline", icon: "exclamationmark.shield", count: discipline.count, isExpanded: $disciplineOpen)
+                            if disciplineOpen {
+                                VStack(spacing: 0) {
+                                    ForEach(discipline) { p in
+                                        genericRow(p, subtitle: sectionSubtitle(p))
+                                    }
+                                }
                             }
-                        } header: {
-                            sectionHeader("Discipline", icon: "exclamationmark.shield", count: discipline.count)
                         }
                     }
                     if !general.isEmpty {
-                        Section(isExpanded: $generalOpen) {
-                            ForEach(general) { p in
-                                genericRow(p, subtitle: sectionSubtitle(p)).tag(p.id)
+                        VStack(spacing: 0) {
+                            projectSectionHeader(title: "Projects", icon: "folder", count: general.count, isExpanded: $generalOpen)
+                            if generalOpen {
+                                VStack(spacing: 0) {
+                                    ForEach(general) { p in
+                                        genericRow(p, subtitle: sectionSubtitle(p))
+                                    }
+                                }
                             }
-                        } header: {
-                            sectionHeader("Projects", icon: "folder", count: general.count)
                         }
                     }
                     if !archivedProjects.isEmpty {
-                        Section(isExpanded: $archivedOpen) {
-                            ForEach(archivedProjects) { p in
-                                archivedRow(p).tag(p.id)
+                        VStack(spacing: 0) {
+                            projectSectionHeader(title: "Archived", icon: "archivebox", count: archivedProjects.count, isExpanded: $archivedOpen)
+                            if archivedOpen {
+                                VStack(spacing: 0) {
+                                    ForEach(archivedProjects) { p in
+                                        archivedRow(p)
+                                    }
+                                }
                             }
-                        } header: {
-                            sectionHeader("Archived", icon: "archivebox", count: archivedProjects.count)
                         }
                     }
                 }
-                .listStyle(.sidebar)
-                .scrollContentBackground(.hidden)
+                .padding(.vertical, 4)
             }
         }
         .background(Color.appBackground)
@@ -245,24 +259,76 @@ struct ProjectListView: View {
 
     // MARK: - Row builders
 
+    // MARK: - Helper Layouts
+
+    private func projectRowWrapper<Content: View>(_ p: MWProject, @ViewBuilder content: () -> Content) -> some View {
+        let selected = appState.selectedProjectId == p.id
+        return Button {
+            appState.selectedProjectId = p.id
+            appState.selectedThreadId = nil
+            appState.selectedJournalId = nil
+            appState.selectedChannelId = nil
+            appState.showInbox = false
+            appState.showSkills = false
+        } label: {
+            content()
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .sidebarRowStyle(isSelected: selected)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func projectSectionHeader(title: String, icon: String, count: Int, isExpanded: Binding<Bool>) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.15)) {
+                isExpanded.wrappedValue.toggle()
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isExpanded.wrappedValue ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .frame(width: 10, alignment: .leading)
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(.secondary)
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text("\(count)")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(.secondary.opacity(0.6))
+            }
+            .contentShape(Rectangle())
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
+    }
+
     @ViewBuilder
     private func blogRow(_ p: MWProject) -> some View {
         let status = (p.projectData?["status"]?.value as? String) ?? "draft"
         let statusColor: Color = status == "published" ? .green : status == "scheduled" ? .orange : .secondary
         let wc = (p.projectData?["word_count"]?.value as? Int) ?? 0
 
-        rowShell(p) {
-            HStack(spacing: 4) {
-                Text(status)
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundColor(statusColor)
-                    .padding(.horizontal, 4).padding(.vertical, 1)
-                    .background(statusColor.opacity(0.12))
-                    .cornerRadius(3)
-                if wc > 0 {
-                    Text("\(wc) words")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+        projectRowWrapper(p) {
+            rowShell(p) {
+                HStack(spacing: 4) {
+                    Text(status)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(statusColor)
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(statusColor.opacity(0.12))
+                        .cornerRadius(3)
+                    if wc > 0 {
+                        Text("\(wc) words")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
         }
@@ -270,20 +336,22 @@ struct ProjectListView: View {
 
     @ViewBuilder
     private func collabRow(_ p: MWProject) -> some View {
-        rowShell(p) {
-            HStack(spacing: 4) {
-                if p.collaboratorRole == "collaborator" {
-                    Text("shared")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(.purple)
-                        .padding(.horizontal, 4).padding(.vertical, 1)
-                        .background(Color.purple.opacity(0.12))
-                        .cornerRadius(3)
-                }
-                if let collabs = p.collaborators {
-                    let others = collabs.filter { $0.userId != appState.currentUser?.id }
-                    if !others.isEmpty {
-                        CollaboratorRowSummary(others: others)
+        projectRowWrapper(p) {
+            rowShell(p) {
+                HStack(spacing: 4) {
+                    if p.collaboratorRole == "collaborator" {
+                        Text("shared")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(.purple)
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(Color.purple.opacity(0.12))
+                            .cornerRadius(3)
+                    }
+                    if let collabs = p.collaborators {
+                        let others = collabs.filter { $0.userId != appState.currentUser?.id }
+                        if !others.isEmpty {
+                            CollaboratorRowSummary(others: others)
+                        }
                     }
                 }
             }
@@ -292,30 +360,34 @@ struct ProjectListView: View {
 
     @ViewBuilder
     private func genericRow(_ p: MWProject, subtitle: String) -> some View {
-        rowShell(p) {
-            Text(subtitle)
-                .font(.system(size: 10))
-                .foregroundColor(.secondary)
+        projectRowWrapper(p) {
+            rowShell(p) {
+                Text(subtitle)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
         }
     }
 
     @ViewBuilder
     private func archivedRow(_ p: MWProject) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(p.title)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.secondary)
-                .lineLimit(1)
-            Text(sectionSubtitle(p))
-                .font(.system(size: 10))
-                .foregroundColor(.secondary.opacity(0.6))
-        }
-        .padding(.vertical, 2)
-        .contextMenu {
-            Button("Unarchive") {
-                Task {
-                    try? await MatchaWorkService.shared.unarchiveProject(id: p.id)
-                    await load()
+        projectRowWrapper(p) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(p.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                Text(sectionSubtitle(p))
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary.opacity(0.6))
+            }
+            .padding(.vertical, 2)
+            .contextMenu {
+                Button("Unarchive") {
+                    Task {
+                        try? await MatchaWorkService.shared.unarchiveProject(id: p.id)
+                        await load()
+                    }
                 }
             }
         }

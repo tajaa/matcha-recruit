@@ -392,7 +392,6 @@ struct ContentView: View {
             }
         ) {
             ChannelsSidebarView(showHeader: false)
-                .frame(height: 220)
         }
     }
 
@@ -495,7 +494,6 @@ struct ContentView: View {
                     .background(Color.red.opacity(0.1))
                 }
                 ProjectListView(showHeader: false)
-                    .frame(height: 220)
             }
         }
     }
@@ -529,7 +527,6 @@ struct ContentView: View {
             }
         ) {
             JournalListView(showHeader: false)
-                .frame(height: 220)
         }
     }
 
@@ -555,7 +552,6 @@ struct ContentView: View {
             }
         ) {
             ThreadListView(viewModel: threadListVM, showHeader: false)
-                .frame(height: 280)
         }
     }
 
@@ -728,4 +724,32 @@ struct ContentView: View {
         }
     }
 }
+
+struct SidebarRowModifier: ViewModifier {
+    let isSelected: Bool
+    @State private var isHovered = false
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isSelected
+                          ? Color.matcha500.opacity(0.15)
+                          : (isHovered ? Color.white.opacity(0.04) : Color.clear))
+                    .padding(.horizontal, 6)
+            )
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.1)) {
+                    isHovered = hovering
+                }
+            }
+    }
+}
+
+extension View {
+    func sidebarRowStyle(isSelected: Bool) -> some View {
+        self.modifier(SidebarRowModifier(isSelected: isSelected))
+    }
+}
+
 

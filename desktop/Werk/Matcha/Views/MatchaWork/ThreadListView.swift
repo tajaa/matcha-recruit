@@ -124,62 +124,79 @@ struct ThreadListView: View {
 
             // Thread list
             if viewModel.isLoading {
-                Spacer()
                 ProgressView().tint(.secondary)
-                Spacer()
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 12)
             } else if viewModel.filteredThreads.isEmpty {
-                Spacer()
                 VStack(spacing: 8) {
                     Image(systemName: "bubble.left")
-                        .font(.system(size: 32))
+                        .font(.system(size: 28))
                         .foregroundColor(.secondary)
                     Text("No threads yet")
                         .foregroundColor(.secondary)
-                        .font(.system(size: 13))
+                        .font(.system(size: 11))
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 16)
             } else {
-                List(viewModel.filteredThreads, selection: $appState.selectedThreadId) { thread in
-                    ThreadRowView(
-                        thread: thread,
-                        onDelete: {
-                            threadToDelete = thread
-                            showDeleteConfirm = true
-                        },
-                        onTogglePin: {
-                            Task { await viewModel.togglePin(thread: thread) }
+                LazyVStack(spacing: 0) {
+                    ForEach(viewModel.filteredThreads, id: \.id) { thread in
+                        let selected = appState.selectedThreadId == thread.id
+                        Button {
+                            appState.selectedThreadId = thread.id
+                            appState.selectedProjectId = nil
+                            appState.selectedChannelId = nil
+                            appState.selectedJournalId = nil
+                            appState.showInbox = false
+                            appState.showPeople = false
+                            appState.showHome = false
+                            appState.showSkills = false
+                        } label: {
+                            ThreadRowView(
+                                thread: thread,
+                                onDelete: {
+                                    threadToDelete = thread
+                                    showDeleteConfirm = true
+                                },
+                                onTogglePin: {
+                                    Task { await viewModel.togglePin(thread: thread) }
+                                }
+                            )
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .sidebarRowStyle(isSelected: selected)
+                            .contentShape(Rectangle())
                         }
-                    )
-                    .tag(thread.id)
-                    .contextMenu {
-                        Button(thread.isPinned ? "Unpin" : "Pin") {
-                            Task { await viewModel.togglePin(thread: thread) }
-                        }
-                        if thread.status == "archived" {
-                            Button("Unarchive") {
-                                Task { await viewModel.unarchiveThread(thread: thread) }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button(thread.isPinned ? "Unpin" : "Pin") {
+                                Task { await viewModel.togglePin(thread: thread) }
                             }
-                        } else {
-                            Button("Archive") {
-                                Task { await viewModel.archiveThread(thread: thread) }
+                            if thread.status == "archived" {
+                                Button("Unarchive") {
+                                    Task { await viewModel.unarchiveThread(thread: thread) }
+                                }
+                            } else {
+                                Button("Archive") {
+                                    Task { await viewModel.archiveThread(thread: thread) }
+                                }
                             }
-                        }
-                        Divider()
-                        Button("Delete", role: .destructive) {
-                            threadToDelete = thread
-                            showDeleteConfirm = true
+                            Divider()
+                            Button("Delete", role: .destructive) {
+                                threadToDelete = thread
+                                showDeleteConfirm = true
+                            }
                         }
                     }
                 }
-                .listStyle(.sidebar)
-                .scrollContentBackground(.hidden)
-                .background(Color.appBackground)
             }
         }
         .background(Color.appBackground)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
-                Divider().opacity(0.3)
+                Divider().opacity(0.15)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
                 Button {
                     appState.selectedThreadId = nil
                     appState.selectedProjectId = nil
@@ -192,19 +209,22 @@ struct ThreadListView: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "bolt.fill")
-                            .font(.system(size: 12))
+                            .font(.system(size: 11))
                             .foregroundColor(appState.showSkills ? .matcha500 : .secondary)
+                            .frame(width: 16)
                         Text("Skills")
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundColor(appState.showSkills ? .white : .secondary)
                         Spacer()
                     }
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(appState.showSkills ? Color.matcha600.opacity(0.15) : Color.clear)
+                    .padding(.vertical, 6)
+                    .sidebarRowStyle(isSelected: appState.showSkills)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
+            .background(Color.appBackground)
         }
         .task { await viewModel.loadThreads() }
         .onReceive(NotificationCenter.default.publisher(for: .mwCreateNewThread)) { _ in

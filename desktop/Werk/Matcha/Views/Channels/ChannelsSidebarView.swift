@@ -105,44 +105,38 @@ struct ChannelsSidebarView: View {
     }
 
     private var loadingView: some View {
-        VStack {
-            Spacer()
-            Text("Loading…")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-            Spacer()
-        }
+        Text("Loading…")
+            .font(.system(size: 11))
+            .foregroundColor(.secondary)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 16)
     }
 
     private var emptyView: some View {
-        VStack {
-            Spacer()
-            VStack(spacing: 8) {
-                Text("No channels yet")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                Button {
-                    showCreate = true
-                } label: {
-                    Text("Create one")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(Color.matcha500)
-                }
-                .buttonStyle(.plain)
+        VStack(spacing: 8) {
+            Text("No channels yet")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+            Button {
+                showCreate = true
+            } label: {
+                Text("Create one")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(Color.matcha500)
             }
-            Spacer()
+            .buttonStyle(.plain)
         }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.vertical, 16)
     }
 
     private var channelList: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(channels, id: \.id) { channel in
-                    row(for: channel)
-                }
+        LazyVStack(spacing: 0) {
+            ForEach(channels, id: \.id) { channel in
+                row(for: channel)
             }
-            .padding(.vertical, 4)
         }
+        .padding(.vertical, 4)
     }
 
     private var deleteDialogBinding: Binding<Bool> {
@@ -253,11 +247,7 @@ struct ChannelsSidebarView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(selected ? Color.matcha500.opacity(0.15) : Color.clear)
-                    .padding(.horizontal, 6)
-            )
+            .sidebarRowStyle(isSelected: selected)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

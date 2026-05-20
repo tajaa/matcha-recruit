@@ -27,7 +27,9 @@ struct JournalListView: View {
             }
 
             if isLoading {
-                Spacer(); ProgressView().tint(.secondary); Spacer()
+                ProgressView().tint(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 12)
             } else if let errorMessage {
                 Text(errorMessage)
                     .font(.system(size: 10))
@@ -35,19 +37,18 @@ struct JournalListView: View {
                     .padding(8)
             } else if journals.isEmpty {
                 VStack(spacing: 6) {
-                    Spacer()
                     Image(systemName: "book.closed").font(.system(size: 22)).foregroundColor(.secondary)
                     Text("No journals yet").font(.system(size: 11)).foregroundColor(.secondary)
-                    Spacer()
                 }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 16)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(journals) { j in
-                            row(j)
-                        }
+                LazyVStack(spacing: 0) {
+                    ForEach(journals) { j in
+                        row(j)
                     }
                 }
+                .padding(.vertical, 4)
             }
         }
         .task { await load() }
@@ -84,9 +85,10 @@ struct JournalListView: View {
                 }
                 Spacer()
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(selected ? Color.white.opacity(0.06) : Color.clear)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .sidebarRowStyle(isSelected: selected)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
