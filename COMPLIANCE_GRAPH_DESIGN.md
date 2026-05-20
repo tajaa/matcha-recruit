@@ -258,6 +258,14 @@ priority-ordered.
   two companies may coin different slugs for the same cert (`bcba` vs
   `bacb_bcba`). Matters once the graph dedups/researches across
   companies — consider a slug-normalization or a catalog table.
+  → **Addressed by the shared-content layer** in `COMPLIANCE_GRAPH_P1.md`:
+  the graph holds per-company *structure*; content lives in shared stores
+  (`jurisdiction_requirements`, `certifications_catalog`/`licenses_catalog`,
+  `credential_*`, + new `compliance_policy_template`), leaves link to a
+  shared row via `cc_requirement.jurisdiction_requirement_id` /
+  `cc_credential.catalog_id` / `cc_policy.template_id` (resolve-before-
+  research dedup, P2/P3). Cross-company slug normalization still needed
+  for the resolver to match variant slugs to one shared row.
 - **Migration `zzzz_b04` (gap_analysis column) must run before
   finalize** on any environment, else finalize 500s. Operational
   reminder, not code.
