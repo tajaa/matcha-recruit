@@ -85,6 +85,9 @@ export default function NewsletterAdmin() {
   const [composeHtml, setComposeHtml] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [isDirty, setIsDirty] = useState(false)
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved')
+  const [previewViewport, setPreviewViewport] = useState<ViewportKey>('mobile')
 
   // Send modal state
   const [sendModal, setSendModal] = useState<{ kind: 'now' | 'schedule' | 'segment' } | null>(null)
@@ -157,6 +160,52 @@ export default function NewsletterAdmin() {
     return () => { progressStopRef.current = true }
   }, [progress?.newsletter_status])
 
+  // Auto-save: 2s after last keystroke, create or update draft
+  useEffect(() => {
+    if (!isDirty) return
+    const canCreate = composeTitle.trim() && composeSubject.trim()
+    if (!editingId && !canCreate) return
+    setSaveStatus('saving')
+    const timer = window.setTimeout(async () => {
+      try {
+        if (!editingId) {
+          const nl = await api.post<Newsletter>('/admin/newsletter/newsletters', {
+            title: composeTitle.trim(), subject: composeSubject.trim(),
+          })
+          setEditingId(nl.id)
+          setNewsletters((prev) => [nl, ...prev])
+          if (composeHtml || composePreheader) {
+            await api.put(`/admin/newsletter/newsletters/${nl.id}`, {
+              title: composeTitle.trim(), subject: composeSubject.trim(),
+              preheader: composePreheader || undefined,
+              content_html: composeHtml || undefined,
+            })
+          }
+        } else {
+          await api.put(`/admin/newsletter/newsletters/${editingId}`, {
+            title: composeTitle.trim() || undefined,
+            subject: composeSubject.trim() || undefined,
+            preheader: composePreheader || undefined,
+            content_html: composeHtml || undefined,
+          })
+        }
+        setIsDirty(false)
+        setSaveStatus('saved')
+      } catch {
+        setSaveStatus('unsaved')
+      }
+    }, 2000)
+    return () => window.clearTimeout(timer)
+  }, [composeTitle, composeSubject, composePreheader, composeHtml, isDirty])
+
+  useEffect(() => {
+    function handler(e: BeforeUnloadEvent) {
+      if (isDirty) { e.preventDefault(); e.returnValue = '' }
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [isDirty])
+
   async function handleCreate() {
     if (!composeTitle.trim() || !composeSubject.trim()) return
     setSaving(true)
@@ -166,6 +215,7 @@ export default function NewsletterAdmin() {
       })
       setEditingId(nl.id)
       setNewsletters((prev) => [nl, ...prev])
+      setIsDirty(false); setSaveStatus('saved')
     } catch {}
     setSaving(false)
   }
@@ -180,6 +230,7 @@ export default function NewsletterAdmin() {
         preheader: composePreheader || undefined,
         content_html: composeHtml || undefined,
       })
+      setIsDirty(false); setSaveStatus('saved')
     } catch {}
     setSaving(false)
   }
@@ -223,6 +274,7 @@ export default function NewsletterAdmin() {
       setSendModal(null)
       setEditingId(null)
       setComposeTitle(''); setComposeSubject(''); setComposePreheader(''); setComposeHtml('')
+      setIsDirty(false); setSaveStatus('saved')
       setTab('newsletters')
       loadData()
     } catch (err) {
@@ -289,6 +341,8 @@ export default function NewsletterAdmin() {
     setComposeSubject(nl.subject)
     setComposePreheader(nl.preheader ?? '')
     setComposeHtml(nl.content_html || '')
+    setIsDirty(false)
+    setSaveStatus('saved')
     setTab('compose')
   }
 
@@ -298,6 +352,7 @@ export default function NewsletterAdmin() {
     setComposePreheader(t.preheader ?? '')
     setComposeHtml(t.content_html ?? '')
     setEditingId(null)
+    setIsDirty(true); setSaveStatus('unsaved')
     setTab('compose')
   }
 
@@ -316,6 +371,13 @@ export default function NewsletterAdmin() {
     return s.email.toLowerCase().includes(q) || (s.name || '').toLowerCase().includes(q)
   }), [subscribers, search])
 
+  function handleTabChange(next: Tab) {
+    if (tab === 'compose' && isDirty) {
+      if (!confirm('You have unsaved changes. Leave compose?')) return
+    }
+    setTab(next)
+  }
+
   if (loading) {
     return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-zinc-500" size={24} /></div>
   }
@@ -325,7 +387,11 @@ export default function NewsletterAdmin() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold text-zinc-100">Newsletter</h1>
         <button
-          onClick={() => { setEditingId(null); setComposeTitle(''); setComposeSubject(''); setComposePreheader(''); setComposeHtml(''); setTab('compose') }}
+          onClick={() => {
+            if (isDirty && !confirm('Discard unsaved changes?')) return
+            setEditingId(null); setComposeTitle(''); setComposeSubject(''); setComposePreheader(''); setComposeHtml('')
+            setIsDirty(false); setSaveStatus('saved'); setTab('compose')
+          }}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors"
         >
           <Plus size={14} /> New Newsletter
@@ -379,7 +445,7 @@ export default function NewsletterAdmin() {
       {/* Tabs */}
       <div className="flex gap-1 mb-6 border-b border-zinc-800/60 pb-px">
         {(['subscribers', 'newsletters', 'compose', 'tags', 'templates'] as Tab[]).map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={`px-4 py-2 text-xs font-medium transition-colors relative ${tab === t ? 'text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}>
+          <button key={t} onClick={() => handleTabChange(t)} className={`px-4 py-2 text-xs font-medium transition-colors relative ${tab === t ? 'text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}>
             {t === 'compose' ? (editingId ? 'Edit Draft' : 'Compose') : t.charAt(0).toUpperCase() + t.slice(1)}
             {tab === t && <span className="absolute bottom-0 left-2 right-2 h-px bg-zinc-300 rounded-full" />}
           </button>
@@ -498,28 +564,34 @@ export default function NewsletterAdmin() {
       {/* Compose tab — split editor + mobile preview */}
       {tab === 'compose' && (
         <div className="space-y-4">
-          <div className="grid lg:grid-cols-[1fr_360px] gap-6 max-w-6xl">
+          {/* Save status indicator */}
+          <div className="h-4 flex items-center">
+            {saveStatus === 'saving' && <span className="text-[10px] text-zinc-500 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Saving…</span>}
+            {saveStatus === 'saved' && editingId && <span className="text-[10px] text-zinc-500">Saved</span>}
+            {saveStatus === 'unsaved' && <span className="text-[10px] text-amber-500">Unsaved changes</span>}
+          </div>
+          <div className={`grid ${previewViewport === 'wide' ? 'grid-cols-1' : previewViewport === 'desktop' ? 'lg:grid-cols-[1fr_660px]' : 'lg:grid-cols-[1fr_376px]'} gap-6 max-w-6xl`}>
             <div className="space-y-4">
               <div>
                 <label className="block text-xs text-zinc-400 mb-1">Title</label>
-                <input value={composeTitle} onChange={(e) => setComposeTitle(e.target.value)} placeholder="Newsletter title..." className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500" />
+                <input value={composeTitle} onChange={(e) => { setComposeTitle(e.target.value); setIsDirty(true); setSaveStatus('unsaved') }} placeholder="Newsletter title..." className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500" />
               </div>
               <div>
                 <label className="block text-xs text-zinc-400 mb-1">Subject line</label>
-                <input value={composeSubject} onChange={(e) => setComposeSubject(e.target.value)} placeholder="Email subject..." className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500" />
+                <input value={composeSubject} onChange={(e) => { setComposeSubject(e.target.value); setIsDirty(true); setSaveStatus('unsaved') }} placeholder="Email subject..." className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500" />
               </div>
               <div>
                 <label className="block text-xs text-zinc-400 mb-1">
                   Preheader <span className="text-zinc-600">— inbox preview snippet, hidden in body</span>
                 </label>
-                <input value={composePreheader} onChange={(e) => setComposePreheader(e.target.value)} maxLength={255} placeholder="Short hook seen in the recipient's inbox preview..." className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500" />
+                <input value={composePreheader} onChange={(e) => { setComposePreheader(e.target.value); setIsDirty(true); setSaveStatus('unsaved') }} maxLength={255} placeholder="Short hook seen in the recipient's inbox preview..." className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500" />
               </div>
               <div>
                 <label className="block text-xs text-zinc-400 mb-1">Content</label>
                 <div className="rounded-lg border border-zinc-700 overflow-hidden" style={{ background: '#1e1e1e' }}>
                   <SectionEditor
                     content={composeHtml}
-                    onUpdate={(html) => setComposeHtml(html)}
+                    onUpdate={(html) => { setComposeHtml(html); setIsDirty(true); setSaveStatus('unsaved') }}
                     onImageUpload={uploadNewsletterMedia}
                     onVideoUpload={uploadNewsletterMedia}
                   />
@@ -527,12 +599,14 @@ export default function NewsletterAdmin() {
               </div>
             </div>
 
-            {/* Mobile preview pane */}
+            {/* Preview pane */}
             <MobilePreview
               title={composeTitle}
               subject={composeSubject}
               preheader={composePreheader}
               html={composeHtml}
+              viewport={previewViewport}
+              onViewportChange={setPreviewViewport}
             />
           </div>
 
@@ -664,12 +738,14 @@ type ThemeKey = 'dark' | 'light'
 
 const VIEWPORT_WIDTHS: Record<ViewportKey, number> = { mobile: 360, desktop: 640, wide: 800 }
 
-function MobilePreview({ title, subject, preheader, html }: { title: string; subject: string; preheader: string; html: string }) {
+function MobilePreview({ title, subject, preheader, html, viewport, onViewportChange }: {
+  title: string; subject: string; preheader: string; html: string
+  viewport: ViewportKey; onViewportChange: (v: ViewportKey) => void
+}) {
   // Iframe runs the SAME render pipeline as outbound mail — POSTs the draft
   // to /admin/newsletter/preview and inlines whatever the backend produces.
   // That's the only way the preview can stay honest about video poster
   // fallback, branded chrome, theme palette, and CAN-SPAM footer changes.
-  const [viewport, setViewport] = useState<ViewportKey>('mobile')
   const [theme, setTheme] = useState<ThemeKey>('dark')
   const [previewHtml, setPreviewHtml] = useState<string>('')
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -714,7 +790,7 @@ function MobilePreview({ title, subject, preheader, html }: { title: string; sub
         {(['mobile', 'desktop', 'wide'] as ViewportKey[]).map((v) => (
           <button
             key={v}
-            onClick={() => setViewport(v)}
+            onClick={() => onViewportChange(v)}
             className={`text-[10px] px-2 py-1 rounded ${viewport === v ? 'bg-zinc-700 text-zinc-100' : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'}`}
           >
             {v === 'mobile' ? 'Mobile' : v === 'desktop' ? 'Desktop' : 'Wide'} <span className="text-zinc-500">({VIEWPORT_WIDTHS[v]})</span>
