@@ -71,8 +71,22 @@ struct ProjectDetailView: View {
             // weren't attached yet. SwiftUI auto-cancels this block when
             // projectId changes.
             viewModel.attachTaskRealtime(currentUserId: appState.currentUser?.id)
+            // Deep-link from a notification tap: open the requested panel
+            // (e.g. kanban for a task notification), then clear the hint.
+            if let panel = appState.pendingProjectPanel {
+                collabPanel = panel
+                appState.pendingProjectPanel = nil
+            }
             presenceVM.start(projectId: projectId, pageKey: collabPanel.rawValue)
             await viewModel.loadProject(id: projectId)
+        }
+        // Same project already open when the notification fires: projectId
+        // doesn't change so the .task above won't re-run — catch it here.
+        .onChange(of: appState.pendingProjectPanel) { _, panel in
+            if let panel {
+                collabPanel = panel
+                appState.pendingProjectPanel = nil
+            }
         }
         .onChange(of: collabPanel) { _, newPanel in
             presenceVM.setPage(newPanel.rawValue)

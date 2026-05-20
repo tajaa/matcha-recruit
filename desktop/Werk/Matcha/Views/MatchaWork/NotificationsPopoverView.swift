@@ -2,6 +2,7 @@ import SwiftUI
 
 struct NotificationsPopoverView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.dismiss) private var dismiss
     @State private var notifications: [MWAppNotification] = []
     @State private var loading = true
     @State private var markingAll = false
@@ -11,7 +12,7 @@ struct NotificationsPopoverView: View {
             HStack {
                 Text("Notifications")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(appState.themeText)
                 Spacer()
                 if !notifications.isEmpty && notifications.contains(where: { !$0.isRead }) {
                     Button {
@@ -52,6 +53,8 @@ struct NotificationsPopoverView: View {
                         ForEach(notifications) { n in
                             NotificationRow(notification: n) {
                                 Task { await markRead(id: n.id) }
+                                appState.handleNotificationLink(n.link)
+                                dismiss()
                             }
                             Divider().opacity(0.15)
                         }
@@ -103,6 +106,7 @@ private extension MWAppNotification {
 }
 
 private struct NotificationRow: View {
+    @Environment(AppState.self) private var appState
     let notification: MWAppNotification
     let onTap: () -> Void
 
@@ -116,7 +120,7 @@ private struct NotificationRow: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(notification.title)
                         .font(.system(size: 12, weight: notification.isRead ? .regular : .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(appState.themeText)
                         .multilineTextAlignment(.leading)
                     if let body = notification.body, !body.isEmpty {
                         Text(body)
