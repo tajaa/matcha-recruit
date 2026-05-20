@@ -18,7 +18,7 @@ from ...config import get_settings
 
 logger = logging.getLogger(__name__)
 
-EXTRACTION_MODEL = "gemini-2.0-flash"
+EXTRACTION_MODEL = "gemini-3.5-flash"
 
 # Mapping from document_type to the fields we want to extract
 EXTRACTION_FIELDS: dict[str, list[dict[str, str]]] = {
@@ -71,17 +71,8 @@ EXTRACTION_FIELDS: dict[str, list[dict[str, str]]] = {
 
 def _get_client() -> genai.Client:
     settings = get_settings()
-    api_key = os.getenv("GEMINI_API_KEY")
-    if api_key:
-        return genai.Client(api_key=api_key)
-    elif settings.use_vertex:
-        return genai.Client(
-            vertexai=True,
-            project=settings.vertex_project,
-            location=settings.vertex_location,
-        )
-    else:
-        return genai.Client(api_key=settings.gemini_api_key)
+    api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
+    return genai.Client(api_key=api_key)
 
 
 def _build_prompt(document_type: str) -> str:

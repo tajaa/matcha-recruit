@@ -61,7 +61,7 @@ server/
 - Gmail API via OAuth2 (`app/core/services/email.py`) for transactional. MailerSend for broker invites + a few transactional flows. The send wrapper has a defense-in-depth guard that skips RFC 2606 reserved test domains — see root CLAUDE.md test-data rules.
 
 **AI**:
-- Gemini via `google.genai` SDK with `settings.gemini_api_key`. Vertex AI used only for Gemini Live API in voice interviews.
+- Gemini via `google.genai` SDK with `settings.gemini_api_key` (from the `LIVE_API` env var). Some services also honor a `GEMINI_API_KEY` env override. Native Google AI only — no Vertex.
 - Per-feature analyzer singletons (e.g. `get_ir_analyzer`, `get_er_analyzer`) cache the model handle; don't instantiate per request.
 
 **Streaming**:

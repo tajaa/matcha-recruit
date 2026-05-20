@@ -71,9 +71,6 @@ class Settings:
 
     # Gemini API
     gemini_api_key: Optional[str]
-    vertex_project: Optional[str]
-    vertex_location: str
-    use_vertex: bool
 
     # Models
     live_model: str
@@ -196,19 +193,10 @@ def load_settings() -> Settings:
     if secret_id:
         _load_secrets_from_aws(secret_id)
 
-    # Ensure GOOGLE_APPLICATION_CREDENTIALS is set for Vertex AI
-    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if creds_path:
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-
-    # Check if using Vertex AI (service account) or API key
-    vertex_project = os.getenv("VERTEX_PROJECT")
     api_key = os.getenv("LIVE_API", "")
 
-    use_vertex = vertex_project is not None
-
-    if not use_vertex and not api_key:
-        raise ValueError("Either VERTEX_PROJECT or LIVE_API environment variable is required")
+    if not api_key:
+        raise ValueError("LIVE_API environment variable is required")
 
     database_url = os.getenv("DATABASE_URL", "")
     if not database_url:
@@ -237,11 +225,8 @@ def load_settings() -> Settings:
         database_url=database_url_clean,
         database_ssl=database_ssl,
         gemini_api_key=api_key if api_key else None,
-        vertex_project=vertex_project,
-        vertex_location=os.getenv("VERTEX_LOCATION", "us-central1"),
-        use_vertex=use_vertex,
         live_model=os.getenv("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview"),
-        analysis_model=os.getenv("GEMINI_ANALYSIS_MODEL", "gemini-3-flash-preview"),
+        analysis_model=os.getenv("GEMINI_ANALYSIS_MODEL", "gemini-3.5-flash"),
         voice=os.getenv("GEMINI_VOICE", "Kore"),
         port=int(os.getenv("PORT", "8002")),
         search_api_key=os.getenv("SEARCH_API_KEY"),

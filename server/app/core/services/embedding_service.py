@@ -26,27 +26,14 @@ class EmbeddingService:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        vertex_project: Optional[str] = None,
-        vertex_location: str = "us-central1",
     ):
         """
         Initialize the embedding service.
 
         Args:
-            api_key: Gemini API key (use if not using Vertex AI).
-            vertex_project: GCP project ID for Vertex AI.
-            vertex_location: Vertex AI location (default: us-central1).
+            api_key: Gemini API key.
         """
-        if vertex_project:
-            self.client = genai.Client(
-                vertexai=True,
-                project=vertex_project,
-                location=vertex_location,
-            )
-        elif api_key:
-            self.client = genai.Client(api_key=api_key)
-        else:
-            raise ValueError("Either api_key or vertex_project must be provided")
+        self.client = genai.Client(api_key=api_key)
 
     async def embed_text(
         self,

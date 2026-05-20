@@ -682,11 +682,8 @@ def test_sanitize_guided_questions_parses_required_string_values():
 
 def test_generate_guided_draft_ai_payload_raises_rate_limit_error(monkeypatch):
     settings = SimpleNamespace(
-        use_vertex=True,
-        gemini_api_key=None,
-        vertex_project="demo-project",
-        vertex_location="us-central1",
-        analysis_model="gemini-3-flash-preview",
+        gemini_api_key="demo-key",
+        analysis_model="gemini-3.5-flash",
     )
     monkeypatch.setattr(handbook_service_module, "get_settings", lambda: settings)
 

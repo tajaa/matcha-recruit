@@ -58,7 +58,7 @@ Sidebar dispatch in `client/src/components/TenantSidebar.tsx`. Tier-check helper
 - **Framework**: FastAPI + uvicorn (async)
 - **Database**: PostgreSQL via asyncpg (connection pool)
 - **Background jobs**: Celery + Redis
-- **AI**: Google Gemini via `GEMINI_API_KEY` (Vertex used only for Gemini Live API in voice interviews)
+- **AI**: Google Gemini via `GEMINI_API_KEY` (native Google AI; Vertex removed)
 - **Storage**: S3 + CloudFront (`server/app/core/services/storage.py`)
 - **Auth**: JWT
 - **Deployment**: AWS EC2 — Nginx reverse proxy + Postgres on dedicated EC2 (acts as RDS, runs directly on host, not Docker).

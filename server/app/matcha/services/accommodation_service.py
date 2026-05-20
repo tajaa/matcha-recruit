@@ -153,22 +153,10 @@ class AccommodationAnalyzer:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        vertex_project: Optional[str] = None,
-        vertex_location: str = "us-central1",
-        model: str = "gemini-2.5-flash",
+        model: str = "gemini-3.5-flash",
     ):
         self.model = model
-
-        if vertex_project:
-            self.client = genai.Client(
-                vertexai=True,
-                project=vertex_project,
-                location=vertex_location,
-            )
-        elif api_key:
-            self.client = genai.Client(api_key=api_key)
-        else:
-            raise ValueError("Either api_key or vertex_project must be provided")
+        self.client = genai.Client(api_key=api_key)
 
     def _parse_json_response(self, text: str) -> dict[str, Any]:
         """Parse JSON from LLM response, handling markdown code blocks."""

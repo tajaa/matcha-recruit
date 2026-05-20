@@ -872,8 +872,7 @@ async def get_analytics_consistency(
         try:
             result = await compute_consistency_analytics(
                 incidents,
-                api_key=settings.gemini_api_key if not settings.use_vertex else None,
-                vertex_project=settings.vertex_project if settings.use_vertex else None,
+                api_key=settings.gemini_api_key,
             )
         except Exception as e:
             logger.warning(f"Consistency analytics computation failed: {e}")

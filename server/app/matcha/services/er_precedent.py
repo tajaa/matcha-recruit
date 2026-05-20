@@ -253,7 +253,6 @@ async def enrich_with_semantics(
     current: dict,
     top_candidates: list[dict],
     api_key: Optional[str] = None,
-    vertex_project: Optional[str] = None,
 ) -> dict[str, Any]:
     """Phase 2: Single Gemini call to score semantic dimensions for top candidates.
 
@@ -263,12 +262,7 @@ async def enrich_with_semantics(
     from ...config import get_settings
     from ...core.services.rate_limiter import get_rate_limiter
 
-    if vertex_project:
-        client = genai.Client(vertexai=True, project=vertex_project, location="us-central1")
-    elif api_key:
-        client = genai.Client(api_key=api_key)
-    else:
-        raise ValueError("Either api_key or vertex_project must be provided")
+    client = genai.Client(api_key=api_key)
 
     rate_limiter = get_rate_limiter()
     await rate_limiter.check_limit("er_analysis", "precedent_semantic")
@@ -298,7 +292,7 @@ async def enrich_with_semantics(
 
     # Build model candidates: configured model first, then stable fallbacks
     settings = get_settings()
-    primary_model = getattr(settings, "analysis_model", None) or "gemini-2.5-flash"
+    primary_model = getattr(settings, "analysis_model", None) or "gemini-3.5-flash"
     model_candidates: list[str] = []
     for m in [primary_model, *PRECEDENT_FALLBACK_MODELS]:
         if m and m not in model_candidates:
@@ -572,8 +566,7 @@ async def find_similar_cases_stream(case_id: str, conn, case_row=None):
     semantic_result = await enrich_with_semantics(
         current,
         top,
-        api_key=settings.gemini_api_key if not settings.use_vertex else None,
-        vertex_project=settings.vertex_project if settings.use_vertex else None,
+        api_key=settings.gemini_api_key,
     )
 
     semantic_lookup: dict[str, dict] = {}

@@ -38,7 +38,7 @@ async def _analyze_interview(
     investigation_analysis_data = None
 
     # Initialize analyzers. Always use direct Gemini API — Vertex lacks the
-    # preview models (e.g. gemini-3-flash-preview) that analysis_model points at.
+    # preview models (e.g. gemini-3.5-flash) that analysis_model points at.
     conv_analyzer = ConversationAnalyzer(
         api_key=settings.gemini_api_key,
         model=settings.analysis_model,

@@ -69,7 +69,6 @@ Return ONLY the single sentence, no JSON wrapping."""
 async def _categorize_actions(
     precedents: list[dict],
     api_key: Optional[str] = None,
-    vertex_project: Optional[str] = None,
 ) -> dict[str, list[str]]:
     """Single Gemini call to categorize corrective_actions for all precedents.
 
@@ -78,12 +77,7 @@ async def _categorize_actions(
     from google import genai
     from ...core.services.rate_limiter import get_rate_limiter
 
-    if vertex_project:
-        client = genai.Client(vertexai=True, project=vertex_project, location="us-central1")
-    elif api_key:
-        client = genai.Client(api_key=api_key)
-    else:
-        raise ValueError("Either api_key or vertex_project must be provided")
+    client = genai.Client(api_key=api_key)
 
     rate_limiter = get_rate_limiter()
     await rate_limiter.check_limit("ir_analysis", "consistency_categorize")
@@ -103,7 +97,7 @@ async def _categorize_actions(
 
     response = await asyncio.wait_for(
         client.aio.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.5-flash",
             contents=prompt,
         ),
         timeout=GEMINI_CALL_TIMEOUT,
@@ -138,18 +132,12 @@ async def _generate_insight(
     effective_n: float,
     confidence: str,
     api_key: Optional[str] = None,
-    vertex_project: Optional[str] = None,
 ) -> Optional[str]:
     """Single Gemini call to produce a 1-sentence consistency insight."""
     from google import genai
     from ...core.services.rate_limiter import get_rate_limiter
 
-    if vertex_project:
-        client = genai.Client(vertexai=True, project=vertex_project, location="us-central1")
-    elif api_key:
-        client = genai.Client(api_key=api_key)
-    else:
-        raise ValueError("Either api_key or vertex_project must be provided")
+    client = genai.Client(api_key=api_key)
 
     rate_limiter = get_rate_limiter()
     await rate_limiter.check_limit("ir_analysis", "consistency_insight")
@@ -165,7 +153,7 @@ async def _generate_insight(
 
     response = await asyncio.wait_for(
         client.aio.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.5-flash",
             contents=prompt,
         ),
         timeout=GEMINI_CALL_TIMEOUT,
@@ -278,14 +266,12 @@ def _compute_resolution_stats(precedents: list[dict]) -> dict[str, Any]:
 async def compute_outcome_distribution(
     precedents: list[dict],
     api_key: Optional[str] = None,
-    vertex_project: Optional[str] = None,
 ) -> dict[str, Any]:
     """Main entry point: compute consistency guidance from precedent list.
 
     Args:
         precedents: List of PrecedentMatch-shaped dicts (from cached similar analysis).
         api_key: Gemini API key.
-        vertex_project: Vertex AI project ID.
 
     Returns a ConsistencyGuidance-shaped dict.
     """
@@ -305,7 +291,7 @@ async def compute_outcome_distribution(
 
     try:
         categorized = await _categorize_actions(
-            precedents, api_key=api_key, vertex_project=vertex_project,
+            precedents, api_key=api_key,
         )
         action_distribution = _compute_weighted_action_distribution(precedents, categorized)
 
@@ -321,7 +307,6 @@ async def compute_outcome_distribution(
                     n_eff,
                     confidence,
                     api_key=api_key,
-                    vertex_project=vertex_project,
                 )
             except Exception as e:
                 logger.warning(f"Consistency insight generation failed: {e}")
@@ -383,7 +368,6 @@ def _compute_aggregate_distribution(
 async def compute_consistency_analytics(
     incidents: list[dict],
     api_key: Optional[str] = None,
-    vertex_project: Optional[str] = None,
 ) -> dict[str, Any]:
     """Compute company-wide consistency analytics across resolved incidents.
 
@@ -391,7 +375,6 @@ async def compute_consistency_analytics(
         incidents: Resolved incident rows (dicts with id, incident_type, severity,
                    corrective_actions, resolved_at, occurred_at).
         api_key: Gemini API key.
-        vertex_project: Vertex AI project ID.
 
     Returns a ConsistencyAnalytics-shaped dict.
     """
@@ -415,7 +398,7 @@ async def compute_consistency_analytics(
         {"incident_id": str(i["id"]), "corrective_actions": i["corrective_actions"]}
         for i in with_actions
     ]
-    categorized = await _categorize_actions(formatted, api_key=api_key, vertex_project=vertex_project)
+    categorized = await _categorize_actions(formatted, api_key=api_key)
 
     # Overall distribution
     action_distribution = _compute_aggregate_distribution(with_actions, categorized)

@@ -297,7 +297,6 @@ async def enrich_with_semantics(
     current: dict,
     top_candidates: list[dict],
     api_key: Optional[str] = None,
-    vertex_project: Optional[str] = None,
 ) -> dict[str, Any]:
     """Phase 2: Single Gemini call to score semantic dimensions for top candidates.
 
@@ -306,12 +305,7 @@ async def enrich_with_semantics(
     from google import genai
     from ...core.services.rate_limiter import get_rate_limiter
 
-    if vertex_project:
-        client = genai.Client(vertexai=True, project=vertex_project, location="us-central1")
-    elif api_key:
-        client = genai.Client(api_key=api_key)
-    else:
-        raise ValueError("Either api_key or vertex_project must be provided")
+    client = genai.Client(api_key=api_key)
 
     # Rate limit check
     rate_limiter = get_rate_limiter()
@@ -341,7 +335,7 @@ async def enrich_with_semantics(
     try:
         response = await asyncio.wait_for(
             client.aio.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.5-flash",
                 contents=prompt,
             ),
             timeout=GEMINI_CALL_TIMEOUT,
@@ -552,8 +546,7 @@ async def find_precedents(incident_id: str, conn, incident_row=None) -> dict[str
     semantic_result = await enrich_with_semantics(
         current,
         top,
-        api_key=settings.gemini_api_key if not settings.use_vertex else None,
-        vertex_project=settings.vertex_project if settings.use_vertex else None,
+        api_key=settings.gemini_api_key,
     )
 
     # Build semantic score lookup
@@ -728,8 +721,7 @@ async def find_precedents_stream(incident_id: str, conn, incident_row=None):
     semantic_result = await enrich_with_semantics(
         current,
         top,
-        api_key=settings.gemini_api_key if not settings.use_vertex else None,
-        vertex_project=settings.vertex_project if settings.use_vertex else None,
+        api_key=settings.gemini_api_key,
     )
 
     semantic_lookup: dict[str, dict] = {}

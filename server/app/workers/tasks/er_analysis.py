@@ -46,24 +46,11 @@ def _build_er_analyzer(model_override: Optional[str] = None):
     settings = load_settings()
     model = "gemini-3.1-pro-preview" if model_override == "pro" else settings.analysis_model
 
-    # Same priority as GeminiComplianceService.client:
-    # 1. GEMINI_API_KEY env var (explicit override)
-    # 2. Vertex AI (if VERTEX_PROJECT configured)
-    # 3. LIVE_API via settings.gemini_api_key
-    explicit_api_key = os.getenv("GEMINI_API_KEY")
-
-    if explicit_api_key:
-        return ERAnalyzer(api_key=explicit_api_key, model=model)
-    elif settings.use_vertex:
-        return ERAnalyzer(
-            vertex_project=settings.vertex_project,
-            vertex_location=settings.vertex_location,
-            model=model,
-        )
-    elif settings.gemini_api_key:
-        return ERAnalyzer(api_key=settings.gemini_api_key, model=model)
-    else:
-        raise ValueError("ER analysis requires GEMINI_API_KEY, LIVE_API, or VERTEX_PROJECT configuration")
+    # Prefer GEMINI_API_KEY env override, fall back to LIVE_API via settings.
+    api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
+    if not api_key:
+        raise ValueError("ER analysis requires GEMINI_API_KEY or LIVE_API configuration")
+    return ERAnalyzer(api_key=api_key, model=model)
 
 
 async def _get_documents_for_analysis(

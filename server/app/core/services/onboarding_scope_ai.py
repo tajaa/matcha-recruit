@@ -251,12 +251,6 @@ def _gemini_client():
     except RuntimeError:
         settings = load_settings()
 
-    if settings.use_vertex:
-        return genai.Client(
-            vertexai=True,
-            project=settings.vertex_project,
-            location=settings.vertex_location or "us-central1",
-        )
     api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY not configured")
@@ -329,11 +323,27 @@ async def expand_scope(
         else ""
     )
 
-    few_shot_block = (
-        "WORKED EXAMPLES (study these shapes carefully; your output should look like these):\n"
-        + json.dumps(FEW_SHOT_EXAMPLES, indent=2)
-        + "\n\n"
-    )
+    # Embed examples with explicit INPUT / EXPECTED OUTPUT labels rather
+    # than dumping the raw {input, output} dicts. Gemini was echoing the
+    # wrapper shape (returning {"input": ..., "output": {...}}) instead
+    # of the bare AIScope shape when the examples were emitted as a JSON
+    # blob of wrapper objects. Labeling makes the OUTPUT shape the only
+    # thing Gemini sees as a "response example".
+    few_shot_lines = [
+        "WORKED EXAMPLES (study these — your response must match the "
+        "OUTPUT shape exactly, flat AIScope with no wrapper):\n"
+    ]
+    for i, ex in enumerate(FEW_SHOT_EXAMPLES, start=1):
+        few_shot_lines.append(f"--- EXAMPLE {i} ---")
+        few_shot_lines.append("INPUT (for context only — do not echo):")
+        few_shot_lines.append(json.dumps(ex["input"], indent=2))
+        few_shot_lines.append(
+            "EXPECTED OUTPUT (return JSON in this exact shape — flat, "
+            "no wrapper):"
+        )
+        few_shot_lines.append(json.dumps(ex["output"], indent=2))
+        few_shot_lines.append("")
+    few_shot_block = "\n".join(few_shot_lines) + "\n"
 
     prompt = (
         f"You are scoping a NEW BUSINESS called \"{business_name}\" for compliance tracking.\n\n"
@@ -404,7 +414,7 @@ async def expand_scope(
         logger.exception("Gemini client init failed for scope expansion: %s", exc)
         raise
 
-    model_name = os.getenv("ONBOARDING_SCOPE_MODEL", "gemini-2.5-flash")
+    model_name = os.getenv("ONBOARDING_SCOPE_MODEL", "gemini-3.5-flash")
     try:
         response = await asyncio.wait_for(
             client.aio.models.generate_content(
@@ -430,6 +440,37 @@ async def expand_scope(
             "applicable_jurisdictions": [],
             "_warning": "Gemini returned non-JSON; admin should re-run expand",
         }
+
+    # Defensive: Gemini sometimes echoes the few-shot {input, output}
+    # wrapper instead of the bare AIScope shape — the route would then
+    # see a top-level dict with empty AIScope fields because the real
+    # content sits under "output". Unwrap before continuing.
+    if (
+        isinstance(parsed, dict)
+        and isinstance(parsed.get("output"), dict)
+        and (
+            "compliance_categories" in parsed["output"]
+            or "required_licenses" in parsed["output"]
+            or "applicable_jurisdictions" in parsed["output"]
+        )
+    ):
+        logger.info(
+            "Scope expansion: Gemini returned {input, output} wrapper; "
+            "unwrapping to output"
+        )
+        parsed = parsed["output"]
+    elif (
+        isinstance(parsed, list)
+        and parsed
+        and isinstance(parsed[0], dict)
+        and isinstance(parsed[0].get("output"), dict)
+    ):
+        logger.info(
+            "Scope expansion: Gemini returned [{input, output}] list; "
+            "unwrapping to first output"
+        )
+        parsed = parsed[0]["output"]
+
     if not isinstance(parsed, dict):
         return {
             "naics_sector": None,
@@ -724,7 +765,7 @@ async def gap_check(
         logger.exception("Gemini client init failed for gap check: %s", exc)
         raise
 
-    model_name = os.getenv("ONBOARDING_SCOPE_MODEL", "gemini-2.5-flash")
+    model_name = os.getenv("ONBOARDING_SCOPE_MODEL", "gemini-3.5-flash")
     try:
         response = await asyncio.wait_for(
             client.aio.models.generate_content(

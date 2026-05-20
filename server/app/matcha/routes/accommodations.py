@@ -804,11 +804,7 @@ def _get_analyzer():
     """Create an AccommodationAnalyzer instance from settings."""
     from ..services.accommodation_service import AccommodationAnalyzer
     settings = get_settings()
-    return AccommodationAnalyzer(
-        api_key=settings.gemini_api_key,
-        vertex_project=settings.vertex_project,
-        vertex_location=settings.vertex_location,
-    )
+    return AccommodationAnalyzer(api_key=settings.gemini_api_key)
 
 
 async def _get_case_info(conn, case_id: UUID) -> dict:

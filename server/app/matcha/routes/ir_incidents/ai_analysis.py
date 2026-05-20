@@ -948,8 +948,7 @@ async def get_consistency_guidance(
         try:
             result = await compute_outcome_distribution(
                 precedents,
-                api_key=settings.gemini_api_key if not settings.use_vertex else None,
-                vertex_project=settings.vertex_project if settings.use_vertex else None,
+                api_key=settings.gemini_api_key,
             )
         except Exception as e:
             logger.warning(f"Consistency guidance computation failed: {e}")

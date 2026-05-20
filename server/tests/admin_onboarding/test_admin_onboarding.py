@@ -25,6 +25,7 @@ sys.modules.setdefault("google.genai", genai_module)
 sys.modules.setdefault("google.genai.types", types_module)
 
 import asyncio
+import json
 from uuid import uuid4
 
 import pytest
@@ -44,6 +45,7 @@ from app.core.services.onboarding_scope_ai import (
     FEW_SHOT_EXAMPLES,
     INDUSTRY_SPECIALTIES,
     build_missing_id,
+    expand_scope,
     map_to_bank,
 )
 
@@ -475,3 +477,139 @@ class TestGapCheckResult:
                     {"category_slug": "x", "scope": "global"},  # not a Literal value
                 ],
             })
+
+
+# ── expand_scope wrapper unwrapping ────────────────────────────────────
+
+
+class _StubGeminiResponse:
+    def __init__(self, text):
+        self.text = text
+
+
+class _StubGeminiModels:
+    def __init__(self, text):
+        self._text = text
+        self.last_prompt: str = ""
+
+    async def generate_content(self, *, model, contents, **_):
+        self.last_prompt = contents
+        return _StubGeminiResponse(self._text)
+
+
+class _StubGeminiAio:
+    def __init__(self, text):
+        self.models = _StubGeminiModels(text)
+
+
+class _StubGeminiClient:
+    def __init__(self, text):
+        self.aio = _StubGeminiAio(text)
+
+
+class _ExpandConn:
+    """Minimal conn satisfying _fetch_category_slugs (returns a few slugs)."""
+
+    def __init__(self):
+        self.slugs = [
+            {"slug": "hipaa_privacy"},
+            {"slug": "osha_general"},
+            {"slug": "ca_workers_comp"},
+        ]
+
+    async def fetch(self, query, *params):
+        if "FROM compliance_categories" in query:
+            return self.slugs
+        return []
+
+
+def _run_expand(monkeypatch, gemini_text):
+    client = _StubGeminiClient(gemini_text)
+    monkeypatch.setattr(
+        "app.core.services.onboarding_scope_ai._gemini_client",
+        lambda: client,
+    )
+    basics = {
+        "industry": "healthcare",
+        "specialty": "behavioral_health",
+        "business_name": "Test Co",
+        "description": "ABA clinic in CA",
+    }
+    locations = [
+        {"state": "CA", "city": "Los Angeles", "county": None, "facility_attributes": {}},
+    ]
+    result = asyncio.run(expand_scope(basics=basics, locations=locations, conn=_ExpandConn()))
+    return result, client.aio.models.last_prompt
+
+
+class TestExpandScopeUnwrap:
+    def test_unwraps_input_output_dict_wrapper(self, monkeypatch):
+        """Gemini sometimes echoes {input,output} — unwrap to output."""
+        wrapped = json.dumps({
+            "input": {"business_name": "Test Co"},
+            "output": {
+                "naics_sector": "62",
+                "compliance_categories": [
+                    {"category_slug": "hipaa_privacy", "scope": "federal", "reason": "x"},
+                ],
+                "required_certifications": [],
+                "required_licenses": [],
+                "applicable_jurisdictions": [{"state": "CA", "county": None, "city": None}],
+            },
+        })
+        result, _ = _run_expand(monkeypatch, wrapped)
+        assert result["naics_sector"] == "62"
+        assert len(result["compliance_categories"]) == 1
+        assert result["compliance_categories"][0]["category_slug"] == "hipaa_privacy"
+        assert len(result["applicable_jurisdictions"]) == 1
+
+    def test_unwraps_list_of_input_output(self, monkeypatch):
+        """Gemini occasionally returns [{input,output}] — unwrap first."""
+        wrapped = json.dumps([{
+            "input": {"business_name": "Test Co"},
+            "output": {
+                "naics_sector": "62",
+                "compliance_categories": [
+                    {"category_slug": "osha_general", "scope": "federal", "reason": "y"},
+                ],
+                "required_certifications": [],
+                "required_licenses": [],
+                "applicable_jurisdictions": [],
+            },
+        }])
+        result, _ = _run_expand(monkeypatch, wrapped)
+        assert result["naics_sector"] == "62"
+        assert len(result["compliance_categories"]) == 1
+
+    def test_passes_through_flat_response(self, monkeypatch):
+        """Flat AIScope-shaped response (the normal happy path)."""
+        flat = json.dumps({
+            "naics_sector": "62",
+            "compliance_categories": [
+                {"category_slug": "hipaa_privacy", "scope": "federal", "reason": "z"},
+            ],
+            "required_certifications": [],
+            "required_licenses": [],
+            "applicable_jurisdictions": [],
+        })
+        result, _ = _run_expand(monkeypatch, flat)
+        assert result["naics_sector"] == "62"
+        assert len(result["compliance_categories"]) == 1
+
+    def test_prompt_labels_output_shape(self, monkeypatch):
+        """Few-shot block must say EXPECTED OUTPUT — the raw {input, output}
+        JSON dump was confusing Gemini. Pure prompt-shape regression."""
+        flat = json.dumps({
+            "naics_sector": "62",
+            "compliance_categories": [],
+            "required_certifications": [],
+            "required_licenses": [],
+            "applicable_jurisdictions": [],
+        })
+        _, prompt = _run_expand(monkeypatch, flat)
+        assert "EXPECTED OUTPUT" in prompt
+        assert "INPUT (for context only" in prompt
+        # No bare wrapper JSON object literal (looser than the old raw dump,
+        # but enough to catch a regression to dumping the FEW_SHOT_EXAMPLES
+        # list directly).
+        assert '"input": {' not in prompt or "EXPECTED OUTPUT" in prompt

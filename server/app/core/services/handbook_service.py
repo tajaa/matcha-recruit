@@ -2591,7 +2591,7 @@ class HandbookService:
         except Exception:
             return None
 
-        if not settings.use_vertex and not settings.gemini_api_key:
+        if not settings.gemini_api_key:
             return None
 
         try:
@@ -2656,18 +2656,11 @@ class HandbookService:
         )
 
         try:
-            if settings.use_vertex:
-                client = genai.Client(
-                    vertexai=True,
-                    project=settings.vertex_project,
-                    location=settings.vertex_location or "us-central1",
-                )
-            else:
-                client = genai.Client(api_key=settings.gemini_api_key)
+            client = genai.Client(api_key=settings.gemini_api_key)
         except Exception:
             return None
 
-        model_name = settings.analysis_model or "gemini-3-flash-preview"
+        model_name = settings.analysis_model or "gemini-3.5-flash"
         try:
             response = await asyncio.wait_for(
                 client.aio.models.generate_content(

@@ -581,8 +581,6 @@ class GeminiLiveSession:
         model: str,
         voice: str,
         api_key: Optional[str] = None,
-        vertex_project: Optional[str] = None,
-        vertex_location: str = "us-central1",
         use_alpha_api: bool = False,
     ):
         self.model = model
@@ -593,18 +591,7 @@ class GeminiLiveSession:
         if use_alpha_api:
             client_kwargs["http_options"] = {"api_version": "v1alpha"}
 
-        # Initialize client based on auth method
-        if vertex_project:
-            self.client = genai.Client(
-                vertexai=True,
-                project=vertex_project,
-                location=vertex_location,
-                **client_kwargs,
-            )
-        elif api_key:
-            self.client = genai.Client(api_key=api_key, **client_kwargs)
-        else:
-            raise ValueError("Either api_key or vertex_project must be provided")
+        self.client = genai.Client(api_key=api_key, **client_kwargs)
 
         self.session = None
         self._session_context = None

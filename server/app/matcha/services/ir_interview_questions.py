@@ -59,9 +59,7 @@ async def generate_investigation_questions(
     interviewee_role: str,
     prior_transcripts: Optional[list[str]] = None,
     api_key: Optional[str] = None,
-    vertex_project: Optional[str] = None,
-    vertex_location: str = "us-central1",
-    model: str = "gemini-2.5-flash",
+    model: str = "gemini-3.5-flash",
 ) -> list[dict[str, Any]]:
     """Generate investigation questions for an interviewee.
 
@@ -71,28 +69,14 @@ async def generate_investigation_questions(
         interviewee_role: Role in investigation (complainant, respondent, witness)
         prior_transcripts: Optional list of transcript texts from prior interviews
         api_key: Gemini API key
-        vertex_project: Vertex AI project ID
-        vertex_location: Vertex AI location
         model: Gemini model to use
 
     Returns:
         List of question dicts with question, category, rationale
     """
-    # Prefer GEMINI_API_KEY (direct API) over Vertex AI — matches compliance service pattern
+    # Prefer GEMINI_API_KEY (direct API) per-service override.
     import os
-    direct_api_key = os.getenv("GEMINI_API_KEY")
-    if direct_api_key:
-        client = genai.Client(api_key=direct_api_key)
-    elif api_key:
-        client = genai.Client(api_key=api_key)
-    elif vertex_project:
-        client = genai.Client(
-            vertexai=True,
-            project=vertex_project,
-            location=vertex_location,
-        )
-    else:
-        raise ValueError("Either api_key or vertex_project must be provided")
+    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY") or api_key)
 
     incident_summary = (
         f"Title: {incident.get('title', 'N/A')}\n"

@@ -771,7 +771,7 @@ async def _analyze_with_ai(patterns: dict) -> list[dict] | None:
 
         response = await _asyncio.to_thread(
             lambda: client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-3.5-flash",
                 contents=prompt,
                 config=genai.types.GenerateContentConfig(
                     temperature=0.2,

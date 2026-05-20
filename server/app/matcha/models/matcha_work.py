@@ -311,7 +311,7 @@ class CreateThreadResponse(BaseModel):
 class SendMessageRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=4000)
     slide_index: Optional[int] = Field(None, ge=0, description="0-based index of slide to focus edits on")
-    model: Optional[str] = Field(None, description="Model override (e.g. gemini-3.1-flash-lite-preview, gemini-3-flash-preview, gemini-3.1-pro-preview)")
+    model: Optional[str] = Field(None, description="Model override (e.g. gemini-3.1-flash-lite-preview, gemini-3.5-flash, gemini-3.1-pro-preview)")
     image_urls: Optional[list[str]] = Field(
         None,
         description="Attachment image URLs (already uploaded). Stored on user message metadata and passed to the AI as multimodal parts.",

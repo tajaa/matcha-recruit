@@ -1708,13 +1708,7 @@ async def _generate_ai_narrative(
     try:
         settings = get_settings()
 
-        if settings.use_vertex:
-            client = genai.Client(
-                vertexai=True,
-                project=settings.vertex_project,
-                location=settings.vertex_location,
-            )
-        elif settings.gemini_api_key:
+        if settings.gemini_api_key:
             client = genai.Client(api_key=settings.gemini_api_key)
         else:
             logger.warning("No Gemini credentials configured — skipping AI narrative")

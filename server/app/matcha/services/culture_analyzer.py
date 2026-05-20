@@ -47,23 +47,10 @@ class CultureAnalyzer:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        vertex_project: Optional[str] = None,
-        vertex_location: str = "us-central1",
-        model: str = "gemini-3-flash-preview",
+        model: str = "gemini-3.5-flash",
     ):
         self.model = model
-
-        # Prefer direct Gemini API when api_key is set. Vertex lacks preview models.
-        if api_key:
-            self.client = genai.Client(api_key=api_key)
-        elif vertex_project:
-            self.client = genai.Client(
-                vertexai=True,
-                project=vertex_project,
-                location=vertex_location,
-            )
-        else:
-            raise ValueError("Either api_key or vertex_project must be provided")
+        self.client = genai.Client(api_key=api_key)
 
     async def extract_culture_from_transcript(self, transcript: str) -> dict[str, Any]:
         """Extract structured culture data from an interview transcript."""

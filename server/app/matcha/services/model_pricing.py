@@ -9,8 +9,9 @@ from decimal import Decimal, ROUND_UP
 
 # Price per 1M tokens (input / output) for each supported model
 MODEL_PRICING: dict[str, dict[str, Decimal]] = {
-    # Gemini 3 Flash — $0.50 input, $3.00 output (text/image/video)
-    "gemini-3-flash-preview": {
+    # Gemini 3.5 Flash — pricing TBD (placeholder = prior 3-flash-preview
+    # tier of $0.50 in / $3.00 out; revisit when Google publishes 3.5 GA pricing).
+    "gemini-3.5-flash": {
         "input_per_1m": Decimal("0.50"),
         "output_per_1m": Decimal("3.00"),
     },

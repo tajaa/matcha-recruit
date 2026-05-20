@@ -515,31 +515,17 @@ class ERAnalyzer:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        vertex_project: Optional[str] = None,
-        vertex_location: str = "us-central1",
-        model: str = "gemini-2.5-flash",
+        model: str = "gemini-3.5-flash",
     ):
         """
         Initialize the ER analyzer.
 
         Args:
             api_key: Gemini API key.
-            vertex_project: GCP project ID for Vertex AI.
-            vertex_location: Vertex AI location.
-            model: Model to use for analysis (default: gemini-2.5-flash).
+            model: Model to use for analysis (default: gemini-3.5-flash).
         """
         self.model = model
-
-        if vertex_project:
-            self.client = genai.Client(
-                vertexai=True,
-                project=vertex_project,
-                location=vertex_location,
-            )
-        elif api_key:
-            self.client = genai.Client(api_key=api_key)
-        else:
-            raise ValueError("Either api_key or vertex_project must be provided")
+        self.client = genai.Client(api_key=api_key)
 
     @staticmethod
     def _is_model_unavailable_error(error: Exception) -> bool:

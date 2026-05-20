@@ -386,12 +386,6 @@ def _gemini_client():
     from app.config import get_settings
 
     settings = get_settings()
-    if settings.use_vertex:
-        return genai.Client(
-            vertexai=True,
-            project=settings.vertex_project,
-            location=settings.vertex_location or "us-central1",
-        )
     api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY not configured")
@@ -445,7 +439,7 @@ async def _extract_sections_from_pdf(pdf_bytes: bytes) -> list[dict[str, Any]]:
             logger.exception("Could not build PDF Part: %s", exc)
             return []
 
-    model_name = os.getenv("HANDBOOK_AUDIT_MODEL", "gemini-2.5-flash")
+    model_name = os.getenv("HANDBOOK_AUDIT_MODEL", "gemini-3.5-flash")
     try:
         response = await asyncio.wait_for(
             client.aio.models.generate_content(
@@ -537,7 +531,7 @@ async def _grade_state_coverage(
         "- Do not invent statutes; if no specific citation is reliable, use null."
     )
 
-    model_name = os.getenv("HANDBOOK_AUDIT_MODEL", "gemini-2.5-flash")
+    model_name = os.getenv("HANDBOOK_AUDIT_MODEL", "gemini-3.5-flash")
     try:
         response = await asyncio.wait_for(
             client.aio.models.generate_content(

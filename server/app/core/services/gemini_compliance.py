@@ -29,7 +29,7 @@ from ..compliance_registry import (
 GEMINI_CALL_TIMEOUT = 45
 
 DEFAULT_LITE_MODEL = "gemini-3.1-flash-lite-preview"
-DEFAULT_LIGHT_MODEL = "gemini-3-flash-preview"
+DEFAULT_LIGHT_MODEL = "gemini-3.5-flash"
 DEFAULT_HEAVY_MODEL = "gemini-3.1-pro-preview"
 DEFAULT_HEAVY_FALLBACK_MODEL = "gemini-2.5-pro"
 
@@ -499,21 +499,12 @@ class GeminiComplianceService:
             # Check for specific API key for this service first
             api_key = os.getenv("GEMINI_API_KEY")
 
-            if api_key:
-                self._client = genai.Client(api_key=api_key)
-            elif self.settings.use_vertex:
-                self._client = genai.Client(
-                    vertexai=True,
-                    project=self.settings.vertex_project,
-                    location=self.settings.vertex_location,
-                )
-            else:
-                self._client = genai.Client(api_key=self.settings.gemini_api_key)
+            self._client = genai.Client(api_key=api_key or self.settings.gemini_api_key)
         return self._client
 
     def _has_api_key(self) -> bool:
         api_key = os.getenv("GEMINI_API_KEY") or self.settings.gemini_api_key
-        return bool(api_key) or self.settings.use_vertex
+        return bool(api_key)
 
     async def _resolve_model_candidates(self) -> List[str]:
         mode = await get_jurisdiction_research_model_mode()

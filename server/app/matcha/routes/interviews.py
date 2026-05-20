@@ -992,8 +992,6 @@ async def analyze_interview(
         # Run analysis
         conv_analyzer = ConversationAnalyzer(
             api_key=settings.gemini_api_key,
-            vertex_project=settings.vertex_project,
-            vertex_location=settings.vertex_location,
             model=settings.analysis_model,
         )
 
@@ -1059,8 +1057,6 @@ async def interview_websocket(
     gemini_session: Optional[GeminiLiveSession] = None
     analyzer = CultureAnalyzer(
         api_key=settings.gemini_api_key,
-        vertex_project=settings.vertex_project,
-        vertex_location=settings.vertex_location,
         model=settings.analysis_model,
     )
 

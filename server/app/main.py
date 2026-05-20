@@ -51,12 +51,11 @@ async def lifespan(app: FastAPI):
     settings = load_settings()
     print(f"[Matcha] Starting server on port {settings.port}")
     # Gemini client preference: matcha-work chat and most analyzers check
-    # GEMINI_API_KEY first and use direct API when set. Vertex is only used
-    # as fallback when the API key is absent AND VERTEX_PROJECT is set.
+    # GEMINI_API_KEY first, falling back to the LIVE_API key in settings.
     _gemini_mode = (
         "Direct API (GEMINI_API_KEY set)"
         if os.getenv("GEMINI_API_KEY")
-        else "Vertex AI" if settings.use_vertex
+        else "Direct API (LIVE_API set)" if settings.gemini_api_key
         else "none configured — chat will fail"
     )
     print(f"[Matcha] Gemini client: {_gemini_mode}")

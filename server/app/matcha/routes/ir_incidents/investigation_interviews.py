@@ -93,8 +93,6 @@ async def create_investigation_interview(
             interviewee_role=request_body.interviewee_role,
             prior_transcripts=prior_transcripts if prior_transcripts else None,
             api_key=settings.gemini_api_key,
-            vertex_project=settings.vertex_project,
-            vertex_location=settings.vertex_location,
             model=settings.analysis_model,
         )
 
@@ -273,8 +271,6 @@ async def batch_create_investigation_interviews(
                     interviewee_role=item.interviewee_role,
                     prior_transcripts=prior_transcripts if prior_transcripts else None,
                     api_key=settings.gemini_api_key,
-                    vertex_project=settings.vertex_project,
-                    vertex_location=settings.vertex_location,
                     model=settings.analysis_model,
                 )
 

@@ -227,23 +227,14 @@ async def get_policy_types_for_company(company_id: str) -> List[dict]:
 
 _POLICY_TYPE_MAP = {pt["value"]: pt for pt in POLICY_TYPES}
 
-DEFAULT_MODEL = "gemini-3-flash-preview"
+DEFAULT_MODEL = "gemini-3.5-flash"
 FALLBACK_MODEL = "gemini-2.5-flash"
 
 
 def _get_client() -> genai.Client:
     settings = get_settings()
-    api_key = os.getenv("GEMINI_API_KEY")
-    if api_key:
-        return genai.Client(api_key=api_key)
-    elif settings.use_vertex:
-        return genai.Client(
-            vertexai=True,
-            project=settings.vertex_project,
-            location=settings.vertex_location,
-        )
-    else:
-        return genai.Client(api_key=settings.gemini_api_key)
+    api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
+    return genai.Client(api_key=api_key)
 
 
 def _requirement_to_context(req: dict) -> dict:

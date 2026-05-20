@@ -334,19 +334,10 @@ def _build_er_analyzer(model_override: Optional[str] = None):
 
     settings = get_settings()
     model = "gemini-3.1-pro-preview" if model_override == "pro" else settings.analysis_model
-    explicit_api_key = os.getenv("GEMINI_API_KEY")
-
-    if explicit_api_key:
-        return ERAnalyzer(api_key=explicit_api_key, model=model)
-    if settings.use_vertex:
-        return ERAnalyzer(
-            vertex_project=settings.vertex_project,
-            vertex_location=settings.vertex_location,
-            model=model,
-        )
-    if settings.gemini_api_key:
-        return ERAnalyzer(api_key=settings.gemini_api_key, model=model)
-    raise ValueError("ER analysis requires GEMINI_API_KEY, LIVE_API, or VERTEX_PROJECT configuration")
+    api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
+    if not api_key:
+        raise ValueError("ER analysis requires GEMINI_API_KEY or LIVE_API configuration")
+    return ERAnalyzer(api_key=api_key, model=model)
 
 
 # ===========================================
@@ -3471,11 +3462,7 @@ async def search_evidence(
             from ...core.services.embedding_service import EmbeddingService
             from ...core.services.rag_service import RAGService
 
-            embedding_service = EmbeddingService(
-                api_key=settings.gemini_api_key,
-                vertex_project=settings.vertex_project,
-                vertex_location=settings.vertex_location,
-            )
+            embedding_service = EmbeddingService(api_key=settings.gemini_api_key)
             rag_service = RAGService(embedding_service)
             results = await rag_service.search_evidence(
                 case_id=str(case_id),

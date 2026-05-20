@@ -46,16 +46,7 @@ class GeminiLeadsService:
             # Check for specific API key for this service first
             api_key = os.getenv("GEMINI_API_KEY")
             
-            if api_key:
-                self._client = genai.Client(api_key=api_key)
-            elif self.settings.use_vertex:
-                self._client = genai.Client(
-                    vertexai=True,
-                    project=self.settings.vertex_project,
-                    location=self.settings.vertex_location,
-                )
-            else:
-                self._client = genai.Client(api_key=self.settings.gemini_api_key)
+            self._client = genai.Client(api_key=api_key or self.settings.gemini_api_key)
         return self._client
     
     def _clean_json_text(self, text: str) -> str:

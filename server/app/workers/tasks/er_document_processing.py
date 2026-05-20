@@ -36,11 +36,7 @@ async def _process_document(document_id: str, case_id: str) -> dict[str, Any]:
     embedding_service = None
     embedding_warning = None
     try:
-        embedding_service = EmbeddingService(
-            api_key=settings.gemini_api_key,
-            vertex_project=settings.vertex_project,
-            vertex_location=settings.vertex_location,
-        )
+        embedding_service = EmbeddingService(api_key=settings.gemini_api_key)
     except Exception as e:
         # Embeddings are optional for case analysis; keep processing and fall back to keyword search.
         embedding_warning = f"Embeddings unavailable: {e}"

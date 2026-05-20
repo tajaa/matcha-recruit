@@ -4744,7 +4744,7 @@ Return ONLY the modified SVG code, nothing else. No markdown fences, no explanat
 
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-3.5-flash",
             contents=prompt,
         )
         new_svg = response.text.strip()
@@ -8719,13 +8719,9 @@ async def get_tutor_voice_status(
             try:
                 from ..services.conversation_analyzer import ConversationAnalyzer
                 settings = get_settings()
-                # Use gemini-2.5-flash for Vertex (gemini-3-flash-preview not accessible on all projects)
-                analysis_model = "gemini-2.5-flash" if settings.use_vertex else settings.analysis_model
                 analyzer = ConversationAnalyzer(
                     api_key=settings.gemini_api_key,
-                    vertex_project=settings.vertex_project if settings.use_vertex else None,
-                    vertex_location=settings.vertex_location,
-                    model=analysis_model,
+                    model=settings.analysis_model,
                 )
                 language = tutor_state.get("language", "en")
                 tutor_analysis = await analyzer.analyze_tutor_language(
@@ -8852,14 +8848,7 @@ async def check_tutor_utterance(
     settings = get_settings()
     try:
         from google import genai
-        if settings.use_vertex:
-            client = genai.Client(
-                vertexai=True,
-                project=settings.vertex_project,
-                location=settings.vertex_location,
-            )
-        else:
-            client = genai.Client(api_key=settings.gemini_api_key)
+        client = genai.Client(api_key=settings.gemini_api_key)
 
         if language in ("es", "es-mx"):
             prompt = UTTERANCE_CHECK_PROMPT_ES.format(utterance=utterance)
@@ -8867,7 +8856,7 @@ async def check_tutor_utterance(
             prompt = UTTERANCE_CHECK_PROMPT_FR.format(utterance=utterance)
         else:
             prompt = UTTERANCE_CHECK_PROMPT_EN.format(utterance=utterance)
-        response = await client.aio.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+        response = await client.aio.models.generate_content(model="gemini-3.5-flash", contents=prompt)
         text = response.text.strip()
         if text.startswith("```"):
             text = text.split("\n", 1)[1] if "\n" in text else text[3:]
