@@ -5107,15 +5107,15 @@ async def invite_to_project(
         if existing:
             if existing["status"] == "active":
                 raise HTTPException(status_code=400, detail="User is already a collaborator")
-            # Was pending or removed — re-invite as active
+            # Was pending or removed — re-invite as pending
             await conn.execute(
-                "UPDATE mw_project_collaborators SET status = 'active', invited_by = $3, created_at = NOW() WHERE project_id = $1 AND user_id = $2",
+                "UPDATE mw_project_collaborators SET status = 'pending', invited_by = $3, created_at = NOW() WHERE project_id = $1 AND user_id = $2",
                 project_id, invitee_id, current_user.id,
             )
         else:
             await conn.execute(
                 """INSERT INTO mw_project_collaborators (project_id, user_id, invited_by, role, status)
-                   VALUES ($1, $2, $3, 'collaborator', 'active')""",
+                   VALUES ($1, $2, $3, 'collaborator', 'pending')""",
                 project_id, invitee_id, current_user.id,
             )
 
