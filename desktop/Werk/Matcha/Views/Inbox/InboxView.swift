@@ -144,8 +144,16 @@ struct InboxThreadView: View {
     let currentUserId: String
     let onSend: (String, [(data: Data, filename: String, mimeType: String)]?) async throws -> Void
 
+    @Environment(AppState.self) private var appState
     @State private var draft = ""
     @State private var isSending = false
+    @State private var pendingInvite: MWProjectInvite? = nil
+    @State private var isProcessingInvite = false
+
+    private var projectTitleFromInvite: String? {
+        guard let title = conversation.title, title.hasPrefix("Project Invite: ") else { return nil }
+        return String(title.dropFirst("Project Invite: ".count))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -165,6 +173,54 @@ struct InboxThreadView: View {
             .padding(.vertical, 10)
 
             Divider().opacity(0.3)
+
+            if let invite = pendingInvite {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("You've been invited to join this project")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white)
+                        Text("Invited by \(invite.invitedByName) (\(invite.invitedByEmail))")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    if isProcessingInvite {
+                        ProgressView().scaleEffect(0.6)
+                    } else {
+                        Button {
+                            acceptInvite(invite)
+                        } label: {
+                            Text("Accept")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.matcha500)
+                                .cornerRadius(6)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            declineInvite(invite)
+                        } label: {
+                            Text("Decline")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Color.zinc800)
+                                .cornerRadius(6)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(Color.zinc900.opacity(0.4))
+
+                Divider().opacity(0.3)
+            }
 
             // Messages
             ScrollViewReader { proxy in
@@ -256,6 +312,20 @@ struct InboxThreadView: View {
             .padding(.vertical, 10)
         }
         .background(Color.appBackground)
+        .task(id: conversation.id) {
+            pendingInvite = nil
+            guard let title = projectTitleFromInvite else { return }
+            do {
+                let invites = try await MatchaWorkService.shared.listPendingInvites()
+                if let matched = invites.first(where: { $0.projectTitle == title }) {
+                    await MainActor.run {
+                        self.pendingInvite = matched
+                    }
+                }
+            } catch {
+                print("Failed to fetch pending invites: \(error)")
+            }
+        }
     }
 
     private func send() {
@@ -266,6 +336,47 @@ struct InboxThreadView: View {
         Task {
             try? await onSend(content, nil)
             await MainActor.run { isSending = false }
+        }
+    }
+
+    private func acceptInvite(_ invite: MWProjectInvite) {
+        isProcessingInvite = true
+        Task {
+            do {
+                try await MatchaWorkService.shared.acceptProjectInvite(projectId: invite.projectId)
+                await MainActor.run {
+                    pendingInvite = nil
+                    isProcessingInvite = false
+                }
+                await MainActor.run {
+                    appState.projectsListGeneration &+= 1
+                    appState.selectedProjectId = invite.projectId
+                    appState.selectedThreadId = nil
+                    appState.selectedChannelId = nil
+                    appState.selectedJournalId = nil
+                    appState.showInbox = false
+                }
+            } catch {
+                await MainActor.run { isProcessingInvite = false }
+            }
+        }
+    }
+
+    private func declineInvite(_ invite: MWProjectInvite) {
+        isProcessingInvite = true
+        Task {
+            do {
+                try await MatchaWorkService.shared.declineProjectInvite(projectId: invite.projectId)
+                await MainActor.run {
+                    pendingInvite = nil
+                    isProcessingInvite = false
+                }
+                await MainActor.run {
+                    appState.projectsListGeneration &+= 1
+                }
+            } catch {
+                await MainActor.run { isProcessingInvite = false }
+            }
         }
     }
 }

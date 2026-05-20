@@ -544,3 +544,20 @@ struct MWActivityItem: Codable, Identifiable, Hashable {
         case updatedAt = "updated_at"
     }
 }
+
+struct MWProjectInvite: Codable, Identifiable {
+    var id: String { projectId }
+    let projectId: String
+    let projectTitle: String
+    let invitedByEmail: String
+    let invitedByName: String
+    let createdAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case projectId = "project_id"
+        case projectTitle = "project_title"
+        case invitedByEmail = "invited_by_email"
+        case invitedByName = "invited_by_name"
+        case createdAt = "created_at"
+    }
+}

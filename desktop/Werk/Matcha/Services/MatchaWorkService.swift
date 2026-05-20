@@ -1236,4 +1236,20 @@ class MatchaWorkService {
     ) async throws -> String {
         try await JournalService.shared.uploadJournalImage(journalId: journalId, data: data, filename: filename, mimeType: mimeType)
     }
+
+    // MARK: - Project Invites
+
+    func listPendingInvites() async throws -> [MWProjectInvite] {
+        try await client.request(method: "GET", path: "/project-invites")
+    }
+
+    func acceptProjectInvite(projectId: String) async throws {
+        _ = try await client.requestData(method: "POST", path: "\(basePath)/projects/\(projectId)/invite/accept")
+        invalidateProjectLists()
+    }
+
+    func declineProjectInvite(projectId: String) async throws {
+        _ = try await client.requestData(method: "POST", path: "\(basePath)/projects/\(projectId)/invite/decline")
+        invalidateProjectLists()
+    }
 }
