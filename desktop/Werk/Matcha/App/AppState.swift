@@ -10,6 +10,10 @@ class AppState {
     var selectedProjectId: String? = nil
     var selectedChannelId: String? = nil
     var selectedJournalId: String? = nil
+    /// Deep-link hint: when set, the project detail view switches its collab
+    /// panel to this tab once it mounts/updates, then clears it. Used by
+    /// notification taps so a task notification opens the kanban board.
+    var pendingProjectPanel: CollabRightPanel? = nil
     var showSkills: Bool = false
     var showInbox: Bool = false
     var showPeople: Bool = false
@@ -484,6 +488,55 @@ class AppState {
     func refreshNotificationsCount() async {
         if let count = try? await MatchaWorkService.shared.fetchNotificationsUnreadCount() {
             notificationsUnreadCount = count
+        }
+    }
+
+    /// Navigate to the object a notification points at. Links look like
+    /// `/work?project={id}&task={id}` (task → open the project's kanban) or
+    /// `/work?thread={id}` etc. Mirrors the surface-clearing the sidebar /
+    /// home buttons do so the target view actually shows.
+    @MainActor
+    func handleNotificationLink(_ link: String?) {
+        guard let link, let comps = URLComponents(string: link) else { return }
+        let items = comps.queryItems ?? []
+        func value(_ key: String) -> String? {
+            items.first(where: { $0.name == key })?.value.flatMap { $0.isEmpty ? nil : $0 }
+        }
+
+        func clearSurfaces() {
+            showHome = false
+            showSkills = false
+            showInbox = false
+            showPeople = false
+            showChannelBrowse = false
+        }
+
+        if let project = value("project") {
+            clearSurfaces()
+            selectedThreadId = nil
+            selectedJournalId = nil
+            selectedChannelId = nil
+            selectedProjectId = project
+            // A task notification should land on the kanban board, not chat.
+            pendingProjectPanel = value("task") != nil ? .kanban : nil
+        } else if let thread = value("thread") {
+            clearSurfaces()
+            selectedProjectId = nil
+            selectedJournalId = nil
+            selectedChannelId = nil
+            selectedThreadId = thread
+        } else if let channel = value("channel") {
+            clearSurfaces()
+            selectedProjectId = nil
+            selectedThreadId = nil
+            selectedJournalId = nil
+            selectedChannelId = channel
+        } else if let journal = value("journal") {
+            clearSurfaces()
+            selectedProjectId = nil
+            selectedThreadId = nil
+            selectedChannelId = nil
+            selectedJournalId = journal
         }
     }
 

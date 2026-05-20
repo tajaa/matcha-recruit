@@ -125,7 +125,7 @@ struct ContentView: View {
                             ZStack(alignment: .topTrailing) {
                                 Image(systemName: "bell")
                                     .font(.system(size: 13))
-                                    .foregroundColor(.white.opacity(0.7))
+                                    .foregroundColor(appState.themeText.opacity(0.7))
                                 if appState.notificationsUnreadCount > 0 {
                                     Text(appState.notificationsUnreadCount > 9 ? "9+" : "\(appState.notificationsUnreadCount)")
                                         .font(.system(size: 8, weight: .bold))
@@ -150,7 +150,7 @@ struct ContentView: View {
                         } label: {
                             Text(user.email)
                                 .font(.system(size: 12))
-                                .foregroundColor(.white.opacity(0.55))
+                                .foregroundColor(appState.themeText.opacity(0.55))
                                 .underline(false)
                         }
                         .buttonStyle(.plain)
