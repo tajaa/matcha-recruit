@@ -10,10 +10,35 @@ private let maxPendingFiles = 5
 private let maxFileBytes = 10 * 1024 * 1024
 
 struct ChatPanelView: View {
+    @Environment(AppState.self) private var appState
     @Bindable var viewModel: ThreadDetailViewModel
     var lightMode: Bool = false
     var selectedModel: String? = nil
     @State private var inputText = ""
+
+    private var greetingText: String {
+        let name: String
+        if let user = appState.currentUser {
+            if let fullName = user.name, !fullName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let parts = fullName.split(separator: " ")
+                if let first = parts.first {
+                    name = String(first)
+                } else {
+                    name = fullName
+                }
+            } else {
+                let emailParts = user.email.split(separator: "@")
+                if let firstPart = emailParts.first {
+                    name = String(firstPart).capitalized
+                } else {
+                    name = "there"
+                }
+            }
+        } else {
+            name = "there"
+        }
+        return "Hi, \(name). What should we do today?"
+    }
     @State private var previewURL: String? = nil
     @State private var isDragOver = false
     @State private var uploadProgress: String? = nil
@@ -197,6 +222,8 @@ struct ChatPanelView: View {
                 Spacer()
                 ProgressView().tint(.secondary)
                 Spacer()
+            } else if viewModel.messages.isEmpty {
+                emptyThreadMiddleView
             } else {
                 messagesArea
                 Divider().opacity(0.3)
@@ -527,5 +554,245 @@ private struct ImagePreviewSheet: View {
         }
         .frame(minWidth: 480, minHeight: 400)
         .background(Color.appBackground)
+    }
+}
+
+// MARK: - Center/Empty thread views & components
+
+extension ChatPanelView {
+    @ViewBuilder private var emptyThreadMiddleView: some View {
+        VStack(spacing: 0) {
+            Spacer()
+            
+            VStack(spacing: 24) {
+                Text(greetingText)
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundColor(lightMode ? Color.zinc950 : .white)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    if let err = viewModel.errorMessage {
+                        Text(err)
+                            .font(.system(size: 12))
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.red.opacity(0.1))
+                            .cornerRadius(8)
+                    }
+                    
+                    if !viewModel.presentationImageURLs.isEmpty || viewModel.isUploadingImages {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(viewModel.presentationImageURLs, id: \.self) { url in
+                                    ImageThumbnailView(
+                                        url: url,
+                                        onPreview: { previewURL = url },
+                                        onRemove: { Task { await viewModel.removeImage(url: url) } }
+                                    )
+                                }
+                                if viewModel.isUploadingImages {
+                                    ZStack {
+                                        Color.zinc800.cornerRadius(6)
+                                        ProgressView().controlSize(.small)
+                                    }
+                                    .frame(width: 64, height: 64)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 4)
+                    }
+                    
+                    if let progress = uploadProgress {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.mini)
+                            Text(progress)
+                                .font(.system(size: 11))
+                                .foregroundColor(.matcha500)
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 4)
+                    }
+                    
+                    if !pendingFiles.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(Array(pendingFiles.enumerated()), id: \.offset) { idx, file in
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "doc")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.matcha500)
+                                        Text(file.filename)
+                                            .font(.system(size: 11))
+                                            .foregroundColor(lightMode ? .primary : .white)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                        Button {
+                                            pendingFiles.remove(at: idx)
+                                        } label: {
+                                            Image(systemName: "xmark")
+                                                .font(.system(size: 8))
+                                                .foregroundColor(.secondary)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 5)
+                                    .background(lightMode ? Color(white: 0.88) : Color.zinc800)
+                                    .cornerRadius(6)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 4)
+                    }
+                    
+                    HStack(alignment: .bottom, spacing: 10) {
+                        Button { pickImages() } label: {
+                            Image(systemName: "photo.badge.plus")
+                                .font(.system(size: 17))
+                                .foregroundColor(
+                                    imgAtLimit || viewModel.isUploadingImages
+                                    ? Color.secondary.opacity(0.35)
+                                    : .secondary
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(imgAtLimit || viewModel.isUploadingImages)
+                        .help(
+                            imgAtLimit
+                            ? "Maximum 4 images per thread"
+                            : "Upload images (\(viewModel.presentationImageURLs.count)/4)"
+                        )
+
+                        TextField(inputPlaceholder, text: $inputText, axis: .vertical)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 14))
+                            .foregroundColor(lightMode ? .primary : .white)
+                            .lineLimit(1...6)
+                            .padding(.vertical, 8)
+                            .onChange(of: inputText) { _, newValue in
+                                if newValue.count > Self.messageCharLimit {
+                                    inputText = String(newValue.prefix(Self.messageCharLimit))
+                                }
+                            }
+                            .onKeyPress(keys: [.return], phases: .down) { press in
+                                if press.modifiers.contains(.shift) {
+                                    inputText += "\n"
+                                    return .handled
+                                }
+                                send()
+                                return .handled
+                            }
+
+                        if trimmedInputCount > Self.messageCharLimit - 500 {
+                            Text("\(trimmedInputCount)/\(Self.messageCharLimit)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(isOverLimit ? .red : .secondary)
+                        }
+
+                        Button { send() } label: {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 28))
+                                .foregroundColor(
+                                    inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isOverLimit
+                                    ? .secondary : .matcha500
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isStreaming || isOverLimit)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(lightMode ? Color(white: 0.94) : Color.zinc900)
+                .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(lightMode ? Color.black.opacity(0.08) : Color.white.opacity(0.08), lineWidth: 1)
+                )
+                .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
+                .frame(maxWidth: 560)
+                
+                HStack(spacing: 12) {
+                    SuggestionCard(
+                        title: "Draft an offer letter",
+                        icon: "doc.text.fill",
+                        text: "Create a job offer letter for a Software Engineer candidate",
+                        lightMode: lightMode
+                    ) {
+                        inputText = "Draft an offer letter for a Software Engineer candidate named Jane."
+                    }
+                    
+                    SuggestionCard(
+                        title: "Performance review",
+                        icon: "star.fill",
+                        text: "Write a performance review highlighting key accomplishments",
+                        lightMode: lightMode
+                    ) {
+                        inputText = "Write a performance review highlighting key achievements and growth areas."
+                    }
+                    
+                    SuggestionCard(
+                        title: "Onboarding workbook",
+                        icon: "book.fill",
+                        text: "Build an onboarding guide or workbook for a new hire",
+                        lightMode: lightMode
+                    ) {
+                        inputText = "Create an onboarding workbook for a new engineer starting next week."
+                    }
+                }
+                .frame(maxWidth: 560)
+            }
+            .padding(.horizontal, 24)
+            
+            Spacer()
+        }
+    }
+}
+
+// MARK: - Suggestion Card Component
+
+struct SuggestionCard: View {
+    let title: String
+    let icon: String
+    let text: String
+    let lightMode: Bool
+    let action: () -> Void
+    @State private var isHovered = false
+    
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: icon)
+                        .font(.system(size: 11))
+                        .foregroundColor(.matcha500)
+                    Text(title)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(lightMode ? .primary : .white)
+                }
+                Text(text)
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, minHeight: 72, alignment: .topLeading)
+            .background(isHovered ? (lightMode ? Color(white: 0.90) : Color.zinc800) : (lightMode ? Color(white: 0.94) : Color.zinc900))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(lightMode ? Color.black.opacity(0.08) : Color.white.opacity(0.08), lineWidth: 1)
+            )
+            .scaleEffect(isHovered ? 1.02 : 1.0)
+            .animation(.easeOut(duration: 0.12), value: isHovered)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
     }
 }

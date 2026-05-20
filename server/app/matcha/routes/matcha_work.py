@@ -7399,10 +7399,13 @@ async def send_message(
         msg_dicts, ai_facing_state, company_context=ctx,
         slide_index=body.slide_index, context_summary=context_summary,
         payer_mode_prompt=payer_prompt,
+        model_override=body.model,
+        company_id=str(company_id) if company_id else "",
         compliance_mode=bool(thread.get("compliance_mode")),
         payer_mode=bool(thread.get("payer_mode")),
         node_mode=bool(thread.get("node_mode")),
         blog_mode_state=blog_mode_state,
+        thread_id=str(thread_id),
     )
     _scope_slide_update(ai_resp, thread["current_state"], body.slide_index)
     final_usage = ai_resp.token_usage
@@ -7428,6 +7431,10 @@ async def send_message(
 
     # Build metadata from compliance reasoning chains + payer sources
     msg_metadata = _build_compliance_metadata(compliance_result, ai_resp)
+    if ai_resp and getattr(ai_resp, "attachments", None):
+        if msg_metadata is None:
+            msg_metadata = {}
+        msg_metadata["attachments"] = ai_resp.attachments
     if payer_sources:
         if msg_metadata is None:
             msg_metadata = {}
@@ -7819,6 +7826,7 @@ async def send_message_stream(
                 payer_mode=bool(thread.get("payer_mode")),
                 node_mode=bool(thread.get("node_mode")),
                 blog_mode_state=stream_blog_mode_state,
+                thread_id=str(thread_id),
             ))
             while True:
                 done, _ = await asyncio.wait({_ai_task}, timeout=15.0)
@@ -7850,6 +7858,10 @@ async def send_message_stream(
 
             # Build metadata from compliance reasoning chains + payer sources
             msg_metadata = _build_compliance_metadata(compliance_result, ai_resp)
+            if ai_resp and getattr(ai_resp, "attachments", None):
+                if msg_metadata is None:
+                    msg_metadata = {}
+                msg_metadata["attachments"] = ai_resp.attachments
             if stream_payer_sources:
                 if msg_metadata is None:
                     msg_metadata = {}

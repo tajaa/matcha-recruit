@@ -5,13 +5,60 @@ from types import ModuleType
 google_module = ModuleType("google")
 genai_module = ModuleType("google.genai")
 types_module = ModuleType("google.genai.types")
+
+class MockTool:
+    def __init__(self, *args, **kwargs):
+        pass
+
+class MockGoogleSearch:
+    def __init__(self, *args, **kwargs):
+        pass
+
+class MockPartClass:
+    def __init__(self, text=None, *args, **kwargs):
+        self.text = text
+    
+    @classmethod
+    def from_bytes(cls, data, mime_type):
+        return cls()
+
+    @classmethod
+    def from_text(cls, text):
+        return cls(text=text)
+
+class MockContentClass:
+    def __init__(self, role=None, parts=None, *args, **kwargs):
+        self.role = role
+        self.parts = parts
+
+types_module.Tool = MockTool
+types_module.GoogleSearch = MockGoogleSearch
+types_module.Part = MockPartClass
+types_module.Content = MockContentClass
+
 genai_module.Client = object
 genai_module.types = types_module
+class MockGenerateContentConfig:
+    def __init__(self, *args, **kwargs):
+        pass
+
+class MockImageConfig:
+    def __init__(self, *args, **kwargs):
+        pass
+
+class MockThinkingConfig:
+    def __init__(self, *args, **kwargs):
+        pass
+
+types_module.ThinkingConfig = MockThinkingConfig
+types_module.GenerateContentConfig = MockGenerateContentConfig
+types_module.ImageConfig = MockImageConfig
+
 google_module.genai = genai_module
 
-sys.modules.setdefault("google", google_module)
-sys.modules.setdefault("google.genai", genai_module)
-sys.modules.setdefault("google.genai.types", types_module)
+sys.modules["google"] = google_module
+sys.modules["google.genai"] = genai_module
+sys.modules["google.genai.types"] = types_module
 
 from app.matcha.services.matcha_work_ai import HANDBOOK_FIELDS, _infer_skill_from_state
 

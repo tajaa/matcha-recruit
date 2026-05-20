@@ -904,6 +904,7 @@ class AIResponse:
     compliance_reasoning: list[dict] | None = field(default=None)
     referenced_categories: list[str] | None = field(default=None)
     referenced_locations: list[str] | None = field(default=None)
+    attachments: list[dict] | None = field(default=None)
 
 
 class MatchaWorkAIProvider:
@@ -913,8 +914,15 @@ class MatchaWorkAIProvider:
         current_state: dict,
         company_context: str = "",
         slide_index: Optional[int] = None,
+        context_summary: Optional[str] = None,
+        payer_mode_prompt: Optional[str] = None,
         model_override: Optional[str] = None,
         company_id: str = "",
+        compliance_mode: bool = False,
+        payer_mode: bool = False,
+        node_mode: bool = False,
+        blog_mode_state: Optional[str] = None,
+        thread_id: Optional[str] = None,
     ) -> AIResponse:
         raise NotImplementedError
 
@@ -984,7 +992,113 @@ class GeminiProvider(MatchaWorkAIProvider):
         payer_mode: bool = False,
         node_mode: bool = False,
         blog_mode_state: Optional[str] = None,
+        thread_id: Optional[str] = None,
     ) -> AIResponse:
+        latest_user_msg = next(
+            (m["content"] for m in reversed(messages) if m.get("role") == "user"),
+            "",
+        )
+
+        # Check if the user is requesting image/diagram generation
+        is_image_request = False
+        latest_user_msg_lower = latest_user_msg.lower()
+        image_pattern = r"\b(generate|create|draw|make|sketch|illustrate|render)\b.*\b(image|picture|photo|illustration|sketch|diagram|flowchart|drawing)\b"
+        if re.search(image_pattern, latest_user_msg_lower) or "image generation" in latest_user_msg_lower:
+            is_image_request = True
+
+        if is_image_request and not payer_mode_prompt:
+            import os
+            import secrets
+            from uuid import UUID
+            from google.genai import types as _genai_types
+            from ...core.services.storage import get_storage
+            from ..services.matcha_work_document import build_matcha_work_thread_storage_prefix
+
+            def _call_imagen() -> Optional[tuple[bytes, str, str]]:
+                try:
+                    response = self.client.models.generate_content(
+                        model="gemini-3.1-flash-image-preview",
+                        contents=latest_user_msg,
+                        config=_genai_types.GenerateContentConfig(
+                            response_modalities=["IMAGE", "TEXT"],
+                            image_config=_genai_types.ImageConfig(aspect_ratio="16:9"),
+                        ),
+                    )
+                    
+                    image_data = None
+                    mime = "image/png"
+                    reply_text = ""
+                    
+                    if response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+                        for part in response.candidates[0].content.parts:
+                            if part.text:
+                                reply_text += part.text
+                            elif part.inline_data and part.inline_data.data:
+                                image_data = part.inline_data.data
+                                mime = part.inline_data.mime_type or "image/png"
+                    
+                    if image_data:
+                        return image_data, mime, reply_text
+                except Exception as e:
+                    logger.warning("Gemini image generation call failed: %s", e)
+                return None
+
+            result = await asyncio.to_thread(_call_imagen)
+            if result:
+                image_bytes, mime_type, reply_text = result
+                ext = "png" if "png" in mime_type else "jpg"
+                filename = f"image_{secrets.token_hex(8)}.{ext}"
+                
+                co_uuid = None
+                th_uuid = None
+                if company_id:
+                    try:
+                        co_uuid = UUID(company_id)
+                    except Exception:
+                        pass
+                if thread_id:
+                    try:
+                        th_uuid = UUID(thread_id)
+                    except Exception:
+                        pass
+                
+                if co_uuid and th_uuid:
+                    prefix = build_matcha_work_thread_storage_prefix(co_uuid, th_uuid, "images")
+                else:
+                    prefix = "matcha-work/temp-images"
+
+                try:
+                    url = await get_storage().upload_file(
+                        image_bytes,
+                        filename,
+                        prefix=prefix,
+                        content_type=mime_type,
+                    )
+                    if not reply_text:
+                        reply_text = f"Here is the generated image for your request: \"{latest_user_msg}\""
+
+                    attachments = [{
+                        "url": url,
+                        "kind": "image",
+                        "filename": filename
+                    }]
+                    
+                    token_usage = {
+                        "prompt_tokens": len(latest_user_msg.split()) * 2,
+                        "completion_tokens": 1024,
+                        "total_tokens": 1024 + len(latest_user_msg.split()) * 2,
+                        "model": "gemini-3.1-flash-image-preview",
+                    }
+
+                    return AIResponse(
+                        assistant_reply=reply_text,
+                        structured_update=None,
+                        attachments=attachments,
+                        token_usage=token_usage,
+                    )
+                except Exception as e:
+                    logger.exception("Failed to upload generated image: %s", e)
+
         if payer_mode_prompt:
             # Payer mode: dedicated medical policy prompt, plain text response (no JSON)
             window_size = 15 if context_summary else 20
