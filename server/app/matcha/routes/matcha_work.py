@@ -3141,6 +3141,17 @@ async def archive_project_endpoint(
     return {"status": "archived"}
 
 
+@router.delete("/projects/{project_id}/permanent", status_code=204)
+async def delete_project_permanent_endpoint(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Hard-delete a project along with all its threads and messages."""
+    from ..services import project_service as proj_svc
+    await _verify_project_access(project_id, current_user)
+    await proj_svc.delete_project_permanent(project_id)
+
+
 @router.post("/projects/{project_id}/unarchive")
 async def unarchive_project_endpoint(
     project_id: UUID,

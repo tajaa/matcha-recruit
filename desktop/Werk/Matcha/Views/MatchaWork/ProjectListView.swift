@@ -439,7 +439,29 @@ struct ProjectListView: View {
             Button("Archive") {
                 Task {
                     try? await MatchaWorkService.shared.archiveProject(id: p.id)
+                    await MainActor.run {
+                        if appState.selectedProjectId == p.id { appState.selectedProjectId = nil }
+                    }
                     await load()
+                }
+            }
+            Divider()
+            Button("Delete…") {
+                let alert = NSAlert()
+                alert.messageText = "Delete \"\(p.title)\"?"
+                alert.informativeText = "Permanently deletes the project, its sections, and all associated threads and messages. Cannot be undone."
+                alert.alertStyle = .critical
+                alert.addButton(withTitle: "Delete Permanently")
+                alert.addButton(withTitle: "Cancel")
+                if alert.runModal() == .alertFirstButtonReturn {
+                    Task {
+                        try? await MatchaWorkService.shared.deleteProject(id: p.id)
+                        await MainActor.run {
+                            if appState.selectedProjectId == p.id { appState.selectedProjectId = nil }
+                            appState.projectsListGeneration &+= 1
+                        }
+                        await load()
+                    }
                 }
             }
         }
@@ -496,6 +518,7 @@ struct ProjectListView: View {
         }
         do {
             _ = try await MatchaWorkService.shared.setProjectPinned(id: project.id, pinned: nextPinned)
+            await MainActor.run { appState.projectsListGeneration &+= 1 }
         } catch {
             await MainActor.run {
                 if let i = projects.firstIndex(where: { $0.id == project.id }) {

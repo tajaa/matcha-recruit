@@ -546,6 +546,11 @@ class MatchaWorkService {
         invalidateProjectLists()
     }
 
+    func deleteProject(id: String) async throws {
+        _ = try await client.requestData(method: "DELETE", path: "\(basePath)/projects/\(id)/permanent")
+        invalidateProjectLists()
+    }
+
     func unarchiveProject(id: String) async throws {
         _ = try await client.requestData(method: "POST", path: "\(basePath)/projects/\(id)/unarchive")
         invalidateProjectLists()

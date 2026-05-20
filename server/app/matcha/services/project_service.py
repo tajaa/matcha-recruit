@@ -536,6 +536,19 @@ async def unarchive_project(project_id: UUID):
         )
 
 
+async def delete_project_permanent(project_id: UUID):
+    async with get_connection() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                "DELETE FROM mw_threads WHERE project_id = $1",
+                project_id,
+            )
+            await conn.execute(
+                "DELETE FROM mw_projects WHERE id = $1",
+                project_id,
+            )
+
+
 # ── Section operations ──
 #
 # All mutating section ops go through `_mutate_sections`: acquire row lock,

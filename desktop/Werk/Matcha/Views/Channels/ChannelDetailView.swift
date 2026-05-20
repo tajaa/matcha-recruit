@@ -104,6 +104,10 @@ struct ChannelDetailView: View {
                     isUploading: $isUploading,
                     lastTypingSentAt: $lastTypingSentAt
                 )
+                .onDrop(of: [UTType.fileURL], isTargeted: $isDragOver) { providers in
+                    handleFileDrop(providers)
+                    return true
+                }
             }
         }
         .background(appState.themeBg)
