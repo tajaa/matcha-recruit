@@ -30,6 +30,7 @@ struct MessageBubbleView: View {
 
     @State private var isExporting = false
     @State private var exportError: String?
+    @State private var selectedPreviewImageURL: String? = nil
 
     var body: some View {
         VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 4) {
@@ -108,6 +109,12 @@ struct MessageBubbleView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
+        .sheet(item: Binding<AttachmentPreviewImageItem?>(
+            get: { selectedPreviewImageURL.map { AttachmentPreviewImageItem(url: $0) } },
+            set: { selectedPreviewImageURL = $0?.url }
+        )) { item in
+            AttachmentImagePreviewSheet(urlString: item.url)
+        }
     }
 
     private func exportPDF() {
@@ -166,7 +173,7 @@ struct MessageBubbleView: View {
     private func attachmentStrip(_ attachments: [MWMessageAttachment]) -> some View {
         let images = attachments.filter { ($0.kind ?? "image") == "image" }
         let files = attachments.filter { $0.kind == "file" }
-        return VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
             if !images.isEmpty {
                 let columns = min(images.count, 3)
                 LazyVGrid(
@@ -174,24 +181,31 @@ struct MessageBubbleView: View {
                     spacing: 6
                 ) {
                     ForEach(images, id: \.url) { att in
-                        AsyncImage(url: URL(string: att.url)) { phase in
-                            switch phase {
-                            case .success(let img):
-                                img.resizable().scaledToFill()
-                            case .failure:
-                                Image(systemName: "photo")
-                                    .foregroundColor(.white.opacity(0.4))
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                    .background(Color.black.opacity(0.15))
-                            default:
-                                ProgressView()
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                    .background(Color.black.opacity(0.15))
+                        Button {
+                            selectedPreviewImageURL = att.url
+                        } label: {
+                            AsyncImage(url: URL(string: att.url)) { phase in
+                                switch phase {
+                                case .success(let img):
+                                    img.resizable().scaledToFill()
+                                case .failure:
+                                    Image(systemName: "photo")
+                                        .foregroundColor(.white.opacity(0.4))
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                        .background(Color.black.opacity(0.15))
+                                default:
+                                    ProgressView()
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                        .background(Color.black.opacity(0.15))
+                                }
                             }
+                            .frame(height: 120)
+                            .frame(maxWidth: .infinity)
+                            .clipped()
+                            .cornerRadius(8)
                         }
-                        .frame(height: 120)
-                        .clipped()
-                        .cornerRadius(8)
+                        .buttonStyle(.plain)
+                        .help("Click to view larger and download")
                     }
                 }
                 .frame(maxWidth: 320)
@@ -771,5 +785,121 @@ struct StreamingBubbleView: View {
             Spacer(minLength: 60)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - Image Preview structures
+
+struct AttachmentPreviewImageItem: Identifiable {
+    var id: String { url }
+    let url: String
+}
+
+struct AttachmentImagePreviewSheet: View {
+    let urlString: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var isDownloading = false
+    @State private var errorMessage: String?
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+            }
+            
+            AsyncImage(url: URL(string: urlString)) { phase in
+                switch phase {
+                case .success(let img):
+                    img.resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: 800, maxHeight: 600)
+                case .failure:
+                    VStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 24))
+                            .foregroundColor(.red)
+                        Text("Failed to load image").font(.system(size: 12))
+                    }
+                    .frame(width: 300, height: 200)
+                default:
+                    ProgressView()
+                        .frame(width: 300, height: 200)
+                }
+            }
+            .cornerRadius(8)
+            
+            HStack(spacing: 16) {
+                if isDownloading {
+                    ProgressView().scaleEffect(0.8)
+                } else {
+                    Button {
+                        downloadImage()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "arrow.down.to.line.circle.fill")
+                            Text("Download Image")
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Color.matcha500)
+                        .cornerRadius(6)
+                    }
+                    .buttonStyle(.plain)
+                }
+                
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.system(size: 11))
+                        .foregroundColor(.red)
+                }
+            }
+        }
+        .padding(16)
+        .background(Color.zinc900)
+    }
+    
+    private func downloadImage() {
+        guard let url = URL(string: urlString) else { return }
+        isDownloading = true
+        errorMessage = nil
+        
+        Task {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                await MainActor.run {
+                    isDownloading = false
+                    let panel = NSSavePanel()
+                    panel.allowedContentTypes = [.png, .jpeg]
+                    
+                    // Deduce file extension from URL or use png
+                    let ext = url.pathExtension.isEmpty ? "png" : url.pathExtension
+                    panel.nameFieldStringValue = "diagram.\(ext)"
+                    
+                    if panel.runModal() == .OK, let saveURL = panel.url {
+                        do {
+                            try data.write(to: saveURL)
+                        } catch {
+                            errorMessage = "Failed to save: \(error.localizedDescription)"
+                        }
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isDownloading = false
+                    errorMessage = "Download failed: \(error.localizedDescription)"
+                }
+            }
+        }
     }
 }
