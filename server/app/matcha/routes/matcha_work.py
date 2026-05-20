@@ -6408,6 +6408,110 @@ async def delete_project_section(
     return {"current_state": result["current_state"], "version": result["version"]}
 
 
+# Shared A4 stylesheet for thread/message PDF export. Plain string (single
+# braces) — mirrors the inline CSS in the project-export pdf branch below.
+_PDF_CSS = """
+  @page { size: A4; margin: 50px 60px; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11pt; line-height: 1.6; color: #1a1a1a; margin: 0; }
+  h1 { font-size: 22pt; font-weight: 700; color: #0f172a; margin: 0 0 6px 0; letter-spacing: -0.5px; }
+  .title-rule { border: none; border-top: 3px solid #22c55e; margin: 0 0 30px 0; }
+  h2 { font-size: 14pt; font-weight: 600; color: #0f172a; margin: 28px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #e2e8f0; }
+  h3 { font-size: 12pt; font-weight: 600; color: #0f172a; margin: 18px 0 8px 0; }
+  p { margin: 6px 0; color: #334155; }
+  ul, ol { margin: 6px 0; padding-left: 22px; color: #334155; }
+  li { margin: 3px 0; }
+  strong { color: #0f172a; }
+  em { color: #475569; }
+  pre { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 10px 14px; font-size: 9pt; font-family: 'SF Mono', 'Menlo', monospace; overflow-wrap: break-word; white-space: pre-wrap; color: #334155; }
+  code { background: #f1f5f9; padding: 1px 5px; border-radius: 3px; font-size: 9pt; font-family: 'SF Mono', 'Menlo', monospace; color: #b45309; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 9.5pt; }
+  th, td { border: 1px solid #e2e8f0; padding: 6px 10px; text-align: left; }
+  th { background: #f8fafc; font-weight: 600; color: #0f172a; }
+  blockquote { border-left: 3px solid #22c55e; margin: 12px 0; padding: 8px 16px; background: #f0fdf4; color: #334155; }
+  a { color: #2563eb; text-decoration: none; }
+  img { max-width: 100%; max-height: 22cm; height: auto; margin: 12px 0; border-radius: 4px; }
+  .footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid #e2e8f0; font-size: 8pt; color: #94a3b8; text-align: center; }
+"""
+
+
+def _pdf_title_from_markdown(content: str, fallback: str = "Deal Memo") -> str:
+    """First markdown heading (# / ## / ###) becomes the document title."""
+    for line in (content or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            title = stripped.lstrip("#").strip()
+            if title:
+                return title
+    return fallback
+
+
+async def _render_markdown_pdf(title: str, content_md: str) -> bytes:
+    """Render a markdown (or HTML) string to PDF bytes via WeasyPrint. Used by
+    the per-message export endpoint so a thread reply (e.g. a deal memo) can be
+    saved as a PDF without promoting the thread to a Project."""
+    import html as _html
+    content = content_md or ""
+    if content.lstrip().startswith("<"):
+        body_html = content  # already HTML
+    else:
+        try:
+            import markdown as _md
+            body_html = _md.markdown(content, extensions=["tables", "fenced_code", "nl2br"])
+        except ImportError:
+            body_html = f"<p>{_html.escape(content)}</p>"
+    full_html = (
+        '<!DOCTYPE html><html><head><meta charset="UTF-8">'
+        f"<style>{_PDF_CSS}</style></head><body>"
+        f"<h1>{_html.escape(title)}</h1><hr class=\"title-rule\">"
+        f"{body_html}"
+        '<div class="footer">Generated with Matcha Work</div>'
+        "</body></html>"
+    )
+    try:
+        from weasyprint import HTML
+    except ImportError:
+        raise HTTPException(status_code=501, detail="PDF generation not available — install weasyprint")
+    return await asyncio.to_thread(lambda: HTML(string=full_html).write_pdf())
+
+
+@router.post("/threads/{thread_id}/messages/{message_id}/export/pdf")
+async def export_message_pdf(
+    thread_id: UUID,
+    message_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Render a single thread message's markdown to a downloadable PDF. Lets a
+    plain thread produce deal memos / briefs without a Project — the AI writes
+    the memo as markdown in its reply and the user exports that reply."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    thread = await doc_svc.get_thread(thread_id, company_id, user_id=current_user.id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, content FROM mw_messages WHERE id = $1 AND thread_id = $2",
+            message_id, thread_id,
+        )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Message not found")
+    content = row["content"] or ""
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="Message has no content to export")
+
+    title = _pdf_title_from_markdown(content)
+    pdf_bytes = await _render_markdown_pdf(title, content)
+    safe_title = "".join(c for c in title if c.isalnum() or c in (" ", "-", "_")).strip() or "Deal Memo"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_title}.pdf"'},
+    )
+
+
 @router.get("/threads/{thread_id}/project/export/{fmt}")
 async def export_project(
     thread_id: UUID,
@@ -7229,10 +7333,11 @@ async def send_message(
             "\n\n=== PLAIN THREAD (NO PROJECT) ==="
             "\nThis is a plain chat thread. Per the Surface architecture section at the top of the system prompt: threads cannot contain projects, and no project is attached to this thread."
             "\n- Set mode=\"general\", skill=\"none\", operation=\"none\". Never emit project_title, project_sections, blog_outline, blog_section_draft, or blog_section_revision."
-            "\n- Your reply text is the only artifact. Do not reference any panel, canvas, document, or draft surface — none exists for this chat."
+            "\n- There is no project panel / canvas / draft surface in this chat — don't reference one."
+            "\n- Documents, memos, deal memos, briefs, reports, letters: WRITE THE COMPLETE DOCUMENT as well-structured Markdown directly in your reply (use # / ## headings, bullet lists, and tables as appropriate). This is fully supported."
+            "\n- The user can export any of your replies to a downloadable PDF using the export button on the message. NEVER say you cannot create, generate, or export a PDF or a document. NEVER output raw SVG or HTML wireframes / mockups of a document — write the actual content as Markdown."
             "\n- Short-form content (LinkedIn posts, social captions, emails, summaries, cover letters): write it directly in your reply."
-            "\n- If the user wants a blog post: tell them to use + next to Projects in the sidebar and choose 'Blog Post'."
-            "\n- If the user wants a multi-section long-form document (strategy report, multi-page brief, job posting): tell them to create a Project from the sidebar and chat inside it."
+            "\n- Suggest creating a Project (+ next to Projects in the sidebar) ONLY when the user wants to iteratively edit a multi-section document over time — never as a reason to decline writing the content now."
         )
 
     # Grounded web search pre-pass for time-sensitive questions

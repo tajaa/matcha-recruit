@@ -355,6 +355,27 @@ class MatchaWorkService {
         }
     }
 
+    // MARK: - Per-message PDF export
+
+    /// Render a single thread message (markdown) to PDF bytes. Lets a plain
+    /// thread reply — e.g. a deal memo the AI wrote — be saved as a PDF.
+    func exportMessagePDF(threadId: String, messageId: String) async throws -> Data {
+        guard let url = URL(string: "\(client.baseURL)\(basePath)/threads/\(threadId)/messages/\(messageId)/export/pdf") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/pdf", forHTTPHeaderField: "Accept")
+        if let token = client.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw APIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0, "PDF export failed")
+        }
+        return data
+    }
+
     // MARK: - Send / Sync Interviews
 
     func sendInterviews(

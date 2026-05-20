@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 // Process-wide cache so re-renders (or scrolling past the same message twice)
 // don't re-parse the markdown. Keyed by raw content; bounded to keep memory in
@@ -26,6 +27,9 @@ private final class MarkdownCache {
 struct MessageBubbleView: View {
     let message: MWMessage
     var lightMode: Bool = false
+
+    @State private var isExporting = false
+    @State private var exportError: String?
 
     var body: some View {
         VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 4) {
@@ -70,12 +74,85 @@ struct MessageBubbleView: View {
                                 .foregroundColor(.matcha500)
                                 .padding(.leading, 4)
                         }
+
+                        if message.role == "assistant" && !message.content.isEmpty {
+                            HStack(spacing: 6) {
+                                Button(action: exportPDF) {
+                                    HStack(spacing: 4) {
+                                        if isExporting {
+                                            ProgressView().controlSize(.mini)
+                                        } else {
+                                            Image(systemName: "arrow.down.doc")
+                                                .font(.system(size: 10))
+                                        }
+                                        Text("Export PDF")
+                                            .font(.system(size: 10))
+                                    }
+                                    .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(isExporting)
+                                .help("Save this reply as a PDF")
+                                if let err = exportError {
+                                    Text(err)
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.red)
+                                }
+                            }
+                            .padding(.leading, 4)
+                            .padding(.top, 2)
+                        }
                     }
                     if message.role == "assistant" { Spacer(minLength: 60) }
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
+    }
+
+    private func exportPDF() {
+        guard !isExporting else { return }
+        isExporting = true
+        exportError = nil
+        Task {
+            do {
+                let data = try await MatchaWorkService.shared.exportMessagePDF(
+                    threadId: message.threadId, messageId: message.id
+                )
+                await MainActor.run {
+                    isExporting = false
+                    let panel = NSSavePanel()
+                    panel.allowedContentTypes = [.pdf]
+                    panel.nameFieldStringValue = "\(suggestedFileName).pdf"
+                    if panel.runModal() == .OK, let url = panel.url {
+                        do {
+                            try data.write(to: url)
+                        } catch {
+                            exportError = "Save failed"
+                        }
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isExporting = false
+                    exportError = "Export failed"
+                }
+            }
+        }
+    }
+
+    /// Default save name derived from the first markdown heading in the reply.
+    private var suggestedFileName: String {
+        for line in message.content.split(separator: "\n") {
+            let s = line.trimmingCharacters(in: .whitespaces)
+            if s.hasPrefix("#") {
+                let title = s.drop(while: { $0 == "#" }).trimmingCharacters(in: .whitespaces)
+                if !title.isEmpty {
+                    return String(title.prefix(60))
+                }
+            }
+        }
+        return "Deal Memo"
     }
 
     private var bubbleBackground: Color {
