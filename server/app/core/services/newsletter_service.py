@@ -1050,8 +1050,9 @@ def _render_email(
         )
 
     return f"""
+    <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');</style>
     {preheader_html}
-    <div style="max-width:600px;margin:0 auto;font-family:-apple-system,system-ui,sans-serif;background:{palette['wrapper_bg']};color:{palette['wrapper_fg']};padding:32px 24px;">
+    <div style="max-width:600px;margin:0 auto;font-family:'Inter',-apple-system,system-ui,sans-serif;background:{palette['wrapper_bg']};color:{palette['wrapper_fg']};padding:32px 24px;">
         <div style="text-align:center;margin-bottom:24px;">
             <span style="font-size:20px;font-weight:700;color:{palette['accent']};">Matcha</span>
         </div>

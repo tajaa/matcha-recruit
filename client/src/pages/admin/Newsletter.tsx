@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Loader2, Plus, Send, Trash2, FileText, Search, Tag as TagIcon, Layout, Calendar, Upload, X, BarChart3 } from 'lucide-react'
 import { api } from '../../api/client'
 import SectionEditor from '../../components/matcha-work/SectionEditor'
@@ -67,8 +68,9 @@ async function uploadNewsletterMedia(file: File): Promise<string | null> {
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
-export default function NewsletterAdmin() {
-  const [tab, setTab] = useState<Tab>('subscribers')
+export default function NewsletterAdmin({ initialTab }: { initialTab?: Tab } = {}) {
+  const navigate = useNavigate()
+  const [tab, setTab] = useState<Tab>(initialTab ?? 'subscribers')
   const [subscribers, setSubs] = useState<Subscriber[]>([])
   const [stats, setStats] = useState<SubStats | null>(null)
   const [newsletters, setNewsletters] = useState<Newsletter[]>([])
@@ -390,7 +392,8 @@ export default function NewsletterAdmin() {
           onClick={() => {
             if (isDirty && !confirm('Discard unsaved changes?')) return
             setEditingId(null); setComposeTitle(''); setComposeSubject(''); setComposePreheader(''); setComposeHtml('')
-            setIsDirty(false); setSaveStatus('saved'); setTab('compose')
+            setIsDirty(false); setSaveStatus('saved')
+            navigate('/admin/newsletter/composer')
           }}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors"
         >
@@ -772,9 +775,9 @@ function MobilePreview({ title, subject, preheader, html, viewport, onViewportCh
   // returns the email body div; we add a doctype + the recipient-side
   // background that simulates what the email client paints around the email.
   const clientBg = theme === 'dark' ? '#0a0a0a' : '#f3f4f6'
-  const previewDoc = `<!doctype html><html><head><meta charset="utf-8"><style>
+  const previewDoc = `<!doctype html><html><head><meta charset="utf-8"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"><style>
     html,body{margin:0;padding:0;background:${clientBg};}
-    body{padding:16px 0;}
+    body{padding:16px 0;font-family:'Inter',-apple-system,system-ui,sans-serif;}
     img{max-width:100%;height:auto}
     video{max-width:100%;height:auto}
   </style></head><body>${previewHtml || '<p style="padding:16px;color:#777;text-align:center;">Loading preview…</p>'}</body></html>`
@@ -816,7 +819,7 @@ function MobilePreview({ title, subject, preheader, html, viewport, onViewportCh
           </div>
           <iframe
             title="Newsletter preview"
-            sandbox=""
+            sandbox="allow-same-origin"
             srcDoc={previewDoc}
             className="block"
             style={{ width: viewportPx, height: 700, border: 0, background: clientBg }}
