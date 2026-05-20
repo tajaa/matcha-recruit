@@ -617,19 +617,101 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Markdown description starter prefilled into the compose sheet.
+    /// Markdown description starter prefilled into the compose sheet. Italic
+    /// `_prompts_` are inline guidance the author replaces or deletes.
     var scaffold: String {
         switch self {
         case .engineering:
-            return "## Context\n\n## Acceptance criteria\n- [ ] \n\n## Notes\n"
+            return """
+            ## Context
+            _What's the problem and why now?_
+
+            ## Scope
+            - [ ] \n- [ ]
+
+            ## Acceptance criteria
+            - [ ]
+
+            ## Technical notes
+            _Approach, affected files/services, risks._
+
+            ## Out of scope
+            -
+            """
         case .sales:
-            return "## Account\n\n## Deal stage\n\n## Next step\n"
+            return """
+            ## Account
+            _Company · contact · role_
+
+            ## Opportunity
+            _Deal size · timeline · source_
+
+            ## Stage
+            _Prospecting / Demo / Proposal / Negotiation / Closing_
+
+            ## Pain / need
+            -
+
+            ## Next step
+            - [ ]
+
+            ## Blockers
+            -
+            """
         case .product:
-            return "## Problem\n\n## Proposed solution\n\n## Success metric\n"
+            return """
+            ## Problem
+            _Who hurts, and how today?_
+
+            ## User story
+            As a _____, I want _____ so that _____.
+
+            ## Proposed solution
+            -
+
+            ## Success metric
+            _How we'll know it worked._
+
+            ## Open questions
+            -
+
+            ## Out of scope
+            -
+            """
         case .bug:
-            return "## Steps to reproduce\n1. \n\n## Expected\n\n## Actual\n"
+            return """
+            ## Summary
+            _One line._
+
+            ## Environment
+            _Build / OS / device_
+
+            ## Steps to reproduce
+            1. \n2.
+
+            ## Expected
+            -
+
+            ## Actual
+            -
+
+            ## Severity / impact
+            _Who's affected, how often._
+
+            ## Evidence
+            _Screenshots / logs — drag files onto the ticket._
+            """
         case .general:
-            return ""
+            return """
+            ## Goal
+            -
+
+            ## Tasks
+            - [ ]
+
+            ## Notes
+            -
+            """
         }
     }
 

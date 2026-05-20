@@ -344,7 +344,7 @@ private struct TaskComposeContent: View {
                 .foregroundColor(.white.opacity(0.9))
                 .scrollContentBackground(.hidden)
                 .padding(6)
-                .frame(height: 160)
+                .frame(height: 240)
                 .background(Color.zinc800)
                 .cornerRadius(6)
 
@@ -386,7 +386,7 @@ private struct TaskComposeContent: View {
             }
         }
         .padding(16)
-        .frame(width: 380)
+        .frame(width: 420)
         .background(Color.appBackground)
     }
 }
