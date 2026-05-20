@@ -209,18 +209,29 @@ async def confirm(token: str = Query(...)):
 
 @public_router.get("/unsubscribe")
 async def unsubscribe_get(token: str = Query(...)):
-    success = await svc.unsubscribe(token)
-    if not success:
+    _base = (
+        'background:#1e1e1e;color:#d4d4d4;font-family:sans-serif;'
+        'display:flex;align-items:center;justify-content:center;height:100vh;'
+    )
+    result = await svc.unsubscribe(token)
+    if result == 'invalid':
         return HTMLResponse(
-            '<html><body style="background:#1e1e1e;color:#d4d4d4;font-family:sans-serif;'
-            'display:flex;align-items:center;justify-content:center;height:100vh;">'
+            f'<html><body style="{_base}">'
             '<div style="text-align:center"><h2>Invalid link</h2>'
-            '<p>This unsubscribe link is invalid, already used, or expired.</p></div></body></html>',
+            '<p>This unsubscribe link is not valid.</p></div></body></html>',
             status_code=400,
         )
+    if result == 'already_unsubscribed':
+        return HTMLResponse(
+            f'<html><body style="{_base}">'
+            '<div style="text-align:center">'
+            '<h2 style="color:#ce9178;">Already unsubscribed</h2>'
+            '<p>You are not subscribed to Matcha newsletters.</p>'
+            '<p style="color:#6a737d;font-size:13px;margin-top:16px;">You can close this tab.</p>'
+            '</div></body></html>'
+        )
     return HTMLResponse(
-        '<html><body style="background:#1e1e1e;color:#d4d4d4;font-family:sans-serif;'
-        'display:flex;align-items:center;justify-content:center;height:100vh;">'
+        f'<html><body style="{_base}">'
         '<div style="text-align:center"><h2 style="color:#ce9178;">Unsubscribed</h2>'
         '<p>You have been unsubscribed from Matcha newsletters.</p>'
         '<p style="color:#6a737d;font-size:13px;margin-top:16px;">You can close this tab.</p>'

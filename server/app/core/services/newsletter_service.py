@@ -240,10 +240,11 @@ async def confirm_subscription(token: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
-async def unsubscribe(token: str) -> bool:
+async def unsubscribe(token: str) -> str:
+    """Returns 'ok' | 'already_unsubscribed' | 'invalid'."""
     sub_id = verify_unsubscribe_token(token)
     if not sub_id:
-        return False
+        return 'invalid'
     async with get_connection() as conn:
         result = await conn.execute(
             """UPDATE newsletter_subscribers
@@ -251,7 +252,12 @@ async def unsubscribe(token: str) -> bool:
                WHERE id = $1 AND status IN ('active', 'pending')""",
             sub_id,
         )
-        return "UPDATE 1" in result
+        if "UPDATE 1" in result:
+            return 'ok'
+        exists = await conn.fetchval(
+            "SELECT 1 FROM newsletter_subscribers WHERE id = $1", sub_id
+        )
+        return 'already_unsubscribed' if exists else 'invalid'
 
 
 async def record_soft_bounce(email_or_id: str | UUID, reason: Optional[str] = None) -> dict:
