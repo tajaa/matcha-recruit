@@ -410,15 +410,8 @@ enum TaskClipboardExporter {
     }
 
     private static func formatHistoryDate(_ iso: String) -> String {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date: Date? = f.date(from: iso) ?? {
-            f.formatOptions = [.withInternetDateTime]
-            return f.date(from: iso)
-        }()
-        guard let d = date else { return iso }
-        let out = DateFormatter()
-        out.dateFormat = "yyyy-MM-dd HH:mm"
-        return out.string(from: d)
+        // Absolute Pacific time so a pasted ticket reads the same for everyone,
+        // regardless of the reader's machine timezone.
+        PacificDateFormatter.absolute(iso) ?? iso
     }
 }

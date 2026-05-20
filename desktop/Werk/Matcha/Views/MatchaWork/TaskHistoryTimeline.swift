@@ -107,16 +107,16 @@ struct TaskHistoryTimeline: View {
         raw.replacingOccurrences(of: "_", with: " ").capitalized
     }
 
+    /// Absolute Pacific timestamp (the audit anchor for disputes — e.g. who
+    /// closed a bug and exactly when product reopened it) with a relative hint
+    /// appended for quick scanning: "May 20, 2:15 PM PT · 2h ago".
     private static func relativeDate(_ iso: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date: Date? = formatter.date(from: iso) ?? {
-            formatter.formatOptions = [.withInternetDateTime]
-            return formatter.date(from: iso)
-        }()
-        guard let d = date else { return iso }
-        let rel = RelativeDateTimeFormatter()
-        rel.unitsStyle = .short
-        return rel.localizedString(for: d, relativeTo: Date())
+        let abs = PacificDateFormatter.absolute(iso)
+        let rel = PacificDateFormatter.relative(iso)
+        switch (abs, rel) {
+        case let (a?, r?): return "\(a) · \(r)"
+        case let (a?, nil): return a
+        default: return iso
+        }
     }
 }
