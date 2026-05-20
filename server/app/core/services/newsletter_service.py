@@ -1121,6 +1121,19 @@ async def delete_tag(tag_id: UUID) -> bool:
     return "DELETE 1" in result
 
 
+async def get_tag_subscribers(tag_id: UUID) -> list[dict]:
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT s.id, s.email, s.name, s.status
+                 FROM newsletter_subscribers s
+                 JOIN newsletter_subscriber_tags st ON st.subscriber_id = s.id
+                WHERE st.tag_id = $1
+                ORDER BY s.email""",
+            tag_id,
+        )
+    return [dict(r) for r in rows]
+
+
 async def attach_tags_to_subscriber(subscriber_id: UUID, tag_slugs: list[str]) -> None:
     """Attach by slug. Unknown slugs are silently ignored — auto-tagging
     paths shouldn't 500 if a slug got renamed."""

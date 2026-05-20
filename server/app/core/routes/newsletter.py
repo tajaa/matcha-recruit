@@ -833,6 +833,14 @@ async def delete_tag(
     return {"ok": True}
 
 
+@admin_router.get("/tags/{tag_id}/subscribers")
+async def get_tag_subscribers_endpoint(
+    tag_id: UUID,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    return {"subscribers": await svc.get_tag_subscribers(tag_id)}
+
+
 @admin_router.get("/subscribers/{subscriber_id}/tags")
 async def get_subscriber_tags_endpoint(
     subscriber_id: UUID,

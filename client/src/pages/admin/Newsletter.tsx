@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Loader2, Plus, Send, Trash2, FileText, Search, Tag as TagIcon, Layout, Calendar, Upload, X, BarChart3 } from 'lucide-react'
+import { Loader2, Plus, Send, Trash2, FileText, Search, Tag as TagIcon, Layout, Calendar, Upload, X, BarChart3, ChevronDown, UserPlus } from 'lucide-react'
 import { api } from '../../api/client'
 import SectionEditor from '../../components/matcha-work/SectionEditor'
 
@@ -111,6 +111,10 @@ export default function NewsletterAdmin() {
 
   // CSV import
   const [importOpen, setImportOpen] = useState(false)
+
+  // Group (tag) management per subscriber
+  const [managingTagsFor, setManagingTagsFor] = useState<string | null>(null)
+  const [subTagsCache, setSubTagsCache] = useState<Record<string, Tag[]>>({})
 
   useEffect(() => { loadData() }, [])
 
@@ -378,6 +382,27 @@ export default function NewsletterAdmin() {
     } catch {}
   }
 
+  async function loadSubTags(subscriberId: string) {
+    if (subTagsCache[subscriberId] !== undefined) return
+    try {
+      const res = await api.get<{ tags: Tag[] }>(`/admin/newsletter/subscribers/${subscriberId}/tags`)
+      setSubTagsCache(prev => ({ ...prev, [subscriberId]: res.tags }))
+    } catch {}
+  }
+
+  async function toggleSubTag(subscriberId: string, tagId: string) {
+    const current = subTagsCache[subscriberId] ?? []
+    const has = current.some(t => t.id === tagId)
+    const found = tags.find(t => t.id === tagId)
+    const next = has ? current.filter(t => t.id !== tagId) : found ? [...current, found] : current
+    try {
+      await api.put(`/admin/newsletter/subscribers/${subscriberId}/tags`, { tag_ids: next.map(t => t.id) })
+      setSubTagsCache(prev => ({ ...prev, [subscriberId]: next }))
+      const tagRes = await api.get<{ tags: Tag[] }>('/admin/newsletter/tags')
+      setTags(tagRes.tags)
+    } catch {}
+  }
+
   const filteredSubs = useMemo(() => subscribers.filter((s) => {
     if (!search) return true
     const q = search.toLowerCase()
@@ -479,6 +504,9 @@ export default function NewsletterAdmin() {
               <button onClick={handleExport} className="px-3 py-1.5 text-xs text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-lg">Export CSV</button>
             </div>
           </div>
+          {managingTagsFor && (
+            <div className="fixed inset-0 z-40" onClick={() => setManagingTagsFor(null)} />
+          )}
           <div className="rounded-xl border border-zinc-800 overflow-hidden">
             <table className="w-full text-xs">
               <thead>
@@ -487,6 +515,7 @@ export default function NewsletterAdmin() {
                   <th className="text-left px-4 py-2.5 text-zinc-400 font-medium">Name</th>
                   <th className="text-left px-4 py-2.5 text-zinc-400 font-medium">Source</th>
                   <th className="text-left px-4 py-2.5 text-zinc-400 font-medium">Status</th>
+                  <th className="text-left px-4 py-2.5 text-zinc-400 font-medium">Groups</th>
                   <th className="text-left px-4 py-2.5 text-zinc-400 font-medium">Subscribed</th>
                   <th className="px-4 py-2.5"></th>
                 </tr>
@@ -505,6 +534,37 @@ export default function NewsletterAdmin() {
                         : 'bg-zinc-800 text-zinc-500'
                       }`}>{s.status}</span>
                     </td>
+                    <td className="px-4 py-2.5 relative">
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {(subTagsCache[s.id] ?? []).map(t => (
+                          <span key={t.id} className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-700 text-zinc-300">{t.label}</span>
+                        ))}
+                        <button
+                          onClick={async (e) => { e.stopPropagation(); await loadSubTags(s.id); setManagingTagsFor(managingTagsFor === s.id ? null : s.id) }}
+                          className="text-zinc-500 hover:text-emerald-400 transition-colors"
+                          title="Manage groups"
+                        ><TagIcon size={11} /></button>
+                      </div>
+                      {managingTagsFor === s.id && (
+                        <div className="absolute left-0 top-full mt-1 z-50 bg-zinc-900 border border-zinc-700 rounded-lg p-2 shadow-xl min-w-[180px]" onClick={e => e.stopPropagation()}>
+                          {tags.length === 0
+                            ? <p className="text-[10px] text-zinc-500 px-1 py-0.5">No groups yet. Create one in the Groups tab.</p>
+                            : tags.map(t => (
+                              <label key={t.id} className="flex items-center gap-2 px-1 py-1 text-[11px] text-zinc-300 cursor-pointer hover:text-zinc-100">
+                                <input
+                                  type="checkbox"
+                                  className="accent-emerald-500"
+                                  checked={(subTagsCache[s.id] ?? []).some(st => st.id === t.id)}
+                                  onChange={() => toggleSubTag(s.id, t.id)}
+                                />
+                                {t.label}
+                              </label>
+                            ))
+                          }
+                          <button onClick={() => setManagingTagsFor(null)} className="mt-1 w-full text-[10px] text-zinc-500 hover:text-zinc-300 text-right pr-1">Done</button>
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5 text-zinc-500">{new Date(s.subscribed_at).toLocaleDateString()}</td>
                     <td className="px-4 py-2.5 text-right">
                       <button
@@ -516,7 +576,7 @@ export default function NewsletterAdmin() {
                   </tr>
                 ))}
                 {filteredSubs.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-zinc-500">No subscribers yet</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-500">No subscribers yet</td></tr>
                 )}
               </tbody>
             </table>
@@ -651,7 +711,7 @@ export default function NewsletterAdmin() {
       )}
 
       {/* Tags tab */}
-      {tab === 'tags' && <TagsTab tags={tags} onChange={async () => { const t = await api.get<{ tags: Tag[] }>('/admin/newsletter/tags'); setTags(t.tags) }} />}
+      {tab === 'tags' && <TagsTab tags={tags} onChange={async () => { const t = await api.get<{ tags: Tag[] }>('/admin/newsletter/tags'); setTags(t.tags) }} subscribers={subscribers} />}
 
       {/* Templates tab */}
       {tab === 'templates' && <TemplatesTab templates={templates} onChange={loadData} onPickTemplate={fromTemplate} />}
@@ -841,10 +901,17 @@ function MobilePreview({ title, subject, preheader, html, viewport, onViewportCh
 
 // ── Tags tab ────────────────────────────────────────────────────────────────
 
-function TagsTab({ tags, onChange }: { tags: Tag[]; onChange: () => Promise<void> | void }) {
+function TagsTab({ tags, onChange, subscribers }: {
+  tags: Tag[]
+  onChange: () => Promise<void> | void
+  subscribers: Subscriber[]
+}) {
   const [slug, setSlug] = useState('')
   const [label, setLabel] = useState('')
   const [desc, setDesc] = useState('')
+  const [expandedTag, setExpandedTag] = useState<string | null>(null)
+  const [tagMembers, setTagMembers] = useState<Record<string, { id: string; email: string; name: string | null; status: string }[]>>({})
+  const [addSearch, setAddSearch] = useState<Record<string, string>>({})
 
   async function add() {
     if (!slug.trim() || !label.trim()) return
@@ -856,7 +923,43 @@ function TagsTab({ tags, onChange }: { tags: Tag[]; onChange: () => Promise<void
   async function remove(id: string) {
     if (!confirm('Delete this tag? Subscribers tagged with it lose the assignment.')) return
     await api.delete(`/admin/newsletter/tags/${id}`)
+    if (expandedTag === id) setExpandedTag(null)
     await onChange()
+  }
+
+  async function expandTag(tagId: string) {
+    if (expandedTag === tagId) { setExpandedTag(null); return }
+    setExpandedTag(tagId)
+    if (!tagMembers[tagId]) {
+      try {
+        const res = await api.get<{ subscribers: { id: string; email: string; name: string | null; status: string }[] }>(`/admin/newsletter/tags/${tagId}/subscribers`)
+        setTagMembers(prev => ({ ...prev, [tagId]: res.subscribers }))
+      } catch {
+        setTagMembers(prev => ({ ...prev, [tagId]: [] }))
+      }
+    }
+  }
+
+  async function removeMemberFromTag(tagId: string, subscriberId: string) {
+    try {
+      const res = await api.get<{ tags: Tag[] }>(`/admin/newsletter/subscribers/${subscriberId}/tags`)
+      const next = res.tags.filter(t => t.id !== tagId).map(t => t.id)
+      await api.put(`/admin/newsletter/subscribers/${subscriberId}/tags`, { tag_ids: next })
+      setTagMembers(prev => ({ ...prev, [tagId]: (prev[tagId] ?? []).filter(m => m.id !== subscriberId) }))
+      await onChange()
+    } catch {}
+  }
+
+  async function addMemberToTag(tagId: string, sub: Subscriber) {
+    try {
+      const res = await api.get<{ tags: Tag[] }>(`/admin/newsletter/subscribers/${sub.id}/tags`)
+      const alreadyIn = res.tags.some(t => t.id === tagId)
+      if (alreadyIn) return
+      await api.put(`/admin/newsletter/subscribers/${sub.id}/tags`, { tag_ids: [...res.tags.map(t => t.id), tagId] })
+      setTagMembers(prev => ({ ...prev, [tagId]: [...(prev[tagId] ?? []), { id: sub.id, email: sub.email, name: sub.name, status: sub.status }] }))
+      setAddSearch(prev => ({ ...prev, [tagId]: '' }))
+      await onChange()
+    } catch {}
   }
 
   return (
@@ -882,19 +985,105 @@ function TagsTab({ tags, onChange }: { tags: Tag[]; onChange: () => Promise<void
             </tr>
           </thead>
           <tbody>
-            {tags.map((t) => (
-              <tr key={t.id} className="border-b border-zinc-800/50">
-                <td className="px-4 py-2.5 font-mono text-zinc-300">{t.slug}</td>
-                <td className="px-4 py-2.5 text-zinc-200">{t.label}</td>
-                <td className="px-4 py-2.5 text-zinc-500">{t.description ?? '—'}</td>
-                <td className="px-4 py-2.5 text-right text-zinc-400">{t.subscriber_count}</td>
-                <td className="px-4 py-2.5 text-right">
-                  <button onClick={() => remove(t.id)} className="text-zinc-500 hover:text-red-400" title="Delete tag">
-                    <Trash2 size={13} />
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {tags.map((t) => {
+              const members = tagMembers[t.id] ?? []
+              const search = addSearch[t.id] ?? ''
+              const searchResults = search.length >= 1
+                ? subscribers.filter(s =>
+                    !members.some(m => m.id === s.id) &&
+                    (s.email.toLowerCase().includes(search.toLowerCase()) || (s.name || '').toLowerCase().includes(search.toLowerCase()))
+                  ).slice(0, 6)
+                : []
+              return (
+                <>
+                  <tr
+                    key={t.id}
+                    className="border-b border-zinc-800/50 hover:bg-zinc-800/20 cursor-pointer"
+                    onClick={() => expandTag(t.id)}
+                  >
+                    <td className="px-4 py-2.5 font-mono text-zinc-300">{t.slug}</td>
+                    <td className="px-4 py-2.5 text-zinc-200">{t.label}</td>
+                    <td className="px-4 py-2.5 text-zinc-500">{t.description ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-right text-zinc-400">{t.subscriber_count}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      <div className="flex items-center gap-2 justify-end">
+                        <ChevronDown
+                          size={12}
+                          className={`text-zinc-500 transition-transform ${expandedTag === t.id ? 'rotate-180' : ''}`}
+                        />
+                        <button
+                          onClick={(e) => { e.stopPropagation(); remove(t.id) }}
+                          className="text-zinc-500 hover:text-red-400"
+                          title="Delete tag"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {expandedTag === t.id && (
+                    <tr key={`${t.id}-members`}>
+                      <td colSpan={5} className="px-4 py-3 bg-zinc-900/40 border-b border-zinc-800/50">
+                        {members.length === 0 && !tagMembers[t.id] && (
+                          <p className="text-[11px] text-zinc-500 mb-2">Loading…</p>
+                        )}
+                        {tagMembers[t.id] && members.length === 0 && (
+                          <p className="text-[11px] text-zinc-500 mb-2">No members yet.</p>
+                        )}
+                        {members.length > 0 && (
+                          <div className="space-y-1 mb-3">
+                            {members.map(m => (
+                              <div key={m.id} className="flex items-center gap-2">
+                                <span className="text-[11px] text-zinc-300 flex-1">{m.email}</span>
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                                  m.status === 'active' ? 'bg-emerald-900/30 text-emerald-400'
+                                  : m.status === 'pending' ? 'bg-amber-900/30 text-amber-400'
+                                  : 'bg-zinc-800 text-zinc-500'
+                                }`}>{m.status}</span>
+                                <button
+                                  onClick={() => removeMemberFromTag(t.id, m.id)}
+                                  className="text-zinc-600 hover:text-red-400"
+                                  title="Remove from group"
+                                >
+                                  <X size={11} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {/* Add subscriber search */}
+                        <div className="relative">
+                          <div className="flex items-center gap-2">
+                            <UserPlus size={11} className="text-zinc-500 shrink-0" />
+                            <input
+                              value={search}
+                              onChange={(e) => setAddSearch(prev => ({ ...prev, [t.id]: e.target.value }))}
+                              placeholder="Add subscriber by email…"
+                              className="flex-1 px-2 py-1 rounded border border-zinc-700 bg-zinc-900 text-[11px] text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-500"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </div>
+                          {searchResults.length > 0 && (
+                            <div className="absolute left-6 top-full mt-1 z-50 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl w-72">
+                              {searchResults.map(s => (
+                                <button
+                                  key={s.id}
+                                  onClick={(e) => { e.stopPropagation(); addMemberToTag(t.id, s) }}
+                                  className="w-full text-left px-3 py-2 text-[11px] text-zinc-300 hover:bg-zinc-800 flex items-center gap-2"
+                                >
+                                  <span className="flex-1 truncate">{s.email}</span>
+                                  {s.name && <span className="text-zinc-500 truncate max-w-[100px]">{s.name}</span>}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
+              )
+            })}
             {tags.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-500">No tags yet.</td></tr>}
           </tbody>
         </table>
