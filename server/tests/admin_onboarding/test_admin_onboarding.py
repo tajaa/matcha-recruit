@@ -650,6 +650,13 @@ def _sample_session():
             "required_licenses": [
                 {"slug": "ca_bh", "name": "CA BH License", "issuing_authority": "DHCS", "scope_level": "state", "renewal_period_months": 12},
             ],
+            "required_policies": [
+                {"slug": "hipaa_privacy_policy", "name": "HIPAA Privacy Policy", "scope_level": "federal", "reason": "PHI"},
+            ],
+            "required_credentials": [
+                {"slug": "bcba", "name": "Board Certified Behavior Analyst", "issuing_authority": "BACB", "applies_to_role": "Clinical Supervisor", "scope_level": "specialty", "renewal_period_months": 24},
+                {"slug": "rbt", "name": "Registered Behavior Technician", "issuing_authority": "BACB", "applies_to_role": "Behavior Interventionist", "scope_level": "specialty", "renewal_period_months": 12},
+            ],
             "applicable_jurisdictions": [{"state": "CA", "county": None, "city": None}],
         },
         "resolved_scope": {
@@ -680,7 +687,8 @@ class TestGapAnalysisDossier:
         assert d["scope"]["naics_sector"] == "62"
         assert d["counts"] == {
             "covered": 1, "gaps": 1, "ambiguous": 1,
-            "certifications": 1, "licenses": 1, "suggestions": 1,
+            "certifications": 1, "licenses": 1, "policies": 1, "credentials": 2,
+            "suggestions": 1,
         }
         assert d["coverage"]["gaps"][0]["category_slug"] == "ca_aba_billing"
         assert d["ai_suggestions"]["summary"].startswith("Mostly")
@@ -713,6 +721,11 @@ class TestGapAnalysisDossier:
         assert "telehealth" in md
         # Jurisdictions section renders the AI-expanded list (CA here).
         assert "## Jurisdictions in scope" in md
+        # Gap A + B: policies + employee credentials surfaced.
+        assert "## Credentials (employee / professional)" in md
+        assert "Board Certified Behavior Analyst" in md
+        assert "## Policies (must be maintained)" in md
+        assert "HIPAA Privacy Policy" in md
 
     def test_html_renders_gaps_and_escapes(self):
         session = _sample_session()

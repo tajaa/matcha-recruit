@@ -185,6 +185,8 @@ export default function GapAnalysisReport() {
         <Count label="Ambiguous" value={counts.ambiguous} alert />
         <Count label="Certs" value={counts.certifications} />
         <Count label="Licenses" value={counts.licenses} />
+        <Count label="Credentials" value={counts.credentials} />
+        <Count label="Policies" value={counts.policies} />
         <Count label="AI flags" value={counts.suggestions} alert />
       </div>
 
@@ -251,6 +253,23 @@ export default function GapAnalysisReport() {
           rows={(scope.required_licenses || []).map((l) => [
             l.name, l.issuing_authority || '', l.scope_level, String(l.renewal_period_months ?? ''),
           ])}
+        />
+      </Section>
+
+      <Section title="Credentials (employee / professional)" count={counts.credentials}>
+        <Table
+          headers={['Name', 'Authority', 'Role', 'Scope', 'Renewal (mo)']}
+          rows={(scope.required_credentials || []).map((c) => [
+            c.name, c.issuing_authority || '', c.applies_to_role || '', c.scope_level,
+            String(c.renewal_period_months ?? ''),
+          ])}
+        />
+      </Section>
+
+      <Section title="Policies (must be maintained)" count={counts.policies}>
+        <Table
+          headers={['Name', 'Scope', 'Why']}
+          rows={(scope.required_policies || []).map((p) => [p.name, p.scope_level, p.reason || ''])}
         />
       </Section>
 

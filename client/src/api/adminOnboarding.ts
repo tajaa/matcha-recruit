@@ -70,11 +70,30 @@ export type AIScopeJurisdiction = {
   city?: string | null
 }
 
+export type AIScopePolicy = {
+  slug: string
+  name: string
+  scope_level: 'federal' | 'state' | 'county' | 'city' | 'specialty'
+  reason?: string | null
+}
+
+export type AIScopeCredential = {
+  slug: string
+  name: string
+  issuing_authority?: string | null
+  applies_to_role?: string | null
+  scope_level: 'federal' | 'state' | 'specialty'
+  renewal_period_months?: number | null
+  reason?: string | null
+}
+
 export type AIScope = {
   naics_sector?: string | null
   compliance_categories: AIScopeCategory[]
   required_certifications: AIScopeCertification[]
   required_licenses: AIScopeLicense[]
+  required_policies: AIScopePolicy[]
+  required_credentials: AIScopeCredential[]
   applicable_jurisdictions: AIScopeJurisdiction[]
 }
 
@@ -228,6 +247,8 @@ export type GapAnalysisDossier = {
     compliance_categories?: AIScopeCategory[]
     required_certifications?: AIScopeCertification[]
     required_licenses?: AIScopeLicense[]
+    required_policies?: AIScopePolicy[]
+    required_credentials?: AIScopeCredential[]
     applicable_jurisdictions?: AIScopeJurisdiction[]
   }
   coverage: {
@@ -242,6 +263,8 @@ export type GapAnalysisDossier = {
     ambiguous: number
     certifications: number
     licenses: number
+    policies: number
+    credentials: number
     suggestions: number
   }
 }

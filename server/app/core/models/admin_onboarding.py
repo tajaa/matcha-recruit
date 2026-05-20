@@ -122,12 +122,36 @@ class AIScopeJurisdiction(BaseModel):
     )
 
 
+class AIScopePolicy(BaseModel):
+    """A written policy the company must maintain (HIPAA privacy policy,
+    bloodborne exposure control plan, etc.)."""
+    slug: str
+    name: str
+    scope_level: Literal["federal", "state", "county", "city", "specialty"] = "federal"
+    reason: Optional[str] = None
+
+
+class AIScopeCredential(BaseModel):
+    """An employee/professional credential, inferred from the staff
+    described in the company's basics (e.g. BCBA, RBT). Distinct from
+    company-level certifications/licenses."""
+    slug: str
+    name: str
+    issuing_authority: Optional[str] = None
+    applies_to_role: Optional[str] = None
+    scope_level: Literal["federal", "state", "specialty"] = "specialty"
+    renewal_period_months: Optional[int] = Field(default=None, ge=1, le=120)
+    reason: Optional[str] = None
+
+
 class AIScope(BaseModel):
     """Raw AI output BEFORE bank reconciliation."""
     naics_sector: Optional[str] = None
     compliance_categories: list[AIScopeCategory] = Field(default_factory=list)
     required_certifications: list[AIScopeCertification] = Field(default_factory=list)
     required_licenses: list[AIScopeLicense] = Field(default_factory=list)
+    required_policies: list[AIScopePolicy] = Field(default_factory=list)
+    required_credentials: list[AIScopeCredential] = Field(default_factory=list)
     applicable_jurisdictions: list[AIScopeJurisdiction] = Field(default_factory=list)
 
 
@@ -328,6 +352,8 @@ class DossierCounts(BaseModel):
     ambiguous: int = 0
     certifications: int = 0
     licenses: int = 0
+    policies: int = 0
+    credentials: int = 0
     suggestions: int = 0
 
 

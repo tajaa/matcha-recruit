@@ -132,6 +132,16 @@ FEW_SHOT_EXAMPLES: list[dict[str, Any]] = [
                 {"slug": "ca_athletic_trainer_voluntary", "name": "CA Athletic Trainer (voluntary, where required)", "issuing_authority": "CA Department of Consumer Affairs", "scope_level": "state", "renewal_period_months": 24},
                 {"slug": "la_business_license", "name": "LA City Business License", "issuing_authority": "LA Office of Finance", "scope_level": "specialty", "renewal_period_months": 12},
             ],
+            "required_policies": [
+                {"slug": "hipaa_privacy_policy", "name": "HIPAA Privacy & Breach Notification Policy", "scope_level": "federal", "reason": "PHI handling for patients"},
+                {"slug": "exposure_control_plan", "name": "Bloodborne Pathogens Exposure Control Plan", "scope_level": "federal", "reason": "in-house lab + clinical specimen handling"},
+                {"slug": "ca_iipp", "name": "Injury & Illness Prevention Program (IIPP)", "scope_level": "state", "reason": "CA Cal/OSHA IIPP mandate"},
+            ],
+            "required_credentials": [
+                {"slug": "ca_pt_license", "name": "CA Physical Therapist License", "issuing_authority": "Physical Therapy Board of California", "applies_to_role": "Physical Therapist", "scope_level": "state", "renewal_period_months": 24},
+                {"slug": "atc_boc", "name": "Athletic Trainer (BOC)", "issuing_authority": "Board of Certification", "applies_to_role": "Athletic Trainer", "scope_level": "specialty", "renewal_period_months": 24},
+                {"slug": "bls_aha", "name": "Basic Life Support (AHA)", "issuing_authority": "American Heart Association", "applies_to_role": "Clinical Staff", "scope_level": "specialty", "renewal_period_months": 24},
+            ],
             "applicable_jurisdictions": [
                 {"state": None, "county": None, "city": None},
                 {"state": "CA", "county": None, "city": None},
@@ -178,6 +188,16 @@ FEW_SHOT_EXAMPLES: list[dict[str, Any]] = [
                 {"slug": "ca_hazardous_waste_generator", "name": "CA Hazardous Waste Generator ID", "issuing_authority": "CA DTSC", "scope_level": "state", "renewal_period_months": None},
                 {"slug": "sf_business_registration", "name": "SF Business Registration Certificate", "issuing_authority": "SF Treasurer", "scope_level": "specialty", "renewal_period_months": 12},
             ],
+            "required_policies": [
+                {"slug": "chemical_hygiene_plan", "name": "Chemical Hygiene Plan", "scope_level": "federal", "reason": "OSHA lab standard 29 CFR 1910.1450"},
+                {"slug": "exposure_control_plan", "name": "Bloodborne Pathogens Exposure Control Plan", "scope_level": "federal", "reason": "human tissue + specimen handling"},
+                {"slug": "irb_protocol", "name": "IRB Human-Subjects Research Protocol", "scope_level": "federal", "reason": "human subjects research oversight"},
+            ],
+            "required_credentials": [
+                {"slug": "bbp_training", "name": "Bloodborne Pathogens Training", "issuing_authority": "OSHA-compliant provider", "applies_to_role": "Lab Staff", "scope_level": "federal", "renewal_period_months": 12},
+                {"slug": "citi_human_subjects", "name": "CITI Human Subjects Research Training", "issuing_authority": "CITI Program", "applies_to_role": "Research Staff / Grad Students", "scope_level": "federal", "renewal_period_months": 36},
+                {"slug": "iata_dgr", "name": "IATA Dangerous Goods Regulations Training", "issuing_authority": "IATA", "applies_to_role": "Shipping Staff", "scope_level": "federal", "renewal_period_months": 24},
+            ],
             "applicable_jurisdictions": [
                 {"state": None, "county": None, "city": None},
                 {"state": "CA", "county": None, "city": None},
@@ -221,6 +241,16 @@ FEW_SHOT_EXAMPLES: list[dict[str, Any]] = [
                 {"slug": "tabc_mb_permit", "name": "TABC Mixed Beverage Permit", "issuing_authority": "TX Alcoholic Beverage Commission", "scope_level": "state", "renewal_period_months": 24},
                 {"slug": "austin_business_license", "name": "Austin Business License", "issuing_authority": "City of Austin", "scope_level": "specialty", "renewal_period_months": 12},
                 {"slug": "austin_outdoor_music_permit", "name": "Austin Outdoor Music Venue Permit", "issuing_authority": "City of Austin", "scope_level": "specialty", "renewal_period_months": 12},
+            ],
+            "required_policies": [
+                {"slug": "cash_handling_policy", "name": "Cash Handling & Robbery Prevention Policy", "scope_level": "specialty", "reason": "cash acceptance + late-night operation"},
+                {"slug": "responsible_alcohol_service", "name": "Responsible Alcohol Service Policy", "scope_level": "state", "reason": "TABC service + dram-shop liability"},
+                {"slug": "tip_pooling_policy", "name": "Tip Pooling & Credit Policy", "scope_level": "federal", "reason": "FLSA tip credit + dual-jobs rule"},
+            ],
+            "required_credentials": [
+                {"slug": "tabc_seller_server", "name": "TABC Seller-Server Certification", "issuing_authority": "TX Alcoholic Beverage Commission", "applies_to_role": "Server / Bartender", "scope_level": "state", "renewal_period_months": 24},
+                {"slug": "tx_food_handler", "name": "TX Accredited Food Handler", "issuing_authority": "TX DSHS", "applies_to_role": "Kitchen Staff", "scope_level": "state", "renewal_period_months": 24},
+                {"slug": "tx_food_manager", "name": "TX Certified Food Manager", "issuing_authority": "TX DSHS", "applies_to_role": "Kitchen Manager", "scope_level": "state", "renewal_period_months": 60},
             ],
             "applicable_jurisdictions": [
                 {"state": None, "county": None, "city": None},
@@ -303,6 +333,8 @@ async def expand_scope(
             "compliance_categories": [],
             "required_certifications": [],
             "required_licenses": [],
+            "required_policies": [],
+            "required_credentials": [],
             "applicable_jurisdictions": [],
             "_warning": "compliance_categories table is empty; seed before running scope",
         }
@@ -384,8 +416,23 @@ async def expand_scope(
         f"Rules:\n"
         f"- compliance_categories.category_slug MUST be from this controlled list:\n"
         f"  {json.dumps(category_slugs)}\n"
-        f"- required_certifications + required_licenses: pick well-known names.\n"
-        f"  Skip if speculative. Provide stable slug + display name.\n"
+        f"- required_certifications + required_licenses: COMPANY-level certs/\n"
+        f"  licenses (CLIA waiver, facility license, business license). Pick\n"
+        f"  well-known names. Skip if speculative. Stable slug + display name.\n"
+        f"- required_policies: WRITTEN policies the business must maintain.\n"
+        f"  Infer from the categories + description (PHI handling → HIPAA\n"
+        f"  privacy policy + breach-notification policy; clinical specimen\n"
+        f"  handling → bloodborne pathogens exposure control plan; cash →\n"
+        f"  robbery/cash-handling policy). Stable slug + name + scope_level.\n"
+        f"- required_credentials: EMPLOYEE / PROFESSIONAL credentials, inferred\n"
+        f"  from the STAFF ROLES named in the description (this is the key\n"
+        f"  signal — read it carefully). e.g. 'BCBAs / Clinical Supervisors'\n"
+        f"  → Board Certified Behavior Analyst (BACB); 'RBTs / Behavior\n"
+        f"  Interventionists' → Registered Behavior Technician (BACB);\n"
+        f"  'physical therapists' → state PT license; 'RNs' → state RN\n"
+        f"  license. Set applies_to_role to the role it's for. Distinct from\n"
+        f"  company certs/licenses. Skip a credential if its staff type isn't\n"
+        f"  described.\n"
         f"- applicable_jurisdictions: emit as {{state, county, city}} tuples. Use\n"
         f"  ISO state codes (CA, TX). county/city null when scope is broader.\n"
         f"- Only list jurisdictions whose laws actually bind this business.\n\n"
@@ -401,6 +448,13 @@ async def expand_scope(
         f' "required_licenses": [\n'
         f'   {{"slug": "string", "name": "string", "issuing_authority": "string or null", '
         f'"scope_level": "federal|state|specialty", "renewal_period_months": int_or_null}}\n'
+        f' ],\n'
+        f' "required_policies": [\n'
+        f'   {{"slug": "string", "name": "string", "scope_level": "federal|state|county|city|specialty", "reason": "string"}}\n'
+        f' ],\n'
+        f' "required_credentials": [\n'
+        f'   {{"slug": "string", "name": "string", "issuing_authority": "string or null", '
+        f'"applies_to_role": "string or null", "scope_level": "federal|state|specialty", "renewal_period_months": int_or_null}}\n'
         f' ],\n'
         f' "applicable_jurisdictions": [\n'
         f'   {{"state": "CA or null", "county": "string or null", "city": "string or null"}}\n'
@@ -437,6 +491,8 @@ async def expand_scope(
             "compliance_categories": [],
             "required_certifications": [],
             "required_licenses": [],
+            "required_policies": [],
+            "required_credentials": [],
             "applicable_jurisdictions": [],
             "_warning": "Gemini returned non-JSON; admin should re-run expand",
         }
@@ -477,6 +533,8 @@ async def expand_scope(
             "compliance_categories": [],
             "required_certifications": [],
             "required_licenses": [],
+            "required_policies": [],
+            "required_credentials": [],
             "applicable_jurisdictions": [],
             "_warning": "Gemini returned non-object root; admin should re-run expand",
         }

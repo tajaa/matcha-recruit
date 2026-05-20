@@ -47,6 +47,8 @@ def build_gap_analysis_dossier(session: dict[str, Any]) -> dict[str, Any]:
 
     certifications = ai_scope.get("required_certifications") or []
     licenses = ai_scope.get("required_licenses") or []
+    policies = ai_scope.get("required_policies") or []
+    credentials = ai_scope.get("required_credentials") or []
 
     suggestions_count = (
         len(gap_check.get("suggested_compliance_categories") or [])
@@ -81,6 +83,8 @@ def build_gap_analysis_dossier(session: dict[str, Any]) -> dict[str, Any]:
             "compliance_categories": ai_scope.get("compliance_categories") or [],
             "required_certifications": certifications,
             "required_licenses": licenses,
+            "required_policies": policies,
+            "required_credentials": credentials,
             "applicable_jurisdictions": ai_scope.get("applicable_jurisdictions") or [],
         },
         "coverage": {
@@ -95,6 +99,8 @@ def build_gap_analysis_dossier(session: dict[str, Any]) -> dict[str, Any]:
             "ambiguous": len(ambiguous),
             "certifications": len(certifications),
             "licenses": len(licenses),
+            "policies": len(policies),
+            "credentials": len(credentials),
             "suggestions": suggestions_count,
         },
     }
@@ -191,6 +197,21 @@ def _dossier_to_markdown(d: dict[str, Any]) -> str:
         ["Name", "Authority", "Scope", "Renewal (mo)"],
         [[l.get("name") or "", l.get("issuing_authority") or "", l.get("scope_level") or "",
           str(l.get("renewal_period_months") or "")] for l in (scope.get("required_licenses") or [])],
+    ))
+
+    lines.append("## Credentials (employee / professional)")
+    lines.append(_md_table(
+        ["Name", "Authority", "Role", "Scope", "Renewal (mo)"],
+        [[c.get("name") or "", c.get("issuing_authority") or "", c.get("applies_to_role") or "",
+          c.get("scope_level") or "", str(c.get("renewal_period_months") or "")]
+         for c in (scope.get("required_credentials") or [])],
+    ))
+
+    lines.append("## Policies (must be maintained)")
+    lines.append(_md_table(
+        ["Name", "Scope", "Why"],
+        [[p.get("name") or "", p.get("scope_level") or "", p.get("reason") or ""]
+         for p in (scope.get("required_policies") or [])],
     ))
 
     lines.append("## Jurisdictions in scope")
@@ -318,6 +339,21 @@ def _dossier_to_html(d: dict[str, Any]) -> str:
         ["Name", "Authority", "Scope", "Renewal (mo)"],
         [[l.get("name") or "", l.get("issuing_authority") or "", l.get("scope_level") or "",
           str(l.get("renewal_period_months") or "")] for l in (scope.get("required_licenses") or [])],
+    ))
+
+    sections.append("<h2>Credentials (employee / professional)</h2>")
+    sections.append(_html_table(
+        ["Name", "Authority", "Role", "Scope", "Renewal (mo)"],
+        [[c.get("name") or "", c.get("issuing_authority") or "", c.get("applies_to_role") or "",
+          c.get("scope_level") or "", str(c.get("renewal_period_months") or "")]
+         for c in (scope.get("required_credentials") or [])],
+    ))
+
+    sections.append("<h2>Policies (must be maintained)</h2>")
+    sections.append(_html_table(
+        ["Name", "Scope", "Why"],
+        [[p.get("name") or "", p.get("scope_level") or "", p.get("reason") or ""]
+         for p in (scope.get("required_policies") or [])],
     ))
 
     sections.append("<h2>Jurisdictions in scope</h2>")
