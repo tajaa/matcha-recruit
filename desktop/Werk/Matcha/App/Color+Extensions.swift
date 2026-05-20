@@ -6,9 +6,34 @@ extension Color {
     static let zinc800 = Color("zinc800")
     static let zinc900 = Color("zinc900")
     static let zinc950 = Color("zinc950")
-    static let appBackground = Color("zinc950")
-    static let cardBackground = Color("zinc900")
-    static let borderColor = Color.white.opacity(0.1)
+
+    /// Dynamic — switches with the active theme so all views get the right
+    /// background without individually reading AppState.
+    static var appBackground: Color {
+        switch UserDefaults.standard.string(forKey: "mw-theme") ?? "dark" {
+        case "light":     return Color(white: 0.96)
+        case "cappuchin": return cappuchinDark
+        default:          return zinc950
+        }
+    }
+
+    /// Dynamic card/surface color, mirrors AppState.themeCard.
+    static var cardBackground: Color {
+        switch UserDefaults.standard.string(forKey: "mw-theme") ?? "dark" {
+        case "light":     return .white
+        case "cappuchin": return cappuchinCard
+        default:          return zinc900
+        }
+    }
+
+    /// Dynamic border color, mirrors AppState.themeBorder.
+    static var borderColor: Color {
+        switch UserDefaults.standard.string(forKey: "mw-theme") ?? "dark" {
+        case "light":     return .black.opacity(0.08)
+        case "cappuchin": return cappuchinAccent.opacity(0.15)
+        default:          return .white.opacity(0.1)
+        }
+    }
 
     // Cappuchin theme components
     static let cappuchinDark = Color(red: 0.15, green: 0.12, blue: 0.10)      // Espresso background #261E1A

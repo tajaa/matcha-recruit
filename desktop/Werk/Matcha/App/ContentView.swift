@@ -70,6 +70,8 @@ struct ContentView: View {
             }
         }
         .environment(appState)
+        .tint(appState.themeAccent)
+        .background(appState.themeBg)
         .modifier(GlassWindowModifier())
         .sheet(isPresented: $showProfile) {
             ProfileSheet()

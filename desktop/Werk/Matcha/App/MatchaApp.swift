@@ -6,6 +6,10 @@ struct MatchaApp: App {
     @State private var broadcastService = BroadcastService.shared
     @Environment(\.scenePhase) private var scenePhase
 
+    private var colorScheme: ColorScheme {
+        appState.appTheme == "light" ? .light : .dark
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {
@@ -18,7 +22,7 @@ struct MatchaApp: App {
                         .environment(appState)
                 }
             }
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(colorScheme)
             .onChange(of: scenePhase) { _, phase in
                 appState.isSceneActive = (phase == .active)
                 if phase == .active {
@@ -40,7 +44,7 @@ struct MatchaApp: App {
         Settings {
             SettingsView()
                 .environment(appState)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(colorScheme)
         }
     }
 }
