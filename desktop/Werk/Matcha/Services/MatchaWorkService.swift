@@ -711,7 +711,8 @@ class MatchaWorkService {
         description: String? = nil,
         priority: String = "medium",
         dueDate: String? = nil,
-        assignedTo: String? = nil
+        assignedTo: String? = nil,
+        category: String? = nil
     ) async throws -> MWProjectTask {
         struct Body: Encodable {
             let title: String
@@ -720,13 +721,15 @@ class MatchaWorkService {
             let priority: String
             let due_date: String?
             let assigned_to: String?
+            let category: String?
         }
         return try await client.request(
             method: "POST",
             path: "\(basePath)/projects/\(projectId)/tasks",
             body: Body(
                 title: title, description: description, board_column: boardColumn,
-                priority: priority, due_date: dueDate, assigned_to: assignedTo
+                priority: priority, due_date: dueDate, assigned_to: assignedTo,
+                category: category
             )
         )
     }

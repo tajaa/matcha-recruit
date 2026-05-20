@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 /// Read-only modal that opens on a kanban card tap. Surfaces title,
 /// description, due date, assignee, and attachments. The user clicks
@@ -17,6 +18,7 @@ struct TaskViewerSheet: View {
     @State private var previewFile: MWProjectFile?
     @State private var history: [MWTaskHistoryEntry] = []
     @State private var didCopy = false
+    @State private var isCopying = false
 
     private var attachments: [MWProjectFile] {
         viewModel.taskFiles[task.id] ?? []
@@ -46,13 +48,20 @@ struct TaskViewerSheet: View {
                     .foregroundColor(.white)
                     .lineLimit(2)
                 Spacer()
-                Button(action: copyTicketToClipboard) {
-                    Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
-                        .font(.system(size: 11))
-                        .foregroundColor(didCopy ? .matcha500 : .secondary)
+                Button {
+                    Task { await copyTicketToClipboard() }
+                } label: {
+                    if isCopying {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 11))
+                            .foregroundColor(didCopy ? .matcha500 : .secondary)
+                    }
                 }
                 .buttonStyle(.plain)
-                .help("Copy ticket as markdown")
+                .disabled(isCopying)
+                .help("Copy ticket (markdown + screenshots)")
                 Button(action: onClose) {
                     Image(systemName: "xmark")
                         .font(.system(size: 11))
@@ -71,6 +80,21 @@ struct TaskViewerSheet: View {
                     metaPill(label: name, color: .secondary)
                 }
                 Spacer()
+            }
+
+            if PacificDateFormatter.absolute(task.createdAt) != nil
+                || PacificDateFormatter.absolute(task.lastMovedAt) != nil {
+                HStack(spacing: 8) {
+                    if let added = PacificDateFormatter.absolute(task.createdAt) {
+                        Label("Added \(added)", systemImage: "plus.circle")
+                    }
+                    if let moved = PacificDateFormatter.absolute(task.lastMovedAt) {
+                        Label("Moved \(moved)", systemImage: "arrow.left.arrow.right")
+                    }
+                    Spacer()
+                }
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
             }
 
             if let description = task.description, !description.isEmpty {
@@ -167,7 +191,19 @@ struct TaskViewerSheet: View {
         }
     }
 
-    private func copyTicketToClipboard() {
+    /// Copies the ticket as markdown PLUS the real screenshot bytes, so pasting
+    /// into Claude/ChatGPT web drops the actual images instead of dead
+    /// presigned/CloudFront URLs. The markdown (which still lists every image as
+    /// a `![](url)` line) doubles as the fallback for images that fail to
+    /// download or for paste targets that ignore image flavors.
+    ///
+    /// The primary pasteboard item carries BOTH the markdown string and the
+    /// first image's bytes, so a single paste can surface either flavor. Extra
+    /// images ride on follow-up items (best-effort — browsers typically pull
+    /// only one image per paste).
+    @MainActor
+    private func copyTicketToClipboard() async {
+        isCopying = true
         let markdown = TaskClipboardExporter.markdown(
             for: task,
             assigneeName: assigneeName,
@@ -175,14 +211,54 @@ struct TaskViewerSheet: View {
             attachments: attachments,
             history: history,
         )
+
+        // Download up to 6 image attachments' bytes.
+        let images = Array(attachments.filter { $0.isImage }.prefix(6))
+        var downloaded: [(file: MWProjectFile, data: Data)] = []
+        for img in images {
+            guard let url = URL(string: img.storageUrl) else { continue }
+            if let (data, _) = try? await URLSession.shared.data(from: url) {
+                downloaded.append((img, data))
+            }
+        }
+
+        let primary = NSPasteboardItem()
+        primary.setString(markdown, forType: .string)
+        if let first = downloaded.first {
+            primary.setData(first.data, forType: pasteboardType(for: first.file))
+        }
+        var items = [primary]
+        for entry in downloaded.dropFirst() {
+            let item = NSPasteboardItem()
+            item.setData(entry.data, forType: pasteboardType(for: entry.file))
+            items.append(item)
+        }
+
         let board = NSPasteboard.general
         board.clearContents()
-        board.setString(markdown, forType: .string)
+        board.writeObjects(items)
+
+        isCopying = false
         didCopy = true
         Task {
             try? await Task.sleep(for: .milliseconds(1500))
             await MainActor.run { didCopy = false }
         }
+    }
+
+    /// Concrete image pasteboard type so the receiver knows the format.
+    private func pasteboardType(for file: MWProjectFile) -> NSPasteboard.PasteboardType {
+        let ct = (file.contentType ?? "").lowercased()
+        let ext = (file.filename as NSString).pathExtension.lowercased()
+        if ct.contains("png") || ext == "png" { return .png }
+        if ct.contains("tiff") || ext == "tiff" || ext == "tif" { return .tiff }
+        if ct.contains("jpeg") || ct.contains("jpg") || ext == "jpg" || ext == "jpeg" {
+            return NSPasteboard.PasteboardType(UTType.jpeg.identifier)
+        }
+        if let ut = UTType(filenameExtension: ext), ut.conforms(to: .image) {
+            return NSPasteboard.PasteboardType(ut.identifier)
+        }
+        return .png
     }
 
     private func metaPill(label: String, color: Color) -> some View {

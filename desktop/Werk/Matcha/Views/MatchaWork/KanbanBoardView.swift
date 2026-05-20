@@ -21,10 +21,11 @@ struct KanbanBoardView: View {
     @State private var inlineAddColumn: String?
     @State private var inlineAddTitle: String = ""
     @State private var hoveredEmptyColumn: String?
-    /// Legacy modal sheet still wired for keyboard-discoverability fallback;
-    /// inline path is the default.
+    /// Template-compose sheet. `newTaskColumn` is the destination column;
+    /// `composeTemplate` the picked template (scaffold + default priority +
+    /// category). Reuses the single legacy sheet slot to avoid a 4th `.sheet`.
     @State private var newTaskColumn: String?
-    @State private var newTaskTitle: String = ""
+    @State private var composeTemplate: KanbanTemplate?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -115,8 +116,15 @@ struct KanbanBoardView: View {
                 }
             )
         }
-        .sheet(isPresented: Binding(get: { newTaskColumn != nil }, set: { if !$0 { newTaskColumn = nil; newTaskTitle = "" } })) {
-            newTaskSheet
+        .sheet(isPresented: Binding(get: { newTaskColumn != nil }, set: { if !$0 { newTaskColumn = nil; composeTemplate = nil } })) {
+            if let col = newTaskColumn {
+                TaskComposeContent(
+                    column: col,
+                    template: composeTemplate ?? .general,
+                    viewModel: viewModel,
+                    onClose: { newTaskColumn = nil; composeTemplate = nil }
+                )
+            }
         }
     }
 
@@ -171,16 +179,29 @@ struct KanbanBoardView: View {
                     .background(Color.zinc800)
                     .cornerRadius(4)
                 Spacer()
-                Button {
-                    inlineAddColumn = key
-                    inlineAddTitle = ""
+                Menu {
+                    Button("Blank task") {
+                        inlineAddColumn = key
+                        inlineAddTitle = ""
+                    }
+                    Divider()
+                    ForEach(KanbanTemplate.allCases) { tpl in
+                        Button {
+                            composeTemplate = tpl
+                            newTaskColumn = key
+                        } label: {
+                            Label(tpl.displayName, systemImage: tpl.icon)
+                        }
+                    }
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
                 }
-                .buttonStyle(.plain)
-                .help("Add task (Enter to save, Esc to cancel)")
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Add task — blank or from a template")
             }
             .padding(.horizontal, 8)
             .padding(.top, 6)
@@ -270,42 +291,102 @@ struct KanbanBoardView: View {
         }
     }
 
-    private var newTaskSheet: some View {
+}
+
+/// Create-mode sheet for template-based tickets. Distinct from the edit-only
+/// `TaskEditorSheet` (whose `task` is non-optional and whose upload UI needs an
+/// existing task id). Prefills the description scaffold + default priority +
+/// category, then creates on Add.
+private struct TaskComposeContent: View {
+    let column: String
+    let template: KanbanTemplate
+    @Bindable var viewModel: ProjectDetailViewModel
+    let onClose: () -> Void
+
+    @State private var title: String = ""
+    @State private var description: String
+    @State private var priority: String
+
+    init(column: String, template: KanbanTemplate, viewModel: ProjectDetailViewModel, onClose: @escaping () -> Void) {
+        self.column = column
+        self.template = template
+        self.viewModel = viewModel
+        self.onClose = onClose
+        _description = State(initialValue: template.scaffold)
+        _priority = State(initialValue: template.defaultPriority)
+    }
+
+    private let priorities: [(key: String, label: String)] = [
+        ("critical", "Critical"), ("high", "High"), ("medium", "Medium"), ("low", "Low"),
+    ]
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("New Task")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.white)
-            TextField("Title", text: $newTaskTitle)
+            HStack(spacing: 6) {
+                Image(systemName: template.icon)
+                    .font(.system(size: 12))
+                    .foregroundColor(template.color)
+                Text("New \(template.displayName) Ticket")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+
+            TextField("Title", text: $title)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .foregroundColor(.white)
                 .padding(8)
                 .background(Color.zinc800)
                 .cornerRadius(6)
-            HStack {
-                Button("Cancel") {
-                    newTaskColumn = nil
-                    newTaskTitle = ""
+
+            TextEditor(text: $description)
+                .font(.system(size: 12))
+                .foregroundColor(.white.opacity(0.9))
+                .scrollContentBackground(.hidden)
+                .padding(6)
+                .frame(height: 160)
+                .background(Color.zinc800)
+                .cornerRadius(6)
+
+            HStack(spacing: 6) {
+                Text("Priority")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                Picker("", selection: $priority) {
+                    ForEach(priorities, id: \.key) { p in
+                        Text(p.label).tag(p.key)
+                    }
                 }
-                .buttonStyle(.plain)
-                .foregroundColor(.secondary)
+                .labelsHidden()
+                .fixedSize()
+                Spacer()
+            }
+
+            HStack {
+                Button("Cancel") { onClose() }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
                 Spacer()
                 Button("Add") {
-                    let title = newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !title.isEmpty, let col = newTaskColumn else { return }
+                    let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !t.isEmpty else { return }
+                    let desc = description.trimmingCharacters(in: .whitespacesAndNewlines)
                     Task {
-                        await viewModel.addTask(title: title, column: col)
-                        newTaskColumn = nil
-                        newTaskTitle = ""
+                        await viewModel.addTask(
+                            title: t, column: column, priority: priority,
+                            description: desc.isEmpty ? nil : desc,
+                            category: template.rawValue
+                        )
+                        onClose()
                     }
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(.matcha500)
-                .disabled(newTaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(16)
-        .frame(width: 340)
+        .frame(width: 380)
         .background(Color.appBackground)
     }
 }
@@ -373,6 +454,18 @@ private struct KanbanCardView: View {
                 HStack(spacing: 5) {
                     Circle().fill(priorityColor).frame(width: 5, height: 5)
 
+                    if let tpl = KanbanTemplate.from(category: task.category) {
+                        HStack(spacing: 2) {
+                            Image(systemName: tpl.icon).font(.system(size: 7))
+                            Text(tpl.displayName).font(.system(size: 8, weight: .semibold))
+                        }
+                        .foregroundColor(tpl.color)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(tpl.color.opacity(0.15))
+                        .cornerRadius(3)
+                    }
+
                     Menu {
                         ForEach(kanbanColumns, id: \.key) { c in
                             Button {
@@ -425,6 +518,8 @@ private struct KanbanCardView: View {
                     }
                 }
 
+                timestampLine
+
                 if !attachments.isEmpty {
                     attachmentStrip
                 }
@@ -435,6 +530,22 @@ private struct KanbanCardView: View {
         .background(Color.zinc800)
         .cornerRadius(6)
         .onTapGesture(perform: onTap)
+    }
+
+    /// "Added <date> · Moved <relative>" in Pacific time. Moved only shows
+    /// once the card has crossed columns at least once (lastMovedAt != nil).
+    @ViewBuilder
+    private var timestampLine: some View {
+        if let added = PacificDateFormatter.shortDate(task.createdAt) {
+            HStack(spacing: 3) {
+                Text("Added \(added)")
+                if let moved = PacificDateFormatter.relative(task.lastMovedAt) {
+                    Text("· Moved \(moved)")
+                }
+            }
+            .font(.system(size: 9))
+            .foregroundColor(.secondary)
+        }
     }
 
     @ViewBuilder

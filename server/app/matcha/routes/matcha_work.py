@@ -3954,6 +3954,7 @@ async def create_project_task_endpoint(
             assigned_to=assigned_to,
             progress_note=body.get("progress_note"),
             project_title=project.get("title"),
+            category=body.get("category", "manual"),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

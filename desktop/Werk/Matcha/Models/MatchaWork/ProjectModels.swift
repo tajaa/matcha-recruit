@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 // MARK: - Resume Candidate
 
@@ -194,10 +195,14 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
     var createdAt: String?
     var updatedAt: String?
     var progressNote: String?
+    var category: String?
+    /// Last time the card crossed columns (from mw_task_history). Null until
+    /// the first move. Drives the "Moved …" stamp on the kanban card.
+    var lastMovedAt: String?
     var attachments: [MWProjectFile]?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, description, priority, status, attachments
+        case id, title, description, priority, status, attachments, category
         case projectId = "project_id"
         case boardColumn = "board_column"
         case assignedTo = "assigned_to"
@@ -208,6 +213,7 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case progressNote = "progress_note"
+        case lastMovedAt = "last_moved_at"
     }
 }
 
@@ -557,5 +563,133 @@ struct MWProjectInvite: Codable, Identifiable {
         case projectTitle = "project_title"
         case invitedBy = "invited_by"
         case invitedAt = "invited_at"
+    }
+}
+
+// MARK: - Kanban ticket templates
+
+/// Built-in ticket starting points. The rawValue is the wire string stored in
+/// `mw_tasks.category`; `manual` (blank task / legacy rows) maps to no
+/// template, so `from(category:)` returns nil and the card shows no badge.
+enum KanbanTemplate: String, CaseIterable, Identifiable {
+    case engineering
+    case sales
+    case product
+    case bug
+    case general
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .engineering: return "Engineering"
+        case .sales: return "Sales"
+        case .product: return "Product Feature"
+        case .bug: return "Bug"
+        case .general: return "General"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .engineering: return "hammer"
+        case .sales: return "dollarsign.circle"
+        case .product: return "sparkles"
+        case .bug: return "ant"
+        case .general: return "doc.text"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .engineering: return .blue
+        case .sales: return .green
+        case .product: return .purple
+        case .bug: return .red
+        case .general: return .secondary
+        }
+    }
+
+    var defaultPriority: String {
+        switch self {
+        case .bug: return "high"
+        default: return "medium"
+        }
+    }
+
+    /// Markdown description starter prefilled into the compose sheet.
+    var scaffold: String {
+        switch self {
+        case .engineering:
+            return "## Context\n\n## Acceptance criteria\n- [ ] \n\n## Notes\n"
+        case .sales:
+            return "## Account\n\n## Deal stage\n\n## Next step\n"
+        case .product:
+            return "## Problem\n\n## Proposed solution\n\n## Success metric\n"
+        case .bug:
+            return "## Steps to reproduce\n1. \n\n## Expected\n\n## Actual\n"
+        case .general:
+            return ""
+        }
+    }
+
+    /// Maps a stored `category` string back to a template for badge rendering.
+    /// Returns nil for "manual"/unknown so those cards render without a badge.
+    static func from(category: String?) -> KanbanTemplate? {
+        guard let category, category != "manual" else { return nil }
+        return KanbanTemplate(rawValue: category)
+    }
+}
+
+// MARK: - Pacific-time formatting
+
+/// Formats ISO8601 UTC timestamp strings into Pacific-time display strings for
+/// kanban cards / the task viewer. Uses America/Los_Angeles so PST/PDT is
+/// handled automatically.
+enum PacificDateFormatter {
+    private static let pacific = TimeZone(identifier: "America/Los_Angeles") ?? .current
+
+    /// Parse an ISO8601 string, tolerating both fractional-seconds and plain
+    /// internet-datetime variants (mirrors TaskClipboardExporter.formatHistoryDate).
+    static func parse(_ iso: String?) -> Date? {
+        guard let iso, !iso.isEmpty else { return nil }
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f.date(from: iso) { return d }
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: iso)
+    }
+
+    /// Short Pacific date, e.g. "May 20" (no time). For compact card lines.
+    static func shortDate(_ iso: String?) -> String? {
+        guard let date = parse(iso) else { return nil }
+        let out = DateFormatter()
+        out.timeZone = pacific
+        out.dateFormat = "MMM d"
+        return out.string(from: date)
+    }
+
+    /// Absolute Pacific time, e.g. "May 20, 2:15 PM PT".
+    static func absolute(_ iso: String?) -> String? {
+        guard let date = parse(iso) else { return nil }
+        let out = DateFormatter()
+        out.timeZone = pacific
+        out.dateFormat = "MMM d, h:mm a"
+        return out.string(from: date) + " PT"
+    }
+
+    /// Compact relative ("just now", "2h ago", "3d ago"); falls back to a short
+    /// absolute Pacific date past 7 days.
+    static func relative(_ iso: String?) -> String? {
+        guard let date = parse(iso) else { return nil }
+        let secs = Int(Date().timeIntervalSince(date))
+        if secs < 60 { return "just now" }
+        if secs < 3600 { return "\(secs / 60)m ago" }
+        if secs < 86400 { return "\(secs / 3600)h ago" }
+        if secs < 7 * 86400 { return "\(secs / 86400)d ago" }
+        let out = DateFormatter()
+        out.timeZone = pacific
+        out.dateFormat = "MMM d"
+        return out.string(from: date)
     }
 }

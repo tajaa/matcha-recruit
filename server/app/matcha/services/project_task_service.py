@@ -54,6 +54,9 @@ async def _log_task_history(
 
 _ALLOWED_COLUMNS = {"todo", "in_progress", "review", "done"}
 _ALLOWED_PRIORITIES = {"critical", "high", "medium", "low"}
+# Ticket-template kinds stored in mw_tasks.category. "manual" = no template
+# (blank task / legacy rows) and renders without a badge on the client.
+_ALLOWED_CATEGORIES = {"manual", "engineering", "sales", "product", "bug", "general"}
 
 # Email + bell templates for forward-only column transitions. Destinations
 # other than these (e.g. moving back to 'todo') intentionally fire nothing.
@@ -84,7 +87,7 @@ def _row_to_task(row: dict) -> dict:
             d[key] = str(d[key])
     if d.get("due_date") is not None:
         d["due_date"] = d["due_date"].isoformat()
-    for key in ("completed_at", "created_at", "updated_at"):
+    for key in ("completed_at", "created_at", "updated_at", "last_moved_at"):
         if d.get(key) is not None:
             d[key] = d[key].isoformat()
     return d
@@ -96,7 +99,11 @@ async def list_project_tasks(project_id: UUID) -> list[dict]:
             """
             SELECT t.id, t.project_id, t.company_id, t.created_by, t.title, t.description,
                    t.due_date, t.priority, t.status, t.board_column, t.assigned_to,
-                   t.completed_at, t.created_at, t.updated_at, t.progress_note,
+                   t.completed_at, t.created_at, t.updated_at, t.progress_note, t.category,
+                   -- Last time this card crossed columns, for the "Moved …" stamp
+                   -- on the kanban card. Null until the first column_change.
+                   (SELECT MAX(h.created_at) FROM mw_task_history h
+                      WHERE h.task_id = t.id AND h.event_type = 'column_change') AS last_moved_at,
                    -- Split assignee fields so the client can pick a
                    -- human-readable name and never fall back to showing
                    -- a raw email in cards / tooltips. Older callsites
@@ -135,11 +142,14 @@ async def create_project_task(
     assigned_to: Optional[UUID] = None,
     progress_note: Optional[str] = None,
     project_title: Optional[str] = None,
+    category: str = "manual",
 ) -> dict:
     if board_column not in _ALLOWED_COLUMNS:
         raise ValueError(f"Invalid board_column: {board_column}")
     if priority not in _ALLOWED_PRIORITIES:
         raise ValueError(f"Invalid priority: {priority}")
+    if category not in _ALLOWED_CATEGORIES:
+        raise ValueError(f"Invalid category: {category}")
     if not title or not title.strip():
         raise ValueError("Title required")
 
@@ -154,14 +164,14 @@ async def create_project_task(
                 due_date, priority, status, board_column, assigned_to,
                 completed_at, category, progress_note
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'manual', $12)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $13, $12)
             RETURNING id, project_id, company_id, created_by, title, description,
                       due_date, priority, status, board_column, assigned_to,
-                      completed_at, created_at, updated_at, progress_note
+                      completed_at, created_at, updated_at, progress_note, category
             """,
             company_id, created_by, project_id, title.strip(), description,
             due_date, priority, status, board_column, assigned_to,
-            completed_at, progress_note,
+            completed_at, progress_note, category,
         )
 
         await _log_task_history(
@@ -429,7 +439,7 @@ async def update_project_task(
             WHERE id = $2 AND project_id = $12
             RETURNING id, project_id, company_id, created_by, title, description,
                       due_date, priority, status, board_column, assigned_to,
-                      completed_at, created_at, updated_at, progress_note
+                      completed_at, created_at, updated_at, progress_note, category
             """,
             new_column,                   # $1
             task_id,                      # $2
@@ -526,13 +536,20 @@ async def update_project_task(
             project_title=project_title,
         )
 
-    if row:
-        task_payload = _row_to_task(dict(row))
+    result = _row_to_task(dict(row)) if row else None
+    # Stamp the fresh move time so the card's "Moved …" line updates without
+    # waiting for the next list reload (the list query derives last_moved_at
+    # from mw_task_history; here we approximate it with now()).
+    if result is not None and new_column != current["board_column"]:
+        result["last_moved_at"] = datetime.now(timezone.utc).isoformat()
+
+    if result is not None:
+        task_payload = dict(result)
         if actor_user_id is not None:
             task_payload["actor_id"] = str(actor_user_id)
         await _broadcast_task_event_safe(project_id, "task.updated", task_payload)
 
-    return _row_to_task(dict(row)) if row else None
+    return result
 
 
 async def delete_project_task(
