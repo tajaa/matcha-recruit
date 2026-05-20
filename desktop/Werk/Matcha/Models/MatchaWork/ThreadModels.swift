@@ -316,6 +316,38 @@ struct MWMessageMetadata: Codable {
 struct MWMessageAttachment: Codable, Hashable {
     let url: String
     let kind: String?
+    var filename: String?
+    var contentType: String?
+    var size: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case url, kind, filename, size
+        case contentType = "content_type"
+    }
+
+    init(url: String, kind: String? = nil, filename: String? = nil,
+         contentType: String? = nil, size: Int? = nil) {
+        self.url = url
+        self.kind = kind
+        self.filename = filename
+        self.contentType = contentType
+        self.size = size
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.url = try c.decode(String.self, forKey: .url)
+        self.kind = try c.decodeIfPresent(String.self, forKey: .kind)
+        self.filename = try c.decodeIfPresent(String.self, forKey: .filename)
+        self.contentType = try c.decodeIfPresent(String.self, forKey: .contentType)
+        self.size = try c.decodeIfPresent(Int.self, forKey: .size)
+    }
+
+    var isImage: Bool {
+        if kind == "image" { return true }
+        if let ct = contentType, ct.lowercased().hasPrefix("image/") { return true }
+        return false
+    }
 }
 
 struct MWComplianceReasoningLocation: Codable {

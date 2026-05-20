@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // Process-wide cache so re-renders (or scrolling past the same message twice)
 // don't re-parse the markdown. Keyed by raw content; bounded to keep memory in
@@ -87,34 +88,59 @@ struct MessageBubbleView: View {
     @ViewBuilder
     private func attachmentStrip(_ attachments: [MWMessageAttachment]) -> some View {
         let images = attachments.filter { ($0.kind ?? "image") == "image" }
-        if !images.isEmpty {
-            let columns = min(images.count, 3)
-            LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: columns),
-                spacing: 6
-            ) {
-                ForEach(images, id: \.url) { att in
-                    AsyncImage(url: URL(string: att.url)) { phase in
-                        switch phase {
-                        case .success(let img):
-                            img.resizable().scaledToFill()
-                        case .failure:
-                            Image(systemName: "photo")
-                                .foregroundColor(.white.opacity(0.4))
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .background(Color.black.opacity(0.15))
-                        default:
-                            ProgressView()
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .background(Color.black.opacity(0.15))
+        let files = attachments.filter { $0.kind == "file" }
+        return VStack(alignment: .leading, spacing: 6) {
+            if !images.isEmpty {
+                let columns = min(images.count, 3)
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: columns),
+                    spacing: 6
+                ) {
+                    ForEach(images, id: \.url) { att in
+                        AsyncImage(url: URL(string: att.url)) { phase in
+                            switch phase {
+                            case .success(let img):
+                                img.resizable().scaledToFill()
+                            case .failure:
+                                Image(systemName: "photo")
+                                    .foregroundColor(.white.opacity(0.4))
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .background(Color.black.opacity(0.15))
+                            default:
+                                ProgressView()
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .background(Color.black.opacity(0.15))
+                            }
                         }
+                        .frame(height: 120)
+                        .clipped()
+                        .cornerRadius(8)
                     }
-                    .frame(height: 120)
-                    .clipped()
-                    .cornerRadius(8)
                 }
+                .frame(maxWidth: 320)
             }
-            .frame(maxWidth: 320)
+            ForEach(files, id: \.url) { att in
+                Button {
+                    if let u = URL(string: att.url) { NSWorkspace.shared.open(u) }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "doc")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.8))
+                        Text(att.filename ?? "file")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.black.opacity(0.2))
+                    .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: 320, alignment: .leading)
+            }
         }
     }
 

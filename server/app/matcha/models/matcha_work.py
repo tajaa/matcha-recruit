@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class OnboardingEmployee(BaseModel):
@@ -308,8 +308,20 @@ class CreateThreadResponse(BaseModel):
     pdf_url: Optional[str] = None
 
 
+class ThreadAttachment(BaseModel):
+    """A non-image file attached to a thread message (PDF/DOC/CSV/TXT/etc).
+    Already uploaded via POST /threads/{id}/files; the send call references
+    it by url. Server re-fetches + extracts text for AI context."""
+    url: str
+    filename: str
+    content_type: Optional[str] = None
+    size: Optional[int] = None
+
+
 class SendMessageRequest(BaseModel):
-    content: str = Field(..., min_length=1, max_length=4000)
+    # Empty content is allowed when attachments are present (file-only send).
+    # The route turns that into a clarifying reply rather than analyzing.
+    content: str = Field("", max_length=4000)
     slide_index: Optional[int] = Field(None, ge=0, description="0-based index of slide to focus edits on")
     model: Optional[str] = Field(None, description="Model override (e.g. gemini-3.1-flash-lite-preview, gemini-3.5-flash, gemini-3.1-pro-preview)")
     image_urls: Optional[list[str]] = Field(
@@ -317,6 +329,19 @@ class SendMessageRequest(BaseModel):
         description="Attachment image URLs (already uploaded). Stored on user message metadata and passed to the AI as multimodal parts.",
         max_length=8,
     )
+    attachments: Optional[list[ThreadAttachment]] = Field(
+        None,
+        description="Non-image file attachments (already uploaded). Content fed to AI as text context only when the user gives an instruction.",
+        max_length=5,
+    )
+
+    @model_validator(mode="after")
+    def _require_content_or_attachment(self):
+        has_text = bool((self.content or "").strip())
+        has_files = bool(self.attachments) or bool(self.image_urls)
+        if not has_text and not has_files:
+            raise ValueError("content or attachments required")
+        return self
 
 
 class SendInterviewsRequest(BaseModel):

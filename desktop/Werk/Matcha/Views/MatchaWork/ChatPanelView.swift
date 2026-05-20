@@ -1,9 +1,13 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-private let resumeExtensions: Set<String> = ["pdf", "doc", "docx", "txt"]
-private let inventoryExtensions: Set<String> = ["csv", "xlsx", "xls"]
 private let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "heic", "webp", "bmp", "tiff"]
+// Non-image files that attach to a message as plain reference material. The
+// AI only reads them when the user's message gives an instruction; a file
+// sent with no text yields a clarifying reply (server-side guardrail).
+private let attachableExtensions: Set<String> = ["pdf", "doc", "docx", "txt", "md", "csv", "json"]
+private let maxPendingFiles = 5
+private let maxFileBytes = 10 * 1024 * 1024
 
 struct ChatPanelView: View {
     @Bindable var viewModel: ThreadDetailViewModel
@@ -13,6 +17,7 @@ struct ChatPanelView: View {
     @State private var previewURL: String? = nil
     @State private var isDragOver = false
     @State private var uploadProgress: String? = nil
+    @State private var pendingFiles: [(data: Data, filename: String, mimeType: String)] = []
 
     // Matches server-side `SendMessageRequest.content` Field(max_length=4000)
     private static let messageCharLimit = 4000
@@ -23,9 +28,35 @@ struct ChatPanelView: View {
 
     private func send() {
         let content = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !content.isEmpty, !viewModel.isStreaming, !isOverLimit else { return }
+        let files = pendingFiles
+        // Allow sending with files but no text — server replies asking what the
+        // user wants rather than auto-analyzing.
+        guard (!content.isEmpty || !files.isEmpty), !viewModel.isStreaming, !isOverLimit else { return }
         inputText = ""
-        Task { await viewModel.sendMessage(content: content, model: selectedModel) }
+        pendingFiles = []
+        Task {
+            var attachments: [MWMessageAttachment] = []
+            if !files.isEmpty, let threadId = viewModel.thread?.id {
+                await MainActor.run {
+                    uploadProgress = "Uploading \(files.count) file\(files.count == 1 ? "" : "s")..."
+                }
+                do {
+                    attachments = try await MatchaWorkService.shared.uploadThreadFiles(
+                        threadId: threadId, files: files
+                    )
+                } catch {
+                    await MainActor.run {
+                        viewModel.errorMessage = "Upload failed: \(error.localizedDescription)"
+                        uploadProgress = nil
+                        // Restore the dropped files so the user can retry.
+                        pendingFiles = files
+                    }
+                    return
+                }
+                await MainActor.run { uploadProgress = nil }
+            }
+            await viewModel.sendMessage(content: content, model: selectedModel, fileAttachments: attachments)
+        }
     }
 
     private var selectedSlideTitle: String? {
@@ -43,8 +74,44 @@ struct ChatPanelView: View {
         return "Message..."
     }
 
+    @ViewBuilder
+    private var pendingFilesStrip: some View {
+        if !pendingFiles.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(pendingFiles.enumerated()), id: \.offset) { idx, file in
+                        HStack(spacing: 6) {
+                            Image(systemName: "doc")
+                                .font(.system(size: 11))
+                                .foregroundColor(.matcha500)
+                            Text(file.filename)
+                                .font(.system(size: 11))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Button {
+                                pendingFiles.remove(at: idx)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8))
+                                    .foregroundColor(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color.zinc800)
+                        .cornerRadius(6)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
     private func handleFileDrop(_ providers: [NSItemProvider]) {
-        guard let threadId = viewModel.thread?.id else { return }
+        guard viewModel.thread != nil else { return }
         for provider in providers {
             provider.loadItem(forTypeIdentifier: "public.file-url") { item, _ in
                 guard let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
@@ -62,37 +129,27 @@ struct ChatPanelView: View {
                     return
                 }
 
-                let endpoint: String
-                if resumeExtensions.contains(ext) {
-                    endpoint = "resume/upload"
-                } else if inventoryExtensions.contains(ext) {
-                    endpoint = "inventory/upload"
-                } else {
+                guard attachableExtensions.contains(ext) else {
                     Task { @MainActor in
-                        viewModel.errorMessage = "Unsupported file type: .\(ext). Supported: images, PDF/DOC/TXT (resumes), CSV/XLSX (inventory)."
+                        viewModel.errorMessage = "Unsupported file type: .\(ext). Supported: images, PDF, DOC/DOCX, TXT, MD, CSV, JSON."
                     }
                     return
                 }
 
-                Task {
-                    await MainActor.run { uploadProgress = "Uploading \(url.lastPathComponent)..." }
-                    do {
-                        let bytes = try await MatchaWorkService.shared.uploadFiles(
-                            threadId: threadId, endpoint: endpoint, files: [file]
-                        )
-                        for try await line in bytes.lines {
-                            if line.hasPrefix("data: "), line.contains("\"type\":\"complete\"") || line.contains("[DONE]") {
-                                break
-                            }
-                        }
-                        await viewModel.loadThread(id: threadId)
-                        await MainActor.run { uploadProgress = nil }
-                    } catch {
-                        await MainActor.run {
-                            viewModel.errorMessage = "Upload failed: \(error.localizedDescription)"
-                            uploadProgress = nil
-                        }
+                // Generic attach: queue as a pending chip. The file is NOT
+                // analyzed on drop — it uploads + feeds the AI only when the
+                // user sends a message with it (server guardrail handles the
+                // no-instruction case with a clarifying reply).
+                Task { @MainActor in
+                    if pendingFiles.count >= maxPendingFiles {
+                        viewModel.errorMessage = "Up to \(maxPendingFiles) files per message."
+                        return
                     }
+                    if fileData.count > maxFileBytes {
+                        viewModel.errorMessage = "\(file.filename) exceeds 10 MB."
+                        return
+                    }
+                    pendingFiles.append(file)
                 }
             }
         }
@@ -167,6 +224,7 @@ struct ChatPanelView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.matcha500.opacity(0.06))
                 }
+                pendingFilesStrip
                 inputBar
             }
         }

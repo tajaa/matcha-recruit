@@ -136,7 +136,7 @@ class ERDocumentParser:
             return text, page_count
         elif ext in [".docx", ".doc"]:
             return self.extract_text_from_docx(file_path), None
-        elif ext == ".txt":
+        elif ext in (".txt", ".md"):
             return self.extract_text_from_txt(file_path), None
         elif ext == ".csv":
             text, _ = self.parse_csv(file_path)

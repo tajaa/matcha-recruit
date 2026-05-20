@@ -99,9 +99,11 @@ class ThreadDetailViewModel {
         }
     }
 
-    func sendMessage(content: String, model: String? = nil) async {
+    func sendMessage(content: String, model: String? = nil, fileAttachments: [MWMessageAttachment] = []) async {
         guard let threadId = thread?.id else { return }
-        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // Allow a file-only send (empty text) when attachments are present —
+        // the server turns that into a "what do you want?" clarifying reply.
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !fileAttachments.isEmpty else { return }
 
         // Cancel any in-flight stream
         streamingTask?.cancel()
@@ -113,7 +115,9 @@ class ThreadDetailViewModel {
         // Attach any pending image URLs so screenshots render in the bubble
         // before the server confirms — matches the final persisted metadata.
         let optimisticImages = presentationImageURLs
-        let optimisticMeta: MWMessageMetadata? = optimisticImages.isEmpty ? nil : MWMessageMetadata(
+        let optimisticAttachments =
+            optimisticImages.map { MWMessageAttachment(url: $0, kind: "image") } + fileAttachments
+        let optimisticMeta: MWMessageMetadata? = optimisticAttachments.isEmpty ? nil : MWMessageMetadata(
             complianceReasoning: nil,
             aiReasoningSteps: nil,
             referencedCategories: nil,
@@ -121,7 +125,7 @@ class ThreadDetailViewModel {
             payerSources: nil,
             affectedEmployees: nil,
             complianceGaps: nil,
-            attachments: optimisticImages.map { MWMessageAttachment(url: $0, kind: "image") }
+            attachments: optimisticAttachments
         )
         let tempId = UUID().uuidString
         let localMsg = MWMessage(
@@ -174,8 +178,9 @@ class ThreadDetailViewModel {
             let slideIndex: Int?
             let model: String?
             let imageUrls: [String]?
+            let attachments: [MWMessageAttachment]?
             enum CodingKeys: String, CodingKey {
-                case content, model
+                case content, model, attachments
                 case slideIndex = "slide_index"
                 case imageUrls = "image_urls"
             }
@@ -193,7 +198,8 @@ class ThreadDetailViewModel {
                 content: content,
                 slideIndex: capturedSlideIndex,
                 model: model,
-                imageUrls: pendingImages.isEmpty ? nil : pendingImages
+                imageUrls: pendingImages.isEmpty ? nil : pendingImages,
+                attachments: fileAttachments.isEmpty ? nil : fileAttachments
             )
         )
 

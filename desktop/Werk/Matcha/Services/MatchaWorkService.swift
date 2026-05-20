@@ -314,6 +314,47 @@ class MatchaWorkService {
         return bytes
     }
 
+    // MARK: - Generic Thread File Attachments (multipart)
+
+    /// Upload non-image files to a thread for plain attachment (no analysis).
+    /// Returns attachment refs to include on the next message send. The server
+    /// stores them + extracts text for AI context only when the user gives an
+    /// instruction; a file-only send yields a clarifying reply.
+    func uploadThreadFiles(
+        threadId: String,
+        files: [(data: Data, filename: String, mimeType: String)]
+    ) async throws -> [MWMessageAttachment] {
+        var multipart = MultipartUploadBuilder()
+        for file in files {
+            multipart.addFile(name: "files", filename: file.filename, mimeType: file.mimeType, data: file.data)
+        }
+        let (body, contentType) = multipart.finalize()
+
+        guard let url = URL(string: "\(client.baseURL)\(basePath)/threads/\(threadId)/files") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let token = client.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = body
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw APIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0, "Upload failed")
+        }
+        struct UploadResponse: Decodable { let attachments: [MWMessageAttachment] }
+        let decoded = try JSONDecoder().decode(UploadResponse.self, from: data)
+        // Server returns kind-less file refs; stamp kind="file" for the client.
+        return decoded.attachments.map {
+            MWMessageAttachment(url: $0.url, kind: "file", filename: $0.filename,
+                                contentType: $0.contentType, size: $0.size)
+        }
+    }
+
     // MARK: - Send / Sync Interviews
 
     func sendInterviews(

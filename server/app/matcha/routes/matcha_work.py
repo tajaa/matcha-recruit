@@ -239,6 +239,26 @@ def _row_to_message(row: dict) -> MWMessageOut:
             raw_meta = json.loads(raw_meta)
         except (json.JSONDecodeError, TypeError):
             raw_meta = None
+    # Strip the server-only extracted `text` from file attachments before the
+    # message reaches the client. That text is AI context (can be tens of KB),
+    # not display data — the client only needs url/filename/size/kind.
+    # Also presign s3:// urls so the desktop chip is clickable (CloudFront
+    # urls pass through; stored url stays stable for re-extraction).
+    if isinstance(raw_meta, dict) and isinstance(raw_meta.get("attachments"), list):
+        _storage = get_storage()
+        cleaned = []
+        for a in raw_meta["attachments"]:
+            if not isinstance(a, dict):
+                cleaned.append(a)
+                continue
+            a = {k: v for k, v in a.items() if k != "text"}
+            url = a.get("url") or ""
+            if isinstance(url, str) and url.startswith("s3://"):
+                signed = _storage.get_presigned_download_url(url, expires_in=3600)
+                if signed:
+                    a["url"] = signed
+            cleaned.append(a)
+        raw_meta = {**raw_meta, "attachments": cleaned}
     return MWMessageOut(
         id=row["id"],
         thread_id=row["thread_id"],
@@ -2336,6 +2356,86 @@ Resume text:
 ---
 %s
 ---"""
+
+
+# Kept in lockstep with ERDocumentParser.extract_text — every allowed type
+# must be text-extractable so an attached file can actually feed the AI.
+# (xlsx/xls excluded: no extractor; export to CSV instead.)
+THREAD_FILE_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt", ".md", ".csv", ".json"}
+THREAD_FILE_MAX_BYTES = 10 * 1024 * 1024
+# Per-file cap on extracted text fed into the AI prompt. Keeps a single large
+# PDF from blowing the context window; the user can ask follow-ups that target
+# specific sections if a file is truncated.
+THREAD_FILE_TEXT_CAP = 40000
+
+
+async def _build_thread_file_attachment_meta(attachments) -> list[dict]:
+    """For each uploaded file attachment, re-fetch its bytes from storage and
+    extract capped text. Returns attachment metadata dicts (with a server-only
+    `text` field) for message storage. `_row_to_message` strips `text` before
+    any client response. Extraction failures degrade gracefully — the file
+    still attaches, it just won't feed the AI."""
+    if not attachments:
+        return []
+    from ..services.er_document_parser import ERDocumentParser
+    storage = get_storage()
+    parser = ERDocumentParser()
+    out: list[dict] = []
+    for att in attachments:
+        meta: dict = {
+            "url": att.url,
+            "filename": att.filename,
+            "content_type": att.content_type,
+            "size": att.size,
+            "kind": "file",
+        }
+        try:
+            raw = await storage.download_file(att.url)
+            text, _ = parser.extract_text_from_bytes(raw, att.filename)
+            if text and text.strip():
+                meta["text"] = text[:THREAD_FILE_TEXT_CAP]
+        except Exception:
+            logger.warning("Thread file text extraction failed: %s", att.filename, exc_info=True)
+        out.append(meta)
+    return out
+
+
+@router.post("/threads/{thread_id}/files")
+async def upload_thread_files(
+    thread_id: UUID,
+    files: list[UploadFile] = File(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Generic file attach for a thread message — stores to S3 and returns
+    refs. Deliberately does NOT extract or analyze: the dropped file is a
+    plain attachment until the user sends an instruction with it. Extraction
+    + AI context happens at send time (see send_message), and a file sent
+    with no instruction yields a clarifying reply, not an auto-analysis.
+    """
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if thread["status"] in ("finalized", "archived"):
+        raise HTTPException(status_code=400, detail=f"Cannot upload to a {thread['status']} thread")
+
+    storage = get_storage()
+    prefix = doc_svc.build_matcha_work_thread_storage_prefix(company_id, thread_id, "files")
+    out: list[dict] = []
+    for f in files:
+        fname = f.filename or "file"
+        ext = os.path.splitext(fname)[1].lower()
+        if ext not in THREAD_FILE_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {fname}")
+        raw = await f.read()
+        if len(raw) > THREAD_FILE_MAX_BYTES:
+            raise HTTPException(status_code=400, detail=f"File exceeds 10 MB limit: {fname}")
+        ct = f.content_type or "application/octet-stream"
+        url = await storage.upload_file(raw, fname, prefix=prefix, content_type=ct)
+        out.append({"url": url, "filename": fname, "content_type": ct, "size": len(raw)})
+    return {"attachments": out}
 
 
 @router.post("/threads/{thread_id}/resume/upload")
@@ -7046,8 +7146,32 @@ async def send_message(
     if current_user.role != "admin":
         await token_budget_service.check_token_budget(company_id)
 
+    # Persist attachments (images + non-image files with extracted text) on the
+    # user message metadata, mirroring the streaming endpoint.
+    image_atts = [{"url": u, "kind": "image"} for u in (body.image_urls or []) if isinstance(u, str) and u]
+    file_atts = await _build_thread_file_attachment_meta(body.attachments)
+    all_atts = image_atts + file_atts
+    user_meta = {"attachments": all_atts} if all_atts else None
+    is_file_only = bool(file_atts) and not (body.content or "").strip()
+
     # Save user message
-    user_msg = await doc_svc.add_message(thread_id, "user", body.content)
+    user_msg = await doc_svc.add_message(thread_id, "user", body.content, metadata=user_meta)
+
+    # File-only send → ask for intent rather than auto-analyzing. File + text
+    # already persisted, so the follow-up has context. No model call.
+    if is_file_only:
+        assistant_msg = await doc_svc.add_message(
+            thread_id, "assistant", "Are you looking for analysis or something else?"
+        )
+        return SendMessageResponse(
+            user_message=_row_to_message(user_msg),
+            assistant_message=_row_to_message(assistant_msg),
+            current_state=thread["current_state"],
+            version=thread["version"],
+            task_type=_infer_skill_from_state(thread["current_state"]),
+            pdf_url=None,
+            token_usage=None,
+        )
 
     # Fetch message history + company profile + context summary in parallel
     messages, profile, (context_summary, summary_at_count) = await asyncio.gather(
@@ -7056,6 +7180,19 @@ async def send_message(
         doc_svc.get_context_summary(thread_id),
     )
     msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
+    # Collect extracted text from any file attachments in the window for AI context.
+    _file_ctx_parts: list[str] = []
+    for _m in messages:
+        _meta = _m.get("metadata")
+        if isinstance(_meta, str):
+            try:
+                _meta = json.loads(_meta)
+            except Exception:
+                _meta = None
+        if isinstance(_meta, dict):
+            for _a in (_meta.get("attachments") or []):
+                if isinstance(_a, dict) and _a.get("kind") == "file" and _a.get("text"):
+                    _file_ctx_parts.append(f"[{_a.get('filename') or 'file'}]\n{_a['text']}")
 
     # Inject selected slide content into the AI-facing message (not saved to DB)
     _inject_slide_context(msg_dicts, thread["current_state"], body.slide_index)
@@ -7063,6 +7200,13 @@ async def send_message(
     # Call AI with company context
     ai_provider = get_ai_provider()
     ctx = _build_company_context(profile)
+    if _file_ctx_parts:
+        ctx += (
+            "\n\n=== ATTACHED FILES ===\n"
+            "The user attached the following file(s). Use their content only as "
+            "the user's message directs — do not produce an unprompted full "
+            "summary or analysis.\n\n" + "\n\n".join(_file_ctx_parts) + "\n"
+        )
 
     # Inject project file attachments metadata
     if thread.get("project_id"):
@@ -7357,7 +7501,17 @@ async def send_message_stream(
     attach_urls: list[str] = []
     if body.image_urls:
         attach_urls = [u for u in body.image_urls if isinstance(u, str) and u]
-    user_meta = {"attachments": [{"url": u, "kind": "image"} for u in attach_urls]} if attach_urls else None
+    image_atts = [{"url": u, "kind": "image"} for u in attach_urls]
+    # Non-image files: extract capped text now so it persists on the message
+    # and feeds the AI on this turn AND on follow-ups (read back from metadata).
+    file_atts = await _build_thread_file_attachment_meta(body.attachments)
+    all_atts = image_atts + file_atts
+    user_meta = {"attachments": all_atts} if all_atts else None
+
+    # File-only send (attachments, no instruction) → don't analyze; ask what
+    # they want. The file + its extracted text are persisted, so the follow-up
+    # ("summarize it") has full context.
+    is_file_only = bool(file_atts) and not (body.content or "").strip()
 
     # Save user message before streaming
     user_msg = await doc_svc.add_message(thread_id, "user", body.content, metadata=user_meta)
@@ -7384,6 +7538,7 @@ async def send_message_stream(
         doc_svc.get_context_summary(thread_id),
     )
     msg_dicts = []
+    file_context_parts: list[str] = []
     for m in messages:
         entry = {"role": m["role"], "content": m["content"]}
         meta = m.get("metadata")
@@ -7394,9 +7549,19 @@ async def send_message_stream(
                 meta = None
         if isinstance(meta, dict):
             atts = meta.get("attachments") or []
-            urls = [a.get("url") for a in atts if isinstance(a, dict) and a.get("url")]
+            # Only image attachments go into the multimodal image path. File
+            # attachments must NOT be sent as image parts.
+            urls = [
+                a.get("url") for a in atts
+                if isinstance(a, dict) and a.get("url") and a.get("kind") != "file"
+            ]
             if urls:
                 entry["image_urls"] = urls
+            for a in atts:
+                if isinstance(a, dict) and a.get("kind") == "file" and a.get("text"):
+                    file_context_parts.append(
+                        f"[{a.get('filename') or 'file'}]\n{a['text']}"
+                    )
         msg_dicts.append(entry)
 
     # Inject selected slide content into the AI-facing message (not saved to DB)
@@ -7418,6 +7583,18 @@ async def send_message_stream(
             listing = "\n".join(f"- {f['filename']} ({f['content_type']}, {f['file_size']:,} bytes)" for f in pfiles)
             ctx += f"\n\n=== PROJECT ATTACHMENTS ===\nThe user has attached these files to the project. Reference them when relevant:\n{listing}\n"
 
+    # Inject the text of files the user attached to chat messages. These are
+    # reference material — the system-prompt note tells the model not to
+    # volunteer a full analysis unless the user's message asks for it.
+    if file_context_parts:
+        joined = "\n\n".join(file_context_parts)
+        ctx += (
+            "\n\n=== ATTACHED FILES ===\n"
+            "The user attached the following file(s). Use their content only as "
+            "the user's message directs — do not produce an unprompted full "
+            "summary or analysis.\n\n" + joined + "\n"
+        )
+
     # Inject recruiting project context so AI generates posting sections in the right project
     ctx = await _inject_recruiting_project_context(ctx, thread, thread["current_state"])
 
@@ -7427,6 +7604,35 @@ async def send_message_stream(
         nonlocal ctx
         compliance_result: ComplianceContextResult | None = None
         try:
+            # File-only send → ask for intent instead of auto-analyzing. The
+            # file is already persisted with extracted text, so the user's next
+            # message has full context. No model call (deterministic + free).
+            if is_file_only:
+                canned = "Are you looking for analysis or something else?"
+                assistant_msg = await doc_svc.add_message(thread_id, "assistant", canned)
+                try:
+                    from .thread_ws import thread_manager
+                    asyncio.create_task(
+                        thread_manager.broadcast_new_message(
+                            str(thread_id),
+                            [_row_to_message(user_msg).model_dump(mode="json"),
+                             _row_to_message(assistant_msg).model_dump(mode="json")],
+                            exclude_user=current_user.id,
+                        )
+                    )
+                except Exception:
+                    logger.warning("Thread WS broadcast failed (file-only) for thread %s", thread_id)
+                guard_response = SendMessageResponse(
+                    user_message=_row_to_message(user_msg),
+                    assistant_message=_row_to_message(assistant_msg),
+                    current_state=thread["current_state"],
+                    version=thread["version"],
+                    task_type=_infer_skill_from_state(thread["current_state"]),
+                    pdf_url=None,
+                    token_usage=None,
+                )
+                yield _sse_data({"type": "complete", "data": guard_response.model_dump(mode="json")})
+                return
             # Build mode-specific context with status updates
             if thread.get("node_mode"):
                 yield _sse_data({"type": "status", "message": "Loading internal company data..."})
