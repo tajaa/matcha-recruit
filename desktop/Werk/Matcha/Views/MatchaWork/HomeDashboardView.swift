@@ -50,6 +50,7 @@ struct HomeDashboardView: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .scrollContentBackground(.hidden)
         .background(Color.appBackground)
         .task { await loadAll() }
     }
@@ -89,16 +90,16 @@ struct HomeDashboardView: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 if isLoading {
-                    ProgressView().controlSize(.small).tint(.white)
+                    ProgressView().controlSize(.small).tint(appState.themeOnAccent)
                 } else {
                     Image(systemName: icon).font(.system(size: 11, weight: .medium))
                 }
                 Text(label).font(.system(size: 12, weight: .medium))
             }
-            .foregroundColor(.white)
+            .foregroundColor(appState.themeOnAccent)
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            .background(Color.matcha600)
+            .background(appState.themeAccent)
             .cornerRadius(6)
         }
         .buttonStyle(.plain)
@@ -113,25 +114,25 @@ struct HomeDashboardView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Home")
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(appState.themeText)
                 Text("What's in flight across your work.")
                     .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.5))
+                    .foregroundColor(appState.themeText.opacity(0.5))
             }
             Spacer()
             Button { Task { await loadAll() } } label: {
                 HStack(spacing: 4) {
                     if isLoading {
-                        ProgressView().controlSize(.small).tint(.white)
+                        ProgressView().controlSize(.small).tint(appState.themeOnAccent)
                     } else {
                         Image(systemName: "arrow.clockwise").font(.system(size: 11))
                     }
                     Text("Refresh").font(.system(size: 11, weight: .medium))
                 }
-                .foregroundColor(.white)
+                .foregroundColor(appState.themeOnAccent)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(Color.matcha600)
+                .background(appState.themeAccent)
                 .cornerRadius(5)
             }
             .buttonStyle(.plain)
@@ -147,7 +148,7 @@ struct HomeDashboardView: View {
             if activeProjects.isEmpty {
                 Text("No active projects yet.")
                     .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(appState.themeText.opacity(0.4))
                     .padding(.vertical, 4)
             } else {
                 ForEach(activeProjects) { project in
@@ -159,17 +160,17 @@ struct HomeDashboardView: View {
                         HStack(spacing: 8) {
                             Image(systemName: projectIcon(project.projectType))
                                 .font(.system(size: 10))
-                                .foregroundColor(.matcha500)
+                                .foregroundColor(appState.themeAccent)
                                 .frame(width: 14)
                             Text(project.title)
                                 .font(.system(size: 12))
-                                .foregroundColor(.white.opacity(0.85))
+                                .foregroundColor(appState.themeText.opacity(0.85))
                                 .lineLimit(1)
                             Spacer()
                             if let updated = project.updatedAt, let date = parseMWDate(updated) {
                                 Text(relativeTime(from: date))
                                     .font(.system(size: 9))
-                                    .foregroundColor(.white.opacity(0.4))
+                                    .foregroundColor(appState.themeText.opacity(0.4))
                             }
                         }
                     }
@@ -179,8 +180,8 @@ struct HomeDashboardView: View {
             }
         }
         .padding(12)
-        .background(Color.zinc900.opacity(0.5))
-        .cornerRadius(8)
+        .background(Color.cardBackground, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.borderColor, lineWidth: 1))
     }
 
     private var blogsCard: some View {
@@ -189,7 +190,7 @@ struct HomeDashboardView: View {
             if inFlightBlogs.isEmpty {
                 Text("No drafts. Spin one up from the sidebar.")
                     .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(appState.themeText.opacity(0.4))
                     .padding(.vertical, 4)
             } else {
                 ForEach(inFlightBlogs) { blog in
@@ -201,11 +202,11 @@ struct HomeDashboardView: View {
                         HStack(spacing: 8) {
                             Image(systemName: "doc.text")
                                 .font(.system(size: 10))
-                                .foregroundColor(.matcha500)
+                                .foregroundColor(appState.themeAccent)
                                 .frame(width: 14)
                             Text(blog.title)
                                 .font(.system(size: 12))
-                                .foregroundColor(.white.opacity(0.85))
+                                .foregroundColor(appState.themeText.opacity(0.85))
                                 .lineLimit(1)
                             Spacer()
                             blogStatusPill(for: blog)
@@ -217,8 +218,8 @@ struct HomeDashboardView: View {
             }
         }
         .padding(12)
-        .background(Color.zinc900.opacity(0.5))
-        .cornerRadius(8)
+        .background(Color.cardBackground, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.borderColor, lineWidth: 1))
     }
 
     private var openTasksCard: some View {
@@ -227,7 +228,7 @@ struct HomeDashboardView: View {
             if openTasks.isEmpty {
                 Text("No open tasks. Nice.")
                     .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(appState.themeText.opacity(0.4))
                     .padding(.vertical, 4)
             } else {
                 ForEach(openTasks) { task in
@@ -243,22 +244,22 @@ struct HomeDashboardView: View {
                                 Circle().fill(priorityColor(task.priority)).frame(width: 6, height: 6)
                                 Text(task.title)
                                     .font(.system(size: 12))
-                                    .foregroundColor(.white.opacity(0.85))
+                                    .foregroundColor(appState.themeText.opacity(0.85))
                                     .lineLimit(1)
                                 Spacer()
                                 if let projectTitle = task.projectTitle {
                                     Text(projectTitle)
                                         .font(.system(size: 9, weight: .medium))
-                                        .foregroundColor(.white.opacity(0.6))
+                                        .foregroundColor(appState.themeText.opacity(0.6))
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
-                                        .background(Color.zinc800)
+                                        .background(Color.cardBackground)
                                         .cornerRadius(3)
                                 }
                                 if let due = task.dueDate, !due.isEmpty {
                                     Text(due.prefix(10))
                                         .font(.system(size: 9))
-                                        .foregroundColor(.white.opacity(0.5))
+                                        .foregroundColor(appState.themeText.opacity(0.5))
                                 }
                             }
                             if let note = task.progressNote,
@@ -266,7 +267,7 @@ struct HomeDashboardView: View {
                                 Text(note)
                                     .font(.system(size: 10))
                                     .italic()
-                                    .foregroundColor(.white.opacity(0.5))
+                                    .foregroundColor(appState.themeText.opacity(0.5))
                                     .lineLimit(1)
                                     .padding(.leading, 14)
                             }
@@ -278,8 +279,8 @@ struct HomeDashboardView: View {
             }
         }
         .padding(12)
-        .background(Color.zinc900.opacity(0.5))
-        .cornerRadius(8)
+        .background(Color.cardBackground, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.borderColor, lineWidth: 1))
     }
 
     private var recentActivityCard: some View {
@@ -288,7 +289,7 @@ struct HomeDashboardView: View {
             if activity.isEmpty {
                 Text("No activity in the last 14 days.")
                     .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(appState.themeText.opacity(0.4))
                     .padding(.vertical, 4)
             } else {
                 ForEach(activity) { item in
@@ -320,21 +321,21 @@ struct HomeDashboardView: View {
                         HStack(spacing: 8) {
                             Image(systemName: activityIcon(item.kind))
                                 .font(.system(size: 10))
-                                .foregroundColor(.matcha500)
+                                .foregroundColor(appState.themeAccent)
                                 .frame(width: 14)
                             Text(item.title)
                                 .font(.system(size: 12))
-                                .foregroundColor(.white.opacity(0.85))
+                                .foregroundColor(appState.themeText.opacity(0.85))
                                 .lineLimit(1)
                             Spacer()
                             Text(item.kind)
                                 .font(.system(size: 9, weight: .medium))
-                                .foregroundColor(.white.opacity(0.4))
+                                .foregroundColor(appState.themeText.opacity(0.4))
                                 .textCase(.uppercase)
                             if let updated = item.updatedAt, let date = parseMWDate(updated) {
                                 Text(relativeTime(from: date))
                                     .font(.system(size: 9))
-                                    .foregroundColor(.white.opacity(0.4))
+                                    .foregroundColor(appState.themeText.opacity(0.4))
                             }
                         }
                     }
@@ -344,8 +345,8 @@ struct HomeDashboardView: View {
             }
         }
         .padding(12)
-        .background(Color.zinc900.opacity(0.5))
-        .cornerRadius(8)
+        .background(Color.cardBackground, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.borderColor, lineWidth: 1))
     }
 
     // MARK: - Helpers
@@ -359,10 +360,10 @@ struct HomeDashboardView: View {
             if let trailing {
                 Text(trailing)
                     .font(.system(size: 9, weight: .medium))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(appState.themeText.opacity(0.4))
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
-                    .background(Color.zinc800)
+                    .background(Color.cardBackground)
                     .cornerRadius(3)
             }
             Spacer()
@@ -376,7 +377,7 @@ struct HomeDashboardView: View {
                 .foregroundColor(.red)
             Text(msg)
                 .font(.system(size: 11))
-                .foregroundColor(.white.opacity(0.85))
+                .foregroundColor(appState.themeText.opacity(0.85))
             Spacer()
         }
         .padding(.horizontal, 10)
@@ -418,13 +419,13 @@ struct HomeDashboardView: View {
     private func blogStatusPill(for blog: MWProject) -> some View {
         let status = (blog.projectData?["status"]?.value as? String) ?? "draft"
         let label = status.capitalized
-        let color: Color = status == "scheduled" ? .matcha500 : .white.opacity(0.5)
+        let color: Color = status == "scheduled" ? .matcha500 : appState.themeText.opacity(0.5)
         return Text(label)
             .font(.system(size: 9, weight: .medium))
             .foregroundColor(color)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(Color.zinc800)
+            .background(Color.cardBackground)
             .cornerRadius(3)
     }
 

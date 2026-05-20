@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 
 struct ChannelMessageRowView: View {
+    @Environment(AppState.self) private var appState
     let msg: ChannelMessage
     let members: [ChannelMember]
     let currentUserId: String
@@ -17,16 +18,16 @@ struct ChannelMessageRowView: View {
             if let rp = msg.replyPreview {
                 HStack(alignment: .top, spacing: 6) {
                     RoundedRectangle(cornerRadius: 1)
-                        .fill(Color.matcha500.opacity(0.5))
+                        .fill(appState.themeAccent.opacity(0.5))
                         .frame(width: 2)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(rp.senderName)
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(Color.matcha500)
+                            .foregroundColor(appState.themeAccent)
                         if !rp.content.isEmpty {
                             Text(rp.content)
                                 .font(.system(size: 10))
-                                .foregroundColor(.white.opacity(0.5))
+                                .foregroundColor(appState.themeText.opacity(0.5))
                                 .lineLimit(2)
                         }
                         // Show attachment thumbnails in reply preview
@@ -44,7 +45,7 @@ struct ChannelMessageRowView: View {
                                                     .cornerRadius(4)
                                             default:
                                                 RoundedRectangle(cornerRadius: 4)
-                                                    .fill(Color.white.opacity(0.05))
+                                                    .fill(appState.themeText.opacity(0.05))
                                                     .frame(width: 48, height: 48)
                                             }
                                         }
@@ -52,15 +53,15 @@ struct ChannelMessageRowView: View {
                                         HStack(spacing: 4) {
                                             Image(systemName: "paperclip")
                                                 .font(.system(size: 9))
-                                                .foregroundColor(.white.opacity(0.4))
+                                                .foregroundColor(appState.themeText.opacity(0.4))
                                             Text(att.filename)
                                                 .font(.system(size: 9))
-                                                .foregroundColor(.white.opacity(0.4))
+                                                .foregroundColor(appState.themeText.opacity(0.4))
                                                 .lineLimit(1)
                                         }
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 3)
-                                        .background(Color.white.opacity(0.05))
+                                        .background(appState.themeText.opacity(0.05))
                                         .cornerRadius(4)
                                     }
                                 }
@@ -80,10 +81,10 @@ struct ChannelMessageRowView: View {
                     HStack(spacing: 6) {
                         Text(msg.senderName)
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.primary)
+                            .foregroundColor(appState.themeText)
                         Text(formatTimestamp(msg.createdAt))
                             .font(.system(size: 10))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeTextSecondary)
                         if msg.failed {
                             HStack(spacing: 3) {
                                 Image(systemName: "exclamationmark.circle.fill")
@@ -96,18 +97,18 @@ struct ChannelMessageRowView: View {
                         } else if msg.pending {
                             Text("sending…")
                                 .font(.system(size: 10))
-                                .foregroundColor(.white.opacity(0.4))
+                                .foregroundColor(appState.themeText.opacity(0.4))
                         }
                     }
                     if msg.deletedAt != nil {
                         Text("message deleted")
                             .font(.system(size: 12))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeTextSecondary)
                             .italic()
                     } else if !msg.content.isEmpty {
                         Text(mentionAttributedContent(msg))
                             .font(.system(size: 13))
-                            .foregroundColor(.primary.opacity(0.9))
+                            .foregroundColor(appState.themeText.opacity(0.9))
                             .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -129,16 +130,16 @@ struct ChannelMessageRowView: View {
                                         if reaction.count > 1 {
                                             Text("\(reaction.count)")
                                                 .font(.system(size: 10, weight: .medium))
-                                                .foregroundColor(isMine ? Color.matcha500 : .white.opacity(0.6))
+                                                .foregroundColor(isMine ? appState.themeAccent : appState.themeText.opacity(0.6))
                                         }
                                     }
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
-                                    .background(isMine ? Color.matcha500.opacity(0.2) : Color.white.opacity(0.08))
+                                    .background(isMine ? appState.themeAccent.opacity(0.2) : appState.themeText.opacity(0.08))
                                     .cornerRadius(10)
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 10)
-                                            .stroke(isMine ? Color.matcha500.opacity(0.4) : Color.clear, lineWidth: 1)
+                                            .stroke(isMine ? appState.themeAccent.opacity(0.4) : Color.clear, lineWidth: 1)
                                     )
                                 }
                                 .buttonStyle(.plain)
@@ -154,7 +155,7 @@ struct ChannelMessageRowView: View {
         .padding(.horizontal, 4)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(hoveredMessageId == msg.id ? Color.white.opacity(0.04) : Color.clear)
+                .fill(hoveredMessageId == msg.id ? appState.themeText.opacity(0.04) : Color.clear)
         )
         .onHover { hovering in hoveredMessageId = hovering ? msg.id : nil }
         .overlay(alignment: .topTrailing) {
@@ -166,9 +167,9 @@ struct ChannelMessageRowView: View {
                     Button { onReply(msg) } label: {
                         Image(systemName: "arrowshape.turn.up.left")
                             .font(.system(size: 10))
-                            .foregroundColor(.white.opacity(0.7))
+                            .foregroundColor(appState.themeText.opacity(0.7))
                             .frame(width: 24, height: 22)
-                            .background(Color.zinc800)
+                            .background(appState.themeCard)
                             .cornerRadius(4)
                     }
                     .buttonStyle(.plain)
@@ -179,7 +180,7 @@ struct ChannelMessageRowView: View {
                             Text(emoji)
                                 .font(.system(size: 11))
                                 .frame(width: 24, height: 22)
-                                .background(Color.zinc800)
+                                .background(appState.themeCard)
                                 .cornerRadius(4)
                         }
                         .buttonStyle(.plain)
@@ -296,7 +297,7 @@ struct ChannelMessageRowView: View {
                         .cornerRadius(6)
                 default:
                     RoundedRectangle(cornerRadius: 6)
-                        .fill(Color.white.opacity(0.05))
+                        .fill(appState.themeText.opacity(0.05))
                         .frame(width: 200, height: 120)
                         .overlay(ProgressView().controlSize(.small))
                 }
@@ -311,21 +312,21 @@ struct ChannelMessageRowView: View {
                 HStack(spacing: 8) {
                     Image(systemName: channelAttachmentIcon(for: att.contentType))
                         .font(.system(size: 14))
-                        .foregroundColor(Color.matcha500)
+                        .foregroundColor(appState.themeAccent)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(att.filename)
                             .font(.system(size: 12))
-                            .foregroundColor(.white.opacity(0.85))
+                            .foregroundColor(appState.themeText.opacity(0.85))
                             .lineLimit(1)
                             .truncationMode(.middle)
                         Text(formatSize(att.size))
                             .font(.system(size: 10))
-                            .foregroundColor(.white.opacity(0.4))
+                            .foregroundColor(appState.themeText.opacity(0.4))
                     }
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(Color.white.opacity(0.05))
+                .background(appState.themeText.opacity(0.05))
                 .cornerRadius(6)
             }
             .buttonStyle(.plain)
@@ -377,7 +378,7 @@ struct ChannelMessageRowView: View {
                   let attrRange = Range(stringRange, in: attributed)
             else { continue }
             let isMe = member.userId == currentUserId
-            attributed[attrRange].foregroundColor = isMe ? .yellow : Color.matcha500
+            attributed[attrRange].foregroundColor = isMe ? .yellow : appState.themeAccent
             attributed[attrRange].font = .system(size: 13, weight: .semibold)
         }
         return attributed

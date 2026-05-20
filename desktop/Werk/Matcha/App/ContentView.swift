@@ -29,50 +29,39 @@ struct ContentView: View {
     @State private var starredProjects: [MWProject] = []
     @State private var starredThreads: [MWThread] = []
 
-    private struct GlassWindowModifier: ViewModifier {
-        func body(content: Content) -> some View {
-            if #available(macOS 15.0, *) {
-                content.containerBackground(.ultraThinMaterial, for: .window)
-            } else {
-                content
-            }
-        }
-    }
-
     var body: some View {
         @Bindable var appState = appState
 
         NavigationSplitView {
             sidebarColumn
         } detail: {
-            if let threadId = appState.selectedThreadId {
-                ThreadDetailView(threadId: threadId)
-                    .onChange(of: threadId) { appState.showSkills = false }
-            } else if let projectId = appState.selectedProjectId {
-                ProjectDetailView(projectId: projectId)
-            } else if let journalId = appState.selectedJournalId {
-                JournalDetailView(journalId: journalId)
-            } else if let channelId = appState.selectedChannelId {
-                ChannelDetailView(channelId: channelId)
-            } else if appState.showChannelBrowse {
-                ChannelBrowseView()
-            } else if appState.showInbox {
-                InboxView()
-            } else if appState.showPeople {
-                PeopleView()
-            } else if appState.showSkills {
-                SkillsView()
-            } else {
-                // Default detail pane: Home dashboard. Replaces the old
-                // "No thread selected" placeholder so users always land
-                // somewhere actionable.
-                HomeDashboardView()
+            Group {
+                if let threadId = appState.selectedThreadId {
+                    ThreadDetailView(threadId: threadId)
+                        .onChange(of: threadId) { appState.showSkills = false }
+                } else if let projectId = appState.selectedProjectId {
+                    ProjectDetailView(projectId: projectId)
+                } else if let journalId = appState.selectedJournalId {
+                    JournalDetailView(journalId: journalId)
+                } else if let channelId = appState.selectedChannelId {
+                    ChannelDetailView(channelId: channelId)
+                } else if appState.showChannelBrowse {
+                    ChannelBrowseView()
+                } else if appState.showInbox {
+                    InboxView()
+                } else if appState.showPeople {
+                    PeopleView()
+                } else if appState.showSkills {
+                    SkillsView()
+                } else {
+                    HomeDashboardView()
+                }
             }
+            .background(appState.themeBg)
         }
         .environment(appState)
         .tint(appState.themeAccent)
         .background(appState.themeBg)
-        .modifier(GlassWindowModifier())
         .sheet(isPresented: $showProfile) {
             ProfileSheet()
                 .environment(appState)
@@ -802,12 +791,13 @@ struct ContentView: View {
     private var sidebarBackground: some View {
         switch appState.appTheme {
         case "cappuchin":
-            VisualEffectView(material: .sidebar)
-                .overlay(Color.cappuchinDark.opacity(0.85))
+            // Solid espresso — no desktop bleed-through.
+            Color.cappuchinDark
         case "light":
-            VisualEffectView(material: .sidebar)
-                .overlay(Color(white: 0.96).opacity(0.6))
+            // Solid light gray panel.
+            Color.grayBg
         default:
+            // Dark mode keeps the native vibrancy.
             VisualEffectView(material: .sidebar)
                 .overlay(Color.zinc950.opacity(0.45))
         }

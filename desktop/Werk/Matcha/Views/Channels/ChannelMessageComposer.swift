@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ChannelMessageComposer: View {
+    @Environment(AppState.self) private var appState
     let channelId: String
     let channelSlug: String
     let userHandle: String
@@ -22,22 +23,22 @@ struct ChannelMessageComposer: View {
             if let reply = replyingTo {
                 HStack(spacing: 8) {
                     RoundedRectangle(cornerRadius: 1)
-                        .fill(Color.matcha500)
+                        .fill(appState.themeAccent)
                         .frame(width: 3, height: 24)
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Replying to \(reply.senderName)")
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(Color.matcha500)
+                            .foregroundColor(appState.themeAccent)
                         Text(reply.content.isEmpty ? (reply.attachments.isEmpty ? "" : "📎 attachment") : String(reply.content.prefix(80)))
                             .font(.system(size: 10))
-                            .foregroundColor(.white.opacity(0.5))
+                            .foregroundColor(appState.themeText.opacity(0.5))
                             .lineLimit(1)
                     }
                     Spacer()
                     Button { replyingTo = nil } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.white.opacity(0.4))
+                            .foregroundColor(appState.themeText.opacity(0.4))
                     }
                     .buttonStyle(.plain)
                 }
@@ -64,11 +65,11 @@ struct ChannelMessageComposer: View {
                         Text("MENTION")
                             .font(.system(size: 9, weight: .semibold))
                             .tracking(1.2)
-                            .foregroundColor(.white.opacity(0.35))
+                            .foregroundColor(appState.themeText.opacity(0.35))
                         Spacer()
                         Text("Click to insert")
                             .font(.system(size: 9))
-                            .foregroundColor(.white.opacity(0.25))
+                            .foregroundColor(appState.themeText.opacity(0.25))
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
@@ -79,15 +80,15 @@ struct ChannelMessageComposer: View {
                             HStack {
                                 Text(member.name)
                                     .font(.system(size: 12))
-                                    .foregroundColor(.white.opacity(0.9))
+                                    .foregroundColor(appState.themeText.opacity(0.9))
                                 Spacer()
                                 Text("@\(handle)")
                                     .font(.system(size: 11))
-                                    .foregroundColor(Color.matcha500)
+                                    .foregroundColor(appState.themeAccent)
                             }
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background(idx == 0 ? Color.white.opacity(0.05) : Color.clear)
+                            .background(idx == 0 ? appState.themeText.opacity(0.05) : Color.clear)
                         }
                         .buttonStyle(.plain)
                     }
@@ -95,7 +96,7 @@ struct ChannelMessageComposer: View {
                 .background(.regularMaterial)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                        .stroke(appState.themeBorder, lineWidth: 1)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .frame(maxWidth: 320, alignment: .leading)
@@ -105,13 +106,13 @@ struct ChannelMessageComposer: View {
             HStack(alignment: .center, spacing: 8) {
                 Text("\(userHandle)@\(channelSlug) ›")
                     .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.45))
+                    .foregroundColor(appState.themeText.opacity(0.45))
                     .fixedSize()
 
                 Button(action: onOpenFilePicker) {
                     Image(systemName: "paperclip")
                         .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.55))
+                        .foregroundColor(appState.themeText.opacity(0.55))
                 }
                 .buttonStyle(.plain)
                 .help("Attach files (max \(maxAttachments), 10 MB each)")
@@ -120,12 +121,12 @@ struct ChannelMessageComposer: View {
                 TextField(
                     "",
                     text: $inputText,
-                    prompt: Text("type a message").foregroundColor(.white.opacity(0.2)),
+                    prompt: Text("type a message").foregroundColor(appState.themeText.opacity(0.2)),
                     axis: .vertical
                 )
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundColor(appState.themeText.opacity(0.9))
                 .lineLimit(1...4)
                 .onChange(of: inputText) {
                     guard !inputText.isEmpty else { return }
@@ -144,7 +145,7 @@ struct ChannelMessageComposer: View {
                     } else {
                         Text("↵")
                             .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(canSend ? Color.matcha500 : .white.opacity(0.2))
+                            .foregroundColor(canSend ? appState.themeAccent : appState.themeText.opacity(0.2))
                     }
                 }
                 .buttonStyle(.plain)
@@ -169,14 +170,14 @@ struct ChannelMessageComposer: View {
             } else {
                 Image(systemName: channelAttachmentIcon(for: att.mimeType))
                     .font(.system(size: 12))
-                    .foregroundColor(Color.matcha500)
+                    .foregroundColor(appState.themeAccent)
                     .frame(width: 28, height: 28)
-                    .background(Color.white.opacity(0.05))
+                    .background(appState.themeText.opacity(0.05))
                     .cornerRadius(4)
             }
             Text(att.filename)
                 .font(.system(size: 11))
-                .foregroundColor(.white.opacity(0.75))
+                .foregroundColor(appState.themeText.opacity(0.75))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: 140)
@@ -185,13 +186,13 @@ struct ChannelMessageComposer: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(.white.opacity(0.5))
+                    .foregroundColor(appState.themeText.opacity(0.5))
             }
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(Color.white.opacity(0.06))
+        .background(appState.themeText.opacity(0.06))
         .cornerRadius(6)
     }
 

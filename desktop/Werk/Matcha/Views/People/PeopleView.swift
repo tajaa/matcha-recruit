@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct PeopleView: View {
+    @Environment(AppState.self) private var appState
     @State private var tab: Tab = .pending
     @State private var connections: [UserConnection] = []
     @State private var pending: [UserConnection] = []
@@ -24,7 +25,7 @@ struct PeopleView: View {
                 Spacer()
                 Text("Loading…")
                     .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(appState.themeTextSecondary)
                 Spacer()
             } else if let errorMessage {
                 Spacer()
@@ -34,7 +35,7 @@ struct PeopleView: View {
                         .foregroundColor(.red)
                     Text(errorMessage)
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 16)
                     Button {
@@ -46,7 +47,7 @@ struct PeopleView: View {
                         Text("Try again").font(.system(size: 11, weight: .medium))
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.matcha600)
+                    .tint(appState.themeAccent)
                     .controlSize(.small)
                 }
                 Spacer()
@@ -66,16 +67,16 @@ struct PeopleView: View {
         HStack {
             Text("People")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.secondary)
+                .foregroundColor(appState.themeTextSecondary)
             Spacer()
             Button {
                 Task { await loadAll() }
             } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(appState.themeTextSecondary)
                     .frame(width: 24, height: 24)
-                    .background(Color.zinc800)
+                    .background(appState.themeCard)
                     .cornerRadius(6)
             }
             .buttonStyle(.plain)
@@ -94,14 +95,14 @@ struct PeopleView: View {
                             .font(.system(size: 11, weight: .medium))
                         Text("\(countFor(t))")
                             .font(.system(size: 10))
-                            .foregroundColor(tab == t ? .white.opacity(0.8) : .secondary)
+                            .foregroundColor(tab == t ? appState.themeOnAccent.opacity(0.8) : appState.themeTextSecondary)
                     }
-                    .foregroundColor(tab == t ? .white : .secondary)
+                    .foregroundColor(tab == t ? appState.themeOnAccent : appState.themeTextSecondary)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
                     .background(
                         RoundedRectangle(cornerRadius: 6)
-                            .fill(tab == t ? Color.matcha500.opacity(0.8) : Color.zinc800)
+                            .fill(tab == t ? appState.themeAccent.opacity(0.8) : appState.themeCard)
                     )
                 }
                 .buttonStyle(.plain)
@@ -131,7 +132,7 @@ struct PeopleView: View {
                     Spacer()
                     Text(emptyMessage)
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
                     Spacer()
                 }
             } else {
@@ -152,9 +153,9 @@ struct PeopleView: View {
         HStack(alignment: .center, spacing: 10) {
             Text(initials(for: user))
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.secondary)
+                .foregroundColor(appState.themeTextSecondary)
                 .frame(width: 32, height: 32)
-                .background(Color.zinc800)
+                .background(appState.themeCard)
                 .clipShape(Circle())
 
             VStack(alignment: .leading, spacing: 2) {
@@ -164,7 +165,7 @@ struct PeopleView: View {
                     .lineLimit(1)
                 Text(user.email)
                     .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(appState.themeTextSecondary)
                     .lineLimit(1)
             }
 
@@ -179,10 +180,10 @@ struct PeopleView: View {
                     } label: {
                         Text("Accept")
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.white)
+                            .foregroundColor(appState.themeOnAccent)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 4)
-                            .background(Color.matcha500)
+                            .background(appState.themeAccent)
                             .cornerRadius(6)
                     }
                     .buttonStyle(.plain)
@@ -192,10 +193,10 @@ struct PeopleView: View {
                     } label: {
                         Text("Decline")
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeTextSecondary)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 4)
-                            .background(Color.zinc800)
+                            .background(appState.themeCard)
                             .cornerRadius(6)
                     }
                     .buttonStyle(.plain)

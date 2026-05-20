@@ -45,7 +45,7 @@ class AppState {
 
     var themeBg: Color {
         switch appTheme {
-        case "light": return Color(white: 0.96)
+        case "light": return Color.grayBg
         case "cappuchin": return Color.cappuchinDark
         default: return Color.zinc950
         }
@@ -53,7 +53,7 @@ class AppState {
 
     var themeCard: Color {
         switch appTheme {
-        case "light": return Color.white
+        case "light": return Color.grayCard
         case "cappuchin": return Color.cappuchinCard
         default: return Color.zinc900
         }
@@ -61,14 +61,15 @@ class AppState {
 
     var themeBorder: Color {
         switch appTheme {
-        case "light": return Color.black.opacity(0.08)
-        case "cappuchin": return Color.cappuchinAccent.opacity(0.15)
+        case "light": return Color.grayBorder
+        case "cappuchin": return Color.cappuchinBorder
         default: return Color.white.opacity(0.1)
         }
     }
 
     var themeAccent: Color {
         switch appTheme {
+        case "light": return Color.grayAccent
         case "cappuchin": return Color.cappuchinAccent
         default: return Color.matcha500
         }
@@ -76,6 +77,7 @@ class AppState {
 
     var themeAccentDark: Color {
         switch appTheme {
+        case "light": return Color.grayAccentDark
         case "cappuchin": return Color.cappuchinAccentDark
         default: return Color.matcha600
         }
@@ -83,15 +85,25 @@ class AppState {
 
     var themeText: Color {
         switch appTheme {
-        case "light": return Color.black
+        case "light": return Color.grayText
         case "cappuchin": return Color.cappuchinText
+        default: return Color.white
+        }
+    }
+
+    /// Foreground for content sitting ON the accent color (e.g. button labels).
+    /// Caramel cappuchin accent is light, so it needs dark text; charcoal and
+    /// matcha green accents need white.
+    var themeOnAccent: Color {
+        switch appTheme {
+        case "cappuchin": return Color.cappuchinDark
         default: return Color.white
         }
     }
 
     var themeTextSecondary: Color {
         switch appTheme {
-        case "light": return Color.gray
+        case "light": return Color.grayTextSecondary
         case "cappuchin": return Color.cappuchinSecondary
         default: return Color.secondary
         }

@@ -92,22 +92,22 @@ struct JournalDetailView: View {
         HStack(spacing: 8) {
             Image(systemName: vm.journal?.icon ?? "book")
                 .font(.system(size: 14))
-                .foregroundColor(Color.matcha500)
+                .foregroundColor(appState.themeAccent)
             Text(vm.journal?.title ?? "…")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(appState.themeText)
             if let n = vm.journal?.collaboratorCount, n > 0 {
                 Text("· \(n) collaborator\(n == 1 ? "" : "s")")
                     .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(appState.themeTextSecondary)
             }
             Spacer()
             Button { showStylePopover = true } label: {
                 Image(systemName: "textformat")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white.opacity(0.6))
+                    .foregroundColor(appState.themeText.opacity(0.6))
                     .padding(.horizontal, 6).padding(.vertical, 3)
-                    .background(Color.white.opacity(0.05))
+                    .background(appState.themeText.opacity(0.05))
                     .cornerRadius(4)
             }
             .buttonStyle(.plain)
@@ -122,8 +122,8 @@ struct JournalDetailView: View {
                     Text("Invite").font(.system(size: 10, weight: .medium))
                 }
                 .padding(.horizontal, 7).padding(.vertical, 3)
-                .background(Color.matcha600.opacity(0.2))
-                .foregroundColor(Color.matcha500)
+                .background(appState.themeAccentDark.opacity(0.2))
+                .foregroundColor(appState.themeAccent)
                 .cornerRadius(4)
             }
             .buttonStyle(.plain)
@@ -139,12 +139,12 @@ struct JournalDetailView: View {
             if !composerOpen {
                 Button { composerOpen = true } label: {
                     HStack {
-                        Image(systemName: "plus.circle").foregroundColor(.secondary)
-                        Text("New entry today…").font(.system(size: 12)).foregroundColor(.secondary)
+                        Image(systemName: "plus.circle").foregroundColor(appState.themeTextSecondary)
+                        Text("New entry today…").font(.system(size: 12)).foregroundColor(appState.themeTextSecondary)
                         Spacer()
                     }
                     .padding(8)
-                    .background(Color.zinc800.opacity(0.4))
+                    .background(appState.themeCard.opacity(0.4))
                     .cornerRadius(6)
                 }
                 .buttonStyle(.plain)
@@ -153,7 +153,7 @@ struct JournalDetailView: View {
                     TextField("Title (optional)", text: $composerTitle)
                         .textFieldStyle(.plain)
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.white)
+                        .foregroundColor(appState.themeText)
                     DatePicker("", selection: $composerDate, displayedComponents: .date)
                         .labelsHidden()
                         .controlSize(.small)
@@ -167,21 +167,21 @@ struct JournalDetailView: View {
                     lineSpacing: lineSpacing,
                 )
                 .frame(minHeight: 100, maxHeight: 200)
-                .background(Color.zinc800.opacity(0.4))
+                .background(appState.themeCard.opacity(0.4))
                 .cornerRadius(4)
                 HStack {
                     Spacer()
                     Button("Cancel") { resetComposer() }
                         .buttonStyle(.plain)
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
                     Button {
                         Task { await saveComposer() }
                     } label: {
                         Text("Save").font(.system(size: 11, weight: .semibold))
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.matcha600)
+                    .tint(appState.themeAccent)
                     .controlSize(.small)
                     .disabled(composerContent.trimmingCharacters(in: .whitespaces).isEmpty)
                     .keyboardShortcut(.return, modifiers: .command)
@@ -202,22 +202,22 @@ struct JournalDetailView: View {
             VStack(spacing: 10) {
                 Spacer()
                 Image(systemName: "exclamationmark.triangle").font(.system(size: 22)).foregroundColor(.red)
-                Text(err).font(.system(size: 11)).foregroundColor(.secondary).multilineTextAlignment(.center).padding(.horizontal, 16)
+                Text(err).font(.system(size: 11)).foregroundColor(appState.themeTextSecondary).multilineTextAlignment(.center).padding(.horizontal, 16)
                 Button {
                     Task { await vm.refresh() }
                 } label: {
                     Text("Try again").font(.system(size: 11, weight: .medium))
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(Color.matcha600)
+                .tint(appState.themeAccent)
                 .controlSize(.small)
                 Spacer()
             }
         } else if vm.entries.isEmpty {
             VStack(spacing: 6) {
                 Spacer()
-                Image(systemName: "tray").font(.system(size: 22)).foregroundColor(.secondary)
-                Text("No entries yet").font(.system(size: 11)).foregroundColor(.secondary)
+                Image(systemName: "tray").font(.system(size: 22)).foregroundColor(appState.themeTextSecondary)
+                Text("No entries yet").font(.system(size: 11)).foregroundColor(appState.themeTextSecondary)
                 Spacer()
             }
         } else {
@@ -226,7 +226,7 @@ struct JournalDetailView: View {
                     ForEach(groupedEntries, id: \.0) { date, items in
                         Text(formatDateHeader(date))
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeTextSecondary)
                             .textCase(.uppercase)
                             .padding(.top, 6)
                         ForEach(items) { entry in
@@ -247,14 +247,14 @@ struct JournalDetailView: View {
                     TextField("Title", text: $editingTitle)
                         .textFieldStyle(.plain)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(appState.themeText)
                     DatePicker("", selection: $editingDate, displayedComponents: .date)
                         .labelsHidden()
                         .controlSize(.small)
                 } else if let t = entry.title, !t.isEmpty {
                     Text(t)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(appState.themeText)
                 }
                 Spacer()
                 Menu {
@@ -263,7 +263,7 @@ struct JournalDetailView: View {
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
                         .padding(.horizontal, 6)
                 }
                 .menuStyle(.borderlessButton)
@@ -280,19 +280,19 @@ struct JournalDetailView: View {
                     lineSpacing: lineSpacing,
                 )
                 .frame(minHeight: 100, maxHeight: 260)
-                .background(Color.zinc800.opacity(0.4))
+                .background(appState.themeCard.opacity(0.4))
                 .cornerRadius(4)
                 HStack {
                     Spacer()
                     Button("Cancel") { editingEntryId = nil }
                         .buttonStyle(.plain)
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
                     Button("Save") {
                         Task { await commitEdit(entry) }
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.matcha600)
+                    .tint(appState.themeAccent)
                     .controlSize(.small)
                 }
             } else {
@@ -308,7 +308,7 @@ struct JournalDetailView: View {
             }
         }
         .padding(10)
-        .background(Color.zinc900.opacity(0.5))
+        .background(appState.themeCard.opacity(0.5))
         .cornerRadius(6)
     }
 

@@ -108,10 +108,10 @@ struct ChatPanelView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "doc")
                                 .font(.system(size: 11))
-                                .foregroundColor(.matcha500)
+                                .foregroundColor(appState.themeAccent)
                             Text(file.filename)
                                 .font(.system(size: 11))
-                                .foregroundColor(.white)
+                                .foregroundColor(appState.themeText)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                             Button {
@@ -119,13 +119,13 @@ struct ChatPanelView: View {
                             } label: {
                                 Image(systemName: "xmark")
                                     .font(.system(size: 8))
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(appState.themeTextSecondary)
                             }
                             .buttonStyle(.plain)
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
-                        .background(Color.zinc800)
+                        .background(appState.themeCard)
                         .cornerRadius(6)
                     }
                 }
@@ -244,12 +244,12 @@ struct ChatPanelView: View {
                         ProgressView().controlSize(.mini)
                         Text(progress)
                             .font(.system(size: 11))
-                            .foregroundColor(.matcha500)
+                            .foregroundColor(appState.themeAccent)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 4)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.matcha500.opacity(0.06))
+                    .background(appState.themeAccent.opacity(0.06))
                 }
                 pendingFilesStrip
                 inputBar
@@ -258,8 +258,8 @@ struct ChatPanelView: View {
         .overlay(
             isDragOver
             ? RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.matcha500, lineWidth: 2)
-                .background(Color.matcha500.opacity(0.05))
+                .stroke(appState.themeAccent, lineWidth: 2)
+                .background(appState.themeAccent.opacity(0.05))
                 .allowsHitTesting(false)
             : nil
         )
@@ -319,7 +319,7 @@ struct ChatPanelView: View {
                     }
                     if viewModel.isUploadingImages {
                         ZStack {
-                            Color.zinc800.cornerRadius(6)
+                            appState.themeCard.cornerRadius(6)
                             ProgressView().controlSize(.small)
                         }
                         .frame(width: 64, height: 64)
@@ -328,7 +328,7 @@ struct ChatPanelView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
             }
-            .background(Color.zinc900)
+            .background(appState.themeCard)
             Divider().opacity(0.3)
         }
     }
@@ -338,27 +338,27 @@ struct ChatPanelView: View {
             HStack(spacing: 6) {
                 Image(systemName: "rectangle.on.rectangle")
                     .font(.system(size: 11))
-                    .foregroundColor(.matcha500)
+                    .foregroundColor(appState.themeAccent)
                 let title = selectedSlideTitle
                 Text("Slide \(idx + 1)\(title.map { ": \($0)" } ?? "")")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(Color.matcha500.opacity(0.85))
+                    .foregroundColor(appState.themeAccent.opacity(0.85))
                 Spacer()
                 Button { viewModel.selectedSlideIndex = nil } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
                 }
                 .buttonStyle(.plain)
                 .help("Clear slide selection")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
-            .background(Color.matcha500.opacity(0.08))
+            .background(appState.themeAccent.opacity(0.08))
             .overlay(
                 Rectangle()
                     .frame(height: 1)
-                    .foregroundColor(Color.matcha500.opacity(0.2)),
+                    .foregroundColor(appState.themeAccent.opacity(0.2)),
                 alignment: .top
             )
         }
@@ -372,7 +372,7 @@ struct ChatPanelView: View {
                     .foregroundColor(.cyan)
                 Text("JURISDICTIONS")
                     .font(.system(size: 9, weight: .medium))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(appState.themeTextSecondary)
                     .tracking(0.5)
                 if let meta = viewModel.messages.last(where: { $0.role == "assistant" })?.metadata,
                    let locs = meta.complianceReasoning, !locs.isEmpty {
@@ -392,13 +392,13 @@ struct ChatPanelView: View {
                 } else {
                     Text("Active — locations will appear with responses")
                         .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
                 }
                 Spacer()
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
-            .background(lightMode ? Color(white: 0.97) : Color.zinc900.opacity(0.5))
+            .background(appState.themeCard.opacity(0.5))
         }
     }
 
@@ -426,7 +426,7 @@ struct ChatPanelView: View {
             TextField(inputPlaceholder, text: $inputText, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
-                .foregroundColor(.white)
+                .foregroundColor(appState.themeText)
                 .lineLimit(1...6)
                 .padding(.vertical, 8)
                 .onChange(of: inputText) { _, newValue in
@@ -456,7 +456,7 @@ struct ChatPanelView: View {
                     .font(.system(size: 28))
                     .foregroundColor(
                         inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isOverLimit
-                        ? .secondary : .matcha500
+                        ? appState.themeTextSecondary : appState.themeAccent
                     )
             }
             .buttonStyle(.plain)
@@ -464,7 +464,7 @@ struct ChatPanelView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(Color.zinc900)
+        .background(appState.themeCard)
     }
 }
 
@@ -483,7 +483,7 @@ private struct ImageThumbnailView: View {
                     if let img = phase.image {
                         img.resizable().scaledToFill()
                     } else {
-                        Color.zinc800
+                        Color.cardBackground
                     }
                 }
                 .frame(width: 72, height: 72)
@@ -491,7 +491,7 @@ private struct ImageThumbnailView: View {
                 .cornerRadius(8)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(isHovered ? Color.white.opacity(0.4) : Color.clear, lineWidth: 1.5)
+                        .stroke(isHovered ? Color.borderColor : Color.clear, lineWidth: 1.5)
                 )
                 .scaleEffect(isHovered ? 1.03 : 1.0)
                 .animation(.easeOut(duration: 0.12), value: isHovered)
@@ -567,7 +567,7 @@ extension ChatPanelView {
             VStack(spacing: 24) {
                 Text(greetingText)
                     .font(.system(size: 26, weight: .bold))
-                    .foregroundColor(lightMode ? Color.zinc950 : .white)
+                    .foregroundColor(appState.themeText)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
                 
@@ -595,7 +595,7 @@ extension ChatPanelView {
                                 }
                                 if viewModel.isUploadingImages {
                                     ZStack {
-                                        Color.zinc800.cornerRadius(6)
+                                        appState.themeCard.cornerRadius(6)
                                         ProgressView().controlSize(.small)
                                     }
                                     .frame(width: 64, height: 64)
@@ -605,13 +605,13 @@ extension ChatPanelView {
                         .padding(.horizontal, 4)
                         .padding(.vertical, 4)
                     }
-                    
+
                     if let progress = uploadProgress {
                         HStack(spacing: 6) {
                             ProgressView().controlSize(.mini)
                             Text(progress)
                                 .font(.system(size: 11))
-                                .foregroundColor(.matcha500)
+                                .foregroundColor(appState.themeAccent)
                         }
                         .padding(.horizontal, 4)
                         .padding(.vertical, 4)
@@ -624,10 +624,10 @@ extension ChatPanelView {
                                     HStack(spacing: 6) {
                                         Image(systemName: "doc")
                                             .font(.system(size: 11))
-                                            .foregroundColor(.matcha500)
+                                            .foregroundColor(appState.themeAccent)
                                         Text(file.filename)
                                             .font(.system(size: 11))
-                                            .foregroundColor(lightMode ? .primary : .white)
+                                            .foregroundColor(appState.themeText)
                                             .lineLimit(1)
                                             .truncationMode(.middle)
                                         Button {
@@ -635,13 +635,13 @@ extension ChatPanelView {
                                         } label: {
                                             Image(systemName: "xmark")
                                                 .font(.system(size: 8))
-                                                .foregroundColor(.secondary)
+                                                .foregroundColor(appState.themeTextSecondary)
                                         }
                                         .buttonStyle(.plain)
                                     }
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 5)
-                                    .background(lightMode ? Color(white: 0.88) : Color.zinc800)
+                                    .background(appState.themeCard)
                                     .cornerRadius(6)
                                 }
                             }
@@ -671,7 +671,7 @@ extension ChatPanelView {
                         TextField(inputPlaceholder, text: $inputText, axis: .vertical)
                             .textFieldStyle(.plain)
                             .font(.system(size: 14))
-                            .foregroundColor(lightMode ? .primary : .white)
+                            .foregroundColor(appState.themeText)
                             .lineLimit(1...6)
                             .padding(.vertical, 8)
                             .onChange(of: inputText) { _, newValue in
@@ -699,7 +699,7 @@ extension ChatPanelView {
                                 .font(.system(size: 28))
                                 .foregroundColor(
                                     inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isOverLimit
-                                    ? .secondary : .matcha500
+                                    ? appState.themeTextSecondary : appState.themeAccent
                                 )
                         }
                         .buttonStyle(.plain)
@@ -708,11 +708,11 @@ extension ChatPanelView {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
-                .background(lightMode ? Color(white: 0.94) : Color.zinc900)
+                .background(appState.themeCard)
                 .cornerRadius(12)
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .stroke(lightMode ? Color.black.opacity(0.08) : Color.white.opacity(0.08), lineWidth: 1)
+                        .stroke(appState.themeBorder, lineWidth: 1)
                 )
                 .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
                 .frame(maxWidth: 560)
@@ -773,7 +773,7 @@ struct SuggestionCard: View {
                         .foregroundColor(.matcha500)
                     Text(title)
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(lightMode ? .primary : .white)
+                        .foregroundColor(.primary)
                 }
                 Text(text)
                     .font(.system(size: 9))
@@ -783,11 +783,11 @@ struct SuggestionCard: View {
             }
             .padding(10)
             .frame(maxWidth: .infinity, minHeight: 72, alignment: .topLeading)
-            .background(isHovered ? (lightMode ? Color(white: 0.90) : Color.zinc800) : (lightMode ? Color(white: 0.94) : Color.zinc900))
+            .background(isHovered ? Color.cardBackground.opacity(0.7) : Color.cardBackground)
             .cornerRadius(8)
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(lightMode ? Color.black.opacity(0.08) : Color.white.opacity(0.08), lineWidth: 1)
+                    .stroke(Color.borderColor, lineWidth: 1)
             )
             .scaleEffect(isHovered ? 1.02 : 1.0)
             .animation(.easeOut(duration: 0.12), value: isHovered)

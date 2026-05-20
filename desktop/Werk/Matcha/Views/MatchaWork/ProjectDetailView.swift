@@ -109,17 +109,17 @@ struct ProjectDetailView: View {
                             if let type = project.projectType, !type.isEmpty {
                                 Text(type.lowercased())
                                     .font(.system(size: 12))
-                                    .foregroundColor(.white.opacity(0.45))
+                                    .foregroundColor(appState.themeText.opacity(0.45))
                                 Text("·")
                                     .font(.system(size: 12))
-                                    .foregroundColor(.white.opacity(0.3))
+                                    .foregroundColor(appState.themeText.opacity(0.3))
                             }
                             Text(project.title)
                                 .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.white)
+                                .foregroundColor(appState.themeText)
                             Image(systemName: "pencil")
                                 .font(.system(size: 9))
-                                .foregroundColor(.white.opacity(0.4))
+                                .foregroundColor(appState.themeText.opacity(0.4))
                         }
                     }
                     .buttonStyle(.plain)
@@ -165,7 +165,7 @@ struct ProjectDetailView: View {
                     }
                     .padding(.horizontal, 7)
                     .padding(.vertical, 4)
-                    .background(Color.zinc800)
+                    .background(appState.themeCard)
                     .cornerRadius(6)
                     .foregroundColor(.secondary)
                 }
@@ -308,14 +308,14 @@ struct ProjectDetailView: View {
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .foregroundColor(collabPanel == panel ? .white : .white.opacity(0.55))
+                    .foregroundColor(collabPanel == panel ? appState.themeText : appState.themeText.opacity(0.55))
                     .background(
                         RoundedRectangle(cornerRadius: 5)
-                            .fill(collabPanel == panel ? Color.matcha600.opacity(0.25) : Color.clear)
+                            .fill(collabPanel == panel ? appState.themeAccent.opacity(0.25) : Color.clear)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 5)
-                            .stroke(collabPanel == panel ? Color.matcha500.opacity(0.4) : Color.clear, lineWidth: 1)
+                            .stroke(collabPanel == panel ? appState.themeAccent.opacity(0.4) : Color.clear, lineWidth: 1)
                     )
                 }
                 .buttonStyle(.plain)
@@ -338,10 +338,10 @@ struct ProjectDetailView: View {
                 Text("\(count)")
                     .font(.system(size: 10, weight: .medium))
             }
-            .foregroundColor(.white.opacity(0.55))
+            .foregroundColor(appState.themeText.opacity(0.55))
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(Color.zinc800.opacity(0.6))
+            .background(appState.themeCard.opacity(0.6))
             .cornerRadius(10)
         }
     }
@@ -392,7 +392,7 @@ struct ProjectDetailView: View {
                     .foregroundColor(.red)
                 Text("Couldn't open collab chat")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.white)
+                    .foregroundColor(appState.themeText)
                 Text(err)
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
@@ -443,7 +443,7 @@ struct ProjectDetailView: View {
                     .foregroundColor(.red)
                 Text("Couldn't start chat")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.white)
+                    .foregroundColor(appState.themeText)
                 Text(err)
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
@@ -495,7 +495,7 @@ struct ProjectDetailView: View {
                                 Button { editingSectionId = section.id } label: {
                                     HStack(alignment: .top, spacing: 8) {
                                         VStack(alignment: .leading, spacing: 3) {
-                                            Text(section.title).font(.system(size: 12, weight: .medium)).foregroundColor(.white)
+                                            Text(section.title).font(.system(size: 12, weight: .medium)).foregroundColor(appState.themeText)
                                             if let c = section.content, !c.isEmpty {
                                                 Text(c.prefix(120))
                                                     .font(.system(size: 10))
@@ -519,7 +519,7 @@ struct ProjectDetailView: View {
                                         }
                                     }
                                     .padding(10)
-                                    .background(Color.zinc900.opacity(0.5))
+                                    .background(appState.themeCard.opacity(0.5))
                                     .cornerRadius(6)
                                 }
                                 .buttonStyle(.plain)
@@ -573,7 +573,7 @@ struct ProjectDetailView: View {
                             .foregroundColor(.red)
                         Text("Couldn't start chat")
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.white)
+                            .foregroundColor(appState.themeText)
                         Text(err)
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
@@ -652,11 +652,11 @@ struct ProjectDetailView: View {
                         } label: {
                             Text(section.title)
                                 .font(.system(size: 12))
-                                .foregroundColor(editingSectionId == section.id ? .white : .secondary)
+                                .foregroundColor(editingSectionId == section.id ? appState.themeText : appState.themeTextSecondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 5)
-                                .background(editingSectionId == section.id ? Color.matcha600.opacity(0.2) : Color.clear)
+                                .background(editingSectionId == section.id ? appState.themeAccent.opacity(0.2) : Color.clear)
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
@@ -695,11 +695,11 @@ struct ProjectDetailView: View {
                             Text("Chat")
                                 .font(.system(size: 12))
                         }
-                        .foregroundColor(editingSectionId == nil ? .white : .secondary)
+                        .foregroundColor(editingSectionId == nil ? appState.themeText : appState.themeTextSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 5)
-                        .background(editingSectionId == nil ? Color.matcha600.opacity(0.2) : Color.clear)
+                        .background(editingSectionId == nil ? appState.themeAccent.opacity(0.2) : Color.clear)
                     }
                     .buttonStyle(.plain)
                 }

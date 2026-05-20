@@ -17,12 +17,12 @@ struct InboxView: View {
                 HStack {
                     Text("Inbox")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(appState.themeTextSecondary)
                     Spacer()
                     Button { showCompose = true } label: {
                         Image(systemName: "square.and.pencil")
                             .font(.system(size: 12))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeTextSecondary)
                     }
                     .buttonStyle(.plain)
                 }
@@ -40,10 +40,10 @@ struct InboxView: View {
                     VStack(spacing: 8) {
                         Image(systemName: "envelope")
                             .font(.system(size: 28))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeTextSecondary)
                         Text("No messages")
                             .font(.system(size: 13))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeTextSecondary)
                     }
                     Spacer()
                 } else {
@@ -53,17 +53,17 @@ struct InboxView: View {
                                 let others = convo.participants?.filter { $0.userId != currentUserId } ?? []
                                 Text(convo.title ?? others.map(\.name).joined(separator: ", "))
                                     .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.white)
+                                    .foregroundColor(appState.themeText)
                                     .lineLimit(1)
                                 Spacer()
                                 if (convo.unreadCount ?? 0) > 0 {
-                                    Circle().fill(Color.matcha500).frame(width: 8, height: 8)
+                                    Circle().fill(appState.themeAccent).frame(width: 8, height: 8)
                                 }
                             }
                             if let preview = convo.lastMessagePreview {
                                 Text(preview)
                                     .font(.system(size: 10))
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(appState.themeTextSecondary)
                                     .lineLimit(1)
                             }
                         }
@@ -91,8 +91,8 @@ struct InboxView: View {
                 ZStack {
                     Color.appBackground
                     VStack(spacing: 8) {
-                        Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 36)).foregroundColor(.secondary)
-                        Text("Select a conversation").font(.system(size: 13)).foregroundColor(.secondary)
+                        Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 36)).foregroundColor(appState.themeTextSecondary)
+                        Text("Select a conversation").font(.system(size: 13)).foregroundColor(appState.themeTextSecondary)
                     }
                 }
             }
@@ -162,10 +162,10 @@ struct InboxThreadView: View {
                 let others = conversation.participants?.filter { $0.userId != currentUserId } ?? []
                 Text(conversation.title ?? others.map(\.name).joined(separator: ", "))
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(appState.themeText)
                 if conversation.isGroup == true {
                     Text("\(conversation.participants?.count ?? 0) participants")
-                        .font(.system(size: 10)).foregroundColor(.secondary)
+                        .font(.system(size: 10)).foregroundColor(appState.themeTextSecondary)
                 }
                 Spacer()
             }
@@ -179,10 +179,10 @@ struct InboxThreadView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("You've been invited to join this project")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.white)
+                            .foregroundColor(appState.themeText)
                         Text("Invited by \(invite.invitedBy)")
                             .font(.system(size: 10))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(appState.themeTextSecondary)
                     }
                     Spacer()
                     if isProcessingInvite {
@@ -193,10 +193,10 @@ struct InboxThreadView: View {
                         } label: {
                             Text("Accept")
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.black)
+                                .foregroundColor(appState.themeOnAccent)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 6)
-                                .background(Color.matcha500)
+                                .background(appState.themeAccent)
                                 .cornerRadius(6)
                         }
                         .buttonStyle(.plain)
@@ -206,10 +206,10 @@ struct InboxThreadView: View {
                         } label: {
                             Text("Decline")
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(.white)
+                                .foregroundColor(appState.themeText)
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 6)
-                                .background(Color.zinc800)
+                                .background(appState.themeCard)
                                 .cornerRadius(6)
                         }
                         .buttonStyle(.plain)
@@ -217,7 +217,7 @@ struct InboxThreadView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
-                .background(Color.zinc900.opacity(0.4))
+                .background(appState.themeCard.opacity(0.4))
 
                 Divider().opacity(0.3)
             }
@@ -234,13 +234,13 @@ struct InboxThreadView: View {
                                     if conversation.isGroup == true && !isMine {
                                         Text(msg.senderName)
                                             .font(.system(size: 9))
-                                            .foregroundColor(.secondary)
+                                            .foregroundColor(appState.themeTextSecondary)
                                     }
                                     VStack(alignment: .leading, spacing: 4) {
                                         if !msg.content.isEmpty {
                                             Text(msg.content)
                                                 .font(.system(size: 13))
-                                                .foregroundColor(isMine ? .white : Color(.labelColor))
+                                                .foregroundColor(isMine ? appState.themeOnAccent : Color(.labelColor))
                                         }
                                         // Attachments
                                         if let attachments = msg.attachments, !attachments.isEmpty {
@@ -269,13 +269,13 @@ struct InboxThreadView: View {
                                     }
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 8)
-                                    .background(isMine ? Color.matcha600.opacity(0.6) : Color.zinc800)
+                                    .background(isMine ? appState.themeAccentDark.opacity(0.6) : appState.themeCard)
                                     .cornerRadius(16)
                                     .frame(maxWidth: 320, alignment: isMine ? .trailing : .leading)
 
                                     Text(formatInboxTime(msg.createdAt))
                                         .font(.system(size: 9))
-                                        .foregroundColor(.secondary)
+                                        .foregroundColor(appState.themeTextSecondary)
                                 }
                                 if !isMine { Spacer() }
                             }
@@ -303,7 +303,7 @@ struct InboxThreadView: View {
                 Button { send() } label: {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 24))
-                        .foregroundColor(draft.isEmpty ? .secondary : .matcha500)
+                        .foregroundColor(draft.isEmpty ? appState.themeTextSecondary : appState.themeAccent)
                 }
                 .buttonStyle(.plain)
                 .disabled(draft.isEmpty || isSending)

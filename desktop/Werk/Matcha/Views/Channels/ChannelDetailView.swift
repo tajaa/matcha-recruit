@@ -44,7 +44,7 @@ struct ChannelDetailView: View {
                 Spacer()
                 Text("loading…")
                     .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.35))
+                    .foregroundColor(appState.themeText.opacity(0.35))
                 Spacer()
             } else if let errorMessage = vm.errorMessage {
                 Spacer()
@@ -54,7 +54,7 @@ struct ChannelDetailView: View {
                         .foregroundColor(.red)
                     Text(errorMessage)
                         .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.4))
+                        .foregroundColor(appState.themeText.opacity(0.4))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 16)
                     Button {
@@ -66,7 +66,7 @@ struct ChannelDetailView: View {
                         Text("Try again").font(.system(size: 11, weight: .medium))
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.matcha600)
+                    .tint(appState.themeAccent)
                     .controlSize(.small)
                 }
                 Spacer()
@@ -106,13 +106,7 @@ struct ChannelDetailView: View {
                 )
             }
         }
-        .background(
-            LinearGradient(
-                colors: [Color.black.opacity(0.15), Color.black.opacity(0.05)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
+        .background(appState.themeBg)
         .task(id: channelId) {
             await vm.start(channelId: channelId)
             // REST fallback so a viewer who navigates into the channel mid-stream
@@ -175,17 +169,17 @@ struct ChannelDetailView: View {
             HStack(spacing: 0) {
                 Text("# ")
                     .font(.system(size: 13))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(appState.themeText.opacity(0.4))
                 Text(vm.channel?.name.lowercased() ?? "")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.white.opacity(0.95))
+                    .foregroundColor(appState.themeText.opacity(0.95))
                 if let cat = vm.channel?.category, let parsed = ChannelCategory(rawValue: cat) {
                     Text(parsed.label)
                         .font(.system(size: 9, weight: .medium))
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background(Color.white.opacity(0.08))
-                        .foregroundColor(.white.opacity(0.55))
+                        .background(appState.themeText.opacity(0.08))
+                        .foregroundColor(appState.themeText.opacity(0.55))
                         .cornerRadius(3)
                         .padding(.leading, 6)
                 }
@@ -197,12 +191,12 @@ struct ChannelDetailView: View {
                             .foregroundColor(Color.matcha500)
                         Text("\(vm.onlineUsers.count) online")
                             .font(.system(size: 10))
-                            .foregroundColor(.white.opacity(0.6))
+                            .foregroundColor(appState.themeText.opacity(0.6))
                     }
                     if let count = vm.channel?.memberCount {
                         Text("·")
                             .font(.system(size: 10))
-                            .foregroundColor(.white.opacity(0.25))
+                            .foregroundColor(appState.themeText.opacity(0.25))
                         // Click → Manage members sheet. Visible to everyone
                         // (sheet itself adapts to role).
                         Button {
@@ -210,7 +204,7 @@ struct ChannelDetailView: View {
                         } label: {
                             Text("\(count) members")
                                 .font(.system(size: 10))
-                                .foregroundColor(.white.opacity(0.4))
+                                .foregroundColor(appState.themeText.opacity(0.4))
                                 .underline(false)
                         }
                         .buttonStyle(.plain)
@@ -279,8 +273,8 @@ struct ChannelDetailView: View {
                                 }
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 3)
-                                .background(Color.matcha600.opacity(0.2))
-                                .foregroundColor(Color.matcha500)
+                                .background(appState.themeAccent.opacity(0.2))
+                                .foregroundColor(appState.themeAccent)
                                 .cornerRadius(4)
                             }
                             .menuStyle(.borderlessButton)
@@ -298,8 +292,8 @@ struct ChannelDetailView: View {
                         }
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(Color.matcha600.opacity(0.2))
-                        .foregroundColor(Color.matcha500)
+                        .background(appState.themeAccent.opacity(0.2))
+                        .foregroundColor(appState.themeAccent)
                         .cornerRadius(4)
                     }
                     .buttonStyle(.plain)
@@ -311,7 +305,7 @@ struct ChannelDetailView: View {
                         } label: {
                             Image(systemName: "questionmark.circle")
                                 .font(.system(size: 11))
-                                .foregroundColor(.white.opacity(0.5))
+                                .foregroundColor(appState.themeText.opacity(0.5))
                         }
                         .buttonStyle(.plain)
                         .help("Channel admin guide")
@@ -321,7 +315,7 @@ struct ChannelDetailView: View {
             if let desc = vm.channel?.description, !desc.isEmpty {
                 Text(desc)
                     .font(.system(size: 10))
-                    .foregroundColor(.white.opacity(0.35))
+                    .foregroundColor(appState.themeText.opacity(0.35))
                     .lineLimit(1)
                     .padding(.leading, 15)
             }
@@ -357,7 +351,7 @@ struct ChannelDetailView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.white.opacity(0.95))
+                    .foregroundColor(appState.themeText.opacity(0.95))
                 if hasErr, let msg = broadcast.errorMessage {
                     Text("Couldn't connect: \(msg)")
                         .font(.system(size: 10))
@@ -412,7 +406,7 @@ struct ChannelDetailView: View {
                             TypingBubbleView()
                             Text(vm.typingUsers.values.sorted().joined(separator: ", "))
                                 .font(.system(size: 10))
-                                .foregroundColor(.white.opacity(0.35))
+                                .foregroundColor(appState.themeText.opacity(0.35))
                         }
                         .transition(.opacity)
                     }
@@ -443,12 +437,12 @@ struct ChannelDetailView: View {
             Group {
                 if isDragOver {
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.matcha500, style: StrokeStyle(lineWidth: 2, dash: [6]))
+                        .stroke(appState.themeAccent, style: StrokeStyle(lineWidth: 2, dash: [6]))
                         .padding(8)
                         .overlay(
                             Text("drop files to attach")
                                 .font(.system(size: 12))
-                                .foregroundColor(Color.matcha500)
+                                .foregroundColor(appState.themeAccent)
                         )
                         .allowsHitTesting(false)
                 }
@@ -647,7 +641,7 @@ private struct TypingBubbleView: View {
     @State private var phase: Int = 0
 
     private let dotSize: CGFloat = 5
-    private let dotColor = Color.white.opacity(0.4)
+    private let dotColor = Color.borderColor
 
     var body: some View {
         HStack(spacing: 3) {
@@ -666,7 +660,7 @@ private struct TypingBubbleView: View {
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
-        .background(Color.white.opacity(0.07))
+        .background(Color.cardBackground)
         .cornerRadius(10)
         .onAppear {
             phase = 0
