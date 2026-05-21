@@ -492,13 +492,60 @@ async def join_lite_waitlist(body: LiteWaitlistRequest, request: Request):
             display_name = body.name.strip() if body.name else None
             greeting = f"Hi {_html.escape(display_name)}," if display_name else "Hi there,"
             user_html = f"""
-                <p>{greeting}</p>
-                <p>You're on the Matcha Lite waitlist. We'll email you the
-                moment Lite opens up — no other emails, no newsletter, just
-                that one ping.</p>
-                <p>In the meantime, the public glossary and blog are open
-                if you want to poke around: <a href="https://hey-matcha.com/resources">hey-matcha.com/resources</a></p>
-                <p>— The Matcha team</p>
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+    body {{ margin: 0; padding: 0; background: #f1f5f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1f2937; }}
+    .container {{ max-width: 600px; margin: 0 auto; padding: 0; }}
+    .header {{ background: linear-gradient(135deg, #16a34a 0%, #22c55e 55%, #4ade80 100%); padding: 40px 32px 36px; text-align: center; }}
+    .logo {{ color: #ffffff; font-size: 26px; font-weight: 800; letter-spacing: 4px; }}
+    .pill {{ display: inline-block; margin-top: 10px; background: rgba(255,255,255,0.18); color: #ffffff; font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; padding: 5px 12px; border-radius: 999px; }}
+    .body {{ background: #ffffff; padding: 36px 32px 28px; }}
+    h1 {{ font-size: 22px; margin: 0 0 18px; color: #14532d; }}
+    p {{ margin: 0 0 16px; font-size: 15px; }}
+    .card {{ background: #f0fdf4; border: 1px solid #bbf7d0; border-left: 4px solid #22c55e; border-radius: 10px; padding: 16px 18px; margin: 22px 0; }}
+    .card p {{ margin: 0; font-size: 14px; color: #166534; }}
+    .resources {{ background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 12px; padding: 22px; margin: 24px 0; }}
+    .resources h2 {{ font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px; color: #6b7280; margin: 0 0 14px; }}
+    .res-item {{ margin: 0 0 12px; font-size: 14px; }}
+    .res-item strong {{ color: #14532d; }}
+    .btn {{ display: inline-block; background: #16a34a; color: #ffffff !important; padding: 13px 30px; text-decoration: none; border-radius: 8px; font-weight: 700; font-size: 15px; }}
+    .footer {{ text-align: center; padding: 24px 32px 32px; color: #9ca3af; font-size: 12px; background: #ffffff; border-top: 1px solid #f1f5f0; }}
+    a {{ color: #16a34a; }}
+</style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+            <div class="pill">Lite&nbsp;·&nbsp;Waitlist</div>
+        </div>
+        <div class="body">
+            <h1>You're on the list&nbsp;🍵</h1>
+            <p>{greeting}</p>
+            <p>You're officially on the <strong>Matcha Lite</strong> waitlist. You'll get exactly one email from us — the moment Lite opens up.</p>
+            <div class="card">
+                <p><strong>No noise.</strong> No newsletter, no drip campaign, no "just checking in." Just that one ping when your spot is ready.</p>
+            </div>
+            <div class="resources">
+                <h2>While you wait</h2>
+                <div class="res-item">📖 <strong>HR Glossary</strong> — plain-English definitions for the acronym soup.</div>
+                <div class="res-item">✍️ <strong>The Blog</strong> — practical HR &amp; compliance reads, no fluff.</div>
+                <p style="text-align: center; margin: 18px 0 4px;">
+                    <a href="https://hey-matcha.com/resources" class="btn">Explore the resource hub →</a>
+                </p>
+            </div>
+            <p style="color: #6b7280; font-size: 14px;">Talk soon,<br>— The Matcha team</p>
+        </div>
+        <div class="footer">
+            <p style="margin: 0;">Sent via Matcha Recruit · You're receiving this because you joined the Matcha Lite waitlist.</p>
+        </div>
+    </div>
+</body>
+</html>
             """
             user_text = (
                 f"{'Hi ' + display_name + ',' if display_name else 'Hi there,'}\n\n"
