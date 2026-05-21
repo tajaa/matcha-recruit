@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../api/client'
 import { Badge, Button, Card, type BadgeVariant } from '../ui'
-import type { SuggestedGuidanceResponse, SuggestedGuidanceCard, ERCaseOutcome, OutcomeOption, OutcomeAnalysisResponse } from '../../types/er'
+import type { SuggestedGuidanceResponse, SuggestedGuidanceCard, ERCaseOutcome, OutcomeOption, OutcomeAnalysisResponse, ERDocument } from '../../types/er'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -43,7 +43,7 @@ type ERGuidancePanelProps = {
   onCacheSkipped?: () => void
 }
 
-export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidanceGenerated, documentCount, hasDescription, caseStatus, onActionClick, onBeginDetermination, skipCache, onCacheSkipped }: ERGuidancePanelProps) {
+export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidanceGenerated, hasDescription, caseStatus, onActionClick, onBeginDetermination, skipCache, onCacheSkipped }: ERGuidancePanelProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [determinationDismissed, setDeterminationDismissed] = useState(false)
@@ -59,12 +59,44 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
 
   const isClosed = caseStatus === 'closed'
 
-  const hasContent = documentCount > 0 || hasDescription
+  // Document processing state, polled from the server. Guidance must wait for at
+  // least one document to finish parsing — otherwise the fallback (which counts
+  // only `completed` non-policy docs) nags "upload a complaint" even though one
+  // was just uploaded at intake and is still being processed.
+  const [docStats, setDocStats] = useState<{ completed: number; processing: number; total: number } | null>(null)
+  const completedCount = docStats?.completed ?? 0
+  const processingCount = docStats?.processing ?? 0
+  const totalDocs = docStats?.total ?? 0
+  const isProcessing = processingCount > 0 && completedCount === 0
+  const hasReadyContent = completedCount > 0 || hasDescription
 
   // Tracks whether we've already done the initial cache-fetch on this mount.
   // Distinguishes "first mount with no guidance" (→ try cache first)
   // from "guidance cleared by parent after upload" (→ regenerate directly).
   const hasFetchedCache = useRef(false)
+
+  // Poll document processing status while there's no guidance yet and something
+  // is still parsing. Keyed on [caseId, guidance] so a Documents-tab upload
+  // (which sets guidance back to null) restarts polling for the new file.
+  useEffect(() => {
+    if (guidance !== null) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    async function poll() {
+      try {
+        const docs = await api.get<ERDocument[]>(`/er/cases/${caseId}/documents`)
+        if (cancelled) return
+        const completed = docs.filter((d) => d.processing_status === 'completed').length
+        const processing = docs.filter((d) => d.processing_status === 'pending' || d.processing_status === 'processing').length
+        setDocStats({ completed, processing, total: docs.length })
+        if (processing > 0) timer = setTimeout(poll, 3000)
+      } catch {
+        if (!cancelled) setDocStats({ completed: 0, processing: 0, total: 0 })
+      }
+    }
+    poll()
+    return () => { cancelled = true; if (timer) clearTimeout(timer) }
+  }, [caseId, guidance])
 
   async function generate() {
     setLoading(true)
@@ -82,13 +114,15 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
     }
   }
 
-  // On mount (or caseId change): try cached guidance first.
-  // If guidance is already in parent state, skip.
-  // If guidance is null and we've already fetched cache once (invalidation path), regenerate directly.
-  // If skipCache is true (e.g. after document upload on another tab), skip cache and regenerate.
+  // Decide whether to fetch cached guidance / generate fresh. Waits for the
+  // first document fetch (docStats) and for any in-flight parsing to finish so
+  // guidance reflects the uploaded complaint instead of nagging to upload one.
   useEffect(() => {
     if (guidance !== null) return
-    if (!hasContent) return
+    if (docStats === null) return // wait for first document fetch
+    if (loading) return
+    if (isProcessing) return // show "processing" state; poll re-triggers this effect
+    if (!hasReadyContent) return // genuine no-content → empty state in render
 
     if (skipCache || hasFetchedCache.current) {
       // Parent cleared guidance (e.g. after document upload) — regenerate
@@ -107,7 +141,7 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
         }
       })
       .catch(() => generate()) // error → generate fresh
-  }, [guidance, caseId, hasContent, skipCache]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [guidance, caseId, docStats, isProcessing, hasReadyContent, skipCache]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function streamOutcomes() {
     setOutcomeLoading(true)
@@ -193,11 +227,26 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
   }
 
   if (!guidance && !loading) {
-    if (!hasContent) {
+    // First document fetch still in flight — avoid flashing the empty state.
+    if (docStats === null) {
+      return <p className="text-sm text-zinc-500 py-8 text-center">Loading...</p>
+    }
+    // A document was uploaded (e.g. at intake) and is still parsing — wait for it
+    // rather than nagging the user to upload a complaint.
+    if (isProcessing) {
+      return (
+        <p className="text-sm text-zinc-500 py-8 text-center">
+          Processing your documents… guidance will appear once parsing finishes.
+        </p>
+      )
+    }
+    if (!hasReadyContent) {
       return (
         <div className="text-center py-8">
           <p className="text-sm text-zinc-500">
-            Upload documents or add a case description before generating guidance.
+            {totalDocs > 0
+              ? 'Document processing did not complete. Re-upload on the Documents tab, or add a case description.'
+              : 'Upload documents or add a case description before generating guidance.'}
           </p>
         </div>
       )

@@ -1,12 +1,23 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Input, Modal, Select, Textarea } from '../../components/ui'
+import { Button, FileUpload, Input, Modal, Select, Textarea } from '../../components/ui'
 import { ERCaseCard } from '../../components/er/ERCaseCard'
 import { api } from '../../api/client'
-import type { ERCase, CaseListResponse } from '../../types/er'
-import { CATEGORIES, categoryLabel } from '../../types/er'
+import type { ERCase, CaseListResponse, ERDocumentType } from '../../types/er'
+import { CATEGORIES, categoryLabel, documentTypeLabel } from '../../types/er'
 
 const CATEGORY_OPTIONS = CATEGORIES.map((c) => ({ value: c, label: categoryLabel[c] }))
+
+const DOC_TYPE_OPTIONS: { value: ERDocumentType; label: string }[] = [
+  { value: 'transcript', label: documentTypeLabel.transcript ?? 'Transcript' },
+  { value: 'email', label: documentTypeLabel.email ?? 'Email' },
+  { value: 'policy', label: documentTypeLabel.policy ?? 'Policy' },
+  { value: 'other', label: documentTypeLabel.other ?? 'Other' },
+]
+
+// Match the backend's allowed_extensions (er_copilot.py) — NOT ERDocumentList's
+// legacy .eml/.msg list, which the backend rejects.
+const DOC_ACCEPT = '.pdf,.docx,.doc,.txt,.csv,.json'
 
 const EMPTY_FORM = { title: '', description: '', category: 'other' }
 
@@ -19,6 +30,9 @@ export default function ERCopilot() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+  const [docType, setDocType] = useState<ERDocumentType>('other')
+  const [files, setFiles] = useState<File[]>([])
+  const [uploadNote, setUploadNote] = useState('')
 
   useEffect(() => {
     setLoading(true)
@@ -34,15 +48,39 @@ export default function ERCopilot() {
     c.case_number.toLowerCase().includes(search.toLowerCase())
   )
 
+  function closeForm() {
+    setShowForm(false)
+    setFiles([])
+    setUploadNote('')
+  }
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
+    setUploadNote('')
     try {
       const created = await api.post<ERCase>('/er/cases', {
         title: form.title,
         description: form.description || null,
         category: form.category,
       })
+      // Upload the initial complaint/evidence to the new case. Sequential, like
+      // ERDocumentList.handleFiles. A failed upload must not block navigation —
+      // the case already exists and the file can be retried on the Documents tab.
+      let failed = 0
+      for (const file of files) {
+        const fd = new FormData()
+        fd.append('file', file)
+        fd.append('document_type', docType)
+        try {
+          await api.upload(`/er/cases/${created.id}/documents`, fd)
+        } catch {
+          failed += 1
+        }
+      }
+      if (failed > 0) {
+        setUploadNote(`${failed} file${failed === 1 ? '' : 's'} failed to upload — retry on the Documents tab.`)
+      }
       navigate(`/app/er-copilot/${created.id}`)
     } finally {
       setSaving(false)
@@ -63,7 +101,7 @@ export default function ERCopilot() {
         <Button onClick={() => setShowForm(true)}>New Case</Button>
       </div>
 
-      <Modal open={showForm} onClose={() => setShowForm(false)} title="New Case">
+      <Modal open={showForm} onClose={closeForm} title="New Case">
         <form onSubmit={handleCreate} className="space-y-4">
           <Input
             label="Case title"
@@ -84,10 +122,29 @@ export default function ERCopilot() {
             onChange={(e) => setForm({ ...form, description: e.target.value })}
             placeholder="Optional details about the case"
           />
+
+          <div className="space-y-2">
+            <Select
+              label="Initial document type"
+              options={DOC_TYPE_OPTIONS}
+              value={docType}
+              onChange={(e) => setDocType(e.target.value as ERDocumentType)}
+            />
+            <FileUpload onFiles={setFiles} accept={DOC_ACCEPT} multiple disabled={saving}>
+              <p className="text-sm text-zinc-400">
+                {files.length > 0
+                  ? `${files.length} file${files.length === 1 ? '' : 's'} selected`
+                  : <>Drop the complaint / evidence here or <span className="text-emerald-400 underline">browse</span> <span className="text-zinc-600">(optional)</span></>}
+              </p>
+            </FileUpload>
+          </div>
+
+          {uploadNote && <p className="text-xs text-amber-400">{uploadNote}</p>}
+
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" type="button" onClick={() => setShowForm(false)}>Cancel</Button>
+            <Button variant="ghost" type="button" onClick={closeForm}>Cancel</Button>
             <Button type="submit" disabled={saving}>
-              {saving ? 'Creating...' : 'Create Case'}
+              {saving ? (files.length > 0 ? 'Creating & uploading...' : 'Creating...') : 'Create Case'}
             </Button>
           </div>
         </form>
