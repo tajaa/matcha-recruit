@@ -309,6 +309,7 @@ private struct TaskComposeContent: View {
     @State private var title: String = ""
     @State private var description: String
     @State private var priority: String
+    @State private var assignedTo: String?
 
     init(column: String, template: KanbanTemplate, viewModel: ProjectDetailViewModel, onClose: @escaping () -> Void) {
         self.column = column
@@ -365,6 +366,23 @@ private struct TaskComposeContent: View {
                 Spacer()
             }
 
+            if !viewModel.collaborators.isEmpty {
+                HStack(spacing: 6) {
+                    Text("Assignee")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    Picker("", selection: $assignedTo) {
+                        Text("Unassigned").tag(String?.none)
+                        ForEach(viewModel.collaborators) { c in
+                            Text(c.name).tag(String?.some(c.userId))
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    Spacer()
+                }
+            }
+
             HStack {
                 Button("Cancel") { onClose() }
                     .buttonStyle(.plain)
@@ -377,6 +395,7 @@ private struct TaskComposeContent: View {
                     Task {
                         await viewModel.addTask(
                             title: t, column: column, priority: priority,
+                            assignedTo: assignedTo,
                             description: desc.isEmpty ? nil : desc,
                             category: template.rawValue
                         )
