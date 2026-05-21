@@ -30,8 +30,8 @@ enum CollabRightPanel: String, CaseIterable, Identifiable {
         case .kanban: return "2"
         case .files: return "3"
         case .sections: return "4"
-        case .threads: return "5"
-        case .overview: return "6"
+        case .overview: return "5"
+        case .threads: return "6"
         }
     }
 }
