@@ -23,6 +23,11 @@ struct ThreadListView: View {
     @State private var visibleCount = 3
     private let pageSize = 3
 
+    private func isRecentlyActive(_ dateString: String?, days: Int = 7) -> Bool {
+        guard let ds = dateString, let date = parseMWDate(ds) else { return true }
+        return Date().timeIntervalSince(date) < Double(days) * 86_400
+    }
+
     let filterOptions = [
         (label: "All", value: Optional<String>.none),
         (label: "Active", value: Optional<String>.some("active")),
@@ -142,9 +147,14 @@ struct ThreadListView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.vertical, 16)
             } else {
-                let filtered = viewModel.filteredThreads.filter {
-                    searchText.isEmpty || $0.title.localizedCaseInsensitiveContains(searchText)
-                }
+                let filtered = viewModel.filteredThreads
+                    .filter { t in
+                        // Apply 7-day recency filter on the "Active" tab only.
+                        // "All", "Finalized", and "Archived" are intentional browses — no cutoff.
+                        let passesRecency = viewModel.filterStatus != "active" || t.isPinned || isRecentlyActive(t.updatedAt)
+                        let passesSearch = searchText.isEmpty || t.title.localizedCaseInsensitiveContains(searchText)
+                        return passesRecency && passesSearch
+                    }
                 let limit = searchText.isEmpty ? visibleCount : filtered.count
                 LazyVStack(spacing: 0) {
                     ForEach(filtered.prefix(limit), id: \.id) { thread in

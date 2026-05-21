@@ -17,6 +17,11 @@ struct JournalListView: View {
     @State private var visibleCount = 3
     private let pageSize = 3
 
+    private func isRecentlyActive(_ dateString: String?, days: Int = 7) -> Bool {
+        guard let ds = dateString, let date = parseMWDate(ds) else { return true }
+        return Date().timeIntervalSince(date) < Double(days) * 86_400
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if showHeader {
@@ -48,8 +53,11 @@ struct JournalListView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.vertical, 16)
             } else {
-                let filtered = journals.filter {
-                    searchText.isEmpty || $0.title.localizedCaseInsensitiveContains(searchText)
+                let filtered = journals.filter { j in
+                    // Bypass recency when searching so old journals remain findable.
+                    let passesRecency = !searchText.isEmpty || isRecentlyActive(j.updatedAt)
+                    let passesSearch = searchText.isEmpty || j.title.localizedCaseInsensitiveContains(searchText)
+                    return passesRecency && passesSearch
                 }
                 // While searching, show all matches; otherwise paginate.
                 let limit = searchText.isEmpty ? visibleCount : filtered.count

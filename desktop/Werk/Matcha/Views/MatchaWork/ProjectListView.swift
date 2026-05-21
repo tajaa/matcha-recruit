@@ -12,52 +12,36 @@ struct ProjectListView: View {
     @State private var showTypePicker = false
     @State private var showNewBlog = false
 
-    // Memoized groupings — recomputed only when `projects` changes, not on
-    // every selection-driven body redraw.
-    @State private var blogs: [MWProject] = []
-    @State private var collabs: [MWProject] = []
-    @State private var discipline: [MWProject] = []
-    @State private var general: [MWProject] = []
-    @State private var archivedProjects: [MWProject] = []
+    @State private var visibleCount = 3
+    private let pageSize = 3
 
-    @AppStorage("mw-sidebar-proj-blogs-open")      private var blogsOpen      = true
-    @AppStorage("mw-sidebar-proj-collabs-open")    private var collabsOpen    = true
-    @AppStorage("mw-sidebar-proj-discipline-open") private var disciplineOpen = true
-    @AppStorage("mw-sidebar-proj-general-open")    private var generalOpen    = true
-    @AppStorage("mw-sidebar-proj-archived-open")   private var archivedOpen   = false
+    @AppStorage("mw-sidebar-proj-archived-open") private var archivedOpen = false
+    @State private var projectToArchive: MWProject?
 
-    // MARK: - Grouping
+    // MARK: - Computed lists
 
-    private func recomputeGroups() {
-        let matchesSearch: (MWProject) -> Bool = { p in
-            searchText.isEmpty || p.title.localizedCaseInsensitiveContains(searchText)
-        }
-        let active = projects.filter { $0.status != "archived" && matchesSearch($0) }
-        blogs = active.filter { $0.projectType == "blog" }.pinnedFirst()
-        collabs = active.filter {
-            $0.projectType == "collab" || $0.collaboratorRole == "collaborator"
-        }.pinnedFirst()
-        discipline = active.filter { $0.projectType == "discipline" }.pinnedFirst()
-        let excluded: Set<String> = ["blog", "collab", "discipline"]
-        general = active.filter { p in
-            let t = p.projectType ?? "general"
-            return !excluded.contains(t) && p.collaboratorRole != "collaborator"
-        }.pinnedFirst()
-        archivedProjects = projects
-            .filter { $0.status == "archived" && matchesSearch($0) }
+    private var sidebarProjects: [MWProject] {
+        projects
+            .filter { p in
+                p.status != "archived" &&
+                (searchText.isEmpty || p.title.localizedCaseInsensitiveContains(searchText)) &&
+                ((p.isPinned ?? false) || isRecentlyActive(p.updatedAt))
+            }
+            .pinnedFirst()
+    }
+
+    private var archivedProjects: [MWProject] {
+        projects
+            .filter { p in
+                p.status == "archived" &&
+                (searchText.isEmpty || p.title.localizedCaseInsensitiveContains(searchText))
+            }
             .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
     }
 
-    private var selectionBinding: Binding<String?> {
-        Binding(
-            get: { appState.selectedProjectId },
-            set: {
-                appState.selectedProjectId = $0
-                appState.selectedThreadId = nil
-                appState.selectedJournalId = nil
-                appState.showSkills = false
-            }
-        )
+    private func isRecentlyActive(_ dateString: String?, days: Int = 7) -> Bool {
+        guard let ds = dateString, let date = parseMWDate(ds) else { return true }
+        return Date().timeIntervalSince(date) < Double(days) * 86_400
     }
 
     // MARK: - Body
@@ -84,82 +68,57 @@ struct ProjectListView: View {
                         .foregroundColor(.secondary)
                 }
                 Spacer()
+            } else if sidebarProjects.isEmpty && archivedProjects.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 22))
+                        .foregroundColor(.secondary)
+                    Text("No recent projects")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    Text("Check Home for older work")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary.opacity(0.7))
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 16)
             } else {
-                VStack(spacing: 4) {
-                    if !blogs.isEmpty {
-                        VStack(spacing: 0) {
-                            projectSectionHeader(title: "Blogs", icon: "doc.richtext", count: blogs.count, isExpanded: $blogsOpen)
-                            if blogsOpen {
-                                VStack(spacing: 0) {
-                                    ForEach(blogs) { p in
-                                        blogRow(p)
-                                    }
-                                }
-                            }
+                let limit = searchText.isEmpty ? visibleCount : sidebarProjects.count
+                LazyVStack(spacing: 0) {
+                    ForEach(sidebarProjects.prefix(limit)) { p in
+                        projectRow(p)
+                    }
+                    if searchText.isEmpty && sidebarProjects.count > visibleCount {
+                        SidebarShowMoreButton(remaining: sidebarProjects.count - visibleCount, pageSize: pageSize) {
+                            visibleCount += pageSize
                         }
                     }
-                    if !collabs.isEmpty {
-                        VStack(spacing: 0) {
-                            projectSectionHeader(title: "Collabs", icon: "person.2", count: collabs.count, isExpanded: $collabsOpen)
-                            if collabsOpen {
-                                VStack(spacing: 0) {
-                                    ForEach(collabs) { p in
-                                        collabRow(p)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if !discipline.isEmpty {
-                        VStack(spacing: 0) {
-                            projectSectionHeader(title: "Discipline", icon: "exclamationmark.shield", count: discipline.count, isExpanded: $disciplineOpen)
-                            if disciplineOpen {
-                                VStack(spacing: 0) {
-                                    ForEach(discipline) { p in
-                                        genericRow(p, subtitle: sectionSubtitle(p))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if !general.isEmpty {
-                        VStack(spacing: 0) {
-                            projectSectionHeader(title: "Projects", icon: "folder", count: general.count, isExpanded: $generalOpen)
-                            if generalOpen {
-                                VStack(spacing: 0) {
-                                    ForEach(general) { p in
-                                        genericRow(p, subtitle: sectionSubtitle(p))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if !archivedProjects.isEmpty {
-                        VStack(spacing: 0) {
-                            projectSectionHeader(title: "Archived", icon: "archivebox", count: archivedProjects.count, isExpanded: $archivedOpen)
-                            if archivedOpen {
-                                VStack(spacing: 0) {
-                                    ForEach(archivedProjects) { p in
-                                        archivedRow(p)
-                                    }
+                }
+                .padding(.vertical, 4)
+
+                if !archivedProjects.isEmpty {
+                    VStack(spacing: 0) {
+                        projectSectionHeader(title: "Archived", icon: "archivebox", count: archivedProjects.count, isExpanded: $archivedOpen)
+                        if archivedOpen {
+                            VStack(spacing: 0) {
+                                ForEach(archivedProjects) { p in
+                                    archivedRow(p)
                                 }
                             }
                         }
                     }
                 }
-                .padding(.vertical, 4)
             }
         }
         .background(Color.clear)
         .task(id: appState.projectsListGeneration) { await load() }
         .onChange(of: searchText) { _, _ in
-            recomputeGroups()
+            visibleCount = 3
         }
         .onReceive(NotificationCenter.default.publisher(for: .mwProjectTitlePatched)) { note in
             guard let patch = note.object as? MWProjectTitlePatch else { return }
             if let i = projects.firstIndex(where: { $0.id == patch.id }) {
                 projects[i].title = patch.title
-                recomputeGroups()
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .mwProjectDataChanged)) { _ in
@@ -169,11 +128,37 @@ struct ProjectListView: View {
         .sheet(isPresented: $showNewBlog) {
             NewBlogSheet { proj in
                 projects.insert(proj, at: 0)
-                recomputeGroups()
                 appState.selectedProjectId = proj.id
                 appState.selectedThreadId = nil
                 appState.selectedJournalId = nil
                 appState.projectsListGeneration &+= 1
+            }
+        }
+        .confirmationDialog(
+            projectToArchive.map { "Archive \"\($0.title)\"?" } ?? "Archive project?",
+            isPresented: Binding(
+                get: { projectToArchive != nil },
+                set: { if !$0 { projectToArchive = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: projectToArchive
+        ) { p in
+            Button("Archive", role: .destructive) {
+                Task {
+                    try? await MatchaWorkService.shared.archiveProject(id: p.id)
+                    await MainActor.run {
+                        if appState.selectedProjectId == p.id { appState.selectedProjectId = nil }
+                        projectToArchive = nil
+                    }
+                    await load()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { p in
+            if p.projectType == "collab" {
+                Text("This will archive the collab project for all collaborators.")
+            } else {
+                Text("The project will be hidden from your sidebar. You can unarchive it from the context menu.")
             }
         }
     }
@@ -247,28 +232,9 @@ struct ProjectListView: View {
         .frame(width: 180)
     }
 
-    // MARK: - Section header
-
-    private func sectionHeader(_ label: String, icon: String, count: Int) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundColor(.secondary)
-            Text(label)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.secondary)
-            Spacer()
-            Text("\(count)")
-                .font(.system(size: 9, weight: .medium))
-                .foregroundColor(.secondary.opacity(0.6))
-        }
-    }
-
     // MARK: - Row builders
 
-    // MARK: - Helper Layouts
-
-    private func projectRowWrapper<Content: View>(_ p: MWProject, @ViewBuilder content: () -> Content) -> some View {
+    private func projectRow(_ p: MWProject) -> some View {
         let selected = appState.selectedProjectId == p.id
         return Button {
             appState.selectedProjectId = p.id
@@ -278,14 +244,87 @@ struct ProjectListView: View {
             appState.showInbox = false
             appState.showSkills = false
         } label: {
-            content()
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .sidebarRowStyle(isSelected: selected)
-                .contentShape(Rectangle())
+            ProjectSidebarRowContent(
+                project: p,
+                onTogglePin: { Task { await togglePin(project: p) } },
+                onArchive: { projectToArchive = p }
+            )
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .sidebarRowStyle(isSelected: selected)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button((p.isPinned ?? false) ? "Unstar" : "Star") {
+                Task { await togglePin(project: p) }
+            }
+            Menu("Export") {
+                Button("PDF") { Task { await exportProject(p, format: "pdf") } }
+                Button("Markdown") { Task { await exportProject(p, format: "md") } }
+                Button("DOCX") { Task { await exportProject(p, format: "docx") } }
+            }
+            Button("Archive") { projectToArchive = p }
+            Divider()
+            Button("Delete…") {
+                let alert = NSAlert()
+                alert.messageText = "Delete \"\(p.title)\"?"
+                alert.informativeText = "Permanently deletes the project, its sections, and all associated threads and messages. Cannot be undone."
+                alert.alertStyle = .critical
+                alert.addButton(withTitle: "Delete Permanently")
+                alert.addButton(withTitle: "Cancel")
+                if alert.runModal() == .alertFirstButtonReturn {
+                    Task {
+                        try? await MatchaWorkService.shared.deleteProject(id: p.id)
+                        await MainActor.run {
+                            if appState.selectedProjectId == p.id { appState.selectedProjectId = nil }
+                            appState.projectsListGeneration &+= 1
+                        }
+                        await load()
+                    }
+                }
+            }
+        }
     }
+
+    @ViewBuilder
+    private func archivedRow(_ p: MWProject) -> some View {
+        let selected = appState.selectedProjectId == p.id
+        Button {
+            appState.selectedProjectId = p.id
+            appState.selectedThreadId = nil
+            appState.selectedJournalId = nil
+            appState.selectedChannelId = nil
+            appState.showInbox = false
+            appState.showSkills = false
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(p.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                Text(sectionSubtitle(p))
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary.opacity(0.6))
+            }
+            .padding(.vertical, 2)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .sidebarRowStyle(isSelected: selected)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Unarchive") {
+                Task {
+                    try? await MatchaWorkService.shared.unarchiveProject(id: p.id)
+                    await load()
+                }
+            }
+        }
+    }
+
+    // MARK: - Section header (Archived only)
 
     private func projectSectionHeader(title: String, icon: String, count: Int, isExpanded: Binding<Bool>) -> some View {
         Button {
@@ -316,157 +355,6 @@ struct ProjectListView: View {
         .buttonStyle(.plain)
     }
 
-    @ViewBuilder
-    private func blogRow(_ p: MWProject) -> some View {
-        let status = (p.projectData?["status"]?.value as? String) ?? "draft"
-        let statusColor: Color = status == "published" ? .green : status == "scheduled" ? .orange : .secondary
-        let wc = (p.projectData?["word_count"]?.value as? Int) ?? 0
-
-        projectRowWrapper(p) {
-            rowShell(p) {
-                HStack(spacing: 4) {
-                    Text(status)
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(statusColor)
-                        .padding(.horizontal, 4).padding(.vertical, 1)
-                        .background(statusColor.opacity(0.12))
-                        .cornerRadius(3)
-                    if wc > 0 {
-                        Text("\(wc) words")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func collabRow(_ p: MWProject) -> some View {
-        projectRowWrapper(p) {
-            rowShell(p) {
-                HStack(spacing: 4) {
-                    if p.collaboratorRole == "collaborator" {
-                        Text("shared")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundColor(.purple)
-                            .padding(.horizontal, 4).padding(.vertical, 1)
-                            .background(Color.purple.opacity(0.12))
-                            .cornerRadius(3)
-                    }
-                    if let collabs = p.collaborators {
-                        let others = collabs.filter { $0.userId != appState.currentUser?.id }
-                        if !others.isEmpty {
-                            CollaboratorRowSummary(others: others)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func genericRow(_ p: MWProject, subtitle: String) -> some View {
-        projectRowWrapper(p) {
-            rowShell(p) {
-                Text(subtitle)
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func archivedRow(_ p: MWProject) -> some View {
-        projectRowWrapper(p) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(p.title)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-                Text(sectionSubtitle(p))
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary.opacity(0.6))
-            }
-            .padding(.vertical, 2)
-            .contextMenu {
-                Button("Unarchive") {
-                    Task {
-                        try? await MatchaWorkService.shared.unarchiveProject(id: p.id)
-                        await load()
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func rowShell<Sub: View>(_ p: MWProject, @ViewBuilder subtitle: () -> Sub) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 4) {
-                if p.isPinned ?? false {
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 9))
-                        .foregroundColor(appState.themeAccent)
-                }
-                Text(p.title)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(appState.themeText)
-                    .lineLimit(1)
-                Spacer()
-                Button {
-                    Task { await togglePin(project: p) }
-                } label: {
-                    Image(systemName: (p.isPinned ?? false) ? "star.fill" : "star")
-                        .font(.system(size: 11))
-                        .foregroundColor((p.isPinned ?? false) ? appState.themeAccent : appState.themeTextSecondary)
-                }
-                .buttonStyle(.plain)
-                .help((p.isPinned ?? false) ? "Unstar" : "Star")
-            }
-            subtitle()
-        }
-        .padding(.vertical, 2)
-        .contextMenu {
-            Button((p.isPinned ?? false) ? "Unstar" : "Star") {
-                Task { await togglePin(project: p) }
-            }
-            Menu("Export") {
-                Button("PDF") { Task { await exportProject(p, format: "pdf") } }
-                Button("Markdown") { Task { await exportProject(p, format: "md") } }
-                Button("DOCX") { Task { await exportProject(p, format: "docx") } }
-            }
-            Button("Archive") {
-                Task {
-                    try? await MatchaWorkService.shared.archiveProject(id: p.id)
-                    await MainActor.run {
-                        if appState.selectedProjectId == p.id { appState.selectedProjectId = nil }
-                    }
-                    await load()
-                }
-            }
-            Divider()
-            Button("Delete…") {
-                let alert = NSAlert()
-                alert.messageText = "Delete \"\(p.title)\"?"
-                alert.informativeText = "Permanently deletes the project, its sections, and all associated threads and messages. Cannot be undone."
-                alert.alertStyle = .critical
-                alert.addButton(withTitle: "Delete Permanently")
-                alert.addButton(withTitle: "Cancel")
-                if alert.runModal() == .alertFirstButtonReturn {
-                    Task {
-                        try? await MatchaWorkService.shared.deleteProject(id: p.id)
-                        await MainActor.run {
-                            if appState.selectedProjectId == p.id { appState.selectedProjectId = nil }
-                            appState.projectsListGeneration &+= 1
-                        }
-                        await load()
-                    }
-                }
-            }
-        }
-    }
-
     private func sectionSubtitle(_ p: MWProject) -> String {
         let s = p.sections?.count ?? 0
         let c = p.chatCount ?? 0
@@ -478,10 +366,8 @@ struct ProjectListView: View {
     private func load() async {
         do {
             let p = try await MatchaWorkService.shared.listProjects()
-            let filtered = p
             await MainActor.run {
-                projects = filtered
-                recomputeGroups()
+                projects = p
                 isLoading = false
             }
         } catch {
@@ -506,14 +392,9 @@ struct ProjectListView: View {
 
     private func togglePin(project: MWProject) async {
         let nextPinned = !(project.isPinned ?? false)
-        // Optimistic — flip the local row first so the star updates within one
-        // frame. Re-group so pinned items resort. On failure, revert in place
-        // and surface a console log; full list refresh is overkill for a
-        // single boolean.
         await MainActor.run {
             if let i = projects.firstIndex(where: { $0.id == project.id }) {
                 projects[i].isPinned = nextPinned
-                recomputeGroups()
             }
         }
         do {
@@ -523,7 +404,6 @@ struct ProjectListView: View {
             await MainActor.run {
                 if let i = projects.firstIndex(where: { $0.id == project.id }) {
                     projects[i].isPinned = !nextPinned
-                    recomputeGroups()
                 }
             }
             print("[ProjectListView] togglePin failed: \(error)")
@@ -537,7 +417,6 @@ struct ProjectListView: View {
                 let proj = try await MatchaWorkService.shared.createProject(title: "New Project", projectType: type)
                 await MainActor.run {
                     projects.insert(proj, at: 0)
-                    recomputeGroups()
                     appState.selectedProjectId = proj.id
                     appState.selectedThreadId = nil
                     appState.selectedJournalId = nil
@@ -573,6 +452,115 @@ struct ProjectListView: View {
         case "collab": return "Collab"
         case "discipline": return "Disciplinary Action"
         default: return type.capitalized
+        }
+    }
+}
+
+// MARK: - Project sidebar row content (manages its own hover state)
+
+private struct ProjectSidebarRowContent: View {
+    @Environment(AppState.self) private var appState
+    let project: MWProject
+    let onTogglePin: () -> Void
+    let onArchive: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Image(systemName: projectIcon(project.projectType))
+                    .font(.system(size: 9))
+                    .foregroundColor(appState.themeTextSecondary)
+                    .frame(width: 12)
+                if project.isPinned ?? false {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 9))
+                        .foregroundColor(appState.themeAccent)
+                }
+                Text(project.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(appState.themeText)
+                    .lineLimit(1)
+                Spacer()
+                if isHovered {
+                    Button(action: onArchive) {
+                        Image(systemName: "archivebox")
+                            .font(.system(size: 11))
+                            .foregroundColor(appState.themeTextSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Archive")
+                } else {
+                    Button(action: onTogglePin) {
+                        Image(systemName: (project.isPinned ?? false) ? "star.fill" : "star")
+                            .font(.system(size: 11))
+                            .foregroundColor((project.isPinned ?? false) ? appState.themeAccent : appState.themeTextSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help((project.isPinned ?? false) ? "Unstar" : "Star")
+                }
+            }
+            subtitleView
+        }
+        .padding(.vertical, 2)
+        .onHover { isHovered = $0 }
+    }
+
+    @ViewBuilder
+    private var subtitleView: some View {
+        switch project.projectType {
+        case "blog":
+            let status = (project.projectData?["status"]?.value as? String) ?? "draft"
+            let statusColor: Color = status == "published" ? .green : status == "scheduled" ? .orange : .secondary
+            let wc = (project.projectData?["word_count"]?.value as? Int) ?? 0
+            HStack(spacing: 4) {
+                Text(status)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(statusColor)
+                    .padding(.horizontal, 4).padding(.vertical, 1)
+                    .background(statusColor.opacity(0.12))
+                    .cornerRadius(3)
+                if wc > 0 {
+                    Text("\(wc) words")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+            }
+        case "collab":
+            HStack(spacing: 4) {
+                if project.collaboratorRole == "collaborator" {
+                    Text("shared")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(.purple)
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Color.purple.opacity(0.12))
+                        .cornerRadius(3)
+                }
+                if let collabs = project.collaborators {
+                    let others = collabs.filter { $0.userId != appState.currentUser?.id }
+                    if !others.isEmpty {
+                        CollaboratorRowSummary(others: others)
+                    }
+                }
+            }
+        default:
+            let s = project.sections?.count ?? 0
+            let c = project.chatCount ?? 0
+            Text("\(s) section\(s == 1 ? "" : "s") · \(c) chat\(c == 1 ? "" : "s")")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private func projectIcon(_ type: String?) -> String {
+        switch type {
+        case "blog": return "doc.text"
+        case "presentation": return "rectangle.stack"
+        case "recruiting": return "person.2"
+        case "collab": return "rectangle.split.3x1"
+        case "discipline": return "shield"
+        default: return "folder"
         }
     }
 }

@@ -6,16 +6,25 @@ struct HomeDashboardView: View {
     @Environment(AppState.self) private var appState
 
     @State private var projects: [MWProject] = []
+    @State private var threads: [MWThread] = []
+    @State private var journals: [MWJournal] = []
+    @State private var channels: [ChannelSummary] = []
     @State private var openTasks: [MWOpenTask] = []
     @State private var activity: [MWActivityItem] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var isCreatingChat = false
 
+    private func isRecentlyActive(_ dateString: String?, days: Int = 7) -> Bool {
+        guard let ds = dateString, let date = parseMWDate(ds) else { return true }
+        return Date().timeIntervalSince(date) < Double(days) * 86_400
+    }
+
     private var activeProjects: [MWProject] {
         projects
             .filter { ($0.projectType ?? "") != "blog" }
             .filter { ($0.status ?? "active") != "completed" }
+            .filter { isRecentlyActive($0.updatedAt) }
             .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
             .prefix(8)
             .map { $0 }
@@ -28,6 +37,46 @@ struct HomeDashboardView: View {
             return blogStatus != "published"
         }
         .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
+    }
+
+    private var olderProjects: [MWProject] {
+        projects
+            .filter { p in
+                p.status != "archived" &&
+                !(p.isPinned ?? false) &&
+                !isRecentlyActive(p.updatedAt) &&
+                (p.projectType ?? "") != "blog"
+            }
+            .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
+            .prefix(8)
+            .map { $0 }
+    }
+
+    private var olderThreads: [MWThread] {
+        threads
+            .filter { t in
+                t.status != "archived" &&
+                !t.isPinned &&
+                !isRecentlyActive(t.updatedAt)
+            }
+            .sorted { ($0.updatedAt ?? $0.createdAt) > ($1.updatedAt ?? $1.createdAt) }
+            .prefix(8)
+            .map { $0 }
+    }
+
+    private var olderJournals: [MWJournal] {
+        journals
+            .filter { !isRecentlyActive($0.updatedAt) }
+            .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
+            .prefix(8).map { $0 }
+    }
+
+    private var olderChannels: [ChannelSummary] {
+        let stars = ChannelStarStore.shared
+        return channels
+            .filter { !stars.isStarred($0.id) && !isRecentlyActive($0.lastMessageAt) }
+            .sorted { ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "") }
+            .prefix(8).map { $0 }
     }
 
     var body: some View {
@@ -46,6 +95,9 @@ struct HomeDashboardView: View {
                 }
                 openTasksCard
                 recentActivityCard
+                if !olderProjects.isEmpty || !olderThreads.isEmpty || !olderJournals.isEmpty || !olderChannels.isEmpty {
+                    olderItemsCard
+                }
             }
             .padding(20)
             // Cap the reading width so cards don't stretch absurdly wide on a
@@ -349,6 +401,122 @@ struct HomeDashboardView: View {
         .elevatedCard(cornerRadius: 12)
     }
 
+    private var olderItemsCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            cardHeader(title: "NOT RECENTLY ACTIVE", trailing: "\(olderProjects.count + olderThreads.count + olderJournals.count + olderChannels.count)")
+            ForEach(olderProjects) { project in
+                Button {
+                    appState.selectedProjectId = project.id
+                    appState.selectedJournalId = nil
+                    appState.showHome = false
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: projectIcon(project.projectType))
+                            .font(.system(size: 10))
+                            .foregroundColor(appState.themeText.opacity(0.4))
+                            .frame(width: 14)
+                        Text(project.title)
+                            .font(.system(size: 12))
+                            .foregroundColor(appState.themeText.opacity(0.6))
+                            .lineLimit(1)
+                        Spacer()
+                        if let updated = project.updatedAt, let date = parseMWDate(updated) {
+                            Text(relativeTime(from: date))
+                                .font(.system(size: 9))
+                                .foregroundColor(appState.themeText.opacity(0.3))
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 2)
+            }
+            ForEach(olderThreads) { thread in
+                Button {
+                    appState.selectedThreadId = thread.id
+                    appState.selectedJournalId = nil
+                    appState.showHome = false
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "bubble.left")
+                            .font(.system(size: 10))
+                            .foregroundColor(appState.themeText.opacity(0.4))
+                            .frame(width: 14)
+                        Text(thread.title)
+                            .font(.system(size: 12))
+                            .foregroundColor(appState.themeText.opacity(0.6))
+                            .lineLimit(1)
+                        Spacer()
+                        if let updated = thread.updatedAt, let date = parseMWDate(updated) {
+                            Text(relativeTime(from: date))
+                                .font(.system(size: 9))
+                                .foregroundColor(appState.themeText.opacity(0.3))
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 2)
+            }
+            ForEach(olderJournals) { j in
+                Button {
+                    appState.selectedJournalId = j.id
+                    appState.selectedProjectId = nil
+                    appState.selectedThreadId = nil
+                    appState.selectedChannelId = nil
+                    appState.showHome = false
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: j.icon ?? "book")
+                            .font(.system(size: 10))
+                            .foregroundColor(appState.themeText.opacity(0.4))
+                            .frame(width: 14)
+                        Text(j.title)
+                            .font(.system(size: 12))
+                            .foregroundColor(appState.themeText.opacity(0.6))
+                            .lineLimit(1)
+                        Spacer()
+                        if let updated = j.updatedAt, let date = parseMWDate(updated) {
+                            Text(relativeTime(from: date))
+                                .font(.system(size: 9))
+                                .foregroundColor(appState.themeText.opacity(0.3))
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 2)
+            }
+            ForEach(olderChannels, id: \.id) { ch in
+                Button {
+                    appState.selectedChannelId = ch.id
+                    appState.selectedProjectId = nil
+                    appState.selectedThreadId = nil
+                    appState.selectedJournalId = nil
+                    appState.showHome = false
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "number")
+                            .font(.system(size: 10))
+                            .foregroundColor(appState.themeText.opacity(0.4))
+                            .frame(width: 14)
+                        Text(ch.name)
+                            .font(.system(size: 12))
+                            .foregroundColor(appState.themeText.opacity(0.6))
+                            .lineLimit(1)
+                        Spacer()
+                        if let updated = ch.lastMessageAt, let date = parseMWDate(updated) {
+                            Text(relativeTime(from: date))
+                                .font(.system(size: 9))
+                                .foregroundColor(appState.themeText.opacity(0.3))
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 2)
+            }
+        }
+        .padding(14)
+        .elevatedCard(cornerRadius: 12)
+    }
+
     // MARK: - Helpers
 
     private func cardHeader(title: String, trailing: String?) -> some View {
@@ -444,18 +612,24 @@ struct HomeDashboardView: View {
         errorMessage = nil
         defer { isLoading = false }
 
-        // Run all three requests in parallel; surface only the first failure.
+        // All 6 start concurrently. Primary 4 are fatal; journals/channels are supplemental.
         async let projectsTask: [MWProject] = MatchaWorkService.shared.listProjects(forceRefresh: true)
+        async let threadsTask: [MWThread] = MatchaWorkService.shared.listThreads(forceRefresh: true)
         async let tasksTask: [MWOpenTask] = MatchaWorkService.shared.listOpenTasks()
         async let activityTask: [MWActivityItem] = MatchaWorkService.shared.listRecentActivity()
+        async let journalsTask: [MWJournal] = MatchaWorkService.shared.listJournals(forceRefresh: true)
+        async let channelsTask: [ChannelSummary] = ChannelsService.shared.listChannels()
 
         do {
-            let (p, t, a) = try await (projectsTask, tasksTask, activityTask)
+            let (p, th, t, a) = try await (projectsTask, threadsTask, tasksTask, activityTask)
             self.projects = p
+            self.threads = th
             self.openTasks = t
             self.activity = a
         } catch {
             self.errorMessage = "Couldn't load dashboard: \(error.localizedDescription)"
         }
+        self.journals = (try? await journalsTask) ?? []
+        self.channels = (try? await channelsTask) ?? []
     }
 }

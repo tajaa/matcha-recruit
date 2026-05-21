@@ -329,18 +329,26 @@ struct ChannelsSidebarView: View {
         }
     }
 
+    private func isRecentlyActive(_ dateString: String?, days: Int = 7) -> Bool {
+        guard let ds = dateString, let date = parseMWDate(ds) else { return true }
+        return Date().timeIntervalSince(date) < Double(days) * 86_400
+    }
+
     private func load() async {
         do {
             let list = try await ChannelsService.shared.listChannels()
             // Starred channels float to the top, then by last activity.
             // Star state is per-user UserDefaults — bound at login by AppState.
+            // Channels with no activity in 7+ days are hidden (starred bypass this).
             let stars = ChannelStarStore.shared
-            channels = list.sorted { a, b in
-                let sa = stars.isStarred(a.id)
-                let sb = stars.isStarred(b.id)
-                if sa != sb { return sa && !sb }
-                return (a.lastMessageAt ?? "") > (b.lastMessageAt ?? "")
-            }
+            channels = list
+                .filter { ch in stars.isStarred(ch.id) || isRecentlyActive(ch.lastMessageAt) }
+                .sorted { a, b in
+                    let sa = stars.isStarred(a.id)
+                    let sb = stars.isStarred(b.id)
+                    if sa != sb { return sa && !sb }
+                    return (a.lastMessageAt ?? "") > (b.lastMessageAt ?? "")
+                }
             // Subscribe to all member channels so background messages arrive.
             ChannelsWebSocket.shared.joinBackgroundRooms(list.map { (id: $0.id, name: $0.name) })
             // API returned fresh unread counts — local overrides are now stale.
