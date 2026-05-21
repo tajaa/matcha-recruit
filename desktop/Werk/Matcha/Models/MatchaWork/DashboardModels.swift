@@ -10,9 +10,12 @@ struct MWAppNotification: Codable, Identifiable {
     let link: String?
     let isRead: Bool
     let createdAt: String
+    /// Target IDs for navigation (project_id / task_id / thread_id / channel_id).
+    /// Most notifications carry the real target here rather than in `link`.
+    let metadata: [String: String]?
 
     enum CodingKeys: String, CodingKey {
-        case id, type, title, body, link
+        case id, type, title, body, link, metadata
         case isRead = "is_read"
         case createdAt = "created_at"
     }

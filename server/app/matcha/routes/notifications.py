@@ -1,5 +1,6 @@
 """Matcha Work notification endpoints."""
 
+import json
 import logging
 from datetime import datetime
 from typing import Optional
@@ -16,6 +17,21 @@ from ..services import notification_service as notif_svc
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _parse_metadata(raw) -> dict:
+    """asyncpg returns JSONB as a string (no codec registered), so coerce it
+    to a dict for the client. Tolerate dicts (if a codec is ever added) and
+    bad values."""
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw:
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+    return {}
 
 
 class NotificationResponse(BaseModel):
@@ -53,7 +69,7 @@ async def list_notifications(
                 "title": n["title"],
                 "body": n["body"],
                 "link": n["link"],
-                "metadata": n["metadata"],
+                "metadata": _parse_metadata(n["metadata"]),
                 "is_read": n["is_read"],
                 "created_at": n["created_at"].isoformat(),
             }

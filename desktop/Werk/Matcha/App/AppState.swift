@@ -491,17 +491,30 @@ class AppState {
         }
     }
 
-    /// Navigate to the object a notification points at. Links look like
-    /// `/work?project={id}&task={id}` (task → open the project's kanban) or
-    /// `/work?thread={id}` etc. Mirrors the surface-clearing the sidebar /
-    /// home buttons do so the target view actually shows.
+    /// Navigate to the object a notification points at. Most notifications
+    /// carry the target in `metadata` (project_id / task_id / thread_id /
+    /// channel_id / journal_id) with a bare `/work` link; task notifications
+    /// also encode it in the link query (`?project=&task=`). We prefer
+    /// metadata and fall back to the link query, so either shape navigates.
+    /// Mirrors the surface-clearing the sidebar / home buttons do.
     @MainActor
-    func handleNotificationLink(_ link: String?) {
-        guard let link, let comps = URLComponents(string: link) else { return }
-        let items = comps.queryItems ?? []
-        func value(_ key: String) -> String? {
+    func handleNotificationLink(_ link: String?, metadata: [String: String]? = nil) {
+        // Link query params (if any).
+        let items = link.flatMap { URLComponents(string: $0)?.queryItems } ?? []
+        func query(_ key: String) -> String? {
             items.first(where: { $0.name == key })?.value.flatMap { $0.isEmpty ? nil : $0 }
         }
+        func meta(_ key: String) -> String? {
+            metadata?[key].flatMap { $0.isEmpty ? nil : $0 }
+        }
+        // Prefer metadata's `<thing>_id`, fall back to link's `<thing>`.
+        func target(_ name: String) -> String? { meta("\(name)_id") ?? query(name) }
+
+        let project = target("project")
+        let task = target("task")
+        let thread = target("thread")
+        let channel = target("channel")
+        let journal = target("journal")
 
         func clearSurfaces() {
             showHome = false
@@ -511,27 +524,27 @@ class AppState {
             showChannelBrowse = false
         }
 
-        if let project = value("project") {
+        if let project {
             clearSurfaces()
             selectedThreadId = nil
             selectedJournalId = nil
             selectedChannelId = nil
             selectedProjectId = project
             // A task notification should land on the kanban board, not chat.
-            pendingProjectPanel = value("task") != nil ? .kanban : nil
-        } else if let thread = value("thread") {
+            pendingProjectPanel = task != nil ? .kanban : nil
+        } else if let thread {
             clearSurfaces()
             selectedProjectId = nil
             selectedJournalId = nil
             selectedChannelId = nil
             selectedThreadId = thread
-        } else if let channel = value("channel") {
+        } else if let channel {
             clearSurfaces()
             selectedProjectId = nil
             selectedThreadId = nil
             selectedJournalId = nil
             selectedChannelId = channel
-        } else if let journal = value("journal") {
+        } else if let journal {
             clearSurfaces()
             selectedProjectId = nil
             selectedThreadId = nil

@@ -53,7 +53,7 @@ struct NotificationsPopoverView: View {
                         ForEach(notifications) { n in
                             NotificationRow(notification: n) {
                                 Task { await markRead(id: n.id) }
-                                appState.handleNotificationLink(n.link)
+                                appState.handleNotificationLink(n.link, metadata: n.metadata)
                                 dismiss()
                             }
                             Divider().opacity(0.15)
@@ -101,7 +101,7 @@ private extension MWAppNotification {
     func markedRead() -> MWAppNotification {
         MWAppNotification(
             id: id, type: type, title: title, body: body,
-            link: link, isRead: true, createdAt: createdAt
+            link: link, isRead: true, createdAt: createdAt, metadata: metadata
         )
     }
 }
