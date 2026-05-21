@@ -6,6 +6,20 @@ struct CollabOverviewView: View {
     @Binding var showCollaborators: Bool
     let onExport: (String) -> Void
 
+    @State private var showAddElement = false
+    @State private var newElementName = ""
+    @State private var newElementKind: String? = nil
+    @State private var newElementAssignedTo: String? = nil
+    @State private var editingElement: MWProjectElement? = nil
+    @State private var editElementName = ""
+    @State private var editElementKind: String? = nil
+    @State private var editElementAssignedTo: String? = nil
+
+    private let elementKinds: [(key: String, label: String)] = [
+        ("chapter", "Chapter"), ("feature", "Feature"), ("section", "Section"),
+        ("milestone", "Milestone"), ("other", "Other"),
+    ]
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -16,6 +30,7 @@ struct CollabOverviewView: View {
                         recentActivityCard.frame(maxWidth: .infinity, alignment: .topLeading)
                     }
                     peopleCard(project: project)
+                    elementsCard
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -203,6 +218,250 @@ struct CollabOverviewView: View {
         .padding(12)
         .background(Color.zinc900.opacity(0.5))
         .cornerRadius(8)
+    }
+
+    // MARK: - Elements card
+
+    private var canEditElements: Bool {
+        let role = viewModel.myRole
+        return role == "owner" || role == "editor" || role == nil
+    }
+
+    private var elementsCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                cardHeader(title: "ELEMENTS", trailing: viewModel.elements.isEmpty ? nil : "\(viewModel.elements.count)")
+                Spacer()
+                if canEditElements {
+                    Button {
+                        newElementName = ""
+                        newElementKind = nil
+                        newElementAssignedTo = nil
+                        showAddElement = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus").font(.system(size: 10))
+                            Text("Add").font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(Color.matcha600)
+                        .cornerRadius(5)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if viewModel.elements.isEmpty && !showAddElement {
+                Text("No elements yet. Add chapters, features, or sections to organize work.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.4))
+                    .padding(.vertical, 4)
+            }
+
+            if showAddElement {
+                elementAddForm
+            }
+
+            ForEach(viewModel.elements) { el in
+                if editingElement?.id == el.id {
+                    elementEditForm(el)
+                } else {
+                    elementRow(el)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.zinc900.opacity(0.5))
+        .cornerRadius(8)
+    }
+
+    @ViewBuilder
+    private var elementAddForm: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("Element name", text: $newElementName)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundColor(.white)
+                .padding(6)
+                .background(Color.zinc800)
+                .cornerRadius(5)
+
+            HStack(spacing: 8) {
+                Picker("Kind", selection: $newElementKind) {
+                    Text("No kind").tag(String?.none)
+                    ForEach(elementKinds, id: \.key) { k in
+                        Text(k.label).tag(String?.some(k.key))
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+
+                if !viewModel.collaborators.isEmpty {
+                    Picker("Assign", selection: $newElementAssignedTo) {
+                        Text("Unassigned").tag(String?.none)
+                        ForEach(viewModel.collaborators) { c in
+                            Text(c.name).tag(String?.some(c.userId))
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                Spacer()
+            }
+
+            HStack {
+                Button("Cancel") { showAddElement = false }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button("Add") {
+                    let n = newElementName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !n.isEmpty else { return }
+                    showAddElement = false
+                    Task {
+                        await viewModel.createElement(
+                            name: n, kind: newElementKind,
+                            description: nil, assignedTo: newElementAssignedTo
+                        )
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.matcha500)
+                .disabled(newElementName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(8)
+        .background(Color.zinc800.opacity(0.5))
+        .cornerRadius(6)
+    }
+
+    @ViewBuilder
+    private func elementEditForm(_ el: MWProjectElement) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("Element name", text: $editElementName)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundColor(.white)
+                .padding(6)
+                .background(Color.zinc800)
+                .cornerRadius(5)
+
+            HStack(spacing: 8) {
+                Picker("Kind", selection: $editElementKind) {
+                    Text("No kind").tag(String?.none)
+                    ForEach(elementKinds, id: \.key) { k in
+                        Text(k.label).tag(String?.some(k.key))
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+
+                if !viewModel.collaborators.isEmpty {
+                    Picker("Assign", selection: $editElementAssignedTo) {
+                        Text("Unassigned").tag(String?.none)
+                        ForEach(viewModel.collaborators) { c in
+                            Text(c.name).tag(String?.some(c.userId))
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                Spacer()
+            }
+
+            HStack {
+                Button("Cancel") { editingElement = nil }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button("Save") {
+                    let n = editElementName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !n.isEmpty else { return }
+                    let target = el
+                    editingElement = nil
+                    Task {
+                        await viewModel.updateElement(
+                            target, name: n, kind: editElementKind,
+                            description: nil, assignedTo: editElementAssignedTo
+                        )
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.matcha500)
+            }
+        }
+        .padding(8)
+        .background(Color.zinc800.opacity(0.5))
+        .cornerRadius(6)
+    }
+
+    @ViewBuilder
+    private func elementRow(_ el: MWProjectElement) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(el.name)
+                    .font(.system(size: 12))
+                    .foregroundColor(.white)
+                HStack(spacing: 6) {
+                    if let kind = el.kind {
+                        let kLabel = elementKinds.first(where: { $0.key == kind })?.label ?? kind.capitalized
+                        Text(kLabel)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(.matcha500)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.matcha500.opacity(0.12))
+                            .cornerRadius(3)
+                    }
+                    if let name = el.assignedName, !name.isEmpty {
+                        HStack(spacing: 3) {
+                            Circle().fill(Color.matcha500.opacity(0.5)).frame(width: 10, height: 10)
+                                .overlay(
+                                    Text(String(name.prefix(1)).uppercased())
+                                        .font(.system(size: 6, weight: .bold))
+                                        .foregroundColor(.white)
+                                )
+                            Text(name)
+                                .font(.system(size: 10))
+                                .foregroundColor(.white.opacity(0.6))
+                        }
+                    }
+                }
+            }
+            Spacer()
+            if canEditElements {
+                HStack(spacing: 8) {
+                    Button {
+                        editElementName = el.name
+                        editElementKind = el.kind
+                        editElementAssignedTo = el.assignedTo
+                        editingElement = el
+                        showAddElement = false
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        Task { await viewModel.deleteElement(el) }
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 10))
+                            .foregroundColor(.red.opacity(0.7))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.vertical, 3)
     }
 
     private func cardHeader(title: String, trailing: String?) -> some View {

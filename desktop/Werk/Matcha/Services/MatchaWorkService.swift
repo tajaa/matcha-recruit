@@ -712,7 +712,8 @@ class MatchaWorkService {
         priority: String = "medium",
         dueDate: String? = nil,
         assignedTo: String? = nil,
-        category: String? = nil
+        category: String? = nil,
+        elementId: String? = nil
     ) async throws -> MWProjectTask {
         struct Body: Encodable {
             let title: String
@@ -722,6 +723,7 @@ class MatchaWorkService {
             let due_date: String?
             let assigned_to: String?
             let category: String?
+            let element_id: String?
         }
         return try await client.request(
             method: "POST",
@@ -729,8 +731,62 @@ class MatchaWorkService {
             body: Body(
                 title: title, description: description, board_column: boardColumn,
                 priority: priority, due_date: dueDate, assigned_to: assignedTo,
-                category: category
+                category: category, element_id: elementId
             )
+        )
+    }
+
+    // MARK: - Project Elements
+
+    func listProjectElements(projectId: String) async throws -> [MWProjectElement] {
+        try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/elements")
+    }
+
+    func createProjectElement(
+        projectId: String,
+        name: String,
+        kind: String? = nil,
+        description: String? = nil,
+        assignedTo: String? = nil
+    ) async throws -> MWProjectElement {
+        struct Body: Encodable {
+            let name: String
+            let kind: String?
+            let description: String?
+            let assigned_to: String?
+        }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/elements",
+            body: Body(name: name, kind: kind, description: description, assigned_to: assignedTo)
+        )
+    }
+
+    func updateProjectElement(
+        projectId: String,
+        elementId: String,
+        name: String? = nil,
+        kind: String? = nil,
+        description: String? = nil,
+        assignedTo: String? = nil
+    ) async throws -> MWProjectElement {
+        struct Body: Encodable {
+            let name: String?
+            let kind: String?
+            let description: String?
+            let assigned_to: String?
+        }
+        return try await client.request(
+            method: "PATCH",
+            path: "\(basePath)/projects/\(projectId)/elements/\(elementId)",
+            body: Body(name: name, kind: kind, description: description, assigned_to: assignedTo)
+        )
+    }
+
+    func deleteProjectElement(projectId: String, elementId: String) async throws {
+        _ = try await client.requestData(
+            method: "DELETE",
+            path: "\(basePath)/projects/\(projectId)/elements/\(elementId)"
         )
     }
 
@@ -743,6 +799,7 @@ class MatchaWorkService {
         var dueDate: String?
         var assignedTo: String?
         var progressNote: String?
+        var elementId: String?
 
         enum CodingKeys: String, CodingKey {
             case title, description, priority, status
@@ -750,6 +807,7 @@ class MatchaWorkService {
             case dueDate = "due_date"
             case assignedTo = "assigned_to"
             case progressNote = "progress_note"
+            case elementId = "element_id"
         }
 
         /// Custom encode — emit only the fields that were actually set.
@@ -772,6 +830,7 @@ class MatchaWorkService {
             try c.encodeIfPresent(dueDate, forKey: .dueDate)
             try c.encodeIfPresent(assignedTo, forKey: .assignedTo)
             try c.encodeIfPresent(progressNote, forKey: .progressNote)
+            try c.encodeIfPresent(elementId, forKey: .elementId)
         }
     }
 

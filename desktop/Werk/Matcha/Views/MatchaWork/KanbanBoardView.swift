@@ -377,6 +377,7 @@ private struct TaskComposeContent: View {
     @State private var description: String
     @State private var priority: String
     @State private var assignedTo: String?
+    @State private var selectedElementId: String?
 
     init(column: String, template: KanbanTemplate, viewModel: ProjectDetailViewModel, onClose: @escaping () -> Void) {
         self.column = column
@@ -433,6 +434,23 @@ private struct TaskComposeContent: View {
                 Spacer()
             }
 
+            if !viewModel.elements.isEmpty {
+                HStack(spacing: 6) {
+                    Text("Element")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    Picker("", selection: $selectedElementId) {
+                        Text("None").tag(String?.none)
+                        ForEach(viewModel.elements) { el in
+                            Text(el.name).tag(String?.some(el.id))
+                        }
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    Spacer()
+                }
+            }
+
             if !viewModel.collaborators.isEmpty {
                 HStack(spacing: 6) {
                     Text("Assignee")
@@ -464,7 +482,8 @@ private struct TaskComposeContent: View {
                             title: t, column: column, priority: priority,
                             assignedTo: assignedTo,
                             description: desc.isEmpty ? nil : desc,
-                            category: template.rawValue
+                            category: template.rawValue,
+                            elementId: selectedElementId
                         )
                         onClose()
                     }
@@ -555,6 +574,16 @@ private struct KanbanCardView: View {
                         .padding(.vertical, 1)
                         .background(tpl.color.opacity(0.15))
                         .cornerRadius(3)
+                    }
+
+                    if let elName = task.elementName {
+                        Text(elName)
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundColor(appState.themeAccent)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(appState.themeAccent.opacity(0.12))
+                            .cornerRadius(3)
                     }
 
                     Menu {
@@ -692,6 +721,7 @@ private struct TaskEditorSheet: View {
     @State private var boardColumn: String
     @State private var progressNote: String
     @State private var assignedTo: String?
+    @State private var selectedElementId: String?
     @State private var uploadingName: String?
     @State private var isDragOverAttachments = false
     /// Local state. The attachment preview presents nested over this editor
@@ -719,6 +749,7 @@ private struct TaskEditorSheet: View {
         _boardColumn = State(initialValue: task.boardColumn)
         _progressNote = State(initialValue: task.progressNote ?? "")
         _assignedTo = State(initialValue: task.assignedTo)
+        _selectedElementId = State(initialValue: task.elementId)
     }
 
     private var collaborators: [MWProjectCollaborator] { viewModel.collaborators }
@@ -794,6 +825,16 @@ private struct TaskEditorSheet: View {
                 .pickerStyle(.menu)
             }
 
+            if !viewModel.elements.isEmpty {
+                Picker("Element", selection: $selectedElementId) {
+                    Text("No element").tag(Optional<String>.none)
+                    ForEach(viewModel.elements) { el in
+                        Text(el.name).tag(Optional(el.id))
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+
             Picker("Assignee", selection: $assignedTo) {
                 Text("Unassigned").tag(Optional<String>.none)
                 ForEach(collaborators) { c in
@@ -836,7 +877,8 @@ private struct TaskEditorSheet: View {
                         priority: priority,
                         dueDate: dueDate.isEmpty ? nil : dueDate,
                         assignedTo: assigneeWire,
-                        progressNote: progressNote
+                        progressNote: progressNote,
+                        elementId: selectedElementId ?? ""
                     )
                     onSave(patch)
                 }

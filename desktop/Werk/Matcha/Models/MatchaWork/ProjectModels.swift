@@ -196,6 +196,8 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
     var updatedAt: String?
     var progressNote: String?
     var category: String?
+    var elementId: String?
+    var elementName: String?
     /// Last time the card crossed columns (from mw_task_history). Null until
     /// the first move. Drives the "Moved …" stamp on the kanban card.
     var lastMovedAt: String?
@@ -214,6 +216,32 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
         case updatedAt = "updated_at"
         case progressNote = "progress_note"
         case lastMovedAt = "last_moved_at"
+        case elementId = "element_id"
+        case elementName = "element_name"
+    }
+}
+
+// MARK: - Project Element
+
+struct MWProjectElement: Identifiable, Codable, Equatable {
+    let id: String
+    let projectId: String
+    var name: String
+    var kind: String?
+    var description: String?
+    var assignedTo: String?
+    var assignedName: String?
+    var order: Int
+    let createdAt: String
+    var updatedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, kind, description, order
+        case projectId = "project_id"
+        case assignedTo = "assigned_to"
+        case assignedName = "assigned_name"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
     }
 }
 

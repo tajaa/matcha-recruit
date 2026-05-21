@@ -100,6 +100,7 @@ async def list_project_tasks(project_id: UUID) -> list[dict]:
             SELECT t.id, t.project_id, t.company_id, t.created_by, t.title, t.description,
                    t.due_date, t.priority, t.status, t.board_column, t.assigned_to,
                    t.completed_at, t.created_at, t.updated_at, t.progress_note, t.category,
+                   t.element_id,
                    -- Last time this card crossed columns, for the "Moved …" stamp
                    -- on the kanban card. Null until the first column_change.
                    (SELECT MAX(h.created_at) FROM mw_task_history h
@@ -110,12 +111,14 @@ async def list_project_tasks(project_id: UUID) -> list[dict]:
                    -- expected `assigned_name` to fall back to email; that
                    -- behavior moves to the client via AssigneeDisplay.
                    COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name) AS assigned_name,
-                   u.email AS assigned_email
+                   u.email AS assigned_email,
+                   el.name AS element_name
             FROM mw_tasks t
             LEFT JOIN users u ON u.id = t.assigned_to
             LEFT JOIN clients c ON c.user_id = t.assigned_to
             LEFT JOIN employees e ON e.user_id = t.assigned_to
             LEFT JOIN admins a ON a.user_id = t.assigned_to
+            LEFT JOIN mw_project_elements el ON el.id = t.element_id
             WHERE t.project_id = $1 AND t.status != 'cancelled'
             ORDER BY
                 CASE t.priority
@@ -143,6 +146,7 @@ async def create_project_task(
     progress_note: Optional[str] = None,
     project_title: Optional[str] = None,
     category: str = "manual",
+    element_id: Optional[str] = None,
 ) -> dict:
     if board_column not in _ALLOWED_COLUMNS:
         raise ValueError(f"Invalid board_column: {board_column}")
@@ -162,16 +166,16 @@ async def create_project_task(
             INSERT INTO mw_tasks (
                 company_id, created_by, project_id, title, description,
                 due_date, priority, status, board_column, assigned_to,
-                completed_at, category, progress_note
+                completed_at, category, progress_note, element_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $13, $12)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $13, $12, $14)
             RETURNING id, project_id, company_id, created_by, title, description,
                       due_date, priority, status, board_column, assigned_to,
-                      completed_at, created_at, updated_at, progress_note, category
+                      completed_at, created_at, updated_at, progress_note, category, element_id
             """,
             company_id, created_by, project_id, title.strip(), description,
             due_date, priority, status, board_column, assigned_to,
-            completed_at, progress_note, category,
+            completed_at, progress_note, category, element_id,
         )
 
         await _log_task_history(
@@ -402,6 +406,7 @@ async def update_project_task(
         due_date = patch.get("due_date")
         assigned_to = patch.get("assigned_to")
         progress_note = patch.get("progress_note")
+        element_id = patch.get("element_id")
 
         if priority is not None and priority not in _ALLOWED_PRIORITIES:
             raise ValueError(f"Invalid priority: {priority}")
@@ -435,11 +440,12 @@ async def update_project_task(
                 due_date = CASE WHEN $8::boolean THEN $9::date ELSE due_date END,
                 assigned_to = CASE WHEN $10::boolean THEN $11::uuid ELSE assigned_to END,
                 progress_note = CASE WHEN $14::boolean THEN $15::text ELSE progress_note END,
+                element_id = CASE WHEN $16::boolean THEN $17::text ELSE element_id END,
                 updated_at = NOW()
             WHERE id = $2 AND project_id = $12
             RETURNING id, project_id, company_id, created_by, title, description,
                       due_date, priority, status, board_column, assigned_to,
-                      completed_at, created_at, updated_at, progress_note, category
+                      completed_at, created_at, updated_at, progress_note, category, element_id
             """,
             new_column,                   # $1
             task_id,                      # $2
@@ -456,6 +462,8 @@ async def update_project_task(
             completed_at_value,           # $13
             "progress_note" in patch,     # $14
             progress_note,                # $15
+            "element_id" in patch,        # $16
+            element_id,                   # $17
         )
 
         if row and new_column != current["board_column"]:

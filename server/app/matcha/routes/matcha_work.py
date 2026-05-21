@@ -3955,6 +3955,7 @@ async def create_project_task_endpoint(
             progress_note=body.get("progress_note"),
             project_title=project.get("title"),
             category=body.get("category", "manual"),
+            element_id=body.get("element_id") or None,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -3992,6 +3993,9 @@ async def update_project_task_endpoint(
         v = body["assigned_to"]
         patch["assigned_to"] = UUID(v) if v else None
 
+    if "element_id" in body:
+        patch["element_id"] = body["element_id"] or None
+
     try:
         result = await pt_svc.update_project_task(
             project_id,
@@ -4020,6 +4024,167 @@ async def delete_project_task_endpoint(
     ):
         raise HTTPException(status_code=404, detail="Task not found")
     return {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# Project Elements
+# ---------------------------------------------------------------------------
+
+@router.get("/projects/{project_id}/elements")
+async def list_project_elements(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    await _verify_project_access(project_id, current_user)
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT e.id, e.project_id, e.name, e.kind, e.description,
+                   e.assigned_to, e.order, e.created_at, e.updated_at,
+                   COALESCE(c.name, CONCAT(emp.first_name, ' ', emp.last_name), a.name) AS assigned_name
+            FROM mw_project_elements e
+            LEFT JOIN users u ON u.id::text = e.assigned_to
+            LEFT JOIN clients c ON c.user_id::text = e.assigned_to
+            LEFT JOIN employees emp ON emp.user_id::text = e.assigned_to
+            LEFT JOIN admins a ON a.user_id::text = e.assigned_to
+            WHERE e.project_id = $1
+            ORDER BY e.order ASC, e.created_at ASC
+            """,
+            str(project_id),
+        )
+    return [_serialize_element(dict(r)) for r in rows]
+
+
+@router.post("/projects/{project_id}/elements", status_code=201)
+async def create_project_element(
+    project_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    await _verify_project_access(project_id, current_user)
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    kind = body.get("kind")
+    description = body.get("description")
+    assigned_to = body.get("assigned_to") or None
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO mw_project_elements (project_id, name, kind, description, assigned_to)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, project_id, name, kind, description, assigned_to, "order", created_at, updated_at
+            """,
+            str(project_id), name, kind, description, assigned_to,
+        )
+        assigned_name = None
+        if assigned_to:
+            name_row = await conn.fetchrow(
+                """
+                SELECT COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name) AS n
+                FROM users u
+                LEFT JOIN clients c ON c.user_id = u.id
+                LEFT JOIN employees e ON e.user_id = u.id
+                LEFT JOIN admins a ON a.user_id = u.id
+                WHERE u.id::text = $1
+                """,
+                assigned_to,
+            )
+            if name_row:
+                assigned_name = name_row["n"]
+    d = _serialize_element(dict(row))
+    d["assigned_name"] = assigned_name
+    return d
+
+
+@router.patch("/projects/{project_id}/elements/{element_id}")
+async def update_project_element(
+    project_id: UUID,
+    element_id: str,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    await _verify_project_access(project_id, current_user)
+    async with get_connection() as conn:
+        existing = await conn.fetchrow(
+            "SELECT id FROM mw_project_elements WHERE id = $1 AND project_id = $2",
+            element_id, str(project_id),
+        )
+        if not existing:
+            raise HTTPException(status_code=404, detail="Element not found")
+
+        patch = {}
+        for key in ("name", "kind", "description"):
+            if key in body:
+                patch[key] = body[key]
+        if "assigned_to" in body:
+            patch["assigned_to"] = body["assigned_to"] or None
+        if "order" in body:
+            patch["order"] = body["order"]
+
+        if not patch:
+            row = await conn.fetchrow(
+                "SELECT * FROM mw_project_elements WHERE id = $1", element_id
+            )
+        else:
+            set_clauses = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(patch))
+            values = list(patch.values())
+            row = await conn.fetchrow(
+                f"""
+                UPDATE mw_project_elements
+                SET {set_clauses}, updated_at = now()
+                WHERE id = $1
+                RETURNING id, project_id, name, kind, description, assigned_to, "order", created_at, updated_at
+                """,
+                element_id, *values,
+            )
+
+        assigned_to = dict(row).get("assigned_to")
+        assigned_name = None
+        if assigned_to:
+            name_row = await conn.fetchrow(
+                """
+                SELECT COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name) AS n
+                FROM users u
+                LEFT JOIN clients c ON c.user_id = u.id
+                LEFT JOIN employees e ON e.user_id = u.id
+                LEFT JOIN admins a ON a.user_id = u.id
+                WHERE u.id::text = $1
+                """,
+                assigned_to,
+            )
+            if name_row:
+                assigned_name = name_row["n"]
+    d = _serialize_element(dict(row))
+    d["assigned_name"] = assigned_name
+    return d
+
+
+@router.delete("/projects/{project_id}/elements/{element_id}")
+async def delete_project_element(
+    project_id: UUID,
+    element_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    await _verify_project_access(project_id, current_user)
+    async with get_connection() as conn:
+        result = await conn.execute(
+            "DELETE FROM mw_project_elements WHERE id = $1 AND project_id = $2",
+            element_id, str(project_id),
+        )
+    if result == "DELETE 0":
+        raise HTTPException(status_code=404, detail="Element not found")
+    return {"deleted": True}
+
+
+def _serialize_element(d: dict) -> dict:
+    for k in ("id", "project_id"):
+        if d.get(k) is not None:
+            d[k] = str(d[k])
+    for k in ("created_at", "updated_at"):
+        if d.get(k) is not None:
+            d[k] = d[k].isoformat()
+    return d
 
 
 def _serialize_history_row(r) -> dict:

@@ -20,6 +20,7 @@ class ProjectDetailViewModel {
     var files: [MWProjectFile] = []
     var isLoadingFiles = false
     var collaborators: [MWProjectCollaborator] = []
+    var elements: [MWProjectElement] = []
     /// Attachments per task, keyed by task id. Seeded by `loadTasks`
     /// (server embeds `attachments` per task) and updated by add/delete.
     var taskFiles: [String: [MWProjectFile]] = [:]
@@ -108,6 +109,7 @@ class ProjectDetailViewModel {
             await MainActor.run {
                 tasks = []
                 files = []
+                elements = []
                 recentActivity = []
             }
         }
@@ -141,6 +143,7 @@ class ProjectDetailViewModel {
             Task { await self.loadTasks() }
             Task { await self.loadFiles() }
             Task { await self.loadCollaborators() }
+            Task { await self.loadElements() }
         } catch is CancellationError {
             // Rapid project switch cancelled the in-flight load. Don't show
             // a red banner — the new project's .task is already loading.
@@ -525,12 +528,12 @@ class ProjectDetailViewModel {
         }
     }
 
-    func addTask(title: String, column: String = "todo", priority: String = "medium", assignedTo: String? = nil, description: String? = nil, category: String? = nil) async {
+    func addTask(title: String, column: String = "todo", priority: String = "medium", assignedTo: String? = nil, description: String? = nil, category: String? = nil, elementId: String? = nil) async {
         guard let pid = project?.id else { return }
         do {
             let task = try await service.createProjectTask(
                 projectId: pid, title: title, boardColumn: column, description: description,
-                priority: priority, assignedTo: assignedTo, category: category
+                priority: priority, assignedTo: assignedTo, category: category, elementId: elementId
             )
             await MainActor.run {
                 tasks.insert(task, at: 0)
@@ -671,6 +674,68 @@ class ProjectDetailViewModel {
             }
             // Silent — picker just shows "Unassigned"; don't red-banner.
         }
+    }
+
+    // MARK: - Elements
+
+    func loadElements() async {
+        guard let pid = project?.id else { return }
+        do {
+            let list = try await service.listProjectElements(projectId: pid)
+            await MainActor.run { elements = list }
+        } catch is CancellationError { return
+        } catch {
+            let nsErr = error as NSError
+            if nsErr.domain == NSURLErrorDomain && nsErr.code == NSURLErrorCancelled { return }
+        }
+    }
+
+    func createElement(name: String, kind: String?, description: String?, assignedTo: String?) async {
+        guard let pid = project?.id else { return }
+        do {
+            let el = try await service.createProjectElement(
+                projectId: pid, name: name, kind: kind,
+                description: description, assignedTo: assignedTo
+            )
+            await MainActor.run { elements.append(el) }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func updateElement(_ element: MWProjectElement, name: String?, kind: String?, description: String?, assignedTo: String?) async {
+        guard let pid = project?.id else { return }
+        do {
+            let updated = try await service.updateProjectElement(
+                projectId: pid, elementId: element.id,
+                name: name, kind: kind,
+                description: description, assignedTo: assignedTo
+            )
+            await MainActor.run {
+                if let i = elements.firstIndex(where: { $0.id == element.id }) {
+                    elements[i] = updated
+                }
+            }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func deleteElement(_ element: MWProjectElement) async {
+        guard let pid = project?.id else { return }
+        await MainActor.run { elements.removeAll { $0.id == element.id } }
+        do {
+            try await service.deleteProjectElement(projectId: pid, elementId: element.id)
+        } catch {
+            await loadElements()
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    /// Current user's collaborator role ("owner", "editor", "viewer"). nil if not found.
+    var myRole: String? {
+        guard let uid = currentUserId else { return nil }
+        return collaborators.first(where: { $0.userId == uid })?.role
     }
 
     func moveTask(id: String, toColumn column: String) async {
