@@ -194,6 +194,43 @@ def _normalize_json_list(raw_value: Any) -> list:
     return []
 
 
+# Generous per-doc / total budgets for building document text fed to Gemini.
+# Gemini context is ~1M tokens, so 600k chars (~150k tokens) is safe. Linear
+# truncation preserves document order; the old head+tail slice silently dropped
+# middle sections (e.g. the 2nd of 3 interviews concatenated in one PDF).
+ER_DOC_PER_DOC_CHAR_CAP = 100_000
+ER_DOC_TOTAL_CHAR_CAP = 600_000
+
+
+def _build_document_excerpts(rows, *, text_key: str) -> str:
+    """Concatenate document text for an AI prompt under a generous char budget.
+
+    Uses linear truncation (text[:cap]) so document order is preserved and no
+    middle section vanishes. When a cap is hit, a visible marker is appended so
+    the model knows content was cut rather than it disappearing silently.
+    """
+    parts: list[str] = []
+    total = 0
+    for r in rows:
+        text = (r[text_key] or "").strip()
+        if not text:
+            continue
+        doc_type = r["document_type"] or "other"
+        remaining = ER_DOC_TOTAL_CHAR_CAP - total
+        if remaining <= 0:
+            parts.append(
+                f"--- {r['filename']} ({doc_type}) ---\n[omitted, prompt size cap reached]"
+            )
+            continue
+        cap = min(ER_DOC_PER_DOC_CHAR_CAP, remaining)
+        excerpt = text[:cap]
+        if len(text) > cap:
+            excerpt += f"\n[truncated after {cap} chars]"
+        total += len(excerpt)
+        parts.append(f"--- {r['filename']} ({doc_type}) ---\n{excerpt}")
+    return "\n\n".join(parts)
+
+
 async def _collect_raw_evidence_context(conn, case_id: UUID) -> str:
     """Pull uploaded document text + investigation notes + intake guidance
     rationale so the outcome analyzer has the raw source material even when
@@ -221,24 +258,7 @@ async def _collect_raw_evidence_context(conn, case_id: UUID) -> str:
     )
     if doc_rows:
         parts.append("UPLOADED EVIDENCE DOCUMENTS (raw extracted text):")
-        total_chars = 0
-        per_doc_cap = 3000
-        total_cap = 15000
-        for d in doc_rows:
-            text = (d["text"] or "").strip()
-            if not text:
-                continue
-            excerpt = text[:per_doc_cap]
-            remaining = max(0, total_cap - total_chars)
-            if remaining <= 0:
-                parts.append(f"- {d['filename']}: [omitted, prompt size cap reached]")
-                continue
-            if len(excerpt) > remaining:
-                excerpt = excerpt[:remaining]
-            total_chars += len(excerpt)
-            parts.append(
-                f"--- {d['filename']} ({d['document_type'] or 'other'}) ---\n{excerpt}"
-            )
+        parts.append(_build_document_excerpts(doc_rows, text_key="text"))
 
     # Investigation guidance notes (auto_guidance + user-authored) — these
     # often contain the narrative of what happened when the description
@@ -2583,13 +2603,7 @@ async def generate_suggested_guidance(
     }
 
     # Build document excerpts from ALL completed docs with text (used for guidance and confidence eval)
-    transcript_parts: list[str] = []
-    for tr in all_doc_text_rows:
-        text = tr["scrubbed_text"] or ""
-        if len(text) > 2000:
-            text = text[:1000] + "\n...\n" + text[-1000:]
-        transcript_parts.append(f"--- {tr['filename']} ({tr['document_type']}) ---\n{text}")
-    transcript_excerpts = "\n\n".join(transcript_parts) if transcript_parts else ""
+    transcript_excerpts = _build_document_excerpts(all_doc_text_rows, text_key="scrubbed_text")
 
     has_policy_violations = bool(policy_data.get("violations"))
     has_analyses = any(analyses_completed.values())
@@ -2857,13 +2871,7 @@ async def generate_suggested_guidance_stream(
         }
 
         # Build document excerpts from ALL completed docs with text
-        t_parts: list[str] = []
-        for tr in all_doc_text_rows_s:
-            text = tr["scrubbed_text"] or ""
-            if len(text) > 2000:
-                text = text[:1000] + "\n...\n" + text[-1000:]
-            t_parts.append(f"--- {tr['filename']} ({tr['document_type']}) ---\n{text}")
-        t_excerpts = "\n\n".join(t_parts) if t_parts else ""
+        t_excerpts = _build_document_excerpts(all_doc_text_rows_s, text_key="scrubbed_text")
 
         has_violations = bool(policy_data_local.get("violations"))
         has_any_analysis = any(analyses_done.values())
