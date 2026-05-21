@@ -223,8 +223,13 @@ struct CollabOverviewView: View {
     // MARK: - Elements card
 
     private var canEditElements: Bool {
-        let role = viewModel.myRole
-        return role == "owner" || role == "editor" || role == nil
+        // Use the backend-computed authoritative role on the project (defaults
+        // to "owner" for the creator). Deriving from the collaborators list +
+        // currentUserId is fragile and was hiding Add from owners. Backend hard-
+        // gates mutations to owner/editor anyway, so a permissive client gate is
+        // safe — only an explicit viewer/commenter is locked out here.
+        let role = viewModel.project?.collaboratorRole
+        return role != "viewer" && role != "commenter"
     }
 
     private var elementsCard: some View {
@@ -254,10 +259,27 @@ struct CollabOverviewView: View {
             }
 
             if viewModel.elements.isEmpty && !showAddElement {
-                Text("No elements yet. Add chapters, features, or sections to organize work.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.4))
-                    .padding(.vertical, 4)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("No elements yet. Add chapters, features, or sections to organize work.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.4))
+                    if canEditElements {
+                        Button {
+                            newElementName = ""
+                            newElementKind = nil
+                            newElementAssignedTo = nil
+                            showAddElement = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "plus.circle.fill").font(.system(size: 11))
+                                Text("Add your first element").font(.system(size: 11, weight: .medium))
+                            }
+                            .foregroundColor(.matcha500)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.vertical, 4)
             }
 
             if showAddElement {

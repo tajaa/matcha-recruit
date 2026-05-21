@@ -690,16 +690,19 @@ class ProjectDetailViewModel {
         }
     }
 
-    func createElement(name: String, kind: String?, description: String?, assignedTo: String?) async {
-        guard let pid = project?.id else { return }
+    @discardableResult
+    func createElement(name: String, kind: String?, description: String?, assignedTo: String?) async -> MWProjectElement? {
+        guard let pid = project?.id else { return nil }
         do {
             let el = try await service.createProjectElement(
                 projectId: pid, name: name, kind: kind,
                 description: description, assignedTo: assignedTo
             )
             await MainActor.run { elements.append(el) }
+            return el
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
+            return nil
         }
     }
 
@@ -730,12 +733,6 @@ class ProjectDetailViewModel {
             await loadElements()
             await MainActor.run { errorMessage = error.localizedDescription }
         }
-    }
-
-    /// Current user's collaborator role ("owner", "editor", "viewer"). nil if not found.
-    var myRole: String? {
-        guard let uid = currentUserId else { return nil }
-        return collaborators.first(where: { $0.userId == uid })?.role
     }
 
     func moveTask(id: String, toColumn column: String) async {

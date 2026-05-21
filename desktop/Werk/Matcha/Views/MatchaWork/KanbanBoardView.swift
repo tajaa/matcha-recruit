@@ -28,6 +28,9 @@ struct KanbanBoardView: View {
     /// category). Reuses the single legacy sheet slot to avoid a 4th `.sheet`.
     @State private var newTaskColumn: String?
     @State private var composeTemplate: KanbanTemplate?
+    /// Bumped every 60s so card header aging tints (orange >6h / red >12h)
+    /// advance on a board left open, not just on task events / reloads.
+    @State private var agingClock = Date()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -98,6 +101,12 @@ struct KanbanBoardView: View {
             if viewModel.tasks.isEmpty {
                 await viewModel.loadTasks()
             }
+        }
+        // Re-render once a minute so aging tints advance while the board sits
+        // open. Cards carry closures (non-equatable), so the parent re-render
+        // re-renders them and recomputes task.aging against the current time.
+        .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { now in
+            agingClock = now
         }
         .sheet(item: $viewingTask) { task in
             TaskViewerSheet(
@@ -183,6 +192,14 @@ struct KanbanBoardView: View {
         let colTasks = viewModel.tasks
             .filter { $0.boardColumn == key }
             .filter { taskMatchesSearch($0) }
+            .sorted {
+                // Seriousness dictates order: critical → high → medium → low.
+                // Secondary: oldest-waiting first within a priority bucket, so
+                // the longest-pending (and reddest) card floats to the top.
+                if $0.priorityRank != $1.priorityRank { return $0.priorityRank < $1.priorityRank }
+                return (PacificDateFormatter.parse($0.createdAt) ?? .distantFuture)
+                     < (PacificDateFormatter.parse($1.createdAt) ?? .distantFuture)
+            }
         let isEmpty = colTasks.isEmpty
         let isInlineAdding = inlineAddColumn == key
         let isHovered = hoveredEmptyColumn == key
@@ -378,6 +395,8 @@ private struct TaskComposeContent: View {
     @State private var priority: String
     @State private var assignedTo: String?
     @State private var selectedElementId: String?
+    @State private var isAddingElement = false
+    @State private var newElementName = ""
 
     init(column: String, template: KanbanTemplate, viewModel: ProjectDetailViewModel, onClose: @escaping () -> Void) {
         self.column = column
@@ -434,22 +453,7 @@ private struct TaskComposeContent: View {
                 Spacer()
             }
 
-            if !viewModel.elements.isEmpty {
-                HStack(spacing: 6) {
-                    Text("Element")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                    Picker("", selection: $selectedElementId) {
-                        Text("None").tag(String?.none)
-                        ForEach(viewModel.elements) { el in
-                            Text(el.name).tag(String?.some(el.id))
-                        }
-                    }
-                    .labelsHidden()
-                    .fixedSize()
-                    Spacer()
-                }
-            }
+            elementPickerRow
 
             if !viewModel.collaborators.isEmpty {
                 HStack(spacing: 6) {
@@ -498,6 +502,72 @@ private struct TaskComposeContent: View {
         .glassPanel(cornerRadius: 0, material: .hudWindow, blending: .behindWindow,
                     tint: Color.appBackground, tintOpacity: 0.62, shadow: false)
     }
+
+    /// Element row: pick an existing element or create one inline via "＋ New".
+    /// Extracted to keep the compose body within the SwiftUI type-check budget.
+    @ViewBuilder
+    private var elementPickerRow: some View {
+        HStack(spacing: 6) {
+            Text("Element")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+            if isAddingElement {
+                TextField("New element name", text: $newElementName)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundColor(appState.themeText)
+                    .padding(6)
+                    .background(appState.themeText.opacity(0.06))
+                    .cornerRadius(5)
+                    .frame(maxWidth: 180)
+                    .onSubmit { commitNewElement() }
+                Button("Add") { commitNewElement() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.matcha500)
+                    .disabled(newElementName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Cancel") { isAddingElement = false; newElementName = "" }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            } else {
+                Picker("", selection: $selectedElementId) {
+                    Text("None").tag(String?.none)
+                    ForEach(viewModel.elements) { el in
+                        Text(el.name).tag(String?.some(el.id))
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+                Button {
+                    isAddingElement = true
+                    newElementName = ""
+                } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "plus").font(.system(size: 9))
+                        Text("New").font(.system(size: 11))
+                    }
+                    .foregroundColor(.matcha500)
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+    }
+
+    private func commitNewElement() {
+        let n = newElementName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty else { return }
+        Task {
+            if let el = await viewModel.createElement(name: n, kind: nil, description: nil, assignedTo: nil) {
+                await MainActor.run {
+                    selectedElementId = el.id
+                    isAddingElement = false
+                    newElementName = ""
+                }
+            }
+        }
+    }
 }
 
 private struct KanbanCardView: View {
@@ -532,22 +602,30 @@ private struct KanbanCardView: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Button(action: onToggle) {
-                Image(systemName: task.status == "completed" ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 13))
-                    .foregroundColor(task.status == "completed" ? .matcha500 : .secondary)
-            }
-            .buttonStyle(.plain)
+        VStack(alignment: .leading, spacing: 0) {
+            // Header band — checkbox + title. Tints orange after 6h / red after
+            // 12h of inactivity (anchor = lastMovedAt ?? createdAt); never for
+            // done/completed cards. See MWProjectTask.aging.
+            HStack(alignment: .top, spacing: 8) {
+                Button(action: onToggle) {
+                    Image(systemName: task.status == "completed" ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 13))
+                        .foregroundColor(task.status == "completed" ? .matcha500 : .secondary)
+                }
+                .buttonStyle(.plain)
 
-            VStack(alignment: .leading, spacing: 3) {
                 Text(task.title)
                     .font(.system(size: 12))
                     .foregroundColor(appState.themeText)
                     .strikethrough(task.status == "completed")
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(8)
+            .background(headerTint)
 
+            VStack(alignment: .leading, spacing: 3) {
                 if let note = task.progressNote, !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     HStack(spacing: 4) {
                         Image(systemName: "location.north.line")
@@ -644,18 +722,31 @@ private struct KanbanCardView: View {
                     attachmentStrip
                 }
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.bottom, 8)
+            .padding(.top, 4)
         }
-        .padding(8)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .elevatedCard(cornerRadius: 8)
         .onTapGesture(perform: onTap)
     }
 
-    /// "Added <date> · Moved <relative>" in Pacific time. Moved only shows
-    /// once the card has crossed columns at least once (lastMovedAt != nil).
+    /// Header background tint by inactivity age. Clear when fresh / done.
+    private var headerTint: Color {
+        switch task.aging {
+        case .none: return .clear
+        case .warn: return .orange.opacity(0.18)
+        case .overdue: return .red.opacity(0.18)
+        }
+    }
+
+    /// "Added <date> at <time> · Moved <relative>" in Pacific time. The exact
+    /// creation time makes wait-duration legible. Moved only shows once the
+    /// card has crossed columns at least once (lastMovedAt != nil).
     @ViewBuilder
     private var timestampLine: some View {
-        if let added = PacificDateFormatter.shortDate(task.createdAt) {
+        if let added = PacificDateFormatter.dateTime(task.createdAt) {
             HStack(spacing: 3) {
                 Text("Added \(added)")
                 if let moved = PacificDateFormatter.relative(task.lastMovedAt) {
@@ -722,6 +813,8 @@ private struct TaskEditorSheet: View {
     @State private var progressNote: String
     @State private var assignedTo: String?
     @State private var selectedElementId: String?
+    @State private var isAddingElement = false
+    @State private var newElementName = ""
     @State private var uploadingName: String?
     @State private var isDragOverAttachments = false
     /// Local state. The attachment preview presents nested over this editor
@@ -825,15 +918,7 @@ private struct TaskEditorSheet: View {
                 .pickerStyle(.menu)
             }
 
-            if !viewModel.elements.isEmpty {
-                Picker("Element", selection: $selectedElementId) {
-                    Text("No element").tag(Optional<String>.none)
-                    ForEach(viewModel.elements) { el in
-                        Text(el.name).tag(Optional(el.id))
-                    }
-                }
-                .pickerStyle(.menu)
-            }
+            elementEditorRow
 
             Picker("Assignee", selection: $assignedTo) {
                 Text("Unassigned").tag(Optional<String>.none)
@@ -896,6 +981,68 @@ private struct TaskEditorSheet: View {
         }
         .sheet(item: $previewFile) { file in
             AttachmentPreviewSheet(file: file)
+        }
+    }
+
+    /// Element row: pick an existing element or create one inline via "＋ New".
+    @ViewBuilder
+    private var elementEditorRow: some View {
+        if isAddingElement {
+            HStack(spacing: 6) {
+                Text("Element").font(.system(size: 11)).foregroundColor(.secondary)
+                TextField("New element name", text: $newElementName)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundColor(.white)
+                    .padding(6)
+                    .background(Color.zinc800)
+                    .cornerRadius(5)
+                    .onSubmit { commitNewElement() }
+                Button("Add") { commitNewElement() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.matcha500)
+                    .disabled(newElementName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Cancel") { isAddingElement = false; newElementName = "" }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+        } else {
+            HStack(spacing: 6) {
+                Picker("Element", selection: $selectedElementId) {
+                    Text("No element").tag(Optional<String>.none)
+                    ForEach(viewModel.elements) { el in
+                        Text(el.name).tag(Optional(el.id))
+                    }
+                }
+                .pickerStyle(.menu)
+                Button {
+                    isAddingElement = true
+                    newElementName = ""
+                } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "plus").font(.system(size: 9))
+                        Text("New").font(.system(size: 11))
+                    }
+                    .foregroundColor(.matcha500)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func commitNewElement() {
+        let n = newElementName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty else { return }
+        Task {
+            if let el = await viewModel.createElement(name: n, kind: nil, description: nil, assignedTo: nil) {
+                await MainActor.run {
+                    selectedElementId = el.id
+                    isAddingElement = false
+                    newElementName = ""
+                }
+            }
         }
     }
 

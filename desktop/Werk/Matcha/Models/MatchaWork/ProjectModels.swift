@@ -245,7 +245,35 @@ struct MWProjectElement: Identifiable, Codable, Equatable {
     }
 }
 
+/// Time-since-last-activity bucket driving the kanban card header tint.
+/// none → no tint, warn → orange, overdue → red.
+enum TaskAging { case none, warn, overdue }
+
 extension MWProjectTask {
+    /// Priority bucket for column ordering (critical highest). Mirrors the
+    /// backend `list_project_tasks` ORDER BY and CollabOverview.upcomingTasks().
+    var priorityRank: Int {
+        switch priority {
+        case "critical": return 0
+        case "high": return 1
+        case "medium": return 2
+        case "low": return 3
+        default: return 4
+        }
+    }
+
+    /// Time-since-last-activity bucket. Anchor = lastMovedAt ?? createdAt, so
+    /// moving a card between columns resets its clock. Done/completed cards
+    /// never age.
+    var aging: TaskAging {
+        if boardColumn == "done" || status == "completed" { return .none }
+        guard let d = PacificDateFormatter.parse(lastMovedAt ?? createdAt) else { return .none }
+        let hours = Date().timeIntervalSince(d) / 3600
+        if hours >= 12 { return .overdue }
+        if hours >= 6 { return .warn }
+        return .none
+    }
+
     /// Human-readable assignee label, or nil when no assignee is set.
     /// Prefers the server-provided `assignedName` when it's a real name
     /// (not an email). When the server falls back to email (legacy rows
@@ -786,6 +814,16 @@ enum PacificDateFormatter {
         out.timeZone = pacific
         out.dateFormat = "MMM d, h:mm a"
         return out.string(from: date) + " PT"
+    }
+
+    /// Pacific date + time, e.g. "May 20 at 5:23 PM". For the kanban card
+    /// timestamp line so the exact wait-start is visible.
+    static func dateTime(_ iso: String?) -> String? {
+        guard let date = parse(iso) else { return nil }
+        let out = DateFormatter()
+        out.timeZone = pacific
+        out.dateFormat = "MMM d 'at' h:mm a"
+        return out.string(from: date)
     }
 
     /// Compact relative ("just now", "2h ago", "3d ago"); falls back to a short
