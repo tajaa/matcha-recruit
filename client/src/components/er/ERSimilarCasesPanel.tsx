@@ -56,7 +56,7 @@ export function ERSimilarCasesPanel({ caseId }: Props) {
             try {
               const msg = JSON.parse(raw)
               if (msg.type === 'phase') setPhase(msg.message ?? '')
-              if (msg.type === 'complete') { setData(msg.data); setLoading(false); return }
+              if (msg.type === 'complete' || msg.type === 'cached') { setData(msg.result); setLoading(false); return }
             } catch { /* skip malformed */ }
           }
         }
