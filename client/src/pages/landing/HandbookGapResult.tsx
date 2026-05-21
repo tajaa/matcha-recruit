@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import {
-  AlertOctagon, AlertTriangle, CheckCircle2, Info, Loader2, Lock, ShieldCheck, Sparkles,
+  AlertOctagon, AlertTriangle, CheckCircle2, Download, FileText, Info, Loader2, Lock,
+  ShieldCheck, Sparkles, X,
 } from 'lucide-react'
 
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
 import { useMe } from '../../hooks/useMe'
+import { api } from '../../api/client'
 
 const INK = 'var(--color-ivory-ink)'
 const BG = 'var(--color-ivory-bg)'
@@ -223,6 +225,31 @@ function ResultBody({ report }: { report: ReportPayload }) {
   const { gap_counts, gaps, sample_gaps, states, tier, hidden_by_state } = report
   const isFree = tier === 'free'
 
+  const [showUpgrade, setShowUpgrade] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [downloadErr, setDownloadErr] = useState<string | null>(null)
+
+  // Prompt free-tier users to upgrade once per completed result with gaps.
+  // (Re-opens on reload/back-nav — acceptable for a completion prompt.)
+  useEffect(() => {
+    if (isFree && gap_counts.total_gaps > 0) setShowUpgrade(true)
+  }, [isFree, gap_counts.total_gaps])
+
+  async function handleDownload() {
+    setDownloadErr(null)
+    setDownloading(true)
+    try {
+      await api.download(
+        `/resources/handbook-gap-analyzer/report/${report.report_id}/pdf`,
+        `handbook-audit-${states.join('-') || 'report'}.pdf`,
+      )
+    } catch {
+      setDownloadErr('Could not download the report. Please try again.')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   const groupedGaps = useMemo(() => {
     // Paid sees the full gaps array. Free sees only sample_gaps; we still group
     // them by state so the per-state "X more hidden" reveal cards render in
@@ -297,6 +324,23 @@ function ResultBody({ report }: { report: ReportPayload }) {
           help="Best-practice clauses to consider"
         />
       </div>
+
+      {!isFree && (
+        <div className="flex items-center justify-end gap-3 mb-8">
+          {downloadErr && <span className="text-xs" style={{ color: '#8a4a3a' }}>{downloadErr}</span>}
+          <button
+            onClick={handleDownload}
+            disabled={downloading}
+            className="inline-flex items-center gap-2 px-5 h-10 rounded-full text-sm font-medium disabled:opacity-60"
+            style={{ backgroundColor: INK, color: BG }}
+          >
+            {downloading
+              ? <Loader2 className="w-4 h-4 animate-spin" />
+              : <Download className="w-4 h-4" />}
+            Download report (PDF)
+          </button>
+        </div>
+      )}
 
       {isFree && gap_counts.total_gaps > 0 && (
         <UpgradeBanner totalGaps={gap_counts.total_gaps} sampleCount={(sample_gaps || []).length} />
@@ -375,7 +419,92 @@ function ResultBody({ report }: { report: ReportPayload }) {
           not legal advice.
         </p>
       )}
+
+      <HandbookUpgradeModal open={showUpgrade} onClose={() => setShowUpgrade(false)} />
     </>
+  )
+}
+
+function HandbookUpgradeModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [open, onClose])
+
+  if (!open) return null
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ backgroundColor: 'rgba(31,29,26,0.55)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div
+        className="relative w-full max-w-md rounded-2xl p-8"
+        style={{ backgroundColor: BG, color: INK, border: `1px solid ${LINE}` }}
+      >
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute top-4 right-4 p-1 rounded-full"
+          style={{ color: MUTED }}
+        >
+          <X className="w-4 h-4" />
+        </button>
+
+        <Sparkles className="w-6 h-6 mb-4" style={{ color: INK }} />
+        <h2
+          className="tracking-tight mb-3"
+          style={{ fontFamily: DISPLAY, fontWeight: 500, fontSize: '1.5rem' }}
+        >
+          Save your results & get expert guidance.
+        </h2>
+        <p className="text-sm leading-relaxed mb-5" style={{ color: MUTED }}>
+          Upgrade to Matcha Lite to keep this audit and unlock the full clause-by-clause report.
+        </p>
+
+        <ul className="space-y-3 mb-6">
+          <li className="flex items-start gap-3 text-sm" style={{ color: INK }}>
+            <FileText className="w-4 h-4 mt-0.5 shrink-0" style={{ color: INK }} />
+            Download and keep your complete gap report
+          </li>
+          <li className="flex items-start gap-3 text-sm" style={{ color: INK }}>
+            <ShieldCheck className="w-4 h-4 mt-0.5 shrink-0" style={{ color: INK }} />
+            20-minute handbook consult with a Matcha Professional
+          </li>
+        </ul>
+
+        <div
+          className="flex items-center gap-3 rounded-xl px-4 py-3 mb-6"
+          style={{ backgroundColor: 'rgba(31,29,26,0.04)', border: `1px dashed ${LINE}` }}
+        >
+          <Lock className="w-4 h-4 shrink-0" style={{ color: INK }} />
+          <span className="text-sm" style={{ color: MUTED }}>Download report (PDF)</span>
+          <span className="ml-auto text-[11px] uppercase tracking-[0.2em]" style={{ color: MUTED, fontFamily: 'var(--font-mono)' }}>
+            Locked
+          </span>
+        </div>
+
+        <div className="flex flex-wrap gap-3">
+          <Link
+            to="/matcha-lite"
+            className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
+            style={{ backgroundColor: INK, color: BG }}
+          >
+            Upgrade to Matcha Lite
+          </Link>
+          <button
+            onClick={onClose}
+            className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
+            style={{ border: `1px solid ${LINE}`, color: INK }}
+          >
+            Maybe later
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 

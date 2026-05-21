@@ -203,7 +203,8 @@ function FeatureGrid() {
           <p className="mt-4 sm:mt-5 text-base sm:text-lg" style={{ color: MUTED, lineHeight: 1.6 }}>
             Each tool stands on its own. Together they cover the everyday
             HR risk surface for a small team without a dedicated compliance
-            function.
+            function — plus a 20-minute handbook consult with a Matcha
+            Professional to turn your audit results into action.
           </p>
         </div>
 

@@ -14,14 +14,18 @@ Gating to authed callers prevents anonymous abuse — running an audit always
 requires a Free-tier signup at minimum.
 """
 
+import asyncio
+import html as html_lib
 import json
 import logging
 import re
 from datetime import timedelta
+from io import BytesIO
 from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import StreamingResponse
 
 from ...database import get_connection
 from ..models.auth import CurrentUser
@@ -171,6 +175,132 @@ def _summarize_gaps(report: dict[str, Any]) -> dict[str, Any]:
         "created_at": report["created_at"].isoformat() if report.get("created_at") else None,
         "completed_at": report["completed_at"].isoformat() if report.get("completed_at") else None,
     }
+
+
+def _coerce_jsonb(value: Any, fallback: Any) -> Any:
+    """asyncpg may hand back JSONB as a str; normalize to a Python object."""
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return fallback
+    return value if value is not None else fallback
+
+
+async def _load_owned_report(conn, report_id: UUID, current_user: CurrentUser) -> dict[str, Any]:
+    """Fetch a report and enforce owner-only access (user_id match, or email
+    fallback for legacy rows). Shared by the JSON report endpoint and the PDF
+    export so the ownership rule never drifts between them. Raises 404/403."""
+    row = await conn.fetchrow(
+        """
+        SELECT id, email, user_id, states, industry, status,
+               gap_counts, gaps_jsonb, error_text,
+               created_at, completed_at
+        FROM handbook_audit_reports
+        WHERE id = $1
+        """,
+        report_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    report = dict(row)
+    user_email = (current_user.email or "").lower() or None
+    is_owner = bool(
+        (report.get("user_id") and str(report["user_id"]) == str(current_user.id))
+        or (user_email and report.get("email") and user_email == report["email"].lower())
+    )
+    if not is_owner:
+        raise HTTPException(status_code=403, detail="This report belongs to another account")
+
+    report["gap_counts"] = _coerce_jsonb(report.get("gap_counts"), {})
+    return report
+
+
+def _build_audit_report_html(report: dict[str, Any]) -> str:
+    """Render a handbook-audit report (full gap list) to a self-contained HTML
+    document for WeasyPrint. Pure function — no DB/IO — so it's unit-testable."""
+    esc = html_lib.escape
+    counts = _coerce_jsonb(report.get("gap_counts"), {}) or {}
+    states = report.get("states") or []
+    industry = report.get("industry")
+    completed_at = report.get("completed_at")
+    gaps = list(_coerce_jsonb(report.get("gaps_jsonb"), []) or [])
+
+    total_gaps = int(counts.get("total_gaps", len(gaps)))
+
+    # Group gaps by state, severity-ranked, mirroring the on-screen results.
+    by_state: dict[str, list[dict[str, Any]]] = {}
+    for g in gaps:
+        by_state.setdefault(g.get("state") or "—", []).append(g)
+    for lst in by_state.values():
+        lst.sort(key=lambda g: _SEVERITY_ORDER.get((g.get("severity") or "").lower(), 9))
+
+    sev_colors = {"critical": "#8a4a3a", "important": "#a47c2c", "recommended": "#5b6f7c"}
+
+    sections: list[str] = []
+    for state in sorted(by_state.keys()):
+        rows: list[str] = []
+        for g in by_state[state]:
+            sev = (g.get("severity") or "").lower()
+            color = sev_colors.get(sev, "#5b6f7c")
+            meta_bits = []
+            if g.get("citation"):
+                meta_bits.append(f"cite · {esc(str(g['citation']))}")
+            if g.get("matched_section_title"):
+                meta_bits.append(f"matched · {esc(str(g['matched_section_title']))}")
+            meta = (
+                f"<div class='meta'>{' &nbsp;·&nbsp; '.join(meta_bits)}</div>" if meta_bits else ""
+            )
+            good = (
+                f"<p class='good'>{esc(str(g['what_good_looks_like']))}</p>"
+                if g.get("what_good_looks_like")
+                else ""
+            )
+            rows.append(
+                f"<div class='gap' style='border-left:3px solid {color}'>"
+                f"<div class='gap-head'><span class='title'>{esc(str(g.get('requirement_title') or 'Requirement'))}</span>"
+                f"<span class='sev' style='color:{color};border-color:{color}'>{esc(sev or 'gap')}</span></div>"
+                f"{good}{meta}</div>"
+            )
+        sections.append(
+            f"<section><h2>{esc(state)}</h2>{''.join(rows) or '<p class=\"empty\">No gaps flagged.</p>'}</section>"
+        )
+
+    completed_str = ""
+    if completed_at is not None:
+        try:
+            completed_str = completed_at.strftime("%B %-d, %Y")
+        except Exception:
+            completed_str = str(completed_at)
+
+    industry_str = f" · {esc(str(industry))}" if industry else ""
+
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  @page {{ size: A4; margin: 40px; }}
+  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; color: #1f1d1a; font-size: 12px; line-height: 1.5; }}
+  h1 {{ font-size: 26px; font-weight: 600; margin: 0 0 6px; }}
+  .sub {{ color: #6b6862; font-size: 12px; margin: 0 0 4px; }}
+  .summary {{ margin: 18px 0 24px; font-size: 13px; }}
+  section {{ page-break-inside: avoid; margin-bottom: 22px; }}
+  h2 {{ font-size: 16px; font-weight: 600; border-bottom: 1px solid #e4e0d8; padding-bottom: 4px; margin: 0 0 10px; }}
+  .gap {{ padding: 8px 12px; margin-bottom: 8px; background: #faf8f4; border-radius: 6px; page-break-inside: avoid; }}
+  .gap-head {{ display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }}
+  .title {{ font-weight: 600; font-size: 13px; }}
+  .sev {{ font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; border: 1px solid; border-radius: 4px; padding: 1px 6px; white-space: nowrap; }}
+  .good {{ color: #4b4842; margin: 6px 0 0; }}
+  .meta {{ color: #8a877f; font-size: 10.5px; margin-top: 6px; }}
+  .empty {{ color: #8a877f; }}
+  footer {{ margin-top: 28px; color: #8a877f; font-size: 10px; }}
+</style></head><body>
+  <h1>Handbook Audit Report</h1>
+  <p class="sub">{esc(' · '.join(states))}{industry_str}</p>
+  <p class="summary"><strong>{total_gaps}</strong> gap{'' if total_gaps == 1 else 's'} found
+    — Critical {int(counts.get('critical', 0))} · Important {int(counts.get('important', 0))} · Recommended {int(counts.get('recommended', 0))}.</p>
+  {''.join(sections)}
+  <footer>{('Completed ' + completed_str + '. ') if completed_str else ''}Informational only — not legal advice.</footer>
+</body></html>"""
 
 
 @router.get("/quota")
@@ -324,34 +454,7 @@ async def get_handbook_audit_report(
 ):
     """Polling endpoint. Returns the full report when the caller owns it."""
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT id, email, user_id, states, industry, status,
-                   gap_counts, gaps_jsonb, error_text,
-                   created_at, completed_at
-            FROM handbook_audit_reports
-            WHERE id = $1
-            """,
-            report_id,
-        )
-    if not row:
-        raise HTTPException(status_code=404, detail="Report not found")
-
-    report = dict(row)
-
-    user_email = (current_user.email or "").lower() or None
-    is_owner = bool(
-        (report.get("user_id") and str(report["user_id"]) == str(current_user.id))
-        or (user_email and report.get("email") and user_email == report["email"].lower())
-    )
-    if not is_owner:
-        raise HTTPException(status_code=403, detail="This report belongs to another account")
-
-    if isinstance(report.get("gap_counts"), str):
-        try:
-            report["gap_counts"] = json.loads(report["gap_counts"])
-        except json.JSONDecodeError:
-            report["gap_counts"] = {}
+        report = await _load_owned_report(conn, report_id, current_user)
 
     summary = _summarize_gaps(report)
     summary["report_id"] = str(report["id"])
@@ -396,3 +499,41 @@ async def get_handbook_audit_report(
             samples,
         )
     return summary
+
+
+@router.get("/report/{report_id}/pdf")
+async def export_handbook_audit_pdf(
+    report_id: UUID,
+    current_user: CurrentUser = Depends(require_client),
+):
+    """Download the full audit report as a PDF. Paid-tier only — free callers
+    get a 403 upsell. The full gap list is the value being gated (free tier
+    only ever sees sample gaps on the report page)."""
+    async with get_connection() as conn:
+        report = await _load_owned_report(conn, report_id, current_user)
+        tier = await _resolve_caller_tier(conn, current_user.id)
+
+    if report.get("status") != "ready":
+        raise HTTPException(status_code=409, detail="Audit hasn't finished yet")
+    if tier == "free":
+        raise HTTPException(
+            status_code=403,
+            detail="Saving the full report is a Matcha Lite feature",
+        )
+
+    html = _build_audit_report_html(report)
+    try:
+        from weasyprint import HTML  # local import: heavy native dep
+        pdf_bytes = await asyncio.to_thread(lambda: HTML(string=html).write_pdf())
+    except Exception as exc:
+        logger.exception("Handbook audit PDF render failed for report %s: %s", report_id, exc)
+        raise HTTPException(status_code=500, detail="Could not generate the report PDF")
+
+    states = report.get("states") or []
+    state_part = "-".join(states) if states else "report"
+    filename = f"handbook-audit-{state_part}.pdf"
+    return StreamingResponse(
+        BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
