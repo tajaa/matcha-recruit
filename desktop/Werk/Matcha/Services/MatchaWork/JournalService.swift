@@ -79,6 +79,11 @@ final class JournalService {
         invalidateLists()
     }
 
+    func deleteJournal(id: String) async throws {
+        _ = try await client.requestData(method: "DELETE", path: "\(basePath)/journals/\(id)/permanent")
+        invalidateLists()
+    }
+
     func listJournalEntries(
         journalId: String, before: String? = nil, limit: Int = 50
     ) async throws -> [MWJournalEntry] {

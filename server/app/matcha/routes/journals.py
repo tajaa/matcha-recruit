@@ -115,6 +115,17 @@ async def archive_journal_endpoint(
         raise HTTPException(status_code=403, detail=str(e))
 
 
+@router.delete("/journals/{journal_id}/permanent", status_code=204)
+async def delete_journal_permanent_endpoint(
+    journal_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    try:
+        await journal_service.delete_journal_permanent(journal_id, current_user.id)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+
 # ── Entries ─────────────────────────────────────────────────────────────
 
 

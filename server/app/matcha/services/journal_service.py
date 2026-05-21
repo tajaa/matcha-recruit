@@ -196,6 +196,14 @@ async def archive_journal(journal_id: UUID, viewer_id: UUID) -> None:
         )
 
 
+async def delete_journal_permanent(journal_id: UUID, viewer_id: UUID) -> None:
+    """Hard-delete a journal. Entries + collaborators cascade via FK."""
+    async with get_connection() as conn:
+        if not await _is_creator(conn, journal_id, viewer_id):
+            raise PermissionError("Only the journal creator can delete")
+        await conn.execute("DELETE FROM mw_journals WHERE id = $1", journal_id)
+
+
 # ── Entries ─────────────────────────────────────────────────────────────
 
 

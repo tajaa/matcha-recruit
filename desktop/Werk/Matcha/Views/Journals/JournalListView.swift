@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Sidebar list of journals visible to the current user. Selection writes
 /// `appState.selectedJournalId` and clears other selection slots so
@@ -96,6 +97,37 @@ struct JournalListView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("Archive") {
+                Task {
+                    try? await JournalService.shared.archiveJournal(id: j.id)
+                    await MainActor.run {
+                        if appState.selectedJournalId == j.id { appState.selectedJournalId = nil }
+                        appState.journalsListGeneration &+= 1
+                    }
+                    await load()
+                }
+            }
+            Divider()
+            Button("Delete…") {
+                let alert = NSAlert()
+                alert.messageText = "Delete \"\(j.title)\"?"
+                alert.informativeText = "Permanently deletes the journal and all its entries. Cannot be undone."
+                alert.alertStyle = .critical
+                alert.addButton(withTitle: "Delete Permanently")
+                alert.addButton(withTitle: "Cancel")
+                if alert.runModal() == .alertFirstButtonReturn {
+                    Task {
+                        try? await JournalService.shared.deleteJournal(id: j.id)
+                        await MainActor.run {
+                            if appState.selectedJournalId == j.id { appState.selectedJournalId = nil }
+                            appState.journalsListGeneration &+= 1
+                        }
+                        await load()
+                    }
+                }
+            }
+        }
     }
 
     /// Map the stored color name to a SwiftUI Color. Free-form column on
