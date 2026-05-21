@@ -5453,6 +5453,25 @@ async def search_admin_users_endpoint(
     return await proj_svc.search_admin_users(q, current_user.id)
 
 
+@router.get("/projects/{project_id}/chats")
+async def list_project_chats_endpoint(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List AI chat threads in a project visible to the current user.
+
+    Private-per-person: returns threads the user created in this project plus
+    any project thread shared with them. Access to the project itself is
+    verified first.
+    """
+    from ..services import project_service as proj_svc
+    project, _role = await _verify_project_access(project_id, current_user)
+    company_id = project.get("company_id")
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated")
+    return await proj_svc.list_project_chats(project_id, company_id, current_user.id)
+
+
 @router.post("/projects/{project_id}/chats")
 async def create_project_chat_endpoint(
     project_id: UUID,

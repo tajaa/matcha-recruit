@@ -81,6 +81,10 @@ struct MWThread: Codable, Identifiable {
     var payerMode: Bool
     let createdAt: String
     var updatedAt: String?
+    // Present on project-scoped thread listings; nil elsewhere. Used to render
+    // the "Shared" badge and gate the owner-only Share action in collab projects.
+    var createdBy: String?
+    var collaboratorCount: Int?
 
     var resolvedTaskType: MWTaskType {
         taskType ?? .chat
@@ -99,6 +103,8 @@ struct MWThread: Codable, Identifiable {
         case payerMode = "payer_mode"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case createdBy = "created_by"
+        case collaboratorCount = "collaborator_count"
     }
 }
 

@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum CollabRightPanel: String, CaseIterable, Identifiable {
-    case chat, kanban, files, sections, overview
+    case chat, kanban, files, sections, threads, overview
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -9,6 +9,7 @@ enum CollabRightPanel: String, CaseIterable, Identifiable {
         case .kanban: return "Kanban"
         case .files: return "Files"
         case .sections: return "Sections"
+        case .threads: return "Threads"
         case .overview: return "Overview"
         }
     }
@@ -18,6 +19,7 @@ enum CollabRightPanel: String, CaseIterable, Identifiable {
         case .kanban: return "rectangle.split.3x1"
         case .files: return "doc.on.doc"
         case .sections: return "list.bullet.rectangle"
+        case .threads: return "bubble.left.and.text.bubble.right"
         case .overview: return "rectangle.grid.2x2"
         }
     }
@@ -28,7 +30,8 @@ enum CollabRightPanel: String, CaseIterable, Identifiable {
         case .kanban: return "2"
         case .files: return "3"
         case .sections: return "4"
-        case .overview: return "5"
+        case .threads: return "5"
+        case .overview: return "6"
         }
     }
 }

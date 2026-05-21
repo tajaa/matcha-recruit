@@ -588,6 +588,17 @@ class MatchaWorkService {
         return try await client.request(method: "POST", path: "\(basePath)/projects/\(projectId)/chats", body: Body(title: title))
     }
 
+    /// AI chat threads in a project visible to the current user (own + shared).
+    func listProjectChats(projectId: String) async throws -> [MWThread] {
+        try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/chats")
+    }
+
+    /// Share a project thread with another collaborator (owner-only server-side).
+    func addThreadCollaborator(threadId: String, userId: String) async throws {
+        struct Body: Codable { let user_id: String }
+        _ = try await client.requestData(method: "POST", path: "\(basePath)/threads/\(threadId)/collaborators", body: Body(user_id: userId))
+    }
+
     func exportProject(projectId: String, format: String) async throws -> Data {
         try await client.requestData(method: "GET", path: "\(basePath)/projects/\(projectId)/export/\(format)")
     }

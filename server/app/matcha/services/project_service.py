@@ -975,6 +975,38 @@ async def create_project_chat(project_id: UUID, company_id: UUID, user_id: UUID,
     return dict(row)
 
 
+async def list_project_chats(project_id: UUID, company_id: UUID, user_id: UUID) -> list[dict]:
+    """List AI chat threads scoped to a project, private-per-person.
+
+    A user sees threads they created in this project plus any project thread
+    explicitly shared with them (via mw_thread_collaborators). Threads created
+    by other collaborators that haven't been shared are hidden. `company_id` is
+    accepted for signature parity / future tenant filtering; access is already
+    gated by _verify_project_access at the route.
+    """
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT t.id, t.title, t.task_type, t.status, t.version, t.is_pinned,
+                   t.node_mode, t.compliance_mode, t.payer_mode,
+                   t.created_by, t.created_at, t.updated_at,
+                   (SELECT COUNT(*) FROM mw_thread_collaborators c WHERE c.thread_id = t.id)
+                       AS collaborator_count
+            FROM mw_threads t
+            WHERE t.project_id = $1 AND (
+                t.created_by = $2
+                OR EXISTS (
+                    SELECT 1 FROM mw_thread_collaborators c
+                    WHERE c.thread_id = t.id AND c.user_id = $2
+                )
+            )
+            ORDER BY t.is_pinned DESC, t.updated_at DESC
+            """,
+            project_id, user_id,
+        )
+    return [dict(r) for r in rows]
+
+
 # ── Recruiting-specific operations ──
 
 
