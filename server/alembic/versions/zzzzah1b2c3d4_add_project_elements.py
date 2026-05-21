@@ -17,7 +17,7 @@ def upgrade():
     op.execute("""
         CREATE TABLE mw_project_elements (
             id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-            project_id TEXT NOT NULL REFERENCES mw_projects(id) ON DELETE CASCADE,
+            project_id UUID NOT NULL REFERENCES mw_projects(id) ON DELETE CASCADE,
             name TEXT NOT NULL,
             kind TEXT,
             description TEXT,
