@@ -10,6 +10,7 @@ private let kanbanColumns: [(key: String, label: String)] = [
 ]
 
 struct KanbanBoardView: View {
+    @Environment(AppState.self) private var appState
     @Bindable var viewModel: ProjectDetailViewModel
     @State private var editingTask: MWProjectTask?
     /// Read-only viewer modal. Tapping a card opens this first; the user
@@ -66,7 +67,7 @@ struct KanbanBoardView: View {
                 boardColumns
             }
         }
-        .background(Color.appBackground)
+        .background(ThemeRadialBackground())
         // Only fetch when we have nothing yet. The eager prefetch in
         // `loadProject` already runs for collab projects, and a background
         // refresh races user toggles: a stale GET-list response can land
@@ -176,7 +177,7 @@ struct KanbanBoardView: View {
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
-                    .background(Color.zinc800)
+                    .background(appState.themeText.opacity(0.08))
                     .cornerRadius(4)
                 Spacer()
                 Menu {
@@ -252,10 +253,10 @@ struct KanbanBoardView: View {
             TextField("New task", text: $inlineAddTitle)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
-                .foregroundColor(.white)
+                .foregroundColor(appState.themeText)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
-                .background(Color.zinc800)
+                .background(appState.themeText.opacity(0.06))
                 .cornerRadius(5)
                 .onSubmit { commitInlineAdd(column: column) }
             Button {
@@ -299,6 +300,7 @@ struct KanbanBoardView: View {
 /// existing task id). Prefills the description scaffold + default priority +
 /// category, then creates on Add.
 private struct TaskComposeContent: View {
+    @Environment(AppState.self) private var appState
     let column: String
     let template: KanbanTemplate
     @Bindable var viewModel: ProjectDetailViewModel
@@ -329,24 +331,24 @@ private struct TaskComposeContent: View {
                     .foregroundColor(template.color)
                 Text("New \(template.displayName) Ticket")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(appState.themeText)
             }
 
             TextField("Title", text: $title)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
-                .foregroundColor(.white)
+                .foregroundColor(appState.themeText)
                 .padding(8)
-                .background(Color.zinc800)
+                .background(appState.themeText.opacity(0.06))
                 .cornerRadius(6)
 
             TextEditor(text: $description)
                 .font(.system(size: 12))
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundColor(appState.themeText.opacity(0.9))
                 .scrollContentBackground(.hidden)
                 .padding(6)
                 .frame(height: 240)
-                .background(Color.zinc800)
+                .background(appState.themeText.opacity(0.06))
                 .cornerRadius(6)
 
             HStack(spacing: 6) {
@@ -394,6 +396,7 @@ private struct TaskComposeContent: View {
 }
 
 private struct KanbanCardView: View {
+    @Environment(AppState.self) private var appState
     let task: MWProjectTask
     let attachments: [MWProjectFile]
     let onTap: () -> Void
@@ -435,7 +438,7 @@ private struct KanbanCardView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.title)
                     .font(.system(size: 12))
-                    .foregroundColor(.white)
+                    .foregroundColor(appState.themeText)
                     .strikethrough(task.status == "completed")
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
@@ -444,11 +447,11 @@ private struct KanbanCardView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "location.north.line")
                             .font(.system(size: 8))
-                            .foregroundColor(.matcha500)
+                            .foregroundColor(appState.themeAccent)
                         Text(note)
                             .font(.system(size: 10))
                             .italic()
-                            .foregroundColor(.white.opacity(0.6))
+                            .foregroundColor(appState.themeText.opacity(0.6))
                             .lineLimit(1)
                     }
                 }
@@ -483,11 +486,11 @@ private struct KanbanCardView: View {
                     } label: {
                         Text(currentColumnLabel)
                             .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.8))
+                            .foregroundColor(appState.themeText.opacity(0.8))
                             .tracking(0.3)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.white.opacity(0.12))
+                            .background(appState.themeText.opacity(0.08))
                             .cornerRadius(8)
                     }
                     .menuStyle(.borderlessButton)
@@ -496,12 +499,12 @@ private struct KanbanCardView: View {
 
                     if let initial = assigneeInitial, let name = assigneeDisplay {
                         Circle()
-                            .fill(Color.white.opacity(0.12))
+                            .fill(appState.themeAccent.opacity(0.18))
                             .frame(width: 14, height: 14)
                             .overlay(
                                 Text(initial)
                                     .font(.system(size: 8, weight: .semibold))
-                                    .foregroundColor(.white)
+                                    .foregroundColor(appState.themeAccent)
                             )
                         Text(name)
                             .font(.system(size: 10))
@@ -529,8 +532,7 @@ private struct KanbanCardView: View {
             Spacer(minLength: 0)
         }
         .padding(8)
-        .background(Color.zinc800)
-        .cornerRadius(6)
+        .elevatedCard(cornerRadius: 8)
         .onTapGesture(perform: onTap)
     }
 

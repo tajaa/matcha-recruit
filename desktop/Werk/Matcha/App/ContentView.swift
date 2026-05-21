@@ -1123,6 +1123,32 @@ extension View {
     }
 }
 
+// MARK: - Muted radial background
+
+/// A soft, top-anchored radial grayscale gradient used behind content panes
+/// (Home, collab). Center is a hair lighter than the flat theme bg, edges a
+/// hair darker — quiet depth, no color. This is the "muted elegance" base the
+/// elevated cards float on.
+struct ThemeRadialBackground: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        let pair: (Color, Color)
+        switch appState.appTheme {
+        case "light":     pair = (.grayRadialCenter, .grayRadialEdge)
+        case "cappuchin": pair = (.cappuchinRadialCenter, .cappuchinRadialEdge)
+        default:          pair = (.darkRadialCenter, .darkRadialEdge)
+        }
+        return RadialGradient(
+            gradient: Gradient(colors: [pair.0, pair.1]),
+            center: .top,
+            startRadius: 0,
+            endRadius: 1100
+        )
+        .ignoresSafeArea()
+    }
+}
+
 // MARK: - Elevated card (depth for light mode; border for dark)
 
 /// Premium card surface. In light mode it floats on soft layered shadows with

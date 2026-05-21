@@ -378,7 +378,7 @@ struct ProjectDetailView: View {
                 collabOverview
             }
         }
-        .background(Color.appBackground)
+        .background(ThemeRadialBackground())
         .onChange(of: viewModel.project?.id) { _, _ in
             // Lazy-create the per-project discussion channel. Cancel any
             // in-flight ensure call so rapid project switches don't stack

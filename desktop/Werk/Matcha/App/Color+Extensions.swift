@@ -44,6 +44,16 @@ extension Color {
     static let grayText = Color(red: 0.094, green: 0.094, blue: 0.106)          // zinc-900 #18181B
     static let grayTextSecondary = Color(red: 0.443, green: 0.443, blue: 0.478) // zinc-500 #71717A
 
+    // Radial-gradient endpoints for the "muted elegance" depth backgrounds.
+    // Center is a touch lighter than the flat theme bg, edges a touch darker —
+    // a soft top-anchored spotlight that reads as depth without color.
+    static let grayRadialCenter = Color(red: 0.992, green: 0.992, blue: 0.996)  // ~#FDFDFE
+    static let grayRadialEdge   = Color(red: 0.914, green: 0.914, blue: 0.925)  // ~#E9E9EC
+    static let darkRadialCenter = Color(red: 0.110, green: 0.110, blue: 0.122)  // ~#1C1C1F
+    static let darkRadialEdge   = Color(red: 0.035, green: 0.035, blue: 0.047)  // ~#09090C
+    static let cappuchinRadialCenter = Color(red: 0.176, green: 0.137, blue: 0.106) // ~#2D231B
+    static let cappuchinRadialEdge   = Color(red: 0.102, green: 0.075, blue: 0.055) // ~#1A130E
+
     // Cappuchin theme components — warm espresso with clear tonal steps
     static let cappuchinDark = Color(red: 0.129, green: 0.098, blue: 0.075)     // Deep espresso bg #211913
     static let cappuchinCard = Color(red: 0.204, green: 0.157, blue: 0.122)     // Lifted mocha card #34281F

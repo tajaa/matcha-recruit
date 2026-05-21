@@ -51,7 +51,7 @@ struct HomeDashboardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .scrollContentBackground(.hidden)
-        .background(Color.appBackground)
+        .background(ThemeRadialBackground())
         .task { await loadAll() }
     }
 
