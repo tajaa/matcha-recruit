@@ -694,7 +694,8 @@ async def map_to_bank(
                 WHERE jr.category_id = $1
                   AND jr.status = 'active'
                   AND (
-                    $2::uuid IS NULL OR jr.jurisdiction_id = $2::uuid
+                    ($2::uuid IS NOT NULL AND jr.jurisdiction_id = $2::uuid)
+                    OR ($2::uuid IS NULL AND LOWER(jr.jurisdiction_level) = 'federal')
                   )
                 ORDER BY jr.title
                 """,

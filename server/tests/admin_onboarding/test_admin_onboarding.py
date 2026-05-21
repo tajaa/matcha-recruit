@@ -273,7 +273,17 @@ class FakeConn:
             return []
         if "FROM jurisdiction_requirements" in query:
             cat_id = params[0]
-            return self.requirement_rows.get(str(cat_id), [])
+            juris_id = params[1]
+            rows = self.requirement_rows.get(str(cat_id), [])
+            # Mirror the real WHERE: federal scope ($2 NULL) → federal-level
+            # rows only; otherwise an exact jurisdiction_id match. Rows that
+            # omit the fields default to federal (keeps older tests valid).
+            if juris_id is None:
+                return [
+                    r for r in rows
+                    if (r.get("jurisdiction_level") or "federal").lower() == "federal"
+                ]
+            return [r for r in rows if str(r.get("jurisdiction_id")) == str(juris_id)]
         return []
 
     async def fetchrow(self, query, *params):
@@ -339,6 +349,48 @@ class TestMapToBank:
         assert len(result["existing"]) == 1
         assert result["existing"][0]["requirement_id"] == req_id
         assert result["existing"][0]["scope_level"] == "federal"
+
+    def test_federal_scope_does_not_leak_other_state_rows(self):
+        """Regression (QA 2026-05-20): a federal-scope category must match
+        only federal-level bank rows, not every state's rows for that
+        category. A CA-only company was seeing IL/CO/WA in "Covered"
+        because the federal branch dropped the jurisdiction filter."""
+        cat_id = "22222222-2222-2222-2222-222222222222"
+        fed_req = "44444444-4444-4444-4444-444444444444"
+        il_req = "55555555-5555-5555-5555-555555555555"
+        ca_req = "66666666-6666-6666-6666-666666666666"
+        scope = {
+            "compliance_categories": [
+                {"category_slug": "osha_general", "scope": "federal"},
+            ],
+            # Wizard adds a federal entry + the company's real state (CA).
+            "applicable_jurisdictions": [
+                {"state": None, "county": None, "city": None},
+                {"state": "CA", "county": None, "city": None},
+            ],
+        }
+        conn = FakeConn(
+            category_rows=[{"id": cat_id, "slug": "osha_general"}],
+            jurisdiction_rows={"CA": {"id": "ca00...-state"}},
+            requirement_rows={
+                cat_id: [
+                    {"id": fed_req, "canonical_key": "osha-general",
+                     "title": "OSHA General Duty",
+                     "jurisdiction_level": "federal", "jurisdiction_id": None},
+                    {"id": il_req, "canonical_key": "il-osha",
+                     "title": "IL OSHA", "jurisdiction_level": "state",
+                     "jurisdiction_id": "il00...-state"},
+                    {"id": ca_req, "canonical_key": "ca-osha",
+                     "title": "CA OSHA", "jurisdiction_level": "state",
+                     "jurisdiction_id": "ca00...-state"},
+                ],
+            },
+        )
+        result = asyncio.run(map_to_bank(scope, conn))
+        ids = {e["requirement_id"] for e in result["existing"]}
+        assert fed_req in ids                 # federal row matches federal scope
+        assert il_req not in ids              # ← the leak: must NOT appear
+        assert ca_req not in ids              # CA only via a state-scope category
 
     def test_jurisdictions_queries_use_actual_columns(self):
         """Regression: jurisdictions table has no 'code' or 'name' column.
