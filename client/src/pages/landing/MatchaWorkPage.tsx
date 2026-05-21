@@ -4,7 +4,6 @@ import { Link } from 'react-router-dom'
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
 import { ComplianceTicker } from '../../components/landing/ComplianceTicker'
-import { NewsletterHeroSection } from '../../components/landing/NewsletterHeroSection'
 import { MatchaWorkMockup } from '../../components/landing/MatchaWorkMockup'
 import { PricingContactModal } from '../../components/PricingContactModal'
 import { api } from '../../api/client'
@@ -70,7 +69,6 @@ export default function MatchaWorkPage() {
         <ClosingCta onPricingClick={() => setIsPricingOpen(true)} />
       </main>
 
-      <NewsletterHeroSection />
       <MarketingFooter />
     </div>
   )

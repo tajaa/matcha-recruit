@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import NewsletterSignup from '../../components/NewsletterSignup'
+import { NewsletterHeroSection } from '../../components/landing/NewsletterHeroSection'
 import { PricingContactModal } from '../../components/PricingContactModal'
 
 const INK = 'var(--color-ivory-ink)'
@@ -16,6 +16,9 @@ export default function MarketingFooter() {
   const [consultationOpen, setConsultationOpen] = useState(false)
 
   return (
+    <>
+      {/* Cool newsletter band — renders on every page that uses the footer. */}
+      <NewsletterHeroSection />
     <footer className="border-t py-16" style={{ borderColor: LINE }}>
       <div className="max-w-[1440px] mx-auto px-6 sm:px-10">
         <div className="grid md:grid-cols-4 gap-10">
@@ -29,9 +32,6 @@ export default function MarketingFooter() {
             <p className="mt-4 text-sm max-w-xs" style={{ color: MUTED }}>
               Bespoke HR, GRC, employee relations, and AI integration consulting.
             </p>
-            <div className="mt-6">
-              <NewsletterSignup source="footer" variant="footer" headline="Get the brief" description="Weekly HR + employment-law updates." />
-            </div>
           </div>
           <FooterCol title="Services" links={[
             { label: 'HR Consulting', to: '/services' },
@@ -68,6 +68,7 @@ export default function MarketingFooter() {
         mode="consultation"
       />
     </footer>
+    </>
   )
 }
 
