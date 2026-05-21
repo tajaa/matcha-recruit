@@ -73,12 +73,16 @@ export function OshaLogsPanel() {
   }, [year])
 
   function downloadCsv(type: '300' | '300a') {
-    const token = localStorage.getItem('matcha_access_token')
-    const base = import.meta.env.VITE_API_URL || '/api'
-    const url = type === '300'
-      ? `${base}/ir/incidents/osha/300-log/csv?year=${year}`
-      : `${base}/ir/incidents/osha/300a/csv?year=${year}`
-    window.open(`${url}&_token=${token}`, '_blank')
+    // Must go through api.download — the backend CSV endpoints use
+    // require_admin_or_client (header JWT). A bare window.open sends no
+    // Authorization header, so it 401s with "Not authenticated".
+    const path = type === '300'
+      ? `/ir/incidents/osha/300-log/csv?year=${year}`
+      : `/ir/incidents/osha/300a/csv?year=${year}`
+    const filename = type === '300'
+      ? `osha_300_log_${year}.csv`
+      : `osha_300a_summary_${year}.csv`
+    api.download(path, filename).catch(() => {})
   }
 
   const years = Array.from({ length: 5 }, (_, i) => currentYear - i)
