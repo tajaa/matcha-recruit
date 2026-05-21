@@ -55,7 +55,7 @@ export function NewsletterHeroSection() {
 
   return (
     <section
-      className="relative w-full overflow-hidden py-28 sm:py-36"
+      className="relative w-full overflow-hidden py-16 sm:py-20"
       style={{ backgroundColor: 'var(--color-ivory-ink)' }}
     >
       {/* Caramel radial glow + faint grid for depth */}
@@ -84,7 +84,7 @@ export function NewsletterHeroSection() {
 
       <div className="relative max-w-2xl mx-auto px-6 text-center">
         <span
-          className="inline-flex items-center gap-2 rounded-full px-3.5 py-1 text-[11px] uppercase tracking-[0.22em] font-medium mb-7"
+          className="inline-flex items-center gap-2 rounded-full px-3.5 py-1 text-[11px] uppercase tracking-[0.22em] font-medium mb-4"
           style={{
             color: '#dcc79b',
             border: '1px solid rgba(201,180,142,0.28)',
@@ -96,8 +96,8 @@ export function NewsletterHeroSection() {
         </span>
 
         <h2
-          className="text-4xl sm:text-5xl font-semibold tracking-tight mb-5"
-          style={{ color: 'rgba(240,236,228,0.98)', lineHeight: 1.05 }}
+          className="text-3xl sm:text-4xl font-semibold tracking-tight mb-3"
+          style={{ color: 'rgba(240,236,228,0.98)', lineHeight: 1.08 }}
         >
           Where HR goes
           <br />
@@ -115,7 +115,7 @@ export function NewsletterHeroSection() {
         </h2>
 
         <p
-          className="text-base leading-relaxed mb-10 max-w-lg mx-auto"
+          className="text-base leading-relaxed mb-7 max-w-lg mx-auto"
           style={{ color: 'rgba(228,222,210,0.62)' }}
         >
           One short brief a week — employment-law changes, compliance gotchas, and the occasional template. No pitch.
