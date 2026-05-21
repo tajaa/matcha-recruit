@@ -179,9 +179,8 @@ struct HomeDashboardView: View {
                 }
             }
         }
-        .padding(12)
-        .background(Color.cardBackground, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.borderColor, lineWidth: 1))
+        .padding(14)
+        .elevatedCard(cornerRadius: 12)
     }
 
     private var blogsCard: some View {
@@ -217,9 +216,8 @@ struct HomeDashboardView: View {
                 }
             }
         }
-        .padding(12)
-        .background(Color.cardBackground, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.borderColor, lineWidth: 1))
+        .padding(14)
+        .elevatedCard(cornerRadius: 12)
     }
 
     private var openTasksCard: some View {
@@ -278,9 +276,8 @@ struct HomeDashboardView: View {
                 }
             }
         }
-        .padding(12)
-        .background(Color.cardBackground, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.borderColor, lineWidth: 1))
+        .padding(14)
+        .elevatedCard(cornerRadius: 12)
     }
 
     private var recentActivityCard: some View {
@@ -344,9 +341,8 @@ struct HomeDashboardView: View {
                 }
             }
         }
-        .padding(12)
-        .background(Color.cardBackground, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.borderColor, lineWidth: 1))
+        .padding(14)
+        .elevatedCard(cornerRadius: 12)
     }
 
     // MARK: - Helpers

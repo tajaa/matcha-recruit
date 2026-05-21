@@ -686,10 +686,10 @@ struct ContentView: View {
             HStack(spacing: 6) {
                 Image(systemName: icon)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(isActive ? .white : appState.themeTextSecondary)
+                    .foregroundColor(isActive ? appState.themeAccent : appState.themeTextSecondary)
                 Text(label)
                     .font(.system(size: 12, weight: isActive ? .semibold : .regular))
-                    .foregroundColor(isActive ? .white : appState.themeText.opacity(0.85))
+                    .foregroundColor(isActive ? appState.themeAccent : appState.themeText.opacity(0.85))
                 if badge > 0 {
                     Text("\(badge)")
                         .font(.system(size: 9, weight: .bold))
@@ -705,7 +705,7 @@ struct ContentView: View {
             .padding(.vertical, 6)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(isActive ? appState.themeAccent.opacity(0.8) : appState.themeCard.opacity(0.5))
+                    .fill(isActive ? appState.themeAccent.opacity(0.14) : Color.clear)
             )
         }
         .buttonStyle(.plain)
@@ -1120,6 +1120,35 @@ extension View {
         modifier(GlassPanelModifier(
             cornerRadius: cornerRadius, material: material, blending: blending,
             tint: tint, tintOpacity: tintOpacity, stroke: stroke, shadow: shadow))
+    }
+}
+
+// MARK: - Elevated card (depth for light mode; border for dark)
+
+/// Premium card surface. In light mode it floats on soft layered shadows with
+/// no harsh border (Linear/Things aesthetic); in dark/cappuchin, where black
+/// shadows don't read, it uses a crisp hairline border plus a faint shadow.
+/// This is what carries "premium" on macOS 15, where glass can't blur an
+/// opaque content pane.
+struct ElevatedCardModifier: ViewModifier {
+    var cornerRadius: CGFloat = 12
+    @Environment(AppState.self) private var appState
+
+    func body(content: Content) -> some View {
+        let isLight = appState.appTheme == "light"
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return content
+            .background(shape.fill(Color.cardBackground))
+            .overlay(shape.strokeBorder(appState.themeBorder.opacity(isLight ? 0.0 : 0.9), lineWidth: 1))
+            // Two-layer shadow: a soft ambient spread + a tight contact shadow.
+            .shadow(color: .black.opacity(isLight ? 0.08 : 0.0), radius: 16, y: 5)
+            .shadow(color: .black.opacity(isLight ? 0.06 : 0.22), radius: 2, y: 1)
+    }
+}
+
+extension View {
+    func elevatedCard(cornerRadius: CGFloat = 12) -> some View {
+        modifier(ElevatedCardModifier(cornerRadius: cornerRadius))
     }
 }
 
