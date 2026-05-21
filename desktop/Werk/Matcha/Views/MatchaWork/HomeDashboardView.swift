@@ -47,8 +47,11 @@ struct HomeDashboardView: View {
                 openTasksCard
                 recentActivityCard
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
+            // Cap the reading width so cards don't stretch absurdly wide on a
+            // big window (Linear/Things style), then center the capped block.
+            .frame(maxWidth: 980)
+            .frame(maxWidth: .infinity, alignment: .center)
         }
         .scrollContentBackground(.hidden)
         .background(ThemeRadialBackground())
