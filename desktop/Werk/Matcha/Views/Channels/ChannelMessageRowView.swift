@@ -11,6 +11,7 @@ struct ChannelMessageRowView: View {
     let onReply: (ChannelMessage) -> Void
     let onToggleReaction: (String, String) -> Void
     let onRequestDelete: (ChannelMessage) -> Void
+    @State private var previewFile: MWProjectFile?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -282,6 +283,24 @@ struct ChannelMessageRowView: View {
                 attachmentView(att)
             }
         }
+        .sheet(item: $previewFile) { file in
+            AttachmentPreviewSheet(file: file)
+        }
+    }
+
+    /// Adapt a channel attachment to the shared in-app preview model.
+    private func previewModel(_ att: ChannelAttachment) -> MWProjectFile {
+        MWProjectFile(
+            id: att.url,
+            projectId: nil,
+            taskId: nil,
+            uploadedBy: nil,
+            filename: att.filename,
+            storageUrl: att.url,
+            contentType: att.contentType,
+            fileSize: att.size,
+            createdAt: nil
+        )
     }
 
     @ViewBuilder
@@ -302,12 +321,10 @@ struct ChannelMessageRowView: View {
                         .overlay(ProgressView().controlSize(.small))
                 }
             }
-            .onTapGesture {
-                if let u = URL(string: att.url) { NSWorkspace.shared.open(u) }
-            }
+            .onTapGesture { previewFile = previewModel(att) }
         } else {
             Button {
-                if let u = URL(string: att.url) { NSWorkspace.shared.open(u) }
+                previewFile = previewModel(att)
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: channelAttachmentIcon(for: att.contentType))

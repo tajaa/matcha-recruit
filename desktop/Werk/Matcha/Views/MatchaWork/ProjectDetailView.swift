@@ -268,6 +268,42 @@ struct ProjectDetailView: View {
                     Image(systemName: "square.and.arrow.up").font(.system(size: 13))
                 }
                 .help("Export project")
+
+                Menu {
+                    Button("Archive") {
+                        guard let pid = viewModel.project?.id else { return }
+                        Task {
+                            try? await MatchaWorkService.shared.archiveProject(id: pid)
+                            await MainActor.run {
+                                if appState.selectedProjectId == pid { appState.selectedProjectId = nil }
+                                appState.projectsListGeneration &+= 1
+                            }
+                        }
+                    }
+                    Divider()
+                    Button("Delete…") {
+                        guard let p = viewModel.project else { return }
+                        let alert = NSAlert()
+                        alert.messageText = "Delete \"\(p.title)\"?"
+                        alert.informativeText = "Permanently deletes the project, its sections, and all associated threads and messages. Cannot be undone."
+                        alert.alertStyle = .critical
+                        alert.addButton(withTitle: "Delete Permanently")
+                        alert.addButton(withTitle: "Cancel")
+                        if alert.runModal() == .alertFirstButtonReturn {
+                            Task {
+                                try? await MatchaWorkService.shared.deleteProject(id: p.id)
+                                await MainActor.run {
+                                    appState.closeTab(WorkTab(kind: .project, entityId: p.id, title: p.title))
+                                    if appState.selectedProjectId == p.id { appState.selectedProjectId = nil }
+                                    appState.projectsListGeneration &+= 1
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle").font(.system(size: 13))
+                }
+                .help("Archive or delete project")
             }
         }
         .alert("Rename project", isPresented: $showRenameAlert) {
@@ -399,7 +435,7 @@ struct ProjectDetailView: View {
     @ViewBuilder
     private var collabChatView: some View {
         if let channelId = collabDiscussionChannelId {
-            ChannelDetailView(channelId: channelId)
+            ChannelDetailView(channelId: channelId, isEmbedded: true)
         } else if let err = collabChannelLoadError {
             VStack(spacing: 12) {
                 Spacer()

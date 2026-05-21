@@ -6,11 +6,14 @@ require active membership; entry edits require either authoring the entry
 or being the journal creator.
 """
 
+import logging
 from datetime import date, datetime
 from typing import Optional
 from uuid import UUID
 
 from ...database import get_connection
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_journal(row) -> dict:
@@ -379,6 +382,41 @@ async def add_collaborator(journal_id: UUID, user_id: UUID, invited_by: UUID) ->
             """,
             journal_id, user_id, invited_by,
         )
+        jrow = await conn.fetchrow(
+            "SELECT company_id, title FROM mw_journals WHERE id = $1", journal_id,
+        )
+        inviter = await conn.fetchrow(
+            """
+            SELECT COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
+            FROM users u
+            LEFT JOIN clients c ON c.user_id = u.id
+            LEFT JOIN employees e ON e.user_id = u.id
+            LEFT JOIN admins a ON a.user_id = u.id
+            WHERE u.id = $1
+            """, invited_by,
+        )
+
+    # Notify the new collaborator (best-effort — never fail the add). Surfaces
+    # in the desktop bell; metadata.journal_id drives tap-to-navigate.
+    if jrow is not None and user_id != invited_by:
+        inviter_name = (inviter["name"] if inviter and inviter["name"] else "Someone")
+        title = jrow["title"] or "a journal"
+        try:
+            from . import notification_service as notif_svc
+            await notif_svc.create_notification(
+                user_id=user_id,
+                company_id=jrow["company_id"],
+                type="journal_invite",
+                title=f"Added to journal: {title}",
+                body=f"{inviter_name} shared “{title}” with you.",
+                link="/work",
+                metadata={"journal_id": str(journal_id), "invited_by": str(invited_by)},
+                send_email=True,
+                email_subject=f"You were added to “{title}”",
+            )
+        except Exception as e:
+            logger.warning("Failed to create journal invite notification %s -> %s: %s",
+                           journal_id, user_id, e)
 
 
 async def remove_collaborator(journal_id: UUID, user_id: UUID, removed_by: UUID) -> None:
