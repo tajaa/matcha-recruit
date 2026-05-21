@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Download } from 'lucide-react'
 import { Badge, Button, Card, Select } from '../../components/ui'
+import { api } from '../../api/client'
 import { useIRIncident } from '../../hooks/ir/useIRIncident'
 import { IRCategorizationPanel } from '../../components/ir/IRCategorizationPanel'
 import { IRRootCausePanel } from '../../components/ir/IRRootCausePanel'
@@ -81,6 +83,13 @@ export default function IRDetail() {
     if (!confirm('Delete this incident? This cannot be undone.')) return
     await deleteIncident()
     navigate('/app/ir')
+  }
+
+  function handleExport() {
+    // Goes through api.download so the Authorization header is attached —
+    // the backend PDF endpoint uses require_admin_or_client (header JWT).
+    api.download(`/ir/incidents/${incidentId}/pdf`, `incident-${incident?.incident_number}.pdf`)
+      .catch(() => {})
   }
 
   if (loading) return <p className="text-sm text-zinc-500">Loading incident...</p>
@@ -282,6 +291,9 @@ export default function IRDetail() {
           )}
 
           <div className="space-y-2 pt-2">
+            <Button size="sm" variant="secondary" className="w-full" onClick={handleExport}>
+              <Download size={12} className="mr-1.5" /> Export PDF
+            </Button>
             {showERFeatures && (
               <IREscalationForm incidentId={incidentId!} incident={incident} onEscalated={(id) => navigate(`/app/er-copilot/${id}`)} />
             )}
