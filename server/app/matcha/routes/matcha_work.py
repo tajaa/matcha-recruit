@@ -4040,15 +4040,14 @@ async def list_project_elements(
         rows = await conn.fetch(
             """
             SELECT e.id, e.project_id, e.name, e.kind, e.description,
-                   e.assigned_to, e.order, e.created_at, e.updated_at,
+                   e.assigned_to, e."order", e.created_at, e.updated_at,
                    COALESCE(c.name, CONCAT(emp.first_name, ' ', emp.last_name), a.name) AS assigned_name
             FROM mw_project_elements e
-            LEFT JOIN users u ON u.id::text = e.assigned_to
             LEFT JOIN clients c ON c.user_id::text = e.assigned_to
             LEFT JOIN employees emp ON emp.user_id::text = e.assigned_to
             LEFT JOIN admins a ON a.user_id::text = e.assigned_to
             WHERE e.project_id = $1
-            ORDER BY e.order ASC, e.created_at ASC
+            ORDER BY e."order" ASC, e.created_at ASC
             """,
             str(project_id),
         )
@@ -4061,7 +4060,9 @@ async def create_project_element(
     body: dict = Body(...),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    await _verify_project_access(project_id, current_user)
+    _project, role = await _verify_project_access(project_id, current_user)
+    if role not in ("owner", "editor"):
+        raise HTTPException(status_code=403, detail="Owner or editor role required")
     name = (body.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
@@ -4104,7 +4105,9 @@ async def update_project_element(
     body: dict = Body(...),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    await _verify_project_access(project_id, current_user)
+    _project, role = await _verify_project_access(project_id, current_user)
+    if role not in ("owner", "editor"):
+        raise HTTPException(status_code=403, detail="Owner or editor role required")
     async with get_connection() as conn:
         existing = await conn.fetchrow(
             "SELECT id FROM mw_project_elements WHERE id = $1 AND project_id = $2",
@@ -4124,10 +4127,13 @@ async def update_project_element(
 
         if not patch:
             row = await conn.fetchrow(
-                "SELECT * FROM mw_project_elements WHERE id = $1", element_id
+                'SELECT id, project_id, name, kind, description, assigned_to, "order", created_at, updated_at '
+                "FROM mw_project_elements WHERE id = $1",
+                element_id,
             )
         else:
-            set_clauses = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(patch))
+            # Quote each identifier — "order" is a reserved PostgreSQL keyword.
+            set_clauses = ", ".join(f'"{k}" = ${i+2}' for i, k in enumerate(patch))
             values = list(patch.values())
             row = await conn.fetchrow(
                 f"""
@@ -4166,7 +4172,9 @@ async def delete_project_element(
     element_id: str,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    await _verify_project_access(project_id, current_user)
+    _project, role = await _verify_project_access(project_id, current_user)
+    if role not in ("owner", "editor"):
+        raise HTTPException(status_code=403, detail="Owner or editor role required")
     async with get_connection() as conn:
         result = await conn.execute(
             "DELETE FROM mw_project_elements WHERE id = $1 AND project_id = $2",
