@@ -61,15 +61,15 @@ export function ComplianceTicker() {
                 <span
                   className="text-[10.5px] font-medium uppercase tracking-wider px-2 py-[2px] rounded-sm"
                   style={{
-                    color: '#9a8a70',
-                    border: '1px solid rgba(154,138,112,0.35)',
+                    color: '#c9b48e',
+                    border: '1px solid rgba(201,180,142,0.45)',
                   }}
                 >
                   {item.tag}
                 </span>
                 <span
                   className="text-[13px]"
-                  style={{ color: 'rgba(228,222,210,0.7)' }}
+                  style={{ color: 'rgba(240,236,228,0.95)' }}
                 >
                   {item.text}
                 </span>

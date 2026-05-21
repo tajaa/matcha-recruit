@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
 import { ComplianceTicker } from '../../components/landing/ComplianceTicker'
+import { NewsletterHeroSection } from '../../components/landing/NewsletterHeroSection'
 import { PricingContactModal } from '../../components/PricingContactModal'
 
 const INK = 'var(--color-ivory-ink)'
@@ -165,6 +166,7 @@ export default function ServicesPage() {
         <EngagementModels onPricingClick={() => setIsPricingOpen(true)} />
       </main>
 
+      <NewsletterHeroSection />
       <MarketingFooter />
     </div>
   )
