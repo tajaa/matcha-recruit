@@ -69,7 +69,7 @@ export function NewsletterHeroSection() {
           className="text-3xl sm:text-4xl font-semibold tracking-tight mb-4"
           style={{ color: 'rgba(240,236,228,0.97)' }}
         >
-          Stay ahead of HR law.
+          Where HR goes for HR problems.
         </h2>
         <p
           className="text-base leading-relaxed mb-10"
