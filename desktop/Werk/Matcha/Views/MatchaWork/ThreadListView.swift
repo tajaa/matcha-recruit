@@ -20,6 +20,8 @@ struct ThreadListView: View {
     @State private var isCreating = false
     @State private var threadToDelete: MWThread?
     @State private var showDeleteConfirm = false
+    @State private var visibleCount = 3
+    private let pageSize = 3
 
     let filterOptions = [
         (label: "All", value: Optional<String>.none),
@@ -143,8 +145,9 @@ struct ThreadListView: View {
                 let filtered = viewModel.filteredThreads.filter {
                     searchText.isEmpty || $0.title.localizedCaseInsensitiveContains(searchText)
                 }
+                let limit = searchText.isEmpty ? visibleCount : filtered.count
                 LazyVStack(spacing: 0) {
-                    ForEach(filtered, id: \.id) { thread in
+                    ForEach(filtered.prefix(limit), id: \.id) { thread in
                         let selected = appState.selectedThreadId == thread.id
                         Button {
                             appState.selectedThreadId = thread.id
@@ -190,6 +193,11 @@ struct ThreadListView: View {
                                 threadToDelete = thread
                                 showDeleteConfirm = true
                             }
+                        }
+                    }
+                    if searchText.isEmpty && filtered.count > visibleCount {
+                        SidebarShowMoreButton(remaining: filtered.count - visibleCount, pageSize: pageSize) {
+                            visibleCount += pageSize
                         }
                     }
                 }

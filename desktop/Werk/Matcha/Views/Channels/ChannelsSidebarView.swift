@@ -12,6 +12,8 @@ struct ChannelsSidebarView: View {
     @State private var channelPendingDelete: ChannelSummary?
     @State private var channelPendingLeave: ChannelSummary?
     @State private var isDeleting = false
+    @State private var visibleCount = 3
+    private let pageSize = 3
     @State private var isLeaving = false
     @AppStorage("channel-admin-wizard-shown-v1") private var hasSeenWizard = false
 
@@ -135,9 +137,15 @@ struct ChannelsSidebarView: View {
         let filtered = channels.filter {
             searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(searchText)
         }
+        let limit = searchText.isEmpty ? visibleCount : filtered.count
         return LazyVStack(spacing: 0) {
-            ForEach(filtered, id: \.id) { channel in
+            ForEach(filtered.prefix(limit), id: \.id) { channel in
                 row(for: channel)
+            }
+            if searchText.isEmpty && filtered.count > visibleCount {
+                SidebarShowMoreButton(remaining: filtered.count - visibleCount, pageSize: pageSize) {
+                    visibleCount += pageSize
+                }
             }
         }
         .padding(.vertical, 4)

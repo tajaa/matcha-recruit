@@ -1178,6 +1178,31 @@ extension View {
     }
 }
 
+/// "Show N more" row used by sidebar lists that paginate (projects, channels,
+/// journals, threads) so the sidebar stays short. Reveals the next batch.
+struct SidebarShowMoreButton: View {
+    @Environment(AppState.self) private var appState
+    let remaining: Int
+    let pageSize: Int
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+                Text("Show \(min(pageSize, remaining)) more").font(.system(size: 10, weight: .medium))
+                Spacer()
+            }
+            .foregroundColor(appState.themeTextSecondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("\(remaining) more")
+    }
+}
+
 struct SidebarRowModifier: ViewModifier {
     let isSelected: Bool
     @Environment(AppState.self) private var appState

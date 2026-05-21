@@ -13,6 +13,9 @@ struct JournalListView: View {
     @State private var journals: [MWJournal] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
+    /// Sidebar shows a few at a time; "Show more" reveals the next batch.
+    @State private var visibleCount = 3
+    private let pageSize = 3
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,9 +51,17 @@ struct JournalListView: View {
                 let filtered = journals.filter {
                     searchText.isEmpty || $0.title.localizedCaseInsensitiveContains(searchText)
                 }
+                // While searching, show all matches; otherwise paginate.
+                let limit = searchText.isEmpty ? visibleCount : filtered.count
                 LazyVStack(spacing: 0) {
-                    ForEach(filtered) { j in
+                    ForEach(filtered.prefix(limit)) { j in
                         row(j)
+                    }
+                    if searchText.isEmpty && filtered.count > visibleCount {
+                        SidebarShowMoreButton(
+                            remaining: filtered.count - visibleCount,
+                            pageSize: pageSize
+                        ) { visibleCount += pageSize }
                     }
                 }
                 .padding(.vertical, 4)
