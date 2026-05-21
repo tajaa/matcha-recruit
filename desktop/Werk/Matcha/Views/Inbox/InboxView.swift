@@ -61,7 +61,7 @@ struct InboxView: View {
                                 }
                             }
                             if let preview = convo.lastMessagePreview {
-                                Text(preview)
+                                Text(stripMarkdown(preview))
                                     .font(.system(size: 10))
                                     .foregroundColor(appState.themeTextSecondary)
                                     .lineLimit(1)
@@ -238,9 +238,7 @@ struct InboxThreadView: View {
                                     }
                                     VStack(alignment: .leading, spacing: 4) {
                                         if !msg.content.isEmpty {
-                                            Text(msg.content)
-                                                .font(.system(size: 13))
-                                                .foregroundColor(isMine ? appState.themeOnAccent : Color(.labelColor))
+                                            inboxMessageText(msg.content, isMine: isMine)
                                         }
                                         // Attachments
                                         if let attachments = msg.attachments, !attachments.isEmpty {
@@ -328,6 +326,16 @@ struct InboxThreadView: View {
         }
     }
 
+    @ViewBuilder
+    private func inboxMessageText(_ content: String, isMine: Bool) -> some View {
+        let color = isMine ? appState.themeOnAccent : Color(.labelColor)
+        if let attributed = try? AttributedString(markdown: content) {
+            Text(attributed).font(.system(size: 13)).foregroundColor(color)
+        } else {
+            Text(content).font(.system(size: 13)).foregroundColor(color)
+        }
+    }
+
     private func send() {
         let content = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty, !isSending else { return }
@@ -384,4 +392,13 @@ struct InboxThreadView: View {
 private func formatInboxTime(_ iso: String) -> String {
     guard let date = parseMWDate(iso) else { return iso }
     return date.formatted(date: .omitted, time: .shortened)
+}
+
+private func stripMarkdown(_ text: String) -> String {
+    text
+        .replacingOccurrences(of: "**", with: "")
+        .replacingOccurrences(of: "__", with: "")
+        .replacingOccurrences(of: "*", with: "")
+        .replacingOccurrences(of: "_", with: "")
+        .replacingOccurrences(of: "`", with: "")
 }
