@@ -7,10 +7,10 @@ struct ContentView: View {
     @State private var isOpeningCheckout = false
     @State private var upgradeError: String?
     @State private var showProfile = false
-    @AppStorage("mw-sidebar-channels-open") private var channelsSectionOpen = true
-    @AppStorage("mw-sidebar-projects-open") private var projectsSectionOpen = true
-    @AppStorage("mw-sidebar-journals-open") private var journalsSectionOpen = true
-    @AppStorage("mw-sidebar-threads-open") private var threadsSectionOpen = true
+    @AppStorage("mw-sidebar-channels-open") private var channelsSectionOpen = false
+    @AppStorage("mw-sidebar-projects-open") private var projectsSectionOpen = false
+    @AppStorage("mw-sidebar-journals-open") private var journalsSectionOpen = false
+    @AppStorage("mw-sidebar-threads-open") private var threadsSectionOpen = false
     @State private var showNewJournal = false
     @State private var showNewBlog = false
     @State private var pendingConnectionsCount = 0
