@@ -117,6 +117,8 @@ struct ChannelDetailView: View {
             // (or whose WS dropped before the broadcast.started fan-out) still
             // sees the Watch-feed banner without depending on the WS event.
             await broadcast.fetchBroadcastStatus(channelId: channelId)
+            appState.setActiveContext(WorkTab(kind: .channel, entityId: channelId,
+                                              title: vm.channel?.name ?? "Channel"))
         }
         .onDisappear {
             // Don't leaveRoom — keep this channel subscribed via

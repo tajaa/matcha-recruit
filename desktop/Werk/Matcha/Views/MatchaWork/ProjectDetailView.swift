@@ -79,6 +79,8 @@ struct ProjectDetailView: View {
             }
             presenceVM.start(projectId: projectId, pageKey: collabPanel.rawValue)
             await viewModel.loadProject(id: projectId)
+            appState.setActiveContext(WorkTab(kind: .project, entityId: projectId,
+                                              title: viewModel.project?.title ?? "Project"))
         }
         // Same project already open when the notification fires: projectId
         // doesn't change so the .task above won't re-run — catch it here.

@@ -55,6 +55,7 @@ struct HomeDashboardView: View {
         }
         .scrollContentBackground(.hidden)
         .background(ThemeRadialBackground())
+        .onAppear { appState.setActiveContext(.home) }
         .task { await loadAll() }
     }
 

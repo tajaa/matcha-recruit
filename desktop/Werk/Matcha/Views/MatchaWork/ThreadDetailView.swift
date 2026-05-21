@@ -288,6 +288,8 @@ struct ThreadDetailView: View {
         }
         .task(id: threadId) {
             await viewModel.loadThread(id: threadId)
+            appState.setActiveContext(WorkTab(kind: .thread, entityId: threadId,
+                                              title: viewModel.thread?.title ?? "Chat"))
         }
         .alert("Finalize Thread?", isPresented: $showFinalizeConfirm) {
             Button("Finalize", role: .destructive) {

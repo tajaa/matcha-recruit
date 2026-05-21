@@ -49,7 +49,11 @@ struct JournalDetailView: View {
             timeline
         }
         .background(Color.appBackground)
-        .task(id: journalId) { await vm.load(id: journalId) }
+        .task(id: journalId) {
+            await vm.load(id: journalId)
+            appState.setActiveContext(WorkTab(kind: .journal, entityId: journalId,
+                                              title: vm.journal?.title ?? "Journal"))
+        }
         .onAppear { wireUploadCallbacks() }
         .onChange(of: journalId) { _, _ in wireUploadCallbacks() }
         .sheet(isPresented: $showInviteSheet) {

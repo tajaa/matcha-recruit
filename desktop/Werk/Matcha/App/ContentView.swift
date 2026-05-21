@@ -35,26 +35,29 @@ struct ContentView: View {
         NavigationSplitView {
             sidebarColumn
         } detail: {
-            Group {
-                if let threadId = appState.selectedThreadId {
-                    ThreadDetailView(threadId: threadId)
-                        .onChange(of: threadId) { appState.showSkills = false }
-                } else if let projectId = appState.selectedProjectId {
-                    ProjectDetailView(projectId: projectId)
-                } else if let journalId = appState.selectedJournalId {
-                    JournalDetailView(journalId: journalId)
-                } else if let channelId = appState.selectedChannelId {
-                    ChannelDetailView(channelId: channelId)
-                } else if appState.showChannelBrowse {
-                    ChannelBrowseView()
-                } else if appState.showInbox {
-                    InboxView()
-                } else if appState.showPeople {
-                    PeopleView()
-                } else if appState.showSkills {
-                    SkillsView()
-                } else {
-                    HomeDashboardView()
+            VStack(spacing: 0) {
+                WorkTabBar()
+                Group {
+                    if let threadId = appState.selectedThreadId {
+                        ThreadDetailView(threadId: threadId)
+                            .onChange(of: threadId) { appState.showSkills = false }
+                    } else if let projectId = appState.selectedProjectId {
+                        ProjectDetailView(projectId: projectId)
+                    } else if let journalId = appState.selectedJournalId {
+                        JournalDetailView(journalId: journalId)
+                    } else if let channelId = appState.selectedChannelId {
+                        ChannelDetailView(channelId: channelId)
+                    } else if appState.showChannelBrowse {
+                        ChannelBrowseView()
+                    } else if appState.showInbox {
+                        InboxView()
+                    } else if appState.showPeople {
+                        PeopleView()
+                    } else if appState.showSkills {
+                        SkillsView()
+                    } else {
+                        HomeDashboardView()
+                    }
                 }
             }
             .background(appState.themeBg)
@@ -1175,6 +1178,79 @@ struct ElevatedCardModifier: ViewModifier {
 extension View {
     func elevatedCard(cornerRadius: CGFloat = 12) -> some View {
         modifier(ElevatedCardModifier(cornerRadius: cornerRadius))
+    }
+}
+
+/// Tab strip above the detail pane. Home is permanent (element 0); up to
+/// `AppState.maxPinnedTabs` pinned items sit beside it. Click a tab to switch,
+/// "×" to close, "+" to pin the currently-open item.
+struct WorkTabBar: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(appState.openTabs) { tab in
+                tabChip(tab)
+            }
+            Button { appState.pinActiveTab() } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(appState.themeTextSecondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!appState.canPinActiveTab)
+            .opacity(appState.canPinActiveTab ? 1 : 0.3)
+            .help(pinHelp)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(appState.themeBg)
+        .overlay(alignment: .bottom) { Divider().opacity(0.4) }
+    }
+
+    private var pinHelp: String {
+        if appState.activeTab.kind == .home { return "Home is always open" }
+        if appState.openTabs.contains(where: { $0.id == appState.activeTab.id }) { return "Already pinned" }
+        if appState.pinnedTabCount >= AppState.maxPinnedTabs { return "Tab limit reached" }
+        return "Pin “\(appState.activeTab.title)” as a tab"
+    }
+
+    private func tabChip(_ tab: WorkTab) -> some View {
+        let active = appState.activeTab.id == tab.id
+        return HStack(spacing: 6) {
+            Image(systemName: tab.icon).font(.system(size: 10))
+            Text(tab.title)
+                .font(.system(size: 12, weight: active ? .semibold : .regular))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if tab.kind != .home {
+                Button { appState.closeTab(tab) } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(appState.themeText.opacity(0.5))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Close tab")
+            }
+        }
+        .foregroundColor(active ? appState.themeText : appState.themeText.opacity(0.6))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .frame(maxWidth: 170)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(active ? appState.themeAccent.opacity(0.14) : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(active ? appState.themeAccent.opacity(0.3) : appState.themeBorder.opacity(0.45), lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { appState.selectTab(tab) }
     }
 }
 

@@ -2,6 +2,30 @@ import Foundation
 import UserNotifications
 import SwiftUI
 
+/// One open workspace tab. Home is permanent + non-closable; up to
+/// `AppState.maxPinnedTabs` others (project/channel/thread/journal) can be
+/// pinned alongside it. `title` is cached at pin time and refreshed when the
+/// underlying view loads, so a rename eventually reflects without a stale id.
+struct WorkTab: Codable, Hashable, Identifiable {
+    enum Kind: String, Codable { case home, project, channel, thread, journal }
+    var kind: Kind
+    var entityId: String
+    var title: String
+
+    var id: String { kind == .home ? "home" : "\(kind.rawValue):\(entityId)" }
+    static let home = WorkTab(kind: .home, entityId: "", title: "Home")
+
+    var icon: String {
+        switch kind {
+        case .home: return "house"
+        case .project: return "folder"
+        case .channel: return "number"
+        case .thread: return "bubble.left"
+        case .journal: return "book.closed"
+        }
+    }
+}
+
 @Observable
 class AppState {
     var isAuthenticated: Bool = false
@@ -14,6 +38,17 @@ class AppState {
     /// panel to this tab once it mounts/updates, then clears it. Used by
     /// notification taps so a task notification opens the kanban board.
     var pendingProjectPanel: CollabRightPanel? = nil
+
+    // MARK: - Workspace tabs
+    static let maxPinnedTabs = 4
+    private static let tabsKey = "mw-open-tabs-v1"
+    /// Open tabs; Home is always element 0. Persisted across launches.
+    var openTabs: [WorkTab] = AppState.loadTabs() {
+        didSet { AppState.saveTabs(openTabs) }
+    }
+    /// The currently-displayed destination (drives tab highlight + what "+" pins).
+    var activeTab: WorkTab = .home
+
     var showSkills: Bool = false
     var showInbox: Bool = false
     var showPeople: Bool = false
@@ -488,6 +523,81 @@ class AppState {
     func refreshNotificationsCount() async {
         if let count = try? await MatchaWorkService.shared.fetchNotificationsUnreadCount() {
             notificationsUnreadCount = count
+        }
+    }
+
+    // MARK: - Workspace tabs
+
+    private static func loadTabs() -> [WorkTab] {
+        guard let data = UserDefaults.standard.data(forKey: tabsKey),
+              let tabs = try? JSONDecoder().decode([WorkTab].self, from: data),
+              !tabs.isEmpty
+        else { return [.home] }
+        // Home must always lead.
+        return tabs.first?.kind == .home ? tabs : [.home] + tabs.filter { $0.kind != .home }
+    }
+
+    private static func saveTabs(_ tabs: [WorkTab]) {
+        if let data = try? JSONEncoder().encode(tabs) {
+            UserDefaults.standard.set(data, forKey: tabsKey)
+        }
+    }
+
+    var pinnedTabCount: Int { openTabs.filter { $0.kind != .home }.count }
+    var canPinActiveTab: Bool {
+        activeTab.kind != .home
+            && !openTabs.contains(where: { $0.id == activeTab.id })
+            && pinnedTabCount < AppState.maxPinnedTabs
+    }
+
+    /// Switch the detail pane to a tab's destination.
+    @MainActor
+    func selectTab(_ tab: WorkTab) {
+        activeTab = tab
+        navigateToDestination(tab)
+    }
+
+    /// Pin the currently-open item as a tab (no-op for Home / duplicates / when full).
+    @MainActor
+    func pinActiveTab() {
+        guard canPinActiveTab else { return }
+        openTabs.append(activeTab)
+    }
+
+    @MainActor
+    func closeTab(_ tab: WorkTab) {
+        guard tab.kind != .home else { return }
+        openTabs.removeAll { $0.id == tab.id }
+        if activeTab.id == tab.id { selectTab(.home) }
+    }
+
+    /// Called by a detail view once its data loads: marks it active and
+    /// refreshes the cached title on any matching pinned tab.
+    @MainActor
+    func setActiveContext(_ tab: WorkTab) {
+        activeTab = tab
+        if let idx = openTabs.firstIndex(where: { $0.id == tab.id }), openTabs[idx].title != tab.title {
+            openTabs[idx].title = tab.title
+        }
+    }
+
+    @MainActor
+    private func navigateToDestination(_ tab: WorkTab) {
+        selectedProjectId = nil
+        selectedThreadId = nil
+        selectedChannelId = nil
+        selectedJournalId = nil
+        showHome = false
+        showSkills = false
+        showInbox = false
+        showPeople = false
+        showChannelBrowse = false
+        switch tab.kind {
+        case .home: showHome = true
+        case .project: selectedProjectId = tab.entityId
+        case .channel: selectedChannelId = tab.entityId
+        case .thread: selectedThreadId = tab.entityId
+        case .journal: selectedJournalId = tab.entityId
         }
     }
 
