@@ -22,6 +22,7 @@ struct KanbanBoardView: View {
     @State private var inlineAddColumn: String?
     @State private var inlineAddTitle: String = ""
     @State private var hoveredEmptyColumn: String?
+    @State private var searchText = ""
     /// Template-compose sheet. `newTaskColumn` is the destination column;
     /// `composeTemplate` the picked template (scaffold + default priority +
     /// category). Reuses the single legacy sheet slot to avoid a 4th `.sheet`.
@@ -59,9 +60,29 @@ struct KanbanBoardView: View {
                 Spacer()
             } else {
                 if !viewModel.tasks.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        TextField("Search tasks… (space = AND, \"quotes\" = phrase)", text: $searchText)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 12))
+                            .foregroundColor(appState.themeText)
+                        if !searchText.isEmpty {
+                            Button { searchText = "" } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+
                     TaskProgressBar(tasks: viewModel.tasks, compact: true)
                         .padding(.horizontal, 12)
-                        .padding(.top, 8)
+                        .padding(.top, 4)
                         .padding(.bottom, 4)
                 }
                 boardColumns
@@ -159,7 +180,9 @@ struct KanbanBoardView: View {
     }
 
     private func columnView(key: String, label: String) -> some View {
-        let colTasks = viewModel.tasks.filter { $0.boardColumn == key }
+        let colTasks = viewModel.tasks
+            .filter { $0.boardColumn == key }
+            .filter { taskMatchesSearch($0) }
         let isEmpty = colTasks.isEmpty
         let isInlineAdding = inlineAddColumn == key
         let isHovered = hoveredEmptyColumn == key
@@ -281,6 +304,50 @@ struct KanbanBoardView: View {
             .keyboardShortcut(.escape, modifiers: [])
         }
         .padding(.horizontal, 6)
+    }
+
+    // MARK: - Search
+
+    private func taskMatchesSearch(_ task: MWProjectTask) -> Bool {
+        guard !searchText.isEmpty else { return true }
+        let tokens = parseSearchTokens(searchText)
+        guard !tokens.isEmpty else { return true }
+        let haystack = [
+            task.title,
+            task.description ?? "",
+            task.progressNote ?? "",
+            task.displayAssignee ?? "",
+            task.priority,
+            task.category ?? "",
+            task.boardColumn,
+        ].joined(separator: " ").lowercased()
+        return tokens.allSatisfy { haystack.contains($0.lowercased()) }
+    }
+
+    /// Splits a query into tokens. Quoted substrings (e.g. `"login page"`) are
+    /// treated as a single phrase token; unquoted space-separated words are
+    /// individual AND terms.
+    private func parseSearchTokens(_ query: String) -> [String] {
+        var tokens: [String] = []
+        var current = ""
+        var inQuotes = false
+        for ch in query {
+            switch ch {
+            case "\"":
+                if inQuotes {
+                    if !current.isEmpty { tokens.append(current); current = "" }
+                    inQuotes = false
+                } else {
+                    inQuotes = true
+                }
+            case " " where !inQuotes:
+                if !current.isEmpty { tokens.append(current); current = "" }
+            default:
+                current.append(ch)
+            }
+        }
+        if !current.isEmpty { tokens.append(current) }
+        return tokens.filter { !$0.isEmpty }
     }
 
     private func commitInlineAdd(column: String) {
