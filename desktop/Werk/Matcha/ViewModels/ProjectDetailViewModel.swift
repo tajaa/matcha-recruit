@@ -923,6 +923,13 @@ class ProjectDetailViewModel {
         }
     }
 
+    func uploadFile(data: Data, filename: String, mimeType: String, folderId: String) async {
+        await uploadFile(data: data, filename: filename, mimeType: mimeType)
+        if let file = files.first(where: { $0.folderId == nil && $0.filename == filename }) {
+            await moveFile(id: file.id, toFolder: folderId)
+        }
+    }
+
     func deleteFile(id: String) async {
         guard let pid = project?.id else { return }
         await MainActor.run { files.removeAll { $0.id == id } }

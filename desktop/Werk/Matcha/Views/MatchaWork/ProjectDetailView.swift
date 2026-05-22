@@ -424,6 +424,8 @@ struct ProjectDetailView: View {
                 KanbanBoardView(viewModel: viewModel)
             case .files:
                 ProjectFilesView(viewModel: viewModel)
+            case .media:
+                ProjectMediaView(viewModel: viewModel)
             case .sections:
                 collabSections
             case .threads:

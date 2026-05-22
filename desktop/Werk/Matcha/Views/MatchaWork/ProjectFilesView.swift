@@ -2,50 +2,52 @@ import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
 
+// MARK: - Files View
+
 struct ProjectFilesView: View {
     @Bindable var viewModel: ProjectDetailViewModel
     @State private var isDragOver = false
     @State private var uploadingName: String?
     @State private var previewFile: MWProjectFile?
-    @State private var expandedFolders: Set<String> = []
-    @State private var showNewFolder = false
+    @State private var isCreatingFolder = false
     @State private var newFolderName = ""
-    @State private var renamingFolder: MWProjectFolder?
-    @State private var renameText = ""
-
-    private var rootFiles: [MWProjectFile] {
-        viewModel.files.filter { $0.folderId == nil }
-    }
+    @State private var openFolderId: String?
+    @FocusState private var isFolderNameFocused: Bool
 
     private func files(in folderId: String) -> [MWProjectFile] {
         viewModel.files.filter { $0.folderId == folderId }
     }
 
     private var isEmpty: Bool {
-        viewModel.files.isEmpty && viewModel.folders.isEmpty
+        viewModel.folders.isEmpty
     }
 
     var body: some View {
         VStack(spacing: 0) {
             toolbarRow
             Divider().opacity(0.2)
-            if viewModel.isLoadingFiles && isEmpty {
+            if let err = viewModel.errorMessage {
+                Text(err)
+                    .font(.system(size: 11))
+                    .foregroundColor(.red)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.red.opacity(0.08))
+                Divider().opacity(0.2)
+            }
+            if viewModel.isLoadingFiles && isEmpty && openFolderId == nil {
                 Spacer()
                 ProgressView().tint(.secondary)
                 Spacer()
-            } else if isEmpty {
-                dropZone
+            } else if isEmpty && openFolderId == nil {
+                emptyFolderState
                 Spacer()
-                Text("No files yet — drop files above, or make a folder.")
+                Text("Create folders to keep your files organized.")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                 Spacer()
             } else {
                 contentList
-                    .onDrop(of: [.fileURL], isTargeted: $isDragOver) { providers in
-                        handleDrop(providers)
-                        return true
-                    }
             }
         }
         .background(Color.appBackground)
@@ -62,28 +64,8 @@ struct ProjectFilesView: View {
         .sheet(item: $previewFile) { file in
             AttachmentPreviewSheet(file: file)
         }
-        .alert("New folder", isPresented: $showNewFolder) {
-            TextField("Folder name", text: $newFolderName)
-            Button("Create") {
-                let name = newFolderName
-                newFolderName = ""
-                Task { await viewModel.createFolder(name: name) }
-            }
-            Button("Cancel", role: .cancel) { newFolderName = "" }
-        }
-        .alert("Rename folder", isPresented: Binding(
-            get: { renamingFolder != nil },
-            set: { if !$0 { renamingFolder = nil } }
-        )) {
-            TextField("Folder name", text: $renameText)
-            Button("Rename") {
-                if let folder = renamingFolder {
-                    let name = renameText
-                    Task { await viewModel.renameFolder(id: folder.id, name: name) }
-                }
-                renamingFolder = nil
-            }
-            Button("Cancel", role: .cancel) { renamingFolder = nil }
+        .onChange(of: isCreatingFolder) { _, val in
+            if val { isFolderNameFocused = true }
         }
     }
 
@@ -91,36 +73,57 @@ struct ProjectFilesView: View {
 
     private var toolbarRow: some View {
         HStack(spacing: 6) {
-            Image(systemName: "square.and.arrow.up")
-                .font(.system(size: 10))
-                .foregroundColor(.secondary)
-            if let name = uploadingName {
-                Text("Uploading \(name)…")
+            if let fid = openFolderId,
+               let folder = viewModel.folders.first(where: { $0.id == fid }) {
+                Button {
+                    openFolderId = nil
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left").font(.system(size: 9, weight: .semibold))
+                        Text("Folders")
+                    }
                     .font(.system(size: 10))
                     .foregroundColor(.matcha500)
+                }
+                .buttonStyle(.plain)
+                Text("·").font(.system(size: 10)).foregroundColor(.secondary.opacity(0.5))
+                Text(folder.name)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                Spacer()
+                if let name = uploadingName {
+                    Text("Uploading \(name)…")
+                        .font(.system(size: 10))
+                        .foregroundColor(.matcha500)
+                } else {
+                    Button("browse") { browse() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10))
+                        .foregroundColor(.matcha500)
+                }
             } else {
-                Text("Drop files anywhere or")
+                Image(systemName: "folder")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
-                Button("browse") { browse() }
-                    .buttonStyle(.plain)
+                Text("Folders organize your files.")
                     .font(.system(size: 10))
-                    .foregroundColor(.matcha500)
-            }
-            Spacer()
-            Button {
-                newFolderName = ""
-                showNewFolder = true
-            } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: "folder.badge.plus")
-                    Text("New Folder")
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button {
+                    newFolderName = ""
+                    isCreatingFolder = true
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "folder.badge.plus")
+                        Text("New Folder")
+                    }
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
                 }
-                .font(.system(size: 10))
-                .foregroundColor(.secondary)
+                .buttonStyle(.plain)
+                .help("Create a folder")
             }
-            .buttonStyle(.plain)
-            .help("Create a folder")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -131,88 +134,153 @@ struct ProjectFilesView: View {
     private var contentList: some View {
         ScrollView {
             LazyVStack(spacing: 4) {
-                ForEach(viewModel.folders) { folder in
-                    FolderRow(
-                        folder: folder,
-                        fileCount: files(in: folder.id).count,
-                        isExpanded: expandedFolders.contains(folder.id),
-                        onToggle: { toggle(folder.id) },
-                        onRename: {
-                            renameText = folder.name
-                            renamingFolder = folder
-                        },
-                        onDelete: { Task { await viewModel.deleteFolder(id: folder.id) } },
-                        onDropFileId: { fileId in
-                            Task { await viewModel.moveFile(id: fileId, toFolder: folder.id) }
-                        }
-                    )
-                    if expandedFolders.contains(folder.id) {
-                        ForEach(files(in: folder.id)) { file in
-                            fileRow(file, indent: true)
+                if let fid = openFolderId {
+                    let folderFiles = files(in: fid)
+                    if folderFiles.isEmpty {
+                        Text("No files — drop or browse to add.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .padding(.top, 20)
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        ForEach(folderFiles) { file in
+                            fileRow(file)
                         }
                     }
-                }
-                ForEach(rootFiles) { file in
-                    fileRow(file, indent: false)
+                    folderDropZone(folderId: fid)
+                } else {
+                    if isCreatingFolder {
+                        newFolderRow
+                    }
+                    ForEach(viewModel.folders) { folder in
+                        FolderRow(
+                            folder: folder,
+                            fileCount: files(in: folder.id).count,
+                            onOpen: { openFolderId = folder.id },
+                            onRename: { name in Task { await viewModel.renameFolder(id: folder.id, name: name) } },
+                            onDelete: { Task { await viewModel.deleteFolder(id: folder.id) } },
+                            onDropFileId: { fileId in
+                                Task { await viewModel.moveFile(id: fileId, toFolder: folder.id) }
+                            }
+                        )
+                    }
                 }
             }
             .padding(10)
         }
     }
 
-    private func fileRow(_ file: MWProjectFile, indent: Bool) -> some View {
+    @ViewBuilder
+    private var newFolderRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "folder.badge.plus")
+                .font(.system(size: 13))
+                .foregroundColor(.matcha500)
+            TextField("Folder name", text: $newFolderName)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .focused($isFolderNameFocused)
+                .onSubmit { commitNewFolder() }
+                .onKeyPress(.escape) { cancelNewFolder(); return .handled }
+            Button { commitNewFolder() } label: {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.matcha500)
+            }
+            .buttonStyle(.plain)
+            .help("Create folder")
+            Button { cancelNewFolder() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Cancel")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.matcha500.opacity(0.08))
+        .cornerRadius(4)
+    }
+
+    private func commitNewFolder() {
+        let name = newFolderName
+        isCreatingFolder = false
+        newFolderName = ""
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        Task { await viewModel.createFolder(name: name) }
+    }
+
+    private func cancelNewFolder() {
+        isCreatingFolder = false
+        newFolderName = ""
+    }
+
+    private func fileRow(_ file: MWProjectFile) -> some View {
         FileRow(
             file: file,
             folders: viewModel.folders,
-            indent: indent,
-            onOpen: { openFile(file) },
+            indent: false,
+            onOpen: { previewFile = file },
             onDelete: { Task { await viewModel.deleteFile(id: file.id) } },
             onMove: { target in Task { await viewModel.moveFile(id: file.id, toFolder: target) } }
         )
         .onDrag { NSItemProvider(object: file.id as NSString) }
     }
 
-    private func toggle(_ folderId: String) {
-        if expandedFolders.contains(folderId) {
-            expandedFolders.remove(folderId)
-        } else {
-            expandedFolders.insert(folderId)
-        }
-    }
-
-    // MARK: - Drop zone (empty state)
-
-    private var dropZone: some View {
+    private func folderDropZone(folderId: String) -> some View {
         VStack(spacing: 4) {
             Image(systemName: "square.and.arrow.up")
-                .font(.system(size: 18))
+                .font(.system(size: 16))
                 .foregroundColor(isDragOver ? .matcha500 : .secondary)
             if let name = uploadingName {
                 Text("Uploading \(name)…")
                     .font(.system(size: 10))
                     .foregroundColor(.matcha500)
             } else {
-                Text("Drop files here")
+                Text("Drop or browse to add files")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
         .background(isDragOver ? Color.matcha500.opacity(0.08) : Color.zinc900.opacity(0.5))
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(isDragOver ? Color.matcha500 : Color.zinc800, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                .stroke(isDragOver ? Color.matcha500 : Color.zinc800,
+                        style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
         )
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.vertical, 4)
         .onDrop(of: [.fileURL], isTargeted: $isDragOver) { providers in
-            handleDrop(providers)
+            handleDrop(providers, folderId: folderId)
             return true
         }
     }
 
-    private func handleDrop(_ providers: [NSItemProvider]) {
+    // MARK: - Empty state
+
+    private var emptyFolderState: some View {
+        VStack(spacing: 4) {
+            Image(systemName: "folder")
+                .font(.system(size: 18))
+                .foregroundColor(.secondary)
+            Text("No folders yet")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .background(Color.zinc900.opacity(0.5))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.zinc800, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+        )
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+    }
+
+    private func handleDrop(_ providers: [NSItemProvider], folderId: String? = nil) {
         for provider in providers {
             provider.loadItem(forTypeIdentifier: "public.file-url") { item, _ in
                 guard let data = item as? Data,
@@ -222,9 +290,11 @@ struct ProjectFilesView: View {
                 let mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
                 Task { @MainActor in uploadingName = url.lastPathComponent }
                 Task {
-                    await viewModel.uploadFile(
-                        data: fileData, filename: url.lastPathComponent, mimeType: mime
-                    )
+                    if let fid = folderId {
+                        await viewModel.uploadFile(data: fileData, filename: url.lastPathComponent, mimeType: mime, folderId: fid)
+                    } else {
+                        await viewModel.uploadFile(data: fileData, filename: url.lastPathComponent, mimeType: mime)
+                    }
                     await MainActor.run { uploadingName = nil }
                 }
             }
@@ -244,17 +314,15 @@ struct ProjectFilesView: View {
                 let mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
                 Task { @MainActor in uploadingName = url.lastPathComponent }
                 Task {
-                    await viewModel.uploadFile(
-                        data: data, filename: url.lastPathComponent, mimeType: mime
-                    )
+                    if let fid = openFolderId {
+                        await viewModel.uploadFile(data: data, filename: url.lastPathComponent, mimeType: mime, folderId: fid)
+                    } else {
+                        await viewModel.uploadFile(data: data, filename: url.lastPathComponent, mimeType: mime)
+                    }
                     await MainActor.run { uploadingName = nil }
                 }
             }
         }
-    }
-
-    private func openFile(_ file: MWProjectFile) {
-        previewFile = file
     }
 }
 
@@ -263,46 +331,68 @@ struct ProjectFilesView: View {
 private struct FolderRow: View {
     let folder: MWProjectFolder
     let fileCount: Int
-    let isExpanded: Bool
-    let onToggle: () -> Void
-    let onRename: () -> Void
+    let onOpen: () -> Void
+    let onRename: (String) -> Void
     let onDelete: () -> Void
     let onDropFileId: (String) -> Void
     @State private var isHovered = false
     @State private var isTargeted = false
+    @State private var isRenaming = false
+    @State private var renameText = ""
+    @FocusState private var isRenameFocused: Bool
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundColor(.secondary)
-                .frame(width: 10)
             Image(systemName: "folder.fill")
                 .font(.system(size: 13))
                 .foregroundColor(.matcha500)
-            Text(folder.name)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.white)
-                .lineLimit(1)
-            Text("\(fileCount)")
-                .font(.system(size: 10))
-                .foregroundColor(.secondary)
-            Spacer()
-            if isHovered {
-                Button(action: onRename) {
-                    Image(systemName: "pencil")
+            if isRenaming {
+                TextField("Folder name", text: $renameText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, weight: .medium))
+                    .focused($isRenameFocused)
+                    .onSubmit { commitRename() }
+                    .onKeyPress(.escape) { cancelRename(); return .handled }
+                Button { commitRename() } label: {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.matcha500)
+                }
+                .buttonStyle(.plain)
+                Button { cancelRename() } label: {
+                    Image(systemName: "xmark")
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help("Rename")
-                Button(action: onDelete) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 10))
-                        .foregroundColor(.red.opacity(0.8))
+            } else {
+                Text(folder.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Text("\(fileCount)")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary.opacity(0.4))
+                Spacer()
+                if isHovered {
+                    Button { startRename() } label: {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Rename")
+                    Button(action: onDelete) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 10))
+                            .foregroundColor(.red.opacity(0.8))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Delete folder (files move to root)")
                 }
-                .buttonStyle(.plain)
-                .help("Delete folder (files move to root)")
             }
         }
         .padding(.horizontal, 8)
@@ -311,9 +401,9 @@ private struct FolderRow: View {
         .cornerRadius(4)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
-        .onTapGesture(perform: onToggle)
+        .onTapGesture { if !isRenaming { onOpen() } }
         .contextMenu {
-            Button("Rename", action: onRename)
+            Button("Rename") { startRename() }
             Button("Delete folder", role: .destructive, action: onDelete)
         }
         .onDrop(of: [.text], isTargeted: $isTargeted) { providers in
@@ -325,6 +415,27 @@ private struct FolderRow: View {
             }
             return true
         }
+        .onChange(of: isRenaming) { _, val in
+            if val { isRenameFocused = true }
+        }
+    }
+
+    private func startRename() {
+        renameText = folder.name
+        isRenaming = true
+    }
+
+    private func commitRename() {
+        let name = renameText
+        isRenaming = false
+        renameText = ""
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        onRename(name)
+    }
+
+    private func cancelRename() {
+        isRenaming = false
+        renameText = ""
     }
 }
 
@@ -384,7 +495,7 @@ private struct FileRow: View {
             if !folders.isEmpty || file.folderId != nil {
                 Menu("Move to") {
                     if file.folderId != nil {
-                        Button("Root (no folder)") { onMove(nil) }
+                        Button("Remove from folder") { onMove(nil) }
                         Divider()
                     }
                     ForEach(folders) { folder in
@@ -396,6 +507,249 @@ private struct FileRow: View {
             }
             Divider()
             Button("Delete", role: .destructive, action: onDelete)
+        }
+    }
+}
+
+// MARK: - Media View
+
+struct ProjectMediaView: View {
+    @Bindable var viewModel: ProjectDetailViewModel
+    @State private var previewFile: MWProjectFile?
+    @State private var isCreatingFolder = false
+    @State private var newFolderName = ""
+
+    private static let bucketOrder = ["Images", "Videos", "Audio", "Documents", "Other"]
+
+    private var unfiledFiles: [MWProjectFile] {
+        viewModel.files.filter { $0.folderId == nil }
+    }
+
+    private func mediaBucket(for file: MWProjectFile) -> String {
+        let ct = file.contentType?.lowercased() ?? ""
+        if file.isImage { return "Images" }
+        if ct.hasPrefix("video/") { return "Videos" }
+        if ct.hasPrefix("audio/") { return "Audio" }
+        let docExts = ["pdf", "doc", "docx", "txt", "csv", "xls", "xlsx",
+                       "ppt", "pptx", "pages", "numbers", "keynote"]
+        let ext = (file.filename as NSString).pathExtension.lowercased()
+        if ct == "application/pdf" || docExts.contains(ext) { return "Documents" }
+        return "Other"
+    }
+
+    private var grouped: [(bucket: String, files: [MWProjectFile])] {
+        var dict: [String: [MWProjectFile]] = [:]
+        for file in unfiledFiles {
+            let b = mediaBucket(for: file)
+            dict[b, default: []].append(file)
+        }
+        return Self.bucketOrder.compactMap { b in
+            guard let files = dict[b], !files.isEmpty else { return nil }
+            return (bucket: b, files: files)
+        }
+    }
+
+    private func bucketIcon(_ bucket: String) -> String {
+        switch bucket {
+        case "Images": return "photo"
+        case "Videos": return "video"
+        case "Audio": return "music.note"
+        case "Documents": return "doc.text"
+        default: return "doc"
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "photo.stack")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Text("Files dropped in chat appear here.")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            Divider().opacity(0.2)
+            if viewModel.isLoadingFiles && unfiledFiles.isEmpty {
+                Spacer()
+                ProgressView().tint(.secondary)
+                Spacer()
+            } else if unfiledFiles.isEmpty {
+                Spacer()
+                VStack(spacing: 8) {
+                    Image(systemName: "photo.stack")
+                        .font(.system(size: 24))
+                        .foregroundColor(.secondary.opacity(0.5))
+                    Text("Nothing in media yet")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                    Text("Drop files in the project chat to see them here.")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                }
+                Spacer()
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        ForEach(grouped, id: \.bucket) { group in
+                            bucketSection(group.bucket, files: group.files)
+                        }
+                    }
+                    .padding(10)
+                }
+            }
+        }
+        .background(Color.appBackground)
+        .sheet(item: $previewFile) { file in
+            AttachmentPreviewSheet(file: file)
+        }
+        .sheet(isPresented: $isCreatingFolder) {
+            newFolderSheet
+        }
+        .task {
+            if viewModel.files.isEmpty {
+                await viewModel.loadFiles()
+            }
+        }
+    }
+
+    private var newFolderSheet: some View {
+        VStack(spacing: 16) {
+            Text("New Folder")
+                .font(.system(size: 14, weight: .semibold))
+            TextField("Folder name", text: $newFolderName)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 220)
+                .onSubmit { commitNewFolder() }
+            HStack(spacing: 8) {
+                Button("Cancel") { cancelNewFolder() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Create") { commitNewFolder() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(newFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 280)
+    }
+
+    private func commitNewFolder() {
+        let name = newFolderName
+        isCreatingFolder = false
+        newFolderName = ""
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        Task { await viewModel.createFolder(name: name) }
+    }
+
+    private func cancelNewFolder() {
+        isCreatingFolder = false
+        newFolderName = ""
+    }
+
+    private func bucketSection(_ bucket: String, files: [MWProjectFile]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: bucketIcon(bucket))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.secondary)
+                Text(bucket)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.secondary)
+                Text("\(files.count)")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary.opacity(0.6))
+            }
+            .padding(.horizontal, 4)
+
+            if bucket == "Images" {
+                imageGrid(files: files)
+            } else {
+                ForEach(files) { file in
+                    mediaFileRow(file)
+                }
+            }
+        }
+    }
+
+    private func imageGrid(files: [MWProjectFile]) -> some View {
+        let cols = [GridItem(.adaptive(minimum: 72, maximum: 88), spacing: 6)]
+        return LazyVGrid(columns: cols, spacing: 6) {
+            ForEach(files) { file in
+                AsyncImage(url: URL(string: file.storageUrl)) { phase in
+                    switch phase {
+                    case .success(let img):
+                        img.resizable().scaledToFill()
+                    case .failure:
+                        Color.zinc800
+                            .overlay(Image(systemName: "photo").foregroundColor(.secondary))
+                    default:
+                        Color.zinc800.overlay(ProgressView().controlSize(.small))
+                    }
+                }
+                .frame(width: 72, height: 72)
+                .clipped()
+                .cornerRadius(5)
+                .contentShape(Rectangle())
+                .onTapGesture { previewFile = file }
+                .contextMenu { mediaContextMenu(file) }
+            }
+        }
+    }
+
+    private func mediaFileRow(_ file: MWProjectFile) -> some View {
+        let bytes = Double(file.fileSize)
+        let sizeLabel = bytes < 1024 ? "\(file.fileSize) B"
+            : bytes < 1024 * 1024 ? String(format: "%.1f KB", bytes / 1024)
+            : String(format: "%.1f MB", bytes / 1024 / 1024)
+
+        return HStack(spacing: 8) {
+            Image(systemName: bucketIcon(mediaBucket(for: file)))
+                .font(.system(size: 13))
+                .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(file.filename)
+                    .font(.system(size: 12))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Text(sizeLabel)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Color.zinc900.opacity(0.4))
+        .cornerRadius(4)
+        .contentShape(Rectangle())
+        .onTapGesture { previewFile = file }
+        .contextMenu { mediaContextMenu(file) }
+    }
+
+    @ViewBuilder
+    private func mediaContextMenu(_ file: MWProjectFile) -> some View {
+        Button("Open") { previewFile = file }
+        if !viewModel.folders.isEmpty {
+            Menu("Move to folder") {
+                ForEach(viewModel.folders) { folder in
+                    Button(folder.name) {
+                        Task { await viewModel.moveFile(id: file.id, toFolder: folder.id) }
+                    }
+                }
+            }
+        }
+        Button("New folder…") {
+            newFolderName = ""
+            isCreatingFolder = true
+        }
+        Divider()
+        Button("Delete", role: .destructive) {
+            Task { await viewModel.deleteFile(id: file.id) }
         }
     }
 }
