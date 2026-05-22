@@ -4,6 +4,9 @@ import UniformTypeIdentifiers
 
 struct ProjectDetailView: View {
     let projectId: String
+    /// True when shown in a secondary (aux) window. Suppresses writes to the
+    /// shared nav/tab context so it doesn't clobber the main window.
+    var isEmbedded: Bool = false
     @Environment(AppState.self) private var appState
     @State private var viewModel = ProjectDetailViewModel()
     @State private var chatVM = ThreadDetailViewModel()
@@ -73,19 +76,22 @@ struct ProjectDetailView: View {
             viewModel.attachTaskRealtime(currentUserId: appState.currentUser?.id)
             // Deep-link from a notification tap: open the requested panel
             // (e.g. kanban for a task notification), then clear the hint.
-            if let panel = appState.pendingProjectPanel {
+            if !isEmbedded, let panel = appState.pendingProjectPanel {
                 collabPanel = panel
                 appState.pendingProjectPanel = nil
             }
             presenceVM.start(projectId: projectId, pageKey: collabPanel.rawValue)
             await viewModel.loadProject(id: projectId)
-            appState.setActiveContext(WorkTab(kind: .project, entityId: projectId,
-                                              title: viewModel.project?.title ?? "Project"))
+            // An aux window must not write the shared nav/tab context.
+            if !isEmbedded {
+                appState.setActiveContext(WorkTab(kind: .project, entityId: projectId,
+                                                  title: viewModel.project?.title ?? "Project"))
+            }
         }
         // Same project already open when the notification fires: projectId
         // doesn't change so the .task above won't re-run — catch it here.
         .onChange(of: appState.pendingProjectPanel) { _, panel in
-            if let panel {
+            if !isEmbedded, let panel {
                 collabPanel = panel
                 appState.pendingProjectPanel = nil
             }

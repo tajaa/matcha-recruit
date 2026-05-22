@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ThreadDetailView: View {
     let threadId: String
+    /// True in a secondary (aux) window — suppresses shared nav/tab writes.
+    var isEmbedded: Bool = false
     @Environment(AppState.self) private var appState
     @State private var viewModel = ThreadDetailViewModel()
     @State private var showVersionHistory = false
@@ -288,8 +290,10 @@ struct ThreadDetailView: View {
         }
         .task(id: threadId) {
             await viewModel.loadThread(id: threadId)
-            appState.setActiveContext(WorkTab(kind: .thread, entityId: threadId,
-                                              title: viewModel.thread?.title ?? "Chat"))
+            if !isEmbedded {
+                appState.setActiveContext(WorkTab(kind: .thread, entityId: threadId,
+                                                  title: viewModel.thread?.title ?? "Chat"))
+            }
         }
         .alert("Finalize Thread?", isPresented: $showFinalizeConfirm) {
             Button("Finalize", role: .destructive) {

@@ -14,6 +14,7 @@ private func formatThreadDate(_ iso: String) -> String {
 
 struct ThreadListView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.openWindow) private var openWindow
     @Bindable var viewModel: ThreadListViewModel
     var showHeader: Bool = true
     var searchText: String = ""
@@ -186,6 +187,12 @@ struct ThreadListView: View {
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
+                            Button {
+                                openWindow(id: "aux", value: AuxWindowTarget.thread(thread.id))
+                            } label: {
+                                Label("Open in new window", systemImage: "macwindow.on.rectangle")
+                            }
+                            Divider()
                             Button(thread.isPinned ? "Unpin" : "Pin") {
                                 Task { await viewModel.togglePin(thread: thread) }
                             }

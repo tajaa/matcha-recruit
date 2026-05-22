@@ -7,6 +7,7 @@ import AppKit
 /// `journalsListGeneration` bumps from sibling views (NewJournalSheet).
 struct JournalListView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.openWindow) private var openWindow
     var showHeader: Bool = true
     var searchText: String = ""
 
@@ -117,6 +118,12 @@ struct JournalListView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Button {
+                openWindow(id: "aux", value: AuxWindowTarget.journal(j.id))
+            } label: {
+                Label("Open in new window", systemImage: "macwindow.on.rectangle")
+            }
+            Divider()
             Button("Archive") {
                 Task {
                     try? await JournalService.shared.archiveJournal(id: j.id)

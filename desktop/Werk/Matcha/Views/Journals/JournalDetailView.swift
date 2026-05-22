@@ -7,6 +7,8 @@ import SwiftUI
 /// headers, bullets, todos, images, highlight, etc).
 struct JournalDetailView: View {
     let journalId: String
+    /// True in a secondary (aux) window — suppresses shared nav/tab writes.
+    let isEmbedded: Bool
 
     @Environment(AppState.self) private var appState
     @State private var vm = JournalDetailViewModel()
@@ -30,8 +32,9 @@ struct JournalDetailView: View {
     @AppStorage private var fontSizeRaw: Double
     @AppStorage private var lineSpacingRaw: Double
 
-    init(journalId: String) {
+    init(journalId: String, isEmbedded: Bool = false) {
         self.journalId = journalId
+        self.isEmbedded = isEmbedded
         _fontFamily = AppStorage(wrappedValue: "system", "journal.\(journalId).font.family")
         _fontSizeRaw = AppStorage(wrappedValue: 13.0, "journal.\(journalId).font.size")
         _lineSpacingRaw = AppStorage(wrappedValue: 3.0, "journal.\(journalId).line.spacing")
@@ -51,8 +54,10 @@ struct JournalDetailView: View {
         .background(Color.appBackground)
         .task(id: journalId) {
             await vm.load(id: journalId)
-            appState.setActiveContext(WorkTab(kind: .journal, entityId: journalId,
-                                              title: vm.journal?.title ?? "Journal"))
+            if !isEmbedded {
+                appState.setActiveContext(WorkTab(kind: .journal, entityId: journalId,
+                                                  title: vm.journal?.title ?? "Journal"))
+            }
         }
         .onAppear { wireUploadCallbacks() }
         .onChange(of: journalId) { _, _ in wireUploadCallbacks() }

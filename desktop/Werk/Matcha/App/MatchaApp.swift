@@ -62,6 +62,18 @@ struct MatchaApp: App {
             CommandGroup(replacing: .newItem) { }
         }
 
+        // Secondary windows — opened via openWindow(id:"aux", value:) from
+        // sidebar context menus. Value-driven (one window per distinct target),
+        // so the generic File > New Window stays suppressed above.
+        WindowGroup(id: "aux", for: AuxWindowTarget.self) { $target in
+            AuxWindowRootView(target: target)
+                .environment(appState)
+                .environment(broadcastService)
+                .preferredColorScheme(colorScheme)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 900, height: 700)
+
         // macOS Settings scene — opened via Cmd+, or
         // "Werk → Settings…" in the menu bar.
         Settings {

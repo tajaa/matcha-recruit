@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ChannelsSidebarView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.openWindow) private var openWindow
     var showHeader: Bool = true
     var searchText: String = ""
     @State private var channels: [ChannelSummary] = []
@@ -264,6 +265,12 @@ struct ChannelsSidebarView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Button {
+                openWindow(id: "aux", value: AuxWindowTarget.channel(channel.id))
+            } label: {
+                Label("Open in new window", systemImage: "macwindow.on.rectangle")
+            }
+            Divider()
             // Jump to the linked collab project even when it isn't starred —
             // the project loads via getProjectDetail regardless of pinning.
             // Mirrors the project-open in ContentView.starredProjectRow.

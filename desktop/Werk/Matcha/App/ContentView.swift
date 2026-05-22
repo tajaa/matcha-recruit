@@ -3,6 +3,7 @@ import AppKit
 
 struct ContentView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.openWindow) private var openWindow
     @State private var threadListVM = ThreadListViewModel()
     @State private var isOpeningCheckout = false
     @State private var upgradeError: String?
@@ -924,6 +925,12 @@ struct ContentView: View {
         .buttonStyle(.plain)
         .contextMenu {
             Button {
+                openWindow(id: "aux", value: AuxWindowTarget.channel(channel.id))
+            } label: {
+                Label("Open in new window", systemImage: "macwindow.on.rectangle")
+            }
+            Divider()
+            Button {
                 ChannelStarStore.shared.toggle(channel.id)
                 appState.channelsListGeneration &+= 1
             } label: {
@@ -966,6 +973,12 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Button {
+                openWindow(id: "aux", value: AuxWindowTarget.project(p.id))
+            } label: {
+                Label("Open in new window", systemImage: "macwindow.on.rectangle")
+            }
+            Divider()
             Button("Unstar") {
                 Task {
                     await toggleProjectPin(project: p)
@@ -1020,6 +1033,12 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Button {
+                openWindow(id: "aux", value: AuxWindowTarget.thread(thread.id))
+            } label: {
+                Label("Open in new window", systemImage: "macwindow.on.rectangle")
+            }
+            Divider()
             Button("Unpin") {
                 Task {
                     do {
@@ -1326,6 +1345,45 @@ private let threadListOutputFormatter: DateFormatter = {
 private func formatThreadDate(_ iso: String) -> String {
     guard let date = parseMWDate(iso) else { return iso }
     return threadListOutputFormatter.string(from: date)
+}
+
+/// Root of a secondary (aux) window. Renders one surface, pinned to the target
+/// passed via `openWindow(id:"aux", value:)`. Each detail view is `isEmbedded`
+/// so it loads from the explicit id and never writes the main window's shared
+/// nav/tab state. No sidebar — a focused single-surface window.
+struct AuxWindowRootView: View {
+    let target: AuxWindowTarget?
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        Group {
+            if !appState.isAuthenticated {
+                // macOS may restore an aux window on relaunch before sign-in;
+                // don't render a detail view that would fire token-less requests.
+                Text("Sign in to Werk to open this window.")
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                switch target {
+                case .project(let id):
+                    ProjectDetailView(projectId: id, isEmbedded: true)
+                case .channel(let id):
+                    ChannelDetailView(channelId: id, isEmbedded: true)
+                case .thread(let id):
+                    ThreadDetailView(threadId: id, isEmbedded: true)
+                case .journal(let id):
+                    JournalDetailView(journalId: id, isEmbedded: true)
+                case nil:
+                    Text("Nothing to show")
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+        }
+        .frame(minWidth: 480, minHeight: 400)
+        .background(appState.themeBg)
+    }
 }
 
 

@@ -709,3 +709,14 @@ class AppState {
         }
     }
 }
+
+/// What a secondary (aux) window is pinned to. Codable + Hashable so it can be
+/// passed as a WindowGroup presentation value via `openWindow(id:value:)`.
+/// Each detail view it maps to is rendered with `isEmbedded: true` so it never
+/// writes the shared nav/tab context of the main window.
+enum AuxWindowTarget: Codable, Hashable {
+    case project(String)
+    case channel(String)
+    case thread(String)
+    case journal(String)
+}

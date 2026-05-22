@@ -3,6 +3,7 @@ import AppKit
 
 struct ProjectListView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.openWindow) private var openWindow
     var showHeader: Bool = true
     var searchText: String = ""
 
@@ -256,6 +257,12 @@ struct ProjectListView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Button {
+                openWindow(id: "aux", value: AuxWindowTarget.project(p.id))
+            } label: {
+                Label("Open in new window", systemImage: "macwindow.on.rectangle")
+            }
+            Divider()
             Button((p.isPinned ?? false) ? "Unstar" : "Star") {
                 Task { await togglePin(project: p) }
             }
