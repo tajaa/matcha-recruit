@@ -118,6 +118,17 @@ class IRIncidentUpdate(BaseModel):
     location_id: Optional[UUID] = None
 
 
+class InvolvedPerson(BaseModel):
+    """A person linked to an incident in a given role (ir_people).
+
+    Distinct from involved_employee_ids (real employees roster). This is the
+    matcha-lite no-roster identity surfaced on the incident detail view.
+    """
+    id: UUID
+    display_name: str
+    role: Literal["reporter", "involved", "witness", "interviewee"]
+
+
 class IRIncidentResponse(BaseModel):
     """Response model for an incident report."""
     id: UUID
@@ -138,6 +149,9 @@ class IRIncidentResponse(BaseModel):
     root_cause: Optional[str] = None
     corrective_actions: Optional[str] = None
     involved_employee_ids: list[UUID] = []
+    # Lightweight no-roster people linked to this incident (ir_people).
+    # Populated by the single-incident GET; empty on list/create responses.
+    involved_people: list[InvolvedPerson] = []
     er_case_id: Optional[UUID] = None
     document_count: int = 0
     company_id: Optional[UUID] = None
@@ -157,6 +171,48 @@ class IRIncidentListResponse(BaseModel):
     """Response model for listing incidents."""
     incidents: list[IRIncidentResponse]
     total: int
+
+
+# ===========================================
+# IR People — lightweight per-person identity (matcha-lite, no roster)
+# ===========================================
+
+IRPersonRole = Literal["reporter", "involved", "witness", "interviewee"]
+
+
+class IRPersonSummary(BaseModel):
+    """A person in the IR people index, with their total incident count."""
+    id: UUID
+    display_name: str
+    email: Optional[str] = None
+    verified: bool = False
+    incident_count: int = 0
+    last_seen: Optional[datetime] = None
+
+
+class IRPersonRoleCount(BaseModel):
+    """How many incidents a person appears in, for one role."""
+    role: IRPersonRole
+    count: int
+
+
+class IRPersonIncidentRef(BaseModel):
+    """A single incident a person appears in (with their role on it)."""
+    id: UUID
+    incident_number: str
+    title: str
+    incident_type: IRIncidentType
+    severity: IRSeverity
+    status: IRStatus
+    occurred_at: Optional[datetime] = None
+    role: IRPersonRole
+
+
+class IRPersonHistory(BaseModel):
+    """Per-person, role-aware incident history."""
+    person: IRPersonSummary
+    role_breakdown: list[IRPersonRoleCount] = []
+    incidents: list[IRPersonIncidentRef] = []
 
 
 # ===========================================

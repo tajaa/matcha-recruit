@@ -70,6 +70,7 @@ import EmployeeDetail from './pages/app/EmployeeDetail'
 import IRList from './pages/app/IRList'
 import IRDetail from './pages/app/IRDetail'
 import IRRiskInsights from './pages/app/IRRiskInsights'
+import IRPersonDetail from './pages/app/IRPersonDetail'
 import OshaLogs from './pages/app/OshaLogs'
 import Locations from './pages/app/Locations'
 import Handbooks from './pages/app/Handbooks'
@@ -226,6 +227,7 @@ export default function App() {
         <Route path="ir" element={<IRList />} />
         <Route path="ir/risk-insights" element={<IRRiskInsights />} />
         <Route path="ir/osha" element={<OshaLogs />} />
+        <Route path="ir/people/:personId" element={<IRPersonDetail />} />
         <Route path="ir/:incidentId" element={<IRDetail />} />
         <Route path="locations" element={<FeatureGate feature="incidents" label="Locations"><Locations /></FeatureGate>} />
         <Route path="escalated-queries" element={<EscalatedQueries />} />

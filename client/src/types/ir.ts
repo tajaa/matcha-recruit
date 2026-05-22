@@ -35,6 +35,9 @@ export type IRIncident = {
   root_cause: string | null
   corrective_actions: string | null
   involved_employee_ids: string[]
+  // No-roster people linked to this incident (matcha-lite). Populated by the
+  // single-incident GET; empty on list responses.
+  involved_people?: IRInvolvedPerson[]
   er_case_id: string | null
   document_count: number
   company_id: string | null
@@ -286,6 +289,54 @@ export type IRRiskInsights = {
   location_id: string | null
   themes: IRRiskTheme[]
   from_cache: boolean
+}
+
+// ── People (no-roster per-person tracking, matcha-lite) ──
+
+export type IRPersonRole = 'reporter' | 'involved' | 'witness' | 'interviewee'
+
+export type IRInvolvedPerson = {
+  id: string
+  display_name: string
+  role: IRPersonRole
+}
+
+export type IRPersonSummary = {
+  id: string
+  display_name: string
+  email?: string | null
+  verified?: boolean
+  incident_count: number
+  last_seen?: string | null
+}
+
+export type IRPersonRoleCount = {
+  role: IRPersonRole
+  count: number
+}
+
+export type IRPersonIncidentRef = {
+  id: string
+  incident_number: string
+  title: string
+  incident_type: IRIncidentType
+  severity: IRSeverity
+  status: IRStatus
+  occurred_at: string | null
+  role: IRPersonRole
+}
+
+export type IRPersonHistory = {
+  person: IRPersonSummary
+  role_breakdown: IRPersonRoleCount[]
+  incidents: IRPersonIncidentRef[]
+}
+
+export const PERSON_ROLE_LABEL: Record<IRPersonRole, string> = {
+  reporter: 'Reporter',
+  involved: 'Involved',
+  witness: 'Witness',
+  interviewee: 'Interviewee',
 }
 
 // ── Investigation interviews ──

@@ -43,6 +43,9 @@ router.include_router(_osha_router)
 from .investigation_interviews import router as _investigation_interviews_router
 router.include_router(_investigation_interviews_router)
 
+from .people import router as _people_router
+router.include_router(_people_router)
+
 from .ai_analysis import router as _ai_analysis_router
 router.include_router(_ai_analysis_router)
 

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../api/client'
 import { Button, Input, Modal, Select, Textarea } from '../ui'
-import type { IRIncident, IRWitness } from '../../types/ir'
+import { IRPersonMultiSelect } from './IRPersonMultiSelect'
+import type { IRIncident } from '../../types/ir'
 
 type LocationRow = {
   id: string
@@ -17,7 +18,7 @@ const EMPTY_FORM = {
   date_text: '',
   location_id: '',
   description: '',
-  involved_text: '',
+  involved: [] as string[],
   next_steps: '',
 }
 
@@ -26,15 +27,6 @@ function locationLabel(loc: LocationRow): string {
   const place = [loc.city, loc.state].filter(Boolean).join(', ')
   if (name && place) return `${name} — ${place}`
   return name || place || loc.id.slice(0, 8)
-}
-
-// Split "Jane Doe, John Smith\nPat Lee" into ["Jane Doe", "John Smith", "Pat Lee"].
-function parseInvolved(text: string): IRWitness[] {
-  return text
-    .split(/[\n,]+/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((name) => ({ name, contact: null }))
 }
 
 type Props = {
@@ -83,7 +75,7 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
     setSaving(true)
     try {
       const selectedLocation = (locations || []).find((l) => l.id === form.location_id)
-      const witnesses = parseInvolved(form.involved_text)
+      const witnesses = form.involved.map((name) => ({ name, contact: null }))
       const created = await api.post<IRIncident>('/ir/incidents', {
         description: form.description.trim(),
         // Free-text date — backend parses with dateutil and falls back to NOW().
@@ -160,11 +152,14 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
           placeholder="What happened? Include relevant details — the AI will categorize from this."
         />
 
-        <Textarea
-          label="Name of all involved"
-          value={form.involved_text}
-          onChange={(e) => setForm({ ...form, involved_text: e.target.value })}
-          placeholder="One name per line, or comma-separated"
+        {/* These names persist to the witnesses column (role=witness in the
+            per-person index). Label says "witnesses / others involved" so the
+            form matches the role taxonomy shown on a person's history. */}
+        <IRPersonMultiSelect
+          label="Witnesses / others involved"
+          value={form.involved}
+          onChange={(involved) => setForm({ ...form, involved })}
+          placeholder="Type a name, Enter to add"
         />
 
         <Textarea

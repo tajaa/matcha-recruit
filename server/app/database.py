@@ -2071,6 +2071,43 @@ async def init_db():
         """)
 
         # ===========================================
+        # IR People registry (matcha-lite per-person tracking, no roster)
+        # ===========================================
+        # Lightweight, auto-built identity for people named in incidents.
+        # Stable id derived from the typed name (normalized for dedup) so
+        # per-person history works on the IR feature alone — distinct from
+        # involved_employee_ids, which targets the real `employees` roster.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ir_people (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                display_name TEXT NOT NULL,
+                normalized_name TEXT NOT NULL,
+                email TEXT,
+                verified BOOLEAN NOT NULL DEFAULT false,
+                first_seen TIMESTAMP DEFAULT NOW(),
+                last_seen TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_ir_people_company_norm
+            ON ir_people (company_id, normalized_name)
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ir_incident_people (
+                incident_id UUID NOT NULL REFERENCES ir_incidents(id) ON DELETE CASCADE,
+                person_id UUID NOT NULL REFERENCES ir_people(id) ON DELETE CASCADE,
+                role TEXT NOT NULL CHECK (role IN ('reporter', 'involved', 'witness', 'interviewee')),
+                created_at TIMESTAMP DEFAULT NOW(),
+                PRIMARY KEY (incident_id, person_id, role)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ir_incident_people_person
+            ON ir_incident_people (person_id)
+        """)
+
+        # ===========================================
         # IR Investigation Interviews (bridge IR → ER)
         # ===========================================
 

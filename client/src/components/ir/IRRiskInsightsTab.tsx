@@ -17,6 +17,7 @@ import { IRIncidentTrendChart } from './risk/IRIncidentTrendChart'
 import { IRPremiumImpactCard } from './risk/IRPremiumImpactCard'
 import { IRQuarterlyRecordableChart } from './risk/IRQuarterlyRecordableChart'
 import { IRSeverityDonut } from './risk/IRSeverityDonut'
+import { IRPeopleCard } from './risk/IRPeopleCard'
 
 type LocationRow = {
   id: string
@@ -254,6 +255,8 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
               </div>
             )}
           </section>
+
+          <IRPeopleCard />
 
           {/* Upgrade footer */}
           <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">

@@ -20,7 +20,7 @@ import { useMe } from '../../hooks/useMe'
 import { isIrOnlyTier } from '../../utils/tier'
 import {
   typeLabel, statusLabel, severityLabel,
-  SEVERITY_BADGE, STATUS_BADGE, SEVERITY_OPTIONS,
+  SEVERITY_BADGE, STATUS_BADGE, SEVERITY_OPTIONS, PERSON_ROLE_LABEL,
   type IRCategorizationAnalysis,
   type IRRootCauseAnalysis,
   type IRRecommendationsAnalysis,
@@ -182,6 +182,27 @@ export default function IRDetail() {
                   </div>
                 )}
 
+                {incident.involved_people && incident.involved_people.length > 0 && (
+                  <div>
+                    <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">People Involved</h3>
+                    <div className="flex flex-wrap gap-1.5">
+                      {incident.involved_people.map((p) => (
+                        <Link
+                          key={`${p.id}-${p.role}`}
+                          to={`/app/ir/people/${p.id}`}
+                          className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-200 hover:bg-zinc-700 transition-colors"
+                          title={`View ${p.display_name}'s incident history`}
+                        >
+                          {p.display_name}
+                          <span className="ml-1 text-zinc-500">· {PERSON_ROLE_LABEL[p.role]}</span>
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Full-platform roster path (employees table). Still shows raw
+                    ids — needs name hydration like involved_people above. */}
                 {incident.involved_employee_ids && incident.involved_employee_ids.length > 0 && (
                   <div>
                     <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">Involved Employees</h3>

@@ -13,11 +13,14 @@ Backend routes for matcha-lite's Incident Reporting product. Package was split f
 | `analytics.py` | Summary, trends, locations, WC metrics, risk-matrix, risk-insights, consistency | 7 |
 | `ai_analysis.py` | Categorize, severity, root-cause, recommendations, similar, policy-mapping, clear-cache | 9 |
 | `investigation_interviews.py` | Create, batch, resend, generate-link, list, cancel witness interviews | 6 |
+| `people.py` | Per-person identity (no-roster): search + per-person role-aware history | 2 |
 | `osha.py` | 300/301/300A logs + CSV + recordability + AI determine | 7 |
 | `documents.py` | Upload, list, delete incident documents | 3 |
 | `anonymous_reporting.py` | Public token mgmt for `/report/:token` form | 3 |
 | `audit_log.py` | Get audit trail for an incident | 1 |
-| **Total** | | **48 routes** |
+| **Total** | | **50 routes** |
+
+**No-roster people index** (`people.py` + `ir_people` / `ir_incident_people` tables, migration `irp1a2b3c4d5e`): people named in incidents (reporter / involved / witness / interviewee) are auto-indexed for per-person history WITHOUT a managed employee roster. Identity = the typed name, normalized for dedup (`_normalize_person_name`, `_gather_incident_people`, `_sync_incident_people` in `_shared.py`). Wired into `crud.create_incident` / `update_incident` (roles reporter/involved/witness, re-synced on edit) and `investigation_interviews` (role interviewee, managed separately so an incident edit's re-sync won't drop it). Distinct from `involved_employee_ids`, which targets the real `employees` roster. Anonymous intake (`inbound_email.py`) intentionally does NOT auto-mint people. Endpoints use 2+ segment paths (`/people/search`, `/people/{id}/incidents`) to avoid the `/{incident_id}` shadow.
 
 ## Package router pattern
 

@@ -43,12 +43,16 @@ from ._shared import (
     _auto_classify_incident_task,
     _company_filter,
     _detect_osha_reportable_keywords,
+    _gather_incident_people,
     _parse_occurred_at,
     _persist_osha_emergency_alert,
     _resolve_employee_refs,
+    _safe_json_loads,
+    _sync_incident_people,
     _to_naive_utc,
     generate_incident_number,
     log_audit,
+    parse_witnesses,
     row_to_response,
     send_ir_notifications_task,
 )
@@ -202,6 +206,24 @@ async def create_incident(
             {"title": effective_title, "type": effective_type},
             request.client.host if request.client else None,
         )
+
+        # Per-person identity (matcha-lite, no roster): index reporter +
+        # involved + witness names into ir_people / ir_incident_people so
+        # an individual's incident history is queryable. Best-effort —
+        # never block submit on an identity-tracking hiccup.
+        if row.get("company_id"):
+            try:
+                people = _gather_incident_people(
+                    reported_by_name=row.get("reported_by_name"),
+                    reported_by_email=row.get("reported_by_email"),
+                    witnesses=incident.witnesses,
+                    category_data=incident.category_data,
+                )
+                await _sync_incident_people(
+                    conn, str(row["company_id"]), str(row["id"]), people
+                )
+            except Exception:
+                logger.exception("[IR] people sync failed for incident %s", row.get("id"))
 
         # OSHA reportable-event (29 CFR 1904.39) emergency detection. If the
         # initial title/description mentions a fatality, amputation, in-patient
@@ -889,7 +911,25 @@ async def get_incident(
         if not row:
             raise HTTPException(status_code=404, detail="Incident not found")
 
-        return row_to_response(row, row["document_count"])
+        # Hydrate the no-roster people linked to this incident so the detail
+        # view can show names instead of opaque ids.
+        people_rows = await conn.fetch(
+            """
+            SELECT p.id, p.display_name, ip.role
+            FROM ir_incident_people ip
+            JOIN ir_people p ON p.id = ip.person_id
+            WHERE ip.incident_id = $1
+            ORDER BY ip.role, p.display_name
+            """,
+            str(incident_id),
+        )
+
+    response_row = dict(row)
+    response_row["involved_people"] = [
+        {"id": pr["id"], "display_name": pr["display_name"], "role": pr["role"]}
+        for pr in people_rows
+    ]
+    return row_to_response(response_row, row["document_count"])
 
 
 @router.put("/{incident_id}", response_model=IRIncidentResponse)
@@ -1132,6 +1172,23 @@ async def update_incident(
             changes if changes else None,
             request.client.host if request.client else None,
         )
+
+        # Re-sync per-person identity when the people-bearing fields change.
+        # Gather from the returned row so the reporter (not editable here) is
+        # preserved across the delete-and-reinsert. Best-effort.
+        if (incident.witnesses is not None or incident.category_data is not None) and row.get("company_id"):
+            try:
+                people = _gather_incident_people(
+                    reported_by_name=row.get("reported_by_name"),
+                    reported_by_email=row.get("reported_by_email"),
+                    witnesses=parse_witnesses(row.get("witnesses")),
+                    category_data=_safe_json_loads(row.get("category_data"), {}),
+                )
+                await _sync_incident_people(
+                    conn, str(row["company_id"]), str(row["id"]), people
+                )
+            except Exception:
+                logger.exception("[IR] people re-sync failed for incident %s", row.get("id"))
 
         # Build response with context
         response_row = dict(row)

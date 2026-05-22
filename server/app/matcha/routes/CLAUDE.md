@@ -14,7 +14,7 @@
 | `offer_letters.py` | `/offer-letters` | Offer letter creation, signing, candidate portal (1,288 lines) |
 | `interviews.py` | — | Live interview WS + transcript handling (1,522 lines) |
 | `er_copilot.py` | `/er/cases` | Employee Relations case mgmt + AI (4,111 lines — split candidate) |
-| `ir_incidents/` | `/ir/incidents` | Incident reporting (matcha-lite) — **already a package**, see `ir_incidents/CLAUDE.md` |
+| `ir_incidents/` | `/ir/incidents` | Incident reporting (matcha-lite) — **already a package** (50 routes incl. no-roster people index), see `ir_incidents/CLAUDE.md` |
 | `ir_onboarding.py` | `/ir-onboarding` | IR-only onboarding wizard backend |
 | `ir_surveys.py` | `/ir/surveys` | Security survey CRUD (matcha-lite) |
 | `inbound_email.py` | (none) | Public anonymous-report `/report/:token` form |

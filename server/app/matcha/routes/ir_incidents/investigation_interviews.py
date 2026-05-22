@@ -21,8 +21,7 @@ from app.matcha.models.interview import (
     InvestigationInterviewStart,
 )
 
-# log_audit currently lives in _legacy.py; will move to _shared.py in step 10.
-from ._shared import log_audit
+from ._shared import _link_incident_person, log_audit
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +124,17 @@ async def create_investigation_interview(
                 request_body.interviewee_email,
                 json.dumps(questions),
             )
+
+            # Track the interviewee in the per-person index (role=interviewee).
+            try:
+                if incident["company_id"]:
+                    await _link_incident_person(
+                        conn, str(incident["company_id"]), str(incident_id),
+                        request_body.interviewee_name, request_body.interviewee_email,
+                        "interviewee",
+                    )
+            except Exception:
+                logger.exception("[IR] interviewee people link failed for incident %s", incident_id)
 
             await log_audit(
                 conn, incident_id, current_user.id,
@@ -303,6 +313,18 @@ async def batch_create_investigation_interviews(
                         item.interviewee_email,
                         json.dumps(questions),
                     )
+
+                    try:
+                        if incident["company_id"]:
+                            await _link_incident_person(
+                                conn, str(incident["company_id"]), str(incident_id),
+                                item.interviewee_name, item.interviewee_email,
+                                "interviewee",
+                            )
+                    except Exception:
+                        logging.getLogger(__name__).warning(
+                            "[IR] interviewee people link failed for incident %s", incident_id
+                        )
 
                     await log_audit(
                         conn, incident_id, current_user.id,
