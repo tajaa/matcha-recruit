@@ -39,11 +39,14 @@ struct ChannelDetailView: View {
 
     private let ws = ChannelsWebSocket.shared
     private let senderColumnWidth: CGFloat = 160
-    private let maxAttachments = 5
-    private let maxAttachmentBytes = 10 * 1024 * 1024
-    private let allowedExtensions: Set<String> = [
-        "jpg", "jpeg", "png", "webp", "gif",
-        "pdf", "txt", "csv", "doc", "docx", "mp4", "mov", "mp3",
+    private let maxAttachments = 10
+    private let maxAttachmentBytes = 50 * 1024 * 1024
+    /// Permissive: block only executable / installer types; everything else
+    /// (docs, markdown, code, images, video, audio, archives, …) is allowed.
+    private let blockedExtensions: Set<String> = [
+        "exe", "msi", "bat", "cmd", "com", "scr", "vbs", "ps1",
+        "app", "dmg", "pkg", "deb", "rpm", "apk", "jar", "bin",
+        "command", "scpt", "action", "workflow",
     ]
 
     var body: some View {
@@ -640,7 +643,7 @@ struct ChannelDetailView: View {
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        panel.allowedContentTypes = allowedExtensions.compactMap { UTType(filenameExtension: $0) }
+        panel.allowsOtherFileTypes = true   // allow any type; validated on ingest
         if panel.runModal() == .OK {
             for url in panel.urls {
                 ingestFile(at: url)
@@ -660,8 +663,8 @@ struct ChannelDetailView: View {
 
     private func ingestFile(at url: URL) {
         let ext = url.pathExtension.lowercased()
-        guard allowedExtensions.contains(ext) else {
-            vm.errorMessage = "File type .\(ext) not allowed"
+        guard !blockedExtensions.contains(ext) else {
+            vm.errorMessage = "File type .\(ext) isn't allowed"
             return
         }
         guard pendingAttachments.count < maxAttachments else {
@@ -673,7 +676,7 @@ struct ChannelDetailView: View {
             return
         }
         guard data.count <= maxAttachmentBytes else {
-            vm.errorMessage = "\(url.lastPathComponent) is too large (max 10 MB)"
+            vm.errorMessage = "\(url.lastPathComponent) is too large (max 50 MB)"
             return
         }
         let mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"

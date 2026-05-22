@@ -141,7 +141,7 @@ struct ChannelMessageComposer: View {
                         .foregroundColor(appState.themeText.opacity(0.55))
                 }
                 .buttonStyle(.plain)
-                .help("Attach files (max \(maxAttachments), 10 MB each)")
+                .help("Attach files (max \(maxAttachments), 50 MB each)")
                 .disabled(pendingAttachments.count >= maxAttachments || isUploading)
 
                 Button(action: onPasteImage) {

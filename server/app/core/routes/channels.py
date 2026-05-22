@@ -2031,11 +2031,15 @@ async def transfer_ownership(
 # File uploads for channel messages
 # ---------------------------------------------------------------------------
 
-_MAX_CHANNEL_FILE_COUNT = 5
-_MAX_CHANNEL_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
-_ALLOWED_CHANNEL_EXTENSIONS = {
-    ".jpg", ".jpeg", ".png", ".webp", ".gif",
-    ".pdf", ".txt", ".csv", ".doc", ".docx", ".mp4", ".mov", ".mp3",
+_MAX_CHANNEL_FILE_COUNT = 10
+_MAX_CHANNEL_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+# Permissive import: allow ANY file type except executables / installers, which
+# could be malware if shared via the CDN. Everything else — docs, markdown,
+# code, images, video, audio, archives, design files — is accepted.
+_BLOCKED_CHANNEL_EXTENSIONS = {
+    ".exe", ".msi", ".bat", ".cmd", ".com", ".scr", ".vbs", ".ps1",
+    ".app", ".dmg", ".pkg", ".deb", ".rpm", ".apk", ".jar", ".bin",
+    ".command", ".scpt", ".action", ".workflow",
 }
 
 
@@ -2072,10 +2076,10 @@ async def upload_channel_files(
         ext = os.path.splitext(filename)[1].lower()
         size = len(file_bytes)
 
-        if ext not in _ALLOWED_CHANNEL_EXTENSIONS:
-            raise HTTPException(status_code=400, detail=f"File type not allowed: {filename}")
+        if ext in _BLOCKED_CHANNEL_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"File type not allowed for security: {filename}")
         if size > _MAX_CHANNEL_FILE_SIZE:
-            raise HTTPException(status_code=400, detail=f"File too large: {filename}")
+            raise HTTPException(status_code=400, detail=f"File too large (max 50 MB): {filename}")
 
         url = await storage.upload_file(file_bytes, filename, prefix=f"channels/{channel_id}", content_type=ct)
         attachments.append({
