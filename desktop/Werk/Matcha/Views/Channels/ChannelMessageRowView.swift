@@ -11,6 +11,7 @@ struct ChannelMessageRowView: View {
     let onReply: (ChannelMessage) -> Void
     let onToggleReaction: (String, String) -> Void
     let onRequestDelete: (ChannelMessage) -> Void
+    let onRequestEdit: (ChannelMessage) -> Void
     /// Open an attachment in the shared preview. Hoisted to the parent
     /// (ChannelDetailView) so the preview sheet survives row re-renders /
     /// LazyVStack recycling — a per-row `.sheet` dropped the binding when a
@@ -45,6 +46,11 @@ struct ChannelMessageRowView: View {
                         Text(formatTimestamp(msg.createdAt))
                             .font(.system(size: 10))
                             .foregroundColor(appState.themeTextSecondary)
+                        if msg.editedAt != nil && msg.deletedAt == nil {
+                            Text("· edited")
+                                .font(.system(size: 10))
+                                .foregroundColor(appState.themeTextSecondary)
+                        }
                         if msg.failed {
                             HStack(spacing: 3) {
                                 Image(systemName: "exclamationmark.circle.fill")
@@ -130,6 +136,16 @@ struct ChannelMessageRowView: View {
                 Label("Reply", systemImage: "arrowshape.turn.up.left")
             }
 
+            // Author can edit their own text message within the 15-min window.
+            // Attachment-only messages (no text bubble) aren't editable — delete instead.
+            let canEdit = msg.senderId == currentUserId && msg.deletedAt == nil
+                && !msg.pending && !msg.failed && !msg.content.isEmpty && withinEditWindow
+            if canEdit {
+                Button { onRequestEdit(msg) } label: {
+                    Label("Edit", systemImage: "pencil")
+                }
+            }
+
             Divider()
 
             Menu {
@@ -148,7 +164,8 @@ struct ChannelMessageRowView: View {
             // already-tombstoned messages. Pending/failed rows have no
             // server-side row to delete (msg.id is the client UUID until
             // the echo reconciles), so the DELETE would 404.
-            let canDelete = (msg.senderId == currentUserId || isAdmin)
+            // Admins/mods delete anyone's anytime; authors only within the window.
+            let canDelete = (isAdmin || (msg.senderId == currentUserId && withinEditWindow))
                 && msg.deletedAt == nil
                 && !msg.pending
                 && !msg.failed
@@ -385,6 +402,16 @@ struct ChannelMessageRowView: View {
 
     private func formatSize(_ bytes: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+
+    /// True while inside the 15-minute author edit/delete window. The server
+    /// enforces the same window; this only hides the affordance past it.
+    private var withinEditWindow: Bool {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = formatter.date(from: msg.createdAt) ?? ISO8601DateFormatter().date(from: msg.createdAt)
+        guard let date else { return false }
+        return Date().timeIntervalSince(date) <= 15 * 60
     }
 
     private func formatTimestamp(_ iso: String) -> String {

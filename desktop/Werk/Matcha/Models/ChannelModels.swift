@@ -73,13 +73,13 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
     let senderId: String
     let senderName: String
     let senderAvatarUrl: String?
-    let content: String
+    var content: String
     let attachments: [ChannelAttachment]
     let replyToId: String?
     let replyPreview: ReplyPreview?
     var reactions: [ChannelReaction]
     let createdAt: String
-    let editedAt: String?
+    var editedAt: String?
     var deletedAt: String?
     var deletedBy: String?
     /// User IDs the server resolved from @mentions in `content`. Only populated

@@ -16,11 +16,35 @@ struct ChannelMessageComposer: View {
     @Binding var inputText: String
     @Binding var pendingAttachments: [PendingChannelAttachment]
     @Binding var replyingTo: ChannelMessage?
+    @Binding var editingMessage: ChannelMessage?
     @Binding var isUploading: Bool
     @Binding var lastTypingSentAt: Date
 
     var body: some View {
         VStack(spacing: 8) {
+            // Editing banner — mirrors the reply banner; cancel clears the draft.
+            if editingMessage != nil {
+                HStack(spacing: 8) {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(appState.themeAccent)
+                    Text("Editing message")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(appState.themeAccent)
+                    Spacer()
+                    Button {
+                        editingMessage = nil
+                        inputText = ""
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(appState.themeText.opacity(0.4))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 4)
+            }
+
             // Reply banner
             if let reply = replyingTo {
                 HStack(spacing: 8) {

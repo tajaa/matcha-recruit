@@ -2821,6 +2821,16 @@ async def upload_avatar(
     async with get_connection() as conn:
         await conn.execute("UPDATE users SET avatar_url = $1 WHERE id = $2", url, current_user.id)
 
+    # Refresh the live channels-WS user object so messages sent after this
+    # carry the new avatar without a reconnect — the broadcast reads the
+    # in-memory ChannelUser, which would otherwise stay stale until reconnect.
+    try:
+        from .channels_ws import manager
+        if current_user.id in manager.users:
+            manager.users[current_user.id].avatar_url = url
+    except Exception:
+        pass
+
     return {"avatar_url": url}
 
 

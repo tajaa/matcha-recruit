@@ -273,6 +273,15 @@ class ChannelsService {
         _ = try await client.requestData(method: "DELETE", path: "\(basePath)/\(channelId)/messages/\(messageId)")
     }
 
+    func editMessage(channelId: String, messageId: String, content: String) async throws {
+        struct Body: Encodable { let content: String }
+        _ = try await client.requestData(
+            method: "PATCH",
+            path: "\(basePath)/\(channelId)/messages/\(messageId)",
+            body: Body(content: content)
+        )
+    }
+
     // MARK: - Moderation
 
     /// Roles a moderation call can assign. Promoting to owner goes through

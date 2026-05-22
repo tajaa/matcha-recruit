@@ -21,6 +21,8 @@ struct ChannelDetailView: View {
     @State private var showInviteSheet = false
     @State private var showManageMembers = false
     @State private var pendingMessageDelete: ChannelMessage? = nil
+    /// When set, the composer is editing this message instead of sending new.
+    @State private var editingMessage: ChannelMessage? = nil
     @State private var inviteToast: String?
     /// Single hoisted attachment-preview target. Lives here (not per-row) so a
     /// streaming message / hover re-render or LazyVStack recycle can't drop the
@@ -110,6 +112,7 @@ struct ChannelDetailView: View {
                     inputText: $inputText,
                     pendingAttachments: $pendingAttachments,
                     replyingTo: $replyingTo,
+                    editingMessage: $editingMessage,
                     isUploading: $isUploading,
                     lastTypingSentAt: $lastTypingSentAt
                 )
@@ -418,6 +421,7 @@ struct ChannelDetailView: View {
                             onReply: { replyingTo = $0 },
                             onToggleReaction: toggleReaction,
                             onRequestDelete: { pendingMessageDelete = $0 },
+                            onRequestEdit: { editingMessage = $0; inputText = $0.content; replyingTo = nil },
                             onOpenAttachment: { previewFile = previewModel($0) }
                         )
                         .opacity((msg.pending || msg.failed) ? 0.55 : 1.0)
@@ -533,6 +537,14 @@ struct ChannelDetailView: View {
 
     private func send() {
         let trimmed = inputText.trimmingCharacters(in: .whitespaces)
+        // Edit mode: commit the edit instead of sending a new message.
+        if let editing = editingMessage {
+            editingMessage = nil
+            inputText = ""
+            guard !trimmed.isEmpty else { return }
+            Task { await vm.editMessage(editing, newContent: trimmed) }
+            return
+        }
         let attachmentsToSend = pendingAttachments
         guard !trimmed.isEmpty || !attachmentsToSend.isEmpty else { return }
         guard !isUploading else { return }

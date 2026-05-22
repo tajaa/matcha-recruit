@@ -471,6 +471,26 @@ async def broadcast_message_deleted(
     )
 
 
+async def broadcast_message_edited(
+    channel_id: str,
+    message_id: str,
+    content: str,
+    edited_at: Optional[str] = None,
+) -> None:
+    """Fan out a message_edited event so connected members update the message
+    text + 'edited' marker in place. Called by the REST PATCH handler."""
+    await manager._broadcast_to_room(
+        channel_id,
+        {
+            "type": "message_edited",
+            "room": channel_id,
+            "message_id": message_id,
+            "content": content,
+            "edited_at": edited_at,
+        },
+    )
+
+
 async def broadcast_broadcast_started(
     channel_id: str,
     broadcast_id: str,

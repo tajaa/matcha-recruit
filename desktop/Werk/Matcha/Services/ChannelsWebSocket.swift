@@ -36,6 +36,7 @@ final class ChannelsWebSocket: NSObject {
     var onUserLeft: ((ChannelOnlineUser) -> Void)?
     var onTyping: ((_ userId: String, _ name: String) -> Void)?
     var onMessageDeleted: ((_ messageId: String, _ deletedBy: String) -> Void)?
+    var onMessageEdited: ((_ messageId: String, _ content: String, _ editedAt: String?) -> Void)?
     var onError: ((String) -> Void)?
     var onBroadcastStarted: ((WSBroadcastStarted) -> Void)?
     var onBroadcastEnded: ((WSBroadcastEnded) -> Void)?
@@ -274,6 +275,11 @@ final class ChannelsWebSocket: NSObject {
             if let messageId = obj["message_id"] as? String,
                let deletedBy = obj["deleted_by"] as? String {
                 onMessageDeleted?(messageId, deletedBy)
+            }
+        case "message_edited":
+            if let messageId = obj["message_id"] as? String,
+               let content = obj["content"] as? String {
+                onMessageEdited?(messageId, content, obj["edited_at"] as? String)
             }
         case "reaction_update":
             if let messageId = obj["message_id"] as? String,

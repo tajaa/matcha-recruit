@@ -87,6 +87,25 @@ final class ChannelChatViewModel {
         }
     }
 
+    /// Edit an existing message. Optimistic: update content + editedAt locally,
+    /// then PATCH; revert on failure. The server enforces the 15-min window.
+    func editMessage(_ msg: ChannelMessage, newContent: String) async {
+        let trimmed = newContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != msg.content,
+              let idx = messages.firstIndex(where: { $0.id == msg.id }) else { return }
+        let previous = messages[idx].content
+        messages[idx].content = trimmed
+        messages[idx].editedAt = ISO8601DateFormatter().string(from: Date())
+        do {
+            try await service.editMessage(channelId: msg.channelId, messageId: msg.id, content: trimmed)
+        } catch {
+            if let i = messages.firstIndex(where: { $0.id == msg.id }) {
+                messages[i].content = previous
+            }
+            errorMessage = error.localizedDescription
+        }
+    }
+
     private func wireCallbacks(channelId: String) {
         // Closures capture `self` (a class) by reference — mutations propagate
         // to the live SwiftUI view via @Observable tracking.
@@ -114,6 +133,13 @@ final class ChannelChatViewModel {
             if let idx = self.messages.firstIndex(where: { $0.id == messageId }) {
                 self.messages[idx].deletedAt = ISO8601DateFormatter().string(from: Date())
                 self.messages[idx].deletedBy = deletedBy
+            }
+        }
+        ws.onMessageEdited = { [weak self] messageId, content, editedAt in
+            guard let self else { return }
+            if let idx = self.messages.firstIndex(where: { $0.id == messageId }) {
+                self.messages[idx].content = content
+                self.messages[idx].editedAt = editedAt ?? ISO8601DateFormatter().string(from: Date())
             }
         }
         ws.onReactionUpdate = { [weak self] messageId, reactions in

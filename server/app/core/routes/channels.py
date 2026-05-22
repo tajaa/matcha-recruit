@@ -1256,6 +1256,11 @@ async def get_channel_messages(
         return [_row_to_message(r, reactions_map) for r in reversed(rows)]
 
 
+# Authors may edit/delete their own messages only within this window; channel
+# owners/moderators can still delete anyone's at any time (moderation).
+MESSAGE_EDIT_WINDOW = timedelta(minutes=15)
+
+
 @router.delete("/{channel_id}/messages/{message_id}", status_code=status.HTTP_200_OK)
 async def delete_channel_message(
     channel_id: UUID,
@@ -1269,7 +1274,7 @@ async def delete_channel_message(
     """
     async with get_connection() as conn:
         msg = await conn.fetchrow(
-            "SELECT id, sender_id, deleted_at FROM channel_messages WHERE id = $1 AND channel_id = $2",
+            "SELECT id, sender_id, deleted_at, created_at FROM channel_messages WHERE id = $1 AND channel_id = $2",
             message_id, channel_id,
         )
         if not msg:
@@ -1285,6 +1290,11 @@ async def delete_channel_message(
         is_mod = member_role in ("owner", "moderator")
         if not is_author and not is_mod:
             raise HTTPException(status_code=403, detail="You can only delete your own messages")
+        # Authors can only delete recent messages; mods/owners delete anytime.
+        if is_author and not is_mod and (
+            datetime.now(timezone.utc) - msg["created_at"] > MESSAGE_EDIT_WINDOW
+        ):
+            raise HTTPException(status_code=403, detail="This message is too old to delete")
 
         await conn.execute(
             """
@@ -1309,6 +1319,59 @@ async def delete_channel_message(
         logger.warning("Failed to broadcast channel message deletion: %s", exc)
 
     return {"ok": True, "deleted_by": str(current_user.id)}
+
+
+class MessageEditRequest(BaseModel):
+    content: str
+
+
+@router.patch("/{channel_id}/messages/{message_id}", status_code=status.HTTP_200_OK)
+async def edit_channel_message(
+    channel_id: UUID,
+    message_id: UUID,
+    body: MessageEditRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Edit a channel message. Author-only, within the edit window. Stamps
+    edited_at so clients can render an 'edited' marker."""
+    new_content = body.content.strip()
+    if not new_content:
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+    if len(new_content) > 4000:
+        raise HTTPException(status_code=400, detail="Message too long")
+
+    async with get_connection() as conn:
+        msg = await conn.fetchrow(
+            "SELECT id, sender_id, deleted_at, created_at FROM channel_messages WHERE id = $1 AND channel_id = $2",
+            message_id, channel_id,
+        )
+        if not msg:
+            raise HTTPException(status_code=404, detail="Message not found")
+        if msg["deleted_at"] is not None:
+            raise HTTPException(status_code=400, detail="Cannot edit a deleted message")
+        if msg["sender_id"] != current_user.id:
+            raise HTTPException(status_code=403, detail="You can only edit your own messages")
+        if datetime.now(timezone.utc) - msg["created_at"] > MESSAGE_EDIT_WINDOW:
+            raise HTTPException(status_code=403, detail="This message is too old to edit")
+
+        edited_at = await conn.fetchval(
+            "UPDATE channel_messages SET content = $2, edited_at = NOW() WHERE id = $1 RETURNING edited_at",
+            message_id, new_content,
+        )
+
+    # Fan out the edit so connected members update in place.
+    try:
+        from .channels_ws import broadcast_message_edited
+        await broadcast_message_edited(
+            channel_id=str(channel_id),
+            message_id=str(message_id),
+            content=new_content,
+            edited_at=edited_at.isoformat() if edited_at else None,
+        )
+    except Exception as exc:
+        logger.warning("Failed to broadcast channel message edit: %s", exc)
+
+    return {"ok": True, "edited": True, "edited_at": edited_at.isoformat() if edited_at else None}
 
 
 class ReactionToggleRequest(BaseModel):
