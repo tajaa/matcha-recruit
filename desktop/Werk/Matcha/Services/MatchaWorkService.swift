@@ -541,6 +541,18 @@ class MatchaWorkService {
         return try await client.request(method: "PATCH", path: "\(basePath)/projects/\(id)", body: Body(title: title, isPinned: isPinned, status: status))
     }
 
+    /// Toggle sales-pipeline mode for a project. Persisted to
+    /// project_data.pipeline_mode (merged server-side). Returns the updated
+    /// project so the caller can refresh `pipelineMode`.
+    func setPipelineMode(projectId: String, enabled: Bool) async throws -> MWProject {
+        struct Body: Codable { let enabled: Bool }
+        return try await client.request(
+            method: "PATCH",
+            path: "\(basePath)/projects/\(projectId)/pipeline-mode",
+            body: Body(enabled: enabled)
+        )
+    }
+
     func archiveProject(id: String) async throws {
         _ = try await client.requestData(method: "DELETE", path: "\(basePath)/projects/\(id)")
         invalidateProjectLists()
@@ -724,7 +736,17 @@ class MatchaWorkService {
         dueDate: String? = nil,
         assignedTo: String? = nil,
         category: String? = nil,
-        elementId: String? = nil
+        elementId: String? = nil,
+        dealValue: Double? = nil,
+        probability: Int? = nil,
+        contactName: String? = nil,
+        contactCompany: String? = nil,
+        contactEmail: String? = nil,
+        contactPhone: String? = nil,
+        outcome: String? = nil,
+        lossReason: String? = nil,
+        nextActionAt: String? = nil,
+        expectedClose: String? = nil
     ) async throws -> MWProjectTask {
         struct Body: Encodable {
             let title: String
@@ -735,6 +757,16 @@ class MatchaWorkService {
             let assigned_to: String?
             let category: String?
             let element_id: String?
+            let deal_value: Double?
+            let probability: Int?
+            let contact_name: String?
+            let contact_company: String?
+            let contact_email: String?
+            let contact_phone: String?
+            let outcome: String?
+            let loss_reason: String?
+            let next_action_at: String?
+            let expected_close: String?
         }
         return try await client.request(
             method: "POST",
@@ -742,7 +774,12 @@ class MatchaWorkService {
             body: Body(
                 title: title, description: description, board_column: boardColumn,
                 priority: priority, due_date: dueDate, assigned_to: assignedTo,
-                category: category, element_id: elementId
+                category: category, element_id: elementId,
+                deal_value: dealValue, probability: probability,
+                contact_name: contactName, contact_company: contactCompany,
+                contact_email: contactEmail, contact_phone: contactPhone,
+                outcome: outcome, loss_reason: lossReason,
+                next_action_at: nextActionAt, expected_close: expectedClose
             )
         )
     }
@@ -811,14 +848,34 @@ class MatchaWorkService {
         var assignedTo: String?
         var progressNote: String?
         var elementId: String?
+        // Sales-pipeline fields. Same encodeIfPresent contract: nil = leave
+        // unchanged; an empty string clears a text/date field server-side.
+        var dealValue: Double?
+        var probability: Int?
+        var contactName: String?
+        var contactCompany: String?
+        var contactEmail: String?
+        var contactPhone: String?
+        var outcome: String?
+        var lossReason: String?
+        var nextActionAt: String?
+        var expectedClose: String?
 
         enum CodingKeys: String, CodingKey {
-            case title, description, priority, status
+            case title, description, priority, status, outcome, probability
             case boardColumn = "board_column"
             case dueDate = "due_date"
             case assignedTo = "assigned_to"
             case progressNote = "progress_note"
             case elementId = "element_id"
+            case dealValue = "deal_value"
+            case contactName = "contact_name"
+            case contactCompany = "contact_company"
+            case contactEmail = "contact_email"
+            case contactPhone = "contact_phone"
+            case lossReason = "loss_reason"
+            case nextActionAt = "next_action_at"
+            case expectedClose = "expected_close"
         }
 
         /// Custom encode — emit only the fields that were actually set.
@@ -854,6 +911,18 @@ class MatchaWorkService {
             method: "PATCH",
             path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)",
             body: patch
+        )
+    }
+
+    /// Log a sales follow-up activity (call/email/note/meeting) onto a task's
+    /// history timeline. Renders in the existing task-viewer timeline.
+    func logTaskActivity(projectId: String, taskId: String, kind: String, body: String?) async throws {
+        struct Req: Encodable { let kind: String; let body: String? }
+        struct Res: Decodable { let ok: Bool? }
+        let _: Res = try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/activity",
+            body: Req(kind: kind, body: body)
         )
     }
 

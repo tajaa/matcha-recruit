@@ -98,6 +98,19 @@ class ProjectDetailViewModel {
         }
     }
 
+    /// Toggle sales-pipeline mode for the current project. Persists to
+    /// project_data.pipeline_mode (merged server-side) and refreshes the local
+    /// project so the kanban board re-renders with sales stages + deal fields.
+    func setPipelineMode(_ enabled: Bool) async {
+        guard let pid = project?.id else { return }
+        do {
+            let updated = try await service.setPipelineMode(projectId: pid, enabled: enabled)
+            await MainActor.run { self.project = updated }
+        } catch {
+            await MainActor.run { self.errorMessage = "Failed to update pipeline mode" }
+        }
+    }
+
     func loadProject(id: String) async {
         // Clear per-project caches before fetching. The VM is persistent
         // @State on ProjectDetailView and gets reused across projects, so

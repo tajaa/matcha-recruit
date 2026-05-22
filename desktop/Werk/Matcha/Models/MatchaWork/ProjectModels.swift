@@ -203,8 +203,24 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
     var lastMovedAt: String?
     var attachments: [MWProjectFile]?
 
+    // ── Sales-pipeline fields ──
+    // NULL on normal boards; populated and surfaced only when the project is
+    // in pipeline mode. Defaulted to nil so the synthesized memberwise init
+    // stays backward-compatible with existing optimistic-construction sites.
+    var dealValue: Double? = nil
+    var probability: Int? = nil
+    var contactName: String? = nil
+    var contactCompany: String? = nil
+    var contactEmail: String? = nil
+    var contactPhone: String? = nil
+    var outcome: String? = nil        // open | won | lost
+    var lossReason: String? = nil
+    var nextActionAt: String? = nil
+    var expectedClose: String? = nil
+
     enum CodingKeys: String, CodingKey {
         case id, title, description, priority, status, attachments, category
+        case probability, outcome
         case projectId = "project_id"
         case boardColumn = "board_column"
         case assignedTo = "assigned_to"
@@ -218,6 +234,85 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
         case lastMovedAt = "last_moved_at"
         case elementId = "element_id"
         case elementName = "element_name"
+        case dealValue = "deal_value"
+        case contactName = "contact_name"
+        case contactCompany = "contact_company"
+        case contactEmail = "contact_email"
+        case contactPhone = "contact_phone"
+        case lossReason = "loss_reason"
+        case nextActionAt = "next_action_at"
+        case expectedClose = "expected_close"
+    }
+
+    /// Convenience for the card chip — "open" when unset.
+    var dealOutcome: String { outcome ?? "open" }
+}
+
+// MARK: - Sales pipeline
+
+/// Fixed sales-pipeline stages, used in place of the default kanban columns
+/// when a project is in pipeline mode. Keys are stored in
+/// `mw_tasks.board_column`. `defaultProbability` seeds a new deal's win
+/// likelihood from its stage (editable per deal).
+enum SalesStage {
+    static let columns: [(key: String, label: String)] = [
+        ("lead", "Lead"),
+        ("qualified", "Qualified"),
+        ("proposal", "Proposal"),
+        ("negotiation", "Negotiation"),
+        ("closed", "Closed"),
+    ]
+    static let keys: Set<String> = Set(columns.map { $0.key })
+    static let defaultProbability: [String: Int] = [
+        "lead": 10, "qualified": 30, "proposal": 60, "negotiation": 80, "closed": 100,
+    ]
+}
+
+/// Aggregate sales metrics over a board's tasks, computed client-side (the
+/// board already holds every task in memory, so no extra round-trip).
+struct PipelineSummary {
+    var openCount = 0
+    var wonCount = 0
+    var lostCount = 0
+    var openValue: Double = 0       // Σ deal_value of open deals
+    var weightedValue: Double = 0   // Σ deal_value × probability/100 of open deals
+    var wonValue: Double = 0        // Σ deal_value of won deals
+
+    /// won / (won + lost); 0 when nothing has been decided yet.
+    var winRate: Double {
+        let decided = wonCount + lostCount
+        return decided == 0 ? 0 : Double(wonCount) / Double(decided)
+    }
+
+    init(tasks: [MWProjectTask]) {
+        for t in tasks {
+            let value = t.dealValue ?? 0
+            switch t.dealOutcome {
+            case "won":
+                wonCount += 1
+                wonValue += value
+            case "lost":
+                lostCount += 1
+            default:
+                openCount += 1
+                openValue += value
+                let p = Double(t.probability ?? SalesStage.defaultProbability[t.boardColumn] ?? 0)
+                weightedValue += value * p / 100.0
+            }
+        }
+    }
+}
+
+extension MWProject {
+    /// Sales-pipeline mode is opt-in per project, stored in
+    /// `project_data.pipeline_mode` (merged server-side, see
+    /// matcha_work `PATCH /projects/{id}/pipeline-mode`).
+    var pipelineMode: Bool {
+        guard let raw = projectData?["pipeline_mode"]?.value else { return false }
+        if let b = raw as? Bool { return b }
+        if let i = raw as? Int { return i != 0 }
+        if let s = raw as? String { return s == "true" || s == "1" }
+        return false
     }
 }
 

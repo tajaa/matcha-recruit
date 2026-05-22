@@ -3930,13 +3930,25 @@ async def create_project_task_endpoint(
 
     project, _role = await _verify_project_access(project_id, current_user)
 
-    due_raw = body.get("due_date")
-    due_date = None
-    if due_raw:
+    def _opt_date(field):
+        raw = body.get(field)
+        if not raw:
+            return None
         try:
-            due_date = _date.fromisoformat(due_raw)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid due_date")
+            return _date.fromisoformat(raw)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"Invalid {field}")
+
+    def _opt_num(field, cast):
+        v = body.get(field)
+        if v is None or v == "":
+            return None
+        try:
+            return cast(v)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail=f"Invalid {field}")
+
+    due_date = _opt_date("due_date")
 
     assigned_raw = body.get("assigned_to")
     assigned_to = UUID(assigned_raw) if assigned_raw else None
@@ -3956,6 +3968,17 @@ async def create_project_task_endpoint(
             project_title=project.get("title"),
             category=body.get("category", "manual"),
             element_id=body.get("element_id") or None,
+            # Sales-pipeline fields (optional; NULL for normal tasks)
+            deal_value=_opt_num("deal_value", float),
+            probability=_opt_num("probability", int),
+            contact_name=body.get("contact_name"),
+            contact_company=body.get("contact_company"),
+            contact_email=body.get("contact_email"),
+            contact_phone=body.get("contact_phone"),
+            outcome=body.get("outcome"),
+            loss_reason=body.get("loss_reason"),
+            next_action_at=_opt_date("next_action_at"),
+            expected_close=_opt_date("expected_close"),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -3975,19 +3998,39 @@ async def update_project_task_endpoint(
     project, _role = await _verify_project_access(project_id, current_user)
 
     patch: dict = {}
-    for key in ("title", "description", "priority", "board_column", "status", "progress_note"):
+    for key in (
+        "title", "description", "priority", "board_column", "status", "progress_note",
+        # Sales-pipeline text fields
+        "contact_name", "contact_company", "contact_email", "contact_phone",
+        "outcome", "loss_reason",
+    ):
         if key in body:
             patch[key] = body[key]
 
-    if "due_date" in body:
-        v = body["due_date"]
-        if v is None or v == "":
-            patch["due_date"] = None
-        else:
-            try:
-                patch["due_date"] = _date.fromisoformat(v)
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid due_date")
+    # Sales-pipeline numeric fields — coerce so the asyncpg numeric/smallint
+    # casts never receive a JSON string. Empty / null clears the value.
+    for num_key, cast in (("deal_value", float), ("probability", int)):
+        if num_key in body:
+            v = body[num_key]
+            if v is None or v == "":
+                patch[num_key] = None
+            else:
+                try:
+                    patch[num_key] = cast(v)
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail=f"Invalid {num_key}")
+
+    # Date fields (due_date + sales follow-up dates). Empty / null clears.
+    for date_key in ("due_date", "next_action_at", "expected_close"):
+        if date_key in body:
+            v = body[date_key]
+            if v is None or v == "":
+                patch[date_key] = None
+            else:
+                try:
+                    patch[date_key] = _date.fromisoformat(v)
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400, detail=f"Invalid {date_key}")
 
     if "assigned_to" in body:
         v = body["assigned_to"]
@@ -4009,6 +4052,23 @@ async def update_project_task_endpoint(
     if not result:
         raise HTTPException(status_code=404, detail="Task not found")
     return result
+
+
+@router.patch("/projects/{project_id}/pipeline-mode")
+async def set_project_pipeline_mode_endpoint(
+    project_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Toggle sales-pipeline mode for a collab project. Stored in
+    mw_projects.project_data.pipeline_mode via a non-destructive merge so the
+    board can render sales stages / deal fields. Other project_data keys are
+    preserved."""
+    from ..services import project_service as proj_svc
+
+    await _verify_project_access(project_id, current_user)
+    enabled = bool(body.get("enabled", False))
+    return await proj_svc.update_project_data(project_id, {"pipeline_mode": enabled})
 
 
 @router.delete("/projects/{project_id}/tasks/{task_id}")
@@ -4236,6 +4296,33 @@ async def get_task_history_endpoint(
             task_id,
         )
     return [_serialize_history_row(r) for r in rows]
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}/activity", status_code=201)
+async def log_task_activity_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Log a sales follow-up activity (call/email/note/meeting) onto a task's
+    history timeline so collaborators see the deal's touchpoints."""
+    from ..services import project_task_service as pt_svc
+
+    await _verify_project_access(project_id, current_user)
+    try:
+        result = await pt_svc.log_task_activity(
+            project_id=project_id,
+            task_id=task_id,
+            actor_user_id=current_user.id,
+            kind=body.get("kind", "note"),
+            body=body.get("body"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return result
 
 
 def _serialize_activity_row(r) -> dict:

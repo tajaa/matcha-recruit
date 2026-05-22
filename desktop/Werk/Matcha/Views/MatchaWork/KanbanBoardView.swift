@@ -9,6 +9,22 @@ private let kanbanColumns: [(key: String, label: String)] = [
     ("done", "Done"),
 ]
 
+/// The board's columns depend on mode: a sales-pipeline project renders the
+/// fixed sales stages (Lead→…→Closed); every other project keeps the default
+/// task columns. Pipeline mode is a per-project flag (`MWProject.pipelineMode`).
+private func columnsFor(pipeline: Bool) -> [(key: String, label: String)] {
+    pipeline ? SalesStage.columns : kanbanColumns
+}
+
+/// Compact currency for deal values / pipeline totals — "$12k", "$1.2M",
+/// "$0" when nil/zero. Pipeline-mode only.
+private func formatDealValue(_ value: Double) -> String {
+    let v = value
+    if v >= 1_000_000 { return String(format: "$%.1fM", v / 1_000_000) }
+    if v >= 1_000 { return String(format: "$%.0fk", v / 1_000) }
+    return String(format: "$%.0f", v)
+}
+
 struct KanbanBoardView: View {
     @Environment(AppState.self) private var appState
     @Bindable var viewModel: ProjectDetailViewModel
@@ -31,6 +47,13 @@ struct KanbanBoardView: View {
     /// Bumped every 60s so card header aging tints (orange >6h / red >12h)
     /// advance on a board left open, not just on task events / reloads.
     @State private var agingClock = Date()
+
+    /// Sales-pipeline mode for the current project — gates all sales UI
+    /// (summary bar, per-stage $, card deal chips, editor Deal sections).
+    private var isPipeline: Bool { viewModel.project?.pipelineMode ?? false }
+    /// Aggregate deal metrics for the summary bar; cheap, recomputed from the
+    /// already-loaded tasks (pipeline mode only).
+    private var pipelineSummary: PipelineSummary { PipelineSummary(tasks: viewModel.tasks) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -87,6 +110,9 @@ struct KanbanBoardView: View {
                         .padding(.horizontal, 12)
                         .padding(.top, 4)
                         .padding(.bottom, 4)
+                }
+                if isPipeline {
+                    pipelineSummaryBar
                 }
                 boardColumns
             }
@@ -180,7 +206,7 @@ struct KanbanBoardView: View {
     private var boardColumns: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: 10) {
-                ForEach(kanbanColumns, id: \.key) { col in
+                ForEach(columnsFor(pipeline: isPipeline), id: \.key) { col in
                     columnView(key: col.key, label: col.label)
                 }
             }
@@ -188,9 +214,43 @@ struct KanbanBoardView: View {
         }
     }
 
+    /// Sales-pipeline summary bar — open value, weighted forecast, won, count,
+    /// win rate. Sits under the search/progress row; pipeline mode only.
+    private var pipelineSummaryBar: some View {
+        let s = pipelineSummary
+        return HStack(spacing: 14) {
+            summaryStat("Open", formatDealValue(s.openValue), appState.themeText)
+            summaryStat("Forecast", formatDealValue(s.weightedValue), appState.themeAccent)
+            summaryStat("Won", formatDealValue(s.wonValue), .green)
+            Divider().frame(height: 18)
+            summaryStat("Open deals", "\(s.openCount)", appState.themeText.opacity(0.8))
+            summaryStat("Win rate", "\(Int((s.winRate * 100).rounded()))%", .green)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    private func summaryStat(_ label: String, _ value: String, _ color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(value).font(.system(size: 13, weight: .semibold)).foregroundColor(color)
+            Text(label.uppercased())
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundColor(.secondary)
+                .tracking(0.4)
+        }
+    }
+
     private func columnView(key: String, label: String) -> some View {
+        // Mode-aware columns. When pipeline mode swaps the column set, legacy
+        // cards whose board_column is no longer a valid key would otherwise
+        // vanish — route those orphans into the first column so they stay
+        // visible until dragged onto a real stage (no migration needed).
+        let cols = columnsFor(pipeline: isPipeline)
+        let colKeys = Set(cols.map { $0.key })
+        let isFirstColumn = cols.first?.key == key
         let colTasks = viewModel.tasks
-            .filter { $0.boardColumn == key }
+            .filter { $0.boardColumn == key || (isFirstColumn && !colKeys.contains($0.boardColumn)) }
             .filter { taskMatchesSearch($0) }
             .sorted {
                 // Seriousness dictates order: critical → high → medium → low.
@@ -200,6 +260,8 @@ struct KanbanBoardView: View {
                 return (PacificDateFormatter.parse($0.createdAt) ?? .distantFuture)
                      < (PacificDateFormatter.parse($1.createdAt) ?? .distantFuture)
             }
+        // Per-stage deal total (pipeline mode only).
+        let stageValue = colTasks.reduce(0.0) { $0 + ($1.dealValue ?? 0) }
         let isEmpty = colTasks.isEmpty
         let isInlineAdding = inlineAddColumn == key
         let isHovered = hoveredEmptyColumn == key
@@ -219,30 +281,55 @@ struct KanbanBoardView: View {
                     .padding(.vertical, 1)
                     .background(appState.themeText.opacity(0.08))
                     .cornerRadius(4)
+                if isPipeline && stageValue > 0 {
+                    Text(formatDealValue(stageValue))
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(appState.themeAccent)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(appState.themeAccent.opacity(0.12))
+                        .cornerRadius(4)
+                }
                 Spacer()
-                Menu {
-                    Button("Blank task") {
+                if isPipeline {
+                    // Sales boards: a deal is just a titled card; details are
+                    // filled in the editor. Skip the engineering/bug template
+                    // menu, which is meaningless for a pipeline.
+                    Button {
                         inlineAddColumn = key
                         inlineAddTitle = ""
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
                     }
-                    Divider()
-                    ForEach(KanbanTemplate.allCases) { tpl in
-                        Button {
-                            composeTemplate = tpl
-                            newTaskColumn = key
-                        } label: {
-                            Label(tpl.displayName, systemImage: tpl.icon)
+                    .buttonStyle(.plain)
+                    .help("Add deal")
+                } else {
+                    Menu {
+                        Button("Blank task") {
+                            inlineAddColumn = key
+                            inlineAddTitle = ""
                         }
+                        Divider()
+                        ForEach(KanbanTemplate.allCases) { tpl in
+                            Button {
+                                composeTemplate = tpl
+                                newTaskColumn = key
+                            } label: {
+                                Label(tpl.displayName, systemImage: tpl.icon)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
                     }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Add task — blank or from a template")
                 }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Add task — blank or from a template")
             }
             .padding(.horizontal, 8)
             .padding(.top, 6)
@@ -257,6 +344,7 @@ struct KanbanBoardView: View {
                         KanbanCardView(
                             task: task,
                             attachments: viewModel.taskFiles[task.id] ?? [],
+                            pipelineMode: isPipeline,
                             onTap: { viewingTask = task },
                             onToggle: { Task { await viewModel.toggleTaskComplete(id: task.id) } },
                             onMoveColumn: { col in Task { await viewModel.moveTask(id: task.id, toColumn: col) } }
@@ -574,9 +662,18 @@ private struct KanbanCardView: View {
     @Environment(AppState.self) private var appState
     let task: MWProjectTask
     let attachments: [MWProjectFile]
+    var pipelineMode: Bool = false
     let onTap: () -> Void
     let onToggle: () -> Void
     let onMoveColumn: (String) -> Void
+
+    /// "Company · Contact" for the card face (pipeline mode); nil when neither set.
+    private var contactDisplay: String? {
+        let parts = [task.contactCompany, task.contactName]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
 
     private var imageAttachments: [MWProjectFile] { attachments.filter { $0.isImage } }
     private var nonImageCount: Int { attachments.count - imageAttachments.count }
@@ -591,7 +688,7 @@ private struct KanbanCardView: View {
     }
 
     private var currentColumnLabel: String {
-        kanbanColumns.first(where: { $0.key == task.boardColumn })?.label ?? task.boardColumn
+        columnsFor(pipeline: pipelineMode).first(where: { $0.key == task.boardColumn })?.label ?? task.boardColumn
     }
 
     private var assigneeDisplay: String? { task.displayAssignee }
@@ -607,12 +704,17 @@ private struct KanbanCardView: View {
             // 12h of inactivity (anchor = lastMovedAt ?? createdAt); never for
             // done/completed cards. See MWProjectTask.aging.
             HStack(alignment: .top, spacing: 8) {
-                Button(action: onToggle) {
-                    Image(systemName: task.status == "completed" ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 13))
-                        .foregroundColor(task.status == "completed" ? .matcha500 : .secondary)
+                // Pipeline deals use the Won/Lost outcome, not task completion —
+                // the checkbox would shove the card into 'done' (an orphan stage
+                // here). Hide it in pipeline mode.
+                if !pipelineMode {
+                    Button(action: onToggle) {
+                        Image(systemName: task.status == "completed" ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 13))
+                            .foregroundColor(task.status == "completed" ? .matcha500 : .secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
 
                 Text(task.title)
                     .font(.system(size: 12))
@@ -639,8 +741,37 @@ private struct KanbanCardView: View {
                     }
                 }
 
+                if pipelineMode, let contact = contactDisplay {
+                    HStack(spacing: 4) {
+                        Image(systemName: "building.2")
+                            .font(.system(size: 8))
+                            .foregroundColor(.secondary)
+                        Text(contact)
+                            .font(.system(size: 10))
+                            .foregroundColor(appState.themeText.opacity(0.7))
+                            .lineLimit(1)
+                    }
+                }
+
                 HStack(spacing: 5) {
                     Circle().fill(priorityColor).frame(width: 5, height: 5)
+
+                    if pipelineMode {
+                        if let dv = task.dealValue, dv > 0 {
+                            Text(formatDealValue(dv))
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(appState.themeAccent)
+                        }
+                        if task.dealOutcome != "open" {
+                            Text(task.dealOutcome.capitalized)
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundColor(task.dealOutcome == "won" ? .green : .red)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background((task.dealOutcome == "won" ? Color.green : Color.red).opacity(0.15))
+                                .cornerRadius(3)
+                        }
+                    }
 
                     if let tpl = KanbanTemplate.from(category: task.category) {
                         HStack(spacing: 2) {
@@ -665,7 +796,7 @@ private struct KanbanCardView: View {
                     }
 
                     Menu {
-                        ForEach(kanbanColumns, id: \.key) { c in
+                        ForEach(columnsFor(pipeline: pipelineMode), id: \.key) { c in
                             Button {
                                 if c.key != task.boardColumn { onMoveColumn(c.key) }
                             } label: {
@@ -823,6 +954,19 @@ private struct TaskEditorSheet: View {
     /// editor dismisses.
     @State private var previewFile: MWProjectFile?
 
+    // ── Sales-pipeline editor state (surfaced only when project.pipelineMode) ──
+    @State private var dealValue: String
+    @State private var probability: String
+    @State private var contactName: String
+    @State private var contactCompany: String
+    @State private var contactEmail: String
+    @State private var contactPhone: String
+    @State private var outcome: String
+    @State private var lossReason: String
+    @State private var nextActionAt: String
+    @State private var expectedClose: String
+    @State private var activityNote: String = ""
+
     init(
         task: MWProjectTask,
         viewModel: ProjectDetailViewModel,
@@ -843,10 +987,21 @@ private struct TaskEditorSheet: View {
         _progressNote = State(initialValue: task.progressNote ?? "")
         _assignedTo = State(initialValue: task.assignedTo)
         _selectedElementId = State(initialValue: task.elementId)
+        _dealValue = State(initialValue: task.dealValue.map { String(format: "%g", $0) } ?? "")
+        _probability = State(initialValue: task.probability.map(String.init) ?? "")
+        _contactName = State(initialValue: task.contactName ?? "")
+        _contactCompany = State(initialValue: task.contactCompany ?? "")
+        _contactEmail = State(initialValue: task.contactEmail ?? "")
+        _contactPhone = State(initialValue: task.contactPhone ?? "")
+        _outcome = State(initialValue: task.dealOutcome)
+        _lossReason = State(initialValue: task.lossReason ?? "")
+        _nextActionAt = State(initialValue: task.nextActionAt.map { String($0.prefix(10)) } ?? "")
+        _expectedClose = State(initialValue: task.expectedClose.map { String($0.prefix(10)) } ?? "")
     }
 
     private var collaborators: [MWProjectCollaborator] { viewModel.collaborators }
     private var attachments: [MWProjectFile] { viewModel.taskFiles[task.id] ?? [] }
+    private var isPipeline: Bool { viewModel.project?.pipelineMode ?? false }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -905,8 +1060,8 @@ private struct TaskEditorSheet: View {
                 .cornerRadius(6)
 
             HStack(spacing: 8) {
-                Picker("Column", selection: $boardColumn) {
-                    ForEach(kanbanColumns, id: \.key) { c in Text(c.label).tag(c.key) }
+                Picker(isPipeline ? "Stage" : "Column", selection: $boardColumn) {
+                    ForEach(columnsFor(pipeline: isPipeline), id: \.key) { c in Text(c.label).tag(c.key) }
                 }
                 .pickerStyle(.menu)
                 Picker("Priority", selection: $priority) {
@@ -916,6 +1071,10 @@ private struct TaskEditorSheet: View {
                     Text("Low").tag("low")
                 }
                 .pickerStyle(.menu)
+            }
+
+            if isPipeline {
+                salesSection
             }
 
             elementEditorRow
@@ -963,7 +1122,21 @@ private struct TaskEditorSheet: View {
                         dueDate: dueDate.isEmpty ? nil : dueDate,
                         assignedTo: assigneeWire,
                         progressNote: progressNote,
-                        elementId: selectedElementId ?? ""
+                        elementId: selectedElementId ?? "",
+                        // Sales fields only when in pipeline mode (nil = omitted,
+                        // so normal boards never touch these columns). Empty
+                        // text/date strings clear server-side; blank numbers are
+                        // omitted (Double/Int init returns nil) and left unchanged.
+                        dealValue: isPipeline ? Double(dealValue) : nil,
+                        probability: isPipeline ? Int(probability) : nil,
+                        contactName: isPipeline ? contactName : nil,
+                        contactCompany: isPipeline ? contactCompany : nil,
+                        contactEmail: isPipeline ? contactEmail : nil,
+                        contactPhone: isPipeline ? contactPhone : nil,
+                        outcome: isPipeline ? outcome : nil,
+                        lossReason: isPipeline ? lossReason : nil,
+                        nextActionAt: isPipeline ? nextActionAt : nil,
+                        expectedClose: isPipeline ? expectedClose : nil
                     )
                     onSave(patch)
                 }
@@ -1043,6 +1216,110 @@ private struct TaskEditorSheet: View {
                     newElementName = ""
                 }
             }
+        }
+    }
+
+    /// Deal / Outcome / Follow-up fields for a sales pipeline. Hardcoded-dark
+    /// to match the rest of this editor (see werk-theme-conventions — this
+    /// sheet is the deferred-from-theming one).
+    @ViewBuilder
+    private var salesSection: some View {
+        // Grouped into three sub-stacks to stay within the ViewBuilder
+        // 10-child limit and keep each section's type-check cheap.
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
+                sectionLabel("DEAL")
+                HStack(spacing: 8) {
+                    darkField("Value ($)", text: $dealValue)
+                    darkField("Win %", text: $probability)
+                }
+                HStack(spacing: 8) {
+                    darkField("Company", text: $contactCompany)
+                    darkField("Contact", text: $contactName)
+                }
+                HStack(spacing: 8) {
+                    darkField("Email", text: $contactEmail)
+                    darkField("Phone", text: $contactPhone)
+                }
+                darkField("Expected close (YYYY-MM-DD)", text: $expectedClose)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                sectionLabel("OUTCOME")
+                Picker("", selection: $outcome) {
+                    Text("Open").tag("open")
+                    Text("Won").tag("won")
+                    Text("Lost").tag("lost")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                if outcome == "lost" {
+                    darkField("Loss reason", text: $lossReason)
+                }
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                sectionLabel("FOLLOW-UP")
+                darkField("Next action (YYYY-MM-DD)", text: $nextActionAt)
+                activityLogRow
+            }
+        }
+    }
+
+    private var activityLogRow: some View {
+        HStack(spacing: 6) {
+            TextField("Log a call / email / note…", text: $activityNote)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundColor(.white)
+                .padding(8)
+                .background(Color.zinc800)
+                .cornerRadius(6)
+            Menu {
+                ForEach(["call", "email", "note", "meeting"], id: \.self) { kind in
+                    Button(kind.capitalized) { logActivity(kind) }
+                }
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundColor(.matcha500)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Log a follow-up activity")
+        }
+    }
+
+    private func sectionLabel(_ s: String) -> some View {
+        Text(s)
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundColor(.matcha500)
+            .tracking(0.5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func darkField(_ placeholder: String, text: Binding<String>) -> some View {
+        TextField(placeholder, text: text)
+            .textFieldStyle(.plain)
+            .font(.system(size: 12))
+            .foregroundColor(.white)
+            .padding(8)
+            .background(Color.zinc800)
+            .cornerRadius(6)
+    }
+
+    /// Log a follow-up activity onto the task history timeline, then clear the
+    /// note field. Best-effort; failures are silent (the timeline reload will
+    /// simply not show it).
+    private func logActivity(_ kind: String) {
+        let note = activityNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pid = task.projectId ?? viewModel.project?.id ?? ""
+        guard !pid.isEmpty else { return }
+        Task {
+            try? await MatchaWorkService.shared.logTaskActivity(
+                projectId: pid, taskId: task.id, kind: kind,
+                body: note.isEmpty ? nil : note
+            )
+            await MainActor.run { activityNote = "" }
         }
     }
 

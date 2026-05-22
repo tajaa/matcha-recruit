@@ -52,11 +52,25 @@ async def _log_task_history(
         )
 
 
-_ALLOWED_COLUMNS = {"todo", "in_progress", "review", "done"}
+_ALLOWED_COLUMNS = {
+    "todo", "in_progress", "review", "done",
+    # Sales-pipeline stages (used when a project is in pipeline mode; mirror
+    # SalesStage in the werk client). Allowed globally — a non-pipeline board
+    # never emits these, and a pipeline board only emits a task column ('done')
+    # if the user toggles a card's checkbox. The status↔column sync below keys
+    # off 'done'/'todo' only, so sales stages never trip it (outcome handles
+    # won/lost instead).
+    "lead", "qualified", "proposal", "negotiation", "closed",
+}
 _ALLOWED_PRIORITIES = {"critical", "high", "medium", "low"}
 # Ticket-template kinds stored in mw_tasks.category. "manual" = no template
 # (blank task / legacy rows) and renders without a badge on the client.
 _ALLOWED_CATEGORIES = {"manual", "engineering", "sales", "product", "bug", "general"}
+# Sales-pipeline deal outcome. "open" = still in the funnel; won/lost are
+# terminal and independent of board_column (a deal can be lost from any stage).
+_ALLOWED_OUTCOMES = {"open", "won", "lost"}
+# Sales follow-up activity kinds, logged onto the task history timeline.
+_ALLOWED_ACTIVITY_KINDS = {"call", "email", "note", "meeting"}
 
 # Email + bell templates for forward-only column transitions. Destinations
 # other than these (e.g. moving back to 'todo') intentionally fire nothing.
@@ -90,7 +104,49 @@ def _row_to_task(row: dict) -> dict:
     for key in ("completed_at", "created_at", "updated_at", "last_moved_at"):
         if d.get(key) is not None:
             d[key] = d[key].isoformat()
+    # Sales-pipeline fields (present only once the salespipe0001 migration is
+    # applied; NULL on non-sales boards). Dates → ISO; NUMERIC → float so the
+    # JSON response carries a plain number rather than a Decimal.
+    for key in ("next_action_at", "expected_close"):
+        if d.get(key) is not None:
+            d[key] = d[key].isoformat()
+    if d.get("deal_value") is not None:
+        d["deal_value"] = float(d["deal_value"])
     return d
+
+
+async def log_task_activity(
+    *,
+    project_id: UUID,
+    task_id: UUID,
+    actor_user_id: Optional[UUID],
+    kind: str,
+    body: Optional[str] = None,
+) -> Optional[dict]:
+    """Log a sales follow-up activity (call/email/note/meeting) onto a task's
+    history timeline. Reuses mw_task_history (event_type='activity') so it
+    renders in the existing task viewer timeline — no separate table.
+    Returns None if the task doesn't belong to the project.
+    """
+    kind = (kind or "note").strip().lower()
+    if kind not in _ALLOWED_ACTIVITY_KINDS:
+        raise ValueError(f"Invalid activity kind: {kind}")
+    async with get_connection() as conn:
+        exists = await conn.fetchrow(
+            "SELECT id FROM mw_tasks WHERE id = $1 AND project_id = $2",
+            task_id, project_id,
+        )
+        if not exists:
+            return None
+        await _log_task_history(
+            conn,
+            task_id=task_id,
+            project_id=project_id,
+            actor_user_id=actor_user_id,
+            event_type="activity",
+            metadata={"kind": kind, "body": (body or "").strip()},
+        )
+    return {"ok": True, "kind": kind}
 
 
 async def list_project_tasks(project_id: UUID) -> list[dict]:
@@ -101,6 +157,9 @@ async def list_project_tasks(project_id: UUID) -> list[dict]:
                    t.due_date, t.priority, t.status, t.board_column, t.assigned_to,
                    t.completed_at, t.created_at, t.updated_at, t.progress_note, t.category,
                    t.element_id,
+                   t.deal_value, t.probability, t.contact_name, t.contact_company,
+                   t.contact_email, t.contact_phone, t.outcome, t.loss_reason,
+                   t.next_action_at, t.expected_close,
                    -- Last time this card crossed columns, for the "Moved …" stamp
                    -- on the kanban card. Null until the first column_change.
                    (SELECT MAX(h.created_at) FROM mw_task_history h
@@ -147,6 +206,16 @@ async def create_project_task(
     project_title: Optional[str] = None,
     category: str = "manual",
     element_id: Optional[str] = None,
+    deal_value: Optional[float] = None,
+    probability: Optional[int] = None,
+    contact_name: Optional[str] = None,
+    contact_company: Optional[str] = None,
+    contact_email: Optional[str] = None,
+    contact_phone: Optional[str] = None,
+    outcome: Optional[str] = None,
+    loss_reason: Optional[str] = None,
+    next_action_at: Optional[_date] = None,
+    expected_close: Optional[_date] = None,
 ) -> dict:
     if board_column not in _ALLOWED_COLUMNS:
         raise ValueError(f"Invalid board_column: {board_column}")
@@ -154,6 +223,8 @@ async def create_project_task(
         raise ValueError(f"Invalid priority: {priority}")
     if category not in _ALLOWED_CATEGORIES:
         raise ValueError(f"Invalid category: {category}")
+    if outcome is not None and outcome not in _ALLOWED_OUTCOMES:
+        raise ValueError(f"Invalid outcome: {outcome}")
     if not title or not title.strip():
         raise ValueError("Title required")
 
@@ -166,16 +237,27 @@ async def create_project_task(
             INSERT INTO mw_tasks (
                 company_id, created_by, project_id, title, description,
                 due_date, priority, status, board_column, assigned_to,
-                completed_at, category, progress_note, element_id
+                completed_at, category, progress_note, element_id,
+                deal_value, probability, contact_name, contact_company,
+                contact_email, contact_phone, outcome, loss_reason,
+                next_action_at, expected_close
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $13, $12, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                    $11, $12, $13, $14, $15, $16, $17, $18,
+                    $19, $20, $21, $22, $23, $24)
             RETURNING id, project_id, company_id, created_by, title, description,
                       due_date, priority, status, board_column, assigned_to,
-                      completed_at, created_at, updated_at, progress_note, category, element_id
+                      completed_at, created_at, updated_at, progress_note, category, element_id,
+                      deal_value, probability, contact_name, contact_company,
+                      contact_email, contact_phone, outcome, loss_reason,
+                      next_action_at, expected_close
             """,
             company_id, created_by, project_id, title.strip(), description,
             due_date, priority, status, board_column, assigned_to,
-            completed_at, progress_note, category, element_id,
+            completed_at, category, progress_note, element_id,
+            deal_value, probability, contact_name, contact_company,
+            contact_email, contact_phone, outcome, loss_reason,
+            next_action_at, expected_close,
         )
 
         await _log_task_history(
@@ -407,9 +489,21 @@ async def update_project_task(
         assigned_to = patch.get("assigned_to")
         progress_note = patch.get("progress_note")
         element_id = patch.get("element_id")
+        deal_value = patch.get("deal_value")
+        probability = patch.get("probability")
+        contact_name = patch.get("contact_name")
+        contact_company = patch.get("contact_company")
+        contact_email = patch.get("contact_email")
+        contact_phone = patch.get("contact_phone")
+        outcome = patch.get("outcome")
+        loss_reason = patch.get("loss_reason")
+        next_action_at = patch.get("next_action_at")
+        expected_close = patch.get("expected_close")
 
         if priority is not None and priority not in _ALLOWED_PRIORITIES:
             raise ValueError(f"Invalid priority: {priority}")
+        if outcome is not None and outcome not in _ALLOWED_OUTCOMES:
+            raise ValueError(f"Invalid outcome: {outcome}")
 
         # Compute completed_at in Python rather than via a SQL CASE on $3.
         # asyncpg infers each $N's type from how it's used. $3 is assigned to
@@ -441,11 +535,24 @@ async def update_project_task(
                 assigned_to = CASE WHEN $10::boolean THEN $11::uuid ELSE assigned_to END,
                 progress_note = CASE WHEN $14::boolean THEN $15::text ELSE progress_note END,
                 element_id = CASE WHEN $16::boolean THEN $17::text ELSE element_id END,
+                deal_value = CASE WHEN $18::boolean THEN $19::numeric ELSE deal_value END,
+                probability = CASE WHEN $20::boolean THEN $21::smallint ELSE probability END,
+                contact_name = CASE WHEN $22::boolean THEN $23::text ELSE contact_name END,
+                contact_company = CASE WHEN $24::boolean THEN $25::text ELSE contact_company END,
+                contact_email = CASE WHEN $26::boolean THEN $27::text ELSE contact_email END,
+                contact_phone = CASE WHEN $28::boolean THEN $29::text ELSE contact_phone END,
+                outcome = CASE WHEN $30::boolean THEN $31::text ELSE outcome END,
+                loss_reason = CASE WHEN $32::boolean THEN $33::text ELSE loss_reason END,
+                next_action_at = CASE WHEN $34::boolean THEN $35::date ELSE next_action_at END,
+                expected_close = CASE WHEN $36::boolean THEN $37::date ELSE expected_close END,
                 updated_at = NOW()
             WHERE id = $2 AND project_id = $12
             RETURNING id, project_id, company_id, created_by, title, description,
                       due_date, priority, status, board_column, assigned_to,
-                      completed_at, created_at, updated_at, progress_note, category, element_id
+                      completed_at, created_at, updated_at, progress_note, category, element_id,
+                      deal_value, probability, contact_name, contact_company,
+                      contact_email, contact_phone, outcome, loss_reason,
+                      next_action_at, expected_close
             """,
             new_column,                   # $1
             task_id,                      # $2
@@ -464,6 +571,26 @@ async def update_project_task(
             progress_note,                # $15
             "element_id" in patch,        # $16
             element_id,                   # $17
+            "deal_value" in patch,        # $18
+            deal_value,                   # $19
+            "probability" in patch,       # $20
+            probability,                  # $21
+            "contact_name" in patch,      # $22
+            contact_name,                 # $23
+            "contact_company" in patch,   # $24
+            contact_company,              # $25
+            "contact_email" in patch,     # $26
+            contact_email,                # $27
+            "contact_phone" in patch,     # $28
+            contact_phone,                # $29
+            "outcome" in patch,           # $30
+            outcome,                      # $31
+            "loss_reason" in patch,       # $32
+            loss_reason,                  # $33
+            "next_action_at" in patch,    # $34
+            next_action_at,               # $35
+            "expected_close" in patch,    # $36
+            expected_close,               # $37
         )
 
         if row and new_column != current["board_column"]:
