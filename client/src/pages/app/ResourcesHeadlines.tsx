@@ -6,7 +6,7 @@ export default function ResourcesHeadlines() {
       <div>
         <h1 className="text-2xl font-semibold text-zinc-100">This week in HR</h1>
         <p className="mt-1 text-[10px] text-zinc-500 font-mono uppercase tracking-wider">
-          Industry headlines from the last 7 days
+          Latest industry headlines
         </p>
       </div>
       <HeadlinesPanel />

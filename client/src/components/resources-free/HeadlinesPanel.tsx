@@ -56,7 +56,7 @@ export default function HeadlinesPanel({ compact = false }: Props) {
 
   useEffect(() => {
     const limit = compact ? 4 : 12
-    api.get<NewsResponse>(`/news?days=7&limit=${limit}`)
+    api.get<NewsResponse>(`/news?limit=${limit}`)
       .then(r => setItems(r.items))
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -83,7 +83,7 @@ export default function HeadlinesPanel({ compact = false }: Props) {
         <div>
           <h2 className="text-sm font-semibold text-zinc-100">This week in HR</h2>
           <p className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider mt-0.5">
-            Industry headlines · last 7 days
+            Latest industry headlines
           </p>
         </div>
         {compact && (
