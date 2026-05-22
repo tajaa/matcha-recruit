@@ -209,6 +209,7 @@ struct ContentView: View {
                     appState.showPeople = false
                     appState.showHome = false
                     appState.showChannelBrowse = false
+                    appState.showArchive = false
                     appState.selectedThreadId = nil
                     appState.selectedProjectId = nil
                     appState.selectedChannelId = nil
@@ -226,11 +227,30 @@ struct ContentView: View {
                     appState.showInbox = false
                     appState.showHome = false
                     appState.showChannelBrowse = false
+                    appState.showArchive = false
                     appState.selectedThreadId = nil
                     appState.selectedProjectId = nil
                     appState.selectedChannelId = nil
                     appState.selectedJournalId = nil
                     appState.showSkills = false
+                }
+
+                sidebarFooterButton(
+                    icon: "archivebox",
+                    label: "Archive",
+                    badge: 0,
+                    isActive: appState.showArchive
+                ) {
+                    appState.showArchive = true
+                    appState.showInbox = false
+                    appState.showPeople = false
+                    appState.showHome = false
+                    appState.showChannelBrowse = false
+                    appState.showSkills = false
+                    appState.selectedThreadId = nil
+                    appState.selectedProjectId = nil
+                    appState.selectedChannelId = nil
+                    appState.selectedJournalId = nil
                 }
             }
             .padding(.horizontal, 8)
@@ -579,7 +599,6 @@ struct ContentView: View {
                         Button("All") { setThreadFilter(nil) }
                         Button("Active") { setThreadFilter("active") }
                         Button("Finalized") { setThreadFilter("finalized") }
-                        Button("Archived") { setThreadFilter("archived") }
                     } label: {
                         Image(systemName: "line.3.horizontal.decrease.circle")
                             .font(.system(size: 11, weight: .semibold))
@@ -639,6 +658,8 @@ struct ContentView: View {
                 PeopleView()
             } else if appState.showSkills {
                 SkillsView()
+            } else if appState.showArchive {
+                ArchiveView()
             } else {
                 HomeDashboardView()
             }
@@ -1195,6 +1216,158 @@ struct AuxWindowRootView: View {
         }
         .frame(minWidth: 480, minHeight: 400)
         .background(appState.themeBg)
+    }
+}
+
+/// Full-pane home for archived material across all four surfaces. Reachable
+/// from the sidebar footer "Archive" button. Each row opens the item (restoring
+/// it to the detail pane) or restores it back to its active section.
+struct ArchiveView: View {
+    @Environment(AppState.self) private var appState
+    @State private var projects: [MWProject] = []
+    @State private var threads: [MWThread] = []
+    @State private var journals: [MWJournal] = []
+    @State private var channels: [ChannelSummary] = []
+    @State private var isLoading = true
+
+    private var isEmpty: Bool {
+        projects.isEmpty && threads.isEmpty && journals.isEmpty && channels.isEmpty
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(spacing: 8) {
+                    Image(systemName: "archivebox").foregroundColor(appState.themeAccent)
+                    Text("Archive").font(.system(size: 16, weight: .semibold)).foregroundColor(appState.themeText)
+                }
+                if isLoading {
+                    ProgressView().tint(.secondary).frame(maxWidth: .infinity).padding(.top, 40)
+                } else if isEmpty {
+                    Text("Nothing archived.")
+                        .font(.system(size: 12)).foregroundColor(appState.themeTextSecondary)
+                        .frame(maxWidth: .infinity).padding(.top, 40)
+                } else {
+                    if !projects.isEmpty {
+                        section("Projects", "folder") {
+                            ForEach(projects) { p in
+                                row(p.title, "folder",
+                                    open: { open { appState.selectedProjectId = p.id } },
+                                    restore: { restoreProject(p) })
+                            }
+                        }
+                    }
+                    if !threads.isEmpty {
+                        section("Threads", "bubble.left.and.bubble.right") {
+                            ForEach(threads) { t in
+                                row(t.title, "bubble.left.and.bubble.right",
+                                    open: { open { appState.selectedThreadId = t.id } },
+                                    restore: { restoreThread(t) })
+                            }
+                        }
+                    }
+                    if !journals.isEmpty {
+                        section("Journals", "book.closed") {
+                            ForEach(journals) { j in
+                                row(j.title, "book.closed",
+                                    open: { open { appState.selectedJournalId = j.id } },
+                                    restore: { restoreJournal(j) })
+                            }
+                        }
+                    }
+                    if !channels.isEmpty {
+                        section("Channels", "number") {
+                            ForEach(channels) { c in
+                                row(c.name, "number",
+                                    open: { open { appState.selectedChannelId = c.id; appState.showChannelBrowse = false } },
+                                    restore: { restoreChannel(c) })
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(appState.themeBg)
+        .task { await load() }
+    }
+
+    @ViewBuilder
+    private func section<Content: View>(_ title: String, _ icon: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(appState.themeTextSecondary)
+            content()
+        }
+    }
+
+    private func row(_ title: String, _ icon: String, open: @escaping () -> Void, restore: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon).font(.system(size: 12)).foregroundColor(appState.themeTextSecondary).frame(width: 16)
+            Text(title.isEmpty ? "Untitled" : title)
+                .font(.system(size: 13)).foregroundColor(appState.themeText).lineLimit(1)
+            Spacer()
+            Button("Restore", action: restore)
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(appState.themeAccent)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(appState.themeCard.opacity(0.5))
+        .cornerRadius(6)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: open)
+    }
+
+    private func open(_ select: () -> Void) {
+        appState.selectedThreadId = nil; appState.selectedProjectId = nil
+        appState.selectedChannelId = nil; appState.selectedJournalId = nil
+        appState.showInbox = false; appState.showPeople = false; appState.showSkills = false
+        appState.showChannelBrowse = false; appState.showArchive = false
+        select()
+    }
+
+    private func load() async {
+        async let p = (try? await MatchaWorkService.shared.listProjects(status: "archived")) ?? []
+        async let t = (try? await MatchaWorkService.shared.listThreads(status: "archived")) ?? []
+        async let j = (try? await JournalService.shared.listArchivedJournals()) ?? []
+        async let c = (try? await ChannelsService.shared.listArchivedChannels()) ?? []
+        let (pp, tt, jj, cc) = await (p, t, j, c)
+        await MainActor.run {
+            projects = pp; threads = tt; journals = jj; channels = cc; isLoading = false
+        }
+    }
+
+    private func restoreProject(_ p: MWProject) {
+        Task {
+            try? await MatchaWorkService.shared.unarchiveProject(id: p.id)
+            MatchaWorkService.shared.invalidateProjectLists()
+            await MainActor.run { projects.removeAll { $0.id == p.id }; appState.projectsListGeneration &+= 1 }
+        }
+    }
+    private func restoreThread(_ t: MWThread) {
+        Task {
+            try? await MatchaWorkService.shared.unarchiveThread(id: t.id)
+            MatchaWorkService.shared.invalidateThreadLists()
+            await MainActor.run {
+                threads.removeAll { $0.id == t.id }
+                NotificationCenter.default.post(name: .mwThreadsChanged, object: nil)
+            }
+        }
+    }
+    private func restoreJournal(_ j: MWJournal) {
+        Task {
+            try? await JournalService.shared.unarchiveJournal(id: j.id)
+            await MainActor.run { journals.removeAll { $0.id == j.id }; appState.journalsListGeneration &+= 1 }
+        }
+    }
+    private func restoreChannel(_ c: ChannelSummary) {
+        Task {
+            try? await ChannelsService.shared.unarchiveChannel(id: c.id)
+            await MainActor.run { channels.removeAll { $0.id == c.id }; appState.channelsListGeneration &+= 1 }
+        }
     }
 }
 

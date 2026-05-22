@@ -16,7 +16,6 @@ struct ProjectListView: View {
     @State private var visibleCount = 3
     private let pageSize = 3
 
-    @AppStorage("mw-sidebar-proj-archived-open") private var archivedOpen = false
     @State private var projectToArchive: MWProject?
 
     // MARK: - Computed lists
@@ -29,15 +28,6 @@ struct ProjectListView: View {
                 ((p.isPinned ?? false) || isRecentlyActive(p.updatedAt))
             }
             .pinnedFirst()
-    }
-
-    private var archivedProjects: [MWProject] {
-        projects
-            .filter { p in
-                p.status == "archived" &&
-                (searchText.isEmpty || p.title.localizedCaseInsensitiveContains(searchText))
-            }
-            .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
     }
 
     private func isRecentlyActive(_ dateString: String?, days: Int = 7) -> Bool {
@@ -69,7 +59,7 @@ struct ProjectListView: View {
                         .foregroundColor(.secondary)
                 }
                 Spacer()
-            } else if sidebarProjects.isEmpty && archivedProjects.isEmpty {
+            } else if sidebarProjects.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "clock")
                         .font(.system(size: 22))
@@ -96,19 +86,6 @@ struct ProjectListView: View {
                     }
                 }
                 .padding(.vertical, 4)
-
-                if !archivedProjects.isEmpty {
-                    VStack(spacing: 0) {
-                        projectSectionHeader(title: "Archived", icon: "archivebox", count: archivedProjects.count, isExpanded: $archivedOpen)
-                        if archivedOpen {
-                            VStack(spacing: 0) {
-                                ForEach(archivedProjects) { p in
-                                    archivedRow(p)
-                                }
-                            }
-                        }
-                    }
-                }
             }
         }
         .background(Color.clear)
@@ -294,43 +271,6 @@ struct ProjectListView: View {
                         }
                         await load()
                     }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func archivedRow(_ p: MWProject) -> some View {
-        let selected = appState.selectedProjectId == p.id
-        Button {
-            appState.selectedProjectId = p.id
-            appState.selectedThreadId = nil
-            appState.selectedJournalId = nil
-            appState.selectedChannelId = nil
-            appState.showInbox = false
-            appState.showSkills = false
-        } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(p.title)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-                Text(sectionSubtitle(p))
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary.opacity(0.6))
-            }
-            .padding(.vertical, 2)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .sidebarRowStyle(isSelected: selected)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button("Unarchive") {
-                Task {
-                    try? await MatchaWorkService.shared.unarchiveProject(id: p.id)
-                    await load()
                 }
             }
         }

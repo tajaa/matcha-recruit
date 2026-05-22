@@ -56,6 +56,8 @@ class AppState {
     var showSkills: Bool = false
     var showInbox: Bool = false
     var showPeople: Bool = false
+    /// Full-pane Archive home (archived projects/threads/journals/channels).
+    var showArchive: Bool = false
     var showHome: Bool = false
     /// Full-pane "Browse Channels" surface. Reached from the sidebar Channels
     /// section header. Mutually exclusive with thread/project/channel/journal

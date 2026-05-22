@@ -316,9 +316,11 @@ async def _get_company_id(current_user: CurrentUser) -> UUID:
 
 @router.get("", response_model=list[ChannelSummary])
 async def list_channels(
+    archived: bool = Query(False),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """List all channels in the user's company. Shows membership status."""
+    """List channels in the user's company. archived=true returns the archived
+    set (for the Archive home) instead of active channels."""
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
@@ -348,7 +350,7 @@ async def list_channels(
             LEFT JOIN channel_members cm ON cm.channel_id = ch.id AND cm.user_id = $1
             LEFT JOIN mw_projects proj
                    ON proj.project_data->>'discussion_channel_id' = ch.id::text
-            WHERE ch.is_archived = false
+            WHERE ch.is_archived = $3
               AND (
                 -- Channels in the user's current tenant (excluding private ones they're not in)
                 (ch.company_id = $2 AND (COALESCE(ch.visibility, 'public') != 'private' OR cm.user_id IS NOT NULL))
@@ -359,6 +361,7 @@ async def list_channels(
             """,
             current_user.id,
             company_id,
+            archived,
         )
 
         return [
@@ -1900,6 +1903,31 @@ async def kick_member(
             pass
 
     return {"ok": True}
+
+
+@router.post("/{channel_id}/unarchive")
+async def unarchive_channel(
+    channel_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Restore an archived channel. Owner or admin only."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow("SELECT is_archived FROM channels WHERE id = $1", channel_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        if not row["is_archived"]:
+            return {"ok": True, "already_active": True}
+        my_role = await conn.fetchval(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        if my_role != "owner" and current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only the channel owner can restore this channel")
+        await conn.execute(
+            "UPDATE channels SET is_archived = false, updated_at = NOW() WHERE id = $1",
+            channel_id,
+        )
+    return {"ok": True, "restored": True}
 
 
 @router.delete("/{channel_id}")

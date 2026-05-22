@@ -16,6 +16,14 @@ class ChannelsService {
         try await client.request(method: "GET", path: basePath)
     }
 
+    func listArchivedChannels() async throws -> [ChannelSummary] {
+        try await client.request(method: "GET", path: "\(basePath)?archived=true")
+    }
+
+    func unarchiveChannel(id: String) async throws {
+        _ = try await client.requestData(method: "POST", path: "\(basePath)/\(id)/unarchive")
+    }
+
     /// Public + paid channels from any tenant the user is not yet a member of.
     /// Used by the cross-workspace discovery surface so personal-account users
     /// can find each other's paid channels.

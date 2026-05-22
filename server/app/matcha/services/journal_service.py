@@ -83,9 +83,9 @@ async def _is_creator(conn, journal_id: UUID, user_id: UUID) -> bool:
 # ── Journals ────────────────────────────────────────────────────────────
 
 
-async def list_journals(user_id: UUID, company_id: Optional[UUID]) -> list[dict]:
-    """All non-archived journals visible to the user. Includes entry +
-    collaborator counts so the sidebar can render a summary line."""
+async def list_journals(user_id: UUID, company_id: Optional[UUID], status: str = "active") -> list[dict]:
+    """Journals visible to the user in the given status bucket (default
+    active). Includes entry + collaborator counts for the sidebar summary."""
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
@@ -97,7 +97,7 @@ async def list_journals(user_id: UUID, company_id: Optional[UUID]) -> list[dict]
                    (SELECT role FROM mw_journal_collaborators
                        WHERE journal_id = j.id AND user_id = $1 AND status = 'active') AS collaborator_role
             FROM mw_journals j
-            WHERE j.status = 'active'
+            WHERE j.status = $2
               AND (
                   j.created_by = $1
                   OR EXISTS(
@@ -107,9 +107,24 @@ async def list_journals(user_id: UUID, company_id: Optional[UUID]) -> list[dict]
               )
             ORDER BY j.updated_at DESC
             """,
-            user_id,
+            user_id, status,
         )
         return [_parse_journal(r) for r in rows]
+
+
+async def unarchive_journal(journal_id: UUID, user_id: UUID) -> None:
+    """Restore an archived journal (owner only)."""
+    async with get_connection() as conn:
+        owner = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM mw_journals WHERE id = $1 AND created_by = $2)",
+            journal_id, user_id,
+        )
+        if not owner:
+            raise PermissionError("Only the owner can restore this journal")
+        await conn.execute(
+            "UPDATE mw_journals SET status = 'active', updated_at = NOW() WHERE id = $1",
+            journal_id,
+        )
 
 
 async def get_journal(journal_id: UUID, viewer_id: UUID) -> Optional[dict]:

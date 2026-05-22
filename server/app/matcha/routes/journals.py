@@ -55,10 +55,11 @@ class CollaboratorAdd(BaseModel):
 
 @router.get("/journals")
 async def list_journals_endpoint(
+    status: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
-    return await journal_service.list_journals(current_user.id, company_id)
+    return await journal_service.list_journals(current_user.id, company_id, status=status or "active")
 
 
 @router.post("/journals", status_code=201)
@@ -113,6 +114,18 @@ async def archive_journal_endpoint(
         await journal_service.archive_journal(journal_id, current_user.id)
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
+
+
+@router.post("/journals/{journal_id}/unarchive")
+async def unarchive_journal_endpoint(
+    journal_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    try:
+        await journal_service.unarchive_journal(journal_id, current_user.id)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    return {"ok": True}
 
 
 @router.delete("/journals/{journal_id}/permanent", status_code=204)

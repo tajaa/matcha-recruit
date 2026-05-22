@@ -32,8 +32,7 @@ struct ThreadListView: View {
     let filterOptions = [
         (label: "All", value: Optional<String>.none),
         (label: "Active", value: Optional<String>.some("active")),
-        (label: "Finalized", value: Optional<String>.some("finalized")),
-        (label: "Archived", value: Optional<String>.some("archived"))
+        (label: "Finalized", value: Optional<String>.some("finalized"))
     ]
 
     var body: some View {

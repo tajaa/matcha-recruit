@@ -79,6 +79,15 @@ final class JournalService {
         invalidateLists()
     }
 
+    func listArchivedJournals() async throws -> [MWJournal] {
+        try await client.request(method: "GET", path: "\(basePath)/journals?status=archived")
+    }
+
+    func unarchiveJournal(id: String) async throws {
+        _ = try await client.requestData(method: "POST", path: "\(basePath)/journals/\(id)/unarchive")
+        invalidateLists()
+    }
+
     func deleteJournal(id: String) async throws {
         _ = try await client.requestData(method: "DELETE", path: "\(basePath)/journals/\(id)/permanent")
         invalidateLists()
