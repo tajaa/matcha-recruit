@@ -19,6 +19,12 @@ final class ChannelsWebSocket: NSObject {
     private var pingTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
     private var reconnectDelay: Double = 3.0
+    /// Held while the socket is connected so macOS App Nap doesn't suspend the
+    /// receive loop + ping timer when all windows are minimized — which
+    /// otherwise silently stops message delivery (and thus notifications) until
+    /// the app is reactivated. `.userInitiatedAllowingIdleSystemSleep` keeps us
+    /// un-napped while awake but still lets the Mac sleep when idle.
+    private var napAssertion: NSObjectProtocol?
 
     var onMessage: ((ChannelMessage) -> Void)?
     /// Fires for every inbound message regardless of which view owns `onMessage`.
@@ -38,6 +44,21 @@ final class ChannelsWebSocket: NSObject {
 
     override private init() {
         super.init()
+    }
+
+    private func beginNoNap() {
+        guard napAssertion == nil else { return }
+        napAssertion = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiatedAllowingIdleSystemSleep],
+            reason: "Realtime channel messaging"
+        )
+    }
+
+    private func endNoNap() {
+        if let a = napAssertion {
+            ProcessInfo.processInfo.endActivity(a)
+            napAssertion = nil
+        }
     }
 
     func connect() {
@@ -62,6 +83,7 @@ final class ChannelsWebSocket: NSObject {
     }
 
     func disconnect() {
+        endNoNap()
         pingTask?.cancel(); pingTask = nil
         reconnectTask?.cancel(); reconnectTask = nil
         task?.cancel(with: .goingAway, reason: nil)
@@ -370,6 +392,7 @@ extension ChannelsWebSocket: URLSessionWebSocketDelegate {
             self.isConnected = true
             self.isConnecting = false
             self.reconnectDelay = 3.0
+            self.beginNoNap()
             // Replay every channel the client wants to be in. Server reconciles
             // room_members against this set — without this, joins sent before
             // the handshake completed (cold start, scheduleReconnect) are lost
@@ -384,6 +407,7 @@ extension ChannelsWebSocket: URLSessionWebSocketDelegate {
         let codeRaw = closeCode.rawValue
         Task { @MainActor in
             print("[ChannelsWS] WS closed code=\(codeRaw)")
+            self.endNoNap()
             self.scheduleReconnect()
         }
     }

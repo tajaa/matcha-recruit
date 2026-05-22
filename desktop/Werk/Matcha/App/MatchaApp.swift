@@ -1,7 +1,30 @@
 import SwiftUI
+import AppKit
+import UserNotifications
+
+/// Owns the UNUserNotificationCenter delegate. Without a delegate, macOS
+/// suppresses notification banners while the app is the active/foreground
+/// process — so a message arriving while Werk is open behind another window
+/// (or on another channel) showed no banner. `willPresent` opts every
+/// notification into a banner + sound regardless of foreground state; the
+/// decision of *whether* to post is made upstream in AppState.
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        UNUserNotificationCenter.current().delegate = self
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .list, .sound])
+    }
+}
 
 @main
 struct MatchaApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
     @State private var broadcastService = BroadcastService.shared
     @Environment(\.scenePhase) private var scenePhase

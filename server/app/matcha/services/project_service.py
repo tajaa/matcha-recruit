@@ -393,10 +393,18 @@ async def list_projects(
                 pc_rows = await conn.fetch(
                     """
                     SELECT pc.project_id, pc.user_id, pc.role,
-                           COALESCE(NULLIF(BTRIM(COALESCE(u.name, '')), ''), u.email) AS name,
+                           COALESCE(
+                               c.name,
+                               NULLIF(BTRIM(CONCAT(e.first_name, ' ', e.last_name)), ''),
+                               a.name,
+                               u.email
+                           ) AS name,
                            u.email, u.avatar_url
                     FROM mw_project_collaborators pc
                     JOIN users u ON u.id = pc.user_id
+                    LEFT JOIN clients c ON c.user_id = pc.user_id
+                    LEFT JOIN employees e ON e.user_id = pc.user_id
+                    LEFT JOIN admins a ON a.user_id = pc.user_id
                     WHERE pc.project_id = ANY($1::uuid[]) AND pc.status = 'active'
                     ORDER BY pc.role DESC, u.email
                     """,

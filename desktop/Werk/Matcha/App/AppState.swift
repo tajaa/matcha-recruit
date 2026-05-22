@@ -1,6 +1,7 @@
 import Foundation
 import UserNotifications
 import SwiftUI
+import AppKit
 
 /// One open workspace tab. Home is permanent + non-closable; up to
 /// `AppState.maxPinnedTabs` others (project/channel/thread/journal) can be
@@ -231,19 +232,29 @@ class AppState {
             // Ignore own messages — sender already sees their own send.
             guard !isSelf else { return }
             let channelName = ChannelsWebSocket.shared.roomName(for: msg.channelId) ?? "channel"
+            // Frontmost is the right signal, not scenePhase: macOS leaves
+            // scenePhase `.active` when Werk is merely behind another app, and
+            // only flips to background once every window is minimized/hidden.
+            // `NSApp.isActive` is true only when Werk is the focused app.
+            let appFrontmost = NSApplication.shared.isActive
 
             if !isCurrentChannel {
                 Task { @MainActor in
                     self.channelUnreadOverrides[msg.channelId, default: 0] += 1
                 }
-                ChannelNotificationManager.shared.playInAppSound()
+                // In-app chime only when Werk is frontmost — when it isn't, the
+                // macOS banner below carries `.default` sound, so playing this
+                // too would double up.
+                if appFrontmost {
+                    ChannelNotificationManager.shared.playInAppSound()
+                }
 
-                // In-app toast — pops in the top-right when the user is on
-                // another channel / view but the app is active. macOS won't
-                // raise a system notification for an active app, so this is
-                // the only visible-cue path while the user is in Werk.
+                // In-app toast — pops in the top-right when the user is in Werk
+                // (frontmost) but on another channel / view. When Werk isn't
+                // frontmost the macOS banner below covers it instead, so we
+                // don't double-cue.
                 if ChannelNotificationManager.shared.appNotificationsEnabled,
-                   self.isSceneActive {
+                   appFrontmost {
                     print("[AppState] pushing channel toast — \(msg.senderName) in \(channelName)")
                     let isAttachmentOnly =
                         msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -262,16 +273,17 @@ class AppState {
                 }
             }
 
-            // macOS system notification — fires when Werk is in the
-            // background. Previously gated on starred-channel only; now
-            // fires for every channel so collaborators can't miss DMs
-            // just because they didn't star the channel. The global
+            // macOS banner — fires whenever Werk isn't the frontmost app
+            // (minimized, hidden, or behind another window). The willPresent
+            // delegate opts it into a banner+sound even if the process is
+            // technically active. Stays silent only when the user is actually
+            // looking at Werk (toast handles that case in-app). The global
             // app-notifications toggle in Settings still mutes everything.
             //
             // Empty-content (image-only) messages fall back to a
             // "📎 sent an attachment" body so the OS toast doesn't
             // render a blank line under the sender's name.
-            if !self.isSceneActive
+            if !appFrontmost
                 && ChannelNotificationManager.shared.appNotificationsEnabled {
                 let bodyText: String
                 if msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -440,7 +452,9 @@ class AppState {
         }
         await refreshSubscription()
         await refreshBetaFeatures()
-        // Nudge the channels socket to reconnect if it dropped.
+        // Nudge the channels socket to reconnect if it dropped. On reconnect
+        // the WS replays join_room frames; with App Nap mitigation the socket
+        // stays live while minimized, so no extra refetch is needed here.
         ChannelsWebSocket.shared.connect()
         // Best-effort heartbeat so presence flips green immediately.
         Task { try? await MatchaWorkService.shared.sendHeartbeat() }
