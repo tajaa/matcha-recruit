@@ -270,6 +270,11 @@ struct ChannelsSidebarView: View {
             } label: {
                 Label("Open in new window", systemImage: "macwindow.on.rectangle")
             }
+            Button {
+                appState.splitTarget = .channel(channel.id)
+            } label: {
+                Label("Open in split", systemImage: "rectangle.split.2x1")
+            }
             Divider()
             // Jump to the linked collab project even when it isn't starred —
             // the project loads via getProjectDetail regardless of pinning.

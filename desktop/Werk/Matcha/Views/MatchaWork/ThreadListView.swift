@@ -192,6 +192,11 @@ struct ThreadListView: View {
                             } label: {
                                 Label("Open in new window", systemImage: "macwindow.on.rectangle")
                             }
+                            Button {
+                                appState.splitTarget = .thread(thread.id)
+                            } label: {
+                                Label("Open in split", systemImage: "rectangle.split.2x1")
+                            }
                             Divider()
                             Button(thread.isPinned ? "Unpin" : "Pin") {
                                 Task { await viewModel.togglePin(thread: thread) }

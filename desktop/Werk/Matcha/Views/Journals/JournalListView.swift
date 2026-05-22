@@ -123,6 +123,11 @@ struct JournalListView: View {
             } label: {
                 Label("Open in new window", systemImage: "macwindow.on.rectangle")
             }
+            Button {
+                appState.splitTarget = .journal(j.id)
+            } label: {
+                Label("Open in split", systemImage: "rectangle.split.2x1")
+            }
             Divider()
             Button("Archive") {
                 Task {

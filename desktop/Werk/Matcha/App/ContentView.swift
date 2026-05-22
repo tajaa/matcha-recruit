@@ -38,27 +38,15 @@ struct ContentView: View {
         } detail: {
             VStack(spacing: 0) {
                 WorkTabBar()
-                Group {
-                    if let threadId = appState.selectedThreadId {
-                        ThreadDetailView(threadId: threadId)
-                            .onChange(of: threadId) { appState.showSkills = false }
-                    } else if let projectId = appState.selectedProjectId {
-                        ProjectDetailView(projectId: projectId)
-                    } else if let journalId = appState.selectedJournalId {
-                        JournalDetailView(journalId: journalId)
-                    } else if let channelId = appState.selectedChannelId {
-                        ChannelDetailView(channelId: channelId)
-                    } else if appState.showChannelBrowse {
-                        ChannelBrowseView()
-                    } else if appState.showInbox {
-                        InboxView()
-                    } else if appState.showPeople {
-                        PeopleView()
-                    } else if appState.showSkills {
-                        SkillsView()
-                    } else {
-                        HomeDashboardView()
+                if let split = appState.splitTarget {
+                    HSplitView {
+                        primaryDetailPane
+                            .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+                        splitSecondaryPane(split)
+                            .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
                     }
+                } else {
+                    primaryDetailPane
                 }
             }
             .background(appState.themeBg)
@@ -630,6 +618,80 @@ struct ContentView: View {
 
     // MARK: - Sidebar building blocks
 
+    /// The primary (left) detail pane — routed off the shared `selectedX`
+    /// nav state. Used standalone, or as the left side of the in-window split.
+    @ViewBuilder
+    private var primaryDetailPane: some View {
+        Group {
+            if let threadId = appState.selectedThreadId {
+                ThreadDetailView(threadId: threadId)
+                    .onChange(of: threadId) { appState.showSkills = false }
+            } else if let projectId = appState.selectedProjectId {
+                ProjectDetailView(projectId: projectId)
+            } else if let journalId = appState.selectedJournalId {
+                JournalDetailView(journalId: journalId)
+            } else if let channelId = appState.selectedChannelId {
+                ChannelDetailView(channelId: channelId)
+            } else if appState.showChannelBrowse {
+                ChannelBrowseView()
+            } else if appState.showInbox {
+                InboxView()
+            } else if appState.showPeople {
+                PeopleView()
+            } else if appState.showSkills {
+                SkillsView()
+            } else {
+                HomeDashboardView()
+            }
+        }
+    }
+
+    /// The secondary (right) split pane — pinned to `splitTarget`. Renders via
+    /// AuxWindowRootView (isEmbedded, so it never writes shared nav state).
+    private func splitSecondaryPane(_ target: AuxWindowTarget) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "rectangle.split.2x1")
+                    .font(.system(size: 11))
+                    .foregroundColor(appState.themeTextSecondary)
+                Text(splitLabel(target))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(appState.themeTextSecondary)
+                Spacer()
+                Button {
+                    openWindow(id: "aux", value: target)
+                    appState.splitTarget = nil
+                } label: {
+                    Image(systemName: "macwindow.on.rectangle")
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.themeTextSecondary)
+                }
+                .buttonStyle(.plain)
+                .help("Pop out to a window")
+                Button { appState.splitTarget = nil } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(appState.themeTextSecondary)
+                }
+                .buttonStyle(.plain)
+                .help("Close split")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            Divider().opacity(0.2)
+            AuxWindowRootView(target: target)
+        }
+    }
+
+    private func splitLabel(_ target: AuxWindowTarget) -> String {
+        switch target {
+        case .project: return "Project"
+        case .channel: return "Channel"
+        case .thread: return "Thread"
+        case .journal: return "Journal"
+        }
+    }
+
     /// Navigate to the full-pane Channels browse view. Clears any active
     /// thread/project/channel/journal/inbox selection so the detail pane
     /// renders the browse surface unambiguously.
@@ -929,6 +991,11 @@ struct ContentView: View {
             } label: {
                 Label("Open in new window", systemImage: "macwindow.on.rectangle")
             }
+            Button {
+                appState.splitTarget = .channel(channel.id)
+            } label: {
+                Label("Open in split", systemImage: "rectangle.split.2x1")
+            }
             Divider()
             Button {
                 ChannelStarStore.shared.toggle(channel.id)
@@ -977,6 +1044,11 @@ struct ContentView: View {
                 openWindow(id: "aux", value: AuxWindowTarget.project(p.id))
             } label: {
                 Label("Open in new window", systemImage: "macwindow.on.rectangle")
+            }
+            Button {
+                appState.splitTarget = .project(p.id)
+            } label: {
+                Label("Open in split", systemImage: "rectangle.split.2x1")
             }
             Divider()
             Button("Unstar") {
@@ -1037,6 +1109,11 @@ struct ContentView: View {
                 openWindow(id: "aux", value: AuxWindowTarget.thread(thread.id))
             } label: {
                 Label("Open in new window", systemImage: "macwindow.on.rectangle")
+            }
+            Button {
+                appState.splitTarget = .thread(thread.id)
+            } label: {
+                Label("Open in split", systemImage: "rectangle.split.2x1")
             }
             Divider()
             Button("Unpin") {

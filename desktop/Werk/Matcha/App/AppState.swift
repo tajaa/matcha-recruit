@@ -35,6 +35,9 @@ class AppState {
     var selectedProjectId: String? = nil
     var selectedChannelId: String? = nil
     var selectedJournalId: String? = nil
+    /// When set, the main window shows a second (pinned) detail pane beside the
+    /// primary one — the in-window split. nil = no split. Reuses AuxWindowTarget.
+    var splitTarget: AuxWindowTarget? = nil
     /// Deep-link hint: when set, the project detail view switches its collab
     /// panel to this tab once it mounts/updates, then clears it. Used by
     /// notification taps so a task notification opens the kanban board.
