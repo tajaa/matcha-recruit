@@ -132,13 +132,13 @@ struct ChannelMessageComposer: View {
                 TextField(
                     "",
                     text: $inputText,
-                    prompt: Text("type a message").foregroundColor(appState.themeText.opacity(0.2)),
+                    prompt: Text("type a message (⌘↵ to send)").foregroundColor(appState.themeText.opacity(0.2)),
                     axis: .vertical
                 )
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .foregroundColor(appState.themeText.opacity(0.9))
-                .lineLimit(1...4)
+                .lineLimit(1...8)
                 .onChange(of: inputText) {
                     guard !inputText.isEmpty else { return }
                     let now = Date()
@@ -147,7 +147,8 @@ struct ChannelMessageComposer: View {
                         typingPing()
                     }
                 }
-                .onSubmit(onSend)
+                // No .onSubmit — Enter inserts a newline (vertical-axis field).
+                // Send via the ↵ button / ⌘↵ shortcut below.
 
                 let canSend = (!inputText.trimmingCharacters(in: .whitespaces).isEmpty || !pendingAttachments.isEmpty) && !isUploading
                 Button(action: onSend) {

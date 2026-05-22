@@ -91,7 +91,10 @@ struct ChannelMessageRowView: View {
                     }
                 }
 
-                if !isMine {
+                if isMine {
+                    senderAvatar(msg)
+                        .frame(width: 36, height: 36)
+                } else {
                     Spacer(minLength: 44)
                 }
             }
