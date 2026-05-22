@@ -161,6 +161,14 @@ async def list_project_folders(project_id: UUID) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+async def _folder_in_project(conn, folder_id: UUID, project_id: UUID) -> bool:
+    """Guard against cross-project folder references — never trust a client id."""
+    return bool(await conn.fetchval(
+        "SELECT 1 FROM mw_project_folders WHERE id = $1 AND project_id = $2",
+        folder_id, project_id,
+    ))
+
+
 async def create_project_folder(
     project_id: UUID,
     name: str,
@@ -168,6 +176,9 @@ async def create_project_folder(
     created_by: UUID,
 ) -> dict[str, Any]:
     async with get_connection() as conn:
+        # Drop a parent that isn't in this project rather than nest across tenants.
+        if parent_id is not None and not await _folder_in_project(conn, parent_id, project_id):
+            parent_id = None
         row = await conn.fetchrow(
             """INSERT INTO mw_project_folders (project_id, parent_id, name, created_by)
                VALUES ($1, $2, $3, $4)
@@ -187,6 +198,12 @@ async def update_project_folder(
     """Rename and/or reparent a folder. parent_id is set when given; pass
     clear_parent=True (with parent_id None) to move the folder to the root."""
     async with get_connection() as conn:
+        # Reject a self-parent loop or a parent outside this project.
+        if parent_id is not None and (
+            parent_id == folder_id or not await _folder_in_project(conn, parent_id, project_id)
+        ):
+            parent_id = None
+            clear_parent = False
         row = await conn.fetchrow(
             """UPDATE mw_project_folders
                SET name = COALESCE($3, name),
@@ -218,6 +235,9 @@ async def move_file_to_folder(
 ) -> Optional[dict[str, Any]]:
     """Move a file into a folder, or to the root when folder_id is None."""
     async with get_connection() as conn:
+        # Don't let a file land in another project's folder.
+        if folder_id is not None and not await _folder_in_project(conn, folder_id, project_id):
+            return None
         row = await conn.fetchrow(
             """UPDATE mw_project_files
                SET folder_id = $3
