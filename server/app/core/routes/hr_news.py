@@ -36,21 +36,37 @@ async def trigger_refresh(_user=Depends(require_admin)):
 async def public_news(
     request: Request,
     limit: int = Query(12, ge=1, le=50),
+    days: Optional[int] = Query(None, ge=1, le=90),
 ):
     """Public — latest HR news headlines for the marketing pages."""
     await check_rate_limit(client_ip(request), "public_news", 60, 60)
     async with get_connection() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT id, title, description, link, pub_date,
-                   source_name, source_feed_url, image_url
-            FROM hr_news_articles
-            WHERE link IS NOT NULL AND title IS NOT NULL
-            ORDER BY pub_date DESC NULLS LAST, created_at DESC
-            LIMIT $1
-            """,
-            limit,
-        )
+        if days is not None:
+            rows = await conn.fetch(
+                """
+                SELECT id, title, description, link, pub_date,
+                       source_name, source_feed_url, image_url
+                FROM hr_news_articles
+                WHERE link IS NOT NULL AND title IS NOT NULL
+                  AND pub_date >= NOW() - make_interval(days => $2)
+                ORDER BY pub_date DESC NULLS LAST, created_at DESC
+                LIMIT $1
+                """,
+                limit,
+                days,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT id, title, description, link, pub_date,
+                       source_name, source_feed_url, image_url
+                FROM hr_news_articles
+                WHERE link IS NOT NULL AND title IS NOT NULL
+                ORDER BY pub_date DESC NULLS LAST, created_at DESC
+                LIMIT $1
+                """,
+                limit,
+            )
     items = [
         {
             "id": str(r["id"]),

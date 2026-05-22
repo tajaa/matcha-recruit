@@ -92,6 +92,7 @@ import DisciplineSettings from './pages/app/DisciplineSettings'
 import Training from './pages/app/Training'
 import TrainingDetail from './pages/app/TrainingDetail'
 import AppResources from './pages/app/AppResources'
+import ResourcesHeadlines from './pages/app/ResourcesHeadlines'
 import { FeatureGate } from './components/FeatureGate'
 import BrokerSidebar from './components/BrokerSidebar'
 import BrokerDashboard from './pages/broker/BrokerDashboard'
@@ -257,6 +258,7 @@ export default function App() {
         <Route path="resources/handbook-audit/result/:reportId" element={<RequireBusinessAccount><HandbookGapResult embedded /></RequireBusinessAccount>} />
         <Route path="resources/glossary" element={<ResourcesGlossary embedded />} />
         <Route path="resources/glossary/:slug" element={<ResourcesGlossaryTerm embedded />} />
+        <Route path="resources/headlines" element={<ResourcesHeadlines />} />
         <Route path="inbox" element={<Inbox />} />
         <Route path="notifications" element={<Notifications />} />
         <Route path="settings" element={<UserSettings />} />
