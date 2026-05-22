@@ -12,6 +12,7 @@ struct ProjectFilesView: View {
     @State private var isCreatingFolder = false
     @State private var newFolderName = ""
     @State private var openFolderId: String?
+    @State private var fileError: String?
     @FocusState private var isFolderNameFocused: Bool
 
     private func files(in folderId: String) -> [MWProjectFile] {
@@ -26,7 +27,7 @@ struct ProjectFilesView: View {
         VStack(spacing: 0) {
             toolbarRow
             Divider().opacity(0.2)
-            if let err = viewModel.errorMessage {
+            if let err = fileError {
                 Text(err)
                     .font(.system(size: 11))
                     .foregroundColor(.red)
@@ -42,9 +43,17 @@ struct ProjectFilesView: View {
             } else if isEmpty && openFolderId == nil {
                 emptyFolderState
                 Spacer()
-                Text("Create folders to keep your files organized.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                VStack(spacing: 4) {
+                    Text("Create folders to keep your files organized.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    let unfiledCount = viewModel.files.filter { $0.folderId == nil }.count
+                    if unfiledCount > 0 {
+                        Text("\(unfiledCount) unfiled file\(unfiledCount == 1 ? "" : "s") in Media ↑")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary.opacity(0.7))
+                    }
+                }
                 Spacer()
             } else {
                 contentList
@@ -52,11 +61,16 @@ struct ProjectFilesView: View {
         }
         .background(Color.appBackground)
         .task {
+            viewModel.errorMessage = nil
+            fileError = nil
             if viewModel.files.isEmpty {
                 await viewModel.loadFiles()
             } else {
                 Task.detached { await viewModel.loadFiles() }
             }
+        }
+        .onChange(of: viewModel.errorMessage) { _, msg in
+            fileError = msg
         }
         .onReceive(NotificationCenter.default.publisher(for: .mwCollabFilesBrowse)) { _ in
             browse()
@@ -527,12 +541,14 @@ struct ProjectMediaView: View {
 
     private func mediaBucket(for file: MWProjectFile) -> String {
         let ct = file.contentType?.lowercased() ?? ""
+        let ext = (file.filename as NSString).pathExtension.lowercased()
         if file.isImage { return "Images" }
-        if ct.hasPrefix("video/") { return "Videos" }
-        if ct.hasPrefix("audio/") { return "Audio" }
+        let videoExts = ["mp4", "mov", "avi", "mkv", "webm", "m4v", "wmv", "flv"]
+        let audioExts = ["mp3", "wav", "aac", "m4a", "flac", "ogg", "opus", "wma"]
+        if ct.hasPrefix("video/") || videoExts.contains(ext) { return "Videos" }
+        if ct.hasPrefix("audio/") || audioExts.contains(ext) { return "Audio" }
         let docExts = ["pdf", "doc", "docx", "txt", "csv", "xls", "xlsx",
                        "ppt", "pptx", "pages", "numbers", "keynote"]
-        let ext = (file.filename as NSString).pathExtension.lowercased()
         if ct == "application/pdf" || docExts.contains(ext) { return "Documents" }
         return "Other"
     }
@@ -614,6 +630,8 @@ struct ProjectMediaView: View {
         .task {
             if viewModel.files.isEmpty {
                 await viewModel.loadFiles()
+            } else if viewModel.folders.isEmpty {
+                await viewModel.loadFolders()
             }
         }
     }

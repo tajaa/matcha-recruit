@@ -924,10 +924,12 @@ class ProjectDetailViewModel {
     }
 
     func uploadFile(data: Data, filename: String, mimeType: String, folderId: String) async {
+        let countBefore = files.count
         await uploadFile(data: data, filename: filename, mimeType: mimeType)
-        if let file = files.first(where: { $0.folderId == nil && $0.filename == filename }) {
-            await moveFile(id: file.id, toFolder: folderId)
-        }
+        guard files.count > countBefore,
+              let file = files.first(where: { $0.folderId == nil && $0.filename == filename })
+        else { return }
+        await moveFile(id: file.id, toFolder: folderId)
     }
 
     func deleteFile(id: String) async {
