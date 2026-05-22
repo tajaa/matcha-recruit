@@ -7,6 +7,12 @@ import type { NewsItem, NewsResponse } from '../../types/news'
 
 type Props = { compact?: boolean }
 
+function decodeEntities(str: string): string {
+  const txt = document.createElement('textarea')
+  txt.innerHTML = str
+  return txt.value
+}
+
 function formatDate(iso: string | null): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -21,30 +27,41 @@ function NewsCard({ item }: { item: NewsItem }) {
       href={item.link}
       target="_blank"
       rel="noopener noreferrer"
-      className="group flex flex-col gap-2 bg-zinc-900 border border-white/10 rounded-2xl p-4 hover:border-white/20 hover:bg-zinc-800/50 transition-colors"
+      className="group flex flex-col bg-zinc-900 border border-white/10 rounded-2xl overflow-hidden hover:border-white/20 hover:bg-zinc-800/50 transition-colors"
     >
-      {imgOk && item.image_url && (
-        <img
-          src={item.image_url}
-          alt=""
-          onError={() => setImgOk(false)}
-          className="w-full h-32 object-cover rounded-xl"
-        />
-      )}
+      <div className="relative w-full h-36 overflow-hidden">
+        {imgOk && item.image_url ? (
+          <img
+            src={item.image_url}
+            alt=""
+            onError={() => setImgOk(false)}
+            className="w-full h-full object-cover brightness-75 saturate-[0.7]"
+          />
+        ) : (
+          <div className="w-full h-full bg-gradient-to-br from-zinc-800 to-zinc-900 flex items-center justify-center">
+            <span className="text-[10px] font-mono text-zinc-700 uppercase tracking-widest">
+              {item.source_name ?? 'HR News'}
+            </span>
+          </div>
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+      </div>
+      <div className="flex flex-col gap-2 p-4">
       <div className="flex items-center gap-1.5 text-[10px] font-mono text-zinc-500 uppercase tracking-wider">
         {item.source_name && <span>{item.source_name}</span>}
         {item.source_name && item.pub_date && <span>·</span>}
         {item.pub_date && <span>{formatDate(item.pub_date)}</span>}
       </div>
       <p className="text-sm font-medium text-zinc-100 line-clamp-2 group-hover:text-white transition-colors">
-        {item.title}
+        {decodeEntities(item.title)}
       </p>
       {item.description && (
-        <p className="text-[12px] text-zinc-500 leading-relaxed line-clamp-2">{item.description}</p>
+        <p className="text-[12px] text-zinc-500 leading-relaxed line-clamp-2">{decodeEntities(item.description)}</p>
       )}
-      <div className="mt-auto pt-1 flex items-center gap-1 text-[10px] text-emerald-500/70 group-hover:text-emerald-400 transition-colors">
-        <ExternalLink className="w-3 h-3" />
-        <span>Read article</span>
+        <div className="mt-auto pt-1 flex items-center gap-1 text-[10px] text-emerald-500/70 group-hover:text-emerald-400 transition-colors">
+          <ExternalLink className="w-3 h-3" />
+          <span>Read article</span>
+        </div>
       </div>
     </a>
   )
