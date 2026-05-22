@@ -15,7 +15,7 @@ depends_on = None
 
 def upgrade():
     op.execute("""
-        CREATE TABLE mw_project_elements (
+        CREATE TABLE IF NOT EXISTS mw_project_elements (
             id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
             project_id UUID NOT NULL REFERENCES mw_projects(id) ON DELETE CASCADE,
             name TEXT NOT NULL,
@@ -27,10 +27,10 @@ def upgrade():
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
     """)
-    op.execute("CREATE INDEX ON mw_project_elements(project_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_mw_project_elements_project ON mw_project_elements(project_id)")
     op.execute("""
         ALTER TABLE mw_tasks
-        ADD COLUMN element_id TEXT REFERENCES mw_project_elements(id) ON DELETE SET NULL
+        ADD COLUMN IF NOT EXISTS element_id TEXT REFERENCES mw_project_elements(id) ON DELETE SET NULL
     """)
 
 
