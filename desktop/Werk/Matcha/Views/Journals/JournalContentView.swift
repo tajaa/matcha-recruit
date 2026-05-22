@@ -15,6 +15,9 @@ struct JournalContentView: View {
     let fontFamily: String
     let fontSize: CGFloat
     let lineSpacing: CGFloat
+    /// Base text/marker color. Defaults to white (dark surfaces, e.g. journals);
+    /// callers on light surfaces (e.g. chat light mode) pass a dark color.
+    let baseColor: Color
     /// Called when a checkbox is tapped. `index` is the order of the todo
     /// across all lines of `content` (0-based).
     let onToggleTodo: (Int) -> Void
@@ -26,12 +29,14 @@ struct JournalContentView: View {
         fontFamily: String = "system",
         fontSize: CGFloat = 13,
         lineSpacing: CGFloat = 3,
+        baseColor: Color = .white,
         onToggleTodo: @escaping (Int) -> Void = { _ in },
     ) {
         self.content = content
         self.fontFamily = fontFamily
         self.fontSize = fontSize
         self.lineSpacing = lineSpacing
+        self.baseColor = baseColor
         self.onToggleTodo = onToggleTodo
     }
 
@@ -59,14 +64,14 @@ struct JournalContentView: View {
                 .padding(.top, level == 1 ? 4 : 2)
         case .bullet(let text):
             HStack(alignment: .top, spacing: 6) {
-                Text("•").font(.system(size: fontSize)).foregroundColor(.white.opacity(0.7))
+                Text("•").font(.system(size: fontSize)).foregroundColor(baseColor.opacity(0.7))
                 inlineText(text).lineSpacing(lineSpacing)
             }
         case .numbered(let n, let text):
             HStack(alignment: .top, spacing: 6) {
                 Text("\(n).")
                     .font(.system(size: fontSize))
-                    .foregroundColor(.white.opacity(0.55))
+                    .foregroundColor(baseColor.opacity(0.55))
                     .frame(minWidth: 16, alignment: .trailing)
                 inlineText(text).lineSpacing(lineSpacing)
             }
@@ -75,11 +80,11 @@ struct JournalContentView: View {
                 Button { onToggleTodo(idx) } label: {
                     Image(systemName: checked ? "checkmark.square.fill" : "square")
                         .font(.system(size: fontSize))
-                        .foregroundColor(checked ? Color.matcha500 : .white.opacity(0.5))
+                        .foregroundColor(checked ? Color.matcha500 : baseColor.opacity(0.5))
                 }
                 .buttonStyle(.plain)
                 inlineText(text)
-                    .strikethrough(checked, color: .white.opacity(0.4))
+                    .strikethrough(checked, color: baseColor.opacity(0.4))
                     .opacity(checked ? 0.55 : 1.0)
                     .lineSpacing(lineSpacing)
             }
@@ -88,14 +93,14 @@ struct JournalContentView: View {
                 Rectangle().fill(Color.matcha500.opacity(0.6)).frame(width: 2)
                 inlineText(text)
                     .italic()
-                    .foregroundColor(.white.opacity(0.7))
+                    .foregroundColor(baseColor.opacity(0.7))
                     .lineSpacing(lineSpacing)
             }
             .padding(.leading, 2)
         case .codeBlock(let code):
             Text(code)
                 .font(.system(size: fontSize - 1, design: .monospaced))
-                .foregroundColor(.white.opacity(0.85))
+                .foregroundColor(baseColor.opacity(0.85))
                 .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.black.opacity(0.35))
@@ -104,7 +109,7 @@ struct JournalContentView: View {
             AsyncImage(url: url) { phase in
                 switch phase {
                 case .empty:
-                    Rectangle().fill(Color.white.opacity(0.05))
+                    Rectangle().fill(baseColor.opacity(0.05))
                         .frame(height: 120)
                         .overlay(ProgressView().tint(.secondary))
                         .cornerRadius(6)
@@ -163,7 +168,7 @@ struct JournalContentView: View {
         case "monospaced": font = .system(size: size, weight: weight, design: .monospaced)
         default:           font = .system(size: size, weight: weight)
         }
-        return Text(attr).font(font).foregroundColor(.white.opacity(0.92))
+        return Text(attr).font(font).foregroundColor(baseColor.opacity(0.92))
     }
 
     /// Walk the attributed string right-to-left for `==…==`, applying

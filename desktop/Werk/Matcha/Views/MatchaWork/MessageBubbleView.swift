@@ -236,10 +236,16 @@ struct MessageBubbleView: View {
     }
 
     private var markdownContent: some View {
-        Text(MarkdownCache.shared.attributed(for: message.content))
-            .font(.system(size: 14))
-            .foregroundColor(lightMode ? .primary : .white)
-            .textSelection(.enabled)
+        // Block-aware markdown (headings, lists, code, quotes) so LLM replies
+        // render structured instead of as flat inline text. Streaming uses the
+        // separate StreamingBubbleView, so this only renders completed messages.
+        JournalContentView(
+            content: message.content,
+            fontFamily: "system",
+            fontSize: 14,
+            lineSpacing: 4,
+            baseColor: lightMode ? Color(white: 0.13) : .white
+        )
     }
 
     @ViewBuilder
