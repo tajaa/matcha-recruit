@@ -1,10 +1,9 @@
 import SwiftUI
 
-/// Right-pane journal view: header (title + collaborators + invite + style),
-/// composer at top for a new entry today, timeline grouped by date below.
-/// Editor uses `RichJournalEditor` (NSTextView-backed) with a toolbar of
-/// markdown shortcuts; read mode renders via `JournalContentView` (handles
-/// headers, bullets, todos, images, highlight, etc).
+/// Right-pane journal view. A list of entries (grouped by date) that opens a
+/// single entry as a **full page** (Day One style): tap an entry — or "New
+/// entry" — and it fills the pane with a title, date and a full-height
+/// `RichJournalEditor`; a back button autosaves and returns to the list.
 struct JournalDetailView: View {
     let journalId: String
     /// True in a secondary (aux) window — suppresses shared nav/tab writes.
@@ -12,19 +11,23 @@ struct JournalDetailView: View {
 
     @Environment(AppState.self) private var appState
     @State private var vm = JournalDetailViewModel()
-    @State private var composerOpen = false
-    @State private var composerTitle = ""
-    @State private var composerContent = ""
-    @State private var composerDate: Date = Date()
-    @State private var editingEntryId: String? = nil
-    @State private var editingDraft: String = ""
-    @State private var editingTitle: String = ""
-    @State private var editingDate: Date = Date()
+
+    // Page (full-screen entry) state. `openEntry` set = editing an existing
+    // entry; `isCreatingEntry` = a new blank page. Both nil/false = list mode.
+    @State private var openEntry: MWJournalEntry? = nil
+    @State private var isCreatingEntry = false
+    @State private var pageTitle = ""
+    @State private var pageContent = ""
+    @State private var pageDate: Date = Date()
+    // Snapshot taken when a page opens, to detect dirty edits for autosave.
+    @State private var pageOrigTitle = ""
+    @State private var pageOrigContent = ""
+    @State private var pageOrigDate = ""
+
     @State private var showInviteSheet = false
     @State private var showStylePopover = false
     @State private var pendingDelete: MWJournalEntry? = nil
-    @StateObject private var composerController = JournalEditorController()
-    @StateObject private var editController = JournalEditorController()
+    @StateObject private var pageController = JournalEditorController()
 
     // Style preferences keyed by journal — read with @AppStorage so the
     // editor + renderer update as soon as the user changes them.
@@ -42,14 +45,15 @@ struct JournalDetailView: View {
 
     private var fontSize: CGFloat { CGFloat(fontSizeRaw) }
     private var lineSpacing: CGFloat { CGFloat(lineSpacingRaw) }
+    private var inPageMode: Bool { isCreatingEntry || openEntry != nil }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider().opacity(0.2)
-            composer
-            Divider().opacity(0.2)
-            timeline
+        Group {
+            if inPageMode {
+                entryPage
+            } else {
+                listView
+            }
         }
         .background(Color.appBackground)
         .task(id: journalId) {
@@ -78,24 +82,36 @@ struct JournalDetailView: View {
             Button("Delete", role: .destructive) {
                 let target = entry
                 pendingDelete = nil
+                // If the open page is this entry, leave the page without saving.
+                if openEntry?.id == target.id {
+                    openEntry = nil
+                    isCreatingEntry = false
+                }
                 Task { await vm.deleteEntry(target) }
             }
             Button("Cancel", role: .cancel) { pendingDelete = nil }
         } message: { _ in Text("This cannot be undone.") }
     }
 
-    /// Both controllers share a single upload path through the VM.
-    /// Re-wire when the journalId changes so uploads target the right
-    /// journal.
+    /// Wire the editor's image-upload path to the VM. Re-wire when journalId
+    /// changes so uploads target the right journal.
     private func wireUploadCallbacks() {
-        let uploader: (Data, String, String) async -> String? = { [vm] data, name, mime in
+        pageController.onUploadImage = { [vm] data, name, mime in
             await vm.uploadImage(data: data, filename: name, mimeType: mime)
         }
-        composerController.onUploadImage = uploader
-        editController.onUploadImage = uploader
     }
 
-    // MARK: - Header
+    // MARK: - List mode
+
+    private var listView: some View {
+        VStack(spacing: 0) {
+            header
+            Divider().opacity(0.2)
+            newEntryBar
+            Divider().opacity(0.2)
+            timeline
+        }
+    }
 
     private var header: some View {
         HStack(spacing: 8) {
@@ -141,67 +157,23 @@ struct JournalDetailView: View {
         .padding(.vertical, 10)
     }
 
-    // MARK: - Composer
-
-    private var composer: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if !composerOpen {
-                Button { composerOpen = true } label: {
-                    HStack {
-                        Image(systemName: "plus.circle").foregroundColor(appState.themeTextSecondary)
-                        Text("New entry today…").font(.system(size: 12)).foregroundColor(appState.themeTextSecondary)
-                        Spacer()
-                    }
-                    .padding(8)
-                    .background(appState.themeCard.opacity(0.4))
-                    .cornerRadius(6)
-                }
-                .buttonStyle(.plain)
-            } else {
-                HStack {
-                    TextField("Title (optional)", text: $composerTitle)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(appState.themeText)
-                    DatePicker("", selection: $composerDate, displayedComponents: .date)
-                        .labelsHidden()
-                        .controlSize(.small)
-                }
-                JournalEditorToolbar(controller: composerController)
-                RichJournalEditor(
-                    text: $composerContent,
-                    controller: composerController,
-                    fontFamily: fontFamily,
-                    fontSize: fontSize,
-                    lineSpacing: lineSpacing,
-                )
-                .frame(minHeight: 100, maxHeight: 200)
-                .background(appState.themeCard.opacity(0.4))
-                .cornerRadius(4)
-                HStack {
-                    Spacer()
-                    Button("Cancel") { resetComposer() }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 11))
-                        .foregroundColor(appState.themeTextSecondary)
-                    Button {
-                        Task { await saveComposer() }
-                    } label: {
-                        Text("Save").font(.system(size: 11, weight: .semibold))
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(appState.themeAccent)
-                    .controlSize(.small)
-                    .disabled(composerContent.trimmingCharacters(in: .whitespaces).isEmpty)
-                    .keyboardShortcut(.return, modifiers: .command)
-                }
+    private var newEntryBar: some View {
+        Button { startNew() } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 12))
+                    .foregroundColor(appState.themeAccent)
+                Text("New entry")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(appState.themeAccent)
+                Spacer()
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .buttonStyle(.plain)
     }
-
-    // MARK: - Timeline
 
     @ViewBuilder
     private var timeline: some View {
@@ -226,7 +198,7 @@ struct JournalDetailView: View {
             VStack(spacing: 6) {
                 Spacer()
                 Image(systemName: "tray").font(.system(size: 22)).foregroundColor(appState.themeTextSecondary)
-                Text("No entries yet").font(.system(size: 11)).foregroundColor(appState.themeTextSecondary)
+                Text("No entries yet — tap “New entry”.").font(.system(size: 11)).foregroundColor(appState.themeTextSecondary)
                 Spacer()
             }
         } else {
@@ -239,7 +211,7 @@ struct JournalDetailView: View {
                             .textCase(.uppercase)
                             .padding(.top, 6)
                         ForEach(items) { entry in
-                            entryCard(entry)
+                            entryRow(entry)
                         }
                     }
                 }
@@ -248,26 +220,17 @@ struct JournalDetailView: View {
         }
     }
 
-    private func entryCard(_ entry: MWJournalEntry) -> some View {
-        let isEditing = editingEntryId == entry.id
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                if isEditing {
-                    TextField("Title", text: $editingTitle)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(appState.themeText)
-                    DatePicker("", selection: $editingDate, displayedComponents: .date)
-                        .labelsHidden()
-                        .controlSize(.small)
-                } else if let t = entry.title, !t.isEmpty {
-                    Text(t)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(appState.themeText)
-                }
+    /// Compact, tappable list row — opens the entry as a full page.
+    private func entryRow(_ entry: MWJournalEntry) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .top) {
+                Text((entry.title?.isEmpty == false) ? entry.title! : "Untitled")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(appState.themeText)
+                    .lineLimit(1)
                 Spacer()
                 Menu {
-                    Button("Edit") { beginEdit(entry) }
+                    Button("Open") { openExisting(entry) }
                     Button("Delete", role: .destructive) { pendingDelete = entry }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -279,47 +242,81 @@ struct JournalDetailView: View {
                 .menuIndicator(.hidden)
                 .fixedSize()
             }
-            if isEditing {
-                JournalEditorToolbar(controller: editController)
-                RichJournalEditor(
-                    text: $editingDraft,
-                    controller: editController,
-                    fontFamily: fontFamily,
-                    fontSize: fontSize,
-                    lineSpacing: lineSpacing,
-                )
-                .frame(minHeight: 100, maxHeight: 260)
-                .background(appState.themeCard.opacity(0.4))
-                .cornerRadius(4)
-                HStack {
-                    Spacer()
-                    Button("Cancel") { editingEntryId = nil }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 11))
-                        .foregroundColor(appState.themeTextSecondary)
-                    Button("Save") {
-                        Task { await commitEdit(entry) }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(appState.themeAccent)
-                    .controlSize(.small)
-                }
-            } else {
-                JournalContentView(
-                    content: entry.content,
-                    fontFamily: fontFamily,
-                    fontSize: fontSize,
-                    lineSpacing: lineSpacing,
-                    onToggleTodo: { idx in
-                        Task { await vm.toggleTodo(entry, todoIndex: idx) }
-                    },
-                )
+            let preview = previewText(entry.content)
+            if !preview.isEmpty {
+                Text(preview)
+                    .font(.system(size: 11))
+                    .foregroundColor(appState.themeTextSecondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
             }
         }
         .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(appState.themeCard.opacity(0.5))
         .cornerRadius(6)
+        .contentShape(Rectangle())
+        .onTapGesture { openExisting(entry) }
     }
+
+    // MARK: - Page mode (full entry)
+
+    private var entryPage: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Button { Task { await closePageSaving() } } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
+                        Text(vm.journal?.title ?? "Journal").font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundColor(appState.themeAccent)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut("[", modifiers: .command)
+                Spacer()
+                if let entry = openEntry {
+                    Button(role: .destructive) { pendingDelete = entry } label: {
+                        Image(systemName: "trash").font(.system(size: 12))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.red.opacity(0.8))
+                    .help("Delete entry")
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            Divider().opacity(0.2)
+
+            HStack {
+                TextField("Title (optional)", text: $pageTitle)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(appState.themeText)
+                DatePicker("", selection: $pageDate, displayedComponents: .date)
+                    .labelsHidden()
+                    .controlSize(.small)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+
+            JournalEditorToolbar(controller: pageController)
+                .padding(.horizontal, 14)
+
+            RichJournalEditor(
+                text: $pageContent,
+                controller: pageController,
+                fontFamily: fontFamily,
+                fontSize: fontSize,
+                lineSpacing: lineSpacing,
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 14)
+        }
+    }
+
+    // MARK: - Grouping + formatting
 
     private var groupedEntries: [(String, [MWJournalEntry])] {
         var seen: [String: [MWJournalEntry]] = [:]
@@ -343,37 +340,55 @@ struct JournalDetailView: View {
         return outFmt.string(from: d)
     }
 
+    /// One-line preview of markdown content for the list row.
+    private func previewText(_ content: String) -> String {
+        content
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     // MARK: - Actions
 
-    private func resetComposer() {
-        composerOpen = false
-        composerTitle = ""
-        composerContent = ""
-        composerDate = Date()
+    private func startNew() {
+        openEntry = nil
+        pageTitle = ""; pageContent = ""; pageDate = Date()
+        pageOrigTitle = ""; pageOrigContent = ""; pageOrigDate = ymd(Date())
+        isCreatingEntry = true
     }
 
-    private func saveComposer() async {
-        let trimmed = composerContent.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let dateStr = ymd(composerDate)
-        let title = composerTitle.isEmpty ? nil : composerTitle
-        await vm.createEntry(title: title, content: trimmed, entryDate: dateStr)
-        resetComposer()
+    private func openExisting(_ entry: MWJournalEntry) {
+        isCreatingEntry = false
+        pageTitle = entry.title ?? ""
+        pageContent = entry.content
+        let inFmt = DateFormatter(); inFmt.dateFormat = "yyyy-MM-dd"
+        pageDate = inFmt.date(from: entry.entryDate) ?? Date()
+        pageOrigTitle = entry.title ?? ""
+        pageOrigContent = entry.content
+        pageOrigDate = entry.entryDate
+        openEntry = entry
     }
 
-    private func beginEdit(_ entry: MWJournalEntry) {
-        editingEntryId = entry.id
-        editingDraft = entry.content
-        editingTitle = entry.title ?? ""
-        let inFmt = DateFormatter()
-        inFmt.dateFormat = "yyyy-MM-dd"
-        editingDate = inFmt.date(from: entry.entryDate) ?? Date()
+    /// Autosave on exit (like a journaling app) — only writes when dirty.
+    private func closePageSaving() async {
+        await savePageIfDirty()
+        openEntry = nil
+        isCreatingEntry = false
     }
 
-    private func commitEdit(_ entry: MWJournalEntry) async {
-        let title = editingTitle.isEmpty ? nil : editingTitle
-        await vm.updateEntry(entry, title: title, content: editingDraft, entryDate: ymd(editingDate))
-        editingEntryId = nil
+    private func savePageIfDirty() async {
+        let dateStr = ymd(pageDate)
+        let title = pageTitle.isEmpty ? nil : pageTitle
+        if let entry = openEntry {
+            let changed = pageContent != pageOrigContent
+                || pageTitle != pageOrigTitle
+                || dateStr != pageOrigDate
+            if changed {
+                await vm.updateEntry(entry, title: title, content: pageContent, entryDate: dateStr)
+            }
+        } else if isCreatingEntry {
+            guard !pageContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            await vm.createEntry(title: title, content: pageContent, entryDate: dateStr)
+        }
     }
 
     private func ymd(_ date: Date) -> String {
