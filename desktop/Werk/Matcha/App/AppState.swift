@@ -72,6 +72,9 @@ class AppState {
     /// observes this to REST-refetch missed messages, since a WS reconnect
     /// replays `join_room` but does not backfill the gap.
     var foregroundTick: Int = 0
+    /// Throttle gate for onSceneActive — refocus fires far more often than the
+    /// refresh work needs to run.
+    private var lastSceneActiveAt = Date.distantPast
     /// True when notifications were previously denied — drives the in-app
     /// alert that asks the user to re-enable them via System Settings.
     /// macOS won't re-show the system dialog after the user denies once,
@@ -385,7 +388,8 @@ class AppState {
     @MainActor
     func refreshBetaFeatures() async {
         if let me = try? await AuthService.shared.fetchMe() {
-            betaFeatures = me.user.betaFeatures ?? [:]
+            let next = me.user.betaFeatures ?? [:]
+            if next != betaFeatures { betaFeatures = next }   // avoid needless re-render
         }
     }
 
@@ -393,9 +397,9 @@ class AppState {
     func refreshSubscription() async {
         do {
             let sub = try await MatchaWorkService.shared.getPersonalSubscription()
-            isPlusActive = sub.isPersonalPlus
+            if isPlusActive != sub.isPersonalPlus { isPlusActive = sub.isPersonalPlus }
         } catch {
-            isPlusActive = false
+            if isPlusActive { isPlusActive = false }
         }
     }
 
@@ -458,12 +462,14 @@ class AppState {
             await restoreSession()
             return
         }
+        // Always keep the socket alive (idempotent, cheap).
+        ChannelsWebSocket.shared.connect()
+        // Throttle the rest: refocus fires on every Cmd-Tab; running the full
+        // refresh each time made the app visibly re-render. Once per 10s.
+        if Date().timeIntervalSince(lastSceneActiveAt) < 10 { return }
+        lastSceneActiveAt = Date()
         await refreshSubscription()
         await refreshBetaFeatures()
-        // Nudge the channels socket to reconnect if it dropped. On reconnect
-        // the WS replays join_room frames; with App Nap mitigation the socket
-        // stays live while minimized, so no extra refetch is needed here.
-        ChannelsWebSocket.shared.connect()
         // Best-effort heartbeat so presence flips green immediately.
         Task { try? await MatchaWorkService.shared.sendHeartbeat() }
         // Kick the inbox + notification badges immediately on resume so users

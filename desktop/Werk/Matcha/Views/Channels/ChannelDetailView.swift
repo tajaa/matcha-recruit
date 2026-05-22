@@ -138,9 +138,10 @@ struct ChannelDetailView: View {
             }
         }
         .onChange(of: appState.foregroundTick) {
-            // App regained focus — refetch in case the WS missed messages while
-            // backgrounded/behind another window (join_room doesn't backfill).
-            Task { await vm.loadChannel(channelId: channelId) }
+            // App regained focus — silently refetch in case the WS missed
+            // messages while away (join_room doesn't backfill). isRefresh = no
+            // loading flash, no list rebuild unless messages actually changed.
+            Task { await vm.loadChannel(channelId: channelId, isRefresh: true) }
         }
         .onDisappear {
             // Don't leaveRoom — keep this channel subscribed via

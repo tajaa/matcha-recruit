@@ -72,18 +72,29 @@ final class ChannelChatViewModel {
         pendingFailureTasks.removeAll()
     }
 
-    func loadChannel(channelId: String) async {
-        isLoading = true
+    func loadChannel(channelId: String, isRefresh: Bool = false) async {
+        if !isRefresh { isLoading = true }   // refresh stays silent — no loading flash
         errorMessage = nil
         do {
             let detail = try await service.getChannel(id: channelId)
             channel = detail
             ws.setCurrentRoomName(detail.name)
-            messages = detail.messages
-            isLoading = false
+            if isRefresh {
+                // Silent merge: keep local optimistic rows the server echo hasn't
+                // replaced yet, and only reassign when the id list actually
+                // changed (identical reassignment would rebuild the list = flash).
+                let pendingExtras = messages.filter { m in
+                    (m.pending || m.failed) && !detail.messages.contains(where: { $0.id == m.id })
+                }
+                let merged = detail.messages + pendingExtras
+                if merged.map(\.id) != messages.map(\.id) { messages = merged }
+            } else {
+                messages = detail.messages
+                isLoading = false
+            }
         } catch {
             errorMessage = error.localizedDescription
-            isLoading = false
+            if !isRefresh { isLoading = false }
         }
     }
 
