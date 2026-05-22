@@ -65,6 +65,14 @@ struct ContentView: View {
         .environment(appState)
         .tint(appState.themeAccent)
         .background(appState.themeBg)
+        // macOS leaves scenePhase `.active` when Werk is merely behind another
+        // window, so scenePhase alone never fires onSceneActive on focus regain.
+        // didBecomeActive fires whenever Werk becomes frontmost → reconnect the
+        // WS + bump foregroundTick so the open channel refetches. connect() is
+        // idempotent, so re-firing on every focus is safe.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await appState.onSceneActive() }
+        }
         .sheet(isPresented: $showProfile) {
             ProfileSheet()
                 .environment(appState)

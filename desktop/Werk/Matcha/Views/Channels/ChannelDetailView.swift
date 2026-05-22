@@ -106,6 +106,7 @@ struct ChannelDetailView: View {
                     typingPing: { ws.sendTyping(channelId: channelId) },
                     onSend: send,
                     onOpenFilePicker: openFilePicker,
+                    onPasteImage: pasteImageFromClipboard,
                     inputText: $inputText,
                     pendingAttachments: $pendingAttachments,
                     replyingTo: $replyingTo,
@@ -129,6 +130,11 @@ struct ChannelDetailView: View {
                 appState.setActiveContext(WorkTab(kind: .channel, entityId: channelId,
                                                   title: vm.channel?.name ?? "Channel"))
             }
+        }
+        .onChange(of: appState.foregroundTick) {
+            // App regained focus — refetch in case the WS missed messages while
+            // backgrounded/behind another window (join_room doesn't backfill).
+            Task { await vm.loadChannel(channelId: channelId) }
         }
         .onDisappear {
             // Don't leaveRoom — keep this channel subscribed via
@@ -661,6 +667,38 @@ struct ChannelDetailView: View {
         let mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
         pendingAttachments.append(
             PendingChannelAttachment(data: data, filename: url.lastPathComponent, mimeType: mime)
+        )
+    }
+
+    /// Pull an image off the system clipboard and stage it as an attachment.
+    /// Lets the user screenshot to clipboard (⌃⌘⇧4) and paste straight into the
+    /// composer — no desktop-file roundtrip. Sandbox-safe (no permission).
+    private func pasteImageFromClipboard() {
+        let pb = NSPasteboard.general
+        // Prefer PNG; fall back to TIFF (the format screenshots land in) and
+        // transcode to PNG so the upload is consistently image/png.
+        let data: Data
+        if let png = pb.data(forType: .png) {
+            data = png
+        } else if let tiff = pb.data(forType: .tiff),
+                  let rep = NSBitmapImageRep(data: tiff),
+                  let png = rep.representation(using: .png, properties: [:]) {
+            data = png
+        } else {
+            vm.errorMessage = "No image on the clipboard — screenshot with ⌃⌘⇧4 first"
+            return
+        }
+        guard pendingAttachments.count < maxAttachments else {
+            vm.errorMessage = "Max \(maxAttachments) attachments per message"
+            return
+        }
+        guard data.count <= maxAttachmentBytes else {
+            vm.errorMessage = "Pasted image is too large (max 10 MB)"
+            return
+        }
+        let stamp = Int(Date().timeIntervalSince1970)
+        pendingAttachments.append(
+            PendingChannelAttachment(data: data, filename: "pasted-\(stamp).png", mimeType: "image/png")
         )
     }
 }

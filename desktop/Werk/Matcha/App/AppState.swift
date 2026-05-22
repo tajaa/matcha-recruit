@@ -64,6 +64,11 @@ class AppState {
     var isPlusActive: Bool = false
     var betaFeatures: [String: Bool] = [:]
     var isSceneActive: Bool = true
+    /// Bumped each time the app regains focus (scene active OR
+    /// `NSApplication.didBecomeActiveNotification`). The open channel view
+    /// observes this to REST-refetch missed messages, since a WS reconnect
+    /// replays `join_room` but does not backfill the gap.
+    var foregroundTick: Int = 0
     /// True when notifications were previously denied — drives the in-app
     /// alert that asks the user to re-enable them via System Settings.
     /// macOS won't re-show the system dialog after the user denies once,
@@ -467,6 +472,8 @@ class AppState {
         }
         Task { await refreshNotificationsCount() }
         promptForNotificationsIfNeeded()
+        // Nudge the open channel view to refetch (fills the gap WS reconnect leaves).
+        foregroundTick &+= 1
     }
 
     /// Surface the notification-permission prompt on every app open when

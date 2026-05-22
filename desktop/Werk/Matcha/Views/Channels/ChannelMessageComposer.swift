@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ChannelMessageComposer: View {
     @Environment(AppState.self) private var appState
@@ -11,6 +12,7 @@ struct ChannelMessageComposer: View {
     let typingPing: () -> Void
     let onSend: () -> Void
     let onOpenFilePicker: () -> Void
+    let onPasteImage: () -> Void
     @Binding var inputText: String
     @Binding var pendingAttachments: [PendingChannelAttachment]
     @Binding var replyingTo: ChannelMessage?
@@ -118,6 +120,15 @@ struct ChannelMessageComposer: View {
                 .help("Attach files (max \(maxAttachments), 10 MB each)")
                 .disabled(pendingAttachments.count >= maxAttachments || isUploading)
 
+                Button(action: onPasteImage) {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: 12))
+                        .foregroundColor(appState.themeText.opacity(0.55))
+                }
+                .buttonStyle(.plain)
+                .help("Paste image from clipboard (⌃⌘⇧4 to screenshot)")
+                .disabled(pendingAttachments.count >= maxAttachments || isUploading)
+
                 TextField(
                     "",
                     text: $inputText,
@@ -156,6 +167,9 @@ struct ChannelMessageComposer: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(.regularMaterial)
+        // Best-effort ⌘V of an image; scoped to image UTTypes so text paste
+        // still goes to the TextField. The paste button is the primary path.
+        .onPasteCommand(of: [.png, .tiff]) { _ in onPasteImage() }
     }
 
     private func pendingChip(_ att: PendingChannelAttachment) -> some View {
