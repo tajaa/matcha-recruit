@@ -84,7 +84,14 @@ struct ChannelMessageRowView: View {
                                 .padding(.vertical, 7)
                                 .background(
                                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                        .fill(isMine ? appState.themeAccent : appState.themeCard)
+                                        .fill(bubbleGradient(isMine: isMine))
+                                        .overlay(
+                                            // Subtle top sheen → glossy, premium feel.
+                                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                                .fill(LinearGradient(
+                                                    colors: [Color.white.opacity(0.12), Color.clear],
+                                                    startPoint: .top, endPoint: .bottom))
+                                        )
                                 )
                         }
                         if !msg.attachments.isEmpty {
@@ -402,6 +409,20 @@ struct ChannelMessageRowView: View {
 
     private func formatSize(_ bytes: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+
+    /// Vertical bubble gradient — accent → darker accent for sent messages,
+    /// a flat card tone for received. Paired with a top-sheen overlay for a
+    /// glossy, premium look across all three themes.
+    private func bubbleGradient(isMine: Bool) -> LinearGradient {
+        if isMine {
+            return LinearGradient(
+                colors: [appState.themeAccent, appState.themeAccentDark],
+                startPoint: .top, endPoint: .bottom)
+        }
+        return LinearGradient(
+            colors: [appState.themeCard, appState.themeCard],
+            startPoint: .top, endPoint: .bottom)
     }
 
     /// True while inside the 15-minute author edit/delete window. The server
