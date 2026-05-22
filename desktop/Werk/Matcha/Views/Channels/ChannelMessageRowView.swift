@@ -11,78 +11,37 @@ struct ChannelMessageRowView: View {
     let onReply: (ChannelMessage) -> Void
     let onToggleReaction: (String, String) -> Void
     let onRequestDelete: (ChannelMessage) -> Void
-    @State private var previewFile: MWProjectFile?
+    /// Open an attachment in the shared preview. Hoisted to the parent
+    /// (ChannelDetailView) so the preview sheet survives row re-renders /
+    /// LazyVStack recycling — a per-row `.sheet` dropped the binding when a
+    /// new message streamed in, which is why media open was flaky.
+    let onOpenAttachment: (ChannelAttachment) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Reply preview — shows the original message this is replying to
-            if let rp = msg.replyPreview {
-                HStack(alignment: .top, spacing: 6) {
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(appState.themeAccent.opacity(0.5))
-                        .frame(width: 2)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(rp.senderName)
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(appState.themeAccent)
-                        if !rp.content.isEmpty {
-                            Text(rp.content)
-                                .font(.system(size: 10))
-                                .foregroundColor(appState.themeText.opacity(0.5))
-                                .lineLimit(2)
-                        }
-                        // Show attachment thumbnails in reply preview
-                        if !rp.attachments.isEmpty {
-                            HStack(spacing: 4) {
-                                ForEach(rp.attachments.prefix(3), id: \.self) { att in
-                                    if att.contentType.hasPrefix("image/"), let url = URL(string: att.url) {
-                                        AsyncImage(url: url) { phase in
-                                            switch phase {
-                                            case .success(let image):
-                                                image.resizable()
-                                                    .aspectRatio(contentMode: .fill)
-                                                    .frame(width: 48, height: 48)
-                                                    .clipped()
-                                                    .cornerRadius(4)
-                                            default:
-                                                RoundedRectangle(cornerRadius: 4)
-                                                    .fill(appState.themeText.opacity(0.05))
-                                                    .frame(width: 48, height: 48)
-                                            }
-                                        }
-                                    } else {
-                                        HStack(spacing: 4) {
-                                            Image(systemName: "paperclip")
-                                                .font(.system(size: 9))
-                                                .foregroundColor(appState.themeText.opacity(0.4))
-                                            Text(att.filename)
-                                                .font(.system(size: 9))
-                                                .foregroundColor(appState.themeText.opacity(0.4))
-                                                .lineLimit(1)
-                                        }
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 3)
-                                        .background(appState.themeText.opacity(0.05))
-                                        .cornerRadius(4)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                .padding(.leading, 46)
-                .padding(.bottom, 4)
+        // iMessage-style sides: my messages render right in an accent bubble
+        // (no avatar/name); everyone else renders left in a card bubble with
+        // avatar + name. See [[werk-theme-conventions]] sent/received rule.
+        let isMine = msg.senderId == currentUserId
+        return VStack(alignment: isMine ? .trailing : .leading, spacing: 2) {
+            if msg.replyPreview != nil {
+                replyPreviewView(isMine: isMine)
             }
 
-            HStack(alignment: .top, spacing: 10) {
-                senderAvatar(msg)
-                    .frame(width: 36, height: 36)
+            HStack(alignment: .top, spacing: 8) {
+                if isMine {
+                    Spacer(minLength: 44)
+                } else {
+                    senderAvatar(msg)
+                        .frame(width: 36, height: 36)
+                }
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: isMine ? .trailing : .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        Text(msg.senderName)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(appState.themeText)
+                        if !isMine {
+                            Text(msg.senderName)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(appState.themeText)
+                        }
                         Text(formatTimestamp(msg.createdAt))
                             .font(.system(size: 10))
                             .foregroundColor(appState.themeTextSecondary)
@@ -101,57 +60,43 @@ struct ChannelMessageRowView: View {
                                 .foregroundColor(appState.themeText.opacity(0.4))
                         }
                     }
+
                     if msg.deletedAt != nil {
                         Text("message deleted")
                             .font(.system(size: 12))
                             .foregroundColor(appState.themeTextSecondary)
                             .italic()
-                    } else if !msg.content.isEmpty {
-                        Text(mentionAttributedContent(msg))
-                            .font(.system(size: 13))
-                            .foregroundColor(appState.themeText.opacity(0.9))
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    if msg.deletedAt == nil && !msg.attachments.isEmpty {
-                        attachmentList(msg.attachments)
+                    } else {
+                        if !msg.content.isEmpty {
+                            Text(mentionAttributedContent(msg))
+                                .font(.system(size: 13))
+                                .foregroundColor(isMine ? appState.themeOnAccent : appState.themeText)
+                                .textSelection(.enabled)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .fill(isMine ? appState.themeAccent : appState.themeCard)
+                                )
+                        }
+                        if !msg.attachments.isEmpty {
+                            attachmentList(msg.attachments, isMine: isMine)
+                        }
                     }
 
-                    // Reaction pills
                     if !msg.reactions.isEmpty {
-                        HStack(spacing: 4) {
-                            ForEach(msg.reactions, id: \.emoji) { reaction in
-                                let isMine = reaction.userIds.contains(currentUserId)
-                                Button {
-                                    onToggleReaction(msg.id, reaction.emoji)
-                                } label: {
-                                    HStack(spacing: 3) {
-                                        Text(reaction.emoji).font(.system(size: 12))
-                                        if reaction.count > 1 {
-                                            Text("\(reaction.count)")
-                                                .font(.system(size: 10, weight: .medium))
-                                                .foregroundColor(isMine ? appState.themeAccent : appState.themeText.opacity(0.6))
-                                        }
-                                    }
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(isMine ? appState.themeAccent.opacity(0.2) : appState.themeText.opacity(0.08))
-                                    .cornerRadius(10)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10)
-                                            .stroke(isMine ? appState.themeAccent.opacity(0.4) : Color.clear, lineWidth: 1)
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.top, 2)
+                        reactionPills
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if !isMine {
+                    Spacer(minLength: 44)
+                }
             }
         }
+        .frame(maxWidth: .infinity, alignment: isMine ? .trailing : .leading)
         .padding(.vertical, 4)
         .padding(.horizontal, 4)
         .background(
@@ -159,36 +104,13 @@ struct ChannelMessageRowView: View {
                 .fill(hoveredMessageId == msg.id ? appState.themeText.opacity(0.04) : Color.clear)
         )
         .onHover { hovering in hoveredMessageId = hovering ? msg.id : nil }
-        .overlay(alignment: .topTrailing) {
+        .overlay(alignment: isMine ? .topLeading : .topTrailing) {
             // Hide hover actions (reply, react) on pending/failed rows — they'd
             // route a request keyed by the client UUID and 404 server-side.
+            // Sits on the bubble's inner edge (leading for own messages).
             if hoveredMessageId == msg.id && msg.deletedAt == nil
                 && !msg.pending && !msg.failed {
-                HStack(spacing: 2) {
-                    Button { onReply(msg) } label: {
-                        Image(systemName: "arrowshape.turn.up.left")
-                            .font(.system(size: 10))
-                            .foregroundColor(appState.themeText.opacity(0.7))
-                            .frame(width: 24, height: 22)
-                            .background(appState.themeCard)
-                            .cornerRadius(4)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Reply")
-
-                    ForEach(["👍", "❤️", "😂"], id: \.self) { emoji in
-                        Button { onToggleReaction(msg.id, emoji) } label: {
-                            Text(emoji)
-                                .font(.system(size: 11))
-                                .frame(width: 24, height: 22)
-                                .background(appState.themeCard)
-                                .cornerRadius(4)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(4)
-                .onHover { if $0 { hoveredMessageId = msg.id } }
+                hoverActions
             }
         }
         .contentShape(Rectangle())
@@ -238,6 +160,126 @@ struct ChannelMessageRowView: View {
         }
     }
 
+    /// Reply preview — the original message this one replies to, padded to the
+    /// sender's side (trailing for own messages).
+    @ViewBuilder
+    private func replyPreviewView(isMine: Bool) -> some View {
+        if let rp = msg.replyPreview {
+            HStack(alignment: .top, spacing: 6) {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(appState.themeAccent.opacity(0.5))
+                    .frame(width: 2)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(rp.senderName)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(appState.themeAccent)
+                    if !rp.content.isEmpty {
+                        Text(rp.content)
+                            .font(.system(size: 10))
+                            .foregroundColor(appState.themeText.opacity(0.5))
+                            .lineLimit(2)
+                    }
+                    if !rp.attachments.isEmpty {
+                        HStack(spacing: 4) {
+                            ForEach(rp.attachments.prefix(3), id: \.self) { att in
+                                if att.contentType.hasPrefix("image/"), let url = URL(string: att.url) {
+                                    AsyncImage(url: url) { phase in
+                                        switch phase {
+                                        case .success(let image):
+                                            image.resizable()
+                                                .aspectRatio(contentMode: .fill)
+                                                .frame(width: 48, height: 48)
+                                                .clipped()
+                                                .cornerRadius(4)
+                                        default:
+                                            RoundedRectangle(cornerRadius: 4)
+                                                .fill(appState.themeText.opacity(0.05))
+                                                .frame(width: 48, height: 48)
+                                        }
+                                    }
+                                } else {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "paperclip")
+                                            .font(.system(size: 9))
+                                            .foregroundColor(appState.themeText.opacity(0.4))
+                                        Text(att.filename)
+                                            .font(.system(size: 9))
+                                            .foregroundColor(appState.themeText.opacity(0.4))
+                                            .lineLimit(1)
+                                    }
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 3)
+                                    .background(appState.themeText.opacity(0.05))
+                                    .cornerRadius(4)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(isMine ? .trailing : .leading, 46)
+            .padding(.bottom, 4)
+        }
+    }
+
+    private var hoverActions: some View {
+        HStack(spacing: 2) {
+            Button { onReply(msg) } label: {
+                Image(systemName: "arrowshape.turn.up.left")
+                    .font(.system(size: 10))
+                    .foregroundColor(appState.themeText.opacity(0.7))
+                    .frame(width: 24, height: 22)
+                    .background(appState.themeCard)
+                    .cornerRadius(4)
+            }
+            .buttonStyle(.plain)
+            .help("Reply")
+
+            ForEach(["👍", "❤️", "😂"], id: \.self) { emoji in
+                Button { onToggleReaction(msg.id, emoji) } label: {
+                    Text(emoji)
+                        .font(.system(size: 11))
+                        .frame(width: 24, height: 22)
+                        .background(appState.themeCard)
+                        .cornerRadius(4)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .onHover { if $0 { hoveredMessageId = msg.id } }
+    }
+
+    private var reactionPills: some View {
+        HStack(spacing: 4) {
+            ForEach(msg.reactions, id: \.emoji) { reaction in
+                let mineReaction = reaction.userIds.contains(currentUserId)
+                Button {
+                    onToggleReaction(msg.id, reaction.emoji)
+                } label: {
+                    HStack(spacing: 3) {
+                        Text(reaction.emoji).font(.system(size: 12))
+                        if reaction.count > 1 {
+                            Text("\(reaction.count)")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(mineReaction ? appState.themeAccent : appState.themeText.opacity(0.6))
+                        }
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(mineReaction ? appState.themeAccent.opacity(0.2) : appState.themeText.opacity(0.08))
+                    .cornerRadius(10)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(mineReaction ? appState.themeAccent.opacity(0.4) : Color.clear, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.top, 2)
+    }
+
     @ViewBuilder
     private func senderAvatar(_ msg: ChannelMessage) -> some View {
         if let urlStr = msg.senderAvatarUrl, let url = URL(string: urlStr) {
@@ -277,54 +319,42 @@ struct ChannelMessageRowView: View {
     }
 
     @ViewBuilder
-    private func attachmentList(_ attachments: [ChannelAttachment]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private func attachmentList(_ attachments: [ChannelAttachment], isMine: Bool) -> some View {
+        VStack(alignment: isMine ? .trailing : .leading, spacing: 6) {
             ForEach(attachments, id: \.self) { att in
                 attachmentView(att)
             }
         }
-        .sheet(item: $previewFile) { file in
-            AttachmentPreviewSheet(file: file)
-        }
-    }
-
-    /// Adapt a channel attachment to the shared in-app preview model.
-    private func previewModel(_ att: ChannelAttachment) -> MWProjectFile {
-        MWProjectFile(
-            id: att.url,
-            projectId: nil,
-            taskId: nil,
-            uploadedBy: nil,
-            filename: att.filename,
-            storageUrl: att.url,
-            contentType: att.contentType,
-            fileSize: att.size,
-            createdAt: nil
-        )
     }
 
     @ViewBuilder
     private func attachmentView(_ att: ChannelAttachment) -> some View {
         if att.contentType.hasPrefix("image/"), let url = URL(string: att.url) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: 320, maxHeight: 240)
-                        .cornerRadius(6)
-                default:
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(appState.themeText.opacity(0.05))
-                        .frame(width: 200, height: 120)
-                        .overlay(ProgressView().controlSize(.small))
+            // Button (not .onTapGesture) so the tap reliably wins over the
+            // row's hover / contextMenu gestures.
+            Button {
+                onOpenAttachment(att)
+            } label: {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: 320, maxHeight: 240)
+                            .cornerRadius(6)
+                    default:
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(appState.themeText.opacity(0.05))
+                            .frame(width: 200, height: 120)
+                            .overlay(ProgressView().controlSize(.small))
+                    }
                 }
             }
-            .onTapGesture { previewFile = previewModel(att) }
+            .buttonStyle(.plain)
         } else {
             Button {
-                previewFile = previewModel(att)
+                onOpenAttachment(att)
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: channelAttachmentIcon(for: att.contentType))

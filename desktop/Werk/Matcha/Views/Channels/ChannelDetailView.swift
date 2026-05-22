@@ -22,6 +22,10 @@ struct ChannelDetailView: View {
     @State private var showManageMembers = false
     @State private var pendingMessageDelete: ChannelMessage? = nil
     @State private var inviteToast: String?
+    /// Single hoisted attachment-preview target. Lives here (not per-row) so a
+    /// streaming message / hover re-render or LazyVStack recycle can't drop the
+    /// binding mid-present — that was the flaky-open bug.
+    @State private var previewFile: MWProjectFile?
 
     @Environment(BroadcastService.self) private var broadcast: BroadcastService
 
@@ -407,7 +411,8 @@ struct ChannelDetailView: View {
                             hoveredMessageId: $hoveredMessageId,
                             onReply: { replyingTo = $0 },
                             onToggleReaction: toggleReaction,
-                            onRequestDelete: { pendingMessageDelete = $0 }
+                            onRequestDelete: { pendingMessageDelete = $0 },
+                            onOpenAttachment: { previewFile = previewModel($0) }
                         )
                         .opacity((msg.pending || msg.failed) ? 0.55 : 1.0)
                         .id(msg.stableKey)
@@ -464,6 +469,19 @@ struct ChannelDetailView: View {
             handleFileDrop(providers)
             return true
         }
+        .sheet(item: $previewFile) { file in
+            AttachmentPreviewSheet(file: file)
+        }
+    }
+
+    /// Adapt a channel attachment to the shared in-app preview model. Lives at
+    /// this level (not per-row) so the single hoisted sheet owns presentation.
+    private func previewModel(_ att: ChannelAttachment) -> MWProjectFile {
+        MWProjectFile(
+            id: att.url, projectId: nil, taskId: nil, uploadedBy: nil,
+            filename: att.filename, storageUrl: att.url,
+            contentType: att.contentType, fileSize: att.size, createdAt: nil
+        )
     }
 
     private func deleteMessage(_ msg: ChannelMessage) {

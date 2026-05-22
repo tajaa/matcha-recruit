@@ -264,6 +264,22 @@ struct ChannelsSidebarView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            // Jump to the linked collab project even when it isn't starred —
+            // the project loads via getProjectDetail regardless of pinning.
+            // Mirrors the project-open in ContentView.starredProjectRow.
+            if let pid = channel.projectId {
+                Button {
+                    appState.selectedProjectId = pid
+                    appState.selectedThreadId = nil
+                    appState.selectedJournalId = nil
+                    appState.selectedChannelId = nil
+                    appState.showInbox = false
+                    appState.showSkills = false
+                } label: {
+                    Label("Open collab project", systemImage: "folder")
+                }
+                Divider()
+            }
             // Star toggle — drives macOS push notifications + sort. Per-user
             // local state so it can't be shared across devices in v1.
             Button {
