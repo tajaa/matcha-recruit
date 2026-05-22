@@ -18,6 +18,7 @@ class ProjectDetailViewModel {
     var tasks: [MWProjectTask] = []
     var isLoadingTasks = false
     var files: [MWProjectFile] = []
+    var folders: [MWProjectFolder] = []
     var isLoadingFiles = false
     var collaborators: [MWProjectCollaborator] = []
     var elements: [MWProjectElement] = []
@@ -877,8 +878,10 @@ class ProjectDetailViewModel {
         await MainActor.run { isLoadingFiles = true }
         do {
             let list = try await service.listProjectFiles(projectId: pid)
+            let fetchedFolders = try? await service.listProjectFolders(projectId: pid)
             await MainActor.run {
                 files = list
+                if let fetchedFolders { folders = fetchedFolders }
                 isLoadingFiles = false
             }
         } catch is CancellationError {
@@ -916,6 +919,75 @@ class ProjectDetailViewModel {
         await MainActor.run { files.removeAll { $0.id == id } }
         do {
             try await service.deleteProjectFile(projectId: pid, fileId: id)
+        } catch {
+            await loadFiles()
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    // MARK: - Collab: file folders
+
+    func loadFolders() async {
+        guard let pid = project?.id else { return }
+        if let list = try? await service.listProjectFolders(projectId: pid) {
+            await MainActor.run { folders = list }
+        }
+    }
+
+    func createFolder(name: String, parentId: String? = nil) async {
+        guard let pid = project?.id else { return }
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        do {
+            let folder = try await service.createProjectFolder(projectId: pid, name: clean, parentId: parentId)
+            await MainActor.run {
+                folders.append(folder)
+                folders.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func renameFolder(id: String, name: String) async {
+        guard let pid = project?.id else { return }
+        let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        do {
+            let updated = try await service.renameProjectFolder(projectId: pid, folderId: id, name: clean)
+            await MainActor.run {
+                if let idx = folders.firstIndex(where: { $0.id == id }) { folders[idx] = updated }
+            }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func deleteFolder(id: String) async {
+        guard let pid = project?.id else { return }
+        await MainActor.run {
+            folders.removeAll { $0.id == id }
+            // Files in the deleted folder fall back to the root (matches the
+            // backend's ON DELETE SET NULL).
+            for i in files.indices where files[i].folderId == id { files[i].folderId = nil }
+        }
+        do {
+            try await service.deleteProjectFolder(projectId: pid, folderId: id)
+        } catch {
+            await loadFiles()
+            await loadFolders()
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    /// Move a file into a folder, or to the root when folderId is nil.
+    func moveFile(id: String, toFolder folderId: String?) async {
+        guard let pid = project?.id else { return }
+        await MainActor.run {
+            if let idx = files.firstIndex(where: { $0.id == id }) { files[idx].folderId = folderId }
+        }
+        do {
+            _ = try await service.moveProjectFile(projectId: pid, fileId: id, folderId: folderId)
         } catch {
             await loadFiles()
             await MainActor.run { errorMessage = error.localizedDescription }

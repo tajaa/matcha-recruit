@@ -18,7 +18,7 @@ async def list_project_files(project_id: UUID) -> list[dict[str, Any]]:
     async with get_connection() as conn:
         rows = await conn.fetch(
             """SELECT id, project_id, task_id, uploaded_by, filename, storage_url,
-                      content_type, file_size, created_at
+                      content_type, file_size, folder_id, created_at
                FROM mw_project_files
                WHERE project_id = $1 AND task_id IS NULL
                ORDER BY created_at DESC""",
@@ -31,7 +31,7 @@ async def list_task_files(project_id: UUID, task_id: UUID) -> list[dict[str, Any
     async with get_connection() as conn:
         rows = await conn.fetch(
             """SELECT id, project_id, task_id, uploaded_by, filename, storage_url,
-                      content_type, file_size, created_at
+                      content_type, file_size, folder_id, created_at
                FROM mw_project_files
                WHERE project_id = $1 AND task_id = $2
                ORDER BY created_at DESC""",
@@ -48,7 +48,7 @@ async def list_files_for_tasks(project_id: UUID, task_ids: list[UUID]) -> dict[s
     async with get_connection() as conn:
         rows = await conn.fetch(
             """SELECT id, project_id, task_id, uploaded_by, filename, storage_url,
-                      content_type, file_size, created_at
+                      content_type, file_size, folder_id, created_at
                FROM mw_project_files
                WHERE project_id = $1 AND task_id = ANY($2::uuid[])
                ORDER BY created_at DESC""",
@@ -107,3 +107,123 @@ async def delete_project_file(file_id: UUID, project_id: UUID) -> bool:
             file_id, project_id,
         )
     return result.endswith("1")
+
+
+async def sync_channel_attachments_to_project(
+    conn,
+    project_id: UUID,
+    uploaded_by: UUID,
+    attachments: list[dict[str, Any]],
+) -> int:
+    """Mirror chat-message attachments into a project's root Files (task_id
+    NULL). Best-effort and idempotent: deduped on (project_id, storage_url)
+    among root files via NOT EXISTS, so message edits / WS redelivery don't
+    double-insert. Runs on the caller's connection (same txn as the message
+    insert). Must never raise into the send path — callers wrap in try/except.
+    Returns the number of files added. Channel uploads return permanent
+    CloudFront URLs, so the URL is stored directly (no S3 copy)."""
+    added = 0
+    for att in attachments or []:
+        url = att.get("url")
+        if not url:
+            continue
+        result = await conn.execute(
+            """INSERT INTO mw_project_files
+                   (project_id, task_id, uploaded_by, filename, storage_url, content_type, file_size)
+               SELECT $1, NULL, $2, $3, $4, $5, $6
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM mw_project_files
+                   WHERE project_id = $1 AND storage_url = $4 AND task_id IS NULL
+               )""",
+            project_id,
+            uploaded_by,
+            (att.get("filename") or "attachment")[:500],
+            url,
+            att.get("content_type"),
+            int(att.get("size") or 0),
+        )
+        if result.rsplit(" ", 1)[-1] == "1":
+            added += 1
+    return added
+
+
+# ── Folders ──
+
+async def list_project_folders(project_id: UUID) -> list[dict[str, Any]]:
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT id, project_id, parent_id, name, created_by, created_at
+               FROM mw_project_folders
+               WHERE project_id = $1
+               ORDER BY name ASC""",
+            project_id,
+        )
+    return [dict(r) for r in rows]
+
+
+async def create_project_folder(
+    project_id: UUID,
+    name: str,
+    parent_id: Optional[UUID],
+    created_by: UUID,
+) -> dict[str, Any]:
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO mw_project_folders (project_id, parent_id, name, created_by)
+               VALUES ($1, $2, $3, $4)
+               RETURNING id, project_id, parent_id, name, created_by, created_at""",
+            project_id, parent_id, (name.strip()[:200] or "Untitled"), created_by,
+        )
+    return dict(row)
+
+
+async def update_project_folder(
+    folder_id: UUID,
+    project_id: UUID,
+    name: Optional[str] = None,
+    parent_id: Optional[UUID] = None,
+    clear_parent: bool = False,
+) -> Optional[dict[str, Any]]:
+    """Rename and/or reparent a folder. parent_id is set when given; pass
+    clear_parent=True (with parent_id None) to move the folder to the root."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """UPDATE mw_project_folders
+               SET name = COALESCE($3, name),
+                   parent_id = CASE WHEN $5 THEN $4 ELSE COALESCE($4, parent_id) END
+               WHERE id = $1 AND project_id = $2
+               RETURNING id, project_id, parent_id, name, created_by, created_at""",
+            folder_id, project_id,
+            (name.strip()[:200] if name else None),
+            parent_id, clear_parent,
+        )
+    return dict(row) if row else None
+
+
+async def delete_project_folder(folder_id: UUID, project_id: UUID) -> bool:
+    """Delete a folder. Its files fall back to the root (folder_id -> NULL via
+    the FK ON DELETE SET NULL); child folders cascade-delete."""
+    async with get_connection() as conn:
+        result = await conn.execute(
+            "DELETE FROM mw_project_folders WHERE id = $1 AND project_id = $2",
+            folder_id, project_id,
+        )
+    return result.endswith("1")
+
+
+async def move_file_to_folder(
+    file_id: UUID,
+    project_id: UUID,
+    folder_id: Optional[UUID],
+) -> Optional[dict[str, Any]]:
+    """Move a file into a folder, or to the root when folder_id is None."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """UPDATE mw_project_files
+               SET folder_id = $3
+               WHERE id = $1 AND project_id = $2
+               RETURNING id, project_id, task_id, uploaded_by, filename, storage_url,
+                         content_type, file_size, folder_id, created_at""",
+            file_id, project_id, folder_id,
+        )
+    return dict(row) if row else None

@@ -102,6 +102,8 @@ struct MWProjectFile: Codable, Identifiable, Hashable {
     var contentType: String?
     var fileSize: Int
     var createdAt: String?
+    /// nil = root of the Files tab; otherwise the containing folder.
+    var folderId: String?
 
     enum CodingKeys: String, CodingKey {
         case id, filename
@@ -112,12 +114,31 @@ struct MWProjectFile: Codable, Identifiable, Hashable {
         case contentType = "content_type"
         case fileSize = "file_size"
         case createdAt = "created_at"
+        case folderId = "folder_id"
     }
 
     var isImage: Bool {
         if let ct = contentType, ct.lowercased().hasPrefix("image/") { return true }
         let ext = (filename as NSString).pathExtension.lowercased()
         return ["png", "jpg", "jpeg", "gif", "webp", "heic", "svg"].contains(ext)
+    }
+}
+
+/// A folder in a project's Files tab. `parentId` nil = top level.
+struct MWProjectFolder: Codable, Identifiable, Hashable {
+    let id: String
+    var projectId: String?
+    var parentId: String?
+    var name: String
+    var createdBy: String?
+    var createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case projectId = "project_id"
+        case parentId = "parent_id"
+        case createdBy = "created_by"
+        case createdAt = "created_at"
     }
 }
 

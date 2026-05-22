@@ -3608,6 +3608,95 @@ async def delete_project_file_endpoint(
     return {"deleted": True}
 
 
+# ── Project Files: folders + move ──
+
+@router.get("/projects/{project_id}/folders")
+async def list_project_folders_endpoint(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List folders for a project's Files tab."""
+    from ..services import project_file_service
+
+    await _verify_project_access(project_id, current_user)
+    return await project_file_service.list_project_folders(project_id)
+
+
+@router.post("/projects/{project_id}/folders")
+async def create_project_folder_endpoint(
+    project_id: UUID,
+    name: str = Body(..., embed=True),
+    parent_id: Optional[UUID] = Body(default=None, embed=True),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Create a folder (optionally nested under parent_id)."""
+    from ..services import project_file_service
+
+    await _verify_project_access(project_id, current_user)
+    clean = (name or "").strip()
+    if not clean:
+        raise HTTPException(status_code=400, detail="Folder name required")
+    return await project_file_service.create_project_folder(
+        project_id=project_id, name=clean, parent_id=parent_id,
+        created_by=current_user.id,
+    )
+
+
+@router.patch("/projects/{project_id}/folders/{folder_id}")
+async def update_project_folder_endpoint(
+    project_id: UUID,
+    folder_id: UUID,
+    name: Optional[str] = Body(default=None, embed=True),
+    parent_id: Optional[UUID] = Body(default=None, embed=True),
+    move_to_root: bool = Body(default=False, embed=True),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Rename and/or reparent a folder. move_to_root=true sends it to the root."""
+    from ..services import project_file_service
+
+    await _verify_project_access(project_id, current_user)
+    rec = await project_file_service.update_project_folder(
+        folder_id=folder_id, project_id=project_id,
+        name=name, parent_id=parent_id, clear_parent=move_to_root,
+    )
+    if not rec:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    return rec
+
+
+@router.delete("/projects/{project_id}/folders/{folder_id}")
+async def delete_project_folder_endpoint(
+    project_id: UUID,
+    folder_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Delete a folder; its files fall back to the root."""
+    from ..services import project_file_service
+
+    await _verify_project_access(project_id, current_user)
+    ok = await project_file_service.delete_project_folder(folder_id, project_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    return {"deleted": True}
+
+
+@router.patch("/projects/{project_id}/files/{file_id}")
+async def move_project_file_endpoint(
+    project_id: UUID,
+    file_id: UUID,
+    folder_id: Optional[UUID] = Body(default=None, embed=True),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Move a file into a folder (folder_id) or to the root (null)."""
+    from ..services import project_file_service
+
+    await _verify_project_access(project_id, current_user)
+    rec = await project_file_service.move_file_to_folder(file_id, project_id, folder_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="File not found")
+    return rec
+
+
 @router.post("/projects/{project_id}/submit-blog")
 async def submit_blog_for_review(
     project_id: UUID,

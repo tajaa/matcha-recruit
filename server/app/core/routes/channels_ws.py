@@ -23,6 +23,38 @@ from .voice_signaling import (
 
 logger = logging.getLogger(__name__)
 
+
+# Background tasks spawned fire-and-forget from the WS handler. Held in a set so
+# they aren't GC'd mid-flight (asyncio keeps only a weak ref to running tasks).
+_bg_tasks: set = set()
+
+
+def _spawn_bg(coro) -> None:
+    task = asyncio.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
+
+async def _bg_sync_channel_attachments(channel_id_str: str, user_id, attachments: list) -> None:
+    """Mirror a message's attachments into the linked collab project's Files,
+    on its own connection and off the send hot path. The reverse JSONB lookup
+    is unindexed, so this must not block broadcasting the message."""
+    try:
+        async with get_connection() as conn:
+            proj_id = await conn.fetchval(
+                "SELECT id FROM mw_projects WHERE project_data->>'discussion_channel_id' = $1",
+                channel_id_str,
+            )
+            if proj_id:
+                from app.matcha.services.project_file_service import (
+                    sync_channel_attachments_to_project,
+                )
+                await sync_channel_attachments_to_project(
+                    conn, proj_id, user_id, attachments,
+                )
+    except Exception:
+        logger.warning("channel->project Files sync failed", exc_info=True)
+
 # Online presence — written on every WS receive (heartbeat), read by the
 # mention_email Celery worker to skip emails for users who are still active.
 # TTL is intentionally generous (60s) so a single dropped ping doesn't trigger
@@ -694,6 +726,15 @@ async def channel_websocket(
                                 )
 
                             broadcast_attachments = _json.loads(row["attachments"]) if row["attachments"] else []
+
+                            # Mirror chat media into the linked collab project's
+                            # Files (root) — fire-and-forget on its own connection
+                            # so the unindexed reverse lookup never adds latency to
+                            # the send. Fresh inserts only (no re-mirror on retry).
+                            if is_new_message and broadcast_attachments:
+                                _spawn_bg(_bg_sync_channel_attachments(
+                                    str(ch_uuid), user.id, list(broadcast_attachments),
+                                ))
                             # Build reply preview for broadcast
                             reply_preview = None
                             if reply_uuid:

@@ -992,6 +992,47 @@ class MatchaWorkService {
         )
     }
 
+    // MARK: - Project file folders
+
+    func listProjectFolders(projectId: String) async throws -> [MWProjectFolder] {
+        try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/folders")
+    }
+
+    func createProjectFolder(projectId: String, name: String, parentId: String? = nil) async throws -> MWProjectFolder {
+        struct Body: Encodable { let name: String; let parent_id: String? }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/folders",
+            body: Body(name: name, parent_id: parentId)
+        )
+    }
+
+    func renameProjectFolder(projectId: String, folderId: String, name: String) async throws -> MWProjectFolder {
+        struct Body: Encodable { let name: String }
+        return try await client.request(
+            method: "PATCH",
+            path: "\(basePath)/projects/\(projectId)/folders/\(folderId)",
+            body: Body(name: name)
+        )
+    }
+
+    func deleteProjectFolder(projectId: String, folderId: String) async throws {
+        _ = try await client.requestData(
+            method: "DELETE",
+            path: "\(basePath)/projects/\(projectId)/folders/\(folderId)"
+        )
+    }
+
+    /// Move a file into a folder, or to the root when folderId is nil.
+    func moveProjectFile(projectId: String, fileId: String, folderId: String?) async throws -> MWProjectFile {
+        struct Body: Encodable { let folder_id: String? }
+        return try await client.request(
+            method: "PATCH",
+            path: "\(basePath)/projects/\(projectId)/files/\(fileId)",
+            body: Body(folder_id: folderId)
+        )
+    }
+
     // MARK: - Task history + activity feed
 
     /// Audit-trail timeline for a single kanban task. Newest-last (server

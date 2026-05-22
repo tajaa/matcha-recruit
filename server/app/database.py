@@ -5101,6 +5101,23 @@ async def init_db():
         """)
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_project_files_project_id ON mw_project_files(project_id)")
 
+        # Folders for manual organization of project Files (migration mwfold0001).
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_project_folders (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                project_id UUID NOT NULL REFERENCES mw_projects(id) ON DELETE CASCADE,
+                parent_id UUID REFERENCES mw_project_folders(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                created_by UUID,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_project_folders_project_id ON mw_project_folders(project_id)")
+        await conn.execute("ALTER TABLE mw_project_files ADD COLUMN IF NOT EXISTS folder_id UUID REFERENCES mw_project_folders(id) ON DELETE SET NULL")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_project_files_folder_id ON mw_project_files(folder_id) WHERE folder_id IS NOT NULL")
+        # Partial unique index so the chat->Files sync dedupes root mirrors.
+        await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_mw_project_files_project_url ON mw_project_files(project_id, storage_url) WHERE task_id IS NULL")
+
         # Per-user project pin (independent across collaborators)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS mw_project_pins (
