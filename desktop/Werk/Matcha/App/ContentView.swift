@@ -23,12 +23,8 @@ struct ContentView: View {
     @State private var showNotifications = false
     @State private var orderStore = SidebarSectionOrderStore.shared
 
-    // Search and Starred states
+    // Search state
     @State private var searchText = ""
-    @AppStorage("mw-sidebar-starred-open") private var starredSectionOpen = true
-    @State private var starredChannels: [ChannelSummary] = []
-    @State private var starredProjects: [MWProject] = []
-    @State private var starredThreads: [MWThread] = []
 
     var body: some View {
         @Bindable var appState = appState
@@ -195,7 +191,6 @@ struct ContentView: View {
                 VStack(spacing: 0) {
                     sidebarHomeButton
                     sidebarSearchBar
-                    starredSidebarSection
                     sidebarOrderedSections
                 }
             }
@@ -246,25 +241,6 @@ struct ContentView: View {
         .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 380)
         .task {
             await refreshPendingConnections()
-            await loadStarredItems()
-        }
-        .onChange(of: appState.channelsListGeneration) { _, _ in
-            Task { await loadStarredItems() }
-        }
-        .onChange(of: appState.projectsListGeneration) { _, _ in
-            Task { await loadStarredItems() }
-        }
-        .onChange(of: ChannelStarStore.shared.generation) { _, _ in
-            Task { await loadStarredItems() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .mwThreadsChanged)) { _ in
-            Task { await loadStarredItems() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .mwProjectDataChanged)) { _ in
-            Task { await loadStarredItems() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .mwProjectTitlePatched)) { _ in
-            Task { await loadStarredItems() }
         }
     }
 
@@ -598,22 +574,45 @@ struct ContentView: View {
             icon: "bubble.left.and.bubble.right",
             isOpen: $threadsSectionOpen,
             trailing: {
-                Button {
-                    NotificationCenter.default.post(name: .mwCreateNewThread, object: nil)
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.secondary)
-                        .frame(width: 18, height: 18)
-                        .background(Color.zinc800)
-                        .cornerRadius(4)
+                HStack(spacing: 4) {
+                    Menu {
+                        Button("All") { setThreadFilter(nil) }
+                        Button("Active") { setThreadFilter("active") }
+                        Button("Finalized") { setThreadFilter("finalized") }
+                        Button("Archived") { setThreadFilter("archived") }
+                    } label: {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(threadListVM.filterStatus == nil ? .secondary : appState.themeAccent)
+                            .frame(width: 18, height: 18)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Filter threads")
+
+                    Button {
+                        NotificationCenter.default.post(name: .mwCreateNewThread, object: nil)
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .frame(width: 18, height: 18)
+                            .background(Color.zinc800)
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+                    .help("New thread")
                 }
-                .buttonStyle(.plain)
-                .help("New thread")
             }
         ) {
             ThreadListView(viewModel: threadListVM, showHeader: false, searchText: searchText)
         }
+    }
+
+    private func setThreadFilter(_ status: String?) {
+        threadListVM.filterStatus = status
+        Task { await threadListVM.loadThreads() }
     }
 
     // MARK: - Sidebar building blocks
@@ -888,270 +887,6 @@ struct ContentView: View {
         }
     }
 
-    @ViewBuilder
-    private var starredSidebarSection: some View {
-        let visibleChannels = starredChannels.filter { channel in
-            searchText.isEmpty || channel.name.localizedCaseInsensitiveContains(searchText)
-        }
-        let visibleProjects = starredProjects.filter { project in
-            searchText.isEmpty || project.title.localizedCaseInsensitiveContains(searchText)
-        }
-        let visibleThreads = starredThreads.filter { thread in
-            searchText.isEmpty || thread.title.localizedCaseInsensitiveContains(searchText)
-        }
-
-        let totalCount = visibleChannels.count + visibleProjects.count + visibleThreads.count
-
-        if totalCount > 0 {
-            sidebarSection(
-                title: "Starred",
-                icon: "star",
-                isOpen: $starredSectionOpen
-            ) {
-                VStack(spacing: 0) {
-                    ForEach(visibleChannels, id: \.id) { channel in
-                        starredChannelRow(channel)
-                    }
-                    ForEach(visibleProjects, id: \.id) { project in
-                        starredProjectRow(project)
-                    }
-                    ForEach(visibleThreads, id: \.id) { thread in
-                        starredThreadRow(thread)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-        }
-    }
-
-    private func starredChannelRow(_ channel: ChannelSummary) -> some View {
-        let selected = appState.selectedChannelId == channel.id
-        let unread = channel.unreadCount + (appState.channelUnreadOverrides[channel.id] ?? 0)
-
-        return Button {
-            appState.selectedChannelId = channel.id
-            appState.showChannelBrowse = false
-            appState.clearChannelUnread(channel.id)
-            appState.selectedThreadId = nil
-            appState.selectedProjectId = nil
-            appState.selectedJournalId = nil
-            appState.showInbox = false
-            appState.showSkills = false
-        } label: {
-            HStack(alignment: .center, spacing: 8) {
-                Image(systemName: "star.fill")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.yellow)
-                    .frame(width: 14)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(channel.name)
-                            .font(.system(size: 13, weight: (selected || unread > 0) ? .semibold : .regular))
-                            .foregroundColor(selected ? .primary : appState.themeText.opacity(0.9))
-                            .lineLimit(1)
-                        if channel.projectId != nil {
-                            Text("collab")
-                                .font(.system(size: 8, weight: .semibold))
-                                .foregroundColor(appState.themeAccent)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 1)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 3)
-                                        .fill(appState.themeAccent.opacity(0.15))
-                                )
-                        }
-                        Spacer(minLength: 4)
-                        if unread > 0 {
-                            Text(unread > 99 ? "99+" : "\(unread)")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(appState.themeAccent))
-                        }
-                    }
-                    if let preview = channel.lastMessagePreview, !preview.isEmpty {
-                        Text(preview)
-                            .font(.system(size: 10))
-                            .foregroundColor(appState.themeTextSecondary)
-                            .lineLimit(1)
-                    }
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .sidebarRowStyle(isSelected: selected)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button {
-                openWindow(id: "aux", value: AuxWindowTarget.channel(channel.id))
-            } label: {
-                Label("Open in new window", systemImage: "macwindow.on.rectangle")
-            }
-            Button {
-                appState.splitTarget = .channel(channel.id)
-            } label: {
-                Label("Open in split", systemImage: "rectangle.split.2x1")
-            }
-            Divider()
-            Button {
-                ChannelStarStore.shared.toggle(channel.id)
-                appState.channelsListGeneration &+= 1
-            } label: {
-                Label("Unstar channel", systemImage: "star.slash")
-            }
-        }
-    }
-
-    private func starredProjectRow(_ p: MWProject) -> some View {
-        let selected = appState.selectedProjectId == p.id
-        return Button {
-            appState.selectedProjectId = p.id
-            appState.selectedThreadId = nil
-            appState.selectedJournalId = nil
-            appState.selectedChannelId = nil
-            appState.showInbox = false
-            appState.showSkills = false
-        } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 4) {
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 9))
-                        .foregroundColor(appState.themeAccent)
-                    Text(p.title)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(appState.themeText)
-                        .lineLimit(1)
-                    Spacer()
-                }
-                let s = p.sections?.count ?? 0
-                let c = p.chatCount ?? 0
-                Text("\(s) section\(s == 1 ? "" : "s") · \(c) chat\(c == 1 ? "" : "s")")
-                    .font(.system(size: 10))
-                    .foregroundColor(appState.themeTextSecondary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .sidebarRowStyle(isSelected: selected)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button {
-                openWindow(id: "aux", value: AuxWindowTarget.project(p.id))
-            } label: {
-                Label("Open in new window", systemImage: "macwindow.on.rectangle")
-            }
-            Button {
-                appState.splitTarget = .project(p.id)
-            } label: {
-                Label("Open in split", systemImage: "rectangle.split.2x1")
-            }
-            Divider()
-            Button("Unstar") {
-                Task {
-                    await toggleProjectPin(project: p)
-                }
-            }
-        }
-    }
-
-    private func toggleProjectPin(project: MWProject) async {
-        do {
-            _ = try await MatchaWorkService.shared.setProjectPinned(id: project.id, pinned: false)
-            await MainActor.run {
-                appState.projectsListGeneration &+= 1
-            }
-        } catch {
-            print("[ContentView] toggleProjectPin failed: \(error)")
-        }
-    }
-
-    private func starredThreadRow(_ thread: MWThread) -> some View {
-        let selected = appState.selectedThreadId == thread.id
-        return Button {
-            appState.selectedThreadId = thread.id
-            appState.selectedProjectId = nil
-            appState.selectedChannelId = nil
-            appState.selectedJournalId = nil
-            appState.showInbox = false
-            appState.showPeople = false
-            appState.showHome = false
-            appState.showSkills = false
-        } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .top) {
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 9))
-                        .foregroundColor(appState.themeAccent)
-                    Text(thread.title)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(appState.themeText)
-                        .lineLimit(1)
-                    Spacer()
-                }
-                Text("\(thread.resolvedTaskType.label) · v\(thread.version) · \(formatThreadDate(thread.lastActivityAt))")
-                    .font(.system(size: 10))
-                    .foregroundColor(appState.themeTextSecondary)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .sidebarRowStyle(isSelected: selected)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .contextMenu {
-            Button {
-                openWindow(id: "aux", value: AuxWindowTarget.thread(thread.id))
-            } label: {
-                Label("Open in new window", systemImage: "macwindow.on.rectangle")
-            }
-            Button {
-                appState.splitTarget = .thread(thread.id)
-            } label: {
-                Label("Open in split", systemImage: "rectangle.split.2x1")
-            }
-            Divider()
-            Button("Unpin") {
-                Task {
-                    do {
-                        _ = try await MatchaWorkService.shared.setPinned(id: thread.id, pinned: false)
-                        await MainActor.run {
-                            NotificationCenter.default.post(name: .mwThreadsChanged, object: nil)
-                        }
-                    } catch {
-                        print("[ContentView] unpin thread failed: \(error)")
-                    }
-                }
-            }
-        }
-    }
-
-    private func loadStarredItems() async {
-        do {
-            let channelList = try await ChannelsService.shared.listChannels()
-            let stars = ChannelStarStore.shared
-            let favChannels = channelList.filter { stars.isStarred($0.id) }
-
-            let projectList = try await MatchaWorkService.shared.listProjects()
-            let favProjects = projectList.filter { $0.isPinned ?? false }
-
-            let threadList = try await MatchaWorkService.shared.listThreads(status: nil)
-            let favThreads = threadList.filter { $0.isPinned }
-
-            await MainActor.run {
-                self.starredChannels = favChannels
-                self.starredProjects = favProjects
-                self.starredThreads = favThreads
-            }
-        } catch {
-            print("[ContentView] loadStarredItems failed: \(error)")
-        }
-    }
 }
 
 // MARK: - Mac Native Visual Effect View

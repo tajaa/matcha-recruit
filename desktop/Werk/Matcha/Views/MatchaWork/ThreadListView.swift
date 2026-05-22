@@ -106,32 +106,7 @@ struct ThreadListView: View {
                 Divider().background(appState.themeBorder)
             }
 
-            // Filter
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
-                    ForEach(filterOptions, id: \.label) { option in
-                        Button {
-                            viewModel.filterStatus = option.value
-                            Task { await viewModel.loadThreads() }
-                        } label: {
-                            Text(option.label)
-                                .font(.system(size: 11, weight: .medium))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(viewModel.filterStatus == option.value ? appState.themeAccent : appState.themeCard)
-                                .foregroundColor(viewModel.filterStatus == option.value ? .white : appState.themeTextSecondary)
-                                .cornerRadius(5)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-            }
-
-            Divider().background(appState.themeBorder)
-
-            // Thread list
+            // Thread list (filter lives in the section header menu)
             if viewModel.isLoading {
                 ProgressView().tint(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)

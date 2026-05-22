@@ -479,101 +479,75 @@ private struct ProjectSidebarRowContent: View {
     @State private var isHovered = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 4) {
-                Image(systemName: projectIcon(project.projectType))
-                    .font(.system(size: 9))
-                    .foregroundColor(appState.themeTextSecondary)
-                    .frame(width: 12)
+        HStack(spacing: 6) {
+            // Leading: star only if pinned (else a blank to keep titles aligned).
+            Group {
                 if project.isPinned ?? false {
                     Image(systemName: "star.fill")
                         .font(.system(size: 9))
                         .foregroundColor(appState.themeAccent)
-                }
-                Text(project.title)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(appState.themeText)
-                    .lineLimit(1)
-                Spacer()
-                if isHovered {
-                    Button(action: onArchive) {
-                        Image(systemName: "archivebox")
-                            .font(.system(size: 11))
-                            .foregroundColor(appState.themeTextSecondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Archive")
                 } else {
-                    Button(action: onTogglePin) {
-                        Image(systemName: (project.isPinned ?? false) ? "star.fill" : "star")
-                            .font(.system(size: 11))
-                            .foregroundColor((project.isPinned ?? false) ? appState.themeAccent : appState.themeTextSecondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help((project.isPinned ?? false) ? "Unstar" : "Star")
+                    Color.clear
                 }
             }
-            subtitleView
+            .frame(width: 12)
+
+            Text(project.title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(appState.themeText)
+                .lineLimit(1)
+
+            Spacer(minLength: 4)
+
+            // Hover → star toggle; otherwise a small collaborator avatar.
+            if isHovered {
+                Button(action: onTogglePin) {
+                    Image(systemName: (project.isPinned ?? false) ? "star.fill" : "star")
+                        .font(.system(size: 11))
+                        .foregroundColor((project.isPinned ?? false) ? appState.themeAccent : appState.themeTextSecondary)
+                }
+                .buttonStyle(.plain)
+                .help((project.isPinned ?? false) ? "Unstar" : "Star")
+            } else if let other = firstCollaborator {
+                collaboratorAvatar(other)
+            }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 3)
         .onHover { isHovered = $0 }
     }
 
-    @ViewBuilder
-    private var subtitleView: some View {
-        switch project.projectType {
-        case "blog":
-            let status = (project.projectData?["status"]?.value as? String) ?? "draft"
-            let statusColor: Color = status == "published" ? .green : status == "scheduled" ? .orange : .secondary
-            let wc = (project.projectData?["word_count"]?.value as? Int) ?? 0
-            HStack(spacing: 4) {
-                Text(status)
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundColor(statusColor)
-                    .padding(.horizontal, 4).padding(.vertical, 1)
-                    .background(statusColor.opacity(0.12))
-                    .cornerRadius(3)
-                if wc > 0 {
-                    Text("\(wc) words")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                }
-            }
-        case "collab":
-            HStack(spacing: 4) {
-                if project.collaboratorRole == "collaborator" {
-                    Text("shared")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(.purple)
-                        .padding(.horizontal, 4).padding(.vertical, 1)
-                        .background(Color.purple.opacity(0.12))
-                        .cornerRadius(3)
-                }
-                if let collabs = project.collaborators {
-                    let others = collabs.filter { $0.userId != appState.currentUser?.id }
-                    if !others.isEmpty {
-                        CollaboratorRowSummary(others: others)
-                    }
-                }
-            }
-        default:
-            let s = project.sections?.count ?? 0
-            let c = project.chatCount ?? 0
-            Text("\(s) section\(s == 1 ? "" : "s") · \(c) chat\(c == 1 ? "" : "s")")
-                .font(.system(size: 10))
-                .foregroundColor(.secondary)
-        }
+    private var firstCollaborator: MWProjectCollaborator? {
+        project.collaborators?.first { $0.userId != appState.currentUser?.id }
     }
 
-    private func projectIcon(_ type: String?) -> String {
-        switch type {
-        case "blog": return "doc.text"
-        case "presentation": return "rectangle.stack"
-        case "recruiting": return "person.2"
-        case "collab": return "rectangle.split.3x1"
-        case "discipline": return "shield"
-        default: return "folder"
+    @ViewBuilder
+    private func collaboratorAvatar(_ c: MWProjectCollaborator) -> some View {
+        Group {
+            if let urlStr = c.avatarUrl, let url = URL(string: urlStr) {
+                AsyncImage(url: url) { phase in
+                    if case .success(let img) = phase {
+                        img.resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        avatarInitials(c.name)
+                    }
+                }
+            } else {
+                avatarInitials(c.name)
+            }
         }
+        .frame(width: 18, height: 18)
+        .clipShape(Circle())
+        .help(c.name)
+    }
+
+    private func avatarInitials(_ name: String) -> some View {
+        Circle()
+            .fill(appState.themeAccent.opacity(0.25))
+            .overlay(
+                Text(String(name.first ?? "?").uppercased())
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(appState.themeAccent)
+            )
     }
 }
 
