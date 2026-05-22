@@ -11,6 +11,7 @@ class MatchaWorkService {
     private var versionsCache: [String: MWCacheEntry<[MWDocumentVersion]>] = [:]
     private var pdfCache: [String: MWCacheEntry<Data>] = [:]
     private var projectListCache: [String: MWCacheEntry<[MWProject]>] = [:]
+    private var projectDetailCache: [String: MWCacheEntry<MWProject>] = [:]
     private init() {}
 
     private func cachedValue<Value>(_ entry: MWCacheEntry<Value>?) -> Value? {
@@ -39,6 +40,7 @@ class MatchaWorkService {
         versionsCache.removeAll()
         pdfCache.removeAll()
         projectListCache.removeAll()
+        projectDetailCache.removeAll()
         JournalService.shared.invalidateLists()
     }
 
@@ -515,8 +517,17 @@ class MatchaWorkService {
         return project
     }
 
-    func getProjectDetail(id: String) async throws -> MWProject {
-        try await client.request(method: "GET", path: "\(basePath)/projects/\(id)")
+    /// Last cached project detail (if still fresh) — used to paint instantly on
+    /// project switch while a fresh copy revalidates in the background.
+    func cachedProjectDetail(_ id: String) -> MWProject? { cachedValue(projectDetailCache[id]) }
+
+    func invalidateProjectDetail(id: String) { projectDetailCache.removeValue(forKey: id) }
+
+    func getProjectDetail(id: String, forceRefresh: Bool = false) async throws -> MWProject {
+        if !forceRefresh, let cached = cachedValue(projectDetailCache[id]) { return cached }
+        let proj: MWProject = try await client.request(method: "GET", path: "\(basePath)/projects/\(id)")
+        projectDetailCache[id] = MWCacheEntry(value: proj, expiresAt: Date().addingTimeInterval(cacheTTL))
+        return proj
     }
 
     @discardableResult

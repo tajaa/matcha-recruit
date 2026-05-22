@@ -113,11 +113,10 @@ class ProjectDetailViewModel {
     }
 
     func loadProject(id: String) async {
-        // Clear per-project caches before fetching. The VM is persistent
-        // @State on ProjectDetailView and gets reused across projects, so
-        // without this reset Project A's tasks/files/activity render in
-        // Project B's overview during the gap between project switch and
-        // loadTasks/loadFiles completing.
+        // Switching projects: clear the per-project secondary arrays so the
+        // prior project's tasks/files/activity don't leak into the new overview.
+        // But paint the project detail INSTANTLY from cache when we have it,
+        // so there's no blank-header flash; a fresh copy revalidates below.
         let switchingProjects = project?.id != id
         if switchingProjects {
             await MainActor.run {
@@ -125,19 +124,26 @@ class ProjectDetailViewModel {
                 files = []
                 elements = []
                 recentActivity = []
+                errorMessage = nil
+                if let cached = service.cachedProjectDetail(id) {
+                    project = cached
+                    activeChatId = cached.chats?.first?.id
+                    isLoading = false
+                } else {
+                    isLoading = true
+                }
             }
+        } else {
+            await MainActor.run { isLoading = true; errorMessage = nil }
         }
-        await MainActor.run { isLoading = true; errorMessage = nil }
         do {
-            let proj = try await service.getProjectDetail(id: id)
+            // forceRefresh: always revalidate (and repopulate the cache) so the
+            // instant-paint above can never go stale across opens.
+            let proj = try await service.getProjectDetail(id: id, forceRefresh: true)
             await MainActor.run {
                 project = proj
-                // Always pick up the loaded project's first chat. The VM is
-                // persistent @State on ProjectDetailView, so switching to a
-                // different project (or creating a new one) reuses the same
-                // instance. Without this reset, activeChatId from the previous
-                // project leaks in, and chatVM renders the old project's
-                // chat in the new project's editor.
+                // Reset to the new project's first chat (the VM is reused across
+                // projects, so a prior activeChatId would otherwise leak in).
                 activeChatId = proj.chats?.first?.id
                 isLoading = false
             }
@@ -877,8 +883,11 @@ class ProjectDetailViewModel {
         guard let pid = project?.id else { return }
         await MainActor.run { isLoadingFiles = true }
         do {
-            let list = try await service.listProjectFiles(projectId: pid)
-            let fetchedFolders = try? await service.listProjectFolders(projectId: pid)
+            // Files + folders concurrently (was serial → doubled the latency).
+            async let filesReq = service.listProjectFiles(projectId: pid)
+            async let foldersReq = service.listProjectFolders(projectId: pid)
+            let list = try await filesReq
+            let fetchedFolders = try? await foldersReq
             await MainActor.run {
                 files = list
                 if let fetchedFolders { folders = fetchedFolders }
