@@ -59,7 +59,7 @@ async def generate_investigation_questions(
     interviewee_role: str,
     prior_transcripts: Optional[list[str]] = None,
     api_key: Optional[str] = None,
-    model: str = "gemini-3.5-flash",
+    model: str = "gemini-3-flash-preview",
 ) -> list[dict[str, Any]]:
     """Generate investigation questions for an interviewee.
 

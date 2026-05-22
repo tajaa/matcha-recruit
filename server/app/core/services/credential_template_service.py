@@ -94,7 +94,7 @@ async def _classify_role_via_gemini(
 
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-3-flash-preview",
             contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
             config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=64),
         )
@@ -345,7 +345,7 @@ async def research_credential_requirements(
         """
         INSERT INTO credential_research_logs
             (company_id, state, city, role_category_id, status, ai_model, triggered_by)
-        VALUES ($1, $2, $3, $4, 'running', 'gemini-3.5-flash', $5)
+        VALUES ($1, $2, $3, $4, 'running', 'gemini-3-flash-preview', $5)
         RETURNING id
         """,
         company_id, state, city, role_category_id, triggered_by,
@@ -396,7 +396,7 @@ Do NOT fabricate requirements — if unsure, omit."""
 
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-3-flash-preview",
             contents=[types.Content(parts=[types.Part.from_text(text=prompt)])],
             config=types.GenerateContentConfig(temperature=0.1, max_output_tokens=4096),
         )

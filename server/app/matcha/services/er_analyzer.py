@@ -515,14 +515,14 @@ class ERAnalyzer:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "gemini-3.5-flash",
+        model: str = "gemini-3-flash-preview",
     ):
         """
         Initialize the ER analyzer.
 
         Args:
             api_key: Gemini API key.
-            model: Model to use for analysis (default: gemini-3.5-flash).
+            model: Model to use for analysis (default: gemini-3-flash-preview).
         """
         self.model = model
         self.client = genai.Client(api_key=api_key)

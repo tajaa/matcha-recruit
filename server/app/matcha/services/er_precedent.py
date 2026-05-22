@@ -292,7 +292,7 @@ async def enrich_with_semantics(
 
     # Build model candidates: configured model first, then stable fallbacks
     settings = get_settings()
-    primary_model = getattr(settings, "analysis_model", None) or "gemini-3.5-flash"
+    primary_model = getattr(settings, "analysis_model", None) or "gemini-3-flash-preview"
     model_candidates: list[str] = []
     for m in [primary_model, *PRECEDENT_FALLBACK_MODELS]:
         if m and m not in model_candidates:

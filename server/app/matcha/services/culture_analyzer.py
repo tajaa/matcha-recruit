@@ -47,7 +47,7 @@ class CultureAnalyzer:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "gemini-3.5-flash",
+        model: str = "gemini-3-flash-preview",
     ):
         self.model = model
         self.client = genai.Client(api_key=api_key)

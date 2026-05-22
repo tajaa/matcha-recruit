@@ -2660,7 +2660,7 @@ class HandbookService:
         except Exception:
             return None
 
-        model_name = settings.analysis_model or "gemini-3.5-flash"
+        model_name = settings.analysis_model or "gemini-3-flash-preview"
         try:
             response = await asyncio.wait_for(
                 client.aio.models.generate_content(

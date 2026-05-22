@@ -97,7 +97,7 @@ async def _categorize_actions(
 
     response = await asyncio.wait_for(
         client.aio.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-3-flash-preview",
             contents=prompt,
         ),
         timeout=GEMINI_CALL_TIMEOUT,
@@ -153,7 +153,7 @@ async def _generate_insight(
 
     response = await asyncio.wait_for(
         client.aio.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-3-flash-preview",
             contents=prompt,
         ),
         timeout=GEMINI_CALL_TIMEOUT,

@@ -226,7 +226,7 @@ def load_settings() -> Settings:
         database_ssl=database_ssl,
         gemini_api_key=api_key if api_key else None,
         live_model=os.getenv("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview"),
-        analysis_model=os.getenv("GEMINI_ANALYSIS_MODEL", "gemini-3.5-flash"),
+        analysis_model=os.getenv("GEMINI_ANALYSIS_MODEL", "gemini-3-flash-preview"),
         voice=os.getenv("GEMINI_VOICE", "Kore"),
         port=int(os.getenv("PORT", "8002")),
         search_api_key=os.getenv("SEARCH_API_KEY"),

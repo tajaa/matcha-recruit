@@ -335,7 +335,7 @@ async def enrich_with_semantics(
     try:
         response = await asyncio.wait_for(
             client.aio.models.generate_content(
-                model="gemini-3.5-flash",
+                model="gemini-3-flash-preview",
                 contents=prompt,
             ),
             timeout=GEMINI_CALL_TIMEOUT,

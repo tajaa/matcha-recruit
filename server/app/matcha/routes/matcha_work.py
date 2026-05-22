@@ -5029,7 +5029,7 @@ Return ONLY the modified SVG code, nothing else. No markdown fences, no explanat
 
     try:
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model="gemini-3-flash-preview",
             contents=prompt,
         )
         new_svg = response.text.strip()
@@ -9372,7 +9372,7 @@ async def check_tutor_utterance(
             prompt = UTTERANCE_CHECK_PROMPT_FR.format(utterance=utterance)
         else:
             prompt = UTTERANCE_CHECK_PROMPT_EN.format(utterance=utterance)
-        response = await client.aio.models.generate_content(model="gemini-3.5-flash", contents=prompt)
+        response = await client.aio.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
         text = response.text.strip()
         if text.startswith("```"):
             text = text.split("\n", 1)[1] if "\n" in text else text[3:]

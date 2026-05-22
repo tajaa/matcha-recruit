@@ -710,7 +710,7 @@ def _infer_skill_from_state(current_state: dict) -> str:
 
 SUPPORTED_MODELS = {
     "gemini-3.1-flash-lite-preview",
-    "gemini-3.5-flash",
+    "gemini-3-flash-preview",
     "gemini-3.1-pro-preview",
 }
 
@@ -848,7 +848,7 @@ async def fetch_live_web_context(user_message: str, settings) -> Optional[str]:
         if not api_key:
             return None
         client = _genai.Client(api_key=api_key)
-        model = getattr(settings, "analysis_model", None) or "gemini-3.5-flash"
+        model = getattr(settings, "analysis_model", None) or "gemini-3-flash-preview"
         today = date.today().isoformat()
         logger.info("[grounding] Fetching live web context (model=%s) for: %r", model, user_message[:120])
         prompt = (
@@ -1620,7 +1620,7 @@ COMPACTION_PROMPT = (
     "Do NOT include greetings or filler. Return ONLY the summary text, no JSON."
 )
 
-COMPACTION_MODEL = "gemini-3.5-flash"
+COMPACTION_MODEL = "gemini-3-flash-preview"
 COMPACTION_THRESHOLD = 30
 # Cap how many "older" messages we feed into one compaction call. Without this,
 # a thread with 5000 messages would send all 4985 older ones to the summarizer

@@ -11,7 +11,7 @@ from decimal import Decimal, ROUND_UP
 MODEL_PRICING: dict[str, dict[str, Decimal]] = {
     # Gemini 3.5 Flash — pricing TBD (placeholder = prior 3-flash-preview
     # tier of $0.50 in / $3.00 out; revisit when Google publishes 3.5 GA pricing).
-    "gemini-3.5-flash": {
+    "gemini-3-flash-preview": {
         "input_per_1m": Decimal("0.50"),
         "output_per_1m": Decimal("3.00"),
     },

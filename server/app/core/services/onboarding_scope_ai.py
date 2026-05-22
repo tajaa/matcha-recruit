@@ -468,7 +468,7 @@ async def expand_scope(
         logger.exception("Gemini client init failed for scope expansion: %s", exc)
         raise
 
-    model_name = os.getenv("ONBOARDING_SCOPE_MODEL", "gemini-3.5-flash")
+    model_name = os.getenv("ONBOARDING_SCOPE_MODEL", "gemini-3-flash-preview")
     try:
         response = await asyncio.wait_for(
             client.aio.models.generate_content(
@@ -824,7 +824,7 @@ async def gap_check(
         logger.exception("Gemini client init failed for gap check: %s", exc)
         raise
 
-    model_name = os.getenv("ONBOARDING_SCOPE_MODEL", "gemini-3.5-flash")
+    model_name = os.getenv("ONBOARDING_SCOPE_MODEL", "gemini-3-flash-preview")
     try:
         response = await asyncio.wait_for(
             client.aio.models.generate_content(

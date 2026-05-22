@@ -18,7 +18,7 @@ from ...config import get_settings
 
 logger = logging.getLogger(__name__)
 
-EXTRACTION_MODEL = "gemini-3.5-flash"
+EXTRACTION_MODEL = "gemini-3-flash-preview"
 
 # Mapping from document_type to the fields we want to extract
 EXTRACTION_FIELDS: dict[str, list[dict[str, str]]] = {

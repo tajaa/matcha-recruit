@@ -227,7 +227,7 @@ async def get_policy_types_for_company(company_id: str) -> List[dict]:
 
 _POLICY_TYPE_MAP = {pt["value"]: pt for pt in POLICY_TYPES}
 
-DEFAULT_MODEL = "gemini-3.5-flash"
+DEFAULT_MODEL = "gemini-3-flash-preview"
 FALLBACK_MODEL = "gemini-2.5-flash"
 
 

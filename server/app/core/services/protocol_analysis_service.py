@@ -178,8 +178,8 @@ async def analyze_protocol(
         company_context=context_section,
     )
 
-    # Try gemini-3.5-flash first, fall back to gemini-2.0-flash
-    models = ["gemini-3.5-flash", "gemini-2.0-flash"]
+    # Try gemini-3-flash-preview first, fall back to gemini-2.0-flash
+    models = ["gemini-3-flash-preview", "gemini-2.0-flash"]
     last_error = None
 
     for model_name in models:

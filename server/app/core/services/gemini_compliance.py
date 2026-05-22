@@ -29,7 +29,7 @@ from ..compliance_registry import (
 GEMINI_CALL_TIMEOUT = 45
 
 DEFAULT_LITE_MODEL = "gemini-3.1-flash-lite-preview"
-DEFAULT_LIGHT_MODEL = "gemini-3.5-flash"
+DEFAULT_LIGHT_MODEL = "gemini-3-flash-preview"
 DEFAULT_HEAVY_MODEL = "gemini-3.1-pro-preview"
 DEFAULT_HEAVY_FALLBACK_MODEL = "gemini-2.5-pro"
 
