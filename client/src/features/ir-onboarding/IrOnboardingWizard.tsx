@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { api } from '../../api/client'
+import { useMe } from '../../hooks/useMe'
 import Step1CompanyInfo from './Step1CompanyInfo'
 import Step2Employees from './Step2Employees'
 import Step3AnonymousReporting from './Step3AnonymousReporting'
@@ -21,10 +22,13 @@ interface OnboardingStatus {
 
 export default function IrOnboardingWizard() {
   const navigate = useNavigate()
+  const { refresh: refreshMe, hasFeature } = useMe()
   const [serverStep, setServerStep] = useState<WizardStep | null>(null)
   const [localStep, setLocalStep] = useState<WizardStep | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [activating, setActivating] = useState(false)
+  const [activationTimedOut, setActivationTimedOut] = useState(false)
 
   async function refresh() {
     try {
@@ -60,11 +64,36 @@ export default function IrOnboardingWizard() {
   async function complete() {
     try {
       await api.post('/ir-onboarding/complete')
-      navigate('/app/ir')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to complete onboarding')
+      return
     }
+    if (hasFeature('incidents')) {
+      navigate('/app/ir')
+      return
+    }
+    // Webhook hasn't fired yet — start polling
+    setActivating(true)
   }
+
+  // Navigate as soon as incidents flips true while we're polling
+  useEffect(() => {
+    if (activating && hasFeature('incidents')) {
+      navigate('/app/ir')
+    }
+  }, [activating, hasFeature, navigate])
+
+  // Poll refreshMe() every 2s; timeout after 30s
+  useEffect(() => {
+    if (!activating) return
+    const poll = setInterval(() => refreshMe(), 2000)
+    const timeout = setTimeout(() => {
+      clearInterval(poll)
+      setActivating(false)
+      setActivationTimedOut(true)
+    }, 30_000)
+    return () => { clearInterval(poll); clearTimeout(timeout) }
+  }, [activating, refreshMe])
 
   if (loading) {
     return (
@@ -93,7 +122,7 @@ export default function IrOnboardingWizard() {
           {step === 'company_info' && <Step1CompanyInfo onDone={advance} />}
           {step === 'employees' && <Step2Employees onDone={advance} />}
           {step === 'anonymous' && <Step3AnonymousReporting onDone={advance} />}
-          {step === 'ready' && <Step4Done onContinue={complete} />}
+          {step === 'ready' && <Step4Done onContinue={complete} activating={activating} activationTimedOut={activationTimedOut} />}
         </div>
       </div>
     </div>

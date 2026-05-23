@@ -312,7 +312,7 @@ function WaitlistSection({ waitlistRef }: { waitlistRef: React.RefObject<HTMLDiv
             </p>
             <p className="mt-3 text-sm" style={{ color: MUTED }}>
               Already have a broker referral link?{' '}
-              <Link to="/auth/lite-signup" className="underline" style={{ color: INK }}>
+              <Link to="/lite/signup" className="underline" style={{ color: INK }}>
                 Use it here →
               </Link>
             </p>
