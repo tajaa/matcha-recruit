@@ -548,11 +548,13 @@ class ProjectDetailViewModel {
         }
     }
 
-    func addTask(title: String, column: String = "todo", priority: String = "medium", assignedTo: String? = nil, description: String? = nil, category: String? = nil, elementId: String? = nil) async {
+    func addTask(title: String, column: String = "todo", pipelineColumn: String = "lead", priority: String = "medium", assignedTo: String? = nil, description: String? = nil, category: String? = nil, elementId: String? = nil) async {
         guard let pid = project?.id else { return }
         do {
             let task = try await service.createProjectTask(
-                projectId: pid, title: title, boardColumn: column, description: description,
+                projectId: pid, title: title,
+                boardColumn: column, pipelineColumn: pipelineColumn,
+                description: description,
                 priority: priority, assignedTo: assignedTo, category: category, elementId: elementId
             )
             await MainActor.run {
@@ -772,6 +774,29 @@ class ProjectDetailViewModel {
             let updated = try await service.updateProjectTask(
                 projectId: pid, taskId: id,
                 patch: MatchaWorkService.ProjectTaskPatch(boardColumn: column)
+            )
+            await MainActor.run {
+                if let idx = tasks.firstIndex(where: { $0.id == id }) {
+                    tasks[idx] = updated
+                }
+            }
+        } catch {
+            await loadTasks()
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func movePipelineTask(id: String, toStage stage: String) async {
+        guard let pid = project?.id else { return }
+        await MainActor.run {
+            if let idx = tasks.firstIndex(where: { $0.id == id }) {
+                tasks[idx].pipelineColumn = stage
+            }
+        }
+        do {
+            let updated = try await service.updateProjectTask(
+                projectId: pid, taskId: id,
+                patch: MatchaWorkService.ProjectTaskPatch(pipelineColumn: stage)
             )
             await MainActor.run {
                 if let idx = tasks.firstIndex(where: { $0.id == id }) {

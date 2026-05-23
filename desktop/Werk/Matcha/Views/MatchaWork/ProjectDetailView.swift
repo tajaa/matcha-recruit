@@ -276,14 +276,6 @@ struct ProjectDetailView: View {
                 .help("Export project")
 
                 Menu {
-                    if viewModel.project?.projectType == "collab" {
-                        Button(viewModel.project?.pipelineMode == true
-                               ? "Switch to task board" : "Switch to sales pipeline") {
-                            let enable = !(viewModel.project?.pipelineMode ?? false)
-                            Task { await viewModel.setPipelineMode(enable) }
-                        }
-                        Divider()
-                    }
                     Button("Archive") {
                         guard let pid = viewModel.project?.id else { return }
                         Task {

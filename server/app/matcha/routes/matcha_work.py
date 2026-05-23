@@ -4050,6 +4050,7 @@ async def create_project_task_endpoint(
             title=body.get("title", ""),
             description=body.get("description"),
             board_column=body.get("board_column", "todo"),
+            pipeline_column=body.get("pipeline_column", "lead"),
             priority=body.get("priority", "medium"),
             due_date=due_date,
             assigned_to=assigned_to,
@@ -4088,7 +4089,8 @@ async def update_project_task_endpoint(
 
     patch: dict = {}
     for key in (
-        "title", "description", "priority", "board_column", "status", "progress_note",
+        "title", "description", "priority", "board_column", "pipeline_column",
+        "status", "progress_note",
         # Sales-pipeline text fields
         "contact_name", "contact_company", "contact_email", "contact_phone",
         "outcome", "loss_reason",

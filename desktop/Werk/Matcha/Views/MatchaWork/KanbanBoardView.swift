@@ -9,11 +9,14 @@ private let kanbanColumns: [(key: String, label: String)] = [
     ("done", "Done"),
 ]
 
-/// The board's columns depend on mode: a sales-pipeline project renders the
-/// fixed sales stages (Lead→…→Closed); every other project keeps the default
-/// task columns. Pipeline mode is a per-project flag (`MWProject.pipelineMode`).
+private enum ViewMode { case board, pipeline }
+
+private func columnsFor(mode: ViewMode) -> [(key: String, label: String)] {
+    mode == .pipeline ? SalesStage.columns : kanbanColumns
+}
+
 private func columnsFor(pipeline: Bool) -> [(key: String, label: String)] {
-    pipeline ? SalesStage.columns : kanbanColumns
+    columnsFor(mode: pipeline ? .pipeline : .board)
 }
 
 /// Compact currency for deal values / pipeline totals — "$12k", "$1.2M",
@@ -47,12 +50,10 @@ struct KanbanBoardView: View {
     /// Bumped every 60s so card header aging tints (orange >6h / red >12h)
     /// advance on a board left open, not just on task events / reloads.
     @State private var agingClock = Date()
+    /// Board/Pipeline tab — initialized from project.pipelineMode on appear.
+    @State private var viewMode: ViewMode = .board
 
-    /// Sales-pipeline mode for the current project — gates all sales UI
-    /// (summary bar, per-stage $, card deal chips, editor Deal sections).
-    private var isPipeline: Bool { viewModel.project?.pipelineMode ?? false }
-    /// Aggregate deal metrics for the summary bar; cheap, recomputed from the
-    /// already-loaded tasks (pipeline mode only).
+    private var isPipeline: Bool { viewMode == .pipeline }
     private var pipelineSummary: PipelineSummary { PipelineSummary(tasks: viewModel.tasks) }
 
     var body: some View {
@@ -111,6 +112,9 @@ struct KanbanBoardView: View {
                         .padding(.top, 4)
                         .padding(.bottom, 4)
                 }
+                if viewModel.project?.projectType == "collab" {
+                    boardPipelinePicker
+                }
                 if isPipeline {
                     pipelineSummaryBar
                 }
@@ -118,11 +122,9 @@ struct KanbanBoardView: View {
             }
         }
         .background(ThemeRadialBackground())
-        // Only fetch when we have nothing yet. The eager prefetch in
-        // `loadProject` already runs for collab projects, and a background
-        // refresh races user toggles: a stale GET-list response can land
-        // after the PATCH and overwrite the optimistic done-state with
-        // the pre-toggle todo state, snapping the card back across columns.
+        .onAppear {
+            if viewModel.project?.pipelineMode == true { viewMode = .pipeline }
+        }
         .task {
             if viewModel.tasks.isEmpty {
                 await viewModel.loadTasks()
@@ -203,10 +205,37 @@ struct KanbanBoardView: View {
         .padding(.vertical, 8)
     }
 
+    private var boardPipelinePicker: some View {
+        HStack(spacing: 0) {
+            viewModeButton("Board", mode: .board, icon: "square.grid.2x2")
+            viewModeButton("Pipeline", mode: .pipeline, icon: "dollarsign.circle")
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 4)
+    }
+
+    private func viewModeButton(_ label: String, mode: ViewMode, icon: String) -> some View {
+        Button {
+            viewMode = mode
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: icon).font(.system(size: 10))
+                Text(label).font(.system(size: 11, weight: .medium))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(viewMode == mode ? appState.themeAccent.opacity(0.15) : Color.clear)
+            .foregroundColor(viewMode == mode ? appState.themeAccent : .secondary)
+            .cornerRadius(5)
+        }
+        .buttonStyle(.plain)
+    }
+
     private var boardColumns: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: 10) {
-                ForEach(columnsFor(pipeline: isPipeline), id: \.key) { col in
+                ForEach(columnsFor(mode: viewMode), id: \.key) { col in
                     columnView(key: col.key, label: col.label)
                 }
             }
@@ -242,15 +271,16 @@ struct KanbanBoardView: View {
     }
 
     private func columnView(key: String, label: String) -> some View {
-        // Mode-aware columns. When pipeline mode swaps the column set, legacy
-        // cards whose board_column is no longer a valid key would otherwise
-        // vanish — route those orphans into the first column so they stay
-        // visible until dragged onto a real stage (no migration needed).
-        let cols = columnsFor(pipeline: isPipeline)
+        let cols = columnsFor(mode: viewMode)
         let colKeys = Set(cols.map { $0.key })
         let isFirstColumn = cols.first?.key == key
         let colTasks = viewModel.tasks
-            .filter { $0.boardColumn == key || (isFirstColumn && !colKeys.contains($0.boardColumn)) }
+            .filter { task in
+                let taskCol = viewMode == .pipeline
+                    ? (task.pipelineColumn ?? "lead")
+                    : task.boardColumn
+                return taskCol == key || (isFirstColumn && !colKeys.contains(taskCol))
+            }
             .filter { taskMatchesSearch($0) }
             .sorted {
                 // Seriousness dictates order: critical → high → medium → low.
@@ -347,7 +377,15 @@ struct KanbanBoardView: View {
                             pipelineMode: isPipeline,
                             onTap: { viewingTask = task },
                             onToggle: { Task { await viewModel.toggleTaskComplete(id: task.id) } },
-                            onMoveColumn: { col in Task { await viewModel.moveTask(id: task.id, toColumn: col) } }
+                            onMoveColumn: { col in
+                                Task {
+                                    if viewMode == .pipeline {
+                                        await viewModel.movePipelineTask(id: task.id, toStage: col)
+                                    } else {
+                                        await viewModel.moveTask(id: task.id, toColumn: col)
+                                    }
+                                }
+                            }
                         )
                         .draggable(task.id)
                     }
@@ -371,7 +409,13 @@ struct KanbanBoardView: View {
         }
         .dropDestination(for: String.self) { items, _ in
             guard let taskId = items.first else { return false }
-            Task { await viewModel.moveTask(id: taskId, toColumn: key) }
+            Task {
+                if viewMode == .pipeline {
+                    await viewModel.movePipelineTask(id: taskId, toStage: key)
+                } else {
+                    await viewModel.moveTask(id: taskId, toColumn: key)
+                }
+            }
             return true
         }
     }
@@ -459,9 +503,12 @@ struct KanbanBoardView: View {
         let trimmed = inlineAddTitle.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
         Task {
-            await viewModel.addTask(title: trimmed, column: column)
+            if viewMode == .pipeline {
+                await viewModel.addTask(title: trimmed, column: "todo", pipelineColumn: column)
+            } else {
+                await viewModel.addTask(title: trimmed, column: column)
+            }
             inlineAddTitle = ""
-            // Keep the row open so the user can keep jotting; Esc to dismiss.
         }
     }
 
@@ -941,6 +988,7 @@ private struct TaskEditorSheet: View {
     @State private var priority: String
     @State private var dueDate: String
     @State private var boardColumn: String
+    @State private var pipelineColumn: String
     @State private var progressNote: String
     @State private var assignedTo: String?
     @State private var selectedElementId: String?
@@ -984,6 +1032,7 @@ private struct TaskEditorSheet: View {
         _priority = State(initialValue: task.priority)
         _dueDate = State(initialValue: task.dueDate.map { String($0.prefix(10)) } ?? "")
         _boardColumn = State(initialValue: task.boardColumn)
+        _pipelineColumn = State(initialValue: task.pipelineColumn ?? "lead")
         _progressNote = State(initialValue: task.progressNote ?? "")
         _assignedTo = State(initialValue: task.assignedTo)
         _selectedElementId = State(initialValue: task.elementId)
@@ -1001,7 +1050,8 @@ private struct TaskEditorSheet: View {
 
     private var collaborators: [MWProjectCollaborator] { viewModel.collaborators }
     private var attachments: [MWProjectFile] { viewModel.taskFiles[task.id] ?? [] }
-    private var isPipeline: Bool { viewModel.project?.pipelineMode ?? false }
+    /// Show pipeline/deal fields for all collab projects — both views are available.
+    private var isPipeline: Bool { viewModel.project?.projectType == "collab" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1060,10 +1110,16 @@ private struct TaskEditorSheet: View {
                 .cornerRadius(6)
 
             HStack(spacing: 8) {
-                Picker(isPipeline ? "Stage" : "Column", selection: $boardColumn) {
-                    ForEach(columnsFor(pipeline: isPipeline), id: \.key) { c in Text(c.label).tag(c.key) }
+                Picker("Column", selection: $boardColumn) {
+                    ForEach(kanbanColumns, id: \.key) { c in Text(c.label).tag(c.key) }
                 }
                 .pickerStyle(.menu)
+                if isPipeline {
+                    Picker("Stage", selection: $pipelineColumn) {
+                        ForEach(SalesStage.columns, id: \.key) { c in Text(c.label).tag(c.key) }
+                    }
+                    .pickerStyle(.menu)
+                }
                 Picker("Priority", selection: $priority) {
                     Text("Critical").tag("critical")
                     Text("High").tag("high")
@@ -1118,15 +1174,13 @@ private struct TaskEditorSheet: View {
                         title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                         description: description,
                         boardColumn: boardColumn,
+                        pipelineColumn: isPipeline ? pipelineColumn : nil,
                         priority: priority,
                         dueDate: dueDate.isEmpty ? nil : dueDate,
                         assignedTo: assigneeWire,
                         progressNote: progressNote,
                         elementId: selectedElementId ?? "",
-                        // Sales fields only when in pipeline mode (nil = omitted,
-                        // so normal boards never touch these columns). Empty
-                        // text/date strings clear server-side; blank numbers are
-                        // omitted (Double/Int init returns nil) and left unchanged.
+                        // Sales fields only for collab projects; nil = omitted.
                         dealValue: isPipeline ? Double(dealValue) : nil,
                         probability: isPipeline ? Int(probability) : nil,
                         contactName: isPipeline ? contactName : nil,

@@ -54,14 +54,11 @@ async def _log_task_history(
 
 _ALLOWED_COLUMNS = {
     "todo", "in_progress", "review", "done",
-    # Sales-pipeline stages (used when a project is in pipeline mode; mirror
-    # SalesStage in the werk client). Allowed globally — a non-pipeline board
-    # never emits these, and a pipeline board only emits a task column ('done')
-    # if the user toggles a card's checkbox. The status↔column sync below keys
-    # off 'done'/'todo' only, so sales stages never trip it (outcome handles
-    # won/lost instead).
+    # Sales-pipeline stages kept here for backward compat (pre-migration rows).
+    # New tasks place the stage in pipeline_column, not board_column.
     "lead", "qualified", "proposal", "negotiation", "closed",
 }
+_ALLOWED_PIPELINE_COLUMNS = {"lead", "qualified", "proposal", "negotiation", "closed"}
 _ALLOWED_PRIORITIES = {"critical", "high", "medium", "low"}
 # Ticket-template kinds stored in mw_tasks.category. "manual" = no template
 # (blank task / legacy rows) and renders without a badge on the client.
@@ -160,6 +157,7 @@ async def list_project_tasks(project_id: UUID) -> list[dict]:
                    t.deal_value, t.probability, t.contact_name, t.contact_company,
                    t.contact_email, t.contact_phone, t.outcome, t.loss_reason,
                    t.next_action_at, t.expected_close,
+                   COALESCE(t.pipeline_column, 'lead') AS pipeline_column,
                    -- Last time this card crossed columns, for the "Moved …" stamp
                    -- on the kanban card. Null until the first column_change.
                    (SELECT MAX(h.created_at) FROM mw_task_history h
@@ -199,6 +197,7 @@ async def create_project_task(
     title: str,
     description: Optional[str] = None,
     board_column: str = "todo",
+    pipeline_column: str = "lead",
     priority: str = "medium",
     due_date: Optional[_date] = None,
     assigned_to: Optional[UUID] = None,
@@ -219,6 +218,8 @@ async def create_project_task(
 ) -> dict:
     if board_column not in _ALLOWED_COLUMNS:
         raise ValueError(f"Invalid board_column: {board_column}")
+    if pipeline_column not in _ALLOWED_PIPELINE_COLUMNS:
+        raise ValueError(f"Invalid pipeline_column: {pipeline_column}")
     if priority not in _ALLOWED_PRIORITIES:
         raise ValueError(f"Invalid priority: {priority}")
     if category not in _ALLOWED_CATEGORIES:
@@ -236,7 +237,7 @@ async def create_project_task(
             """
             INSERT INTO mw_tasks (
                 company_id, created_by, project_id, title, description,
-                due_date, priority, status, board_column, assigned_to,
+                due_date, priority, status, board_column, pipeline_column, assigned_to,
                 completed_at, category, progress_note, element_id,
                 deal_value, probability, contact_name, contact_company,
                 contact_email, contact_phone, outcome, loss_reason,
@@ -244,16 +245,18 @@ async def create_project_task(
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
                     $11, $12, $13, $14, $15, $16, $17, $18,
-                    $19, $20, $21, $22, $23, $24)
+                    $19, $20, $21, $22, $23, $24, $25)
             RETURNING id, project_id, company_id, created_by, title, description,
-                      due_date, priority, status, board_column, assigned_to,
-                      completed_at, created_at, updated_at, progress_note, category, element_id,
+                      due_date, priority, status, board_column,
+                      COALESCE(pipeline_column, 'lead') AS pipeline_column,
+                      assigned_to, completed_at, created_at, updated_at,
+                      progress_note, category, element_id,
                       deal_value, probability, contact_name, contact_company,
                       contact_email, contact_phone, outcome, loss_reason,
                       next_action_at, expected_close
             """,
             company_id, created_by, project_id, title.strip(), description,
-            due_date, priority, status, board_column, assigned_to,
+            due_date, priority, status, board_column, pipeline_column, assigned_to,
             completed_at, category, progress_note, element_id,
             deal_value, probability, contact_name, contact_company,
             contact_email, contact_phone, outcome, loss_reason,
@@ -499,11 +502,14 @@ async def update_project_task(
         loss_reason = patch.get("loss_reason")
         next_action_at = patch.get("next_action_at")
         expected_close = patch.get("expected_close")
+        pipeline_column = patch.get("pipeline_column")
 
         if priority is not None and priority not in _ALLOWED_PRIORITIES:
             raise ValueError(f"Invalid priority: {priority}")
         if outcome is not None and outcome not in _ALLOWED_OUTCOMES:
             raise ValueError(f"Invalid outcome: {outcome}")
+        if pipeline_column is not None and pipeline_column not in _ALLOWED_PIPELINE_COLUMNS:
+            raise ValueError(f"Invalid pipeline_column: {pipeline_column}")
 
         # Compute completed_at in Python rather than via a SQL CASE on $3.
         # asyncpg infers each $N's type from how it's used. $3 is assigned to
@@ -545,11 +551,14 @@ async def update_project_task(
                 loss_reason = CASE WHEN $32::boolean THEN $33::text ELSE loss_reason END,
                 next_action_at = CASE WHEN $34::boolean THEN $35::date ELSE next_action_at END,
                 expected_close = CASE WHEN $36::boolean THEN $37::date ELSE expected_close END,
+                pipeline_column = CASE WHEN $38::boolean THEN $39::text ELSE COALESCE(pipeline_column, 'lead') END,
                 updated_at = NOW()
             WHERE id = $2 AND project_id = $12
             RETURNING id, project_id, company_id, created_by, title, description,
-                      due_date, priority, status, board_column, assigned_to,
-                      completed_at, created_at, updated_at, progress_note, category, element_id,
+                      due_date, priority, status, board_column,
+                      COALESCE(pipeline_column, 'lead') AS pipeline_column,
+                      assigned_to, completed_at, created_at, updated_at,
+                      progress_note, category, element_id,
                       deal_value, probability, contact_name, contact_company,
                       contact_email, contact_phone, outcome, loss_reason,
                       next_action_at, expected_close
@@ -591,6 +600,8 @@ async def update_project_task(
             next_action_at,               # $35
             "expected_close" in patch,    # $36
             expected_close,               # $37
+            "pipeline_column" in patch,   # $38
+            pipeline_column,              # $39
         )
 
         if row and new_column != current["board_column"]:

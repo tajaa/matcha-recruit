@@ -742,6 +742,7 @@ class MatchaWorkService {
         projectId: String,
         title: String,
         boardColumn: String = "todo",
+        pipelineColumn: String = "lead",
         description: String? = nil,
         priority: String = "medium",
         dueDate: String? = nil,
@@ -763,6 +764,7 @@ class MatchaWorkService {
             let title: String
             let description: String?
             let board_column: String
+            let pipeline_column: String
             let priority: String
             let due_date: String?
             let assigned_to: String?
@@ -783,7 +785,8 @@ class MatchaWorkService {
             method: "POST",
             path: "\(basePath)/projects/\(projectId)/tasks",
             body: Body(
-                title: title, description: description, board_column: boardColumn,
+                title: title, description: description,
+                board_column: boardColumn, pipeline_column: pipelineColumn,
                 priority: priority, due_date: dueDate, assigned_to: assignedTo,
                 category: category, element_id: elementId,
                 deal_value: dealValue, probability: probability,
@@ -853,6 +856,7 @@ class MatchaWorkService {
         var title: String?
         var description: String?
         var boardColumn: String?
+        var pipelineColumn: String?
         var priority: String?
         var status: String?
         var dueDate: String?
@@ -875,6 +879,7 @@ class MatchaWorkService {
         enum CodingKeys: String, CodingKey {
             case title, description, priority, status, outcome, probability
             case boardColumn = "board_column"
+            case pipelineColumn = "pipeline_column"
             case dueDate = "due_date"
             case assignedTo = "assigned_to"
             case progressNote = "progress_note"
@@ -904,6 +909,7 @@ class MatchaWorkService {
             try c.encodeIfPresent(title, forKey: .title)
             try c.encodeIfPresent(description, forKey: .description)
             try c.encodeIfPresent(boardColumn, forKey: .boardColumn)
+            try c.encodeIfPresent(pipelineColumn, forKey: .pipelineColumn)
             try c.encodeIfPresent(priority, forKey: .priority)
             try c.encodeIfPresent(status, forKey: .status)
             try c.encodeIfPresent(dueDate, forKey: .dueDate)

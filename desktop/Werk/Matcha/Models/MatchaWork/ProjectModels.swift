@@ -224,10 +224,12 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
     var lastMovedAt: String?
     var attachments: [MWProjectFile]?
 
+    // ── Pipeline position (independent of kanban board_column) ──
+    // Defaults to "lead" on the server; nil until the migration runs.
+    var pipelineColumn: String?
+
     // ── Sales-pipeline fields ──
-    // NULL on normal boards; populated and surfaced only when the project is
-    // in pipeline mode. Defaulted to nil so the synthesized memberwise init
-    // stays backward-compatible with existing optimistic-construction sites.
+    // Defaulted to nil so the synthesized memberwise init stays backward-compatible.
     var dealValue: Double? = nil
     var probability: Int? = nil
     var contactName: String? = nil
@@ -244,6 +246,7 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
         case probability, outcome
         case projectId = "project_id"
         case boardColumn = "board_column"
+        case pipelineColumn = "pipeline_column"
         case assignedTo = "assigned_to"
         case assignedName = "assigned_name"
         case assignedEmail = "assigned_email"
