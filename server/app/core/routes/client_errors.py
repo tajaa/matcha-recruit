@@ -159,6 +159,20 @@ async def report_client_error(
                 body.api_status_code,
                 context_json,
             )
+
+        # Real-time alert (fire-and-forget; filters expected 4xx user-errors).
+        try:
+            from ..services.error_notifier import notify_client_error
+            notify_client_error(
+                kind=body.kind,
+                message=body.message,
+                url=body.url,
+                api_endpoint=body.api_endpoint,
+                api_status_code=body.api_status_code,
+                user_email=user_email,
+            )
+        except Exception as exc:
+            logger.warning("client error alert failed: %s", exc)
     except HTTPException:
         raise
     except Exception as exc:

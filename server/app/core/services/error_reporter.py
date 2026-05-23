@@ -103,6 +103,7 @@ DO UPDATE SET
     context = COALESCE(EXCLUDED.context, server_error_reports.context),
     request_path = COALESCE(EXCLUDED.request_path, server_error_reports.request_path),
     request_method = COALESCE(EXCLUDED.request_method, server_error_reports.request_method)
+RETURNING (xmax = 0) AS inserted
 """
 
 
@@ -118,7 +119,16 @@ def _row_args(row: dict) -> tuple:
 async def _upsert_async(row: dict) -> None:
     from ...database import get_connection  # lazy: avoid circular import at module load
     async with get_connection() as conn:
-        await conn.execute(_INSERT_SQL, *_row_args(row))
+        inserted = await conn.fetchval(_INSERT_SQL, *_row_args(row))
+    # Only alert on a genuinely new fingerprint (xmax = 0). Repeat occurrences
+    # bump the counter without re-emailing. Never let a notify failure
+    # propagate into the reporter.
+    if inserted:
+        try:
+            from .error_notifier import notify_server_error
+            await notify_server_error(row)
+        except Exception as e:
+            sys.stderr.write(f"[error_reporter] notify failed: {e}\n")
 
 
 def _upsert_sync_celery(row: dict) -> None:

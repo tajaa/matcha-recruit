@@ -117,6 +117,8 @@ class Settings:
     gmail_from_name: str = "Matcha Recruit"
     app_base_url: str = "http://localhost:5173"
     contact_email: str = "aaron@hey-matcha.com"
+    # Recipient for real-time server/client error alerts. Empty string disables alerts.
+    error_alert_email: str = "aaron@hey-matcha.com"
 
     # Jina AI Reader API (for job scraping)
     jina_api_key: Optional[str] = None
@@ -252,6 +254,7 @@ def load_settings() -> Settings:
         gmail_from_name=os.getenv("GMAIL_FROM_NAME", "Matcha Recruit"),
         app_base_url=os.getenv("APP_BASE_URL", "http://localhost:5173"),
         contact_email=os.getenv("CONTACT_EMAIL", "aaron@hey-matcha.com"),
+        error_alert_email=os.getenv("ERROR_ALERT_EMAIL", "aaron@hey-matcha.com"),
         jina_api_key=os.getenv("JINA_API_KEY"),
         hunter_api_key=os.getenv("HUNTER_API_KEY"),
         apollo_api_key=os.getenv("APOLLO_API_KEY"),
