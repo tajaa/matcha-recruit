@@ -2647,6 +2647,22 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8)
 
 
+def _validate_password_strength(password: str) -> None:
+    errors = []
+    if len(password) < 8:
+        errors.append("at least 8 characters")
+    if not re.search(r"[A-Z]", password):
+        errors.append("an uppercase letter")
+    if not re.search(r"[a-z]", password):
+        errors.append("a lowercase letter")
+    if not re.search(r"\d", password):
+        errors.append("a digit")
+    if not re.search(r"[^A-Za-z0-9]", password):
+        errors.append("a special character")
+    if errors:
+        raise HTTPException(status_code=400, detail=f"Password must include {', '.join(errors)}.")
+
+
 @router.post("/forgot-password")
 async def forgot_password(request: ForgotPasswordRequest, http_request: Request):
     """Send a password reset email. Always returns 200 to avoid email enumeration."""
@@ -2727,6 +2743,7 @@ async def reset_password(request: ResetPasswordRequest, http_request: Request):
             # suspended user shouldn't even be able to rotate their password.
             raise HTTPException(status_code=403, detail="Account cannot be reset. Contact support.")
 
+        _validate_password_strength(request.new_password)
         new_hash = hash_password(request.new_password)
         await conn.execute(
             "UPDATE users SET password_hash = $1 WHERE id = $2",

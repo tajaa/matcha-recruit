@@ -1,8 +1,18 @@
 import { useState } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
-import { Loader2, CheckCircle } from 'lucide-react'
+import { Loader2, CheckCircle, Check, X } from 'lucide-react'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
+
+function checkStrength(pw: string) {
+  return {
+    length: pw.length >= 8,
+    upper: /[A-Z]/.test(pw),
+    lower: /[a-z]/.test(pw),
+    digit: /\d/.test(pw),
+    special: /[^A-Za-z0-9]/.test(pw),
+  }
+}
 
 export default function ResetPassword() {
   const [params] = useSearchParams()
@@ -38,7 +48,11 @@ export default function ResetPassword() {
   async function handleReset(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
-    if (password.length < 8) { setError('Password must be at least 8 characters'); return }
+    const s = checkStrength(password)
+    if (!s.length || !s.upper || !s.lower || !s.digit || !s.special) {
+      setError('Password does not meet all requirements')
+      return
+    }
     if (password !== confirm) { setError('Passwords do not match'); return }
     setResetting(true)
     try {
@@ -58,6 +72,16 @@ export default function ResetPassword() {
     }
     setResetting(false)
   }
+
+  const strength = checkStrength(password)
+
+  const requirements: { key: keyof typeof strength; label: string }[] = [
+    { key: 'length', label: '8+ characters' },
+    { key: 'upper', label: 'Uppercase letter' },
+    { key: 'lower', label: 'Lowercase letter' },
+    { key: 'digit', label: 'Number' },
+    { key: 'special', label: 'Special character' },
+  ]
 
   return (
     <div className="min-h-screen bg-[#0c0c0e] flex items-center justify-center px-4">
@@ -115,10 +139,21 @@ export default function ResetPassword() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                minLength={8}
-                placeholder="At least 8 characters"
+                placeholder="Create a strong password"
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2.5 text-sm text-zinc-100 placeholder-zinc-600 outline-none focus:border-zinc-500 transition-colors"
               />
+              {password.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {requirements.map(({ key, label }) => (
+                    <li key={key} className={`flex items-center gap-1.5 text-xs ${strength[key] ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                      {strength[key]
+                        ? <Check className="w-3 h-3 shrink-0" />
+                        : <X className="w-3 h-3 shrink-0" />}
+                      {label}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Confirm Password</label>
