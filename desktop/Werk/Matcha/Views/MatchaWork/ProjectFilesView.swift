@@ -659,7 +659,9 @@ struct ProjectMediaView: View {
             } else {
                 Task.detached { await viewModel.loadFiles() }
             }
-            // Links are parsed from chat messages — refresh them too.
+            // Backfill any chat attachments (e.g. screenshots) that weren't
+            // mirrored into Files yet, then links.
+            Task.detached { await viewModel.syncChatFiles() }
             Task.detached { await viewModel.loadLinks() }
         }
     }

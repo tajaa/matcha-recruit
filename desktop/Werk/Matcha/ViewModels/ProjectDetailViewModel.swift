@@ -934,6 +934,15 @@ class ProjectDetailViewModel {
         }
     }
 
+    /// Backfill Files/Media with chat attachments (screenshots dropped in chat),
+    /// then reload if anything was added. Idempotent + best-effort.
+    func syncChatFiles() async {
+        guard let pid = project?.id else { return }
+        if let added = try? await service.syncChatFiles(projectId: pid), added > 0 {
+            await loadFiles()
+        }
+    }
+
     /// Links shared in the collab chat (URLs parsed from messages). Best-effort:
     /// failures leave the previous list intact rather than surfacing an error.
     func loadLinks() async {

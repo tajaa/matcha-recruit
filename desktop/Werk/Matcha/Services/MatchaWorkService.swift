@@ -980,6 +980,18 @@ class MatchaWorkService {
         try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/links")
     }
 
+    /// Backfill Files/Media with all discussion-chat attachments (idempotent).
+    /// Returns the number of newly-added files.
+    @discardableResult
+    func syncChatFiles(projectId: String) async throws -> Int {
+        struct Resp: Decodable { let added: Int }
+        let r: Resp = try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/files/sync-chat"
+        )
+        return r.added
+    }
+
     func uploadProjectFile(
         projectId: String,
         file: (data: Data, filename: String, mimeType: String)

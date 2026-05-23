@@ -3714,6 +3714,21 @@ async def copy_project_file_endpoint(
     return rec
 
 
+@router.post("/projects/{project_id}/files/sync-chat")
+async def sync_chat_files_endpoint(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Backfill the project's Files/Media with all discussion-chat attachments.
+    Idempotent — called when the Media tab opens so screenshots dropped in chat
+    show up even if the per-message mirror didn't run."""
+    from ..services import project_file_service
+
+    await _verify_project_access(project_id, current_user)
+    added = await project_file_service.backfill_project_chat_files(project_id)
+    return {"added": added}
+
+
 @router.get("/projects/{project_id}/links")
 async def list_project_links_endpoint(
     project_id: UUID,

@@ -7,6 +7,7 @@ so the Files tab doesn't surface task-scoped attachments.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Optional
 from uuid import UUID
 
@@ -144,6 +145,58 @@ async def sync_channel_attachments_to_project(
         )
         if result.rsplit(" ", 1)[-1] == "1":
             added += 1
+    return added
+
+
+async def backfill_project_chat_files(project_id: UUID) -> int:
+    """Mirror ALL existing attachments from the project's discussion-channel
+    messages into root Files. Idempotent — deduped on (project_id, storage_url)
+    among root files, so it's safe to call on every Media-tab open. Covers
+    attachments posted before the per-message mirror existed (or that missed it
+    due to a worker restart / race). Each attachment is credited to its message
+    sender. Returns the number of new files added."""
+    async with get_connection() as conn:
+        channel_id = await conn.fetchval(
+            "SELECT (project_data->>'discussion_channel_id')::uuid FROM mw_projects WHERE id = $1",
+            project_id,
+        )
+        if not channel_id:
+            return 0
+        rows = await conn.fetch(
+            """SELECT sender_id, attachments
+               FROM channel_messages
+               WHERE channel_id = $1 AND deleted_at IS NULL
+                 AND attachments IS NOT NULL AND attachments::text NOT IN ('[]', 'null')""",
+            channel_id,
+        )
+        added = 0
+        for r in rows:
+            raw = r["attachments"]
+            try:
+                atts = json.loads(raw) if isinstance(raw, str) else (raw or [])
+            except (ValueError, TypeError):
+                continue
+            for att in atts or []:
+                url = att.get("url") if isinstance(att, dict) else None
+                if not url:
+                    continue
+                result = await conn.execute(
+                    """INSERT INTO mw_project_files
+                           (project_id, task_id, uploaded_by, filename, storage_url, content_type, file_size)
+                       SELECT $1, NULL, $2, $3, $4, $5, $6
+                       WHERE NOT EXISTS (
+                           SELECT 1 FROM mw_project_files
+                           WHERE project_id = $1 AND storage_url = $4 AND task_id IS NULL
+                       )""",
+                    project_id,
+                    r["sender_id"],
+                    (att.get("filename") or "attachment")[:500],
+                    url,
+                    att.get("content_type"),
+                    int(att.get("size") or 0),
+                )
+                if result.rsplit(" ", 1)[-1] == "1":
+                    added += 1
     return added
 
 
