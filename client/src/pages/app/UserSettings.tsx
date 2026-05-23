@@ -1,9 +1,18 @@
 import { useRef, useState, useCallback } from 'react'
-import { Camera, Loader2, Check } from 'lucide-react'
+import { Camera, Loader2, Check, Lock } from 'lucide-react'
 import { useMe } from '../../hooks/useMe'
-import { uploadAvatar } from '../../api/client'
+import { uploadAvatar, api } from '../../api/client'
 import Avatar from '../../components/Avatar'
 import ProfileResumeSection from '../../components/profile/ProfileResumeSection'
+
+function validatePasswordStrength(pw: string): string | null {
+  if (pw.length < 8) return 'Must be at least 8 characters'
+  if (!/[A-Z]/.test(pw)) return 'Must include an uppercase letter'
+  if (!/[a-z]/.test(pw)) return 'Must include a lowercase letter'
+  if (!/[0-9]/.test(pw)) return 'Must include a number'
+  if (!/[^A-Za-z0-9]/.test(pw)) return 'Must include a special character'
+  return null
+}
 
 export default function UserSettings() {
   const { me, refresh } = useMe()
@@ -13,8 +22,39 @@ export default function UserSettings() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
 
+  const [cpCurrent, setCpCurrent] = useState('')
+  const [cpNew, setCpNew] = useState('')
+  const [cpConfirm, setCpConfirm] = useState('')
+  const [cpSaving, setCpSaving] = useState(false)
+  const [cpError, setCpError] = useState<string | null>(null)
+  const [cpSuccess, setCpSuccess] = useState(false)
+
   const currentAvatar = avatarUrl ?? me?.user?.avatar_url ?? null
   const userName = me?.profile?.name ?? me?.user?.email ?? 'User'
+
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault()
+    setCpError(null)
+    setCpSuccess(false)
+
+    const strengthErr = validatePasswordStrength(cpNew)
+    if (strengthErr) { setCpError(strengthErr); return }
+    if (cpNew !== cpConfirm) { setCpError('Passwords do not match'); return }
+
+    setCpSaving(true)
+    try {
+      await api.post('/auth/change-password', { current_password: cpCurrent, new_password: cpNew })
+      setCpSuccess(true)
+      setCpCurrent('')
+      setCpNew('')
+      setCpConfirm('')
+      setTimeout(() => setCpSuccess(false), 3000)
+    } catch (err) {
+      setCpError(err instanceof Error ? err.message : 'Failed to change password')
+    } finally {
+      setCpSaving(false)
+    }
+  }
 
   const handleUpload = useCallback(async (file: File) => {
     if (!file.type.startsWith('image/')) {
@@ -98,6 +138,65 @@ export default function UserSettings() {
         )}
 
         <p className="mt-4 text-xs text-zinc-600">JPEG, PNG, or WebP. Max 5 MB.</p>
+      </div>
+
+      {/* Change password */}
+      <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Lock className="w-4 h-4 text-zinc-400" />
+          <h2 className="text-sm font-medium text-zinc-300">Change Password</h2>
+        </div>
+
+        <form onSubmit={handleChangePassword} className="space-y-3">
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">Current Password</label>
+            <input
+              type="password"
+              value={cpCurrent}
+              onChange={(e) => setCpCurrent(e.target.value)}
+              required
+              autoComplete="current-password"
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">New Password</label>
+            <input
+              type="password"
+              value={cpNew}
+              onChange={(e) => setCpNew(e.target.value)}
+              required
+              autoComplete="new-password"
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">Confirm New Password</label>
+            <input
+              type="password"
+              value={cpConfirm}
+              onChange={(e) => setCpConfirm(e.target.value)}
+              required
+              autoComplete="new-password"
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+            />
+          </div>
+
+          {cpError && <p className="text-sm text-red-400">{cpError}</p>}
+          {cpSuccess && (
+            <p className="text-sm text-emerald-400 flex items-center gap-1.5">
+              <Check className="w-3.5 h-3.5" /> Password changed
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={cpSaving || !cpCurrent || !cpNew || !cpConfirm}
+            className="mt-1 rounded-lg bg-zinc-700 px-4 py-1.5 text-sm text-zinc-100 hover:bg-zinc-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            {cpSaving ? 'Saving…' : 'Change Password'}
+          </button>
+        </form>
       </div>
 
       <div className="mt-6">
