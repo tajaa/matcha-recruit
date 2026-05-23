@@ -47,7 +47,12 @@ struct ProjectDetailView: View {
 
     var body: some View {
         Group {
-            if viewModel.project?.projectType == "recruiting" {
+            if viewModel.project == nil {
+                // Until the project loads we don't know its type. Show a loader
+                // rather than falling through to standardLayout — otherwise a
+                // collab project briefly flashes the Sections/Chats layout.
+                projectLoadingView
+            } else if viewModel.project?.projectType == "recruiting" {
                 recruitingLayout
             } else if viewModel.project?.projectType == "blog" {
                 BlogEditorView(
@@ -683,6 +688,33 @@ struct ProjectDetailView: View {
             RecruitingPipelineView(viewModel: viewModel)
                 .frame(minWidth: 300)
         }
+        .background(Color.appBackground)
+    }
+
+    private var projectLoadingView: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            if let err = viewModel.errorMessage {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 28))
+                    .foregroundColor(.red)
+                Text("Couldn't open project")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(appState.themeText)
+                Text(err)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+            } else {
+                ProgressView().tint(.secondary)
+                Text("Loading project…")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.appBackground)
     }
 
