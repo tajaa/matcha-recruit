@@ -247,3 +247,56 @@ async def move_file_to_folder(
             file_id, project_id, folder_id,
         )
     return dict(row) if row else None
+
+
+async def copy_file_to_folder(
+    file_id: UUID,
+    project_id: UUID,
+    folder_id: UUID,
+) -> Optional[dict[str, Any]]:
+    """Copy a project file into a folder, leaving the original in place.
+
+    Used by the Media tab's "Add to Files": the source row stays at the root
+    (so it remains in Media) and a new row is inserted pointing at the same
+    storage URL under the target folder. No S3 copy — the CloudFront URL is
+    reused, like `sync_channel_attachments_to_project`. Deduped on
+    (project_id, storage_url, folder_id) so repeated adds don't pile up; the
+    existing copy is returned in that case.
+    """
+    async with get_connection() as conn:
+        # Never copy into another project's folder.
+        if not await _folder_in_project(conn, folder_id, project_id):
+            return None
+        src = await conn.fetchrow(
+            """SELECT uploaded_by, filename, storage_url, content_type, file_size
+               FROM mw_project_files
+               WHERE id = $1 AND project_id = $2 AND task_id IS NULL""",
+            file_id, project_id,
+        )
+        if not src:
+            return None
+        row = await conn.fetchrow(
+            """INSERT INTO mw_project_files
+                   (project_id, task_id, uploaded_by, filename, storage_url,
+                    content_type, file_size, folder_id)
+               SELECT $1, NULL, $2, $3, $4, $5, $6, $7
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM mw_project_files
+                   WHERE project_id = $1 AND storage_url = $4 AND folder_id = $7
+               )
+               RETURNING id, project_id, task_id, uploaded_by, filename, storage_url,
+                         content_type, file_size, folder_id, created_at""",
+            project_id, src["uploaded_by"], src["filename"], src["storage_url"],
+            src["content_type"], src["file_size"], folder_id,
+        )
+        if row is None:
+            # Dedupe hit — return the pre-existing copy in this folder.
+            row = await conn.fetchrow(
+                """SELECT id, project_id, task_id, uploaded_by, filename, storage_url,
+                          content_type, file_size, folder_id, created_at
+                   FROM mw_project_files
+                   WHERE project_id = $1 AND storage_url = $2 AND folder_id = $3
+                   LIMIT 1""",
+                project_id, src["storage_url"], folder_id,
+            )
+    return dict(row) if row else None

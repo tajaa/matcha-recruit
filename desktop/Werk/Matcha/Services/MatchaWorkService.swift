@@ -975,6 +975,11 @@ class MatchaWorkService {
         try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/files")
     }
 
+    /// Links shared in the project's collab chat (URLs pulled from messages).
+    func listProjectLinks(projectId: String) async throws -> [MWProjectLink] {
+        try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/links")
+    }
+
     func uploadProjectFile(
         projectId: String,
         file: (data: Data, filename: String, mimeType: String)
@@ -1046,6 +1051,16 @@ class MatchaWorkService {
         return try await client.request(
             method: "PATCH",
             path: "\(basePath)/projects/\(projectId)/files/\(fileId)",
+            body: Body(folder_id: folderId)
+        )
+    }
+
+    /// Copy a file into a folder, leaving the original at root (Media "Add to Files").
+    func copyProjectFile(projectId: String, fileId: String, folderId: String) async throws -> MWProjectFile {
+        struct Body: Encodable { let folder_id: String }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/files/\(fileId)/copy",
             body: Body(folder_id: folderId)
         )
     }

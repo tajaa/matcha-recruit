@@ -124,6 +124,22 @@ struct MWProjectFile: Codable, Identifiable, Hashable {
     }
 }
 
+/// A link shared in the project's collab chat (http(s) URL pulled from a
+/// message). Not a file — surfaced in the Media tab's "Links" bucket.
+struct MWProjectLink: Codable, Identifiable, Hashable {
+    let url: String
+    var senderName: String?
+    var createdAt: String?
+
+    var id: String { url }
+
+    enum CodingKeys: String, CodingKey {
+        case url
+        case senderName = "sender_name"
+        case createdAt = "created_at"
+    }
+}
+
 /// A folder in a project's Files tab. `parentId` nil = top level.
 struct MWProjectFolder: Codable, Identifiable, Hashable {
     let id: String

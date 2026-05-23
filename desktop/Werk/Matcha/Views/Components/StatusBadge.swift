@@ -1,4 +1,28 @@
 import SwiftUI
+import AppKit
+
+/// Small button that opens the macOS emoji & symbols palette, inserting into
+/// the currently-focused text field. Place it next to a name/title TextField.
+/// `refocus` should re-assert the field's @FocusState so the palette inserts
+/// into it even after the button click; it runs before the palette opens.
+struct EmojiPaletteButton: View {
+    var refocus: () -> Void = {}
+
+    var body: some View {
+        Button {
+            refocus()
+            // Defer so the focus change lands before the palette captures the
+            // first responder.
+            DispatchQueue.main.async { NSApp.orderFrontCharacterPalette(nil) }
+        } label: {
+            Image(systemName: "face.smiling")
+                .font(.system(size: 13))
+                .foregroundColor(.secondary)
+        }
+        .buttonStyle(.plain)
+        .help("Insert emoji (⌃⌘Space)")
+    }
+}
 
 struct StatusBadge: View {
     let status: String

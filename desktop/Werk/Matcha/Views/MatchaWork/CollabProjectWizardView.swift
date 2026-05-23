@@ -26,6 +26,7 @@ struct CollabProjectWizardView: View {
 
     // Step 2: create-mode form state
     @State private var title = ""
+    @FocusState private var titleFocused: Bool
     @State private var description = ""
     @State private var creating = false
     @State private var createError: String?
@@ -154,10 +155,14 @@ struct CollabProjectWizardView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("title").font(.system(size: 10)).foregroundColor(.white.opacity(0.4))
-                    TextField("", text: $title, prompt: Text("q4 launch").foregroundColor(.white.opacity(0.25)))
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13))
-                        .foregroundColor(.white.opacity(0.9))
+                    HStack(spacing: 6) {
+                        TextField("", text: $title, prompt: Text("q4 launch").foregroundColor(.white.opacity(0.25)))
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 13))
+                            .foregroundColor(.white.opacity(0.9))
+                            .focused($titleFocused)
+                        EmojiPaletteButton { titleFocused = true }
+                    }
                     Divider()
                 }
 

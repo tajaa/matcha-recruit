@@ -14,6 +14,7 @@ struct NewJournalSheet: View {
     @State private var icon: String = "book"
     @State private var creating = false
     @State private var error: String?
+    @FocusState private var titleFocused: Bool
 
     private let colorOptions: [(String, Color)] = [
         ("matcha", Color.matcha500),
@@ -46,10 +47,14 @@ struct NewJournalSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     field(label: "Title") {
-                        TextField("", text: $title, prompt: Text("Marketing ideas").foregroundColor(.white.opacity(0.25)))
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 13))
-                            .foregroundColor(.white)
+                        HStack(spacing: 6) {
+                            TextField("", text: $title, prompt: Text("Marketing ideas").foregroundColor(.white.opacity(0.25)))
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 13))
+                                .foregroundColor(.white)
+                                .focused($titleFocused)
+                            EmojiPaletteButton { titleFocused = true }
+                        }
                     }
 
                     field(label: "Description (optional)") {

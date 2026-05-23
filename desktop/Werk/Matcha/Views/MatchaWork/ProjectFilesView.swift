@@ -532,24 +532,41 @@ struct ProjectMediaView: View {
     @State private var previewFile: MWProjectFile?
     @State private var isCreatingFolder = false
     @State private var newFolderName = ""
+    // When set, the new folder being created should immediately receive a copy
+    // of this file ("Add to Files → New folder…").
+    @State private var pendingAddToFilesFile: MWProjectFile?
 
-    private static let bucketOrder = ["Images", "Videos", "Audio", "Documents", "Other"]
+    private static let bucketOrder = ["Images", "Screenshots", "Videos", "PDFs",
+                                      "Audio", "Documents", "Links", "Other"]
 
     private var unfiledFiles: [MWProjectFile] {
         viewModel.files.filter { $0.folderId == nil }
     }
 
+    /// Heuristic: pasted screenshots upload as `pasted-{ts}.png`; macOS / common
+    /// capture tools name saved shots "Screenshot …", "Screen Shot …", "CleanShot …".
+    private func isScreenshot(_ file: MWProjectFile) -> Bool {
+        guard file.isImage else { return false }
+        let n = file.filename.lowercased()
+        return n.hasPrefix("pasted-")
+            || n.contains("screenshot")
+            || n.contains("screen shot")
+            || n.contains("cleanshot")
+    }
+
     private func mediaBucket(for file: MWProjectFile) -> String {
         let ct = file.contentType?.lowercased() ?? ""
         let ext = (file.filename as NSString).pathExtension.lowercased()
+        if ct == "application/pdf" || ext == "pdf" { return "PDFs" }
+        if isScreenshot(file) { return "Screenshots" }
         if file.isImage { return "Images" }
         let videoExts = ["mp4", "mov", "avi", "mkv", "webm", "m4v", "wmv", "flv"]
         let audioExts = ["mp3", "wav", "aac", "m4a", "flac", "ogg", "opus", "wma"]
         if ct.hasPrefix("video/") || videoExts.contains(ext) { return "Videos" }
         if ct.hasPrefix("audio/") || audioExts.contains(ext) { return "Audio" }
-        let docExts = ["pdf", "doc", "docx", "txt", "csv", "xls", "xlsx",
+        let docExts = ["doc", "docx", "txt", "csv", "xls", "xlsx",
                        "ppt", "pptx", "pages", "numbers", "keynote"]
-        if ct == "application/pdf" || docExts.contains(ext) { return "Documents" }
+        if docExts.contains(ext) { return "Documents" }
         return "Other"
     }
 
@@ -568,9 +585,12 @@ struct ProjectMediaView: View {
     private func bucketIcon(_ bucket: String) -> String {
         switch bucket {
         case "Images": return "photo"
+        case "Screenshots": return "camera.viewfinder"
         case "Videos": return "video"
+        case "PDFs": return "doc.richtext"
         case "Audio": return "music.note"
         case "Documents": return "doc.text"
+        case "Links": return "link"
         default: return "doc"
         }
     }
@@ -589,11 +609,11 @@ struct ProjectMediaView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             Divider().opacity(0.2)
-            if viewModel.isLoadingFiles && unfiledFiles.isEmpty {
+            if viewModel.isLoadingFiles && unfiledFiles.isEmpty && viewModel.links.isEmpty {
                 Spacer()
                 ProgressView().tint(.secondary)
                 Spacer()
-            } else if unfiledFiles.isEmpty {
+            } else if unfiledFiles.isEmpty && viewModel.links.isEmpty {
                 Spacer()
                 VStack(spacing: 8) {
                     Image(systemName: "photo.stack")
@@ -602,7 +622,7 @@ struct ProjectMediaView: View {
                     Text("Nothing in media yet")
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
-                    Text("Drop files in the project chat to see them here.")
+                    Text("Drop files or links in the project chat to see them here.")
                         .font(.system(size: 10))
                         .foregroundColor(.secondary.opacity(0.7))
                         .multilineTextAlignment(.center)
@@ -614,6 +634,9 @@ struct ProjectMediaView: View {
                     LazyVStack(alignment: .leading, spacing: 14) {
                         ForEach(grouped, id: \.bucket) { group in
                             bucketSection(group.bucket, files: group.files)
+                        }
+                        if !viewModel.links.isEmpty {
+                            linksSection(viewModel.links)
                         }
                     }
                     .padding(10)
@@ -628,11 +651,16 @@ struct ProjectMediaView: View {
             newFolderSheet
         }
         .task {
+            // Always re-fetch on appear so chat-mirrored uploads (e.g. pasted
+            // screenshots synced into project files on message-send) show up
+            // when switching Chat → Media. Matches the Files tab's behavior.
             if viewModel.files.isEmpty {
                 await viewModel.loadFiles()
-            } else if viewModel.folders.isEmpty {
-                await viewModel.loadFolders()
+            } else {
+                Task.detached { await viewModel.loadFiles() }
             }
+            // Links are parsed from chat messages — refresh them too.
+            Task.detached { await viewModel.loadLinks() }
         }
     }
 
@@ -658,15 +686,24 @@ struct ProjectMediaView: View {
 
     private func commitNewFolder() {
         let name = newFolderName
+        let fileToAdd = pendingAddToFilesFile
         isCreatingFolder = false
         newFolderName = ""
+        pendingAddToFilesFile = nil
         guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        Task { await viewModel.createFolder(name: name) }
+        Task {
+            let folder = await viewModel.createFolder(name: name)
+            // If this came from "Add to Files → New folder…", copy the file in.
+            if let folder, let fileToAdd {
+                await viewModel.copyFileToFolder(id: fileToAdd.id, toFolder: folder.id)
+            }
+        }
     }
 
     private func cancelNewFolder() {
         isCreatingFolder = false
         newFolderName = ""
+        pendingAddToFilesFile = nil
     }
 
     private func bucketSection(_ bucket: String, files: [MWProjectFile]) -> some View {
@@ -684,7 +721,7 @@ struct ProjectMediaView: View {
             }
             .padding(.horizontal, 4)
 
-            if bucket == "Images" {
+            if bucket == "Images" || bucket == "Screenshots" {
                 imageGrid(files: files)
             } else {
                 ForEach(files) { file in
@@ -716,6 +753,67 @@ struct ProjectMediaView: View {
                 .onTapGesture { previewFile = file }
                 .contextMenu { mediaContextMenu(file) }
             }
+        }
+    }
+
+    private func linksSection(_ links: [MWProjectLink]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: bucketIcon("Links"))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.secondary)
+                Text("Links")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.secondary)
+                Text("\(links.count)")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary.opacity(0.6))
+            }
+            .padding(.horizontal, 4)
+
+            ForEach(links) { link in
+                linkRow(link)
+            }
+        }
+    }
+
+    private func linkRow(_ link: MWProjectLink) -> some View {
+        let host = URL(string: link.url)?.host ?? link.url
+        return HStack(spacing: 8) {
+            Image(systemName: "link")
+                .font(.system(size: 13))
+                .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Text(host)
+                        .font(.system(size: 12))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    if let sender = link.senderName, !sender.isEmpty {
+                        Text("· \(sender)")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary.opacity(0.7))
+                            .lineLimit(1)
+                    }
+                }
+                Text(link.url)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer()
+            Image(systemName: "arrow.up.right.square")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary.opacity(0.6))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Color.zinc900.opacity(0.4))
+        .cornerRadius(4)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if let url = URL(string: link.url) { NSWorkspace.shared.open(url) }
         }
     }
 
@@ -752,18 +850,19 @@ struct ProjectMediaView: View {
     @ViewBuilder
     private func mediaContextMenu(_ file: MWProjectFile) -> some View {
         Button("Open") { previewFile = file }
-        if !viewModel.folders.isEmpty {
-            Menu("Move to folder") {
-                ForEach(viewModel.folders) { folder in
-                    Button(folder.name) {
-                        Task { await viewModel.moveFile(id: file.id, toFolder: folder.id) }
-                    }
+        // "Add to Files" copies the item into a folder (original stays in Media).
+        Menu("Add to Files") {
+            ForEach(viewModel.folders) { folder in
+                Button(folder.name) {
+                    Task { await viewModel.copyFileToFolder(id: file.id, toFolder: folder.id) }
                 }
             }
-        }
-        Button("New folder…") {
-            newFolderName = ""
-            isCreatingFolder = true
+            if !viewModel.folders.isEmpty { Divider() }
+            Button("New folder…") {
+                pendingAddToFilesFile = file
+                newFolderName = ""
+                isCreatingFolder = true
+            }
         }
         Divider()
         Button("Delete", role: .destructive) {

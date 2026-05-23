@@ -8,6 +8,7 @@ struct NewThreadView: View {
     @State private var initialMessage = ""
     @State private var isCreating = false
     @State private var errorMessage: String?
+    @FocusState private var titleFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -61,17 +62,21 @@ struct NewThreadView: View {
                         Text("Title (optional)")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.secondary)
-                        TextField("e.g. Software Engineer offer for Jane", text: $title)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 13))
-                            .foregroundColor(.white)
-                            .padding(10)
-                            .background(Color.zinc950)
-                            .cornerRadius(8)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.borderColor, lineWidth: 1)
-                            )
+                        HStack(spacing: 6) {
+                            TextField("e.g. Software Engineer offer for Jane", text: $title)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 13))
+                                .foregroundColor(.white)
+                                .focused($titleFocused)
+                            EmojiPaletteButton { titleFocused = true }
+                        }
+                        .padding(10)
+                        .background(Color.zinc950)
+                        .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.borderColor, lineWidth: 1)
+                        )
                     }
 
                     // Optional first message

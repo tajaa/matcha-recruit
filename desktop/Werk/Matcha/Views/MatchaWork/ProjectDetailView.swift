@@ -15,7 +15,9 @@ struct ProjectDetailView: View {
     @State private var newSectionTitle = ""
     @State private var showCollaborators = false
     @State private var showExportMenu = false
-    @State private var collabPanel: CollabRightPanel = .chat
+    // Collab projects open on the Kanban board by default; deep-links (e.g. a
+    // task notification setting pendingProjectPanel) still override this.
+    @State private var collabPanel: CollabRightPanel = .kanban
     @State private var showCompleteConfirm = false
     @State private var showRenameAlert = false
     @State private var renameDraft = ""

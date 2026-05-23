@@ -19,6 +19,7 @@ class ProjectDetailViewModel {
     var isLoadingTasks = false
     var files: [MWProjectFile] = []
     var folders: [MWProjectFolder] = []
+    var links: [MWProjectLink] = []
     var isLoadingFiles = false
     var collaborators: [MWProjectCollaborator] = []
     var elements: [MWProjectElement] = []
@@ -933,6 +934,15 @@ class ProjectDetailViewModel {
         }
     }
 
+    /// Links shared in the collab chat (URLs parsed from messages). Best-effort:
+    /// failures leave the previous list intact rather than surfacing an error.
+    func loadLinks() async {
+        guard let pid = project?.id else { return }
+        if let list = try? await service.listProjectLinks(projectId: pid) {
+            await MainActor.run { links = list }
+        }
+    }
+
     func uploadFile(data: Data, filename: String, mimeType: String) async {
         guard let pid = project?.id else { return }
         do {
@@ -977,18 +987,21 @@ class ProjectDetailViewModel {
         }
     }
 
-    func createFolder(name: String, parentId: String? = nil) async {
-        guard let pid = project?.id else { return }
+    @discardableResult
+    func createFolder(name: String, parentId: String? = nil) async -> MWProjectFolder? {
+        guard let pid = project?.id else { return nil }
         let clean = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return }
+        guard !clean.isEmpty else { return nil }
         do {
             let folder = try await service.createProjectFolder(projectId: pid, name: clean, parentId: parentId)
             await MainActor.run {
                 folders.append(folder)
                 folders.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             }
+            return folder
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
+            return nil
         }
     }
 
@@ -1033,6 +1046,21 @@ class ProjectDetailViewModel {
             _ = try await service.moveProjectFile(projectId: pid, fileId: id, folderId: folderId)
         } catch {
             await loadFiles()
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    /// Copy a file into a folder, leaving the original at root. The original
+    /// keeps `folderId == nil` (stays in Media); the returned copy carries the
+    /// folderId (shows in the Files tab under that folder).
+    func copyFileToFolder(id: String, toFolder folderId: String) async {
+        guard let pid = project?.id else { return }
+        do {
+            let copy = try await service.copyProjectFile(projectId: pid, fileId: id, folderId: folderId)
+            await MainActor.run {
+                if !files.contains(where: { $0.id == copy.id }) { files.insert(copy, at: 0) }
+            }
+        } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }
     }

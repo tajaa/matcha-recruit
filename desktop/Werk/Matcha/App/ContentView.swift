@@ -777,13 +777,15 @@ struct ContentView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 Image(systemName: icon)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(isActive ? appState.themeAccent : appState.themeTextSecondary)
                 Text(label)
                     .font(.system(size: 12, weight: isActive ? .semibold : .regular))
                     .foregroundColor(isActive ? appState.themeAccent : appState.themeText.opacity(0.85))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                 if badge > 0 {
                     Text("\(badge)")
                         .font(.system(size: 9, weight: .bold))

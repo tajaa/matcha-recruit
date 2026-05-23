@@ -249,12 +249,6 @@ struct ChannelsSidebarView: View {
                                 .background(Capsule().fill(appState.themeAccent))
                         }
                     }
-                    if let preview = channel.lastMessagePreview, !preview.isEmpty {
-                        Text(preview)
-                            .font(.system(size: 10))
-                            .foregroundColor(appState.themeTextSecondary)
-                            .lineLimit(1)
-                    }
                 }
             }
             .padding(.horizontal, 12)
@@ -422,6 +416,7 @@ struct CreateChannelSheet: View {
     @State private var priceDollars = "5"
     @State private var isSubmitting = false
     @State private var errorMessage: String?
+    @FocusState private var nameFocused: Bool
 
     // Paid/creator channels are for personal accounts only. Matches the
     // backend rule in /channels POST (role must be individual or admin)
@@ -441,10 +436,14 @@ struct CreateChannelSheet: View {
                 Text("name")
                     .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.4))
-                TextField("", text: $name, prompt: Text("general").foregroundColor(.white.opacity(0.25)))
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .foregroundColor(.white.opacity(0.9))
+                HStack(spacing: 6) {
+                    TextField("", text: $name, prompt: Text("general").foregroundColor(.white.opacity(0.25)))
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.9))
+                        .focused($nameFocused)
+                    EmojiPaletteButton { nameFocused = true }
+                }
                 Divider()
             }
 

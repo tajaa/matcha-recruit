@@ -3697,6 +3697,35 @@ async def move_project_file_endpoint(
     return rec
 
 
+@router.post("/projects/{project_id}/files/{file_id}/copy")
+async def copy_project_file_endpoint(
+    project_id: UUID,
+    file_id: UUID,
+    folder_id: UUID = Body(..., embed=True),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Copy a file into a folder, leaving the original (Media "Add to Files")."""
+    from ..services import project_file_service
+
+    await _verify_project_access(project_id, current_user)
+    rec = await project_file_service.copy_file_to_folder(file_id, project_id, folder_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="File or folder not found")
+    return rec
+
+
+@router.get("/projects/{project_id}/links")
+async def list_project_links_endpoint(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Links shared in the collab chat — http(s) URLs pulled from messages."""
+    from ..services import project_service
+
+    await _verify_project_access(project_id, current_user)
+    return await project_service.list_project_links(project_id)
+
+
 @router.post("/projects/{project_id}/submit-blog")
 async def submit_blog_for_review(
     project_id: UUID,

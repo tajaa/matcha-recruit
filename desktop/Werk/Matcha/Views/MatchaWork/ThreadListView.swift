@@ -333,7 +333,7 @@ struct ThreadRowView: View {
                 }
             }
             HStack(spacing: 4) {
-                Text("\(thread.resolvedTaskType.label) · v\(thread.version) · \(formatThreadDate(thread.lastActivityAt))")
+                Text("\(thread.resolvedTaskType.label) · \(formatThreadDate(thread.lastActivityAt))")
                     .font(.system(size: 10))
                     .foregroundColor(appState.themeTextSecondary)
                     .lineLimit(1)

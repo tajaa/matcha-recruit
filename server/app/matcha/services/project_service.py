@@ -1399,6 +1399,56 @@ async def ensure_discussion_channel(project_id: UUID, current_user_id: UUID) -> 
             return channel_id
 
 
+# Match bare http(s) URLs; stop at whitespace and common trailing delimiters.
+_URL_RE = re.compile(r'https?://[^\s<>"\')\]]+', re.IGNORECASE)
+# Trailing punctuation that's usually sentence/markup, not part of the URL.
+_URL_TRAILING = '.,;:!?)]}\'"'
+
+
+async def list_project_links(project_id: UUID) -> list[dict]:
+    """Links shared in the project's collab chat: extract http(s) URLs from the
+    discussion channel's messages. Deduped on URL, newest first. Returns
+    [{url, sender_name, created_at}]. Empty when the project has no chat."""
+    async with get_connection() as conn:
+        channel_id = await conn.fetchval(
+            "SELECT (project_data->>'discussion_channel_id')::uuid FROM mw_projects WHERE id = $1",
+            project_id,
+        )
+        if not channel_id:
+            return []
+        rows = await conn.fetch(
+            """
+            SELECT m.content, m.created_at,
+                   COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS sender_name
+            FROM channel_messages m
+            JOIN users u ON u.id = m.sender_id
+            LEFT JOIN clients c ON c.user_id = u.id
+            LEFT JOIN employees e ON e.user_id = u.id
+            LEFT JOIN admins a ON a.user_id = u.id
+            WHERE m.channel_id = $1
+              AND m.deleted_at IS NULL
+              AND m.content ~* 'https?://'
+            ORDER BY m.created_at DESC
+            LIMIT 500
+            """,
+            channel_id,
+        )
+    seen: set[str] = set()
+    out: list[dict] = []
+    for r in rows:
+        for raw in _URL_RE.findall(r["content"] or ""):
+            url = raw.rstrip(_URL_TRAILING)
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            out.append({
+                "url": url,
+                "sender_name": r["sender_name"],
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            })
+    return out
+
+
 async def add_collaborator(project_id: UUID, user_id: UUID, invited_by: UUID) -> list[dict]:
     """Add a user as a collaborator. Returns updated collaborator list."""
     async with get_connection() as conn:
