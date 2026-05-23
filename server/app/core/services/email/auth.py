@@ -809,6 +809,76 @@ If you believe this was a mistake or have additional information to provide, ple
         return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
 
 
+    async def send_password_changed_email(
+        self,
+        to_email: str,
+        to_name: str,
+        reset_url: str,
+    ) -> bool:
+        """Security notification sent immediately after a successful password change."""
+        if not self.is_configured():
+            logger.warning("Gmail not configured, skipping password changed email")
+            return False
+
+        safe_name = html.escape(to_name)
+        safe_reset_url = html.escape(reset_url)
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .alert {{ background: #fffbeb; border-left: 4px solid #f59e0b; border-radius: 4px; padding: 14px 18px; margin: 20px 0; font-size: 14px; color: #92400e; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {safe_name},</p>
+            <p>Your Matcha account password was just changed successfully.</p>
+            <div class="alert">
+                <strong>Wasn't you?</strong> If you did not make this change, reset your password immediately:
+                <br><br>
+                <a href="{safe_reset_url}" style="color: #b45309; font-weight: 600;">Reset my password →</a>
+            </div>
+            <p style="color: #6b7280; font-size: 13px;">
+                If you made this change, no action is needed. This is a security notice only.
+            </p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""Hi {to_name},
+
+Your Matcha account password was just changed successfully.
+
+Wasn't you? Reset your password immediately: {reset_url}
+
+If you made this change, no action is needed.
+
+- Matcha
+"""
+
+        return await self._send_with_fallback(
+            to_email, to_name,
+            "Your Matcha password was changed",
+            html_content, text_content,
+        )
+
     async def send_admin_interview_invitation_email(
         self,
         candidate_email: str,

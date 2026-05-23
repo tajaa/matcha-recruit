@@ -2613,6 +2613,9 @@ async def change_password(
     current_user: CurrentUser = Depends(get_current_user)
 ):
     """Change password for current user."""
+    from ..services.email import get_email_service
+    from ...config import get_settings
+
     async with get_connection() as conn:
         # Get current password hash
         user = await conn.fetchrow(
@@ -2635,7 +2638,25 @@ async def change_password(
             new_hash, current_user.id
         )
 
-        return {"status": "password_changed"}
+    # Security notification — fire after connection is released
+    try:
+        settings = get_settings()
+        reset_url = f"{settings.app_base_url.rstrip('/')}/reset-password"
+        to_name = (
+            current_user.profile.name
+            if current_user.profile and getattr(current_user.profile, "name", None)
+            else current_user.email.split("@")[0]
+        )
+        email_svc = get_email_service()
+        await email_svc.send_password_changed_email(
+            to_email=current_user.email,
+            to_name=to_name,
+            reset_url=reset_url,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send password changed notification: {e}")
+
+    return {"status": "password_changed"}
 
 
 class ForgotPasswordRequest(BaseModel):
