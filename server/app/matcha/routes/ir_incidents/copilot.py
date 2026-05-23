@@ -239,7 +239,11 @@ async def stream_copilot_round(
                 ip_address=request.client.host if request.client else None,
             )
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
 
 
 _FIELD_WHITELIST = {
@@ -1551,4 +1555,8 @@ async def accept_copilot_card(
                 logger.exception("copilot accept failed for incident %s", incident_id)
                 yield _sse({"type": "error", "detail": "Action failed — see server logs"})
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )

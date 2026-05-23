@@ -3,6 +3,7 @@ import { Loader2, Send, Sparkles } from 'lucide-react'
 import { Button } from '../ui'
 import IRCopilotCard, { type CopilotCard, type AcceptPayload } from './IRCopilotCard'
 import { api } from '../../api/client'
+import { reportApiError } from '../../api/errorReporter'
 
 const BASE = (import.meta.env.VITE_API_URL ?? '/api').replace(/\/$/, '')
 
@@ -80,6 +81,16 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
         body: JSON.stringify({ message: userMessage }),
       })
       if (!res.ok || !res.body) {
+        // Raw fetch bypasses api/client.ts, so report manually or this is
+        // invisible to client-errors.
+        let detail: string | undefined
+        try { detail = (await res.clone().text()).slice(0, 500) } catch { /* ignore */ }
+        reportApiError({
+          endpoint: `/ir/incidents/${incidentId}/copilot/stream`,
+          status: res.status,
+          message: `Copilot stream failed (${res.status})`,
+          body: detail,
+        })
         throw new Error(`Stream failed (${res.status})`)
       }
 
@@ -171,6 +182,16 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
         body: JSON.stringify(body),
       })
       if (!res.ok || !res.body) {
+        // Raw fetch bypasses api/client.ts, so report manually or this is
+        // invisible to client-errors (this is why the prod 503 never logged).
+        let detail: string | undefined
+        try { detail = (await res.clone().text()).slice(0, 500) } catch { /* ignore */ }
+        reportApiError({
+          endpoint: `/ir/incidents/${incidentId}/copilot/accept`,
+          status: res.status,
+          message: `Copilot accept failed (${res.status})`,
+          body: detail,
+        })
         throw new Error(`Accept failed (${res.status})`)
       }
 
