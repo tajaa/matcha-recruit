@@ -1634,9 +1634,10 @@ GUSTO_OAUTH_REDIRECT_URI = os.getenv("GUSTO_OAUTH_REDIRECT_URI")
 
 if not all([GUSTO_OAUTH_CLIENT_ID, GUSTO_OAUTH_CLIENT_SECRET, GUSTO_OAUTH_REDIRECT_URI]):
     raise RuntimeError("Missing Gusto OAuth env vars: GUSTO_OAUTH_CLIENT_ID, GUSTO_OAUTH_CLIENT_SECRET, GUSTO_OAUTH_REDIRECT_URI")
-GUSTO_AUTHORIZE_URL = "https://api.gusto.com/oauth/authorize"
-GUSTO_TOKEN_URL = "https://api.gusto.com/oauth/token"
-GUSTO_ME_URL = "https://api.gusto.com/v1/me"
+GUSTO_BASE_URL = os.getenv("GUSTO_BASE_URL", "https://api.gusto-demo.com")
+GUSTO_AUTHORIZE_URL = f"{GUSTO_BASE_URL}/oauth/authorize"
+GUSTO_TOKEN_URL = f"{GUSTO_BASE_URL}/oauth/token"
+GUSTO_ME_URL = f"{GUSTO_BASE_URL}/v1/me"
 
 
 @router.get("/hris/authorize")

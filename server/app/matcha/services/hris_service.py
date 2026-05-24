@@ -2,6 +2,7 @@
 
 import base64
 import logging
+import os
 import re
 from typing import Optional
 
@@ -10,7 +11,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 PROVIDER_HRIS = "hris"
-GUSTO_BASE_URL = "https://api.gusto.com"
+GUSTO_BASE_URL = os.getenv("GUSTO_BASE_URL", "https://api.gusto-demo.com")
 
 
 class HRISProvisioningError(Exception):
