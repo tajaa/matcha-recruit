@@ -1639,12 +1639,17 @@ GUSTO_TOKEN_URL = "https://api.gusto.com/oauth/token"
 GUSTO_ME_URL = "https://api.gusto.com/v1/me"
 
 
-@router.get("/hris/authorize", dependencies=[Depends(require_feature("hris_import"))])
+@router.get("/hris/authorize")
 async def authorize_gusto_oauth(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Start Gusto OAuth flow — redirect user to Gusto login."""
+    """Return Gusto OAuth authorization URL."""
     company_id = await get_client_company_id(current_user)
+
+    # Check feature flag
+    if not current_user.company_features.get("hris_import"):
+        raise HTTPException(status_code=403, detail="HRIS import not enabled")
+
     state = secrets.token_urlsafe(32)
 
     # Store state in DB for CSRF validation
@@ -1662,7 +1667,8 @@ async def authorize_gusto_oauth(
         "scope": "employees:read",
         "state": state,
     }
-    return RedirectResponse(url=f"{GUSTO_AUTHORIZE_URL}?{urlencode(params)}")
+    oauth_url = f"{GUSTO_AUTHORIZE_URL}?{urlencode(params)}"
+    return {"oauth_url": oauth_url}
 
 
 @router.get("/hris/callback")

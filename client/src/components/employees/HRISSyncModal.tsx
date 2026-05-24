@@ -64,8 +64,8 @@ export function HRISSyncModal({ open, onClose, onSuccess }: Props) {
     setConnecting(true)
     setConnectError(null)
     try {
-      // Redirect to OAuth flow
-      window.location.href = '/api/provisioning/hris/authorize'
+      const res = await api.get<{ oauth_url: string }>('/provisioning/hris/authorize')
+      window.location.href = res.oauth_url
     } catch (e) {
       setConnectError(e instanceof Error ? e.message : 'Connection failed')
       setConnecting(false)
