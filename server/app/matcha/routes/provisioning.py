@@ -1647,8 +1647,17 @@ async def authorize_gusto_oauth(
     company_id = await get_client_company_id(current_user)
 
     # Check feature flag
-    if not current_user.company_features.get("hris_import"):
-        raise HTTPException(status_code=403, detail="HRIS import not enabled")
+    async with get_connection() as conn:
+        company = await conn.fetchrow(
+            "SELECT enabled_features FROM companies WHERE id = $1",
+            company_id,
+        )
+        if not company:
+            raise HTTPException(status_code=404, detail="Company not found")
+        from ...core.feature_flags import merge_company_features
+        features = merge_company_features(company["enabled_features"])
+        if not features.get("hris_import"):
+            raise HTTPException(status_code=403, detail="HRIS import not enabled")
 
     state = secrets.token_urlsafe(32)
 
