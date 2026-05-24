@@ -89,7 +89,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       if (!retry.ok) {
         const retryBody = await retry.json().catch(() => null)
         const msg = retryBody?.detail || `${retry.status} ${retry.statusText}`
-        if (path !== '/client-errors') {
+        // 401/403 are auth conditions (handled by refresh/logout), not bugs —
+        // don't pollute the error reporter with them.
+        if (path !== '/client-errors' && retry.status !== 401 && retry.status !== 403) {
           reportApiError({ endpoint: path, status: retry.status, message: msg, body: retryBody })
         }
         throw new Error(msg)
@@ -116,7 +118,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } else {
       msg = `${res.status} ${res.statusText || 'Request failed'}`
     }
-    if (path !== '/client-errors') {
+    // Skip 401/403 — auth conditions, not application errors (the no-token
+    // case lands here since the refresh path above requires an existing token).
+    if (path !== '/client-errors' && res.status !== 401 && res.status !== 403) {
       reportApiError({ endpoint: path, status: res.status, message: msg, body: errBody })
     }
     throw new Error(msg)
