@@ -162,7 +162,7 @@ export default function ServicesPage() {
           <PillarSection key={p.id} pillar={p} reverse={i % 2 === 1} />
         ))}
         <Process />
-        <EngagementModels />
+        <EngagementModels onPricingClick={() => setIsPricingOpen(true)} />
       </main>
 
       <MarketingFooter />

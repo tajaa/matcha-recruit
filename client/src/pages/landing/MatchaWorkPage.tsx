@@ -66,7 +66,7 @@ export default function MatchaWorkPage() {
           <ProductPillar key={pillar.id} pillar={pillar} reverse={i % 2 === 1} />
         ))}
         <BetaWaitlistCta />
-        <ClosingCta />
+        <ClosingCta onPricingClick={() => setIsPricingOpen(true)} />
       </main>
 
       <MarketingFooter />
