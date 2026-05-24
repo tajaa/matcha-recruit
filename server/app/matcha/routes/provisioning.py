@@ -1714,20 +1714,27 @@ async def gusto_oauth_callback(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Token exchange error: {str(e)}")
 
-        # Get company UUID from /v1/me
+        # Get company UUID from /v1/companies (list accessible companies)
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(
-                    GUSTO_ME_URL,
+                    f"{GUSTO_BASE_URL}/v1/companies",
                     headers={"Authorization": f"Bearer {access_token}"},
                 )
                 if resp.status_code != 200:
-                    raise HTTPException(status_code=400, detail="Failed to get company info")
-                me_data = resp.json()
-                companies = me_data.get("roles", {}).get("payroll_admin", {}).get("companies", [])
+                    logger.error(f"[Gusto /v1/companies] {resp.status_code}: {resp.text}")
+                    raise HTTPException(status_code=400, detail=f"Failed to get companies: {resp.status_code}")
+                companies_data = resp.json()
+                # Handle both list and dict response
+                if isinstance(companies_data, list):
+                    companies = companies_data
+                elif isinstance(companies_data, dict):
+                    companies = companies_data.get("companies", [])
+                else:
+                    companies = []
                 if not companies:
                     raise HTTPException(status_code=400, detail="No company found in Gusto account")
-                gusto_company_id = companies[0]["uuid"]
+                gusto_company_id = companies[0].get("uuid") or companies[0].get("id")
         except HTTPException:
             raise
         except Exception as e:
