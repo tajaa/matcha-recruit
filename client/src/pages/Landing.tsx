@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import MarketingNav from './landing/MarketingNav'
 import MarketingFooter from './landing/MarketingFooter'
 import { LazyMount } from './landing/LazyMount'
+import LandingIntro from '../components/landing/LandingIntro'
 
 const AgentReasoningAnimation = lazy(() => import('./landing/AgentReasoningAnimation'))
 import { ANIMATION_BY_SIZZLE_ID } from './landing/animations'
@@ -55,12 +56,14 @@ const DEFAULT_SIZZLES: LandingSizzleVideo[] = [
 
 export default function Landing() {
   const [isPricingOpen, setIsPricingOpen] = useState(false)
+  const [introDone, setIntroDone] = useState(false)
   const { data } = useLandingMedia()
 
   const sizzles = data.sizzle_videos.length > 0 ? data.sizzle_videos : DEFAULT_SIZZLES
 
   return (
     <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen overflow-x-hidden">
+      {!introDone && <LandingIntro onDone={() => setIntroDone(true)} />}
       <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
       <MarketingNav onDemoClick={() => setIsPricingOpen(true)} />
       <ComplianceTicker />
