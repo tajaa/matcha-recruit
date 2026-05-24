@@ -1457,7 +1457,7 @@ async def connect_hris(
     test_status = "connected"
     test_error = None
     if request.test_connection and request.mode != "mock":
-        from ..services.hris_service import get_hris_service
+        from ..services.hris_service import get_hris_service, GustoHRISService
         service = get_hris_service(request.mode)
         test_secrets = {
             "client_id": request.client_id or "",
@@ -1467,6 +1467,14 @@ async def connect_hris(
         if not ok:
             test_status = "error"
             test_error = err
+        elif isinstance(service, GustoHRISService) and not config.get("gusto_company_id"):
+            # Auto-discover company UUID from /v1/me so user doesn't need to look it up
+            uuid, discover_err = await service.resolve_company_uuid(config, test_secrets)
+            if uuid:
+                config["gusto_company_id"] = uuid
+            elif discover_err:
+                test_status = "error"
+                test_error = f"Connected but could not determine company: {discover_err}"
 
     async with get_connection() as conn:
         row = await conn.fetchrow(

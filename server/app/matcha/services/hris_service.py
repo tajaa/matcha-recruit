@@ -263,6 +263,33 @@ class GustoHRISService:
         except Exception as e:
             raise HRISProvisioningError("auth_error", f"Gusto auth error: {str(e)}")
 
+    async def resolve_company_uuid(self, config: dict, secrets: dict) -> tuple[Optional[str], Optional[str]]:
+        """Call /v1/me and extract the company UUID. Returns (uuid, error)."""
+        try:
+            token = await self.authenticate(config, secrets)
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                resp = await client.get(
+                    f"{GUSTO_BASE_URL}/v1/me",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                if resp.status_code != 200:
+                    return None, f"/v1/me returned {resp.status_code}"
+                data = resp.json()
+                companies = (
+                    data.get("roles", {})
+                        .get("payroll_admin", {})
+                        .get("companies", [])
+                )
+                if len(companies) == 1:
+                    return companies[0].get("uuid"), None
+                if len(companies) > 1:
+                    return None, "Multiple Gusto companies found — enter company UUID manually"
+                return None, "No company found in Gusto account"
+        except HRISProvisioningError as e:
+            return None, str(e)
+        except Exception as e:
+            return None, f"Company auto-discovery failed: {str(e)}"
+
     async def fetch_workers(self, config: dict, secrets: dict) -> list[dict]:
         gusto_company_id = config.get("gusto_company_id", "")
 

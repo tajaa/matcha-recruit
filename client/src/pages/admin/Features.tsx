@@ -20,6 +20,7 @@ const FEATURE_LABELS: Record<string, string> = {
   cobra: 'COBRA',
   separation_agreements: 'Separation Agreements',
   discipline: 'Performance Action',
+  hris_import: 'HRIS Import (Gusto)',
   inventory: 'Inventory',
 }
 

@@ -36,7 +36,6 @@ export function HRISSyncModal({ open, onClose, onSuccess }: Props) {
   const [fetchError, setFetchError] = useState<string | null>(null)
 
   // Connect form state
-  const [gustoCompanyId, setGustoCompanyId] = useState('')
   const [clientId, setClientId] = useState('')
   const [clientSecret, setClientSecret] = useState('')
   const [connecting, setConnecting] = useState(false)
@@ -70,7 +69,6 @@ export function HRISSyncModal({ open, onClose, onSuccess }: Props) {
     try {
       const result = await api.post<ConnectionStatus>('/provisioning/hris/connect', {
         mode: 'gusto',
-        gusto_company_id: gustoCompanyId.trim(),
         client_id: clientId.trim(),
         client_secret: clientSecret,
         test_connection: true,
@@ -106,7 +104,6 @@ export function HRISSyncModal({ open, onClose, onSuccess }: Props) {
       await api.post('/provisioning/hris/disconnect', {})
       setConnectionStatus(null)
       setSyncResult(null)
-      setGustoCompanyId('')
       setClientId('')
     } catch {
       // disconnect failed — leave state unchanged
@@ -144,12 +141,11 @@ export function HRISSyncModal({ open, onClose, onSuccess }: Props) {
         />
       ) : (
         <ConnectForm
-          gustoCompanyId={gustoCompanyId}
           clientId={clientId}
           clientSecret={clientSecret}
           connecting={connecting}
           error={connectError}
-          onChange={{ gustoCompanyId: setGustoCompanyId, clientId: setClientId, clientSecret: setClientSecret }}
+          onChange={{ clientId: setClientId, clientSecret: setClientSecret }}
           onSubmit={handleConnect}
         />
       )}
@@ -160,7 +156,6 @@ export function HRISSyncModal({ open, onClose, onSuccess }: Props) {
 // ---------------------------------------------------------------------------
 
 function ConnectForm({
-  gustoCompanyId,
   clientId,
   clientSecret,
   connecting,
@@ -168,12 +163,11 @@ function ConnectForm({
   onChange,
   onSubmit,
 }: {
-  gustoCompanyId: string
   clientId: string
   clientSecret: string
   connecting: boolean
   error: string | null
-  onChange: { gustoCompanyId: (v: string) => void; clientId: (v: string) => void; clientSecret: (v: string) => void }
+  onChange: { clientId: (v: string) => void; clientSecret: (v: string) => void }
   onSubmit: (e: React.FormEvent) => void
 }) {
   return (
@@ -182,16 +176,6 @@ function ConnectForm({
         Connect your Gusto account to automatically import employees into Matcha.
         You'll need a Gusto API application with <code className="text-zinc-300">employees:read</code> scope.
       </p>
-      <Field label="Gusto company ID" required>
-        <input
-          type="text"
-          required
-          value={gustoCompanyId}
-          onChange={(e) => onChange.gustoCompanyId(e.target.value)}
-          placeholder="e.g. abc12345-…"
-          className={inputCls}
-        />
-      </Field>
       <Field label="Client ID" required>
         <input
           type="text"
