@@ -560,6 +560,48 @@ private struct ImagePreviewSheet: View {
 // MARK: - Center/Empty thread views & components
 
 extension ChatPanelView {
+    @ViewBuilder private var suggestionCards: some View {
+        if viewModel.currentTaskType == .presentation {
+            SuggestionCard(
+                title: "Create a slide deck",
+                icon: "rectangle.on.rectangle",
+                text: "Build a presentation with slides and speaker notes",
+                lightMode: lightMode
+            ) { inputText = "Create a presentation on this topic with slides and speaker notes." }
+            SuggestionCard(
+                title: "Executive summary",
+                icon: "chart.bar.doc.horizontal",
+                text: "One-pager summarizing key metrics and decisions",
+                lightMode: lightMode
+            ) { inputText = "Create a 1-page executive summary presentation with key highlights." }
+            SuggestionCard(
+                title: "Pitch deck",
+                icon: "arrow.up.forward.circle.fill",
+                text: "Persuasive slides for a pitch or proposal",
+                lightMode: lightMode
+            ) { inputText = "Build a pitch deck with problem, solution, market, and ask slides." }
+        } else {
+            SuggestionCard(
+                title: "Draft an offer letter",
+                icon: "doc.text.fill",
+                text: "Create a job offer letter for a Software Engineer candidate",
+                lightMode: lightMode
+            ) { inputText = "Draft an offer letter for a Software Engineer candidate named Jane." }
+            SuggestionCard(
+                title: "Performance review",
+                icon: "star.fill",
+                text: "Write a performance review highlighting key accomplishments",
+                lightMode: lightMode
+            ) { inputText = "Write a performance review highlighting key achievements and growth areas." }
+            SuggestionCard(
+                title: "Onboarding workbook",
+                icon: "book.fill",
+                text: "Build an onboarding guide or workbook for a new hire",
+                lightMode: lightMode
+            ) { inputText = "Create an onboarding workbook for a new engineer starting next week." }
+        }
+    }
+
     @ViewBuilder private var emptyThreadMiddleView: some View {
         VStack(spacing: 0) {
             Spacer()
@@ -718,32 +760,7 @@ extension ChatPanelView {
                 .frame(maxWidth: 560)
                 
                 HStack(spacing: 12) {
-                    SuggestionCard(
-                        title: "Draft an offer letter",
-                        icon: "doc.text.fill",
-                        text: "Create a job offer letter for a Software Engineer candidate",
-                        lightMode: lightMode
-                    ) {
-                        inputText = "Draft an offer letter for a Software Engineer candidate named Jane."
-                    }
-                    
-                    SuggestionCard(
-                        title: "Performance review",
-                        icon: "star.fill",
-                        text: "Write a performance review highlighting key accomplishments",
-                        lightMode: lightMode
-                    ) {
-                        inputText = "Write a performance review highlighting key achievements and growth areas."
-                    }
-                    
-                    SuggestionCard(
-                        title: "Onboarding workbook",
-                        icon: "book.fill",
-                        text: "Build an onboarding guide or workbook for a new hire",
-                        lightMode: lightMode
-                    ) {
-                        inputText = "Create an onboarding workbook for a new engineer starting next week."
-                    }
+                    suggestionCards
                 }
                 .frame(maxWidth: 560)
             }

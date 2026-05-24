@@ -1580,7 +1580,7 @@ async def _apply_ai_updates_and_operations(
                         action_note += "."
             elif operation == "generate_presentation":
                 if skill != "workbook":
-                    action_note = "Presentation generation is only available in workbook threads."
+                    pass  # AI already populated slides via structured_update; no error needed
                 else:
                     generated = await doc_svc.generate_workbook_presentation(
                         thread_id=thread_id,

@@ -31,6 +31,7 @@ struct ProjectDetailView: View {
     @State private var ensureChannelTask: Task<Void, Never>?
     @AppStorage("mw-chat-theme") private var lightMode = false
     @AppStorage("mw-model") private var selectedModelId = "flash"
+    @AppStorage("mw-preview-collapsed") private var previewCollapsed = false
 
     /// True for general-shaped projects that use `standardLayout` (sections +
     /// chat). Used to gate the Edit/Preview tab toggle in the toolbar so it
@@ -730,10 +731,33 @@ struct ProjectDetailView: View {
         }
     }
 
+    @ViewBuilder private var sidebarProjectHeader: some View {
+        if let project = viewModel.project {
+            VStack(alignment: .leading, spacing: 2) {
+                if let type = project.projectType, type != "general", !type.isEmpty {
+                    Text(type.uppercased())
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .kerning(0.5)
+                }
+                Text(project.title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.primary)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            Divider().opacity(0.3)
+        }
+    }
+
     private var standardEditLayout: some View {
         HSplitView {
             // Sidebar: Sections + Chats
             VStack(spacing: 0) {
+                sidebarProjectHeader
+
                 // Sections header
                 HStack {
                     Text("Sections")
@@ -825,7 +849,21 @@ struct ProjectDetailView: View {
                     }
                 )
             } else if viewModel.activeChatId != nil {
-                ChatPanelView(viewModel: chatVM, lightMode: lightMode, selectedModel: selectedModelValue)
+                HSplitView {
+                    ChatPanelView(viewModel: chatVM, lightMode: lightMode, selectedModel: selectedModelValue)
+                        .frame(minWidth: 280, idealWidth: 520)
+                    if !previewCollapsed && (chatVM.hasPreviewContent || chatVM.isLoadingPDF) {
+                        PreviewPanelView(
+                            currentState: chatVM.currentState,
+                            pdfData: chatVM.pdfData,
+                            isLoading: chatVM.isLoadingPDF,
+                            taskType: chatVM.thread?.taskType,
+                            threadId: chatVM.thread?.id,
+                            selectedSlideIndex: Bindable(chatVM).selectedSlideIndex
+                        )
+                        .frame(minWidth: 320, idealWidth: 420, maxWidth: .infinity)
+                    }
+                }
             } else {
                 ZStack {
                     Color.appBackground.ignoresSafeArea()

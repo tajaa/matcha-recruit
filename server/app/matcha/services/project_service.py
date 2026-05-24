@@ -966,6 +966,11 @@ async def create_project_chat(project_id: UUID, company_id: UUID, user_id: UUID,
                 "project_title": project_row["title"],
                 "project_sections": [],
             })
+        elif project_row and project_row["project_type"] == 'presentation':
+            initial_state = json.dumps({
+                "presentation_title": "",
+                "slides": [],
+            })
 
         row = await conn.fetchrow(
             """

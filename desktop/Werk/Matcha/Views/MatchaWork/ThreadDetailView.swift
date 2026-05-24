@@ -33,6 +33,10 @@ struct ThreadDetailView: View {
         return ["client", "admin", "employee"].contains(role)
     }
 
+    private var stateInferredType: MWTaskType {
+        inferMWTaskType(from: viewModel.currentState)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             LinearGradient(
@@ -122,6 +126,20 @@ struct ThreadDetailView: View {
 
                         VersionBadge(version: thread.version)
                         StatusBadge(status: thread.status)
+
+                        if stateInferredType != .chat {
+                            HStack(spacing: 3) {
+                                Image(systemName: stateInferredType.icon)
+                                    .font(.system(size: 9))
+                                Text(stateInferredType.label.capitalized)
+                                    .font(.system(size: 10, weight: .medium))
+                            }
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.white.opacity(0.06))
+                            .cornerRadius(4)
+                        }
 
                         if let usageText = viewModel.tokenUsage?.displayText {
                             Text(usageText)

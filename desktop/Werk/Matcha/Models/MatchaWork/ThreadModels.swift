@@ -33,6 +33,24 @@ enum MWTaskType: String, Codable {
         }
     }
 
+    var icon: String {
+        switch self {
+        case .chat: return "bubble.left"
+        case .review: return "doc.text.magnifyingglass"
+        case .workbook: return "book.closed"
+        case .onboarding: return "person.badge.plus"
+        case .presentation: return "rectangle.on.rectangle"
+        case .handbook: return "book"
+        case .offerLetter: return "doc.badge.plus"
+        case .resumeBatch: return "person.2"
+        case .inventory: return "list.bullet"
+        case .policy: return "shield"
+        case .project: return "folder"
+        case .blog: return "pencil.line"
+        case .languageTutor: return "character.bubble"
+        }
+    }
+
     // Backend may introduce new skill values ahead of the client. Fall back to
     // `.chat` instead of throwing so thread loads don't fail on unknown values.
     init(from decoder: Decoder) throws {
