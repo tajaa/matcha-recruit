@@ -1628,9 +1628,12 @@ async def get_hris_sync_run(
 # Gusto OAuth Flow
 # =======================================================================
 
-GUSTO_OAUTH_CLIENT_ID = os.getenv("GUSTO_OAUTH_CLIENT_ID", "0DSvMlKCI12Bf6MNNadGjAvXT8FYp8VTGwEePLRIIcY")
-GUSTO_OAUTH_CLIENT_SECRET = os.getenv("GUSTO_OAUTH_CLIENT_SECRET", "y3f8mx326YQmg1_LAC00GiuipqznQukSAVveZUGqnG4")
-GUSTO_OAUTH_REDIRECT_URI = os.getenv("GUSTO_OAUTH_REDIRECT_URI", "http://localhost:8001/api/provisioning/hris/callback")
+GUSTO_OAUTH_CLIENT_ID = os.getenv("GUSTO_OAUTH_CLIENT_ID")
+GUSTO_OAUTH_CLIENT_SECRET = os.getenv("GUSTO_OAUTH_CLIENT_SECRET")
+GUSTO_OAUTH_REDIRECT_URI = os.getenv("GUSTO_OAUTH_REDIRECT_URI")
+
+if not all([GUSTO_OAUTH_CLIENT_ID, GUSTO_OAUTH_CLIENT_SECRET, GUSTO_OAUTH_REDIRECT_URI]):
+    raise RuntimeError("Missing Gusto OAuth env vars: GUSTO_OAUTH_CLIENT_ID, GUSTO_OAUTH_CLIENT_SECRET, GUSTO_OAUTH_REDIRECT_URI")
 GUSTO_AUTHORIZE_URL = "https://api.gusto.com/oauth/authorize"
 GUSTO_TOKEN_URL = "https://api.gusto.com/oauth/token"
 GUSTO_ME_URL = "https://api.gusto.com/v1/me"
