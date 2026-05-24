@@ -21,7 +21,7 @@ export default function MarketingFooter() {
       <NewsletterHeroSection />
     <footer className="border-t py-16" style={{ borderColor: LINE }}>
       <div className="max-w-[1440px] mx-auto px-6 sm:px-10">
-        <div className="grid md:grid-cols-4 gap-10">
+        <div className="grid md:grid-cols-5 gap-10">
           <div>
             <span
               className="text-2xl tracking-tight"

@@ -449,7 +449,8 @@ function IrAnalysisPanel() {
   const inView = useInView(ref, { once: true, margin: '-40px' })
 
   return (
-    <div ref={ref} className="rounded-xl overflow-hidden border font-sans" style={{ borderColor: 'rgba(63,63,70,0.5)', backgroundColor: '#0d0d10' }}>
+    <div ref={ref} className="rounded-xl overflow-x-auto border font-sans" style={{ borderColor: 'rgba(63,63,70,0.5)', backgroundColor: '#0d0d10' }}>
+    <div className="min-w-[520px]">
       {/* Page header */}
       <div className="flex items-start justify-between px-5 py-4 border-b" style={{ borderColor: 'rgba(39,39,42,0.5)' }}>
         <div>
@@ -552,6 +553,7 @@ function IrAnalysisPanel() {
         ))}
       </div>
     </div>
+    </div>
   )
 }
 
@@ -626,7 +628,8 @@ function OshaLogPanel() {
   const ref = useRef<HTMLDivElement>(null)
   const inView = useInView(ref, { once: true, margin: '-40px' })
   return (
-    <div ref={ref} className="rounded-xl overflow-hidden border font-sans" style={{ borderColor: 'rgba(63,63,70,0.5)', backgroundColor: '#09090b' }}>
+    <div ref={ref} className="rounded-xl overflow-x-auto border font-sans" style={{ borderColor: 'rgba(63,63,70,0.5)', backgroundColor: '#09090b' }}>
+    <div className="min-w-[400px]">
       <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'rgba(39,39,42,0.5)', backgroundColor: 'rgba(24,24,27,0.3)' }}>
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold" style={{ color: '#e4e4e7' }}>OSHA 300 Log</span>
@@ -672,6 +675,7 @@ function OshaLogPanel() {
           Export PDF
         </span>
       </div>
+    </div>
     </div>
   )
 }
