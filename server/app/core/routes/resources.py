@@ -437,35 +437,42 @@ async def request_lite_upgrade(
     """
     from ...config import get_settings
 
-    company_id = await get_client_company_id(current_user)
+    try:
+        company_id = await get_client_company_id(current_user)
 
-    async with get_connection() as conn:
-        user_row = await conn.fetchrow(
-            "SELECT email, name FROM users WHERE id = $1",
-            current_user.id,
-        )
-        company_name: Optional[str] = None
-        if company_id is not None:
-            company_row = await conn.fetchrow(
-                "SELECT name FROM companies WHERE id = $1",
-                company_id,
+        async with get_connection() as conn:
+            user_row = await conn.fetchrow(
+                "SELECT email, name FROM users WHERE id = $1",
+                current_user.id,
             )
-            company_name = company_row["name"] if company_row else None
+            company_name: Optional[str] = None
+            if company_id is not None:
+                company_row = await conn.fetchrow(
+                    "SELECT name FROM companies WHERE id = $1",
+                    company_id,
+                )
+                company_name = company_row["name"] if company_row else None
 
-        email = user_row["email"] if user_row else None
-        user_name = (user_row["name"] if user_row else None) or None
+            email = user_row["email"] if user_row else None
+            user_name = (user_row["name"] if user_row else None) or None
 
-        if not email:
-            raise HTTPException(status_code=400, detail="No email on file for this user")
+            if not email:
+                raise HTTPException(status_code=400, detail="No email on file for this user")
 
-        await conn.execute(
-            """
-            INSERT INTO lead_captures (email, name, asset_slug, source)
-            VALUES ($1, $2, 'upgrade_request_to_matcha_lite', 'free_to_lite_request')
-            """,
-            email,
-            user_name,
-        )
+            await conn.execute(
+                """
+                INSERT INTO lead_captures (email, name, asset_slug, source)
+                VALUES ($1, $2, 'upgrade_request_to_matcha_lite', 'free_to_lite_request')
+                """,
+                email,
+                user_name,
+            )
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("request_lite_upgrade failed for user=%s: %s", current_user.id, exc)
+        raise HTTPException(status_code=500, detail="Failed to submit upgrade request") from exc
 
     try:
         from ..services.email import get_email_service
@@ -475,13 +482,13 @@ async def request_lite_upgrade(
             base_url = get_settings().app_base_url.rstrip("/")
             safe_company = _html.escape(company_name or "unknown")
             safe_user = _html.escape(user_name or "(no name)")
-            safe_email = _html.escape(email)
+            safe_email_str = _html.escape(email)
             headcount_str = str(body.headcount) if body.headcount else "not specified"
             admin_link = f"{base_url}/admin/companies/{company_id}" if company_id else f"{base_url}/admin/customers"
             html_content = (
                 f"<h3>Matcha Lite access request</h3>"
                 f"<p><strong>Company:</strong> {safe_company}</p>"
-                f"<p><strong>Contact:</strong> {safe_user} &lt;{safe_email}&gt;</p>"
+                f"<p><strong>Contact:</strong> {safe_user} &lt;{safe_email_str}&gt;</p>"
                 f"<p><strong>Headcount:</strong> {headcount_str}</p>"
                 f"<p><a href='{admin_link}'>Review in admin panel →</a></p>"
             )
