@@ -65,7 +65,7 @@ export default function StateGuide() {
   if (loading) {
     return (
       <div style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}>
-        <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />
+        <MarketingNav onDemoClick={() => setShowPricing(true)} />
         <main className="pt-28 max-w-[900px] mx-auto px-6"><p style={{ color: MUTED }}>Loading…</p></main>
       </div>
     )
@@ -74,7 +74,7 @@ export default function StateGuide() {
   if (error || !data) {
     return (
       <div style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}>
-        <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />
+        <MarketingNav onDemoClick={() => setShowPricing(true)} />
         <main className="pt-28 pb-20 max-w-[700px] mx-auto px-6 sm:px-10 text-center">
           <h1 className="text-3xl mb-4" style={{ fontFamily: DISPLAY, color: INK }}>
             State guide unavailable
@@ -98,7 +98,7 @@ export default function StateGuide() {
 
   return (
     <div style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}>
-      <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />
+      <MarketingNav onDemoClick={() => setShowPricing(true)} />
 
       <main className="pt-28 pb-20 max-w-[900px] mx-auto px-6 sm:px-10">
         <nav className="flex items-center gap-2 text-xs mb-8 flex-wrap" style={{ color: MUTED }}>

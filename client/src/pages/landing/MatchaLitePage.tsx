@@ -87,7 +87,7 @@ export default function MatchaLitePage() {
     <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen">
       <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
       <ComplianceTicker />
-      <MarketingNav onPricingClick={() => setIsPricingOpen(true)} onDemoClick={() => setIsPricingOpen(true)} />
+      <MarketingNav onDemoClick={() => setIsPricingOpen(true)} />
 
       <Hero onWaitlistClick={scrollToWaitlist} />
 

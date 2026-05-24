@@ -45,7 +45,7 @@ export default function StateGuides() {
 
   return (
     <div style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}>
-      <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />
+      <MarketingNav onDemoClick={() => setShowPricing(true)} />
 
       <main className="pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10">
         <nav className="flex items-center gap-2 text-xs mb-8" style={{ color: MUTED }}>

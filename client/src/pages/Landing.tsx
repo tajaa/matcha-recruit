@@ -62,7 +62,7 @@ export default function Landing() {
   return (
     <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen overflow-x-hidden">
       <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
-      <MarketingNav onPricingClick={() => setIsPricingOpen(true)} onDemoClick={() => setIsPricingOpen(true)} />
+      <MarketingNav onDemoClick={() => setIsPricingOpen(true)} />
       <ComplianceTicker />
 
       <Hero data={data} onContactClick={() => setIsPricingOpen(true)} />

@@ -33,15 +33,17 @@ export default function MarketingFooter() {
               Bespoke HR, GRC, employee relations, and AI integration consulting.
             </p>
           </div>
-          <FooterCol title="Services" links={[
-            { label: 'HR Consulting', to: '/services' },
-            { label: 'GRC Consulting', to: '/services' },
-            { label: 'Employee Relations', to: '/services' },
-            { label: 'AI Integration', to: '/services' },
+          <FooterCol title="Products" links={[
+            { label: 'Matcha Lite', to: '/matcha-lite' },
+            { label: 'Matcha Work', to: '/matcha-work' },
+            { label: 'Consulting', to: '/services' },
+          ]} />
+          <FooterCol title="Explore" links={[
+            { label: 'Resources', to: '/resources' },
+            { label: 'Blog', to: '/blog' },
+            { label: 'News', to: '/news' },
           ]} />
           <FooterCol title="Company" links={[
-            { label: 'Matcha Work', to: '/matcha-work' },
-            { label: 'News', to: '/news' },
             { label: 'Book a Consultation', onClick: () => setConsultationOpen(true) },
             { label: 'Client Login', to: '/login' },
           ]} />

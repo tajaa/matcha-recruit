@@ -62,7 +62,7 @@ export default function JobDescriptionDetail({ embedded }: { embedded?: boolean 
 
   return (
     <div style={embedded ? { color: t.ink } : { backgroundColor: t.bg, color: t.ink, minHeight: '100vh' }}>
-      {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
+      {!embedded && <MarketingNav onDemoClick={() => setShowPricing(true)} />}
 
       <main className={embedded ? 'max-w-[900px]' : 'pt-28 pb-20 max-w-[900px] mx-auto px-6 sm:px-10'}>
         {!embedded && (

@@ -153,7 +153,7 @@ export default function ServicesPage() {
     <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen">
       <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} mode="consultation" />
       <ComplianceTicker />
-      <MarketingNav onPricingClick={() => setIsPricingOpen(true)} onDemoClick={() => setIsPricingOpen(true)} />
+      <MarketingNav onDemoClick={() => setIsPricingOpen(true)} />
 
       <Hero onBookClick={() => setIsPricingOpen(true)} />
 
@@ -162,7 +162,7 @@ export default function ServicesPage() {
           <PillarSection key={p.id} pillar={p} reverse={i % 2 === 1} />
         ))}
         <Process />
-        <EngagementModels onPricingClick={() => setIsPricingOpen(true)} />
+        <EngagementModels />
       </main>
 
       <MarketingFooter />

@@ -71,7 +71,7 @@ export default function Calculators({ embedded }: { embedded?: boolean }) {
 
   return (
     <div style={embedded ? { color: t.ink } : { backgroundColor: t.bg, color: t.ink, minHeight: '100vh' }}>
-      {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
+      {!embedded && <MarketingNav onDemoClick={() => setShowPricing(true)} />}
 
       <main className={embedded ? '' : 'pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10'}>
         <nav className={`flex items-center gap-2 text-xs mb-8 ${embedded ? 'text-vsc-text/40' : ''}`} style={embedded ? undefined : { color: t.muted }}>

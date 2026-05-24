@@ -60,7 +60,7 @@ export default function BlogPostPage() {
 
   return (
     <div style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}>
-      <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />
+      <MarketingNav onDemoClick={() => setShowPricing(true)} />
 
       <article className="pt-28 pb-20 max-w-[760px] mx-auto px-6 sm:px-10">
         <Link to="/blog" className="inline-block mb-8 text-sm tracking-wide" style={{ color: MUTED }}>

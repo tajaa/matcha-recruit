@@ -52,7 +52,7 @@ export default function GlossaryTerm({ embedded }: { embedded?: boolean }) {
   if (!term) {
     return (
       <div style={embedded ? { color: t.ink } : { backgroundColor: t.bg, color: t.ink, minHeight: '100vh' }}>
-        {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
+        {!embedded && <MarketingNav onDemoClick={() => setShowPricing(true)} />}
         <main className={embedded ? 'text-center' : 'pt-28 pb-20 max-w-[700px] mx-auto px-6 sm:px-10 text-center'}>
           <h1 className="text-3xl mb-4" style={{ fontFamily: t.display, color: t.ink }}>
             Term not found
@@ -76,7 +76,7 @@ export default function GlossaryTerm({ embedded }: { embedded?: boolean }) {
 
   return (
     <div style={embedded ? { color: t.ink } : { backgroundColor: t.bg, color: t.ink, minHeight: '100vh' }}>
-      {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
+      {!embedded && <MarketingNav onDemoClick={() => setShowPricing(true)} />}
 
       <main className={embedded ? '' : 'pt-28 pb-20 max-w-[760px] mx-auto px-6 sm:px-10'}>
         <nav className={`flex items-center gap-2 text-xs mb-8 flex-wrap ${embedded ? 'text-vsc-text/40' : ''}`} style={embedded ? undefined : { color: t.muted }}>

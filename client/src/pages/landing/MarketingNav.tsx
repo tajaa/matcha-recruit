@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 
 interface Props {
-  onPricingClick?: () => void
   onDemoClick?: () => void
 }
 
@@ -17,7 +16,7 @@ const NAV_LINKS = [
   { to: '/blog', label: 'Blog' },
 ]
 
-export default function MarketingNav({ onPricingClick, onDemoClick }: Props) {
+export default function MarketingNav({ onDemoClick }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
 
   const textColor = '#F5F2ED'
@@ -62,13 +61,6 @@ export default function MarketingNav({ onPricingClick, onDemoClick }: Props) {
                 {link.label}
               </Link>
             ))}
-            <button
-              onClick={onPricingClick}
-              className="text-sm transition-opacity hover:opacity-60"
-              style={{ color: textColor }}
-            >
-              Pricing
-            </button>
           </div>
 
           <div className="flex items-center gap-4">
@@ -122,17 +114,6 @@ export default function MarketingNav({ onPricingClick, onDemoClick }: Props) {
                 {link.label}
               </Link>
             ))}
-            <button
-              onClick={() => handleLinkClick(onPricingClick)}
-              className="py-4 text-2xl text-left border-b"
-              style={{
-                fontFamily: 'var(--font-display)',
-                color: '#F5F2ED',
-                borderColor: 'rgba(245, 242, 237, 0.15)',
-              }}
-            >
-              Pricing
-            </button>
             <Link
               to="/login"
               onClick={() => setMenuOpen(false)}

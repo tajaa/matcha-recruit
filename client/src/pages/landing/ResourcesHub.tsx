@@ -94,7 +94,7 @@ export default function ResourcesHub() {
 
   return (
     <div style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}>
-      <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />
+      <MarketingNav onDemoClick={() => setShowPricing(true)} />
 
       <main className="pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10">
         <header className="mb-14 max-w-2xl">
