@@ -52,6 +52,7 @@ export function HRISSyncModal({ open, onClose, onSuccess }: Props) {
 
   useEffect(() => {
     if (!open) return
+    setConnectionStatus(null)
     setFetchError(null)
     setSyncResult(null)
     setSyncError(null)
@@ -76,6 +77,7 @@ export function HRISSyncModal({ open, onClose, onSuccess }: Props) {
       })
       setConnectionStatus(result)
       setClientSecret('')
+      setClientId('')
     } catch (e) {
       setConnectError(e instanceof Error ? e.message : 'Connection failed')
     } finally {
@@ -107,7 +109,7 @@ export function HRISSyncModal({ open, onClose, onSuccess }: Props) {
       setGustoCompanyId('')
       setClientId('')
     } catch {
-      // ignore — just reload status
+      // disconnect failed — leave state unchanged
     } finally {
       setDisconnecting(false)
     }

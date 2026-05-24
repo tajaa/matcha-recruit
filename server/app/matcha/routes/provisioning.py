@@ -23,7 +23,7 @@ from ...config import get_settings
 from ...core.models.auth import CurrentUser
 from ...core.services.secret_crypto import decrypt_secret, encrypt_secret
 from ...database import get_connection
-from ..dependencies import get_client_company_id, require_admin_or_client
+from ..dependencies import get_client_company_id, require_admin_or_client, require_feature
 from ..services.google_workspace_service import GoogleWorkspaceService
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
@@ -1403,7 +1403,8 @@ def _hris_connection_status_payload(row) -> HRISConnectionStatus:
     )
 
 
-@router.get("/hris/status", response_model=HRISConnectionStatus)
+@router.get("/hris/status", response_model=HRISConnectionStatus,
+            dependencies=[Depends(require_feature("hris_import"))])
 async def get_hris_connection_status(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
@@ -1431,7 +1432,8 @@ async def get_hris_connection_status(
     return payload
 
 
-@router.post("/hris/connect", response_model=HRISConnectionStatus)
+@router.post("/hris/connect", response_model=HRISConnectionStatus,
+             dependencies=[Depends(require_feature("hris_import"))])
 async def connect_hris(
     request: HRISConnectionRequest,
     current_user: CurrentUser = Depends(require_admin_or_client),
@@ -1448,8 +1450,6 @@ async def connect_hris(
     }
 
     secrets_payload: dict = {}
-    if request.client_id:
-        secrets_payload["client_id"] = request.client_id
     if request.client_secret:
         secrets_payload["client_secret"] = encrypt_secret(request.client_secret.strip())
 
@@ -1499,7 +1499,8 @@ async def connect_hris(
     return _hris_connection_status_payload(row)
 
 
-@router.post("/hris/disconnect")
+@router.post("/hris/disconnect",
+             dependencies=[Depends(require_feature("hris_import"))])
 async def disconnect_hris(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
@@ -1513,7 +1514,8 @@ async def disconnect_hris(
     return {"status": "disconnected"}
 
 
-@router.post("/hris/sync", response_model=HRISSyncRunResponse)
+@router.post("/hris/sync", response_model=HRISSyncRunResponse,
+             dependencies=[Depends(require_feature("hris_import"))])
 async def trigger_hris_sync(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
@@ -1545,7 +1547,8 @@ async def trigger_hris_sync(
     )
 
 
-@router.get("/hris/sync/history")
+@router.get("/hris/sync/history",
+            dependencies=[Depends(require_feature("hris_import"))])
 async def get_hris_sync_history(
     current_user: CurrentUser = Depends(require_admin_or_client),
     limit: int = Query(default=20, ge=1, le=100),
@@ -1583,7 +1586,8 @@ async def get_hris_sync_history(
     ]
 
 
-@router.get("/hris/sync/{run_id}", response_model=HRISSyncRunResponse)
+@router.get("/hris/sync/{run_id}", response_model=HRISSyncRunResponse,
+            dependencies=[Depends(require_feature("hris_import"))])
 async def get_hris_sync_run(
     run_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),

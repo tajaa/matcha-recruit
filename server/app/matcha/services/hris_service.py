@@ -240,7 +240,8 @@ class GustoHRISService:
         if mode == "mock":
             return "mock-gusto-token"
 
-        client_id = secrets.get("client_id", "")
+        # client_id is stored in config (not a secret); support legacy secrets location too
+        client_id = config.get("client_id", "") or secrets.get("client_id", "")
         client_secret = secrets.get("client_secret", "")
 
         if not all([client_id, client_secret]):
@@ -255,7 +256,7 @@ class GustoHRISService:
                     data={"grant_type": "client_credentials"},
                 )
                 if resp.status_code != 200:
-                    raise HRISProvisioningError("auth_failed", f"Gusto auth failed: {resp.status_code} {resp.text}")
+                    raise HRISProvisioningError("auth_failed", f"Gusto auth failed: {resp.status_code} {resp.text[:300]}")
                 return resp.json()["access_token"]
         except HRISProvisioningError:
             raise
@@ -263,15 +264,16 @@ class GustoHRISService:
             raise HRISProvisioningError("auth_error", f"Gusto auth error: {str(e)}")
 
     async def fetch_workers(self, config: dict, secrets: dict) -> list[dict]:
-        token = await self.authenticate(config, secrets)
         gusto_company_id = config.get("gusto_company_id", "")
 
         if not gusto_company_id and config.get("mode") != "mock":
             raise HRISProvisioningError("config_missing", "gusto_company_id not configured", needs_action=True)
 
-        # Mock mode: return a small representative set
+        # Mock mode: return a small representative set (no auth needed)
         if config.get("mode") == "mock":
             return _GUSTO_MOCK_EMPLOYEES
+
+        token = await self.authenticate(config, secrets)
 
         workers: list[dict] = []
         url: Optional[str] = (
@@ -285,7 +287,10 @@ class GustoHRISService:
                     resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
                     if resp.status_code != 200:
                         raise HRISProvisioningError("fetch_failed", f"Gusto fetch failed: {resp.status_code}")
-                    workers.extend(resp.json())
+                    batch = resp.json()
+                    if not isinstance(batch, list):
+                        raise HRISProvisioningError("fetch_failed", f"Gusto returned unexpected response shape: {type(batch).__name__}")
+                    workers.extend(batch)
                     # Follow Link: <url>; rel="next" pagination
                     link_header = resp.headers.get("Link", "")
                     next_match = re.search(r'<([^>]+)>;\s*rel="next"', link_header)
