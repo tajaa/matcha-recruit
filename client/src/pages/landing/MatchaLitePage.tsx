@@ -390,7 +390,7 @@ function WaitlistSection({ waitlistRef }: { waitlistRef: React.RefObject<HTMLDiv
 const IR_BULLETS = [
   { label: 'Auto-categorization', desc: 'Behavioral, safety, property, or harassment — tagged on submission.' },
   { label: 'Severity scoring', desc: 'Low / Medium / High with AI justification attached to every incident.' },
-  { label: 'Pattern detection', desc: 'Cross-incident analysis flags repeat actors, locations, and time-of-shift clusters.' },
+  { label: 'Pattern detection', desc: 'Cross-incident analysis surfaces recurring patterns across locations, shifts, and case types — for your team to review.' },
 ]
 
 function IrAnalysisSection() {

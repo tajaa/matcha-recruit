@@ -97,7 +97,7 @@ function Hero() {
           >
             <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#86efac' }} />
             <span className="text-[10px] sm:text-[11px] uppercase tracking-wider font-medium">
-              Agentic workspace
+              AI-assisted workspace
             </span>
             <span
               className="text-[9px] uppercase tracking-wider font-medium px-1.5 py-[1px] rounded ml-1"

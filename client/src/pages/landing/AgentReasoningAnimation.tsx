@@ -32,7 +32,7 @@ const DECISIONS: Decision[] = [
     result: 'GAP',
     remediation: 'Draft plan · 8 sites × 4 risk types',
     cite: 'CA Lab §6401.9(c)',
-    status: 'Wage agent → §6401.9 plan-component check',
+    status: 'Compliance check → §6401.9 plan-component check',
   },
   {
     id: 'training',
@@ -42,7 +42,7 @@ const DECISIONS: Decision[] = [
     result: 'GAP',
     remediation: '87 emp · interactive · bilingual',
     cite: 'CA Lab §6401.9(e)',
-    status: 'Training agent → §6401.9(e) effective Jul 2024',
+    status: 'Compliance check → §6401.9(e) effective Jul 2024',
   },
   {
     id: 'log',
@@ -52,7 +52,7 @@ const DECISIONS: Decision[] = [
     result: 'GAP',
     remediation: 'Deploy log · 5-year retention',
     cite: 'CA Lab §6401.9(f)',
-    status: 'Records agent → §6401.9(f) recordkeeping',
+    status: 'Compliance check → §6401.9(f) recordkeeping',
   },
   {
     id: 'hazard',
@@ -62,7 +62,7 @@ const DECISIONS: Decision[] = [
     result: 'GAP',
     remediation: '8 sites × 2hr walkthrough',
     cite: 'CA Lab §6401.9(c)(2)',
-    status: 'Risk agent → workplace-violence type 1/2/3 scan',
+    status: 'Compliance check → workplace-violence type 1/2/3 scan',
   },
   {
     id: 'review',
@@ -72,7 +72,7 @@ const DECISIONS: Decision[] = [
     result: 'GAP',
     remediation: 'Schedule cadence + trigger rules',
     cite: 'CA Lab §6401.9(d)',
-    status: 'Governance agent → §6401.9(d) review cadence',
+    status: 'Compliance check → §6401.9(d) review cadence',
   },
 ]
 
@@ -237,7 +237,7 @@ export default function AgentReasoningAnimation() {
         <div className="flex items-center gap-2">
           <GitBranch className="w-3.5 h-3.5" style={{ color: '#9a8a70' }} />
           <span className="text-[10px] font-medium tracking-wide font-mono uppercase" style={{ color: '#e4ded2' }}>
-            Agent Reasoning · CA Compliance Audit
+            AI Analysis · CA Compliance Audit
           </span>
           <span
             className="text-[7.5px] uppercase tracking-wider px-1.5 py-[1px] rounded font-mono"
