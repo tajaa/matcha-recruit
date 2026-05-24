@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { motion, useInView } from 'framer-motion'
-import { ShieldAlert, FileText, MapPin, Calculator, Bell, Loader2 } from 'lucide-react'
+import { ShieldAlert, FileText, MapPin, Calculator, Bell, Loader2, Brain, ClipboardList } from 'lucide-react'
 
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
@@ -23,8 +23,24 @@ const FEATURES: { id: string; icon: typeof ShieldAlert; title: string; caption: 
     icon: ShieldAlert,
     title: 'Incident reporting',
     caption:
-      'Behavior + safety tracking with AI summaries, witness statements, photo evidence, and trend analysis across locations. Built for SMBs that need a defensible record without a heavy compliance team.',
+      'Workplace and field safety intake — photo evidence, witness capture, and an anonymous reporting channel. Every incident logged with a defensible chain of custody, no compliance team required.',
     visual: IncidentBars,
+  },
+  {
+    id: 'ir_analysis',
+    icon: Brain,
+    title: 'IR analysis',
+    caption:
+      'AI categorization and severity scoring on every incident. Cross-incident pattern detection surfaces repeat behaviors and emerging risk clusters before they compound.',
+    visual: SeverityGauge,
+  },
+  {
+    id: 'osha',
+    icon: ClipboardList,
+    title: 'OSHA 300 / 300A logs',
+    caption:
+      'Recordable incident tracking tied to your intake flow. Tallies auto-populate — print or export an audit-ready 300A summary any time.',
+    visual: LogRows,
   },
   {
     id: 'resources',
@@ -134,9 +150,10 @@ function Hero({ onWaitlistClick }: { onWaitlistClick: () => void }) {
             className="mt-5 sm:mt-6 mx-auto max-w-xl text-[15px] sm:text-base px-2"
             style={{ color: MUTED, lineHeight: 1.55 }}
           >
-            Incident reporting plus a full HR resource library — state
-            guides, calculators, templates, and a compliance audit.
-            Bundled for small teams that don't need a bespoke engagement.
+            Incident reporting, AI analysis, and OSHA 300 logs — plus a
+            full HR library with state guides, calculators, templates, and
+            a compliance audit. Bundled for small teams that don't need a
+            bespoke engagement.
           </p>
           <div className="mt-8 sm:mt-10 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <button
@@ -198,7 +215,7 @@ function FeatureGrid() {
               lineHeight: 1.05,
             }}
           >
-            Incident reporting + resources, in one bundle.
+            Safety intake, AI analysis, OSHA logs — and a full HR library.
           </h2>
           <p className="mt-4 sm:mt-5 text-base sm:text-lg" style={{ color: MUTED, lineHeight: 1.6 }}>
             Each tool stands on its own. Together they cover the everyday
@@ -491,6 +508,52 @@ function NumberTicker() {
       <span style={{ fontFamily: DISPLAY, fontSize: '1.1rem', fontWeight: 500, color: INK }}>
         {val.toLocaleString()}
       </span>
+    </div>
+  )
+}
+
+function SeverityGauge() {
+  const { ref, inView } = useInViewRef()
+  const levels = [
+    { color: '#86efac' },
+    { color: '#d7ba7d' },
+    { color: '#ce9178' },
+  ]
+  return (
+    <div ref={ref} className="flex flex-col gap-1">
+      {levels.map((l, i) => (
+        <motion.div
+          key={i}
+          initial={{ opacity: 0.25 }}
+          animate={inView ? { opacity: [0.25, 1, 0.25] } : { opacity: 0.25 }}
+          transition={{ duration: 2, repeat: Infinity, delay: i * 0.55, ease: 'easeInOut' }}
+          className="flex items-center gap-1.5"
+        >
+          <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: l.color }} />
+          <div className="h-[2px] rounded-full" style={{ width: `${12 + i * 8}px`, backgroundColor: 'rgba(31,29,26,0.2)' }} />
+        </motion.div>
+      ))}
+    </div>
+  )
+}
+
+function LogRows() {
+  const { ref, inView } = useInViewRef()
+  return (
+    <div ref={ref} className="flex flex-col gap-[4px]">
+      {[0, 1, 2].map((i) => (
+        <motion.div
+          key={i}
+          initial={{ opacity: 0.2 }}
+          animate={inView ? { opacity: [0.2, 0.85, 0.2] } : { opacity: 0.2 }}
+          transition={{ duration: 2.2, repeat: Infinity, delay: i * 0.4, ease: 'easeInOut' }}
+          className="flex gap-[4px]"
+        >
+          <div className="h-[3px] rounded-full w-[10px]" style={{ backgroundColor: 'rgba(31,29,26,0.4)' }} />
+          <div className="h-[3px] rounded-full w-[28px]" style={{ backgroundColor: 'rgba(31,29,26,0.18)' }} />
+          <div className="h-[3px] rounded-full w-[18px]" style={{ backgroundColor: 'rgba(31,29,26,0.18)' }} />
+        </motion.div>
+      ))}
     </div>
   )
 }
