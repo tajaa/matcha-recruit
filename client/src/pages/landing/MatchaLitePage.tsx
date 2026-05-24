@@ -94,6 +94,8 @@ export default function MatchaLitePage() {
 
       <main>
         <FeatureGrid />
+        <IrAnalysisSection />
+        <OshaSection />
         <HRNewsSection />
         <WaitlistSection waitlistRef={waitlistRef} />
       </main>
@@ -382,6 +384,217 @@ function WaitlistSection({ waitlistRef }: { waitlistRef: React.RefObject<HTMLDiv
     </section>
   )
 }
+
+// ---------------------------------------------------------------------------
+// IR Analysis section
+// ---------------------------------------------------------------------------
+
+const IR_RISK_LOCATIONS = [
+  { name: 'Atlanta — Store 7', score: 78, count: 6 },
+  { name: 'Phoenix — Warehouse', score: 54, count: 4 },
+  { name: 'Denver — HQ', score: 22, count: 1 },
+  { name: 'Seattle — Store 12', score: 41, count: 3 },
+]
+
+const IR_BULLETS = [
+  { label: 'Auto-categorization', desc: 'Behavioral, safety, property, or harassment — tagged on submission.' },
+  { label: 'Severity scoring', desc: 'Low / Medium / High with AI justification attached to every incident.' },
+  { label: 'Pattern detection', desc: 'Cross-incident analysis flags repeat actors, locations, and time-of-shift clusters.' },
+]
+
+function IrAnalysisSection() {
+  return (
+    <section className="py-16 sm:py-24 md:py-28 border-t" style={{ borderColor: LINE }}>
+      <div className="max-w-[1440px] mx-auto px-5 sm:px-10">
+        <div className="grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+          <div>
+            <div className="text-[11px] uppercase tracking-wider font-medium mb-3 sm:mb-4" style={{ color: MUTED }}>
+              IR analysis
+            </div>
+            <h2
+              className="tracking-tight"
+              style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(1.875rem, 4vw, 3rem)', lineHeight: 1.05 }}
+            >
+              AI that reads every incident.
+            </h2>
+            <p className="mt-4 text-base" style={{ color: MUTED, lineHeight: 1.6 }}>
+              Cross-incident pattern detection surfaces what no single manager would catch — repeat locations, shift clusters, escalating severity trends.
+            </p>
+            <ul className="mt-7 space-y-5">
+              {IR_BULLETS.map(item => (
+                <li key={item.label} className="flex gap-3">
+                  <div className="w-1.5 h-1.5 rounded-full mt-[7px] shrink-0" style={{ backgroundColor: INK }} />
+                  <div>
+                    <span className="text-sm font-medium" style={{ color: INK }}>{item.label}</span>
+                    <p className="text-sm mt-0.5" style={{ color: MUTED, lineHeight: 1.55 }}>{item.desc}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <IrAnalysisPanel />
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function IrAnalysisPanel() {
+  const ref = useRef<HTMLDivElement>(null)
+  const inView = useInView(ref, { once: true, margin: '-40px' })
+  return (
+    <div ref={ref} className="rounded-xl overflow-hidden border font-sans" style={{ borderColor: 'rgba(63,63,70,0.5)', backgroundColor: '#09090b' }}>
+      <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'rgba(39,39,42,0.5)', backgroundColor: 'rgba(24,24,27,0.3)' }}>
+        <span className="text-[10px] font-medium uppercase tracking-wider" style={{ color: '#71717a' }}>
+          Risk score by location · last 30d
+        </span>
+        <span className="text-[9px]" style={{ color: '#10b981' }}>Updated 12m ago</span>
+      </div>
+      <div className="p-4 space-y-2">
+        {IR_RISK_LOCATIONS.map((loc, i) => {
+          const color = loc.score >= 70 ? '#f87171' : loc.score >= 40 ? '#fbbf24' : '#10b981'
+          return (
+            <div key={loc.name} className="flex items-center gap-3 px-3 py-2.5 rounded-lg" style={{ border: '1px solid rgba(39,39,42,0.6)', backgroundColor: 'rgba(24,24,27,0.3)' }}>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs truncate mb-1.5" style={{ color: '#e4e4e7' }}>{loc.name}</div>
+                <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: '#27272a' }}>
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={inView ? { width: `${loc.score}%` } : { width: 0 }}
+                    transition={{ delay: i * 0.12 + 0.2, duration: 0.7, ease: 'easeOut' }}
+                    className="h-full rounded-full"
+                    style={{ backgroundColor: color }}
+                  />
+                </div>
+              </div>
+              <div className="text-right shrink-0 w-16">
+                <div className="text-sm font-mono" style={{ color }}>{loc.score}</div>
+                <div className="text-[9px]" style={{ color: '#52525b' }}>{loc.count} incidents</div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+      <div className="mx-4 mb-4 p-3 rounded-lg" style={{ border: '1px solid rgba(16,185,129,0.3)', backgroundColor: 'rgba(16,185,129,0.05)' }}>
+        <div className="text-[11px] leading-relaxed" style={{ color: '#d4d4d8' }}>
+          <span className="font-semibold" style={{ color: '#34d399' }}>AI theme:</span> Weekend evening shift escalations clustered at Atlanta · Store 7 — recommend additional manager coverage Fri/Sat 6–10pm.
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// OSHA 300 section
+// ---------------------------------------------------------------------------
+
+const OSHA_ROWS = [
+  { date: 'May 12', loc: 'Atlanta — Store 7', type: 'Strain/sprain', days: 3, recordable: true },
+  { date: 'Apr 28', loc: 'Phoenix — Warehouse', type: 'Laceration', days: 1, recordable: true },
+  { date: 'Mar 31', loc: 'Seattle — Store 12', type: 'Eye irritation', days: 2, recordable: true },
+  { date: 'Mar 15', loc: 'Denver — HQ', type: 'Slip/fall', days: 0, recordable: false },
+]
+
+const OSHA_BULLETS = [
+  { label: 'Recordable / non-recordable', desc: 'Classification tied to your incident intake — no duplicate data entry.' },
+  { label: 'Days away and restricted', desc: 'Track days away from work and restricted duty automatically from each incident.' },
+  { label: 'Audit-ready export', desc: '300A summary auto-tallied. Export PDF for Feb 1 posting or any OSHA audit.' },
+]
+
+function OshaSection() {
+  return (
+    <section className="py-16 sm:py-24 md:py-28 border-t" style={{ borderColor: LINE }}>
+      <div className="max-w-[1440px] mx-auto px-5 sm:px-10">
+        <div className="grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+          <div className="order-2 lg:order-1">
+            <OshaLogPanel />
+          </div>
+          <div className="order-1 lg:order-2">
+            <div className="text-[11px] uppercase tracking-wider font-medium mb-3 sm:mb-4" style={{ color: MUTED }}>
+              OSHA 300 / 300A
+            </div>
+            <h2
+              className="tracking-tight"
+              style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(1.875rem, 4vw, 3rem)', lineHeight: 1.05 }}
+            >
+              OSHA logs, auto-filled.
+            </h2>
+            <p className="mt-4 text-base" style={{ color: MUTED, lineHeight: 1.6 }}>
+              Every recordable flows from intake to log. No manual re-entry, no spreadsheet — print or export an audit-ready 300A summary any time of year.
+            </p>
+            <ul className="mt-7 space-y-5">
+              {OSHA_BULLETS.map(item => (
+                <li key={item.label} className="flex gap-3">
+                  <div className="w-1.5 h-1.5 rounded-full mt-[7px] shrink-0" style={{ backgroundColor: INK }} />
+                  <div>
+                    <span className="text-sm font-medium" style={{ color: INK }}>{item.label}</span>
+                    <p className="text-sm mt-0.5" style={{ color: MUTED, lineHeight: 1.55 }}>{item.desc}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function OshaLogPanel() {
+  const ref = useRef<HTMLDivElement>(null)
+  const inView = useInView(ref, { once: true, margin: '-40px' })
+  return (
+    <div ref={ref} className="rounded-xl overflow-hidden border font-sans" style={{ borderColor: 'rgba(63,63,70,0.5)', backgroundColor: '#09090b' }}>
+      <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'rgba(39,39,42,0.5)', backgroundColor: 'rgba(24,24,27,0.3)' }}>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold" style={{ color: '#e4e4e7' }}>OSHA 300 Log</span>
+          <span className="px-1.5 py-0.5 rounded text-[9px] font-medium" style={{ backgroundColor: 'rgba(16,185,129,0.15)', color: '#6ee7b7', border: '1px solid rgba(16,185,129,0.25)' }}>IR</span>
+        </div>
+        <div className="px-2.5 py-1 rounded text-[9px] font-medium" style={{ backgroundColor: '#27272a', border: '1px solid #3f3f46', color: '#d4d4d8' }}>
+          Export 300A
+        </div>
+      </div>
+      <div className="flex items-center gap-4 px-5 py-2 border-b" style={{ borderColor: 'rgba(39,39,42,0.5)' }}>
+        <span className="text-[9px]" style={{ color: '#52525b' }}>Recordables YTD: <span style={{ color: '#e4e4e7' }}>3</span></span>
+        <span style={{ color: '#3f3f46' }}>·</span>
+        <span className="text-[9px]" style={{ color: '#52525b' }}>Days away: <span style={{ color: '#e4e4e7' }}>6</span></span>
+        <span style={{ color: '#3f3f46' }}>·</span>
+        <span className="text-[9px]" style={{ color: '#10b981' }}>Auto-tallied</span>
+      </div>
+      <div className="grid px-5 py-2" style={{ gridTemplateColumns: '72px 1fr 100px 48px 60px', backgroundColor: 'rgba(39,39,42,0.4)' }}>
+        {['Date', 'Location', 'Type', 'Days', 'Rec.'].map(h => (
+          <span key={h} className="text-[9px] font-bold uppercase tracking-wider" style={{ color: '#52525b' }}>{h}</span>
+        ))}
+      </div>
+      {OSHA_ROWS.map((row, i) => (
+        <motion.div
+          key={row.date + row.loc}
+          initial={{ opacity: 0 }}
+          animate={inView ? { opacity: 1 } : { opacity: 0 }}
+          transition={{ delay: i * 0.1 + 0.2 }}
+          className="grid px-5 py-2.5 border-t"
+          style={{ gridTemplateColumns: '72px 1fr 100px 48px 60px', borderColor: 'rgba(39,39,42,0.6)', backgroundColor: 'rgba(24,24,27,0.2)' }}
+        >
+          <span className="text-[10px]" style={{ color: '#71717a' }}>{row.date}</span>
+          <span className="text-[10px] truncate pr-2" style={{ color: '#d4d4d8' }}>{row.loc}</span>
+          <span className="text-[10px]" style={{ color: '#a1a1aa' }}>{row.type}</span>
+          <span className="text-[10px]" style={{ color: '#a1a1aa' }}>{row.days}d</span>
+          <span className="text-[9px] font-medium" style={{ color: row.recordable ? '#fbbf24' : '#52525b' }}>
+            {row.recordable ? '● Yes' : '○ No'}
+          </span>
+        </motion.div>
+      ))}
+      <div className="flex items-center justify-between px-5 py-3 border-t" style={{ borderColor: 'rgba(39,39,42,0.5)', backgroundColor: 'rgba(24,24,27,0.2)' }}>
+        <span className="text-[10px]" style={{ color: '#71717a' }}>300A summary ready for Feb 1 posting</span>
+        <span className="text-[9px] font-medium" style={{ color: '#34d399', backgroundColor: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', padding: '2px 8px', borderRadius: 4 }}>
+          Export PDF
+        </span>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 
 function Field({
   label, value, onChange, type = 'text', required,
