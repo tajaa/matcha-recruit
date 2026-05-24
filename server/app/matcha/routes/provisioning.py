@@ -1622,3 +1622,130 @@ async def get_hris_sync_run(
         completed_at=row["completed_at"],
         created_at=row["created_at"],
     )
+
+
+# =======================================================================
+# Gusto OAuth Flow
+# =======================================================================
+
+GUSTO_OAUTH_CLIENT_ID = os.getenv("GUSTO_OAUTH_CLIENT_ID", "0DSvMlKCI12Bf6MNNadGjAvXT8FYp8VTGwEePLRIIcY")
+GUSTO_OAUTH_CLIENT_SECRET = os.getenv("GUSTO_OAUTH_CLIENT_SECRET", "y3f8mx326YQmg1_LAC00GiuipqznQukSAVveZUGqnG4")
+GUSTO_OAUTH_REDIRECT_URI = os.getenv("GUSTO_OAUTH_REDIRECT_URI", "http://localhost:8001/api/provisioning/hris/callback")
+GUSTO_AUTHORIZE_URL = "https://api.gusto.com/oauth/authorize"
+GUSTO_TOKEN_URL = "https://api.gusto.com/oauth/token"
+GUSTO_ME_URL = "https://api.gusto.com/v1/me"
+
+
+@router.get("/hris/authorize", dependencies=[Depends(require_feature("hris_import"))])
+async def authorize_gusto_oauth(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Start Gusto OAuth flow — redirect user to Gusto login."""
+    company_id = await get_client_company_id(current_user)
+    state = secrets.token_urlsafe(32)
+
+    # Store state in DB for CSRF validation
+    async with get_connection() as conn:
+        await conn.execute(
+            "INSERT INTO oauth_states (state, company_id, created_at) VALUES ($1, $2, NOW())",
+            state,
+            company_id,
+        )
+
+    params = {
+        "client_id": GUSTO_OAUTH_CLIENT_ID,
+        "redirect_uri": GUSTO_OAUTH_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "employees:read",
+        "state": state,
+    }
+    return RedirectResponse(url=f"{GUSTO_AUTHORIZE_URL}?{urlencode(params)}")
+
+
+@router.get("/hris/callback")
+async def gusto_oauth_callback(
+    code: str = Query(...),
+    state: str = Query(...),
+):
+    """Handle Gusto OAuth callback — exchange code for token."""
+    # Validate state
+    async with get_connection() as conn:
+        oauth_state = await conn.fetchrow(
+            "SELECT company_id FROM oauth_states WHERE state = $1 AND created_at > NOW() - INTERVAL '10 minutes'",
+            state,
+        )
+        if not oauth_state:
+            raise HTTPException(status_code=400, detail="Invalid or expired state")
+
+        company_id = oauth_state["company_id"]
+
+        # Exchange code for token
+        credentials = base64.b64encode(f"{GUSTO_OAUTH_CLIENT_ID}:{GUSTO_OAUTH_CLIENT_SECRET}".encode()).decode()
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    GUSTO_TOKEN_URL,
+                    headers={"Authorization": f"Basic {credentials}"},
+                    data={"grant_type": "authorization_code", "code": code, "redirect_uri": GUSTO_OAUTH_REDIRECT_URI},
+                )
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=400, detail=f"Gusto token exchange failed: {resp.status_code}")
+                token_data = resp.json()
+                access_token = token_data["access_token"]
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Token exchange error: {str(e)}")
+
+        # Get company UUID from /v1/me
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(
+                    GUSTO_ME_URL,
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=400, detail="Failed to get company info")
+                me_data = resp.json()
+                companies = me_data.get("roles", {}).get("payroll_admin", {}).get("companies", [])
+                if not companies:
+                    raise HTTPException(status_code=400, detail="No company found in Gusto account")
+                gusto_company_id = companies[0]["uuid"]
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to get company UUID: {str(e)}")
+
+        # Store in DB
+        config = {
+            "mode": "gusto",
+            "gusto_company_id": gusto_company_id,
+        }
+        secrets_payload = {
+            "access_token": encrypt_secret(access_token),
+        }
+
+        await conn.execute(
+            """
+            INSERT INTO integration_connections
+                (company_id, provider, status, config, secrets, last_tested_at, created_by, updated_by)
+            VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, NOW(), $6, $6)
+            ON CONFLICT (company_id, provider) DO UPDATE SET
+                status = EXCLUDED.status,
+                config = EXCLUDED.config,
+                secrets = EXCLUDED.secrets,
+                last_tested_at = NOW(),
+                updated_at = NOW(),
+                updated_by = EXCLUDED.updated_by
+            """,
+            company_id,
+            PROVIDER_HRIS,
+            "connected",
+            json.dumps(config),
+            json.dumps(secrets_payload),
+            None,  # created_by — anonymous callback
+        )
+
+        # Clean up state
+        await conn.execute("DELETE FROM oauth_states WHERE state = $1", state)
+
+    # Redirect to frontend success page
+    return RedirectResponse(url="/app/employees?hris=connected")

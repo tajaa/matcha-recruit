@@ -35,6 +35,7 @@ export default function Features() {
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     api.get<CompanyFeatures[]>('/admin/company-features')
@@ -49,7 +50,9 @@ export default function Features() {
 
   async function toggle(companyId: string, feature: string, enabled: boolean) {
     const key = `${companyId}:${feature}`
+    console.log('Toggle:', { companyId, feature, enabled })
     setToggling(key)
+    setError(null)
     try {
       const res = await api.patch<{ enabled_features: Record<string, boolean> }>(
         `/admin/company-features/${companyId}`,
@@ -62,6 +65,8 @@ export default function Features() {
             : c
         )
       )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Toggle failed')
     } finally {
       setToggling(null)
     }
@@ -88,6 +93,12 @@ export default function Features() {
           onChange={(e) => setSearch(e.target.value)}
         />
       </div>
+
+      {error && (
+        <p className="mt-4 text-sm text-red-400 bg-red-950/30 border border-red-900/30 rounded px-3 py-2">
+          {error}
+        </p>
+      )}
 
       {loading ? (
         <p className="mt-6 text-sm text-zinc-500">Loading...</p>

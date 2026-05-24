@@ -240,6 +240,11 @@ class GustoHRISService:
         if mode == "mock":
             return "mock-gusto-token"
 
+        # OAuth flow: use access_token from secrets if available
+        if secrets.get("access_token"):
+            return secrets["access_token"]
+
+        # Legacy: client_credentials flow with client_id + client_secret
         # client_id is stored in config (not a secret); support legacy secrets location too
         client_id = config.get("client_id", "") or secrets.get("client_id", "")
         client_secret = secrets.get("client_secret", "")
@@ -256,6 +261,7 @@ class GustoHRISService:
                     data={"grant_type": "client_credentials"},
                 )
                 if resp.status_code != 200:
+                    logger.error(f"[Gusto Auth] {resp.status_code}: {resp.text}")
                     raise HRISProvisioningError("auth_failed", f"Gusto auth failed: {resp.status_code} {resp.text[:300]}")
                 return resp.json()["access_token"]
         except HRISProvisioningError:
