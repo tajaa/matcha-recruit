@@ -327,12 +327,6 @@ function WaitlistSection({ waitlistRef }: { waitlistRef: React.RefObject<HTMLDiv
               Lite is rolling out to broker partners first. Drop your details
               and we'll reach out as soon as a slot opens.
             </p>
-            <p className="mt-3 text-sm" style={{ color: MUTED }}>
-              Already have a broker referral link?{' '}
-              <Link to="/lite/signup" className="underline" style={{ color: INK }}>
-                Use it here →
-              </Link>
-            </p>
           </div>
 
           {submitted ? (
