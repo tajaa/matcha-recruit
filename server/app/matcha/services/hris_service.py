@@ -1,6 +1,8 @@
-"""HRIS integration service for pulling employee data from ADP-style systems."""
+"""HRIS integration service for pulling employee data from ADP/Gusto-style systems."""
 
+import base64
 import logging
+import re
 from typing import Optional
 
 import httpx
@@ -8,6 +10,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 PROVIDER_HRIS = "hris"
+GUSTO_BASE_URL = "https://api.gusto.com"
 
 
 class HRISProvisioningError(Exception):
@@ -205,3 +208,187 @@ class HRISService:
             "status": "active" if status_code == "Active" else "inactive",
             "credentials": credentials if credentials else None,
         }
+
+
+class GustoHRISService:
+    """Client for the Gusto API. Fetches and normalizes employee data."""
+
+    def __init__(self, *, timeout_seconds: float = 30.0):
+        self.timeout_seconds = timeout_seconds
+
+    async def test_connection(self, config: dict, secrets: dict) -> tuple[bool, Optional[str]]:
+        mode = config.get("mode", "mock")
+        if mode == "mock":
+            return True, None
+        try:
+            token = await self.authenticate(config, secrets)
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                resp = await client.get(
+                    f"{GUSTO_BASE_URL}/v1/me",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                if resp.status_code == 200:
+                    return True, None
+                return False, f"Gusto /v1/me returned {resp.status_code}"
+        except HRISProvisioningError as e:
+            return False, str(e)
+        except Exception as e:
+            return False, f"Connection failed: {str(e)}"
+
+    async def authenticate(self, config: dict, secrets: dict) -> str:
+        mode = config.get("mode", "mock")
+        if mode == "mock":
+            return "mock-gusto-token"
+
+        client_id = secrets.get("client_id", "")
+        client_secret = secrets.get("client_secret", "")
+
+        if not all([client_id, client_secret]):
+            raise HRISProvisioningError("auth_config_missing", "Missing Gusto client_id or client_secret", needs_action=True)
+
+        credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                resp = await client.post(
+                    f"{GUSTO_BASE_URL}/oauth/token",
+                    headers={"Authorization": f"Basic {credentials}"},
+                    data={"grant_type": "client_credentials"},
+                )
+                if resp.status_code != 200:
+                    raise HRISProvisioningError("auth_failed", f"Gusto auth failed: {resp.status_code} {resp.text}")
+                return resp.json()["access_token"]
+        except HRISProvisioningError:
+            raise
+        except Exception as e:
+            raise HRISProvisioningError("auth_error", f"Gusto auth error: {str(e)}")
+
+    async def fetch_workers(self, config: dict, secrets: dict) -> list[dict]:
+        token = await self.authenticate(config, secrets)
+        gusto_company_id = config.get("gusto_company_id", "")
+
+        if not gusto_company_id and config.get("mode") != "mock":
+            raise HRISProvisioningError("config_missing", "gusto_company_id not configured", needs_action=True)
+
+        # Mock mode: return a small representative set
+        if config.get("mode") == "mock":
+            return _GUSTO_MOCK_EMPLOYEES
+
+        workers: list[dict] = []
+        url: Optional[str] = (
+            f"{GUSTO_BASE_URL}/v1/companies/{gusto_company_id}/employees"
+            "?include=all&per_page=200"
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                while url:
+                    resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+                    if resp.status_code != 200:
+                        raise HRISProvisioningError("fetch_failed", f"Gusto fetch failed: {resp.status_code}")
+                    workers.extend(resp.json())
+                    # Follow Link: <url>; rel="next" pagination
+                    link_header = resp.headers.get("Link", "")
+                    next_match = re.search(r'<([^>]+)>;\s*rel="next"', link_header)
+                    url = next_match.group(1) if next_match else None
+        except HRISProvisioningError:
+            raise
+        except Exception as e:
+            raise HRISProvisioningError("fetch_error", f"Gusto fetch error: {str(e)}")
+
+        logger.info("[Gusto] Fetched %d employees for company %s", len(workers), gusto_company_id)
+        return workers
+
+    @staticmethod
+    def normalize_worker(gusto_employee: dict) -> dict:
+        """Convert a Gusto employee record to flat Matcha employee format."""
+        jobs = gusto_employee.get("jobs") or []
+        primary_job = next((j for j in jobs if j.get("primary")), jobs[0] if jobs else {})
+
+        home_addr = gusto_employee.get("home_address") or {}
+        work_addr = gusto_employee.get("work_address") or home_addr
+
+        # Prefer work_email; fall back to personal email field
+        email = gusto_employee.get("work_email") or gusto_employee.get("email")
+
+        # Employment type from payment_unit
+        payment_unit = (primary_job.get("current_compensation") or {}).get("payment_unit", "")
+        employment_type = "part_time" if payment_unit == "Hour" else "full_time"
+
+        # Department: Gusto returns it as a string or nested object
+        dept = gusto_employee.get("department")
+        if isinstance(dept, dict):
+            dept = dept.get("title") or dept.get("name")
+
+        terminated = gusto_employee.get("terminated", False)
+
+        return {
+            "hris_id": gusto_employee.get("uuid"),
+            "first_name": gusto_employee.get("first_name"),
+            "last_name": gusto_employee.get("last_name"),
+            "email": email,
+            "personal_email": gusto_employee.get("email") if gusto_employee.get("work_email") else None,
+            "phone": gusto_employee.get("phone"),
+            "job_title": primary_job.get("title"),
+            "department": dept,
+            "employment_type": employment_type,
+            "work_state": work_addr.get("state"),
+            "work_city": work_addr.get("city"),
+            "start_date": primary_job.get("hire_date"),
+            "is_manager": False,
+            "status": "inactive" if terminated else "active",
+            "credentials": None,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Small mock dataset for Gusto mode (dev / demo)
+# ---------------------------------------------------------------------------
+
+_GUSTO_MOCK_EMPLOYEES: list[dict] = [
+    {
+        "uuid": "gusto-mock-001",
+        "first_name": "Alex",
+        "last_name": "Rivera",
+        "work_email": "alex.rivera@example.com",
+        "email": "alex.rivera@example.com",
+        "phone": "555-0101",
+        "department": "Engineering",
+        "terminated": False,
+        "jobs": [{"title": "Software Engineer", "hire_date": "2023-03-01", "primary": True,
+                  "current_compensation": {"payment_unit": "Year"}}],
+        "home_address": {"state": "CA", "city": "San Francisco"},
+    },
+    {
+        "uuid": "gusto-mock-002",
+        "first_name": "Morgan",
+        "last_name": "Chen",
+        "work_email": "morgan.chen@example.com",
+        "email": "morgan.chen@example.com",
+        "phone": "555-0102",
+        "department": "Operations",
+        "terminated": False,
+        "jobs": [{"title": "Operations Manager", "hire_date": "2022-06-15", "primary": True,
+                  "current_compensation": {"payment_unit": "Year"}}],
+        "home_address": {"state": "CA", "city": "Oakland"},
+    },
+    {
+        "uuid": "gusto-mock-003",
+        "first_name": "Jordan",
+        "last_name": "Patel",
+        "work_email": "jordan.patel@example.com",
+        "email": "jordan.patel@example.com",
+        "phone": "555-0103",
+        "department": "HR",
+        "terminated": False,
+        "jobs": [{"title": "HR Coordinator", "hire_date": "2023-09-01", "primary": True,
+                  "current_compensation": {"payment_unit": "Year"}}],
+        "home_address": {"state": "NY", "city": "New York"},
+    },
+]
+
+
+def get_hris_service(provider: str) -> "HRISService | GustoHRISService":
+    """Return the appropriate HRIS service for the given provider/mode."""
+    if provider == "gusto":
+        return GustoHRISService()
+    return HRISService()

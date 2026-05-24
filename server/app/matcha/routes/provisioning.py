@@ -1335,10 +1335,11 @@ async def list_provisioning_runs(
 # =======================================================================
 
 class HRISConnectionRequest(BaseModel):
-    mode: str = Field(default="mock", pattern="^(mock|adp)$")
+    mode: str = Field(default="mock", pattern="^(mock|adp|gusto)$")
     base_url: Optional[str] = Field(default=None, max_length=500)
     client_id: Optional[str] = Field(default=None, max_length=255)
     client_secret: Optional[str] = None
+    gusto_company_id: Optional[str] = Field(default=None, max_length=255)
     auto_sync_on_schedule: bool = False
     sync_interval_hours: int = Field(default=24, ge=1, le=168)
     test_connection: bool = True
@@ -1350,6 +1351,7 @@ class HRISConnectionStatus(BaseModel):
     status: str
     mode: Optional[str] = None
     base_url: Optional[str] = None
+    gusto_company_id: Optional[str] = None
     has_client_secret: bool = False
     auto_sync_on_schedule: bool = False
     sync_interval_hours: int = 24
@@ -1389,6 +1391,7 @@ def _hris_connection_status_payload(row) -> HRISConnectionStatus:
         status=status_value,
         mode=config.get("mode"),
         base_url=config.get("base_url"),
+        gusto_company_id=config.get("gusto_company_id"),
         has_client_secret=bool(secrets.get("client_secret")),
         auto_sync_on_schedule=_coerce_bool(
             config.get("auto_sync_on_schedule"), False
@@ -1439,11 +1442,14 @@ async def connect_hris(
         "mode": request.mode,
         "base_url": request.base_url,
         "client_id": request.client_id,
+        "gusto_company_id": request.gusto_company_id,
         "auto_sync_on_schedule": request.auto_sync_on_schedule,
         "sync_interval_hours": request.sync_interval_hours,
     }
 
     secrets_payload: dict = {}
+    if request.client_id:
+        secrets_payload["client_id"] = request.client_id
     if request.client_secret:
         secrets_payload["client_secret"] = encrypt_secret(request.client_secret.strip())
 
@@ -1451,8 +1457,8 @@ async def connect_hris(
     test_status = "connected"
     test_error = None
     if request.test_connection and request.mode != "mock":
-        from ..services.hris_service import HRISService
-        service = HRISService()
+        from ..services.hris_service import get_hris_service
+        service = get_hris_service(request.mode)
         test_secrets = {
             "client_id": request.client_id or "",
             "client_secret": request.client_secret or "",

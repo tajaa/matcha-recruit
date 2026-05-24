@@ -10,7 +10,7 @@ from uuid import UUID
 
 from ...core.services.secret_crypto import decrypt_secret
 from ...database import get_connection
-from .hris_service import PROVIDER_HRIS, HRISProvisioningError, HRISService
+from .hris_service import PROVIDER_HRIS, HRISProvisioningError, get_hris_service
 
 logger = logging.getLogger(__name__)
 
@@ -176,8 +176,6 @@ async def start_hris_sync(
 
     Returns the sync run summary dict.
     """
-    service = HRISService()
-
     # ── Phase 1: Setup (short connection) ──────────────────────────
     async with get_connection() as conn:
         connection = await conn.fetchrow(
@@ -228,6 +226,8 @@ async def start_hris_sync(
                     secrets_decrypted[key] = value
             else:
                 secrets_decrypted[key] = value
+
+        service = get_hris_service(config.get("mode", "adp"))
 
     # ── Phase 2: Fetch workers (no DB connection held) ─────────────
     try:

@@ -4,6 +4,8 @@ import { Button, Input, Select } from '../../components/ui'
 import { EmployeeStatusBadge } from '../../components/employees/EmployeeStatusBadge'
 import { MultiBatchModal } from '../../components/employees/MultiBatchModal'
 import { BulkUploadModal } from '../../components/employees/BulkUploadModal'
+import { HRISSyncModal } from '../../components/employees/HRISSyncModal'
+import { useMe } from '../../hooks/useMe'
 import { WageGapCard, WageGapDrawer, FlightRiskCard, FlightRiskDrawer, RetentionExplainer } from '../../components/dashboard'
 import { fetchDashboardStats } from '../../api/dashboard'
 import { useEmployees } from '../../hooks/employees/useEmployees'
@@ -12,12 +14,14 @@ import type { WageGapSummary, FlightRiskWidgetSummary } from '../../types/dashbo
 
 export default function Employees() {
   const navigate = useNavigate()
+  const { hasFeature } = useMe()
   const [status, setStatus] = useState('all')
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [department, setDepartment] = useState('')
   const [showBatch, setShowBatch] = useState(false)
   const [showUpload, setShowUpload] = useState(false)
+  const [showHRIS, setShowHRIS] = useState(false)
   const [wageGap, setWageGap] = useState<WageGapSummary | null>(null)
   const [wageDrawerOpen, setWageDrawerOpen] = useState(false)
   const [flightRisk, setFlightRisk] = useState<FlightRiskWidgetSummary | null>(null)
@@ -62,8 +66,11 @@ export default function Employees() {
             {employees.length} total employee{employees.length !== 1 ? 's' : ''}
           </p>
         </div>
-        <div className="flex gap-2 w-full sm:w-auto">
+        <div className="flex gap-2 w-full sm:w-auto flex-wrap">
           <Button variant="ghost" onClick={() => setShowUpload(true)}>Upload CSV</Button>
+          {hasFeature('hris_import') && (
+            <Button variant="ghost" onClick={() => setShowHRIS(true)}>Sync from HRIS</Button>
+          )}
           <Button onClick={() => setShowBatch(true)}>Add Employees</Button>
         </div>
       </div>
@@ -114,6 +121,11 @@ export default function Employees() {
       <BulkUploadModal
         open={showUpload}
         onClose={() => setShowUpload(false)}
+        onSuccess={refetch}
+      />
+      <HRISSyncModal
+        open={showHRIS}
+        onClose={() => setShowHRIS(false)}
         onSuccess={refetch}
       />
 
