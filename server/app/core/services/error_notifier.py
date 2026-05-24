@@ -136,8 +136,10 @@ def _wrap_html(heading: str, rows: list[tuple[str, str]], body_text: str, link: 
 
 
 async def notify_server_error(row: dict) -> None:
-    """Alert on a newly-inserted server_error_reports row."""
+    """Alert on a newly-inserted server_error_reports row. Only fires on CRITICAL level."""
     if not _alerts_enabled():
+        return
+    if (row.get("level") or "").upper() != "CRITICAL":
         return
     fp = row.get("fingerprint") or ""
     if not _should_send(f"srv|{fp}"):
@@ -178,8 +180,12 @@ def notify_client_error(
     expected user-facing errors (4xx API responses) so only real bugs page."""
     if not _alerts_enabled():
         return
-    # Noise filter: skip expected user-facing API errors (login fails, 404s, etc.)
-    if kind == "api_error" and api_status_code in _USER_ERROR_STATUSES:
+    # Only alert on actual React crashes; api_error is a dupe of the server-side
+    # alert and js_error/promise_rejection are too noisy to be actionable.
+    if kind != "react_error":
+        return
+    # Skip errors from local dev browsers hitting prod backend.
+    if url and ("localhost" in url or "127.0.0.1" in url):
         return
     fp = f"cli|{kind}|{(message or '')[:160]}|{api_endpoint or ''}|{api_status_code or ''}"
     if not _should_send(fp):
