@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
 
@@ -1802,8 +1802,9 @@ async def get_gusto_verification_token(
 
 
 @router.post("/hris/webhook/gusto")
-async def gusto_webhook(request: Request):
+async def gusto_webhook(request: Request, background_tasks: BackgroundTasks):
     """Receive Gusto webhook events and sync changes to Matcha."""
+    from ..services.hris_sync_orchestrator import start_hris_sync
     body = await request.body()
 
     try:
@@ -1839,8 +1840,16 @@ async def gusto_webhook(request: Request):
 
     event_type = payload.get("event_type", "")
     entity_uuid = payload.get("entity_uuid") or payload.get("employee_uuid")
-    company_uuid = payload.get("company_uuid")
+    # Gusto carries the company in resource_uuid (resource_type=Company);
+    # fall back to other shapes defensively.
+    company_uuid = (
+        payload.get("resource_uuid")
+        or payload.get("company_uuid")
+        or (payload.get("resources") or [{}])[0].get("uuid")
+    )
 
+    # One-time debug: full payload so we can confirm field names from logs.
+    _whlog.info(f"[Gusto Webhook] RAW: {body.decode(errors='replace')[:1000]}")
     _whlog.info(f"[Gusto Webhook] event={event_type} entity={entity_uuid} company={company_uuid}")
 
     if not entity_uuid or not company_uuid:
@@ -1860,8 +1869,8 @@ async def gusto_webhook(request: Request):
 
         matcha_company_id = conn_row["company_id"]
 
-        if event_type in ("employee.terminated", "employee.deleted"):
-            # Mark employee inactive in Matcha
+        if event_type in ("employee.terminated", "employee.termination_effective", "employee.deleted"):
+            # Mark employee inactive in Matcha — scoped to the owning org
             result = await conn.execute(
                 """UPDATE employees
                    SET employment_status = 'terminated', updated_at = NOW()
@@ -1872,10 +1881,14 @@ async def gusto_webhook(request: Request):
             _whlog.info(f"[Gusto Webhook] Terminated employee hris_id={entity_uuid} result={result}")
 
         elif event_type in ("employee.created", "employee.updated", "employee.rehired"):
-            # Trigger a background re-sync for this company
-            from ..services.hris_sync_orchestrator import start_hris_sync
-            import asyncio
-            asyncio.create_task(start_hris_sync(str(matcha_company_id)))
-            _whlog.info(f"[Gusto Webhook] Triggered re-sync for company={matcha_company_id}")
+            # Re-sync via FastAPI BackgroundTasks (asyncio.create_task would be
+            # cancelled when the response returns). No user → triggered_by=None.
+            background_tasks.add_task(
+                start_hris_sync,
+                company_id=matcha_company_id,
+                triggered_by=None,
+                trigger_source="api",
+            )
+            _whlog.info(f"[Gusto Webhook] Queued re-sync for company={matcha_company_id}")
 
     return {"received": True}

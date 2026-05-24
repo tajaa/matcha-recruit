@@ -165,7 +165,7 @@ async def _upsert_external_identity(
 async def start_hris_sync(
     *,
     company_id: UUID,
-    triggered_by: UUID,
+    triggered_by: Optional[UUID] = None,
     trigger_source: str = "manual",
 ) -> dict:
     """Run a full HRIS sync for a company.
@@ -410,6 +410,7 @@ async def _sync_single_employee(
                 employment_type = COALESCE($5, employment_type),
                 work_state = COALESCE($6, work_state),
                 phone = COALESCE($7, phone),
+                hris_id = COALESCE($8, hris_id),
                 updated_at = NOW()
             WHERE id = $1 AND org_id = $2
             """,
@@ -420,6 +421,7 @@ async def _sync_single_employee(
             normalized.get("employment_type"),
             normalized.get("work_state"),
             normalized.get("phone"),
+            normalized.get("hris_id"),
         )
         action_label = "updated"
     else:
@@ -428,9 +430,9 @@ async def _sync_single_employee(
             """
             INSERT INTO employees (
                 org_id, email, personal_email, first_name, last_name,
-                work_state, employment_type, start_date, phone, job_title, department
+                work_state, employment_type, start_date, phone, job_title, department, hris_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             RETURNING id
             """,
             company_id,
@@ -444,6 +446,7 @@ async def _sync_single_employee(
             normalized.get("phone"),
             normalized.get("job_title"),
             normalized.get("department"),
+            normalized.get("hris_id"),
         )
         employee_id = row["id"]
         action_label = "created"
