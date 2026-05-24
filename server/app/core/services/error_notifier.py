@@ -45,6 +45,21 @@ _pending: set = set()
 _USER_ERROR_STATUSES = {400, 401, 403, 404, 409, 422, 429}
 
 
+def _alerts_enabled() -> bool:
+    """Alerts fire only in production. A recipient must be set AND app_base_url
+    must be a real (non-localhost) host — otherwise a developer running the
+    backend locally would page the prod alert inbox with their dev errors."""
+    from app.config import get_settings
+    s = get_settings()
+    to = (getattr(s, "error_alert_email", "") or "").strip()
+    if not to:
+        return False
+    base = (getattr(s, "app_base_url", "") or "").lower()
+    if not base or "localhost" in base or "127.0.0.1" in base:
+        return False
+    return True
+
+
 def _should_send(fingerprint: str) -> bool:
     """Dedup + global rate cap. Returns True at most once per fingerprint per
     TTL, and never more than _MAX_PER_HOUR times per rolling hour."""
@@ -122,6 +137,8 @@ def _wrap_html(heading: str, rows: list[tuple[str, str]], body_text: str, link: 
 
 async def notify_server_error(row: dict) -> None:
     """Alert on a newly-inserted server_error_reports row."""
+    if not _alerts_enabled():
+        return
     fp = row.get("fingerprint") or ""
     if not _should_send(f"srv|{fp}"):
         return
@@ -159,6 +176,8 @@ def notify_client_error(
 ) -> None:
     """Schedule an alert for a client error. Fire-and-forget; filters out
     expected user-facing errors (4xx API responses) so only real bugs page."""
+    if not _alerts_enabled():
+        return
     # Noise filter: skip expected user-facing API errors (login fails, 404s, etc.)
     if kind == "api_error" and api_status_code in _USER_ERROR_STATUSES:
         return
