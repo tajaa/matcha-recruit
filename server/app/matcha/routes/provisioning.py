@@ -1787,10 +1787,44 @@ import logging as _logging
 _whlog = _logging.getLogger(__name__)
 
 
+@router.get("/hris/webhook/gusto/token")
+async def get_gusto_verification_token(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Return the most-recent Gusto webhook verification token (setup convenience)."""
+    await get_client_company_id(current_user)  # auth gate
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT verification_token FROM gusto_webhook_tokens
+               ORDER BY created_at DESC LIMIT 1""",
+        )
+    return {"verification_token": row["verification_token"] if row else None}
+
+
 @router.post("/hris/webhook/gusto")
 async def gusto_webhook(request: Request):
     """Receive Gusto webhook events and sync changes to Matcha."""
     body = await request.body()
+
+    try:
+        payload = json.loads(body)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    # Subscription verification: Gusto POSTs a verification_token (no event_type)
+    # before any secret is established. Capture it so the user can paste it into
+    # Gusto's "Verify your subscription" form. Skip signature check here.
+    verification_token = payload.get("verification_token")
+    if verification_token and not payload.get("event_type"):
+        _whlog.warning(f"[Gusto Webhook] VERIFICATION TOKEN: {verification_token}")
+        async with get_connection() as conn:
+            await conn.execute(
+                """INSERT INTO gusto_webhook_tokens (verification_token, gusto_company_uuid, created_at)
+                   VALUES ($1, $2, NOW())""",
+                verification_token,
+                payload.get("company_uuid"),  # may be null; best-effort
+            )
+        return {"received": True}
 
     # Verify signature if secret configured
     if GUSTO_WEBHOOK_SECRET:
@@ -1802,11 +1836,6 @@ async def gusto_webhook(request: Request):
         ).hexdigest()
         if not hmac.compare_digest(sig, expected):
             raise HTTPException(status_code=400, detail="Invalid webhook signature")
-
-    try:
-        payload = json.loads(body)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
 
     event_type = payload.get("event_type", "")
     entity_uuid = payload.get("entity_uuid") or payload.get("employee_uuid")
