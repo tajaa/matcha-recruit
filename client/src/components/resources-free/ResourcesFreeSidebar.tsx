@@ -3,40 +3,13 @@ import { AlertTriangle, BookOpen, Calculator, ClipboardCheck, FileText, Home, Li
 import SidebarShell from '../SidebarShell'
 import type { NavItem, NavGroup } from '../SidebarShell'
 import { useMe } from '../../hooks/useMe'
-import { api } from '../../api/client'
 import UpgradePanel from './UpgradePanel'
+import { UpgradeRequestModal } from './UpgradeRequestModal'
 
-interface CheckoutResponse {
-  checkout_url: string
-  stripe_session_id: string
-}
-
-/**
- * Sidebar for free Resources-tier tenants. Lives inside the /app shell so
- * resources_free users get the same internal experience as paid tenants.
- *
- * Nav points to embedded /app/resources/* routes (the in-shell versions of
- * the public marketing pages). The IR tab is locked + grayed; clicking it
- * starts the Matcha IR Stripe-hosted checkout.
- */
 export default function ResourcesFreeSidebar() {
   const { me, loading } = useMe()
-  const [checkoutLoading, setCheckoutLoading] = useState(false)
+  const [requestOpen, setRequestOpen] = useState(false)
   const footerName = me?.profile?.company_name
-
-  async function startIrCheckout() {
-    if (checkoutLoading) return
-    setCheckoutLoading(true)
-    try {
-      const res = await api.post<CheckoutResponse>('/resources/upgrade/ir/checkout', {
-        success_url: `${window.location.origin}/app/ir?upgraded=ir`,
-        cancel_url: `${window.location.origin}/app?upgrade_canceled=1`,
-      })
-      window.location.href = res.checkout_url
-    } catch {
-      setCheckoutLoading(false)
-    }
-  }
 
   const nav: (NavItem | NavGroup)[] = [
     { to: '/app/resources', icon: Home, label: 'Hub' },
@@ -60,23 +33,26 @@ export default function ResourcesFreeSidebar() {
           icon: AlertTriangle,
           label: 'Incident Reporting',
           locked: true,
-          onLockedClick: startIrCheckout,
+          onLockedClick: () => setRequestOpen(true),
         },
       ],
     },
   ]
 
   return (
-    <SidebarShell
-      logoTo="/app/resources"
-      logoLabel="Matcha"
-      nav={loading ? [] : nav}
-      upgradeFooter={<UpgradePanel />}
-      user={footerName ? {
-        name: footerName,
-        avatarUrl: me?.user?.avatar_url,
-        settingsTo: '/app/settings',
-      } : undefined}
-    />
+    <>
+      <SidebarShell
+        logoTo="/app/resources"
+        logoLabel="Matcha"
+        nav={loading ? [] : nav}
+        upgradeFooter={<UpgradePanel />}
+        user={footerName ? {
+          name: footerName,
+          avatarUrl: me?.user?.avatar_url,
+          settingsTo: '/app/settings',
+        } : undefined}
+      />
+      <UpgradeRequestModal isOpen={requestOpen} onClose={() => setRequestOpen(false)} />
+    </>
   )
 }
