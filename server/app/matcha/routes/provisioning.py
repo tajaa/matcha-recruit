@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
 
@@ -1775,3 +1775,78 @@ async def gusto_oauth_callback(
 
     # Redirect to frontend success page
     return RedirectResponse(url="/app/employees?hris=connected")
+
+
+# =======================================================================
+# Gusto Webhook
+# =======================================================================
+
+GUSTO_WEBHOOK_SECRET = os.getenv("GUSTO_WEBHOOK_SECRET", "")
+
+import logging as _logging
+_whlog = _logging.getLogger(__name__)
+
+
+@router.post("/hris/webhook/gusto")
+async def gusto_webhook(request: Request):
+    """Receive Gusto webhook events and sync changes to Matcha."""
+    body = await request.body()
+
+    # Verify signature if secret configured
+    if GUSTO_WEBHOOK_SECRET:
+        sig = request.headers.get("X-Gusto-Signature", "")
+        expected = hmac.new(
+            GUSTO_WEBHOOK_SECRET.encode(),
+            body,
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            raise HTTPException(status_code=400, detail="Invalid webhook signature")
+
+    try:
+        payload = json.loads(body)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    event_type = payload.get("event_type", "")
+    entity_uuid = payload.get("entity_uuid") or payload.get("employee_uuid")
+    company_uuid = payload.get("company_uuid")
+
+    _whlog.info(f"[Gusto Webhook] event={event_type} entity={entity_uuid} company={company_uuid}")
+
+    if not entity_uuid or not company_uuid:
+        return {"received": True}
+
+    # Find the Matcha company that owns this Gusto connection
+    async with get_connection() as conn:
+        conn_row = await conn.fetchrow(
+            """SELECT company_id FROM integration_connections
+               WHERE provider = $1 AND config->>'gusto_company_id' = $2""",
+            PROVIDER_HRIS,
+            str(company_uuid),
+        )
+        if not conn_row:
+            _whlog.warning(f"[Gusto Webhook] No connection found for company_uuid={company_uuid}")
+            return {"received": True}
+
+        matcha_company_id = conn_row["company_id"]
+
+        if event_type in ("employee.terminated", "employee.deleted"):
+            # Mark employee inactive in Matcha
+            result = await conn.execute(
+                """UPDATE employees
+                   SET employment_status = 'terminated', updated_at = NOW()
+                   WHERE hris_id = $1 AND org_id = $2""",
+                str(entity_uuid),
+                matcha_company_id,
+            )
+            _whlog.info(f"[Gusto Webhook] Terminated employee hris_id={entity_uuid} result={result}")
+
+        elif event_type in ("employee.created", "employee.updated", "employee.rehired"):
+            # Trigger a background re-sync for this company
+            from ..services.hris_sync_orchestrator import start_hris_sync
+            import asyncio
+            asyncio.create_task(start_hris_sync(str(matcha_company_id)))
+            _whlog.info(f"[Gusto Webhook] Triggered re-sync for company={matcha_company_id}")
+
+    return {"received": True}
