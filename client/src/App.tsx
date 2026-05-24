@@ -41,6 +41,7 @@ import TermsPage from './pages/landing/TermsPage'
 import PrivacyPage from './pages/landing/PrivacyPage'
 import BlogIndex from './pages/landing/BlogIndex'
 import BlogPostPage from './pages/landing/BlogPost'
+import NewsPage from './pages/landing/NewsPage'
 import ResourcesHub from './pages/landing/ResourcesHub'
 import ResourcesTemplates from './pages/landing/resources/Templates'
 import ResourcesJobDescriptions from './pages/landing/resources/JobDescriptions'
@@ -133,6 +134,7 @@ export default function App() {
       <Route path="/privacy" element={<PrivacyPage />} />
       <Route path="/blog" element={<BlogIndex />} />
       <Route path="/blog/:slug" element={<BlogPostPage />} />
+      <Route path="/news" element={<NewsPage />} />
       <Route path="/resources" element={<ResourcesHub />} />
       <Route path="/resources/glossary" element={<ResourcesGlossary />} />
       <Route path="/resources/glossary/:slug" element={<ResourcesGlossaryTerm />} />

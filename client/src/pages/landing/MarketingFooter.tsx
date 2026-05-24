@@ -41,6 +41,7 @@ export default function MarketingFooter() {
           ]} />
           <FooterCol title="Company" links={[
             { label: 'Matcha Work', to: '/matcha-work' },
+            { label: 'News', to: '/news' },
             { label: 'Book a Consultation', onClick: () => setConsultationOpen(true) },
             { label: 'Client Login', to: '/login' },
           ]} />

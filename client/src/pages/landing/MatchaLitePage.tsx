@@ -6,7 +6,6 @@ import { ShieldAlert, FileText, MapPin, Calculator, Bell, Loader2, Brain, Clipbo
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
 import { ComplianceTicker } from '../../components/landing/ComplianceTicker'
-import { HRNewsSection } from '../../components/landing/HRNewsSection'
 import { MatchaLiteMockup } from '../../components/landing/MatchaLiteMockup'
 import { PricingContactModal } from '../../components/PricingContactModal'
 import { api } from '../../api/client'
@@ -96,7 +95,6 @@ export default function MatchaLitePage() {
         <FeatureGrid />
         <IrAnalysisSection />
         <OshaSection />
-        <HRNewsSection />
         <WaitlistSection waitlistRef={waitlistRef} />
       </main>
 
