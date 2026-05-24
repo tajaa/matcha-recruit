@@ -93,7 +93,6 @@ export function HRISSyncModal({ open, onClose, onSuccess }: Props) {
       await api.post('/provisioning/hris/disconnect', {})
       setConnectionStatus(null)
       setSyncResult(null)
-      setClientId('')
     } catch {
       // disconnect failed — leave state unchanged
     } finally {
