@@ -25,7 +25,7 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
 TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
     # matcha_lite (paid) — employees/discipline gated on Stripe; only the
     # always-on bundle items overlay here.
-    "matcha_lite": {"handbooks": True, "training": True},
+    "matcha_lite": {"handbooks": True, "training": True, "employees": True},
     # ir_only_self_serve (legacy free private beta) — full IR + HR bundle is
     # always on, no payment gate.
     "ir_only_self_serve": {
