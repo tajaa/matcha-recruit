@@ -389,13 +389,6 @@ function WaitlistSection({ waitlistRef }: { waitlistRef: React.RefObject<HTMLDiv
 // IR Analysis section
 // ---------------------------------------------------------------------------
 
-const IR_RISK_LOCATIONS = [
-  { name: 'Atlanta — Store 7', score: 78, count: 6 },
-  { name: 'Phoenix — Warehouse', score: 54, count: 4 },
-  { name: 'Denver — HQ', score: 22, count: 1 },
-  { name: 'Seattle — Store 12', score: 41, count: 3 },
-]
-
 const IR_BULLETS = [
   { label: 'Auto-categorization', desc: 'Behavioral, safety, property, or harassment — tagged on submission.' },
   { label: 'Severity scoring', desc: 'Low / Medium / High with AI justification attached to every incident.' },
@@ -409,7 +402,7 @@ function IrAnalysisSection() {
         <div className="grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
           <div>
             <div className="text-[11px] uppercase tracking-wider font-medium mb-3 sm:mb-4" style={{ color: MUTED }}>
-              IR analysis
+              Risk Insights
             </div>
             <h2
               className="tracking-tight"
@@ -439,47 +432,138 @@ function IrAnalysisSection() {
   )
 }
 
+type HeatLevel = 'red' | 'amber' | null
+
+const RISK_MATRIX_ROWS: Array<{
+  loc: string
+  safety: { v: number; heat: HeatLevel }
+  behavioral: { v: number; heat: HeatLevel }
+  total: number
+}> = [
+  { loc: 'Hollywood', safety: { v: 11, heat: 'red' }, behavioral: { v: 3, heat: 'amber' }, total: 14 },
+  { loc: 'Sherman Oaks', safety: { v: 11, heat: 'red' }, behavioral: { v: 1, heat: null }, total: 12 },
+  { loc: 'Beverly Hills', safety: { v: 10, heat: 'red' }, behavioral: { v: 2, heat: 'amber' }, total: 12 },
+  { loc: 'San Diego', safety: { v: 5, heat: null }, behavioral: { v: 1, heat: null }, total: 6 },
+]
+
 function IrAnalysisPanel() {
   const ref = useRef<HTMLDivElement>(null)
   const inView = useInView(ref, { once: true, margin: '-40px' })
+
   return (
-    <div ref={ref} className="rounded-xl overflow-hidden border font-sans" style={{ borderColor: 'rgba(63,63,70,0.5)', backgroundColor: '#09090b' }}>
-      <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'rgba(39,39,42,0.5)', backgroundColor: 'rgba(24,24,27,0.3)' }}>
-        <span className="text-[10px] font-medium uppercase tracking-wider" style={{ color: '#71717a' }}>
-          Risk score by location · last 30d
-        </span>
-        <span className="text-[9px]" style={{ color: '#10b981' }}>Updated 12m ago</span>
-      </div>
-      <div className="p-4 space-y-2">
-        {IR_RISK_LOCATIONS.map((loc, i) => {
-          const color = loc.score >= 70 ? '#f87171' : loc.score >= 40 ? '#fbbf24' : '#10b981'
-          return (
-            <div key={loc.name} className="flex items-center gap-3 px-3 py-2.5 rounded-lg" style={{ border: '1px solid rgba(39,39,42,0.6)', backgroundColor: 'rgba(24,24,27,0.3)' }}>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs truncate mb-1.5" style={{ color: '#e4e4e7' }}>{loc.name}</div>
-                <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: '#27272a' }}>
-                  <motion.div
-                    initial={{ width: 0 }}
-                    animate={inView ? { width: `${loc.score}%` } : { width: 0 }}
-                    transition={{ delay: i * 0.12 + 0.2, duration: 0.7, ease: 'easeOut' }}
-                    className="h-full rounded-full"
-                    style={{ backgroundColor: color }}
-                  />
-                </div>
-              </div>
-              <div className="text-right shrink-0 w-16">
-                <div className="text-sm font-mono" style={{ color }}>{loc.score}</div>
-                <div className="text-[9px]" style={{ color: '#52525b' }}>{loc.count} incidents</div>
-              </div>
+    <div ref={ref} className="rounded-xl overflow-hidden border font-sans" style={{ borderColor: 'rgba(63,63,70,0.5)', backgroundColor: '#0d0d10' }}>
+      {/* Page header */}
+      <div className="flex items-start justify-between px-5 py-4 border-b" style={{ borderColor: 'rgba(39,39,42,0.5)' }}>
+        <div>
+          <div className="text-sm font-bold" style={{ color: '#f4f4f5' }}>Risk Insights</div>
+          <div className="text-[8px] uppercase tracking-widest mt-1" style={{ color: '#52525b' }}>Computed May 24, 2026 at 2:06 am</div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {(['All locations', 'Last 90 days'] as const).map(label => (
+            <div key={label} className="flex items-center gap-1 px-2 py-1 rounded" style={{ backgroundColor: '#18181b', border: '1px solid #27272a', color: '#71717a', fontSize: 8 }}>
+              {label} <span style={{ fontSize: 7 }}>▾</span>
             </div>
-          )
-        })}
-      </div>
-      <div className="mx-4 mb-4 p-3 rounded-lg" style={{ border: '1px solid rgba(16,185,129,0.3)', backgroundColor: 'rgba(16,185,129,0.05)' }}>
-        <div className="text-[11px] leading-relaxed" style={{ color: '#d4d4d8' }}>
-          <span className="font-semibold" style={{ color: '#34d399' }}>AI theme:</span> Weekend evening shift escalations clustered at Atlanta · Store 7 — recommend additional manager coverage Fri/Sat 6–10pm.
+          ))}
         </div>
       </div>
+
+      {/* Stat row */}
+      <div className="grid border-b" style={{ gridTemplateColumns: '1.5fr 1fr 1fr 1fr 1fr 1fr', borderColor: 'rgba(39,39,42,0.5)' }}>
+        <div className="px-4 py-4 border-r" style={{ borderColor: 'rgba(39,39,42,0.5)' }}>
+          <div className="text-[7px] uppercase tracking-widest mb-3" style={{ color: '#52525b' }}>Incidents · Last 90 days</div>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={inView ? { opacity: 1 } : {}}
+            className="leading-none font-bold"
+            style={{ fontSize: '2.5rem', color: '#fff', letterSpacing: '-0.03em' }}
+          >
+            57
+          </motion.div>
+          <div className="text-[7px] mt-3" style={{ color: '#3f3f46' }}>⚡ No flagged locations or critical patterns</div>
+        </div>
+        {[
+          { label: 'Safety', count: 43, sev: '3.0' },
+          { label: 'Behavioral', count: 12, sev: '1.8' },
+          { label: 'Property', count: 0, sev: null },
+          { label: 'Near Miss', count: 0, sev: null },
+          { label: 'Other', count: 2, sev: '2.0' },
+        ].map((cat, i) => (
+          <motion.div
+            key={cat.label}
+            initial={{ opacity: 0 }}
+            animate={inView ? { opacity: 1 } : {}}
+            transition={{ delay: 0.08 + i * 0.06 }}
+            className={`px-3 py-4 ${i < 4 ? 'border-r' : ''}`}
+            style={{ borderColor: 'rgba(39,39,42,0.5)' }}
+          >
+            <div className="text-[7px] uppercase tracking-widest mb-3" style={{ color: '#52525b' }}>{cat.label}</div>
+            <div className="leading-none font-bold" style={{ fontSize: '1.6rem', color: cat.count > 0 ? '#f4f4f5' : '#27272a', letterSpacing: '-0.02em' }}>
+              {cat.count}
+            </div>
+            <div className="text-[7px] mt-3 uppercase tracking-wider" style={{ color: '#3f3f46' }}>
+              {cat.sev ? `Avg sev ${cat.sev}` : 'None'}
+            </div>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Risk matrix */}
+      <div className="flex items-center justify-between px-4 pt-3 pb-1">
+        <span className="text-[7px] uppercase tracking-widest" style={{ color: '#52525b' }}>Risk Matrix · Last 90 days</span>
+        <span className="text-[7px]" style={{ color: '#52525b' }}>57 incidents · 7 locations</span>
+      </div>
+      <div className="grid px-2" style={{ gridTemplateColumns: '1fr 52px 70px 52px 60px 44px 40px', backgroundColor: '#141418' }}>
+        {([['Location', 'left'], ['Safety', 'center'], ['Behavioral', 'center'], ['Property', 'center'], ['Near Miss', 'center'], ['Other', 'center'], ['Total', 'center']] as [string, string][]).map(([h, align]) => (
+          <div key={h} className="px-1.5 py-1.5 text-[7px] font-bold uppercase tracking-wider" style={{ color: '#52525b', textAlign: align as 'left' | 'center' }}>{h}</div>
+        ))}
+      </div>
+      {RISK_MATRIX_ROWS.map((row, i) => (
+        <motion.div
+          key={row.loc}
+          initial={{ opacity: 0 }}
+          animate={inView ? { opacity: 1 } : {}}
+          transition={{ delay: 0.25 + i * 0.07 }}
+          className="grid border-t px-2"
+          style={{ gridTemplateColumns: '1fr 52px 70px 52px 60px 44px 40px', borderColor: 'rgba(39,39,42,0.4)' }}
+        >
+          <div className="px-1.5 py-2 text-[10px]" style={{ color: '#d4d4d8' }}>{row.loc}</div>
+          <MatrixCell v={row.safety.v} heat={row.safety.heat} />
+          <MatrixCell v={row.behavioral.v} heat={row.behavioral.heat} />
+          <MatrixCell v={null} heat={null} />
+          <MatrixCell v={null} heat={null} />
+          <MatrixCell v={null} heat={null} />
+          <div className="py-2 text-center text-[10px]" style={{ color: '#a1a1aa' }}>{row.total}</div>
+        </motion.div>
+      ))}
+      <div className="grid border-t px-2" style={{ gridTemplateColumns: '1fr 52px 70px 52px 60px 44px 40px', borderColor: 'rgba(63,63,70,0.6)', backgroundColor: '#141418' }}>
+        <div className="px-1.5 py-2 text-[7px] uppercase tracking-wider" style={{ color: '#52525b' }}>Company Total</div>
+        {[43, 12, 0, 0, 2, 57].map((v, i) => (
+          <div key={i} className="py-2 text-center text-[10px]" style={{ color: i === 5 ? '#f4f4f5' : v === 0 ? '#52525b' : '#a1a1aa', fontWeight: i === 5 ? 600 : 400 }}>{v}</div>
+        ))}
+      </div>
+      <div className="flex items-center gap-4 px-4 py-2.5 border-t" style={{ borderColor: 'rgba(39,39,42,0.5)' }}>
+        {[
+          { color: 'rgba(127,29,29,0.7)', label: 'Flagged ≥2× baseline' },
+          { color: 'rgba(120,53,15,0.7)', label: 'Above baseline' },
+          { color: '#27272a', label: 'At/below baseline' },
+        ].map(l => (
+          <div key={l.label} className="flex items-center gap-1.5">
+            <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: l.color, border: '1px solid rgba(255,255,255,0.08)' }} />
+            <span className="text-[7px]" style={{ color: '#52525b' }}>{l.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function MatrixCell({ v, heat }: { v: number | null; heat: HeatLevel }) {
+  if (!v) return <div className="py-2 text-center text-[9px]" style={{ color: '#3f3f46' }}>—</div>
+  const bg = heat === 'red' ? 'rgba(127,29,29,0.5)' : heat === 'amber' ? 'rgba(120,53,15,0.5)' : 'transparent'
+  const color = heat === 'red' ? '#fca5a5' : heat === 'amber' ? '#fbbf24' : '#a1a1aa'
+  return (
+    <div className="py-2 text-center" style={{ backgroundColor: bg }}>
+      <span className="text-[10px] font-medium" style={{ color }}>{v}</span>
     </div>
   )
 }
