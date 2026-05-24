@@ -25,6 +25,7 @@ import Jurisdictions from './pages/admin/Jurisdictions'
 import IndustryRequirements from './pages/admin/IndustryRequirements'
 import SpecializationResearch from './pages/admin/SpecializationResearch'
 import Brokers from './pages/admin/Brokers'
+import MatchaLiteAdmin from './pages/admin/MatchaLiteAdmin'
 import ComplianceManagement from './pages/admin/ComplianceManagement'
 import Individuals from './pages/admin/Individuals'
 import Customers from './pages/admin/Customers'
@@ -193,6 +194,7 @@ export default function App() {
         <Route path="industry-requirements" element={<IndustryRequirements />} />
         <Route path="specialization-research" element={<SpecializationResearch />} />
         <Route path="brokers" element={<Brokers />} />
+        <Route path="matcha-lite" element={<MatchaLiteAdmin />} />
         <Route path="compliance-mgmt" element={<ComplianceManagement />} />
         <Route path="newsletter" element={<NewsletterAdmin />} />
         <Route path="newsletter/composer" element={<NewsletterAdmin />} />

@@ -9642,6 +9642,74 @@ async def list_beta_invitations(current_user=Depends(require_admin)):
     ]
 
 
+class MatchaLiteInviteRequest(BaseModel):
+    note: Optional[str] = None
+
+
+@router.post("/matcha-lite/invite-tokens")
+async def create_matcha_lite_invite_token(
+    body: MatchaLiteInviteRequest,
+    current_user=Depends(require_admin),
+):
+    """Generate a one-use Matcha Lite signup link that activates on registration (no Stripe)."""
+    token = secrets.token_urlsafe(48)
+    base_url = get_settings().app_base_url.rstrip("/")
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO matcha_lite_invite_tokens (token, created_by, note)
+               VALUES ($1, $2, $3)
+               RETURNING id, token, note, created_at""",
+            token, current_user.id, body.note,
+        )
+    return {
+        "id": str(row["id"]),
+        "token": row["token"],
+        "note": row["note"],
+        "signup_url": f"{base_url}/lite/signup?invite_token={token}",
+        "created_at": row["created_at"].isoformat(),
+    }
+
+
+@router.get("/matcha-lite/invite-tokens")
+async def list_matcha_lite_invite_tokens(current_user=Depends(require_admin)):
+    """List all Matcha Lite invite tokens with usage status."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT t.id, t.token, t.note, t.created_at, t.used_at,
+                      c.name AS company_name
+               FROM matcha_lite_invite_tokens t
+               LEFT JOIN companies c ON c.id = t.used_by_company_id
+               ORDER BY t.created_at DESC
+               LIMIT 200""",
+        )
+    base_url = get_settings().app_base_url.rstrip("/")
+    return [
+        {
+            "id": str(r["id"]),
+            "token": r["token"],
+            "note": r["note"],
+            "signup_url": f"{base_url}/lite/signup?invite_token={r['token']}",
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "used_at": r["used_at"].isoformat() if r["used_at"] else None,
+            "company_name": r["company_name"],
+        }
+        for r in rows
+    ]
+
+
+@router.delete("/matcha-lite/invite-tokens/{token_id}")
+async def delete_matcha_lite_invite_token(token_id: UUID, current_user=Depends(require_admin)):
+    """Delete an unused Matcha Lite invite token."""
+    async with get_connection() as conn:
+        result = await conn.execute(
+            "DELETE FROM matcha_lite_invite_tokens WHERE id = $1 AND used_at IS NULL",
+            token_id,
+        )
+    if result == "DELETE 0":
+        raise HTTPException(status_code=404, detail="Token not found or already used")
+    return {"ok": True}
+
+
 @router.delete("/beta-invitations/{invite_id}")
 async def revoke_beta_invitation(invite_id: UUID, current_user=Depends(require_admin)):
     """Revoke a pending beta invitation."""

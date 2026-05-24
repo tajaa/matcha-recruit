@@ -12,6 +12,7 @@ function litePriceDollars(headcount: number): number {
 export default function MatchaLiteSignup() {
   const [searchParams] = useSearchParams()
   const brokerRef = searchParams.get('ref')
+  const inviteToken = searchParams.get('invite_token')
   const [companyName, setCompanyName] = useState('')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -22,8 +23,8 @@ export default function MatchaLiteSignup() {
 
   const hc = parseInt(headcount, 10)
   const headcountValid = !isNaN(hc) && hc >= 1
-  const overLimit = headcountValid && hc > 300
-  const price = headcountValid && !overLimit ? litePriceDollars(hc) : null
+  const overLimit = headcountValid && !inviteToken && hc > 300
+  const price = headcountValid && !overLimit && !inviteToken ? litePriceDollars(hc) : null
 
   const canSubmit =
     companyName.trim() &&
@@ -51,6 +52,7 @@ export default function MatchaLiteSignup() {
           password,
           headcount: hc,
           ...(brokerRef ? { lite_broker_token: brokerRef } : {}),
+          ...(inviteToken ? { lite_invite_token: inviteToken } : {}),
         }),
       })
       const regData = await regRes.json()
@@ -65,8 +67,8 @@ export default function MatchaLiteSignup() {
       localStorage.setItem('matcha_refresh_token', refreshToken)
       invalidateMeCache()
 
-      // Broker-pays tokens: account is already active, skip Stripe
-      if (regData.lite_broker_pays) {
+      // Broker-pays or admin invite: account is already active, skip Stripe
+      if (regData.lite_broker_pays || regData.lite_invite_activated) {
         window.location.href = '/ir/onboarding?lite=1'
         return
       }
@@ -157,7 +159,7 @@ export default function MatchaLiteSignup() {
                 <Loader2 className="w-4 h-4 animate-spin" />
                 Setting up…
               </>
-            ) : brokerRef ? (
+            ) : (brokerRef || inviteToken) ? (
               'Create account'
             ) : (
               'Create account & subscribe'

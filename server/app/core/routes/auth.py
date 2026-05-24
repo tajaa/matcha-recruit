@@ -1635,6 +1635,24 @@ async def register_business(request: BusinessRegister, http_request: Request):
                     referring_broker_id = lite_ref_row["broker_id"]
                     lite_broker_pays = lite_ref_row["payer"] == "broker"
 
+            # Admin invite token — activates Matcha Lite immediately (no Stripe).
+            # Atomic UPDATE-RETURNING so concurrent signups with the same link
+            # can't both pass (matches business_invitations pattern above).
+            lite_invite_activated = False
+            lite_invite_id = None
+            if request.lite_invite_token and request.tier == "matcha_lite":
+                invite_row = await conn.fetchrow(
+                    """UPDATE matcha_lite_invite_tokens
+                       SET used_at = NOW()
+                       WHERE token = $1 AND used_at IS NULL
+                       RETURNING id""",
+                    request.lite_invite_token.strip(),
+                )
+                if not invite_row:
+                    raise HTTPException(status_code=400, detail="Invalid or already-used invite link")
+                lite_invite_activated = True
+                lite_invite_id = invite_row["id"]
+
             # IR-only self-serve signup auto-approves and narrows the
             # feature set to incidents only. Bypasses the bespoke pending
             # queue. Other tier values fall through to standard behavior.
@@ -1642,7 +1660,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
             is_resources_free = request.tier == "resources_free"
             is_matcha_lite = request.tier == "matcha_lite"
 
-            if is_matcha_lite and request.headcount > 300:
+            if is_matcha_lite and not lite_invite_activated and request.headcount > 300:
                 raise HTTPException(
                     status_code=400,
                     detail="Headcount over 300 — please contact us for pricing at matcha.work",
@@ -1695,8 +1713,10 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 lite_features = {k: False for k in DEFAULT_COMPANY_FEATURES}
                 lite_features["handbooks"] = True
                 lite_features["training"] = True
-                if lite_broker_pays:
+                if lite_broker_pays or lite_invite_activated:
                     lite_features["incidents"] = True
+                    lite_features["employees"] = True
+                    lite_features["discipline"] = True
                 enabled_features_json = json.dumps(lite_features)
             else:
                 company_status = "approved" if (invitation or referring_broker_id) else "pending"
@@ -1806,6 +1826,14 @@ async def register_business(request: BusinessRegister, http_request: Request):
                     company_id, invitation["id"],
                 )
 
+            if lite_invite_activated:
+                await conn.execute(
+                    """UPDATE matcha_lite_invite_tokens
+                       SET used_by_company_id = $1
+                       WHERE id = $2""",
+                    company_id, lite_invite_id,
+                )
+
             # Step 6: Create broker referral link if the company came via a broker slug
             if referring_broker_id:
                 await conn.execute(
@@ -1830,8 +1858,8 @@ async def register_business(request: BusinessRegister, http_request: Request):
             # Send appropriate email
             email_service = get_email_service()
             if is_matcha_lite:
-                if lite_broker_pays:
-                    # Broker covers the bill — account is fully active.
+                if lite_broker_pays or lite_invite_activated:
+                    # Broker or admin invite — account is fully active.
                     await email_service.send_business_approved_email(
                         to_email=user["email"],
                         to_name=request.name,
@@ -1867,7 +1895,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
                     company_name=request.company_name
                 )
 
-            if is_matcha_lite and lite_broker_pays:
+            if is_matcha_lite and (lite_broker_pays or lite_invite_activated):
                 next_route = "/ir/onboarding"
                 msg = "Welcome to Matcha Lite. Let's set up your team."
             elif is_matcha_lite:
@@ -1905,6 +1933,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 "next": next_route,
                 "message": msg,
                 "lite_broker_pays": lite_broker_pays,
+                "lite_invite_activated": lite_invite_activated,
             }
 
 
