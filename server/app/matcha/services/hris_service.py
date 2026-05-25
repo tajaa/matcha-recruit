@@ -466,8 +466,12 @@ _GUSTO_MOCK_EMPLOYEES: list[dict] = [
 ]
 
 
-def get_hris_service(provider: str) -> "HRISService | GustoHRISService":
+def get_hris_service(provider: str):
     """Return the appropriate HRIS service for the given provider/mode."""
     if provider == "gusto":
         return GustoHRISService()
+    if provider == "finch":
+        # Lazy import: finch_service imports HRISProvisioningError from this module.
+        from .finch_service import FinchHRISService
+        return FinchHRISService()
     return HRISService()
