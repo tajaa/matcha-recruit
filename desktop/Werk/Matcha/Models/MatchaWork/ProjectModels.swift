@@ -372,7 +372,7 @@ struct PipelineSummary {
             default:
                 openCount += 1
                 openValue += value
-                let p = Double(t.probability ?? SalesStage.defaultProbability[t.boardColumn] ?? 0)
+                let p = Double(t.probability ?? SalesStage.defaultProbability[t.pipelineColumn ?? "lead"] ?? 0)
                 weightedValue += value * p / 100.0
             }
         }

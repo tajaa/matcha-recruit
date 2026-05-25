@@ -42,6 +42,8 @@ struct KanbanBoardView: View {
     @State private var inlineAddTitle: String = ""
     @State private var hoveredEmptyColumn: String?
     @State private var searchText = ""
+    /// Done column collapses to the 5 most-recently-completed; expand shows all.
+    @State private var doneExpanded = false
     /// Template-compose sheet. `newTaskColumn` is the destination column;
     /// `composeTemplate` the picked template (scaffold + default priority +
     /// category). Reuses the single legacy sheet slot to avoid a 4th `.sheet`.
@@ -290,6 +292,17 @@ struct KanbanBoardView: View {
                 return (PacificDateFormatter.parse($0.createdAt) ?? .distantFuture)
                      < (PacificDateFormatter.parse($1.createdAt) ?? .distantFuture)
             }
+        // Done column collapses to the 5 most-recently-completed (newest first)
+        // with a "show more" expander — completed work piles up otherwise.
+        let isDoneColumn = !isPipeline && key == "done"
+        let orderedTasks: [MWProjectTask] = isDoneColumn
+            ? colTasks.sorted {
+                (PacificDateFormatter.parse($0.completedAt ?? $0.updatedAt ?? $0.createdAt) ?? .distantPast)
+                > (PacificDateFormatter.parse($1.completedAt ?? $1.updatedAt ?? $1.createdAt) ?? .distantPast)
+              }
+            : colTasks
+        let doneCollapsed = isDoneColumn && !doneExpanded && orderedTasks.count > 5
+        let visibleTasks = doneCollapsed ? Array(orderedTasks.prefix(5)) : orderedTasks
         // Per-stage deal total (pipeline mode only).
         let stageValue = colTasks.reduce(0.0) { $0 + ($1.dealValue ?? 0) }
         let isEmpty = colTasks.isEmpty
@@ -370,7 +383,7 @@ struct KanbanBoardView: View {
 
             ScrollView {
                 LazyVStack(spacing: 6) {
-                    ForEach(colTasks) { task in
+                    ForEach(visibleTasks) { task in
                         KanbanCardView(
                             task: task,
                             attachments: viewModel.taskFiles[task.id] ?? [],
@@ -390,6 +403,20 @@ struct KanbanBoardView: View {
                             }
                         )
                         .draggable(task.id)
+                    }
+                    if isDoneColumn && orderedTasks.count > 5 {
+                        Button {
+                            doneExpanded.toggle()
+                        } label: {
+                            Text(doneExpanded ? "Show less" : "Show \(orderedTasks.count - 5) more")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.secondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 5)
+                                .background(appState.themeText.opacity(0.05))
+                                .cornerRadius(5)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 6)

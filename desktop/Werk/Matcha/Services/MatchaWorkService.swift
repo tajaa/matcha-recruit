@@ -916,6 +916,19 @@ class MatchaWorkService {
             try c.encodeIfPresent(assignedTo, forKey: .assignedTo)
             try c.encodeIfPresent(progressNote, forKey: .progressNote)
             try c.encodeIfPresent(elementId, forKey: .elementId)
+            // Sales-pipeline fields — same encodeIfPresent contract (nil = omit,
+            // so the board-toggle 400-guard above still holds). Without these
+            // the TaskEditorSheet's deal edits were silently dropped on the wire.
+            try c.encodeIfPresent(dealValue, forKey: .dealValue)
+            try c.encodeIfPresent(probability, forKey: .probability)
+            try c.encodeIfPresent(contactName, forKey: .contactName)
+            try c.encodeIfPresent(contactCompany, forKey: .contactCompany)
+            try c.encodeIfPresent(contactEmail, forKey: .contactEmail)
+            try c.encodeIfPresent(contactPhone, forKey: .contactPhone)
+            try c.encodeIfPresent(outcome, forKey: .outcome)
+            try c.encodeIfPresent(lossReason, forKey: .lossReason)
+            try c.encodeIfPresent(nextActionAt, forKey: .nextActionAt)
+            try c.encodeIfPresent(expectedClose, forKey: .expectedClose)
         }
     }
 
