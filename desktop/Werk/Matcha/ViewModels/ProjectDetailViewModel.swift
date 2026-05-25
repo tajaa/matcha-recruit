@@ -957,7 +957,7 @@ class ProjectDetailViewModel {
                 )
             )
             await MainActor.run {
-                if let i = tasks.firstIndex(where: { $0.id == id }) {
+                if tasks.contains(where: { $0.id == id }) {
                     // Defensive: if the server response somehow diverges from
                     // the intended state, normalize it client-side. The
                     // status↔column relationship is invariant.

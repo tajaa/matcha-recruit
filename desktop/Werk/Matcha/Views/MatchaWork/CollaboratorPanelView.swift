@@ -273,13 +273,12 @@ struct CollaboratorPanelView: View {
         searchTimer?.invalidate()
         guard searchText.count >= 2 else { searchResults = []; return }
         searchTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in
-            Task {
+            Task { @MainActor in
                 let q = searchText
                 do {
-                    let results = try await MatchaWorkService.shared.searchInvitableUsers(query: q)
-                    await MainActor.run { searchResults = results }
+                    searchResults = try await MatchaWorkService.shared.searchInvitableUsers(query: q)
                 } catch {
-                    await MainActor.run { searchResults = [] }
+                    searchResults = []
                 }
             }
         }

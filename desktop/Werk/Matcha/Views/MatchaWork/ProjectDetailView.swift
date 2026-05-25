@@ -836,7 +836,7 @@ struct ProjectDetailView: View {
                 .padding(.vertical, 4)
 
                 // Chat list would come from project detail — for now show active chat
-                if let chatId = viewModel.activeChatId {
+                if viewModel.activeChatId != nil {
                     Button {
                         editingSectionId = nil
                     } label: {

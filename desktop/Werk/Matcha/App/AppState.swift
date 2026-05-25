@@ -184,7 +184,7 @@ class AppState {
     private var heartbeatTask: Task<Void, Never>?
     private var inboxPollTask: Task<Void, Never>?
     private var notificationPollTask: Task<Void, Never>?
-    private var newNotificationObserver: NSObjectProtocol?
+    private var newNotificationTask: Task<Void, Never>?
 
     init() {
         APIClient.shared.onUnauthorized = { [weak self] in
@@ -348,46 +348,37 @@ class AppState {
     /// in onMessageGlobal to avoid double-notifying).
     @MainActor
     private func subscribeNewNotificationObserver() {
-        if let token = newNotificationObserver {
-            NotificationCenter.default.removeObserver(token)
-        }
-        newNotificationObserver = NotificationCenter.default.addObserver(
-            forName: .mwNewNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] note in
-            guard let self else { return }
-            let n = note.userInfo?["notification"] as? [String: Any]
-            let type = n?["type"] as? String ?? ""
-            Task { @MainActor in
-                // Bell badge ticks for every notification type so kanban
-                // moves, channel messages, mentions all show up. Refresh
-                // the count from server to stay in sync if the user
-                // dismissed something on another device.
+        newNotificationTask?.cancel()
+        // Async-sequence form: a directly-created @MainActor task iterating the
+        // notifications avoids the @Sendable block of the token-based observer
+        // closing over non-Sendable `self` (the Swift-6 capture warning).
+        newNotificationTask = Task { @MainActor [weak self] in
+            for await note in NotificationCenter.default.notifications(named: .mwNewNotification) {
+                guard let self else { break }
+                let n = note.userInfo?["notification"] as? [String: Any]
+                let type = n?["type"] as? String ?? ""
+                let isChannel = type.hasPrefix("channel_")
+                func metaString(_ key: String) -> String? {
+                    let raw = n?["metadata"]
+                    if let d = raw as? [String: Any] { return d[key] as? String }
+                    if let s = raw as? String, let data = s.data(using: .utf8),
+                       let d = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        return d[key] as? String
+                    }
+                    return nil
+                }
+
+                // Bell badge ticks for every notification type so kanban moves,
+                // channel messages, mentions all show up. Refresh from server to
+                // stay in sync if the user dismissed something on another device.
                 self.notificationsUnreadCount += 1
                 await self.refreshNotificationsCount()
                 NotificationCenter.default.post(name: .mwNotificationsRefresh, object: nil)
-                // OS toast is owned by the starred-channel path in
-                // `onMessageGlobal` for channel_* events — skip those here
-                // to avoid double-toasting on chat. Non-channel events
-                // (task_assigned, task_progress, mentions, etc.) get the
-                // toast directly from the bell-push.
-                let isChannel = type.hasPrefix("channel_")
 
                 // "X joined the collab" → in-app toast when the user is looking
                 // at Werk (the bell already ticked; the OS banner below covers
-                // the not-frontmost case). metadata may arrive as a dict or a
-                // JSON string depending on the jsonb codec — handle both.
+                // the not-frontmost case).
                 if type == "collab_joined", NSApplication.shared.isActive {
-                    func metaString(_ key: String) -> String? {
-                        let raw = n?["metadata"]
-                        if let d = raw as? [String: Any] { return d[key] as? String }
-                        if let s = raw as? String, let data = s.data(using: .utf8),
-                           let d = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                            return d[key] as? String
-                        }
-                        return nil
-                    }
                     let joiner = metaString("joiner_name") ?? "Someone"
                     let proj = metaString("project_title") ?? (n?["title"] as? String ?? "the collab")
                     ChannelToastCenter.shared.push(
@@ -401,10 +392,15 @@ class AppState {
                     )
                 }
 
+                // OS toast is owned by the starred-channel path in
+                // `onMessageGlobal` for channel_* events — skip those here to
+                // avoid double-toasting on chat. Non-channel events
+                // (task_assigned, mentions, collab_joined, …) get it here.
                 if !self.isSceneActive && !isChannel {
-                    let title = n?["title"] as? String ?? "Notification"
-                    let body = n?["body"] as? String
-                    ChannelNotificationManager.shared.postSystem(title: title, body: body)
+                    ChannelNotificationManager.shared.postSystem(
+                        title: n?["title"] as? String ?? "Notification",
+                        body: n?["body"] as? String
+                    )
                 }
             }
         }
@@ -458,10 +454,8 @@ class AppState {
         notificationPollTask?.cancel()
         notificationPollTask = nil
         notificationsUnreadCount = 0
-        if let token = newNotificationObserver {
-            NotificationCenter.default.removeObserver(token)
-            newNotificationObserver = nil
-        }
+        newNotificationTask?.cancel()
+        newNotificationTask = nil
         betaFeatures = [:]
         ChannelsWebSocket.shared.onMessageGlobal = nil
         ChannelsWebSocket.shared.onBroadcastStarted = nil
@@ -547,13 +541,12 @@ class AppState {
 
     private func startInboxPolling() {
         inboxPollTask?.cancel()
-        inboxPollTask = Task { [weak self] in
+        inboxPollTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                let active = await MainActor.run { self?.isSceneActive ?? false }
-                if active {
+                if self?.isSceneActive == true {
                     do {
                         let count = try await InboxService.shared.getUnreadCount()
-                        await MainActor.run { self?.unreadInboxCount = count }
+                        self?.unreadInboxCount = count
                     } catch { }
                 }
                 try? await Task.sleep(for: .seconds(60))
@@ -563,12 +556,11 @@ class AppState {
 
     private func startNotificationPolling() {
         notificationPollTask?.cancel()
-        notificationPollTask = Task { [weak self] in
+        notificationPollTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                let active = await MainActor.run { self?.isSceneActive ?? false }
-                if active {
+                if self?.isSceneActive == true {
                     if let count = try? await MatchaWorkService.shared.fetchNotificationsUnreadCount() {
-                        await MainActor.run { self?.notificationsUnreadCount = count }
+                        self?.notificationsUnreadCount = count
                     }
                 }
                 try? await Task.sleep(for: .seconds(60))
@@ -725,19 +717,17 @@ class AppState {
 
     private func startPresenceHeartbeat() {
         heartbeatTask?.cancel()
-        heartbeatTask = Task { [weak self] in
+        heartbeatTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                let active = await MainActor.run { self?.isSceneActive ?? false }
-                if active {
+                if self?.isSceneActive == true {
                     do {
                         try await MatchaWorkService.shared.sendHeartbeat()
                         // Skip the explicit poll when the channels WebSocket
                         // is connected — it pushes `online_users` events
                         // automatically, so the GET is redundant load.
-                        let wsConnected = await MainActor.run { ChannelsWebSocket.shared.isConnected }
-                        if !wsConnected {
+                        if !ChannelsWebSocket.shared.isConnected {
                             let users = try await MatchaWorkService.shared.fetchOnlineUsers()
-                            await MainActor.run { self?.onlineUsers = users }
+                            self?.onlineUsers = users
                         }
                     } catch {
                         // Non-critical — silently continue

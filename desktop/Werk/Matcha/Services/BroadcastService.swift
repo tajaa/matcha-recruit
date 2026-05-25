@@ -578,7 +578,9 @@ final class BroadcastService {
 // MARK: - Room delegate
 
 #if canImport(LiveKit)
-@MainActor
+// Nonisolated: LiveKit calls RoomDelegate methods off the main actor, so the
+// class can't be @MainActor (that conformance crosses actors / data-races).
+// Every main-actor mutation hops via tickService()'s `Task { @MainActor }`.
 private final class BroadcastRoomDelegate: RoomDelegate, @unchecked Sendable {
     weak var service: BroadcastService?
     init(service: BroadcastService) { self.service = service }
