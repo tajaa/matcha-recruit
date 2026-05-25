@@ -967,6 +967,16 @@ class MatchaWorkService {
         )
     }
 
+    /// Natural-language → structured ticket draft via Gemini (no DB write).
+    func draftTaskFromPrompt(projectId: String, prompt: String) async throws -> MWTaskDraft {
+        struct Req: Encodable { let prompt: String }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/tasks/ai-draft",
+            body: Req(prompt: prompt)
+        )
+    }
+
     func deleteProjectTask(projectId: String, taskId: String) async throws {
         _ = try await client.requestData(
             method: "DELETE",

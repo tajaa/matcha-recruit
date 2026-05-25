@@ -4254,6 +4254,82 @@ async def reject_project_task_endpoint(
     return result
 
 
+@router.post("/projects/{project_id}/tasks/ai-draft")
+async def ai_draft_task_endpoint(
+    project_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Turn a natural-language request into a structured ticket draft (no DB
+    write). The client reviews/edits, then creates via POST .../tasks."""
+    from ..services import project_service as proj_svc
+    from ..services import matcha_work_ai
+
+    project, _role = await _verify_project_access(project_id, current_user)
+
+    prompt = (body.get("prompt") or "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Describe the task you want to create")
+
+    collaborators = await proj_svc.list_collaborators(project_id)
+    async with get_connection() as conn:
+        element_rows = await conn.fetch(
+            "SELECT id, name FROM mw_project_elements WHERE project_id = $1 ORDER BY \"order\" ASC, created_at ASC",
+            str(project_id),
+        )
+    elements = [{"id": str(r["id"]), "name": r["name"]} for r in element_rows]
+
+    try:
+        draft = await matcha_work_ai.generate_task_draft(
+            prompt=prompt,
+            project_title=project.get("title"),
+            collaborator_names=[c["name"] for c in collaborators if c.get("name")],
+            element_names=[e["name"] for e in elements if e.get("name")],
+        )
+    except Exception as e:
+        logger.warning("AI task draft failed project=%s: %s", project_id, e)
+        raise HTTPException(status_code=502, detail="Couldn't draft the task — try again")
+
+    # Resolve assignee NAME → user_id (exact, then first-name / substring).
+    assigned_to = None
+    assigned_name = None
+    if draft.get("assignee_name"):
+        want = draft["assignee_name"].strip().lower()
+        match = (
+            next((c for c in collaborators if (c.get("name") or "").lower() == want), None)
+            or next((c for c in collaborators if want and want in (c.get("name") or "").lower()), None)
+            or next((c for c in collaborators if (c.get("name") or "").lower().split(" ")[0] == want), None)
+        )
+        if match:
+            assigned_to = str(match["user_id"])
+            assigned_name = match["name"]
+
+    # Resolve element NAME → id (exact, then substring).
+    element_id = None
+    element_name = None
+    if draft.get("element_name"):
+        want = draft["element_name"].strip().lower()
+        match = (
+            next((e for e in elements if e["name"].lower() == want), None)
+            or next((e for e in elements if want and want in e["name"].lower()), None)
+        )
+        if match:
+            element_id = match["id"]
+            element_name = match["name"]
+
+    return {
+        "title": draft["title"],
+        "description": draft["description"],
+        "priority": draft["priority"],
+        "category": draft["category"],
+        "board_column": draft["board_column"],
+        "assigned_to": assigned_to,
+        "assigned_name": assigned_name,
+        "element_id": element_id,
+        "element_name": element_name,
+    }
+
+
 @router.patch("/projects/{project_id}/pipeline-mode")
 async def set_project_pipeline_mode_endpoint(
     project_id: UUID,

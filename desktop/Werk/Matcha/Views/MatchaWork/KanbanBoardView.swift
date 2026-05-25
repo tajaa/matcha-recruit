@@ -44,6 +44,12 @@ struct KanbanBoardView: View {
     @State private var searchText = ""
     /// Done column collapses to the 5 most-recently-completed; expand shows all.
     @State private var doneExpanded = false
+    /// AI ticket drafting (natural language → reviewable draft).
+    @State private var aiPrompt = ""
+    @State private var aiDrafting = false
+    @State private var aiDraft: MWTaskDraft?
+    @State private var showAIReview = false
+    @State private var aiError: String?
     /// Template-compose sheet. `newTaskColumn` is the destination column;
     /// `composeTemplate` the picked template (scaffold + default priority +
     /// category). Reuses the single legacy sheet slot to avoid a 4th `.sheet`.
@@ -119,6 +125,8 @@ struct KanbanBoardView: View {
                 }
                 if isPipeline {
                     pipelineSummaryBar
+                } else {
+                    aiComposeBar
                 }
                 boardColumns
             }
@@ -185,6 +193,87 @@ struct KanbanBoardView: View {
                     viewModel: viewModel,
                     onClose: { newTaskColumn = nil; composeTemplate = nil }
                 )
+            }
+        }
+        .sheet(isPresented: $showAIReview) {
+            if let draft = aiDraft {
+                AIDraftReviewSheet(
+                    draft: draft,
+                    viewModel: viewModel,
+                    onClose: { showAIReview = false; aiDraft = nil }
+                )
+            }
+        }
+    }
+
+    /// Natural-language ticket bar — type a request, Gemini drafts a ticket you
+    /// review before it lands. Board mode only (deals have their own shape).
+    private var aiComposeBar: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11))
+                    .foregroundColor(appState.themeAccent)
+                TextField("Describe a task… e.g. \"fix the 503 in console <error> and assign haley\"", text: $aiPrompt)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundColor(appState.themeText)
+                    .onSubmit { submitAIDraft() }
+                if aiDrafting {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button {
+                        submitAIDraft()
+                    } label: {
+                        Text("Draft")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10).padding(.vertical, 4)
+                            .background(appState.themeAccent)
+                            .cornerRadius(5)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(aiPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            if let err = aiError {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 9)).foregroundColor(.orange)
+                    Text(err).font(.system(size: 10)).foregroundColor(.orange)
+                    Spacer()
+                }
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(appState.themeAccent.opacity(0.06))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(appState.themeAccent.opacity(0.25), lineWidth: 1)
+        )
+        .cornerRadius(6)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 4)
+    }
+
+    private func submitAIDraft() {
+        let prompt = aiPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty, !aiDrafting, let pid = viewModel.project?.id else { return }
+        aiDrafting = true
+        aiError = nil
+        Task {
+            do {
+                let draft = try await MatchaWorkService.shared.draftTaskFromPrompt(projectId: pid, prompt: prompt)
+                await MainActor.run {
+                    aiDrafting = false
+                    aiPrompt = ""
+                    aiDraft = draft
+                    showAIReview = true
+                }
+            } catch {
+                await MainActor.run {
+                    aiDrafting = false
+                    aiError = "Couldn't draft that — try rephrasing."
+                }
             }
         }
     }
@@ -1625,5 +1714,148 @@ private struct AttachmentRow: View {
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .onTapGesture(perform: onOpen)
+    }
+}
+
+// MARK: - AI draft review
+
+/// Reviews a Gemini-drafted ticket before it's created. Every field is editable
+/// (the AI can be wrong about assignee/priority); "Create" routes through the
+/// normal task-create path. Co-located here to avoid a new pbxproj file ref.
+private struct AIDraftReviewSheet: View {
+    @Environment(AppState.self) private var appState
+    let draft: MWTaskDraft
+    @Bindable var viewModel: ProjectDetailViewModel
+    let onClose: () -> Void
+
+    @State private var title: String
+    @State private var description: String
+    @State private var priority: String
+    @State private var category: String
+    @State private var boardColumn: String
+    @State private var assignedTo: String?
+    @State private var selectedElementId: String?
+    @State private var creating = false
+
+    private let priorities = ["critical", "high", "medium", "low"]
+    private let categories = ["manual", "engineering", "bug", "product", "sales", "general"]
+
+    init(draft: MWTaskDraft, viewModel: ProjectDetailViewModel, onClose: @escaping () -> Void) {
+        self.draft = draft
+        self.viewModel = viewModel
+        self.onClose = onClose
+        _title = State(initialValue: draft.title)
+        _description = State(initialValue: draft.description ?? "")
+        _priority = State(initialValue: draft.priority)
+        _category = State(initialValue: draft.category)
+        _boardColumn = State(initialValue: draft.boardColumn)
+        _assignedTo = State(initialValue: draft.assignedTo)
+        _selectedElementId = State(initialValue: draft.elementId)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles").font(.system(size: 12)).foregroundColor(appState.themeAccent)
+                Text("Review AI ticket").font(.system(size: 14, weight: .semibold)).foregroundColor(appState.themeText)
+                Spacer()
+                Button(action: onClose) {
+                    Image(systemName: "xmark").font(.system(size: 11)).foregroundColor(.secondary)
+                }.buttonStyle(.plain)
+            }
+
+            TextField("Title", text: $title)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .foregroundColor(appState.themeText)
+                .padding(8)
+                .background(appState.themeText.opacity(0.06))
+                .cornerRadius(6)
+
+            TextEditor(text: $description)
+                .font(.system(size: 12))
+                .foregroundColor(appState.themeText.opacity(0.9))
+                .scrollContentBackground(.hidden)
+                .padding(6)
+                .frame(height: 180)
+                .background(appState.themeText.opacity(0.06))
+                .cornerRadius(6)
+
+            HStack(spacing: 6) {
+                labeledPicker("Priority", selection: $priority, options: priorities)
+                labeledPicker("Type", selection: $category, options: categories)
+                Spacer()
+            }
+            HStack(spacing: 6) {
+                Text("Column").font(.system(size: 11)).foregroundColor(.secondary)
+                Picker("", selection: $boardColumn) {
+                    ForEach(kanbanColumns, id: \.key) { c in Text(c.label).tag(c.key) }
+                }.labelsHidden().fixedSize()
+                Spacer()
+            }
+
+            if !viewModel.collaborators.isEmpty {
+                HStack(spacing: 6) {
+                    Text("Assignee").font(.system(size: 11)).foregroundColor(.secondary)
+                    Picker("", selection: $assignedTo) {
+                        Text("Unassigned").tag(String?.none)
+                        ForEach(viewModel.collaborators) { c in
+                            Text(c.name).tag(String?.some(c.userId))
+                        }
+                    }.labelsHidden().fixedSize()
+                    Spacer()
+                }
+            }
+            if !viewModel.elements.isEmpty {
+                HStack(spacing: 6) {
+                    Text("Element").font(.system(size: 11)).foregroundColor(.secondary)
+                    Picker("", selection: $selectedElementId) {
+                        Text("None").tag(String?.none)
+                        ForEach(viewModel.elements) { el in
+                            Text(el.name).tag(String?.some(el.id))
+                        }
+                    }.labelsHidden().fixedSize()
+                    Spacer()
+                }
+            }
+
+            HStack {
+                Button("Cancel") { onClose() }
+                    .buttonStyle(.plain).foregroundColor(.secondary)
+                Spacer()
+                Button {
+                    let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !t.isEmpty else { return }
+                    creating = true
+                    let desc = description.trimmingCharacters(in: .whitespacesAndNewlines)
+                    Task {
+                        await viewModel.addTask(
+                            title: t, column: boardColumn, priority: priority,
+                            assignedTo: assignedTo,
+                            description: desc.isEmpty ? nil : desc,
+                            category: category, elementId: selectedElementId
+                        )
+                        onClose()
+                    }
+                } label: {
+                    if creating { ProgressView().controlSize(.small) }
+                    else { Text("Create").font(.system(size: 12, weight: .semibold)).foregroundColor(.matcha500) }
+                }
+                .buttonStyle(.plain)
+                .disabled(creating || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(16)
+        .frame(width: 440)
+        .background(Color.appBackground)
+    }
+
+    private func labeledPicker(_ label: String, selection: Binding<String>, options: [String]) -> some View {
+        HStack(spacing: 4) {
+            Text(label).font(.system(size: 11)).foregroundColor(.secondary)
+            Picker("", selection: selection) {
+                ForEach(options, id: \.self) { Text($0.capitalized).tag($0) }
+            }.labelsHidden().fixedSize()
+        }
     }
 }

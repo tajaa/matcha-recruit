@@ -164,6 +164,30 @@ struct MWProjectFolder: Codable, Identifiable, Hashable {
     }
 }
 
+/// AI-generated ticket draft (Gemini Flash Lite) returned by
+/// `POST /projects/{id}/tasks/ai-draft`. Not persisted — the user reviews/edits
+/// it in `AIDraftReviewSheet`, then creates via the normal task POST.
+struct MWTaskDraft: Codable {
+    var title: String
+    var description: String?
+    var priority: String
+    var category: String
+    var boardColumn: String
+    var assignedTo: String?
+    var assignedName: String?
+    var elementId: String?
+    var elementName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case title, description, priority, category
+        case boardColumn = "board_column"
+        case assignedTo = "assigned_to"
+        case assignedName = "assigned_name"
+        case elementId = "element_id"
+        case elementName = "element_name"
+    }
+}
+
 /// A note or link pinned to a project element's context repo
 /// (`mw_element_notes`). `kind` is "note" (free text in `body`) or "link"
 /// (`url` + optional `body` label).

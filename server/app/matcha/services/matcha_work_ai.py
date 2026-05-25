@@ -1687,3 +1687,85 @@ def get_ai_provider() -> GeminiProvider:
     if _provider is None:
         _provider = GeminiProvider()
     return _provider
+
+
+_TASK_DRAFT_PRIORITIES = {"critical", "high", "medium", "low"}
+_TASK_DRAFT_CATEGORIES = {"engineering", "bug", "product", "sales", "general", "manual"}
+_TASK_DRAFT_COLUMNS = {"todo", "in_progress", "review", "done"}
+
+
+async def generate_task_draft(
+    *,
+    prompt: str,
+    project_title: Optional[str],
+    collaborator_names: list[str],
+    element_names: list[str],
+) -> dict:
+    """Turn a natural-language request into a structured kanban-ticket draft via
+    Gemini Flash Lite. Returns a dict of fields (no DB write) — the route maps
+    assignee/element NAMES back to ids and the client reviews before creating.
+    """
+    people = ", ".join(collaborator_names) if collaborator_names else "(none)"
+    elems = ", ".join(element_names) if element_names else "(none)"
+    where = f' in the project "{project_title}"' if project_title else ""
+
+    instruction = f"""You turn a teammate's plain-English request into one kanban ticket{where}.
+Return ONLY a JSON object with these keys:
+- "title": short imperative summary (max ~80 chars).
+- "description": markdown. Restate the ask, and if the request pastes an error/log/stack trace, include it VERBATIM inside a fenced ``` code block. Keep it concise.
+- "priority": one of critical | high | medium | low. Infer from urgency words ("urgent","blocker","asap"→high/critical); default "medium".
+- "category": one of engineering | bug | product | sales | general | manual. Errors/crashes/stack traces → "bug"; build/refactor/infra → "engineering"; feature ideas → "product"; deals → "sales"; else "general".
+- "board_column": almost always "todo".
+- "assignee_name": EXACTLY one name from this list, or null. People: [{people}]. Match the person the user names (e.g. "assign to haley" → the matching name); null if none clearly named or no match.
+- "element_name": EXACTLY one name from this list, or null. Elements (what the work is about): [{elems}]. Pick one only if the request is clearly about it; else null.
+
+Request:
+{prompt}"""
+
+    provider = get_ai_provider()
+
+    def _call() -> str:
+        resp = provider.client.models.generate_content(
+            model="gemini-3.1-flash-lite-preview",
+            contents=instruction,
+            config=types.GenerateContentConfig(
+                temperature=0.2,
+                response_mime_type="application/json",
+            ),
+        )
+        return resp.text or ""
+
+    raw = await asyncio.to_thread(_call)
+    try:
+        data = json.loads(_clean_json_text(raw))
+    except (json.JSONDecodeError, ValueError):
+        data = {}
+
+    if not isinstance(data, dict):
+        data = {}
+
+    title = str(data.get("title") or "").strip() or (prompt.strip()[:80] or "New task")
+    description = str(data.get("description") or "").strip() or None
+    priority = str(data.get("priority") or "").strip().lower()
+    if priority not in _TASK_DRAFT_PRIORITIES:
+        priority = "medium"
+    category = str(data.get("category") or "").strip().lower()
+    if category not in _TASK_DRAFT_CATEGORIES:
+        category = "manual"
+    board_column = str(data.get("board_column") or "").strip().lower()
+    if board_column not in _TASK_DRAFT_COLUMNS:
+        board_column = "todo"
+
+    def _clean_opt(v) -> Optional[str]:
+        s = str(v).strip() if v is not None else ""
+        return s or None
+
+    return {
+        "title": title[:200],
+        "description": description,
+        "priority": priority,
+        "category": category,
+        "board_column": board_column,
+        "assignee_name": _clean_opt(data.get("assignee_name")),
+        "element_name": _clean_opt(data.get("element_name")),
+    }
