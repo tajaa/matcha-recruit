@@ -309,40 +309,10 @@ struct ChannelMessageRowView: View {
 
     @ViewBuilder
     private func senderAvatar(_ msg: ChannelMessage) -> some View {
-        if let urlStr = msg.senderAvatarUrl, let url = URL(string: urlStr) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 36, height: 36)
-                        .clipShape(Circle())
-                default:
-                    avatarFallback(msg.senderName)
-                }
-            }
-        } else {
-            avatarFallback(msg.senderName)
-        }
-    }
-
-    private func avatarFallback(_ name: String) -> some View {
-        let initials = name
-            .split(separator: " ")
-            .prefix(2)
-            .compactMap { $0.first.map(String.init) }
-            .joined()
-            .uppercased()
-        let hue = Double(abs(name.hashValue) % 360) / 360.0
-        return Circle()
-            .fill(Color(hue: hue, saturation: 0.55, brightness: 0.6))
-            .frame(width: 36, height: 36)
-            .overlay(
-                Text(initials.isEmpty ? "?" : initials)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white)
-            )
+        // Cached + sender-keyed: same avatar never re-fetches or flickers to
+        // initials between rows, and a message that arrives without
+        // sender_avatar_url still shows the sender's last-known avatar.
+        ChannelAvatarView(senderId: msg.senderId, payloadURL: msg.senderAvatarUrl, name: msg.senderName)
     }
 
     @ViewBuilder
@@ -491,4 +461,102 @@ func channelAttachmentIcon(for contentType: String) -> String {
     if contentType.contains("csv") || contentType.contains("sheet") { return "tablecells" }
     if contentType.contains("word") || contentType.contains("document") { return "doc.text" }
     return "paperclip"
+}
+
+/// Process-wide avatar cache. Fixes the "sometimes the pfp shows, sometimes it
+/// doesn't" flicker: SwiftUI's `AsyncImage` keeps no shared cache, so it
+/// re-fetches the same avatar for every row and any transient failure falls
+/// back to initials. Two layers:
+///  1. `senderId → last non-nil URL` — a message that arrives without
+///     `sender_avatar_url` reuses the sender's known avatar instead of dropping
+///     to initials.
+///  2. `URL → decoded NSImage` — the same avatar loads once per session, then
+///     renders instantly and stably across rows.
+final class AvatarImageCache {
+    static let shared = AvatarImageCache()
+    private let images = NSCache<NSString, NSImage>()
+    private var urlBySender: [String: String] = [:]
+    private let lock = NSLock()
+
+    /// Returns the URL to use, remembering a non-empty payload URL for this
+    /// sender and falling back to the last one seen when the payload omits it.
+    func resolve(senderId: String, payloadURL: String?) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        if let u = payloadURL, !u.isEmpty {
+            urlBySender[senderId] = u
+            return u
+        }
+        return urlBySender[senderId]
+    }
+
+    func image(for url: String) -> NSImage? { images.object(forKey: url as NSString) }
+    func store(_ image: NSImage, for url: String) { images.setObject(image, forKey: url as NSString) }
+}
+
+/// Avatar circle backed by `AvatarImageCache`. Shows the cached/decoded image
+/// when available; otherwise colored initials. Only a genuinely missing URL or
+/// a failed fetch leaves initials up — a successful load is cached so it never
+/// reverts on the next row.
+private struct ChannelAvatarView: View {
+    let senderId: String
+    let payloadURL: String?
+    let name: String
+    @State private var image: NSImage?
+
+    private var resolvedURL: String? {
+        AvatarImageCache.shared.resolve(senderId: senderId, payloadURL: payloadURL)
+    }
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                fallback
+            }
+        }
+        .frame(width: 36, height: 36)
+        .clipShape(Circle())
+        .task(id: resolvedURL) { await load() }
+    }
+
+    private var fallback: some View {
+        let initials = name
+            .split(separator: " ")
+            .prefix(2)
+            .compactMap { $0.first.map(String.init) }
+            .joined()
+            .uppercased()
+        let hue = Double(abs(name.hashValue) % 360) / 360.0
+        return Circle()
+            .fill(Color(hue: hue, saturation: 0.55, brightness: 0.6))
+            .overlay(
+                Text(initials.isEmpty ? "?" : initials)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white)
+            )
+    }
+
+    @MainActor
+    private func load() async {
+        // Show a cached image immediately; otherwise fetch once and cache.
+        guard let urlStr = resolvedURL, let url = URL(string: urlStr) else {
+            image = nil
+            return
+        }
+        if let cached = AvatarImageCache.shared.image(for: urlStr) {
+            image = cached
+            return
+        }
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard !Task.isCancelled, let img = NSImage(data: data) else { return }
+            AvatarImageCache.shared.store(img, for: urlStr)
+            image = img
+        } catch {
+            // Leave initials up; a later appearance retries the fetch.
+        }
+    }
 }
