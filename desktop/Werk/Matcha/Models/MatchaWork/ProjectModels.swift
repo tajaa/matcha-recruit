@@ -586,6 +586,16 @@ struct MWSectionHistoryEntry: Codable, Identifiable {
     let content: String
     let source: String?
     let at: String
+    /// Who authored this (now-superseded) content. Older snapshots predate
+    /// attribution and carry nil — fall back to `source` for display.
+    let authorId: String?
+    let authorName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case content, source, at
+        case authorId = "author_id"
+        case authorName = "author_name"
+    }
 }
 
 struct MWProjectSection: Codable, Identifiable {
@@ -598,6 +608,10 @@ struct MWProjectSection: Codable, Identifiable {
     var contentSource: String?
     var contentUpdatedAt: String?
     var history: [MWSectionHistoryEntry]?
+    /// Who last wrote the current content + when — drives "Last edited by X".
+    var lastEditedBy: String?
+    var lastEditedByName: String?
+    var lastEditedAt: String?
 
     var hasPendingRevision: Bool {
         !(pendingRevision?.isEmpty ?? true)
@@ -610,6 +624,9 @@ struct MWProjectSection: Codable, Identifiable {
         case pendingChangeSummary = "pending_change_summary"
         case contentSource = "content_source"
         case contentUpdatedAt = "content_updated_at"
+        case lastEditedBy = "last_edited_by"
+        case lastEditedByName = "last_edited_by_name"
+        case lastEditedAt = "last_edited_at"
     }
 
     // Tolerate `title: null` in legacy section data — historical AI output
@@ -628,6 +645,9 @@ struct MWProjectSection: Codable, Identifiable {
         contentSource = try c.decodeIfPresent(String.self, forKey: .contentSource)
         contentUpdatedAt = try c.decodeIfPresent(String.self, forKey: .contentUpdatedAt)
         history = try c.decodeIfPresent([MWSectionHistoryEntry].self, forKey: .history)
+        lastEditedBy = try c.decodeIfPresent(String.self, forKey: .lastEditedBy)
+        lastEditedByName = try c.decodeIfPresent(String.self, forKey: .lastEditedByName)
+        lastEditedAt = try c.decodeIfPresent(String.self, forKey: .lastEditedAt)
     }
 }
 

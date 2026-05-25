@@ -555,10 +555,23 @@ struct ProjectDetailView: View {
                         onSave: { title, content in
                             Task { await viewModel.updateSection(sectionId: sid, title: title, content: content) }
                         },
+                        onRestore: { restored in
+                            // Pass the current title (a null title would blank it
+                            // server-side) — restore only rolls back content.
+                            Task { await viewModel.updateSection(sectionId: sid, title: section.title, content: restored) }
+                        },
                         onCaretMove: { anchor, head in
                             presenceVM.reportCaret(sectionId: sid, anchor: anchor, head: head)
+                        },
+                        lockedByName: presenceVM.lockedSections[sid]?.name,
+                        liveContent: presenceVM.liveSections[sid],
+                        onEditStart: { presenceVM.startEditing(sectionId: sid) },
+                        onEditEnd: { presenceVM.endEditing(sectionId: sid) },
+                        onContentChange: { title, content in
+                            presenceVM.sendSectionContent(sectionId: sid, title: title, content: content)
                         }
                     )
+                    .id(sid)
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 0) {
@@ -573,6 +586,11 @@ struct ProjectDetailView: View {
                                                     .font(.system(size: 10))
                                                     .foregroundColor(.secondary)
                                                     .lineLimit(2)
+                                            }
+                                            if let editor = section.lastEditedByName, !editor.isEmpty {
+                                                Text("Last edited by \(editor)")
+                                                    .font(.system(size: 9))
+                                                    .foregroundColor(.secondary.opacity(0.8))
                                             }
                                         }
                                         .frame(maxWidth: .infinity, alignment: .leading)

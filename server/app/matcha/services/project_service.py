@@ -592,24 +592,60 @@ def _sections_from_row(raw) -> list:
 
 
 _HISTORY_SNAPSHOT_INTERVAL_SEC = 300
-_HISTORY_MAX_ENTRIES = 20
+_HISTORY_MAX_ENTRIES = 50
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _maybe_append_history(section: dict, prior_content: str, prior_source: str) -> list:
-    """Append a snapshot of prior_content to section['history'] if >5min since
-    last snapshot. Returns updated history list. Caps at _HISTORY_MAX_ENTRIES.
-    No-op when prior_content is empty.
+async def _resolve_actor_name(user_id) -> Optional[str]:
+    """Display name for a user id (clients/employees/admins, email fallback).
+    Mirrors the COALESCE pattern used across the matcha services. None for a
+    null/unknown user."""
+    if user_id is None:
+        return None
+    try:
+        uid = user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+    except (TypeError, ValueError):
+        return None
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
+            FROM users u
+            LEFT JOIN clients c ON c.user_id = u.id
+            LEFT JOIN employees e ON e.user_id = u.id
+            LEFT JOIN admins a ON a.user_id = u.id
+            WHERE u.id = $1
+            """,
+            uid,
+        )
+    name = (row["name"] or "").strip() if row else ""
+    return name or None
+
+
+def _maybe_append_history(
+    section: dict,
+    prior_content: str,
+    prior_source: str,
+    *,
+    prior_author_id: Optional[str] = None,
+    prior_author_name: Optional[str] = None,
+    force: bool = False,
+) -> list:
+    """Append a snapshot of prior_content (with the author who wrote it) to
+    section['history']. Snapshots on the >5min cadence, OR immediately when
+    `force` is set — used when a *different* author takes over so a contributor's
+    version is never swallowed by the debounce. No-op when prior_content empty.
+    Caps at _HISTORY_MAX_ENTRIES.
     """
     history = list(section.get("history") or [])
     if not prior_content:
         return history
     last_at = history[-1].get("at") if history else None
     now = datetime.now(timezone.utc)
-    if last_at:
+    if not force and last_at:
         try:
             last_dt = datetime.fromisoformat(last_at)
             if (now - last_dt).total_seconds() < _HISTORY_SNAPSHOT_INTERVAL_SEC:
@@ -619,6 +655,8 @@ def _maybe_append_history(section: dict, prior_content: str, prior_source: str) 
     history.append({
         "content": prior_content,
         "source": prior_source or "user",
+        "author_id": str(prior_author_id) if prior_author_id else None,
+        "author_name": prior_author_name,
         "at": now.isoformat(),
     })
     if len(history) > _HISTORY_MAX_ENTRIES:
@@ -713,11 +751,20 @@ async def add_section(project_id: UUID, section: dict) -> dict:
     return {"section": inserted, **project}
 
 
-async def update_section(project_id: UUID, section_id: str, updates: dict) -> dict:
-    """User-facing section update. Stamps content_source='user' and appends
-    a history snapshot (>=5min cadence) when content changes.
+async def update_section(
+    project_id: UUID,
+    section_id: str,
+    updates: dict,
+    *,
+    actor_user_id=None,
+    actor_name: Optional[str] = None,
+) -> dict:
+    """User-facing section update. Stamps content_source='user', records the
+    editing author, and appends an author-attributed history snapshot when
+    content changes (forced when a different author takes over).
     """
     source = updates.get("_source") or "user"
+    actor_id_str = str(actor_user_id) if actor_user_id else None
 
     def mutate(sections):
         out = []
@@ -728,14 +775,26 @@ async def update_section(project_id: UUID, section_id: str, updates: dict) -> di
                     "content" in updates and updates["content"] != s.get("content")
                 )
                 if content_changed:
+                    prior_author_id = s.get("last_edited_by")
+                    # Force a snapshot when a different author takes over, so the
+                    # prior contributor's version is preserved even within 5 min.
+                    force = actor_id_str is not None and actor_id_str != prior_author_id
                     merged["history"] = _maybe_append_history(
                         s,
                         s.get("content") or "",
                         s.get("content_source") or "user",
+                        prior_author_id=prior_author_id,
+                        prior_author_name=s.get("last_edited_by_name"),
+                        force=force,
                     )
                     merged["content"] = updates["content"]
                     merged["content_source"] = source
                     merged["content_updated_at"] = _now_iso()
+                    # Who wrote the now-current content — drives "Last edited by X"
+                    # and the author stamp on the NEXT snapshot that displaces it.
+                    merged["last_edited_by"] = actor_id_str
+                    merged["last_edited_by_name"] = actor_name
+                    merged["last_edited_at"] = _now_iso()
                     # Intentionally preserve pending_revision. Only
                     # accept_section_revision / reject_section_revision clear
                     # it — user edits and pending AI suggestions coexist so
@@ -753,8 +812,18 @@ async def update_section(project_id: UUID, section_id: str, updates: dict) -> di
     return project
 
 
-async def accept_section_revision(project_id: UUID, section_id: str) -> dict:
-    """Promote pending_revision → content. Records history snapshot."""
+async def accept_section_revision(
+    project_id: UUID,
+    section_id: str,
+    *,
+    actor_user_id=None,
+    actor_name: Optional[str] = None,
+) -> dict:
+    """Promote pending_revision → content. Snapshots the displaced content with
+    its prior author, and records the accepting human as the new content's
+    editor (content_source stays 'ai' since the text is AI-authored)."""
+    actor_id_str = str(actor_user_id) if actor_user_id else None
+
     def mutate(sections):
         out = []
         for s in sections:
@@ -764,14 +833,21 @@ async def accept_section_revision(project_id: UUID, section_id: str) -> dict:
                     out.append(s)
                     continue
                 merged = {**s}
+                prior_author_id = s.get("last_edited_by")
                 merged["history"] = _maybe_append_history(
                     s,
                     s.get("content") or "",
                     s.get("content_source") or "user",
+                    prior_author_id=prior_author_id,
+                    prior_author_name=s.get("last_edited_by_name"),
+                    force=actor_id_str is not None and actor_id_str != prior_author_id,
                 )
                 merged["content"] = pending
                 merged["content_source"] = "ai"
                 merged["content_updated_at"] = _now_iso()
+                merged["last_edited_by"] = actor_id_str
+                merged["last_edited_by_name"] = actor_name
+                merged["last_edited_at"] = _now_iso()
                 merged["pending_revision"] = None
                 merged["pending_change_summary"] = None
                 out.append(merged)

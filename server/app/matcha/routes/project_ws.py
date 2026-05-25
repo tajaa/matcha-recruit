@@ -42,6 +42,14 @@ _RATE_LIMIT_WINDOW = 1.0
 # all subscribers, so a giant blob would amplify into a DoS.
 _MAX_SECTION_ID_LEN = 64
 
+# Live co-edit section soft-locks. Redis-backed so they're correct across the
+# uvicorn workers (same reason presence/fan-out use Redis). The TTL frees a lock
+# automatically if the editor's client crashes without a section_edit_end.
+_SECTION_LOCK_PREFIX = "mw:seclock:"
+_SECTION_LOCK_TTL = 20
+# Cap a live section_content frame — it fans out to every watcher each tick.
+_MAX_SECTION_CONTENT_LEN = 200_000
+
 # Redis pub/sub channel used to fan-out project broadcasts across uvicorn
 # workers. Same architectural fix as channels_ws.py: with --workers 2 the
 # in-process ProjectConnectionManager dicts would otherwise silo presence
@@ -86,6 +94,11 @@ class ProjectConnectionManager:
         self.page_rooms: Dict[Tuple[UUID, str], Set[UUID]] = {}
         # (user_id, project_id) → ring buffer of recent cursor/caret timestamps
         self.rate_history: Dict[Tuple[UUID, UUID], Deque[float]] = {}
+        # Live co-edit locks held by THIS worker's users → release proactively
+        # on disconnect (Redis TTL is the backstop for crashes).
+        self.held_section_locks: Dict[UUID, Set[Tuple[UUID, str]]] = {}
+        # Redis-down single-process fallback: (project_id, section_id) → holder.
+        self._local_section_locks: Dict[Tuple[UUID, str], dict] = {}
         self.lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket, user: ProjectUser):
@@ -114,6 +127,10 @@ class ProjectConnectionManager:
         # Outside the lock: fan out user_left for each project the user was in.
         for project_id, page_key in pages.items():
             await self._remove_from_rooms(user_id, project_id, page_key, user)
+
+        # Free any sections this user was actively editing so they don't stay
+        # wedged until the Redis TTL expires.
+        await self.release_all_section_locks(user_id, user)
 
     async def _remove_from_rooms(
         self,
@@ -235,6 +252,121 @@ class ProjectConnectionManager:
             "anchor": anchor,
             "head": head,
         }, exclude_user=user_id)
+
+    # ── Live co-edit soft locks ──────────────────────────────────────────────
+
+    def _track_held(self, user_id: UUID, project_id: UUID, section_id: str) -> None:
+        self.held_section_locks.setdefault(user_id, set()).add((project_id, section_id))
+
+    def _untrack_held(self, user_id: UUID, project_id: UUID, section_id: str) -> None:
+        held = self.held_section_locks.get(user_id)
+        if held:
+            held.discard((project_id, section_id))
+
+    async def acquire_section_lock(self, project_id: UUID, section_id: str, user: "ProjectUser") -> Optional[dict]:
+        """Claim the section for editing. Returns None when granted (incl. when
+        this user already holds it — reconnect/re-open), else the current
+        holder dict {user_id, name} so the caller can deny."""
+        holder = {"user_id": str(user.id), "name": user.name}
+        redis = get_redis_cache()
+        if redis is None:
+            existing = self._local_section_locks.get((project_id, section_id))
+            if existing and existing["user_id"] != str(user.id):
+                return existing
+            self._local_section_locks[(project_id, section_id)] = holder
+            self._track_held(user.id, project_id, section_id)
+            return None
+        key = f"{_SECTION_LOCK_PREFIX}{project_id}:{section_id}"
+        val = json.dumps(holder)
+        ok = await redis.set(key, val, nx=True, ex=_SECTION_LOCK_TTL)
+        if ok:
+            self._track_held(user.id, project_id, section_id)
+            return None
+        cur = await redis.get(key)
+        cur_holder = None
+        if cur:
+            try:
+                cur_holder = json.loads(cur)
+            except (ValueError, TypeError):
+                cur_holder = None
+        # Already ours (re-open / heartbeat gap) → refresh and treat as granted.
+        if cur_holder and cur_holder.get("user_id") == str(user.id):
+            await redis.set(key, val, ex=_SECTION_LOCK_TTL)
+            self._track_held(user.id, project_id, section_id)
+            return None
+        return cur_holder
+
+    async def refresh_section_lock(self, project_id: UUID, section_id: str, user: "ProjectUser") -> bool:
+        """Extend the lock TTL while the holder keeps typing. Re-acquires if it
+        expired and is now free. False when someone else holds it."""
+        redis = get_redis_cache()
+        if redis is None:
+            h = self._local_section_locks.get((project_id, section_id))
+            if h is None:
+                self._local_section_locks[(project_id, section_id)] = {"user_id": str(user.id), "name": user.name}
+                self._track_held(user.id, project_id, section_id)
+                return True
+            return h["user_id"] == str(user.id)
+        key = f"{_SECTION_LOCK_PREFIX}{project_id}:{section_id}"
+        cur = await redis.get(key)
+        if not cur:
+            return (await self.acquire_section_lock(project_id, section_id, user)) is None
+        try:
+            h = json.loads(cur)
+        except (ValueError, TypeError):
+            h = None
+        if h and h.get("user_id") == str(user.id):
+            await redis.set(key, cur, ex=_SECTION_LOCK_TTL)
+            return True
+        return False
+
+    async def release_section_lock(self, project_id: UUID, section_id: str, user_id: UUID) -> None:
+        """Release the lock iff this user holds it. Safe to call redundantly."""
+        self._untrack_held(user_id, project_id, section_id)
+        redis = get_redis_cache()
+        if redis is None:
+            h = self._local_section_locks.get((project_id, section_id))
+            if h and h["user_id"] == str(user_id):
+                self._local_section_locks.pop((project_id, section_id), None)
+            return
+        key = f"{_SECTION_LOCK_PREFIX}{project_id}:{section_id}"
+        cur = await redis.get(key)
+        if not cur:
+            return
+        try:
+            h = json.loads(cur)
+        except (ValueError, TypeError):
+            h = None
+        if h and h.get("user_id") == str(user_id):
+            await redis.delete(key)
+
+    async def broadcast_section_lock(self, project_id: UUID, page_key: str, section_id: str, user: "ProjectUser", *, locked: bool) -> None:
+        await self._broadcast_to_page(project_id, page_key, {
+            "type": "section_locked" if locked else "section_unlocked",
+            "project_id": str(project_id),
+            "section_id": section_id,
+            "user_id": str(user.id),
+            "user_name": user.name,
+        }, exclude_user=user.id)
+
+    async def broadcast_section_content(self, project_id: UUID, page_key: str, user_id: UUID, section_id: str, title, content: str) -> None:
+        await self._broadcast_to_page(project_id, page_key, {
+            "type": "section_content",
+            "project_id": str(project_id),
+            "section_id": section_id,
+            "user_id": str(user_id),
+            "title": title,
+            "content": content,
+        }, exclude_user=user_id)
+
+    async def release_all_section_locks(self, user_id: UUID, user: Optional["ProjectUser"]) -> None:
+        """On disconnect: free every lock this user held + tell watchers."""
+        held = self.held_section_locks.pop(user_id, set())
+        for (project_id, section_id) in held:
+            await self.release_section_lock(project_id, section_id, user_id)
+            if user is not None:
+                # Section editing lives on the "sections" sub-tab.
+                await self.broadcast_section_lock(project_id, "sections", section_id, user, locked=False)
 
     async def get_project_presence(self, project_id: UUID) -> list:
         """Snapshot of who's in this project, with their current page_key.
@@ -679,6 +811,61 @@ async def project_websocket(
                     continue
                 await project_manager.broadcast_caret(
                     project_id, page_key, user.id, section_id_str, int(anchor), int(head)
+                )
+
+            elif msg_type == "section_edit_start":
+                # Claim a section for editing. Section ids are 16-hex (not
+                # UUIDs), so validate by length only — not UUID format.
+                page_key = data.get("page_key") or "sections"
+                section_id = data.get("section_id")
+                if section_id is None or not (0 < len(str(section_id)) <= _MAX_SECTION_ID_LEN):
+                    continue
+                section_id_str = str(section_id)
+                holder = await project_manager.acquire_section_lock(project_id, section_id_str, user)
+                if holder is None:
+                    await project_manager.broadcast_section_lock(
+                        project_id, page_key, section_id_str, user, locked=True
+                    )
+                else:
+                    # Denied — tell the requester only who holds it.
+                    await websocket.send_json({
+                        "type": "section_lock_denied",
+                        "project_id": str(project_id),
+                        "section_id": section_id_str,
+                        "holder_id": holder.get("user_id"),
+                        "holder_name": holder.get("name"),
+                    })
+
+            elif msg_type == "section_content":
+                page_key = data.get("page_key") or "sections"
+                section_id = data.get("section_id")
+                if section_id is None or not (0 < len(str(section_id)) <= _MAX_SECTION_ID_LEN):
+                    continue
+                content = data.get("content")
+                if content is None:
+                    continue
+                section_id_str = str(section_id)
+                # Only the lock holder may stream live content; this refreshes
+                # the lock TTL while they keep typing.
+                if not await project_manager.refresh_section_lock(project_id, section_id_str, user):
+                    continue
+                if not project_manager.check_rate_limit(user.id, project_id):
+                    continue
+                if isinstance(content, str) and len(content) > _MAX_SECTION_CONTENT_LEN:
+                    content = content[:_MAX_SECTION_CONTENT_LEN]
+                await project_manager.broadcast_section_content(
+                    project_id, page_key, user.id, section_id_str, data.get("title"), content
+                )
+
+            elif msg_type == "section_edit_end":
+                page_key = data.get("page_key") or "sections"
+                section_id = data.get("section_id")
+                if section_id is None or not (0 < len(str(section_id)) <= _MAX_SECTION_ID_LEN):
+                    continue
+                section_id_str = str(section_id)
+                await project_manager.release_section_lock(project_id, section_id_str, user.id)
+                await project_manager.broadcast_section_lock(
+                    project_id, page_key, section_id_str, user, locked=False
                 )
 
             elif msg_type == "leave_project":

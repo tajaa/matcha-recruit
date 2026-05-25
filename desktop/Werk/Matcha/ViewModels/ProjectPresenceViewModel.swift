@@ -18,13 +18,22 @@ final class ProjectPresenceViewModel {
     private(set) var members: [ProjectWebSocket.PresenceMember] = []
     private(set) var remoteCursors: [String: ProjectWebSocket.CursorPayload] = [:]
     private(set) var remoteCarets: [String: ProjectWebSocket.CaretPayload] = [:]
+    /// Sections currently held by *another* editor (section_id → holder). Our
+    /// own granted lock never lands here (the server excludes the holder from
+    /// the `section_locked` broadcast); a `section_lock_denied` for a section we
+    /// tried to open does. Drives read-only + "X is editing".
+    private(set) var lockedSections: [String: SectionLockHolder] = [:]
+    /// Latest live content streamed by the active editor, for watchers.
+    private(set) var liveSections: [String: SectionLiveContent] = [:]
 
     private var projectId: String?
     private var pageKey: String = "sections"
     private var lastCursorSend: Date = .distantPast
     private var lastCaretSend: Date = .distantPast
+    private var lastContentSend: [String: Date] = [:]
     private let cursorMinInterval: TimeInterval = 0.050
     private let caretMinInterval: TimeInterval = 0.100
+    private let contentMinInterval: TimeInterval = 0.5
 
     /// Connect (or reuse existing connection), join the project on the given
     /// sub-tab, and wire callbacks into local state.
@@ -65,7 +74,49 @@ final class ProjectPresenceViewModel {
         ws.onCaret = { [weak self] payload in
             self?.remoteCarets[payload.userId] = payload
         }
+        ws.onSectionLocked = { [weak self] sectionId, userId, name in
+            self?.lockedSections[sectionId] = SectionLockHolder(userId: userId, name: name)
+        }
+        ws.onSectionUnlocked = { [weak self] sectionId in
+            self?.lockedSections.removeValue(forKey: sectionId)
+            self?.liveSections.removeValue(forKey: sectionId)
+        }
+        ws.onSectionLockDenied = { [weak self] sectionId, holderId, holderName in
+            self?.lockedSections[sectionId] = SectionLockHolder(
+                userId: holderId ?? "", name: holderName ?? "Someone"
+            )
+        }
+        ws.onSectionContent = { [weak self] sectionId, title, content in
+            self?.liveSections[sectionId] = SectionLiveContent(title: title, content: content)
+        }
         ws.joinProject(projectId: projectId, pageKey: pageKey)
+    }
+
+    // MARK: - Live section co-editing
+
+    func startEditing(sectionId: String) {
+        guard let projectId else { return }
+        ProjectWebSocket.shared.sendSectionEditStart(projectId: projectId, pageKey: pageKey, sectionId: sectionId)
+    }
+
+    /// Stream live content while holding the lock. Throttled per section; pass
+    /// `force` on the final flush so the last keystroke isn't dropped.
+    func sendSectionContent(sectionId: String, title: String?, content: String, force: Bool = false) {
+        guard let projectId else { return }
+        let now = Date()
+        if !force, let last = lastContentSend[sectionId], now.timeIntervalSince(last) < contentMinInterval {
+            return
+        }
+        lastContentSend[sectionId] = now
+        ProjectWebSocket.shared.sendSectionContent(
+            projectId: projectId, pageKey: pageKey, sectionId: sectionId, title: title, content: content
+        )
+    }
+
+    func endEditing(sectionId: String) {
+        guard let projectId else { return }
+        lastContentSend.removeValue(forKey: sectionId)
+        ProjectWebSocket.shared.sendSectionEditEnd(projectId: projectId, pageKey: pageKey, sectionId: sectionId)
     }
 
     func setPage(_ pageKey: String) {
@@ -104,8 +155,23 @@ final class ProjectPresenceViewModel {
         members = []
         remoteCursors = [:]
         remoteCarets = [:]
+        lockedSections = [:]
+        liveSections = [:]
+        lastContentSend = [:]
         projectId = nil
     }
+}
+
+/// Who currently holds a section's edit lock.
+struct SectionLockHolder: Equatable {
+    let userId: String
+    let name: String
+}
+
+/// Live content streamed by the active editor, shown to watchers read-only.
+struct SectionLiveContent: Equatable {
+    let title: String?
+    let content: String
 }
 
 /// Stable per-user color for cursor + caret rendering. Hash the user id

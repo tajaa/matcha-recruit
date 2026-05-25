@@ -42,6 +42,11 @@ final class ProjectWebSocket: NSObject {
     var onUserLeft: ((_ userId: String) -> Void)?
     var onCursor: ((CursorPayload) -> Void)?
     var onCaret: ((CaretPayload) -> Void)?
+    // Live section co-editing (soft-lock + live content).
+    var onSectionLocked: ((_ sectionId: String, _ userId: String, _ userName: String) -> Void)?
+    var onSectionUnlocked: ((_ sectionId: String) -> Void)?
+    var onSectionLockDenied: ((_ sectionId: String, _ holderId: String?, _ holderName: String?) -> Void)?
+    var onSectionContent: ((_ sectionId: String, _ title: String?, _ content: String) -> Void)?
     /// task.created / task.updated server events. Payload dict is the raw
     /// task row plus `actor_id` for self-echo suppression.
     var onTaskCreated: (([String: Any]) -> Void)?
@@ -154,6 +159,31 @@ final class ProjectWebSocket: NSObject {
         ])
     }
 
+    /// Claim a section for editing. Server replies with `section_lock_denied`
+    /// (to us only) if someone else holds it; otherwise watchers get
+    /// `section_locked`. We optimistically assume granted until a deny arrives.
+    func sendSectionEditStart(projectId: String, pageKey: String, sectionId: String) {
+        send(["type": "section_edit_start", "project_id": projectId, "page_key": pageKey, "section_id": sectionId])
+    }
+
+    /// Stream live content to watchers while we hold the lock (throttle on the
+    /// caller side). Also refreshes the lock TTL server-side.
+    func sendSectionContent(projectId: String, pageKey: String, sectionId: String, title: String?, content: String) {
+        var payload: [String: Any] = [
+            "type": "section_content",
+            "project_id": projectId,
+            "page_key": pageKey,
+            "section_id": sectionId,
+            "content": content,
+        ]
+        if let title { payload["title"] = title }
+        send(payload)
+    }
+
+    func sendSectionEditEnd(projectId: String, pageKey: String, sectionId: String) {
+        send(["type": "section_edit_end", "project_id": projectId, "page_key": pageKey, "section_id": sectionId])
+    }
+
     func leaveProject(projectId: String) {
         send(["type": "leave_project", "project_id": projectId])
         if currentProjectId == projectId {
@@ -169,6 +199,10 @@ final class ProjectWebSocket: NSObject {
         onUserLeft = nil
         onCursor = nil
         onCaret = nil
+        onSectionLocked = nil
+        onSectionUnlocked = nil
+        onSectionLockDenied = nil
+        onSectionContent = nil
         onTaskCreated = nil
         onTaskUpdated = nil
         onTaskDeleted = nil
@@ -244,6 +278,24 @@ final class ProjectWebSocket: NSObject {
                let anchor = obj["anchor"] as? Int,
                let head = obj["head"] as? Int {
                 onCaret?(CaretPayload(userId: userId, sectionId: sectionId, anchor: anchor, head: head))
+            }
+        case "section_locked":
+            if let sectionId = obj["section_id"] as? String,
+               let userId = obj["user_id"] as? String {
+                onSectionLocked?(sectionId, userId, obj["user_name"] as? String ?? "Someone")
+            }
+        case "section_unlocked":
+            if let sectionId = obj["section_id"] as? String {
+                onSectionUnlocked?(sectionId)
+            }
+        case "section_lock_denied":
+            if let sectionId = obj["section_id"] as? String {
+                onSectionLockDenied?(sectionId, obj["holder_id"] as? String, obj["holder_name"] as? String)
+            }
+        case "section_content":
+            if let sectionId = obj["section_id"] as? String,
+               let content = obj["content"] as? String {
+                onSectionContent?(sectionId, obj["title"] as? String, content)
             }
         case "task.created":
             if let task = obj["task"] as? [String: Any] { onTaskCreated?(task) }

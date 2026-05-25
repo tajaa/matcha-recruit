@@ -3483,7 +3483,11 @@ async def update_project_section_endpoint(
     """Update a project section."""
     from ..services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
-    return await proj_svc.update_section(project_id, section_id, body)
+    actor_name = await proj_svc._resolve_actor_name(current_user.id)
+    return await proj_svc.update_section(
+        project_id, section_id, body,
+        actor_user_id=current_user.id, actor_name=actor_name,
+    )
 
 
 @router.delete("/projects/{project_id}/sections/{section_id}")
@@ -3507,7 +3511,11 @@ async def accept_project_section_revision_endpoint(
     """Promote a section's pending AI revision into its live content."""
     from ..services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
-    return await proj_svc.accept_section_revision(project_id, section_id)
+    actor_name = await proj_svc._resolve_actor_name(current_user.id)
+    return await proj_svc.accept_section_revision(
+        project_id, section_id,
+        actor_user_id=current_user.id, actor_name=actor_name,
+    )
 
 
 @router.post("/projects/{project_id}/sections/{section_id}/reject_revision")
