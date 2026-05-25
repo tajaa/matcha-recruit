@@ -373,6 +373,34 @@ class AppState {
                 // (task_assigned, task_progress, mentions, etc.) get the
                 // toast directly from the bell-push.
                 let isChannel = type.hasPrefix("channel_")
+
+                // "X joined the collab" → in-app toast when the user is looking
+                // at Werk (the bell already ticked; the OS banner below covers
+                // the not-frontmost case). metadata may arrive as a dict or a
+                // JSON string depending on the jsonb codec — handle both.
+                if type == "collab_joined", NSApplication.shared.isActive {
+                    func metaString(_ key: String) -> String? {
+                        let raw = n?["metadata"]
+                        if let d = raw as? [String: Any] { return d[key] as? String }
+                        if let s = raw as? String, let data = s.data(using: .utf8),
+                           let d = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                            return d[key] as? String
+                        }
+                        return nil
+                    }
+                    let joiner = metaString("joiner_name") ?? "Someone"
+                    let proj = metaString("project_title") ?? (n?["title"] as? String ?? "the collab")
+                    ChannelToastCenter.shared.push(
+                        ChannelToastCenter.Toast(
+                            channelId: "",
+                            channelName: proj,
+                            senderName: joiner,
+                            content: "joined the collab",
+                            isAttachmentOnly: false
+                        )
+                    )
+                }
+
                 if !self.isSceneActive && !isChannel {
                     let title = n?["title"] as? String ?? "Notification"
                     let body = n?["body"] as? String

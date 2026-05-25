@@ -11,6 +11,7 @@ struct CollaboratorPanelView: View {
     @State private var isSearching = false
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var inviteSent: String?
     @State private var searchTimer: Timer?
 
     /// Friends filtered by the current search text (local filter).
@@ -165,6 +166,11 @@ struct CollaboratorPanelView: View {
                 Text(err).font(.system(size: 10)).foregroundColor(.red)
                     .padding(.horizontal, 16).padding(.bottom, 8)
             }
+            if let sent = inviteSent {
+                Label(sent, systemImage: "paperplane.fill")
+                    .font(.system(size: 10)).foregroundColor(.matcha500)
+                    .padding(.horizontal, 16).padding(.bottom, 8)
+            }
         }
         .background(Color.appBackground)
         .task {
@@ -239,7 +245,16 @@ struct CollaboratorPanelView: View {
         do {
             try await MatchaWorkService.shared.addCollaborator(projectId: projectId, userId: userId)
             await load()
-            await MainActor.run { searchText = ""; searchResults = [] }
+            // Invite is pending until they accept, so the invitee won't appear
+            // in the list yet — confirm the invite was sent so it doesn't look
+            // like nothing happened.
+            await MainActor.run {
+                searchText = ""; searchResults = []
+                errorMessage = nil
+                inviteSent = "Invite sent — pending acceptance"
+            }
+            try? await Task.sleep(for: .seconds(4))
+            await MainActor.run { inviteSent = nil }
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }

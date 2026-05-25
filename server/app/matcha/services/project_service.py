@@ -1560,7 +1560,11 @@ async def list_project_links(project_id: UUID) -> list[dict]:
 
 
 async def add_collaborator(project_id: UUID, user_id: UUID, invited_by: UUID) -> list[dict]:
-    """Add a user as a collaborator. Returns updated collaborator list."""
+    """Invite a user as a PENDING collaborator: send an inbox message + a bell
+    notification, but do NOT grant access. They join only when they accept
+    (accept_project_invite flips them to active and adds them to the chat).
+    Returns the (still active-only) collaborator list — the invitee won't appear
+    until they accept, which is the point."""
     async with get_connection() as conn:
         target = await conn.fetchrow(
             "SELECT id FROM users WHERE id = $1 AND is_active = true",
@@ -1568,22 +1572,32 @@ async def add_collaborator(project_id: UUID, user_id: UUID, invited_by: UUID) ->
         )
         if not target:
             raise ValueError("User not found")
+        if user_id == invited_by:
+            raise ValueError("You cannot invite yourself")
+        existing = await conn.fetchrow(
+            "SELECT status FROM mw_project_collaborators WHERE project_id = $1 AND user_id = $2",
+            project_id, user_id,
+        )
+        if existing and existing["status"] == "active":
+            raise ValueError("User is already a collaborator")
+        # Pending — not active. A prior pending/removed row is re-armed.
         await conn.execute(
             """
             INSERT INTO mw_project_collaborators (project_id, user_id, invited_by, role, status)
-            VALUES ($1, $2, $3, 'collaborator', 'active')
-            ON CONFLICT (project_id, user_id) DO UPDATE SET status = 'active'
+            VALUES ($1, $2, $3, 'collaborator', 'pending')
+            ON CONFLICT (project_id, user_id)
+            DO UPDATE SET status = 'pending', invited_by = $3, created_at = NOW()
             """,
             project_id, user_id, invited_by,
         )
 
-        project = await conn.fetchrow("SELECT title FROM mw_projects WHERE id = $1", project_id)
+        project = await conn.fetchrow("SELECT title, company_id FROM mw_projects WHERE id = $1", project_id)
         inviter = await conn.fetchrow("SELECT email FROM users WHERE id = $1", invited_by)
         inviter_client = await conn.fetchrow("SELECT name FROM clients WHERE user_id = $1", invited_by)
         inviter_name = (inviter_client["name"] if inviter_client and inviter_client["name"] else None) or inviter["email"].split("@")[0]
         project_title = project["title"] if project else "a project"
 
-        msg_content = f"**{inviter_name}** has invited you to join the project **{project_title}**."
+        msg_content = f"**{inviter_name}** invited you to join the project **{project_title}**. Open your projects to accept or decline."
         conversation = await conn.fetchrow(
             """INSERT INTO inbox_conversations (title, is_group, created_by, last_message_at, last_message_preview)
                VALUES ($1, false, $2, NOW(), $3)
@@ -1595,36 +1609,57 @@ async def add_collaborator(project_id: UUID, user_id: UUID, invited_by: UUID) ->
         await conn.execute("INSERT INTO inbox_participants (conversation_id, user_id) VALUES ($1, $2)", conv_id, user_id)
         await conn.execute("INSERT INTO inbox_messages (conversation_id, sender_id, content) VALUES ($1, $2, $3)", conv_id, invited_by, msg_content)
 
-        # If the project already has a discussion channel, auto-add the new
-        # collaborator. The channel is the chat surface for collab projects.
-        proj_data_row = await conn.fetchrow(
+    # Bell notification for the invitee (own connection; best-effort — never
+    # fail the invite over a notification hiccup).
+    if project and project["company_id"]:
+        try:
+            from . import notification_service as notif_svc
+            await notif_svc.create_notification(
+                user_id=user_id,
+                company_id=project["company_id"],
+                type="project_invite",
+                title=f"Project invite from {inviter_name}",
+                body=f"You've been invited to join \"{project_title}\"",
+                link="/work",
+                metadata={"project_id": str(project_id), "invited_by": str(invited_by)},
+            )
+        except Exception as exc:
+            logger.warning("Failed to create invite notification: %s", exc)
+
+    return await list_collaborators(project_id)
+
+
+async def ensure_collaborator_in_discussion_channel(project_id: UUID, user_id: UUID) -> None:
+    """Add one user to the project's discussion channel (if it exists). Called
+    when an invite is accepted — the chat is the collab surface, so a new active
+    collaborator joins it. No-op for non-collab projects or before the channel
+    is created."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
             "SELECT project_type, project_data FROM mw_projects WHERE id = $1",
             project_id,
         )
-        if proj_data_row and proj_data_row["project_type"] == "collab":
-            data = proj_data_row["project_data"]
-            if isinstance(data, str):
-                try:
-                    data = json.loads(data or "{}")
-                except (json.JSONDecodeError, ValueError):
-                    data = {}
-            data = data or {}
-            chan_id = data.get("discussion_channel_id")
-            if chan_id:
-                try:
-                    await conn.execute(
-                        """
-                        INSERT INTO channel_members (channel_id, user_id, role, last_contributed_at)
-                        VALUES ($1, $2, 'member', NOW())
-                        ON CONFLICT (channel_id, user_id) DO NOTHING
-                        """,
-                        UUID(chan_id) if isinstance(chan_id, str) else chan_id,
-                        user_id,
-                    )
-                except Exception as exc:
-                    logger.warning("ensure collab channel member failed: %s", exc)
-
-    return await list_collaborators(project_id)
+        if not row or row["project_type"] != "collab":
+            return
+        data = row["project_data"]
+        if isinstance(data, str):
+            try:
+                data = json.loads(data or "{}")
+            except (json.JSONDecodeError, ValueError):
+                data = {}
+        data = data or {}
+        chan_id = data.get("discussion_channel_id")
+        if not chan_id:
+            return
+        await conn.execute(
+            """
+            INSERT INTO channel_members (channel_id, user_id, role, last_contributed_at)
+            VALUES ($1, $2, 'member', NOW())
+            ON CONFLICT (channel_id, user_id) DO NOTHING
+            """,
+            UUID(chan_id) if isinstance(chan_id, str) else chan_id,
+            user_id,
+        )
 
 
 async def remove_collaborator(project_id: UUID, user_id: UUID, removed_by: UUID) -> list[dict]:

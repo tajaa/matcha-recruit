@@ -6052,21 +6052,80 @@ async def invite_to_project(
     return {"invited": True, "email": email}
 
 
+async def _create_inbox_dm(*, from_user_id: UUID, to_user_id: UUID, conv_title: str, content: str) -> None:
+    """Create a 1:1 inbox conversation carrying a single message. Used for the
+    project invite-accepted ("X joined") notice."""
+    async with get_connection() as conn:
+        conv = await conn.fetchrow(
+            """INSERT INTO inbox_conversations (title, is_group, created_by, last_message_at, last_message_preview)
+               VALUES ($1, false, $2, NOW(), $3) RETURNING id""",
+            conv_title, from_user_id, content[:100],
+        )
+        cid = conv["id"]
+        await conn.execute("INSERT INTO inbox_participants (conversation_id, user_id) VALUES ($1, $2)", cid, from_user_id)
+        await conn.execute("INSERT INTO inbox_participants (conversation_id, user_id) VALUES ($1, $2)", cid, to_user_id)
+        await conn.execute("INSERT INTO inbox_messages (conversation_id, sender_id, content) VALUES ($1, $2, $3)", cid, from_user_id, content)
+
+
 @router.post("/projects/{project_id}/invite/accept")
 async def accept_project_invite(
     project_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Accept a pending project invitation."""
+    """Accept a pending invite — join the project + its chat, and tell the
+    creator/inviter you've joined (toast + inbox + bell)."""
+    from ..services import project_service as proj_svc
+    from ..services import notification_service as notif_svc
+
     async with get_connection() as conn:
-        result = await conn.execute(
+        row = await conn.fetchrow(
             """UPDATE mw_project_collaborators
                SET status = 'active'
-               WHERE project_id = $1 AND user_id = $2 AND status = 'pending'""",
+               WHERE project_id = $1 AND user_id = $2 AND status = 'pending'
+               RETURNING invited_by""",
             project_id, current_user.id,
         )
-        if result.endswith("0"):
+        if row is None:
             raise HTTPException(status_code=404, detail="No pending invitation found")
+        invited_by = row["invited_by"]
+        proj = await conn.fetchrow(
+            "SELECT title, created_by, company_id FROM mw_projects WHERE id = $1", project_id
+        )
+
+    # Now active → join the discussion channel (the collab chat surface).
+    try:
+        await proj_svc.ensure_collaborator_in_discussion_channel(project_id, current_user.id)
+    except Exception as e:
+        logger.warning("add accepted collaborator to channel failed: %s", e)
+
+    # Tell the creator + inviter that someone joined: bell + inbox now, and the
+    # WS push behind create_notification drives the in-app toast on their client.
+    joiner_name = await proj_svc._resolve_actor_name(current_user.id) or "Someone"
+    title = proj["title"] if proj else "a project"
+    company_id = proj["company_id"] if proj else None
+    recipients = {
+        r for r in [(proj["created_by"] if proj else None), invited_by]
+        if r is not None and r != current_user.id
+    }
+    for rid in recipients:
+        try:
+            await notif_svc.create_notification(
+                user_id=rid,
+                company_id=company_id,
+                type="collab_joined",
+                title=f"{joiner_name} joined {title}",
+                body=f"{joiner_name} has joined the collab",
+                link="/work",
+                metadata={"project_id": str(project_id), "project_title": title, "joiner_name": joiner_name},
+            )
+            await _create_inbox_dm(
+                from_user_id=current_user.id, to_user_id=rid,
+                conv_title=f"Joined: {title}",
+                content=f"**{joiner_name}** has joined **{title}**.",
+            )
+        except Exception as e:
+            logger.warning("collab_joined notify failed for %s: %s", rid, e)
+
     return {"accepted": True}
 
 
