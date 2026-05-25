@@ -21,6 +21,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from ...config import get_settings
 from ...core.models.auth import CurrentUser
+from ...core.dependencies import require_admin
 from ...core.services.secret_crypto import decrypt_secret, encrypt_secret
 from ...database import get_connection
 from ..dependencies import get_client_company_id, require_admin_or_client, require_feature
@@ -1782,6 +1783,9 @@ async def gusto_oauth_callback(
 # =======================================================================
 
 GUSTO_WEBHOOK_SECRET = os.getenv("GUSTO_WEBHOOK_SECRET", "")
+# When true, unsigned or bad-signature events are rejected (fail closed). Default
+# off so the live webhook keeps working until the signing scheme is verified in prod.
+GUSTO_WEBHOOK_REQUIRE_SIGNATURE = os.getenv("GUSTO_WEBHOOK_REQUIRE_SIGNATURE", "").lower() == "true"
 
 import logging as _logging
 _whlog = _logging.getLogger(__name__)
@@ -1789,10 +1793,14 @@ _whlog = _logging.getLogger(__name__)
 
 @router.get("/hris/webhook/gusto/token")
 async def get_gusto_verification_token(
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_admin),
 ):
-    """Return the most-recent Gusto webhook verification token (setup convenience)."""
-    await get_client_company_id(current_user)  # auth gate
+    """Return the most-recent Gusto webhook verification token (setup convenience).
+
+    Platform-admin only: the Gusto webhook is app-level (one subscription for the
+    whole partner app, verified once by the operator), and the token table is not
+    company-scoped — so this must not be exposed to per-tenant client admins.
+    """
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """SELECT verification_token FROM gusto_webhook_tokens
@@ -1827,7 +1835,12 @@ async def gusto_webhook(request: Request, background_tasks: BackgroundTasks):
             )
         return {"received": True}
 
-    # Verify signature if secret configured
+    # Signature verification. The header name + HMAC scheme below have never been
+    # exercised in prod (secret was empty), so verification is advisory until proven:
+    # mismatches are logged but accepted unless GUSTO_WEBHOOK_REQUIRE_SIGNATURE=true.
+    # Rollout: set the secret → watch logs for "signature mismatch" → once a real
+    # signed delivery verifies clean, flip GUSTO_WEBHOOK_REQUIRE_SIGNATURE=true to
+    # fully fail closed (forged terminations rejected).
     if GUSTO_WEBHOOK_SECRET:
         sig = request.headers.get("X-Gusto-Signature", "")
         expected = hmac.new(
@@ -1836,7 +1849,17 @@ async def gusto_webhook(request: Request, background_tasks: BackgroundTasks):
             hashlib.sha256,
         ).hexdigest()
         if not hmac.compare_digest(sig, expected):
-            raise HTTPException(status_code=400, detail="Invalid webhook signature")
+            if GUSTO_WEBHOOK_REQUIRE_SIGNATURE:
+                raise HTTPException(status_code=400, detail="Invalid webhook signature")
+            _whlog.warning(
+                "[Gusto Webhook] signature mismatch — accepting (REQUIRE_SIGNATURE off). "
+                "Verify header name/scheme against Gusto docs before enabling enforcement."
+            )
+    elif GUSTO_WEBHOOK_REQUIRE_SIGNATURE:
+        _whlog.error("[Gusto Webhook] REQUIRE_SIGNATURE set but no secret configured — rejecting event")
+        raise HTTPException(status_code=503, detail="Webhook signing secret not configured")
+    else:
+        _whlog.warning("[Gusto Webhook] no signing secret configured — accepting unsigned event")
 
     event_type = payload.get("event_type", "")
     entity_uuid = payload.get("entity_uuid") or payload.get("employee_uuid")
@@ -1848,8 +1871,7 @@ async def gusto_webhook(request: Request, background_tasks: BackgroundTasks):
         or (payload.get("resources") or [{}])[0].get("uuid")
     )
 
-    # One-time debug: full payload so we can confirm field names from logs.
-    _whlog.info(f"[Gusto Webhook] RAW: {body.decode(errors='replace')[:1000]}")
+    # Log identifiers only — never the full payload (contains employee PII).
     _whlog.info(f"[Gusto Webhook] event={event_type} entity={entity_uuid} company={company_uuid}")
 
     if not entity_uuid or not company_uuid:

@@ -393,12 +393,24 @@ async def _sync_single_employee(
     Must be called inside a transaction. Returns 'created' or 'updated'.
     """
     email = normalized["email"].strip().lower()
+    hris_id = normalized.get("hris_id")
 
-    existing = await conn.fetchrow(
-        "SELECT id FROM employees WHERE org_id = $1 AND email = $2",
-        company_id,
-        email,
-    )
+    # Match by hris_id first (stable across email changes; backed by the
+    # (org_id, hris_id) partial unique). Fall back to email for rows that
+    # predate hris_id backfill.
+    existing = None
+    if hris_id:
+        existing = await conn.fetchrow(
+            "SELECT id FROM employees WHERE org_id = $1 AND hris_id = $2",
+            company_id,
+            hris_id,
+        )
+    if existing is None:
+        existing = await conn.fetchrow(
+            "SELECT id FROM employees WHERE org_id = $1 AND email = $2",
+            company_id,
+            email,
+        )
 
     if existing:
         employee_id = existing["id"]
@@ -411,6 +423,13 @@ async def _sync_single_employee(
                 work_state = COALESCE($6, work_state),
                 phone = COALESCE($7, phone),
                 hris_id = COALESCE($8, hris_id),
+                -- Propagate termination + rehire from Gusto, but don't clobber
+                -- Matcha-set states (on_leave/suspended/etc.) when Gusto says 'active'.
+                employment_status = CASE
+                    WHEN $9 = 'terminated' THEN 'terminated'
+                    WHEN employees.employment_status = 'terminated' AND $9 = 'active' THEN 'active'
+                    ELSE employees.employment_status
+                END,
                 updated_at = NOW()
             WHERE id = $1 AND org_id = $2
             """,
@@ -422,6 +441,7 @@ async def _sync_single_employee(
             normalized.get("work_state"),
             normalized.get("phone"),
             normalized.get("hris_id"),
+            normalized.get("employment_status"),
         )
         action_label = "updated"
     else:
@@ -430,9 +450,10 @@ async def _sync_single_employee(
             """
             INSERT INTO employees (
                 org_id, email, personal_email, first_name, last_name,
-                work_state, employment_type, start_date, phone, job_title, department, hris_id
+                work_state, employment_type, start_date, phone, job_title, department, hris_id,
+                employment_status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             RETURNING id
             """,
             company_id,
@@ -447,6 +468,7 @@ async def _sync_single_employee(
             normalized.get("job_title"),
             normalized.get("department"),
             normalized.get("hris_id"),
+            normalized.get("employment_status") or "active",
         )
         employee_id = row["id"]
         action_label = "created"

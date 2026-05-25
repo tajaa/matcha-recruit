@@ -206,7 +206,7 @@ class HRISService:
             "work_city": work_city,
             "start_date": assignment.get("hireDate"),
             "is_manager": assignment.get("managementPosition", False),
-            "status": "active" if status_code == "Active" else "inactive",
+            "employment_status": "active" if status_code == "Active" else "terminated",
             "credentials": credentials if credentials else None,
         }
 
@@ -374,7 +374,7 @@ class GustoHRISService:
             "work_city": work_addr.get("city"),
             "start_date": primary_job.get("hire_date"),
             "is_manager": False,
-            "status": "inactive" if terminated else "active",
+            "employment_status": "terminated" if terminated else "active",
             "credentials": None,
         }
 
