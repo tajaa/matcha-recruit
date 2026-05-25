@@ -482,6 +482,25 @@ async def update_project(project_id: UUID, updates: dict) -> dict:
                         "UPDATE mw_projects SET project_data = $1::jsonb WHERE id = $2 RETURNING *",
                         json.dumps(data), project_id,
                     )
+
+            # Collab: keep the linked discussion channel's name in sync with the
+            # project title so the channels sidebar stays legible after a rename.
+            if prior and prior["project_type"] == "collab" and "title" in updates:
+                cdata = prior["project_data"]
+                if isinstance(cdata, str):
+                    try:
+                        cdata = json.loads(cdata or "{}")
+                    except (json.JSONDecodeError, ValueError):
+                        cdata = {}
+                cdata = cdata or {}
+                chan_id = cdata.get("discussion_channel_id")
+                new_title = (updates.get("title") or "").strip()
+                if chan_id and new_title:
+                    await conn.execute(
+                        "UPDATE channels SET name = $1 WHERE id = $2 AND name IS DISTINCT FROM $1",
+                        new_title,
+                        UUID(chan_id) if isinstance(chan_id, str) else chan_id,
+                    )
     return _parse_project(row)
 
 
@@ -1342,12 +1361,22 @@ async def ensure_discussion_channel(project_id: UUID, current_user_id: UUID) -> 
                     data = {}
             data = data or {}
 
+            title = (project["title"] or "Project").strip() or "Project"
+
             existing_id = data.get("discussion_channel_id")
             if existing_id:
-                return UUID(existing_id) if isinstance(existing_id, str) else existing_id
+                chan_uuid = UUID(existing_id) if isinstance(existing_id, str) else existing_id
+                # Self-heal the channel name to the current project title, so a
+                # project renamed before this sync existed (or via any path that
+                # skipped propagation) gets a legible sidebar name on next open.
+                # No-op when already in sync (IS DISTINCT FROM guard).
+                await conn.execute(
+                    "UPDATE channels SET name = $1 WHERE id = $2 AND name IS DISTINCT FROM $1",
+                    title, chan_uuid,
+                )
+                return chan_uuid
 
             company_id = project["company_id"]
-            title = (project["title"] or "Project").strip() or "Project"
 
             base_slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:60] or "project"
             slug = f"proj-{base_slug}"

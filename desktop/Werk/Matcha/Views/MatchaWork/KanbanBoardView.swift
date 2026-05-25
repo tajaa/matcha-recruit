@@ -284,7 +284,7 @@ struct KanbanBoardView: View {
 
     private var boardColumns: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
                 ForEach(columnsFor(mode: viewMode), id: \.key) { col in
                     columnView(key: col.key, label: col.label)
                 }
@@ -356,9 +356,11 @@ struct KanbanBoardView: View {
         let isEmpty = colTasks.isEmpty
         let isInlineAdding = inlineAddColumn == key
         let isHovered = hoveredEmptyColumn == key
-        // Empty columns shrink to ~110px so populated columns get the breathing
-        // room. Hovering or starting an inline-add expands them back to full.
-        let columnWidth: CGFloat = (isEmpty && !isInlineAdding && !isHovered) ? 110 : 300
+        // Empty columns shrink so populated columns get the breathing room.
+        // Hovering or starting an inline-add expands them back to full. Full
+        // width is kept tight (240) so all five columns fit without much
+        // horizontal scrolling now that there's a Changes Requested lane.
+        let columnWidth: CGFloat = (isEmpty && !isInlineAdding && !isHovered) ? 100 : 240
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(label.uppercased())
@@ -474,9 +476,18 @@ struct KanbanBoardView: View {
         }
         .frame(width: columnWidth)
         .animation(.easeOut(duration: 0.15), value: columnWidth)
-        .glassPanel(cornerRadius: 8, material: .underWindowBackground,
-                    tint: Color.cardBackground, tintOpacity: 0.40,
-                    stroke: Color.borderColor.opacity(0.5), shadow: false)
+        // Flat tinted fill instead of a glassPanel: each column was an
+        // NSVisualEffectView (live blur), and sliding 5 of them horizontally
+        // recomposites every frame → the left/right scroll jank. A plain fill
+        // over the radial background reads nearly the same and scrolls smooth.
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.cardBackground.opacity(0.40))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.borderColor.opacity(0.5), lineWidth: 1)
+        )
         .onHover { hovering in
             // Only react when the column is empty — populated columns don't
             // need to expand.
