@@ -204,7 +204,15 @@ struct KanbanBoardView: View {
             if let draft = aiDraft {
                 AIDraftReviewSheet(
                     draft: draft,
-                    viewModel: viewModel,
+                    collaborators: viewModel.collaborators,
+                    elements: viewModel.elements,
+                    onCreate: { title, column, priority, assignedTo, description, category, elementId, subtasks in
+                        await viewModel.addTask(
+                            title: title, column: column, priority: priority,
+                            assignedTo: assignedTo, description: description,
+                            category: category, elementId: elementId, subtasks: subtasks
+                        )
+                    },
                     onClose: { showAIReview = false; aiDraft = nil }
                 )
             }
@@ -1751,10 +1759,19 @@ private struct DraftStep: Identifiable, Equatable {
     var text: String
 }
 
-private struct AIDraftReviewSheet: View {
+/// Reusable AI-draft review sheet. Decoupled from any view model — the board
+/// and the chat "Create ticket" flow both present it with their own picker
+/// data + create closure.
+struct AIDraftReviewSheet: View {
     @Environment(AppState.self) private var appState
     let draft: MWTaskDraft
-    @Bindable var viewModel: ProjectDetailViewModel
+    /// Picker options. Empty (e.g. when launched from a chat) just hides the
+    /// assignee/element pickers — the AI's resolved values still apply.
+    let collaborators: [MWProjectCollaborator]
+    let elements: [MWProjectElement]
+    /// Create the task. The board wires this to `addTask` (optimistic insert);
+    /// the chat path wires it straight to the create endpoint.
+    let onCreate: (_ title: String, _ column: String, _ priority: String, _ assignedTo: String?, _ description: String?, _ category: String, _ elementId: String?, _ subtasks: [String]?) async -> Void
     let onClose: () -> Void
 
     @State private var title: String
@@ -1771,9 +1788,17 @@ private struct AIDraftReviewSheet: View {
     private let priorities = ["critical", "high", "medium", "low"]
     private let categories = ["manual", "engineering", "bug", "product", "sales", "general"]
 
-    init(draft: MWTaskDraft, viewModel: ProjectDetailViewModel, onClose: @escaping () -> Void) {
+    init(
+        draft: MWTaskDraft,
+        collaborators: [MWProjectCollaborator],
+        elements: [MWProjectElement],
+        onCreate: @escaping (_ title: String, _ column: String, _ priority: String, _ assignedTo: String?, _ description: String?, _ category: String, _ elementId: String?, _ subtasks: [String]?) async -> Void,
+        onClose: @escaping () -> Void
+    ) {
         self.draft = draft
-        self.viewModel = viewModel
+        self.collaborators = collaborators
+        self.elements = elements
+        self.onCreate = onCreate
         self.onClose = onClose
         _title = State(initialValue: draft.title)
         _description = State(initialValue: draft.description ?? "")
@@ -1870,24 +1895,24 @@ private struct AIDraftReviewSheet: View {
                 Spacer()
             }
 
-            if !viewModel.collaborators.isEmpty {
+            if !collaborators.isEmpty {
                 HStack(spacing: 6) {
                     Text("Assignee").font(.system(size: 11)).foregroundColor(.secondary)
                     Picker("", selection: $assignedTo) {
                         Text("Unassigned").tag(String?.none)
-                        ForEach(viewModel.collaborators) { c in
+                        ForEach(collaborators) { c in
                             Text(c.name).tag(String?.some(c.userId))
                         }
                     }.labelsHidden().fixedSize()
                     Spacer()
                 }
             }
-            if !viewModel.elements.isEmpty {
+            if !elements.isEmpty {
                 HStack(spacing: 6) {
                     Text("Element").font(.system(size: 11)).foregroundColor(.secondary)
                     Picker("", selection: $selectedElementId) {
                         Text("None").tag(String?.none)
-                        ForEach(viewModel.elements) { el in
+                        ForEach(elements) { el in
                             Text(el.name).tag(String?.some(el.id))
                         }
                     }.labelsHidden().fixedSize()
@@ -1910,12 +1935,11 @@ private struct AIDraftReviewSheet: View {
                         .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
                         .filter { !$0.isEmpty }
                     Task {
-                        await viewModel.addTask(
-                            title: t, column: boardColumn, priority: priority,
-                            assignedTo: assignedTo,
-                            description: desc.isEmpty ? nil : desc,
-                            category: category, elementId: selectedElementId,
-                            subtasks: cleanedSteps.isEmpty ? nil : cleanedSteps
+                        await onCreate(
+                            t, boardColumn, priority, assignedTo,
+                            desc.isEmpty ? nil : desc,
+                            category, selectedElementId,
+                            cleanedSteps.isEmpty ? nil : cleanedSteps
                         )
                         onClose()
                     }

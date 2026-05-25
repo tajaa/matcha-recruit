@@ -249,6 +249,9 @@ class ChannelDetail(BaseModel):
     member_count: int = 0
     is_member: bool = False
     my_role: Optional[str] = None  # current user's channel_role
+    # Set when this channel is a collab project's discussion chat — lets the
+    # client offer "Create ticket" pointed at that project's board.
+    project_id: Optional[UUID] = None
     members: list[ChannelMember] = []
     messages: list[ChannelMessage] = []
 
@@ -1122,7 +1125,9 @@ async def get_channel(
 
     async with get_connection() as conn:
         ch = await conn.fetchrow(
-            "SELECT id, name, slug, description, is_archived, created_by, created_at, company_id, COALESCE(visibility, 'public') AS visibility, category, COALESCE(is_paid, false) AS is_paid, price_cents, COALESCE(currency, 'usd') AS currency FROM channels WHERE id = $1",
+            "SELECT id, name, slug, description, is_archived, created_by, created_at, company_id, COALESCE(visibility, 'public') AS visibility, category, COALESCE(is_paid, false) AS is_paid, price_cents, COALESCE(currency, 'usd') AS currency, "
+            "(SELECT p.id FROM mw_projects p WHERE p.project_data->>'discussion_channel_id' = channels.id::text LIMIT 1) AS project_id "
+            "FROM channels WHERE id = $1",
             channel_id,
         )
         if not ch:
@@ -1200,6 +1205,7 @@ async def get_channel(
             member_count=len(members),
             is_member=is_member,
             my_role=my_role,
+            project_id=ch["project_id"],
             members=[
                 ChannelMember(
                     user_id=m["user_id"], name=m["name"], email=m["email"],

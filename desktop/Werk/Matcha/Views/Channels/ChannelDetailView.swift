@@ -28,6 +28,16 @@ struct ChannelDetailView: View {
     /// streaming message / hover re-render or LazyVStack recycle can't drop the
     /// binding mid-present — that was the flaky-open bug.
     @State private var previewFile: MWProjectFile?
+    // "Create ticket" from a message → AI draft → review sheet (project chats only).
+    @State private var ticketDraft: MWTaskDraft?
+    @State private var showTicketReview = false
+    @State private var draftingTicket = false
+    @State private var ticketDraftError: String?
+    // Chat → ticket always drafts with Flash Lite (cheap/fast for this
+    // lightweight action), regardless of the header model selector.
+    private var ticketDraftModel: String? {
+        mwModelOptions.first { $0.id == "flash-lite" }?.value
+    }
 
     @Environment(BroadcastService.self) private var broadcast: BroadcastService
 
@@ -426,7 +436,8 @@ struct ChannelDetailView: View {
                             onToggleReaction: toggleReaction,
                             onRequestDelete: { pendingMessageDelete = $0 },
                             onRequestEdit: { editingMessage = $0; inputText = $0.content; replyingTo = nil },
-                            onOpenAttachment: { previewFile = previewModel($0) }
+                            onOpenAttachment: { previewFile = previewModel($0) },
+                            onCreateTicket: vm.channel?.projectId != nil ? { startTicketDraft(from: $0) } : nil
                         )
                         .opacity((msg.pending || msg.failed) ? 0.55 : 1.0)
                         .id(msg.stableKey)
@@ -485,6 +496,77 @@ struct ChannelDetailView: View {
         }
         .sheet(item: $previewFile) { file in
             AttachmentPreviewSheet(file: file)
+        }
+        .sheet(isPresented: $showTicketReview) {
+            if let draft = ticketDraft, let pid = vm.channel?.projectId {
+                AIDraftReviewSheet(
+                    draft: draft,
+                    collaborators: [],
+                    elements: [],
+                    onCreate: { title, column, priority, assignedTo, description, category, elementId, subtasks in
+                        _ = try? await MatchaWorkService.shared.createProjectTask(
+                            projectId: pid, title: title, boardColumn: column,
+                            description: description, priority: priority,
+                            assignedTo: assignedTo, category: category,
+                            elementId: elementId, subtasks: subtasks
+                        )
+                    },
+                    onClose: { showTicketReview = false; ticketDraft = nil }
+                )
+            }
+        }
+        .overlay(alignment: .top) {
+            if draftingTicket {
+                Label("Drafting ticket…", systemImage: "sparkles")
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.top, 8)
+            } else if let err = ticketDraftError {
+                Text(err)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(Color.red.opacity(0.85), in: Capsule())
+                    .padding(.top, 8)
+                    .onTapGesture { ticketDraftError = nil }
+                    .task {
+                        try? await Task.sleep(for: .seconds(4))
+                        await MainActor.run { ticketDraftError = nil }
+                    }
+            }
+        }
+    }
+
+    /// Turn a chat message into a kanban ticket: AI-draft it against the linked
+    /// project, then open the review sheet. Project chats only (guarded by the
+    /// caller passing onCreateTicket).
+    private func startTicketDraft(from msg: ChannelMessage) {
+        guard let pid = vm.channel?.projectId, !draftingTicket else { return }
+        let text = msg.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        draftingTicket = true
+        ticketDraftError = nil
+        Task {
+            do {
+                let draft = try await MatchaWorkService.shared.draftTaskFromPrompt(
+                    projectId: pid, prompt: text, model: ticketDraftModel
+                )
+                await MainActor.run {
+                    draftingTicket = false
+                    ticketDraft = draft
+                    showTicketReview = true
+                }
+            } catch {
+                await MainActor.run {
+                    draftingTicket = false
+                    if case APIError.httpError(let code, _) = error, code == 429 {
+                        ticketDraftError = "Daily AI limit reached — try again later."
+                    } else {
+                        ticketDraftError = "Couldn't draft a ticket from that message."
+                    }
+                }
+            }
         }
     }
 

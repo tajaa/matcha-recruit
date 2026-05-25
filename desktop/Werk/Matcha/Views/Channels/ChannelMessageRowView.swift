@@ -17,6 +17,9 @@ struct ChannelMessageRowView: View {
     /// LazyVStack recycling — a per-row `.sheet` dropped the binding when a
     /// new message streamed in, which is why media open was flaky.
     let onOpenAttachment: (ChannelAttachment) -> Void
+    /// Turn this message into a kanban ticket. nil when the channel isn't a
+    /// collab project's chat (no board to target) — the menu item is hidden.
+    var onCreateTicket: ((ChannelMessage) -> Void)? = nil
 
     var body: some View {
         // iMessage-style sides: my messages render right in an accent bubble
@@ -141,6 +144,13 @@ struct ChannelMessageRowView: View {
 
             Button { onReply(msg) } label: {
                 Label("Reply", systemImage: "arrowshape.turn.up.left")
+            }
+
+            // Only in a collab project's chat (a board exists to target).
+            if let onCreateTicket, !msg.content.isEmpty {
+                Button { onCreateTicket(msg) } label: {
+                    Label("Create ticket", systemImage: "plus.rectangle.on.folder")
+                }
             }
 
             // Author can edit their own text message within the 15-min window.

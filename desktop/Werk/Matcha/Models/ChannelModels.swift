@@ -260,6 +260,9 @@ struct ChannelDetail: Codable, Identifiable, Hashable {
     let memberCount: Int
     let isMember: Bool
     let myRole: String?
+    /// Set when this channel is a collab project's discussion chat — enables
+    /// "Create ticket" from a message, pointed at that project's board.
+    let projectId: String?
     let members: [ChannelMember]
     let messages: [ChannelMessage]
 
@@ -273,6 +276,7 @@ struct ChannelDetail: Codable, Identifiable, Hashable {
         case memberCount = "member_count"
         case isMember = "is_member"
         case myRole = "my_role"
+        case projectId = "project_id"
     }
 }
 
