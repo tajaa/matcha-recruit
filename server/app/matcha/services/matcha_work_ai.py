@@ -1757,7 +1757,7 @@ Return ONLY a JSON object with these keys:
 - "board_column": almost always "todo".
 - "assignee_name": EXACTLY one name from this list, or null. People: [{people}]. Match the person the user names (e.g. "assign to haley" → the matching name); null if none clearly named or no match.
 - "element_name": EXACTLY one element name from the Elements list above, or null per the rule above.
-- "subtasks": an array of 2-6 short imperative checklist steps that break the work into verifiable pieces — ONLY for engineering/bug/product tickets that genuinely benefit from decomposition; otherwise return []. Each item <=80 chars, no leading numbers or bullets, ordered so a teammate can work top to bottom.
+- "subtasks": an array of short imperative checklist steps that break the work into verifiable pieces. ALWAYS include 3-6 steps when the user asks for subtasks / steps / a breakdown / a checklist, OR when the ticket is an engineering, bug, or product effort that takes more than one step. Use [] only for a genuinely single-step task or a pure sales/general note. Each item <=80 chars, no leading numbers or bullets, ordered so a teammate can work top to bottom. Example: ["Add the data model + migration", "Expose the CRUD endpoints", "Wire the UI", "Show progress on the card"].
 
 Request:
 {prompt}"""
@@ -1799,12 +1799,20 @@ Request:
     if board_column not in _TASK_DRAFT_COLUMNS:
         board_column = "todo"
 
-    # Optional decomposition checklist. Clean to non-empty trimmed strings,
-    # cap length + count so a runaway model can't flood the ticket.
+    # Optional decomposition checklist. Tolerate the model picking a synonym key
+    # or returning objects instead of strings, then clean + cap.
     subtasks: list[str] = []
-    raw_sub = data.get("subtasks")
+    raw_sub = (
+        data.get("subtasks")
+        or data.get("sub_tasks")
+        or data.get("subTasks")
+        or data.get("steps")
+        or data.get("checklist")
+    )
     if isinstance(raw_sub, list):
         for s in raw_sub:
+            if isinstance(s, dict):
+                s = s.get("title") or s.get("text") or s.get("name") or s.get("step") or ""
             t = str(s).strip().lstrip("-*0123456789. ").strip()
             if t:
                 subtasks.append(t[:200])
