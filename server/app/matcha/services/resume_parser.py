@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 RESUME_UPLOAD_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt"}
 RESUME_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 RESUME_TEXT_CAP = 15_000
-RESUME_EXTRACT_MODEL = "gemini-3.1-flash-lite-preview"
+RESUME_EXTRACT_MODEL = "gemini-3.1-flash-lite"
 RESUME_EXTRACT_TIMEOUT = 60
 
 RESUME_EXTRACT_PROMPT = """Extract candidate information from this resume. Return ONLY valid JSON with these fields:

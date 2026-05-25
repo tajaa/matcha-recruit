@@ -16,7 +16,7 @@ from google.genai import types
 
 from ...config import get_settings
 
-LITE_MODEL = "gemini-3.1-flash-lite-preview"
+LITE_MODEL = "gemini-3.1-flash-lite"
 GENERATION_TIMEOUT = 15  # seconds
 
 

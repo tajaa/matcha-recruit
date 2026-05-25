@@ -91,7 +91,7 @@ struct MWModelOption: Identifiable {
 }
 
 let mwModelOptions: [MWModelOption] = [
-    MWModelOption(id: "flash-lite", label: "Flash Lite 3.1", value: "gemini-2.0-flash-lite"),
+    MWModelOption(id: "flash-lite", label: "Flash Lite 3.1", value: "gemini-3.1-flash-lite"),
     MWModelOption(id: "flash", label: "Flash 3.5", value: "gemini-3.5-flash"),
     MWModelOption(id: "pro", label: "Pro 3.1", value: "gemini-2.5-pro-preview-05-06"),
 ]

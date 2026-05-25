@@ -709,7 +709,7 @@ def _infer_skill_from_state(current_state: dict) -> str:
 
 
 SUPPORTED_MODELS = {
-    "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-flash-lite",
     "gemini-3-flash-preview",
     "gemini-3.1-pro-preview",
 }

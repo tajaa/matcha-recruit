@@ -6243,7 +6243,7 @@ async def upload_project_resumes(
 
             api_key = os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key
             client = _genai.Client(api_key=api_key)
-            extract_model = "gemini-3.1-flash-lite-preview"
+            extract_model = "gemini-3.1-flash-lite"
             parser = ERDocumentParser()
             new_candidates = []
 
@@ -6331,7 +6331,7 @@ async def generate_placeholder_questions(
         client = _genai.Client(api_key=api_key)
         resp = await asyncio.to_thread(
             lambda: client.models.generate_content(
-                model="gemini-3.1-flash-lite-preview",
+                model="gemini-3.1-flash-lite",
                 contents=[_types.Content(role="user", parts=[_types.Part.from_text(
                     text=f"Generate a short, friendly question for each placeholder below. The question should help someone fill in the blank in a job posting. Return ONE question per line, in order, no numbering or bullets.\n\n{items}"
                 )])],
@@ -6380,7 +6380,7 @@ async def extract_placeholder_value(
         client = _genai.Client(api_key=api_key)
         resp = await asyncio.to_thread(
             lambda: client.models.generate_content(
-                model="gemini-3.1-flash-lite-preview",
+                model="gemini-3.1-flash-lite",
                 contents=[_types.Content(role="user", parts=[_types.Part.from_text(
                     text=f"Extract the exact value to fill in the placeholder {placeholder} from this user answer: \"{user_input}\"\n"
                          f"Context from the document: \"{context}\"\n"
@@ -6470,7 +6470,7 @@ async def analyze_project_candidates(
         resp = await asyncio.wait_for(
             asyncio.to_thread(
                 lambda: client.models.generate_content(
-                    model="gemini-3.1-flash-lite-preview",
+                    model="gemini-3.1-flash-lite",
                     contents=[_types.Content(role="user", parts=[_types.Part.from_text(text=prompt)])],
                     config=_types.GenerateContentConfig(temperature=0.1),
                 )
@@ -7571,7 +7571,7 @@ async def upload_thread_inventory(
 
             api_key = os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key
             client = _genai.Client(api_key=api_key)
-            extract_model = "gemini-3.1-flash-lite-preview"
+            extract_model = "gemini-3.1-flash-lite"
 
             parser = ERDocumentParser()
             existing_items = list((thread.get("current_state") or {}).get("inventory_items") or [])
