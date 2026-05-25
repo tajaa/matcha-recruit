@@ -65,23 +65,34 @@ Sidebar dispatch in `client/src/components/TenantSidebar.tsx`. Tier-check helper
 
 ## Database
 
-**⚠️ CRITICAL: The database is a PRODUCTION PostgreSQL on a remote EC2 instance (3.101.83.217), NOT a local container.** `DATABASE_URL` in `.env` connects to it (typically via SSH tunnel from `dev-remote.sh`). Treat every database operation as production.
+**Two PostgreSQL containers on a dedicated DB EC2 (`3.101.83.217`)** — both DB name `matcha`, user `matcha` (currently superuser — part of the RLS problem). The app servers run on a **separate** EC2 (`54.177.107.107`). Full workflow + scripts live in `docs/ops/DB_WORKFLOW.md`.
 
-**NEVER do any of the following without explicit user approval:**
+| Container | Port | Role | Who connects |
+|---|---|---|---|
+| `matcha-postgres-prod` | 5433 | **PROD** (encrypted sidecar) | app EC2 `54.177.107.107`; hey-matcha.com |
+| `matcha-postgres` | 5432 | **DEV** (+ 8 other apps' DBs) | your laptop via `dev-remote.sh` SSH tunnel |
+
+**⚠️ Treat `matcha-postgres-prod` (:5433) as live production.** Local dev (`dev-remote.sh`, `DATABASE_URL`) connects to the **dev** container (:5432) — but both live on the same box, so never confuse them and never point a destructive op at the prod container. (The old "Postgres runs directly on the host, not Docker / matcha-only" framing is stale — it's two containers as above, sharing the box with 8 other apps' DBs.)
+
+**NEVER do the following without explicit user approval — especially against prod :5433:**
 - CREATE ROLE / DROP ROLE
 - CREATE TABLE / DROP TABLE on real tables
-- Run Alembic migrations (`alembic upgrade head`)
+- `alembic upgrade head` against prod
 - Any DDL (ALTER TABLE, CREATE INDEX, etc.) directly
-- Write tests that create/drop tables, roles, or modify schema on the live DB
-- Assume you can freely experiment with the database
+- Tests that create/drop/alter tables, roles, or schema on a live DB
+- Assume you can freely experiment with either DB
 
-**For integration tests that need DB access:** write them to be run manually by the user, and use temporary/test data that won't affect production. Never auto-run DB-mutating tests.
+**For integration tests that need DB access:** write them to be run manually by the user, use reserved-domain test data, never auto-run DB-mutating tests.
 
-**SSH access to DB server:** `ssh -i roonMT-arm.pem ec2-user@3.101.83.217`
-**DB name in production:** `matcha` (not `matcha_recruit`)
-**DB user:** `matcha` (currently superuser — this is part of the RLS problem)
+### Schema + data flow — keep dev and prod in sync (both directions)
 
-Schema is managed via Alembic migrations in `server/alembic/versions/`. Tables are also bootstrapped in `server/app/database.py:init_db()` for fresh setups. When adding new tables, use Alembic migrations.
+Schema is managed via Alembic migrations in `server/alembic/versions/`; `server/app/database.py:init_db()` only bootstraps a fresh DB (it does **not** run migrations). The two DBs drift unless synced deliberately:
+
+- **Schema, dev → prod:** author migration → `./scripts/migrate-dev.sh` (applies to dev :5432) → test → `./scripts/migrate-prod.sh` (applies the same revision to prod :5433). Applying to only one DB is the drift that caused real `UndefinedColumnError` 500s. `alembic_version` must match on both afterward.
+- **Data, prod → dev:** `./scripts/refresh-dev-from-prod.sh` — host-side **anonymized** clone of prod into dev (closes the backflow gap; dev used to never reflect prod data). `--dry-run` previews into a staging DB without swapping. After a real run, **every dev user's password becomes `devpass123`**; PII is scrubbed by `scripts/sql/anonymize_dev.sql`.
+- **Backups:** host cron `~/backup-to-s3.sh` (every 12h) → `s3://matcha-recruit-backups/postgres/` (SSE-AES256); inspect/restore via `./scripts/backups.sh`.
+
+**SSH:** `ssh -i roonMT-arm.pem ec2-user@3.101.83.217` (DB host) · `ssh -i roonMT-arm.pem ec2-user@54.177.107.107` (app host).
 
 ## Directory Structure
 
@@ -243,7 +254,7 @@ PDF render is intentionally inline because the desktop client awaits the bytes �
 
 ## Local Development
 
-**Primary script**: `./scripts/dev-remote.sh` — SSH-tunnels Postgres from EC2 (`3.101.83.217:5432`), starts Redis tunnel, backend on `:8001`, frontend on `:5174`, local chat model on `:8080`. Requires `roonMT-arm.pem` at repo root.
+**Primary script**: `./scripts/dev-remote.sh` — SSH-tunnels the **dev** Postgres container from EC2 (`3.101.83.217:5432` → `matcha-postgres`, not prod), starts Redis tunnel, backend on `:8001`, frontend on `:5174`, local chat model on `:8080`. Requires `roonMT-arm.pem` at repo root. To sync dev/prod see the Database section + `docs/ops/DB_WORKFLOW.md`.
 
 **Alternative**: `./scripts/dev.sh` — references a discontinued sister product; do not use.
 
