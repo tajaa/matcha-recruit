@@ -45,7 +45,6 @@ struct KanbanBoardView: View {
     /// Done column collapses to the 5 most-recently-completed; expand shows all.
     @State private var doneExpanded = false
     /// AI ticket drafting (natural language → reviewable draft).
-    @State private var aiPrompt = ""
     @State private var aiDrafting = false
     @State private var aiDraft: MWTaskDraft?
     @State private var showAIReview = false
@@ -126,7 +125,7 @@ struct KanbanBoardView: View {
                 if isPipeline {
                     pipelineSummaryBar
                 } else {
-                    aiComposeBar
+                    AIComposeBar(isDrafting: aiDrafting, error: aiError) { submitAIDraft(prompt: $0) }
                 }
                 boardColumns
             }
@@ -206,57 +205,8 @@ struct KanbanBoardView: View {
         }
     }
 
-    /// Natural-language ticket bar — type a request, Gemini drafts a ticket you
-    /// review before it lands. Board mode only (deals have their own shape).
-    private var aiComposeBar: some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 11))
-                    .foregroundColor(appState.themeAccent)
-                TextField("Describe a task… e.g. \"fix the 503 in console <error> and assign haley\"", text: $aiPrompt)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundColor(appState.themeText)
-                    .onSubmit { submitAIDraft() }
-                if aiDrafting {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Button {
-                        submitAIDraft()
-                    } label: {
-                        Text("Draft")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10).padding(.vertical, 4)
-                            .background(appState.themeAccent)
-                            .cornerRadius(5)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(aiPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-            if let err = aiError {
-                HStack(spacing: 4) {
-                    Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 9)).foregroundColor(.orange)
-                    Text(err).font(.system(size: 10)).foregroundColor(.orange)
-                    Spacer()
-                }
-            }
-        }
-        .padding(.horizontal, 10).padding(.vertical, 7)
-        .background(appState.themeAccent.opacity(0.06))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(appState.themeAccent.opacity(0.25), lineWidth: 1)
-        )
-        .cornerRadius(6)
-        .padding(.horizontal, 12)
-        .padding(.bottom, 4)
-    }
-
-    private func submitAIDraft() {
-        let prompt = aiPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func submitAIDraft(prompt: String) {
+        let prompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty, !aiDrafting, let pid = viewModel.project?.id else { return }
         aiDrafting = true
         aiError = nil
@@ -265,7 +215,6 @@ struct KanbanBoardView: View {
                 let draft = try await MatchaWorkService.shared.draftTaskFromPrompt(projectId: pid, prompt: prompt)
                 await MainActor.run {
                     aiDrafting = false
-                    aiPrompt = ""
                     aiDraft = draft
                     showAIReview = true
                 }
@@ -1857,5 +1806,73 @@ private struct AIDraftReviewSheet: View {
                 ForEach(options, id: \.self) { Text($0.capitalized).tag($0) }
             }.labelsHidden().fixedSize()
         }
+    }
+}
+
+// MARK: - AI compose bar
+
+/// Natural-language ticket bar. Owns its text in LOCAL @State so keystrokes
+/// re-render only this bar, not the whole board (binding the text to a board-
+/// level @State made every keystroke re-render all columns/cards → laggy).
+/// Reports the prompt up via `onDraft` only on submit.
+private struct AIComposeBar: View {
+    @Environment(AppState.self) private var appState
+    var isDrafting: Bool
+    var error: String?
+    var onDraft: (String) -> Void
+
+    @State private var text = ""
+
+    private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private func submit() {
+        guard !trimmed.isEmpty, !isDrafting else { return }
+        onDraft(text)
+        text = ""
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11))
+                    .foregroundColor(appState.themeAccent)
+                TextField("Describe a task… e.g. \"fix the 503 in console <error> and assign haley\"", text: $text)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundColor(appState.themeText)
+                    .onSubmit { submit() }
+                if isDrafting {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button(action: submit) {
+                        Text("Draft")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10).padding(.vertical, 4)
+                            .background(appState.themeAccent)
+                            .cornerRadius(5)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(trimmed.isEmpty)
+                }
+            }
+            if let err = error {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 9)).foregroundColor(.orange)
+                    Text(err).font(.system(size: 10)).foregroundColor(.orange)
+                    Spacer()
+                }
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(appState.themeAccent.opacity(0.06))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(appState.themeAccent.opacity(0.25), lineWidth: 1)
+        )
+        .cornerRadius(6)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 4)
     }
 }
