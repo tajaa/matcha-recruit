@@ -89,6 +89,16 @@ struct TaskViewerSheet: View {
                 if let name = assigneeName {
                     metaPill(label: name, color: .secondary)
                 }
+                if let elName = task.elementName
+                    ?? viewModel.elements.first(where: { $0.id == task.elementId })?.name {
+                    HStack(spacing: 3) {
+                        Image(systemName: "square.stack.3d.up.fill").font(.system(size: 8))
+                        Text(elName).font(.system(size: 9, weight: .semibold))
+                    }
+                    .foregroundColor(.matcha500)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.matcha500.opacity(0.15)).cornerRadius(3)
+                }
                 Spacer()
             }
 

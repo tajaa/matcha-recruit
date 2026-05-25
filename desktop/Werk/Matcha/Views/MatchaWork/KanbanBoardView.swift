@@ -375,6 +375,8 @@ struct KanbanBoardView: View {
                             task: task,
                             attachments: viewModel.taskFiles[task.id] ?? [],
                             pipelineMode: isPipeline,
+                            elementName: task.elementName
+                                ?? viewModel.elements.first(where: { $0.id == task.elementId })?.name,
                             onTap: { viewingTask = task },
                             onToggle: { Task { await viewModel.toggleTaskComplete(id: task.id) } },
                             onMoveColumn: { col in
@@ -767,6 +769,10 @@ private struct KanbanCardView: View {
     let task: MWProjectTask
     let attachments: [MWProjectFile]
     var pipelineMode: Bool = false
+    /// Element label resolved by the board (task.elementName from the list
+    /// query, with a client-side fallback so freshly created/edited cards show
+    /// it before the next full reload).
+    var elementName: String? = nil
     let onTap: () -> Void
     let onToggle: () -> Void
     let onMoveColumn: (String) -> Void
@@ -889,14 +895,16 @@ private struct KanbanCardView: View {
                         .cornerRadius(3)
                     }
 
-                    if let elName = task.elementName {
-                        Text(elName)
-                            .font(.system(size: 8, weight: .medium))
-                            .foregroundColor(appState.themeAccent)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(appState.themeAccent.opacity(0.12))
-                            .cornerRadius(3)
+                    if let elName = elementName ?? task.elementName {
+                        HStack(spacing: 2) {
+                            Image(systemName: "square.stack.3d.up.fill").font(.system(size: 7))
+                            Text(elName).font(.system(size: 8, weight: .medium))
+                        }
+                        .foregroundColor(appState.themeAccent)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(appState.themeAccent.opacity(0.12))
+                        .cornerRadius(3)
                     }
 
                     Menu {
