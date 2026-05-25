@@ -1699,25 +1699,62 @@ async def generate_task_draft(
     prompt: str,
     project_title: Optional[str],
     collaborator_names: list[str],
-    element_names: list[str],
+    elements: list[dict],
+    recent_done: Optional[list[str]] = None,
 ) -> dict:
     """Turn a natural-language request into a structured kanban-ticket draft via
     Gemini Flash Lite. Returns a dict of fields (no DB write) — the route maps
     assignee/element NAMES back to ids and the client reviews before creating.
+
+    `elements` carry context (name + description + notes) so the model checks
+    them FIRST: if the request relates to an element's repo, it grounds the
+    ticket in that context and sets element_name; otherwise it fills the ticket
+    out best-effort from the request alone (element_name=null).
     """
     people = ", ".join(collaborator_names) if collaborator_names else "(none)"
-    elems = ", ".join(element_names) if element_names else "(none)"
     where = f' in the project "{project_title}"' if project_title else ""
 
+    # Build a context block per element: name, description, and a few notes.
+    element_names = [e["name"] for e in elements if e.get("name")]
+    if elements:
+        lines = []
+        for e in elements:
+            name = e.get("name") or ""
+            if not name:
+                continue
+            parts = [f'- "{name}"']
+            desc = (e.get("description") or "").strip()
+            if desc:
+                parts.append(f": {desc[:300]}")
+            notes = [n for n in (e.get("notes") or []) if n]
+            if notes:
+                parts.append("  | context: " + " ; ".join(n[:200] for n in notes[:5]))
+            lines.append("".join(parts))
+        element_block = "\n".join(lines)
+    else:
+        element_block = "(no elements defined)"
+
+    recent = [t for t in (recent_done or []) if t]
+    recent_block = "\n".join(f"- {t[:120]}" for t in recent[:15]) if recent else "(none yet)"
+
     instruction = f"""You turn a teammate's plain-English request into one kanban ticket{where}.
+
+FIRST, check the project's elements below (its context repos — "what work is about"). If the request clearly relates to one of them, USE that element's description + context notes to make the ticket more specific, accurate, and helpful, and set "element_name" to that element. If the request doesn't relate to any element, set "element_name" to null and fill the ticket out to the best of your ability from the request alone.
+
+Elements:
+{element_block}
+
+Recently completed this week (the team's current focus — use only as soft context for tone/category/scope; do NOT copy these, and don't assume the new task is a duplicate):
+{recent_block}
+
 Return ONLY a JSON object with these keys:
 - "title": short imperative summary (max ~80 chars).
-- "description": markdown. Restate the ask, and if the request pastes an error/log/stack trace, include it VERBATIM inside a fenced ``` code block. Keep it concise.
+- "description": markdown. Restate the ask; fold in any relevant element context so the assignee has what they need. If the request pastes an error/log/stack trace, include it VERBATIM inside a fenced ``` code block. Keep it concise.
 - "priority": one of critical | high | medium | low. Infer from urgency words ("urgent","blocker","asap"→high/critical); default "medium".
 - "category": one of engineering | bug | product | sales | general | manual. Errors/crashes/stack traces → "bug"; build/refactor/infra → "engineering"; feature ideas → "product"; deals → "sales"; else "general".
 - "board_column": almost always "todo".
 - "assignee_name": EXACTLY one name from this list, or null. People: [{people}]. Match the person the user names (e.g. "assign to haley" → the matching name); null if none clearly named or no match.
-- "element_name": EXACTLY one name from this list, or null. Elements (what the work is about): [{elems}]. Pick one only if the request is clearly about it; else null.
+- "element_name": EXACTLY one element name from the Elements list above, or null per the rule above.
 
 Request:
 {prompt}"""

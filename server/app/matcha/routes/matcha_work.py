@@ -4274,17 +4274,50 @@ async def ai_draft_task_endpoint(
     collaborators = await proj_svc.list_collaborators(project_id)
     async with get_connection() as conn:
         element_rows = await conn.fetch(
-            "SELECT id, name FROM mw_project_elements WHERE project_id = $1 ORDER BY \"order\" ASC, created_at ASC",
+            "SELECT id, name, description FROM mw_project_elements WHERE project_id = $1 ORDER BY \"order\" ASC, created_at ASC",
             str(project_id),
         )
-    elements = [{"id": str(r["id"]), "name": r["name"]} for r in element_rows]
+        # Element context notes (one query, grouped client-side).
+        note_rows = await conn.fetch(
+            """SELECT element_id, kind, body, url FROM mw_element_notes
+               WHERE project_id = $1 ORDER BY created_at DESC""",
+            project_id,
+        )
+        # What the team finished this week — soft context for the draft.
+        done_rows = await conn.fetch(
+            """SELECT title FROM mw_tasks
+               WHERE project_id = $1 AND status = 'completed'
+                 AND completed_at >= NOW() - INTERVAL '7 days'
+               ORDER BY completed_at DESC LIMIT 15""",
+            project_id,
+        )
+
+    notes_by_element: dict[str, list[str]] = {}
+    for r in note_rows:
+        eid = str(r["element_id"])
+        text = (r["url"] if r["kind"] == "link" else r["body"]) or ""
+        text = text.strip()
+        if text:
+            notes_by_element.setdefault(eid, []).append(text)
+
+    elements = [
+        {
+            "id": str(r["id"]),
+            "name": r["name"],
+            "description": r["description"],
+            "notes": notes_by_element.get(str(r["id"]), []),
+        }
+        for r in element_rows
+    ]
+    recent_done = [r["title"] for r in done_rows if r["title"]]
 
     try:
         draft = await matcha_work_ai.generate_task_draft(
             prompt=prompt,
             project_title=project.get("title"),
             collaborator_names=[c["name"] for c in collaborators if c.get("name")],
-            element_names=[e["name"] for e in elements if e.get("name")],
+            elements=elements,
+            recent_done=recent_done,
         )
     except Exception as e:
         logger.warning("AI task draft failed project=%s: %s", project_id, e)
