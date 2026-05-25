@@ -4,6 +4,7 @@ import base64
 import logging
 import os
 import re
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 import httpx
@@ -338,6 +339,21 @@ class GustoHRISService:
         return workers
 
     @staticmethod
+    def _current_comp(job: dict) -> dict:
+        """Resolve the current compensation object for a job. Gusto exposes it in a few
+        shapes depending on API version: a compensations[] array keyed by
+        current_compensation_uuid, a current_compensation object, or fields on the job."""
+        comps = job.get("compensations") or []
+        cur = job.get("current_compensation_uuid")
+        if cur:
+            for c in comps:
+                if c.get("uuid") == cur:
+                    return c
+        if isinstance(job.get("current_compensation"), dict):
+            return job["current_compensation"]
+        return comps[0] if comps else {}
+
+    @staticmethod
     def normalize_worker(gusto_employee: dict) -> dict:
         """Convert a Gusto employee record to flat Matcha employee format."""
         jobs = gusto_employee.get("jobs") or []
@@ -349,9 +365,31 @@ class GustoHRISService:
         # Prefer work_email; fall back to personal email field
         email = gusto_employee.get("work_email") or gusto_employee.get("email")
 
+        # Compensation (only present when the OAuth token carries compensations:read)
+        comp = GustoHRISService._current_comp(primary_job)
+        payment_unit = comp.get("payment_unit") or primary_job.get("payment_unit") or ""
+
         # Employment type from payment_unit
-        payment_unit = (primary_job.get("current_compensation") or {}).get("payment_unit", "")
         employment_type = "part_time" if payment_unit == "Hour" else "full_time"
+
+        # Pay rate → Decimal (column is numeric); guard missing / non-numeric.
+        raw_rate = primary_job.get("rate") or comp.get("rate")
+        pay_rate: Optional[Decimal] = None
+        if raw_rate not in (None, ""):
+            try:
+                pay_rate = Decimal(str(raw_rate))
+            except (InvalidOperation, ValueError):
+                pay_rate = None
+
+        # Pay classification → Matcha enum (hourly|exempt). Gusto FLSA strings are
+        # "Exempt" / "Nonexempt" / "Salaried Nonexempt" / "Owner" etc.
+        flsa = (comp.get("flsa_status") or primary_job.get("flsa_status") or "").lower()
+        if "nonexempt" in flsa or payment_unit == "Hour":
+            pay_classification = "hourly"
+        elif "exempt" in flsa:
+            pay_classification = "exempt"
+        else:
+            pay_classification = None
 
         # Department: Gusto returns it as a string or nested object
         dept = gusto_employee.get("department")
@@ -372,6 +410,8 @@ class GustoHRISService:
             "employment_type": employment_type,
             "work_state": work_addr.get("state"),
             "work_city": work_addr.get("city"),
+            "pay_rate": pay_rate,
+            "pay_classification": pay_classification,
             "start_date": primary_job.get("hire_date"),
             "is_manager": False,
             "employment_status": "terminated" if terminated else "active",

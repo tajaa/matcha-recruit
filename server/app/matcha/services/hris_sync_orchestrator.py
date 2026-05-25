@@ -430,6 +430,11 @@ async def _sync_single_employee(
                     WHEN employees.employment_status = 'terminated' AND $9 = 'active' THEN 'active'
                     ELSE employees.employment_status
                 END,
+                -- COALESCE so a sync without compensations:read scope doesn't null out
+                -- pay data imported on an earlier scoped sync.
+                work_city = COALESCE($10, work_city),
+                pay_rate = COALESCE($11, pay_rate),
+                pay_classification = COALESCE($12, pay_classification),
                 updated_at = NOW()
             WHERE id = $1 AND org_id = $2
             """,
@@ -442,6 +447,9 @@ async def _sync_single_employee(
             normalized.get("phone"),
             normalized.get("hris_id"),
             normalized.get("employment_status"),
+            normalized.get("work_city"),
+            normalized.get("pay_rate"),
+            normalized.get("pay_classification"),
         )
         action_label = "updated"
     else:
@@ -451,9 +459,9 @@ async def _sync_single_employee(
             INSERT INTO employees (
                 org_id, email, personal_email, first_name, last_name,
                 work_state, employment_type, start_date, phone, job_title, department, hris_id,
-                employment_status
+                employment_status, work_city, pay_rate, pay_classification
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             RETURNING id
             """,
             company_id,
@@ -469,6 +477,9 @@ async def _sync_single_employee(
             normalized.get("department"),
             normalized.get("hris_id"),
             normalized.get("employment_status") or "active",
+            normalized.get("work_city"),
+            normalized.get("pay_rate"),
+            normalized.get("pay_classification"),
         )
         employee_id = row["id"]
         action_label = "created"

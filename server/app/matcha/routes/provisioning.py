@@ -1675,7 +1675,7 @@ async def authorize_gusto_oauth(
         "client_id": GUSTO_OAUTH_CLIENT_ID,
         "redirect_uri": GUSTO_OAUTH_REDIRECT_URI,
         "response_type": "code",
-        "scope": "employees:read",
+        "scope": "employees:read jobs:read compensations:read employee_addresses:read",
         "state": state,
     }
     oauth_url = f"{GUSTO_AUTHORIZE_URL}?{urlencode(params)}"
