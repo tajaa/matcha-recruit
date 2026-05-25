@@ -61,6 +61,8 @@ struct TaskHistoryTimeline: View {
         case "assignee_change": return "person.circle"
         case "description_change": return "text.alignleft"
         case "progress_note_change": return "note.text"
+        case "review_rejected": return "arrow.uturn.backward.circle"
+        case "activity": return "text.bubble"
         case "deleted": return "trash.circle"
         default: return "circle"
         }
@@ -73,6 +75,8 @@ struct TaskHistoryTimeline: View {
         case "assignee_change": return .blue
         case "description_change": return .matcha500
         case "progress_note_change": return .matcha500
+        case "review_rejected": return .orange
+        case "activity": return .blue
         case "deleted": return .red
         default: return .secondary
         }
@@ -96,6 +100,15 @@ struct TaskHistoryTimeline: View {
             return "\(who) updated the description"
         case "progress_note_change":
             return "\(who) updated where we're at"
+        case "review_rejected":
+            let note = (e.metadata?["note"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return note.isEmpty
+                ? "\(who) sent this back for changes"
+                : "\(who) sent this back for changes: “\(note)”"
+        case "activity":
+            let kind = (e.metadata?["kind"] ?? "note")
+            let body = (e.metadata?["body"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return body.isEmpty ? "\(who) logged a \(kind)" : "\(who): \(body)"
         case "deleted":
             return "\(who) deleted this task"
         default:

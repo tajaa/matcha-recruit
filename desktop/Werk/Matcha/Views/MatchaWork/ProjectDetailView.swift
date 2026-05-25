@@ -426,6 +426,8 @@ struct ProjectDetailView: View {
                 ProjectFilesView(viewModel: viewModel)
             case .media:
                 ProjectMediaView(viewModel: viewModel)
+            case .elements:
+                ElementsView(viewModel: viewModel)
             case .sections:
                 collabSections
             case .threads:

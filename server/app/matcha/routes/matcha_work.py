@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, UploadFile, File, status
+from fastapi import APIRouter, Body, Depends, Form, HTTPException, Query, Request, Response, UploadFile, File, status
 from fastapi.responses import StreamingResponse
 
 from ...core.models.auth import CurrentUser
@@ -3535,15 +3535,28 @@ BLOG_MEDIA_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
 async def upload_project_file(
     project_id: UUID,
     file: UploadFile = File(...),
+    element_id: Optional[str] = Form(default=None),
+    folder_id: Optional[str] = Form(default=None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Upload a file attachment to a project."""
+    """Upload a file attachment to a project. Pass `element_id` to bucket it
+    under an element's context repo (and optionally `folder_id` for a folder
+    within that repo); omit both for the project's root Files tab."""
     from ..services import project_file_service
 
     project, _role = await _verify_project_access(project_id, current_user)
     company_id = project.get("company_id")
     if not company_id:
         company_id = await get_client_company_id(current_user)
+
+    # Element-scoped uploads follow the same owner/editor gate + ownership check
+    # as the element folder/note write endpoints (root uploads stay open to any
+    # member, matching the existing Files tab behaviour).
+    if element_id:
+        if _role not in ("owner", "editor"):
+            raise HTTPException(status_code=403, detail="Owner or editor role required")
+        async with get_connection() as conn:
+            await _verify_element_in_project(conn, project_id, element_id)
 
     fname = file.filename or "file"
     ext = os.path.splitext(fname)[1].lower()
@@ -3560,6 +3573,13 @@ async def upload_project_file(
         content_type=file.content_type,
     )
 
+    folder_uuid: Optional[UUID] = None
+    if folder_id:
+        try:
+            folder_uuid = UUID(folder_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid folder_id")
+
     record = await project_file_service.add_project_file(
         project_id=project_id,
         uploaded_by=current_user.id,
@@ -3567,6 +3587,8 @@ async def upload_project_file(
         storage_url=storage_url,
         content_type=file.content_type,
         file_size=len(content),
+        element_id=element_id or None,
+        folder_id=folder_uuid,
     )
     return record
 
@@ -4189,6 +4211,40 @@ async def update_project_task_endpoint(
     return result
 
 
+@router.post("/projects/{project_id}/tasks/{task_id}/reject")
+async def reject_project_task_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Reviewer sends a task back for changes: bounce review → todo, store the
+    reason, and email the assignee. Requires the task to be in the review
+    column and a non-empty note explaining what's incomplete.
+    """
+    from ..services import project_task_service as pt_svc
+
+    project, _role = await _verify_project_access(project_id, current_user)
+
+    note = (body.get("note") or "").strip()
+    if not note:
+        raise HTTPException(status_code=400, detail="A note explaining what's incomplete is required")
+
+    try:
+        result = await pt_svc.reject_project_task(
+            project_id,
+            task_id,
+            note,
+            actor_user_id=current_user.id,
+            project_title=project.get("title"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not result:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return result
+
+
 @router.patch("/projects/{project_id}/pipeline-mode")
 async def set_project_pipeline_mode_endpoint(
     project_id: UUID,
@@ -4388,6 +4444,138 @@ def _serialize_element(d: dict) -> dict:
         if d.get(k) is not None:
             d[k] = d[k].isoformat()
     return d
+
+
+# ── Element context repository: scoped files / folders / notes ──
+# Element-scoped file uploads reuse POST /projects/{id}/files with the
+# `element_id` form field; these endpoints cover listing + folder/note CRUD.
+
+async def _verify_element_in_project(conn, project_id: UUID, element_id: str) -> None:
+    owns = await conn.fetchval(
+        "SELECT 1 FROM mw_project_elements WHERE id = $1 AND project_id = $2",
+        element_id, str(project_id),
+    )
+    if not owns:
+        raise HTTPException(status_code=404, detail="Element not found")
+
+
+@router.get("/projects/{project_id}/elements/{element_id}/files")
+async def list_element_files_endpoint(
+    project_id: UUID,
+    element_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Files bucketed under one element's context repo."""
+    from ..services import project_file_service
+
+    await _verify_project_access(project_id, current_user)
+    async with get_connection() as conn:
+        await _verify_element_in_project(conn, project_id, element_id)
+    return await project_file_service.list_element_files(project_id, element_id)
+
+
+@router.get("/projects/{project_id}/elements/{element_id}/folders")
+async def list_element_folders_endpoint(
+    project_id: UUID,
+    element_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Folder tree scoped to one element."""
+    from ..services import project_file_service
+
+    await _verify_project_access(project_id, current_user)
+    async with get_connection() as conn:
+        await _verify_element_in_project(conn, project_id, element_id)
+    return await project_file_service.list_element_folders(project_id, element_id)
+
+
+@router.post("/projects/{project_id}/elements/{element_id}/folders", status_code=201)
+async def create_element_folder_endpoint(
+    project_id: UUID,
+    element_id: str,
+    name: str = Body(..., embed=True),
+    parent_id: Optional[UUID] = Body(default=None, embed=True),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Create a folder inside an element's repo (optionally nested)."""
+    from ..services import project_file_service
+
+    _project, role = await _verify_project_access(project_id, current_user)
+    if role not in ("owner", "editor"):
+        raise HTTPException(status_code=403, detail="Owner or editor role required")
+    async with get_connection() as conn:
+        await _verify_element_in_project(conn, project_id, element_id)
+    clean = (name or "").strip()
+    if not clean:
+        raise HTTPException(status_code=400, detail="Folder name required")
+    return await project_file_service.create_project_folder(
+        project_id=project_id, name=clean, parent_id=parent_id,
+        created_by=current_user.id, element_id=element_id,
+    )
+
+
+@router.get("/projects/{project_id}/elements/{element_id}/notes")
+async def list_element_notes_endpoint(
+    project_id: UUID,
+    element_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Notes + links pinned to an element."""
+    from ..services import element_notes_service
+
+    await _verify_project_access(project_id, current_user)
+    async with get_connection() as conn:
+        await _verify_element_in_project(conn, project_id, element_id)
+    return await element_notes_service.list_element_notes(project_id, element_id)
+
+
+@router.post("/projects/{project_id}/elements/{element_id}/notes", status_code=201)
+async def add_element_note_endpoint(
+    project_id: UUID,
+    element_id: str,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Pin a note ('note', free text) or a link ('link', url) to an element."""
+    from ..services import element_notes_service
+
+    _project, role = await _verify_project_access(project_id, current_user)
+    if role not in ("owner", "editor"):
+        raise HTTPException(status_code=403, detail="Owner or editor role required")
+    async with get_connection() as conn:
+        await _verify_element_in_project(conn, project_id, element_id)
+    try:
+        rec = await element_notes_service.add_element_note(
+            project_id=project_id,
+            element_id=element_id,
+            created_by=current_user.id,
+            kind=body.get("kind", "note"),
+            body=body.get("body"),
+            url=body.get("url"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not rec:
+        raise HTTPException(status_code=404, detail="Element not found")
+    return rec
+
+
+@router.delete("/projects/{project_id}/elements/{element_id}/notes/{note_id}")
+async def delete_element_note_endpoint(
+    project_id: UUID,
+    element_id: str,
+    note_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    from ..services import element_notes_service
+
+    _project, role = await _verify_project_access(project_id, current_user)
+    if role not in ("owner", "editor"):
+        raise HTTPException(status_code=403, detail="Owner or editor role required")
+    ok = await element_notes_service.delete_element_note(project_id, element_id, note_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return {"deleted": True}
 
 
 def _serialize_history_row(r) -> dict:

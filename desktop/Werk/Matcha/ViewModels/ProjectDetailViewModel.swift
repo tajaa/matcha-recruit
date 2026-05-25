@@ -877,6 +877,26 @@ class ProjectDetailViewModel {
         }
     }
 
+    /// Reviewer sends a task back for changes — bounces it to todo with a note
+    /// and emails the assignee (server-side). Returns true on success.
+    @discardableResult
+    func rejectTask(id: String, note: String) async -> Bool {
+        guard let pid = project?.id else { return false }
+        do {
+            let updated = try await service.rejectTask(projectId: pid, taskId: id, note: note)
+            await MainActor.run {
+                if let i = tasks.firstIndex(where: { $0.id == id }) {
+                    tasks[i] = updated
+                }
+                logActivity("arrow.uturn.backward", "sent “\(updated.title)” back for changes")
+            }
+            return true
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+            return false
+        }
+    }
+
     func deleteTask(id: String) async {
         guard let pid = project?.id else { return }
         await MainActor.run { tasks.removeAll { $0.id == id } }

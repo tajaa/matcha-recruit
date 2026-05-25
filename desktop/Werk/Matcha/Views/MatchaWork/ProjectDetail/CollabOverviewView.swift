@@ -8,17 +8,13 @@ struct CollabOverviewView: View {
 
     @State private var showAddElement = false
     @State private var newElementName = ""
-    @State private var newElementKind: String? = nil
+    @State private var newElementDescription = ""
     @State private var newElementAssignedTo: String? = nil
     @State private var editingElement: MWProjectElement? = nil
     @State private var editElementName = ""
-    @State private var editElementKind: String? = nil
+    @State private var editElementDescription = ""
     @State private var editElementAssignedTo: String? = nil
 
-    private let elementKinds: [(key: String, label: String)] = [
-        ("chapter", "Chapter"), ("feature", "Feature"), ("section", "Section"),
-        ("milestone", "Milestone"), ("other", "Other"),
-    ]
 
     var body: some View {
         ScrollView {
@@ -240,7 +236,7 @@ struct CollabOverviewView: View {
                 if canEditElements {
                     Button {
                         newElementName = ""
-                        newElementKind = nil
+                        newElementDescription = ""
                         newElementAssignedTo = nil
                         showAddElement = true
                     } label: {
@@ -260,13 +256,13 @@ struct CollabOverviewView: View {
 
             if viewModel.elements.isEmpty && !showAddElement {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("No elements yet. Add chapters, features, or sections to organize work.")
+                    Text("No elements yet. Add what your tickets are about (e.g. Inventory, Marketing) to collect context.")
                         .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.4))
                     if canEditElements {
                         Button {
                             newElementName = ""
-                            newElementKind = nil
+                            newElementDescription = ""
                             newElementAssignedTo = nil
                             showAddElement = true
                         } label: {
@@ -302,7 +298,7 @@ struct CollabOverviewView: View {
     @ViewBuilder
     private var elementAddForm: some View {
         VStack(alignment: .leading, spacing: 6) {
-            TextField("Element name", text: $newElementName)
+            TextField("Element name (e.g. Inventory)", text: $newElementName)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
                 .foregroundColor(.white)
@@ -310,16 +306,15 @@ struct CollabOverviewView: View {
                 .background(Color.zinc800)
                 .cornerRadius(5)
 
-            HStack(spacing: 8) {
-                Picker("Kind", selection: $newElementKind) {
-                    Text("No kind").tag(String?.none)
-                    ForEach(elementKinds, id: \.key) { k in
-                        Text(k.label).tag(String?.some(k.key))
-                    }
-                }
-                .labelsHidden()
-                .fixedSize()
+            TextField("What's it about? (optional)", text: $newElementDescription)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundColor(.white.opacity(0.9))
+                .padding(6)
+                .background(Color.zinc800)
+                .cornerRadius(5)
 
+            HStack(spacing: 8) {
                 if !viewModel.collaborators.isEmpty {
                     Picker("Assign", selection: $newElementAssignedTo) {
                         Text("Unassigned").tag(String?.none)
@@ -342,11 +337,12 @@ struct CollabOverviewView: View {
                 Button("Add") {
                     let n = newElementName.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !n.isEmpty else { return }
+                    let desc = newElementDescription.trimmingCharacters(in: .whitespacesAndNewlines)
                     showAddElement = false
                     Task {
                         await viewModel.createElement(
-                            name: n, kind: newElementKind,
-                            description: nil, assignedTo: newElementAssignedTo
+                            name: n, kind: nil,
+                            description: desc.isEmpty ? nil : desc, assignedTo: newElementAssignedTo
                         )
                     }
                 }
@@ -372,16 +368,15 @@ struct CollabOverviewView: View {
                 .background(Color.zinc800)
                 .cornerRadius(5)
 
-            HStack(spacing: 8) {
-                Picker("Kind", selection: $editElementKind) {
-                    Text("No kind").tag(String?.none)
-                    ForEach(elementKinds, id: \.key) { k in
-                        Text(k.label).tag(String?.some(k.key))
-                    }
-                }
-                .labelsHidden()
-                .fixedSize()
+            TextField("What's it about? (optional)", text: $editElementDescription)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundColor(.white.opacity(0.9))
+                .padding(6)
+                .background(Color.zinc800)
+                .cornerRadius(5)
 
+            HStack(spacing: 8) {
                 if !viewModel.collaborators.isEmpty {
                     Picker("Assign", selection: $editElementAssignedTo) {
                         Text("Unassigned").tag(String?.none)
@@ -404,12 +399,13 @@ struct CollabOverviewView: View {
                 Button("Save") {
                     let n = editElementName.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !n.isEmpty else { return }
+                    let desc = editElementDescription.trimmingCharacters(in: .whitespacesAndNewlines)
                     let target = el
                     editingElement = nil
                     Task {
                         await viewModel.updateElement(
-                            target, name: n, kind: editElementKind,
-                            description: nil, assignedTo: editElementAssignedTo
+                            target, name: n, kind: nil,
+                            description: desc.isEmpty ? nil : desc, assignedTo: editElementAssignedTo
                         )
                     }
                 }
@@ -430,17 +426,13 @@ struct CollabOverviewView: View {
                 Text(el.name)
                     .font(.system(size: 12))
                     .foregroundColor(.white)
+                if let d = el.description, !d.isEmpty {
+                    Text(d)
+                        .font(.system(size: 10))
+                        .foregroundColor(.white.opacity(0.5))
+                        .lineLimit(1)
+                }
                 HStack(spacing: 6) {
-                    if let kind = el.kind {
-                        let kLabel = elementKinds.first(where: { $0.key == kind })?.label ?? kind.capitalized
-                        Text(kLabel)
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundColor(.matcha500)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Color.matcha500.opacity(0.12))
-                            .cornerRadius(3)
-                    }
                     if let name = el.assignedName, !name.isEmpty {
                         HStack(spacing: 3) {
                             Circle().fill(Color.matcha500.opacity(0.5)).frame(width: 10, height: 10)
@@ -461,7 +453,7 @@ struct CollabOverviewView: View {
                 HStack(spacing: 8) {
                     Button {
                         editElementName = el.name
-                        editElementKind = el.kind
+                        editElementDescription = el.description ?? ""
                         editElementAssignedTo = el.assignedTo
                         editingElement = el
                         showAddElement = false

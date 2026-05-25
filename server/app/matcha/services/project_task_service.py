@@ -153,7 +153,7 @@ async def list_project_tasks(project_id: UUID) -> list[dict]:
             SELECT t.id, t.project_id, t.company_id, t.created_by, t.title, t.description,
                    t.due_date, t.priority, t.status, t.board_column, t.assigned_to,
                    t.completed_at, t.created_at, t.updated_at, t.progress_note, t.category,
-                   t.element_id,
+                   t.element_id, t.review_note,
                    t.deal_value, t.probability, t.contact_name, t.contact_company,
                    t.contact_email, t.contact_phone, t.outcome, t.loss_reason,
                    t.next_action_at, t.expected_close,
@@ -443,6 +443,151 @@ async def _notify_task_column_transition(
             )
 
 
+async def _notify_task_rejected(
+    *,
+    assigned_to: UUID,
+    company_id: UUID,
+    actor_user_id: Optional[UUID],
+    project_id: UUID,
+    project_title: Optional[str],
+    task_id: UUID,
+    task_title: str,
+    note: str,
+) -> None:
+    """Bell + email the assignee when a reviewer sends their task back for
+    changes. Assignee-only on purpose — this is a direct hand-back, not the
+    fan-out broadcast that `_notify_task_column_transition` does for forward
+    moves (which is silent on backward moves anyway).
+    """
+    from . import notification_service as notif_svc
+
+    reviewer_name = "A reviewer"
+    if actor_user_id is not None:
+        try:
+            async with get_connection() as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
+                    FROM users u
+                    LEFT JOIN clients c ON c.user_id = u.id
+                    LEFT JOIN employees e ON e.user_id = u.id
+                    LEFT JOIN admins a ON a.user_id = u.id
+                    WHERE u.id = $1
+                    """, actor_user_id
+                )
+            if row and row["name"]:
+                reviewer_name = row["name"]
+        except Exception as e:
+            logger.warning("Failed to look up reviewer %s name: %s", actor_user_id, e)
+
+    where = f" in {project_title}" if project_title else ""
+    body = f"{reviewer_name} sent this back for changes{where}:\n\n“{note}”"
+
+    try:
+        await notif_svc.create_notification(
+            user_id=assigned_to,
+            company_id=company_id,
+            type="task_rejected",
+            title=f"Sent back for changes: {task_title}",
+            body=body,
+            link=f"/work?project={project_id}&task={task_id}",
+            metadata={
+                "project_id": str(project_id),
+                "task_id": str(task_id),
+                "reviewer_id": str(actor_user_id) if actor_user_id else None,
+            },
+            send_email=True,
+            email_subject=f"Sent back for changes: {task_title}",
+        )
+    except Exception as e:
+        logger.warning("Failed to notify task rejection %s -> %s: %s", task_id, assigned_to, e)
+
+
+async def reject_project_task(
+    project_id: UUID,
+    task_id: UUID,
+    note: str,
+    *,
+    actor_user_id: Optional[UUID] = None,
+    project_title: Optional[str] = None,
+) -> Optional[dict]:
+    """Reviewer sends a task back: bounce review → todo, store the reason in
+    review_note, log a `review_rejected` history event, and email the
+    assignee. Only valid from the `review` column. Returns the updated task
+    row (same shape as `update_project_task`) or None if not found.
+    """
+    note = (note or "").strip()
+    async with get_connection() as conn:
+        current = await conn.fetchrow(
+            """
+            SELECT board_column, company_id, assigned_to, title
+            FROM mw_tasks WHERE id = $1 AND project_id = $2
+            """,
+            task_id, project_id,
+        )
+        if not current:
+            return None
+        if current["board_column"] != "review":
+            raise ValueError("Task must be in review to send it back")
+
+        row = await conn.fetchrow(
+            """
+            UPDATE mw_tasks SET
+                board_column = 'todo',
+                status = 'pending',
+                completed_at = NULL,
+                review_note = $3::text,
+                updated_at = NOW()
+            WHERE id = $1 AND project_id = $2
+            RETURNING id, project_id, company_id, created_by, title, description,
+                      due_date, priority, status, board_column,
+                      COALESCE(pipeline_column, 'lead') AS pipeline_column,
+                      assigned_to, completed_at, created_at, updated_at,
+                      progress_note, category, element_id, review_note,
+                      deal_value, probability, contact_name, contact_company,
+                      contact_email, contact_phone, outcome, loss_reason,
+                      next_action_at, expected_close
+            """,
+            task_id, project_id, note,
+        )
+        if row:
+            await _log_task_history(
+                conn,
+                task_id=task_id,
+                project_id=project_id,
+                actor_user_id=actor_user_id,
+                event_type="review_rejected",
+                from_value="review",
+                to_value="todo",
+                metadata={"note": note[:500]},
+            )
+
+    if not row:
+        return None
+
+    # Email + bell the assignee only (skip if unassigned — banner + history
+    # still record the bounce-back).
+    if current["assigned_to"] is not None:
+        await _notify_task_rejected(
+            assigned_to=current["assigned_to"],
+            company_id=current["company_id"],
+            actor_user_id=actor_user_id,
+            project_id=project_id,
+            project_title=project_title,
+            task_id=task_id,
+            task_title=row["title"],
+            note=note,
+        )
+
+    result = _row_to_task(dict(row))
+    result["last_moved_at"] = datetime.now(timezone.utc).isoformat()
+    task_payload = dict(result)
+    if actor_user_id is not None:
+        task_payload["actor_id"] = str(actor_user_id)
+    await _broadcast_task_event_safe(project_id, "task.updated", task_payload)
+    return result
+
+
 async def update_project_task(
     project_id: UUID,
     task_id: UUID,
@@ -552,13 +697,17 @@ async def update_project_task(
                 next_action_at = CASE WHEN $34::boolean THEN $35::date ELSE next_action_at END,
                 expected_close = CASE WHEN $36::boolean THEN $37::date ELSE expected_close END,
                 pipeline_column = CASE WHEN $38::boolean THEN $39::text ELSE COALESCE(pipeline_column, 'lead') END,
+                -- Clear the reviewer's "needs work" note once the task is
+                -- re-submitted to review or marked done — the bounce-back
+                -- banner only applies while it sits back in todo/in_progress.
+                review_note = CASE WHEN $1::text IN ('review', 'done') THEN NULL ELSE review_note END,
                 updated_at = NOW()
             WHERE id = $2 AND project_id = $12
             RETURNING id, project_id, company_id, created_by, title, description,
                       due_date, priority, status, board_column,
                       COALESCE(pipeline_column, 'lead') AS pipeline_column,
                       assigned_to, completed_at, created_at, updated_at,
-                      progress_note, category, element_id,
+                      progress_note, category, element_id, review_note,
                       deal_value, probability, contact_name, contact_company,
                       contact_email, contact_phone, outcome, loss_reason,
                       next_action_at, expected_close

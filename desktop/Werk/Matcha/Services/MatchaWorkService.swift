@@ -943,6 +943,17 @@ class MatchaWorkService {
         )
     }
 
+    /// Reviewer sends a task back for changes: server bounces review → todo,
+    /// stores the note, and emails the assignee. Returns the updated task.
+    func rejectTask(projectId: String, taskId: String, note: String) async throws -> MWProjectTask {
+        struct Req: Encodable { let note: String }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/reject",
+            body: Req(note: note)
+        )
+    }
+
     func deleteProjectTask(projectId: String, taskId: String) async throws {
         _ = try await client.requestData(
             method: "DELETE",
@@ -1074,6 +1085,78 @@ class MatchaWorkService {
             method: "POST",
             path: "\(basePath)/projects/\(projectId)/files/\(fileId)/copy",
             body: Body(folder_id: folderId)
+        )
+    }
+
+    // MARK: - Element context repository (files / folders / notes)
+
+    func listElementFiles(projectId: String, elementId: String) async throws -> [MWProjectFile] {
+        try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/elements/\(elementId)/files")
+    }
+
+    func listElementFolders(projectId: String, elementId: String) async throws -> [MWProjectFolder] {
+        try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/elements/\(elementId)/folders")
+    }
+
+    func createElementFolder(projectId: String, elementId: String, name: String, parentId: String? = nil) async throws -> MWProjectFolder {
+        struct Body: Encodable { let name: String; let parent_id: String? }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/elements/\(elementId)/folders",
+            body: Body(name: name, parent_id: parentId)
+        )
+    }
+
+    /// Upload a file into an element's repo (optionally a folder within it).
+    /// Reuses POST /projects/{id}/files with element_id + folder_id form fields.
+    func uploadElementFile(
+        projectId: String,
+        elementId: String,
+        folderId: String? = nil,
+        file: (data: Data, filename: String, mimeType: String)
+    ) async throws -> MWProjectFile {
+        var multipart = MultipartUploadBuilder()
+        multipart.addFile(name: "file", filename: file.filename, mimeType: file.mimeType, data: file.data)
+        multipart.addField(name: "element_id", value: elementId)
+        if let folderId { multipart.addField(name: "folder_id", value: folderId) }
+        let (body, contentType) = multipart.finalize()
+
+        guard let url = URL(string: "\(client.baseURL)\(basePath)/projects/\(projectId)/files") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        if let token = client.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = body
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let msg = String(data: data, encoding: .utf8) ?? "Upload failed"
+            throw APIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0, msg)
+        }
+        return try JSONDecoder().decode(MWProjectFile.self, from: data)
+    }
+
+    func listElementNotes(projectId: String, elementId: String) async throws -> [MWElementNote] {
+        try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/elements/\(elementId)/notes")
+    }
+
+    func addElementNote(projectId: String, elementId: String, kind: String, body: String?, url: String?) async throws -> MWElementNote {
+        struct Req: Encodable { let kind: String; let body: String?; let url: String? }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/elements/\(elementId)/notes",
+            body: Req(kind: kind, body: body, url: url)
+        )
+    }
+
+    func deleteElementNote(projectId: String, elementId: String, noteId: String) async throws {
+        _ = try await client.requestData(
+            method: "DELETE",
+            path: "\(basePath)/projects/\(projectId)/elements/\(elementId)/notes/\(noteId)"
         )
     }
 

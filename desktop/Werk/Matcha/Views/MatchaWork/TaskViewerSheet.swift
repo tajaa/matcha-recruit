@@ -19,9 +19,19 @@ struct TaskViewerSheet: View {
     @State private var history: [MWTaskHistoryEntry] = []
     @State private var didCopy = false
     @State private var isCopying = false
+    @State private var newNote = ""
+    @State private var addingNote = false
+    @State private var isRejecting = false
+    @State private var rejectNote = ""
+    @State private var submitting = false
 
     private var attachments: [MWProjectFile] {
         viewModel.taskFiles[task.id] ?? []
+    }
+
+    /// Free-form notes/comments — the `activity` rows from the task history.
+    private var notes: [MWTaskHistoryEntry] {
+        history.filter { $0.eventType == "activity" }
     }
 
     private var assigneeName: String? {
@@ -97,6 +107,33 @@ struct TaskViewerSheet: View {
                 .foregroundColor(.secondary)
             }
 
+            if let note = task.reviewNote?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !note.isEmpty,
+               task.boardColumn == "todo" || task.boardColumn == "in_progress" {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10))
+                        Text("NEEDS WORK")
+                            .font(.system(size: 9, weight: .semibold))
+                            .tracking(0.5)
+                    }
+                    .foregroundColor(.orange)
+                    Text(note)
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.9))
+                        .textSelection(.enabled)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.orange.opacity(0.12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.orange.opacity(0.4), lineWidth: 1)
+                )
+                .cornerRadius(6)
+            }
+
             if let description = task.description, !description.isEmpty {
                 ScrollView {
                     Text(description)
@@ -128,8 +165,11 @@ struct TaskViewerSheet: View {
                 .cornerRadius(6)
             }
 
-            if !history.isEmpty {
-                TaskHistoryTimeline(entries: history)
+            // Notes (event_type == activity) get their own section above, so
+            // the timeline shows only structural events to avoid duplication.
+            let timelineEntries = history.filter { $0.eventType != "activity" }
+            if !timelineEntries.isEmpty {
+                TaskHistoryTimeline(entries: timelineEntries)
             }
 
             if !attachments.isEmpty {
@@ -160,7 +200,25 @@ struct TaskViewerSheet: View {
                 }
             }
 
-            HStack {
+            notesSection
+
+            if isRejecting {
+                rejectEditor
+            }
+
+            HStack(spacing: 12) {
+                if task.boardColumn == "review" && !isRejecting {
+                    Button {
+                        isRejecting = true
+                        rejectNote = ""
+                    } label: {
+                        Label("Send back", systemImage: "arrow.uturn.backward")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.orange)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Mark incomplete and return to To-do — notifies the assignee")
+                }
                 Spacer()
                 Button("Edit") { onEdit() }
                     .buttonStyle(.plain)
@@ -191,6 +249,146 @@ struct TaskViewerSheet: View {
         }
     }
 
+    // MARK: - Notes / comments
+
+    @ViewBuilder
+    private var notesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "text.bubble")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Text("NOTES")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .tracking(0.5)
+                if !notes.isEmpty {
+                    Text("\(notes.count)")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.zinc800)
+                        .cornerRadius(4)
+                }
+            }
+
+            ForEach(notes) { n in
+                let body = (n.metadata?["body"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !body.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(body)
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.9))
+                            .textSelection(.enabled)
+                        Text("\((n.actorName?.isEmpty == false ? n.actorName! : "Someone")) · \(PacificDateFormatter.absolute(n.createdAt) ?? "")")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.zinc800.opacity(0.5))
+                    .cornerRadius(5)
+                }
+            }
+
+            HStack(spacing: 6) {
+                TextField("Add a note…", text: $newNote)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundColor(.white)
+                    .padding(7)
+                    .background(Color.zinc800.opacity(0.6))
+                    .cornerRadius(5)
+                    .onSubmit { Task { await submitNote() } }
+                Button {
+                    Task { await submitNote() }
+                } label: {
+                    if addingNote {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("Add").font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.matcha500)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(addingNote || newNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+    }
+
+    // MARK: - Reviewer send-back
+
+    @ViewBuilder
+    private var rejectEditor: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("WHAT'S INCOMPLETE?")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundColor(.orange)
+                .tracking(0.5)
+            TextEditor(text: $rejectNote)
+                .font(.system(size: 12))
+                .foregroundColor(.white.opacity(0.9))
+                .scrollContentBackground(.hidden)
+                .padding(5)
+                .frame(height: 64)
+                .background(Color.zinc800.opacity(0.6))
+                .cornerRadius(5)
+            HStack {
+                Button("Cancel") { isRejecting = false; rejectNote = "" }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button {
+                    Task { await submitReject() }
+                } label: {
+                    if submitting {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("Send back to To-do")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.orange)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(submitting || rejectNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.08))
+        .cornerRadius(6)
+    }
+
+    private func submitNote() async {
+        let text = newNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let pid = viewModel.project?.id, !addingNote else { return }
+        addingNote = true
+        defer { addingNote = false }
+        do {
+            try await MatchaWorkService.shared.logTaskActivity(
+                projectId: pid, taskId: task.id, kind: "note", body: text
+            )
+            newNote = ""
+            await loadHistory()
+        } catch {
+            // Best-effort; leave the text in place so the user can retry.
+        }
+    }
+
+    private func submitReject() async {
+        let note = rejectNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !note.isEmpty, !submitting else { return }
+        submitting = true
+        let ok = await viewModel.rejectTask(id: task.id, note: note)
+        submitting = false
+        if ok {
+            isRejecting = false
+            rejectNote = ""
+            onClose()
+        }
+    }
+
     /// Copies the ticket as markdown PLUS the real screenshot bytes, so pasting
     /// into Claude/ChatGPT web drops the actual images instead of dead
     /// presigned/CloudFront URLs. The markdown (which still lists every image as
@@ -209,7 +407,6 @@ struct TaskViewerSheet: View {
             assigneeName: assigneeName,
             columnLabel: columnLabel,
             attachments: attachments,
-            history: history,
         )
 
         // Download up to 6 image attachments' bytes.
@@ -322,7 +519,6 @@ enum TaskClipboardExporter {
         assigneeName: String?,
         columnLabel: String,
         attachments: [MWProjectFile],
-        history: [MWTaskHistoryEntry],
     ) -> String {
         var lines: [String] = []
         lines.append("# \(task.title)")
@@ -363,39 +559,7 @@ enum TaskClipboardExporter {
             lines.append("")
         }
 
-        if !history.isEmpty {
-            lines.append("## History")
-            for e in history {
-                let when = formatHistoryDate(e.createdAt)
-                let who = (e.actorName?.isEmpty == false ? e.actorName! : "Someone")
-                let action = describeEvent(e)
-                lines.append("- \(when) · \(who) · \(action)")
-            }
-            lines.append("")
-        }
-
         return lines.joined(separator: "\n")
-    }
-
-    private static func describeEvent(_ e: MWTaskHistoryEntry) -> String {
-        switch e.eventType {
-        case "created":
-            return "created task" + (e.toValue.map { " in \(columnLabel($0))" } ?? "")
-        case "column_change":
-            let from = e.fromValue.map { columnLabel($0) } ?? "?"
-            let to = e.toValue.map { columnLabel($0) } ?? "?"
-            return "moved \(from) → \(to)"
-        case "assignee_change":
-            return e.toValue == nil ? "unassigned task" : "updated assignee"
-        case "description_change":
-            return "updated description"
-        case "progress_note_change":
-            return "updated where we're at"
-        case "deleted":
-            return "deleted task"
-        default:
-            return e.eventType
-        }
     }
 
     private static func columnLabel(_ raw: String) -> String {
@@ -407,11 +571,5 @@ enum TaskClipboardExporter {
         if b < 1024 { return "\(bytes) B" }
         if b < 1024 * 1024 { return String(format: "%.1f KB", b / 1024) }
         return String(format: "%.1f MB", b / 1024 / 1024)
-    }
-
-    private static func formatHistoryDate(_ iso: String) -> String {
-        // Absolute Pacific time so a pasted ticket reads the same for everyone,
-        // regardless of the reader's machine timezone.
-        PacificDateFormatter.absolute(iso) ?? iso
     }
 }

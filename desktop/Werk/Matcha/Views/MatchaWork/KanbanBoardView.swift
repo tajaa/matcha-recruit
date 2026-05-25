@@ -526,7 +526,9 @@ private struct TaskComposeContent: View {
     let onClose: () -> Void
 
     @State private var title: String = ""
-    @State private var description: String
+    /// One entry per `template.fields` element, keyed by field.key. Composed
+    /// into the markdown description on Add.
+    @State private var fieldValues: [String: String] = [:]
     @State private var priority: String
     @State private var assignedTo: String?
     @State private var selectedElementId: String?
@@ -538,8 +540,11 @@ private struct TaskComposeContent: View {
         self.template = template
         self.viewModel = viewModel
         self.onClose = onClose
-        _description = State(initialValue: template.scaffold)
         _priority = State(initialValue: template.defaultPriority)
+    }
+
+    private func fieldBinding(_ key: String) -> Binding<String> {
+        Binding(get: { fieldValues[key] ?? "" }, set: { fieldValues[key] = $0 })
     }
 
     private let priorities: [(key: String, label: String)] = [
@@ -565,14 +570,15 @@ private struct TaskComposeContent: View {
                 .background(appState.themeText.opacity(0.06))
                 .cornerRadius(6)
 
-            TextEditor(text: $description)
-                .font(.system(size: 12))
-                .foregroundColor(appState.themeText.opacity(0.9))
-                .scrollContentBackground(.hidden)
-                .padding(6)
-                .frame(height: 240)
-                .background(appState.themeText.opacity(0.06))
-                .cornerRadius(6)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(template.fields) { field in
+                        fieldEditor(for: field)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .frame(maxHeight: 300)
 
             HStack(spacing: 6) {
                 Text("Priority")
@@ -615,7 +621,9 @@ private struct TaskComposeContent: View {
                 Button("Add") {
                     let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !t.isEmpty else { return }
-                    let desc = description.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let desc = KanbanTemplate.composeDescription(
+                        fields: template.fields, values: fieldValues
+                    )
                     Task {
                         await viewModel.addTask(
                             title: t, column: column, priority: priority,
@@ -636,6 +644,55 @@ private struct TaskComposeContent: View {
         .frame(width: 420)
         .glassPanel(cornerRadius: 0, material: .hudWindow, blending: .behindWindow,
                     tint: Color.appBackground, tintOpacity: 0.62, shadow: false)
+    }
+
+    /// Renders one structured field (labeled). Single-line → TextField,
+    /// multi-line → TextEditor with a placeholder overlay (TextEditor has no
+    /// native placeholder), picker → segmented dropdown with an empty "—" tag.
+    @ViewBuilder
+    private func fieldEditor(for field: KanbanTemplate.TicketField) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(field.label.uppercased())
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundColor(.secondary)
+                .tracking(0.5)
+            switch field.kind {
+            case .singleLine:
+                TextField(field.placeholder, text: fieldBinding(field.key))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundColor(appState.themeText)
+                    .padding(7)
+                    .background(appState.themeText.opacity(0.06))
+                    .cornerRadius(5)
+            case .multiLine:
+                TextEditor(text: fieldBinding(field.key))
+                    .font(.system(size: 12))
+                    .foregroundColor(appState.themeText.opacity(0.9))
+                    .scrollContentBackground(.hidden)
+                    .padding(5)
+                    .frame(height: 60)
+                    .background(appState.themeText.opacity(0.06))
+                    .cornerRadius(5)
+                    .overlay(alignment: .topLeading) {
+                        if (fieldValues[field.key] ?? "").isEmpty && !field.placeholder.isEmpty {
+                            Text(field.placeholder)
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary.opacity(0.55))
+                                .padding(.horizontal, 9)
+                                .padding(.top, 11)
+                                .allowsHitTesting(false)
+                        }
+                    }
+            case .picker(let options):
+                Picker("", selection: fieldBinding(field.key)) {
+                    Text("—").tag("")
+                    ForEach(options, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+        }
     }
 
     /// Element row: pick an existing element or create one inline via "＋ New".

@@ -15,15 +15,30 @@ from ...database import get_connection
 
 
 async def list_project_files(project_id: UUID) -> list[dict[str, Any]]:
-    """Project-scoped files only (excludes task attachments)."""
+    """Root project files only — excludes task attachments AND element-scoped
+    files (element_id IS NULL). Element repos surface via list_element_files."""
     async with get_connection() as conn:
         rows = await conn.fetch(
             """SELECT id, project_id, task_id, uploaded_by, filename, storage_url,
-                      content_type, file_size, folder_id, created_at
+                      content_type, file_size, folder_id, element_id, created_at
                FROM mw_project_files
-               WHERE project_id = $1 AND task_id IS NULL
+               WHERE project_id = $1 AND task_id IS NULL AND element_id IS NULL
                ORDER BY created_at DESC""",
             project_id,
+        )
+    return [dict(r) for r in rows]
+
+
+async def list_element_files(project_id: UUID, element_id: str) -> list[dict[str, Any]]:
+    """Files bucketed under one element (its context repo)."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT id, project_id, task_id, uploaded_by, filename, storage_url,
+                      content_type, file_size, folder_id, element_id, created_at
+               FROM mw_project_files
+               WHERE project_id = $1 AND task_id IS NULL AND element_id = $2
+               ORDER BY created_at DESC""",
+            project_id, element_id,
         )
     return [dict(r) for r in rows]
 
@@ -71,14 +86,28 @@ async def add_project_file(
     content_type: Optional[str],
     file_size: int,
     task_id: Optional[UUID] = None,
+    element_id: Optional[str] = None,
+    folder_id: Optional[UUID] = None,
 ) -> dict[str, Any]:
     async with get_connection() as conn:
+        # Drop a folder that isn't in this project OR whose element scope
+        # doesn't match the file's — a file must not land in a root folder when
+        # element-scoped, or in another element's folder.
+        if folder_id is not None:
+            folder = await conn.fetchrow(
+                "SELECT element_id FROM mw_project_folders WHERE id = $1 AND project_id = $2",
+                folder_id, project_id,
+            )
+            if folder is None or (folder["element_id"] or None) != (element_id or None):
+                folder_id = None
         row = await conn.fetchrow(
             """INSERT INTO mw_project_files
-               (project_id, task_id, uploaded_by, filename, storage_url, content_type, file_size)
-               VALUES ($1, $2, $3, $4, $5, $6, $7)
+               (project_id, task_id, uploaded_by, filename, storage_url, content_type,
+                file_size, element_id, folder_id)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                RETURNING *""",
-            project_id, task_id, uploaded_by, filename, storage_url, content_type, file_size,
+            project_id, task_id, uploaded_by, filename, storage_url, content_type,
+            file_size, element_id, folder_id,
         )
     return dict(row)
 
@@ -203,13 +232,28 @@ async def backfill_project_chat_files(project_id: UUID) -> int:
 # ── Folders ──
 
 async def list_project_folders(project_id: UUID) -> list[dict[str, Any]]:
+    """Root folders only (element_id IS NULL) — element folder trees surface
+    via list_element_folders so they stay bucketed under their element."""
     async with get_connection() as conn:
         rows = await conn.fetch(
-            """SELECT id, project_id, parent_id, name, created_by, created_at
+            """SELECT id, project_id, parent_id, name, element_id, created_by, created_at
                FROM mw_project_folders
-               WHERE project_id = $1
+               WHERE project_id = $1 AND element_id IS NULL
                ORDER BY name ASC""",
             project_id,
+        )
+    return [dict(r) for r in rows]
+
+
+async def list_element_folders(project_id: UUID, element_id: str) -> list[dict[str, Any]]:
+    """Folder tree scoped to one element."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT id, project_id, parent_id, name, element_id, created_by, created_at
+               FROM mw_project_folders
+               WHERE project_id = $1 AND element_id = $2
+               ORDER BY name ASC""",
+            project_id, element_id,
         )
     return [dict(r) for r in rows]
 
@@ -227,16 +271,24 @@ async def create_project_folder(
     name: str,
     parent_id: Optional[UUID],
     created_by: UUID,
+    element_id: Optional[str] = None,
 ) -> dict[str, Any]:
     async with get_connection() as conn:
-        # Drop a parent that isn't in this project rather than nest across tenants.
-        if parent_id is not None and not await _folder_in_project(conn, parent_id, project_id):
-            parent_id = None
+        # Drop a parent that isn't in this project, or whose element scope
+        # differs — an element's folder tree must stay within that element
+        # (and a root folder must not nest under an element folder).
+        if parent_id is not None:
+            parent = await conn.fetchrow(
+                "SELECT element_id FROM mw_project_folders WHERE id = $1 AND project_id = $2",
+                parent_id, project_id,
+            )
+            if parent is None or (parent["element_id"] or None) != (element_id or None):
+                parent_id = None
         row = await conn.fetchrow(
-            """INSERT INTO mw_project_folders (project_id, parent_id, name, created_by)
-               VALUES ($1, $2, $3, $4)
-               RETURNING id, project_id, parent_id, name, created_by, created_at""",
-            project_id, parent_id, (name.strip()[:200] or "Untitled"), created_by,
+            """INSERT INTO mw_project_folders (project_id, parent_id, name, created_by, element_id)
+               VALUES ($1, $2, $3, $4, $5)
+               RETURNING id, project_id, parent_id, name, element_id, created_by, created_at""",
+            project_id, parent_id, (name.strip()[:200] or "Untitled"), created_by, element_id,
         )
     return dict(row)
 
@@ -262,7 +314,7 @@ async def update_project_folder(
                SET name = COALESCE($3, name),
                    parent_id = CASE WHEN $5 THEN $4 ELSE COALESCE($4, parent_id) END
                WHERE id = $1 AND project_id = $2
-               RETURNING id, project_id, parent_id, name, created_by, created_at""",
+               RETURNING id, project_id, parent_id, name, element_id, created_by, created_at""",
             folder_id, project_id,
             (name.strip()[:200] if name else None),
             parent_id, clear_parent,
@@ -296,7 +348,7 @@ async def move_file_to_folder(
                SET folder_id = $3
                WHERE id = $1 AND project_id = $2
                RETURNING id, project_id, task_id, uploaded_by, filename, storage_url,
-                         content_type, file_size, folder_id, created_at""",
+                         content_type, file_size, folder_id, element_id, created_at""",
             file_id, project_id, folder_id,
         )
     return dict(row) if row else None
@@ -312,7 +364,10 @@ async def copy_file_to_folder(
     Used by the Media tab's "Add to Files": the source row stays at the root
     (so it remains in Media) and a new row is inserted pointing at the same
     storage URL under the target folder. No S3 copy — the CloudFront URL is
-    reused, like `sync_channel_attachments_to_project`. Deduped on
+    reused, like `sync_channel_attachments_to_project`. NOTE: the copy lands
+    at the project root (element_id NULL) — source is always a root file today.
+    If copy is ever exposed from inside an element, propagate element_id here.
+    Deduped on
     (project_id, storage_url, folder_id) so repeated adds don't pile up; the
     existing copy is returned in that case.
     """
@@ -338,7 +393,7 @@ async def copy_file_to_folder(
                    WHERE project_id = $1 AND storage_url = $4 AND folder_id = $7
                )
                RETURNING id, project_id, task_id, uploaded_by, filename, storage_url,
-                         content_type, file_size, folder_id, created_at""",
+                         content_type, file_size, folder_id, element_id, created_at""",
             project_id, src["uploaded_by"], src["filename"], src["storage_url"],
             src["content_type"], src["file_size"], folder_id,
         )
@@ -346,7 +401,7 @@ async def copy_file_to_folder(
             # Dedupe hit — return the pre-existing copy in this folder.
             row = await conn.fetchrow(
                 """SELECT id, project_id, task_id, uploaded_by, filename, storage_url,
-                          content_type, file_size, folder_id, created_at
+                          content_type, file_size, folder_id, element_id, created_at
                    FROM mw_project_files
                    WHERE project_id = $1 AND storage_url = $2 AND folder_id = $3
                    LIMIT 1""",

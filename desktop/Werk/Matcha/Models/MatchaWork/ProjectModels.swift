@@ -104,6 +104,8 @@ struct MWProjectFile: Codable, Identifiable, Hashable {
     var createdAt: String?
     /// nil = root of the Files tab; otherwise the containing folder.
     var folderId: String?
+    /// nil = project root Files/Media; otherwise bucketed under an element repo.
+    var elementId: String?
 
     enum CodingKeys: String, CodingKey {
         case id, filename
@@ -115,6 +117,7 @@ struct MWProjectFile: Codable, Identifiable, Hashable {
         case fileSize = "file_size"
         case createdAt = "created_at"
         case folderId = "folder_id"
+        case elementId = "element_id"
     }
 
     var isImage: Bool {
@@ -148,12 +151,39 @@ struct MWProjectFolder: Codable, Identifiable, Hashable {
     var name: String
     var createdBy: String?
     var createdAt: String?
+    /// nil = a root Files-tab folder; otherwise part of an element's repo tree.
+    var elementId: String?
 
     enum CodingKeys: String, CodingKey {
         case id, name
         case projectId = "project_id"
         case parentId = "parent_id"
         case createdBy = "created_by"
+        case createdAt = "created_at"
+        case elementId = "element_id"
+    }
+}
+
+/// A note or link pinned to a project element's context repo
+/// (`mw_element_notes`). `kind` is "note" (free text in `body`) or "link"
+/// (`url` + optional `body` label).
+struct MWElementNote: Codable, Identifiable, Hashable {
+    let id: String
+    var elementId: String?
+    var projectId: String?
+    var createdBy: String?
+    var authorName: String?
+    var kind: String
+    var body: String?
+    var url: String?
+    var createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, body, url
+        case elementId = "element_id"
+        case projectId = "project_id"
+        case createdBy = "created_by"
+        case authorName = "author_name"
         case createdAt = "created_at"
     }
 }
@@ -257,9 +287,15 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
     var nextActionAt: String? = nil
     var expectedClose: String? = nil
 
+    /// Reviewer's "needs work" note set when a task is sent back from review
+    /// to todo. Cleared server-side once it re-enters review/done. Drives the
+    /// bounce-back banner in TaskViewerSheet.
+    var reviewNote: String? = nil
+
     enum CodingKeys: String, CodingKey {
         case id, title, description, priority, status, attachments, category
         case probability, outcome
+        case reviewNote = "review_note"
         case projectId = "project_id"
         case boardColumn = "board_column"
         case pipelineColumn = "pipeline_column"
@@ -904,6 +940,88 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
             -
             """
         }
+    }
+
+    /// One labeled input rendered in the compose sheet. The label doubles as
+    /// the `## Heading` in the composed markdown description.
+    struct TicketField: Identifiable {
+        enum Kind: Equatable {
+            case singleLine
+            case multiLine
+            case picker([String])
+        }
+        let key: String          // stable identity
+        let label: String        // shown in the form + used as markdown heading
+        let placeholder: String
+        let kind: Kind
+        var id: String { key }
+    }
+
+    /// Structured fields shown in the compose sheet, per template. Replaces the
+    /// raw-markdown scaffold so the author fills labeled inputs instead of
+    /// deleting placeholder text. `general` (and the blank/manual path) use a
+    /// single free-form Description box for back-compat.
+    var fields: [TicketField] {
+        switch self {
+        case .engineering:
+            return [
+                .init(key: "context", label: "Context", placeholder: "What's the problem and why now?", kind: .multiLine),
+                .init(key: "scope", label: "Scope", placeholder: "- \n- ", kind: .multiLine),
+                .init(key: "acceptance", label: "Acceptance criteria", placeholder: "- ", kind: .multiLine),
+                .init(key: "technical", label: "Technical notes", placeholder: "Approach, affected files/services, risks.", kind: .multiLine),
+                .init(key: "outofscope", label: "Out of scope", placeholder: "What this explicitly does not cover.", kind: .multiLine),
+            ]
+        case .sales:
+            return [
+                .init(key: "account", label: "Account", placeholder: "Company · contact · role", kind: .singleLine),
+                .init(key: "opportunity", label: "Opportunity", placeholder: "Deal size · timeline · source", kind: .singleLine),
+                .init(key: "stage", label: "Stage", placeholder: "", kind: .picker(["Prospecting", "Demo", "Proposal", "Negotiation", "Closing"])),
+                .init(key: "pain", label: "Pain / need", placeholder: "What hurts today?", kind: .multiLine),
+                .init(key: "nextstep", label: "Next step", placeholder: "The single next action.", kind: .singleLine),
+                .init(key: "blockers", label: "Blockers", placeholder: "What's in the way?", kind: .multiLine),
+            ]
+        case .product:
+            return [
+                .init(key: "problem", label: "Problem", placeholder: "Who hurts, and how today?", kind: .multiLine),
+                .init(key: "userstory", label: "User story", placeholder: "As a ___, I want ___ so that ___.", kind: .multiLine),
+                .init(key: "solution", label: "Proposed solution", placeholder: "", kind: .multiLine),
+                .init(key: "metric", label: "Success metric", placeholder: "How we'll know it worked.", kind: .singleLine),
+                .init(key: "questions", label: "Open questions", placeholder: "", kind: .multiLine),
+                .init(key: "outofscope", label: "Out of scope", placeholder: "", kind: .multiLine),
+            ]
+        case .bug:
+            return [
+                .init(key: "summary", label: "Summary", placeholder: "One line.", kind: .singleLine),
+                .init(key: "environment", label: "Environment", placeholder: "Build / OS / device", kind: .singleLine),
+                .init(key: "steps", label: "Steps to reproduce", placeholder: "1. \n2. ", kind: .multiLine),
+                .init(key: "expected", label: "Expected", placeholder: "What should happen.", kind: .multiLine),
+                .init(key: "actual", label: "Actual", placeholder: "What happens instead.", kind: .multiLine),
+                .init(key: "severity", label: "Severity / impact", placeholder: "", kind: .picker(["Critical", "High", "Medium", "Low"])),
+                .init(key: "evidence", label: "Evidence", placeholder: "Screenshots / logs — drag files onto the ticket.", kind: .multiLine),
+            ]
+        case .general:
+            return [
+                .init(key: "description", label: "Description", placeholder: "What needs to happen?", kind: .multiLine),
+            ]
+        }
+    }
+
+    /// Builds the markdown `description` from filled compose-sheet field values.
+    /// Empty fields are skipped. A lone free-form "description" field
+    /// (general/manual) is emitted as plain text with no heading so it reads
+    /// naturally; everything else becomes `## Label\n<value>` blocks — the same
+    /// on-disk format the viewer/edit/copy paths already expect.
+    static func composeDescription(fields: [TicketField], values: [String: String]) -> String {
+        if fields.count == 1, fields[0].key == "description" {
+            return (values["description"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        var blocks: [String] = []
+        for f in fields {
+            let v = (values[f.key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !v.isEmpty else { continue }
+            blocks.append("## \(f.label)\n\(v)")
+        }
+        return blocks.joined(separator: "\n\n")
     }
 
     /// Maps a stored `category` string back to a template for badge rendering.
