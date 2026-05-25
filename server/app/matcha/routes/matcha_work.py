@@ -2900,6 +2900,15 @@ async def _verify_project_access(project_id: UUID, current_user: CurrentUser) ->
     return project, project["collaborator_role"]
 
 
+def _can_edit_project(role: Optional[str]) -> bool:
+    """Write gate for collab project content (elements, element files/folders,
+    notes). Permissive on purpose: only explicit read-only roles are blocked.
+    `_verify_project_access` returns role=None / 'owner' for the owner depending
+    on access path, so an `in ('owner','editor')` allowlist 403s legitimate
+    owners — mirror the client's `canEditElements` (viewer/commenter blocked)."""
+    return role not in ("viewer", "commenter")
+
+
 @router.get("/projects")
 async def list_projects_endpoint(
     status: Optional[str] = Query(None, pattern="^(active|archived|completed)$"),
@@ -3553,8 +3562,8 @@ async def upload_project_file(
     # as the element folder/note write endpoints (root uploads stay open to any
     # member, matching the existing Files tab behaviour).
     if element_id:
-        if _role not in ("owner", "editor"):
-            raise HTTPException(status_code=403, detail="Owner or editor role required")
+        if not _can_edit_project(_role):
+            raise HTTPException(status_code=403, detail="You don't have edit access to this project")
         async with get_connection() as conn:
             await _verify_element_in_project(conn, project_id, element_id)
 
@@ -4312,8 +4321,8 @@ async def create_project_element(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     _project, role = await _verify_project_access(project_id, current_user)
-    if role not in ("owner", "editor"):
-        raise HTTPException(status_code=403, detail="Owner or editor role required")
+    if not _can_edit_project(role):
+        raise HTTPException(status_code=403, detail="You don't have edit access to this project")
     name = (body.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
@@ -4357,8 +4366,8 @@ async def update_project_element(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     _project, role = await _verify_project_access(project_id, current_user)
-    if role not in ("owner", "editor"):
-        raise HTTPException(status_code=403, detail="Owner or editor role required")
+    if not _can_edit_project(role):
+        raise HTTPException(status_code=403, detail="You don't have edit access to this project")
     async with get_connection() as conn:
         existing = await conn.fetchrow(
             "SELECT id FROM mw_project_elements WHERE id = $1 AND project_id = $2",
@@ -4424,8 +4433,8 @@ async def delete_project_element(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     _project, role = await _verify_project_access(project_id, current_user)
-    if role not in ("owner", "editor"):
-        raise HTTPException(status_code=403, detail="Owner or editor role required")
+    if not _can_edit_project(role):
+        raise HTTPException(status_code=403, detail="You don't have edit access to this project")
     async with get_connection() as conn:
         result = await conn.execute(
             "DELETE FROM mw_project_elements WHERE id = $1 AND project_id = $2",
@@ -4501,8 +4510,8 @@ async def create_element_folder_endpoint(
     from ..services import project_file_service
 
     _project, role = await _verify_project_access(project_id, current_user)
-    if role not in ("owner", "editor"):
-        raise HTTPException(status_code=403, detail="Owner or editor role required")
+    if not _can_edit_project(role):
+        raise HTTPException(status_code=403, detail="You don't have edit access to this project")
     async with get_connection() as conn:
         await _verify_element_in_project(conn, project_id, element_id)
     clean = (name or "").strip()
@@ -4540,8 +4549,8 @@ async def add_element_note_endpoint(
     from ..services import element_notes_service
 
     _project, role = await _verify_project_access(project_id, current_user)
-    if role not in ("owner", "editor"):
-        raise HTTPException(status_code=403, detail="Owner or editor role required")
+    if not _can_edit_project(role):
+        raise HTTPException(status_code=403, detail="You don't have edit access to this project")
     async with get_connection() as conn:
         await _verify_element_in_project(conn, project_id, element_id)
     try:
@@ -4570,8 +4579,8 @@ async def delete_element_note_endpoint(
     from ..services import element_notes_service
 
     _project, role = await _verify_project_access(project_id, current_user)
-    if role not in ("owner", "editor"):
-        raise HTTPException(status_code=403, detail="Owner or editor role required")
+    if not _can_edit_project(role):
+        raise HTTPException(status_code=403, detail="You don't have edit access to this project")
     ok = await element_notes_service.delete_element_note(project_id, element_id, note_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Note not found")
