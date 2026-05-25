@@ -24,10 +24,19 @@ struct TaskViewerSheet: View {
     @State private var isRejecting = false
     @State private var rejectNote = ""
     @State private var submitting = false
+    @State private var newSubtask = ""
+    @State private var addingSubtask = false
 
     private var attachments: [MWProjectFile] {
         viewModel.taskFiles[task.id] ?? []
     }
+
+    /// Checklist items for this task (ordered). Mutated optimistically by the
+    /// view model; the card-face "done/total" stays in sync via syncSubtaskCounts.
+    private var subtasks: [MWSubtask] {
+        viewModel.taskSubtasks[task.id] ?? []
+    }
+    private var subtaskDoneCount: Int { subtasks.filter { $0.isDone }.count }
 
     /// Free-form notes/comments — the `activity` rows from the task history.
     private var notes: [MWTaskHistoryEntry] {
@@ -119,7 +128,7 @@ struct TaskViewerSheet: View {
 
             if let note = task.reviewNote?.trimmingCharacters(in: .whitespacesAndNewlines),
                !note.isEmpty,
-               task.boardColumn == "todo" || task.boardColumn == "in_progress" {
+               task.boardColumn == "changes_requested" || task.boardColumn == "in_progress" {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 5) {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -210,6 +219,8 @@ struct TaskViewerSheet: View {
                 }
             }
 
+            checklistSection
+
             notesSection
 
             if isRejecting {
@@ -227,7 +238,7 @@ struct TaskViewerSheet: View {
                             .foregroundColor(.orange)
                     }
                     .buttonStyle(.plain)
-                    .help("Mark incomplete and return to To-do — notifies the assignee")
+                    .help("Mark incomplete and send to Changes Requested — notifies the assignee")
                 }
                 Spacer()
                 Button("Edit") { onEdit() }
@@ -243,6 +254,7 @@ struct TaskViewerSheet: View {
             if viewModel.taskFiles[task.id] == nil {
                 await viewModel.loadTaskFiles(taskId: task.id)
             }
+            await viewModel.loadSubtasks(taskId: task.id)
             await loadHistory()
         }
         .sheet(item: $previewFile) { file in
@@ -327,6 +339,77 @@ struct TaskViewerSheet: View {
         }
     }
 
+    // MARK: - Checklist (subtasks)
+
+    @ViewBuilder
+    private var checklistSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "checklist")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Text("CHECKLIST")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .tracking(0.5)
+                if !subtasks.isEmpty {
+                    Text("\(subtaskDoneCount)/\(subtasks.count)")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.zinc800)
+                        .cornerRadius(4)
+                }
+            }
+
+            ForEach(subtasks) { item in
+                SubtaskRow(
+                    item: item,
+                    onToggle: {
+                        Task { await viewModel.toggleSubtask(taskId: task.id, subtaskId: item.id, isDone: !item.isDone) }
+                    },
+                    onDelete: {
+                        Task { await viewModel.deleteSubtask(taskId: task.id, subtaskId: item.id) }
+                    }
+                )
+            }
+
+            HStack(spacing: 6) {
+                TextField("Add a checklist item…", text: $newSubtask)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundColor(.white)
+                    .padding(7)
+                    .background(Color.zinc800.opacity(0.6))
+                    .cornerRadius(5)
+                    .onSubmit { submitSubtask() }
+                Button {
+                    submitSubtask()
+                } label: {
+                    if addingSubtask {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("Add").font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.matcha500)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(addingSubtask || newSubtask.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+    }
+
+    private func submitSubtask() {
+        let text = newSubtask.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !addingSubtask else { return }
+        addingSubtask = true
+        Task {
+            await viewModel.addSubtask(taskId: task.id, title: text)
+            await MainActor.run { newSubtask = ""; addingSubtask = false }
+        }
+    }
+
     // MARK: - Reviewer send-back
 
     @ViewBuilder
@@ -344,6 +427,40 @@ struct TaskViewerSheet: View {
                 .frame(height: 64)
                 .background(Color.zinc800.opacity(0.6))
                 .cornerRadius(5)
+
+            // Re-open specific checklist items as part of sending back, so the
+            // assignee knows exactly which pieces need rework. Only completed
+            // items are candidates; tapping flips them back to not-done live.
+            if subtasks.contains(where: { $0.isDone }) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("RE-OPEN ITEMS")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.orange)
+                        .tracking(0.5)
+                    ForEach(subtasks.filter { $0.isDone }) { item in
+                        Button {
+                            Task { await viewModel.toggleSubtask(taskId: task.id, subtaskId: item.id, isDone: false) }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.matcha500)
+                                Text(item.title)
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.white.opacity(0.85))
+                                    .strikethrough()
+                                    .lineLimit(1)
+                                Spacer()
+                                Text("Re-open")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundColor(.orange)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
             HStack {
                 Button("Cancel") { isRejecting = false; rejectNote = "" }
                     .buttonStyle(.plain)
@@ -356,7 +473,7 @@ struct TaskViewerSheet: View {
                     if submitting {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text("Send back to To-do")
+                        Text("Send back")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.orange)
                     }
@@ -476,6 +593,48 @@ struct TaskViewerSheet: View {
             .padding(.vertical, 2)
             .background(color.opacity(0.15))
             .cornerRadius(3)
+    }
+}
+
+/// One checklist row in the TaskViewerSheet: toggle checkbox + title, delete on
+/// hover. Done items strike through and dim. Dark-themed to match the sheet.
+private struct SubtaskRow: View {
+    let item: MWSubtask
+    let onToggle: () -> Void
+    let onDelete: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: onToggle) {
+                Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 13))
+                    .foregroundColor(item.isDone ? .matcha500 : .secondary)
+            }
+            .buttonStyle(.plain)
+            Text(item.title)
+                .font(.system(size: 12))
+                .foregroundColor(item.isDone ? .secondary : .white)
+                .strikethrough(item.isDone)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+            if isHovered {
+                Button(action: onDelete) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 10))
+                        .foregroundColor(.red.opacity(0.8))
+                }
+                .buttonStyle(.plain)
+                .help("Delete item")
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(isHovered ? Color.zinc800.opacity(0.6) : Color.clear)
+        .cornerRadius(4)
+        .contentShape(Rectangle())
+        .onHover { isHovered = $0 }
     }
 }
 

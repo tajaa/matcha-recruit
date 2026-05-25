@@ -2,11 +2,15 @@
 
 Project tasks live in `mw_tasks` with `project_id` set (null project_id is reserved for
 company-wide dashboard tasks surfaced via /tasks). Board state is tracked in
-`board_column` (todo|in_progress|review|done). The existing `status` column
-(pending|completed|cancelled) stays in sync with `board_column`:
+`board_column` (todo|in_progress|changes_requested|review|done). The existing
+`status` column (pending|completed|cancelled) stays in sync with `board_column`:
 - moving to 'done'   → status='completed', completed_at=now
 - moving out of 'done' → status='pending',  completed_at=null
 - toggling status complete ↔ moves column to 'done' / 'todo' accordingly
+
+`changes_requested` is the rework lane: reject_project_task bounces a card here
+from review (not back to todo) so kicked-back work is visually separate from
+never-started work. The review_note + churn count surface why / how often.
 """
 
 import json
@@ -53,7 +57,7 @@ async def _log_task_history(
 
 
 _ALLOWED_COLUMNS = {
-    "todo", "in_progress", "review", "done",
+    "todo", "in_progress", "changes_requested", "review", "done",
     # Sales-pipeline stages kept here for backward compat (pre-migration rows).
     # New tasks place the stage in pipeline_column, not board_column.
     "lead", "qualified", "proposal", "negotiation", "closed",
@@ -159,9 +163,22 @@ async def list_project_tasks(project_id: UUID) -> list[dict]:
                    t.next_action_at, t.expected_close,
                    COALESCE(t.pipeline_column, 'lead') AS pipeline_column,
                    -- Last time this card crossed columns, for the "Moved …" stamp
-                   -- on the kanban card. Null until the first column_change.
+                   -- on the kanban card. Null until the first move. Counts a
+                   -- review_rejected as a move too (review → changes_requested)
+                   -- so a freshly bounced card resets its aging clock instead
+                   -- of inheriting the time it entered review.
                    (SELECT MAX(h.created_at) FROM mw_task_history h
-                      WHERE h.task_id = t.id AND h.event_type = 'column_change') AS last_moved_at,
+                      WHERE h.task_id = t.id
+                        AND h.event_type IN ('column_change', 'review_rejected')) AS last_moved_at,
+                   -- How many times this card has been sent back from review.
+                   -- Drives the "↻ ×N" churn chip so thrashing tickets are
+                   -- visible at board glance, not just in the card history.
+                   (SELECT COUNT(*) FROM mw_task_history h2
+                      WHERE h2.task_id = t.id AND h2.event_type = 'review_rejected') AS review_cycle_count,
+                   -- Checklist progress for the card face ("done/total").
+                   (SELECT COUNT(*) FROM mw_subtasks s WHERE s.task_id = t.id) AS subtask_total,
+                   (SELECT COUNT(*) FROM mw_subtasks s
+                      WHERE s.task_id = t.id AND s.is_done) AS subtask_done,
                    -- Split assignee fields so the client can pick a
                    -- human-readable name and never fall back to showing
                    -- a raw email in cards / tooltips. Older callsites
@@ -511,8 +528,8 @@ async def reject_project_task(
     actor_user_id: Optional[UUID] = None,
     project_title: Optional[str] = None,
 ) -> Optional[dict]:
-    """Reviewer sends a task back: bounce review → todo, store the reason in
-    review_note, log a `review_rejected` history event, and email the
+    """Reviewer sends a task back: bounce review → changes_requested, store the
+    reason in review_note, log a `review_rejected` history event, and email the
     assignee. Only valid from the `review` column. Returns the updated task
     row (same shape as `update_project_task`) or None if not found.
     """
@@ -533,7 +550,7 @@ async def reject_project_task(
         row = await conn.fetchrow(
             """
             UPDATE mw_tasks SET
-                board_column = 'todo',
+                board_column = 'changes_requested',
                 status = 'pending',
                 completed_at = NULL,
                 review_note = $3::text,
@@ -550,6 +567,7 @@ async def reject_project_task(
             """,
             task_id, project_id, note,
         )
+        cycle_count = 0
         if row:
             await _log_task_history(
                 conn,
@@ -558,8 +576,16 @@ async def reject_project_task(
                 actor_user_id=actor_user_id,
                 event_type="review_rejected",
                 from_value="review",
-                to_value="todo",
+                to_value="changes_requested",
                 metadata={"note": note[:500]},
+            )
+            # Count includes the bounce we just logged, so the card's churn chip
+            # reflects the new total immediately (optimistic update + broadcast)
+            # without waiting for the next full board reload.
+            cycle_count = await conn.fetchval(
+                """SELECT COUNT(*) FROM mw_task_history
+                   WHERE task_id = $1 AND event_type = 'review_rejected'""",
+                task_id,
             )
 
     if not row:
@@ -581,6 +607,7 @@ async def reject_project_task(
 
     result = _row_to_task(dict(row))
     result["last_moved_at"] = datetime.now(timezone.utc).isoformat()
+    result["review_cycle_count"] = cycle_count
     task_payload = dict(result)
     if actor_user_id is not None:
         task_payload["actor_id"] = str(actor_user_id)
@@ -820,7 +847,13 @@ async def update_project_task(
                 task_title=row["title"],
             )
 
-    if row and new_column != current["board_column"]:
+    # Resuming rework (changes_requested → in_progress) is a continuation, not a
+    # fresh start — skip the "Task started" blast. Re-submitting to review/done
+    # still notifies.
+    _is_rework_resume = (
+        current["board_column"] == "changes_requested" and new_column == "in_progress"
+    )
+    if row and new_column != current["board_column"] and not _is_rework_resume:
         await _notify_task_column_transition(
             project_id=project_id,
             company_id=current["company_id"],

@@ -5118,6 +5118,27 @@ async def init_db():
         # Partial unique index so the chat->Files sync dedupes root mirrors.
         await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_mw_project_files_project_url ON mw_project_files(project_id, storage_url) WHERE task_id IS NULL")
 
+        # Checklist items under a kanban task (migration mwsub0001). A complex
+        # feature card decomposes into trackable child items; the board shows
+        # "done/total" and a reviewer can re-open specific items on send-back.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_subtasks (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                task_id UUID NOT NULL REFERENCES mw_tasks(id) ON DELETE CASCADE,
+                project_id UUID NOT NULL,
+                company_id UUID NOT NULL,
+                title TEXT NOT NULL,
+                is_done BOOLEAN NOT NULL DEFAULT false,
+                position INTEGER NOT NULL DEFAULT 0,
+                assigned_to UUID,
+                created_by UUID,
+                completed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_subtasks_task ON mw_subtasks(task_id, position)")
+
         # Per-user project pin (independent across collaborators)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS mw_project_pins (

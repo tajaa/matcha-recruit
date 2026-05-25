@@ -956,8 +956,9 @@ class MatchaWorkService {
         )
     }
 
-    /// Reviewer sends a task back for changes: server bounces review → todo,
-    /// stores the note, and emails the assignee. Returns the updated task.
+    /// Reviewer sends a task back for changes: server bounces review →
+    /// changes_requested, stores the note, and emails the assignee. Returns the
+    /// updated task.
     func rejectTask(projectId: String, taskId: String, note: String) async throws -> MWProjectTask {
         struct Req: Encodable { let note: String }
         return try await client.request(
@@ -1245,6 +1246,42 @@ class MatchaWorkService {
         _ = try await client.requestData(
             method: "DELETE",
             path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/files/\(fileId)"
+        )
+    }
+
+    // MARK: - Task subtasks (checklist)
+
+    func listSubtasks(projectId: String, taskId: String) async throws -> [MWSubtask] {
+        try await client.request(
+            method: "GET",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/subtasks"
+        )
+    }
+
+    func createSubtask(projectId: String, taskId: String, title: String) async throws -> MWSubtask {
+        struct Req: Encodable { let title: String }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/subtasks",
+            body: Req(title: title)
+        )
+    }
+
+    /// Toggle one checklist item. Sends only `is_done` so we never accidentally
+    /// blank the title/position (the backend treats any present key as an edit).
+    func setSubtaskDone(projectId: String, taskId: String, subtaskId: String, isDone: Bool) async throws -> MWSubtask {
+        struct Req: Encodable { let is_done: Bool }
+        return try await client.request(
+            method: "PATCH",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/subtasks/\(subtaskId)",
+            body: Req(is_done: isDone)
+        )
+    }
+
+    func deleteSubtask(projectId: String, taskId: String, subtaskId: String) async throws {
+        _ = try await client.requestData(
+            method: "DELETE",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/subtasks/\(subtaskId)"
         )
     }
 

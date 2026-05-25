@@ -26,6 +26,10 @@ class ProjectDetailViewModel {
     /// Attachments per task, keyed by task id. Seeded by `loadTasks`
     /// (server embeds `attachments` per task) and updated by add/delete.
     var taskFiles: [String: [MWProjectFile]] = [:]
+    /// Checklist items per task, keyed by task id. Loaded lazily when a task
+    /// viewer opens; mutated optimistically. `syncSubtaskCounts` mirrors the
+    /// counts onto the matching `tasks` entry so the card face updates live.
+    var taskSubtasks: [String: [MWSubtask]] = [:]
     /// Per-session activity log surfaced in the collab Overview panel. Capped
     /// at 20 entries; FIFO eviction. In-memory only — survives panel switches
     /// but not project switches or app relaunches. Backend feed is a follow-up.
@@ -620,12 +624,29 @@ class ProjectDetailViewModel {
 
     @MainActor
     private func applyTaskUpdated(_ t: MWProjectTask) {
-        if let i = tasks.firstIndex(where: { $0.id == t.id }) {
-            tasks[i] = t
+        if tasks.contains(where: { $0.id == t.id }) {
+            replacePreservingAggregates(t)
         } else {
             tasks.insert(t, at: 0)
         }
         if let atts = t.attachments { taskFiles[t.id] = atts }
+    }
+
+    /// Replace a task in `tasks`, carrying forward the list-only aggregate
+    /// fields (review cycle count, subtask progress) when the incoming row
+    /// omits them. Single-task responses (move / toggle / edit / reject) and
+    /// most WS payloads don't compute these — only the full list query does —
+    /// so a naive replace would blink the card's chips/progress out until the
+    /// next reload. The reject response *does* carry review_cycle_count, so its
+    /// fresh value wins there; nil-guards only fill the gaps.
+    @MainActor
+    private func replacePreservingAggregates(_ updated: MWProjectTask) {
+        guard let i = tasks.firstIndex(where: { $0.id == updated.id }) else { return }
+        var merged = updated
+        if merged.reviewCycleCount == nil { merged.reviewCycleCount = tasks[i].reviewCycleCount }
+        if merged.subtaskTotal == nil { merged.subtaskTotal = tasks[i].subtaskTotal }
+        if merged.subtaskDone == nil { merged.subtaskDone = tasks[i].subtaskDone }
+        tasks[i] = merged
     }
 
     @MainActor
@@ -681,6 +702,106 @@ class ProjectDetailViewModel {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    // MARK: - Collab: task subtasks (checklist)
+
+    func loadSubtasks(taskId: String) async {
+        guard let pid = project?.id else { return }
+        do {
+            let list = try await service.listSubtasks(projectId: pid, taskId: taskId)
+            await MainActor.run {
+                taskSubtasks[taskId] = list
+                syncSubtaskCounts(taskId: taskId)
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            let nsErr = error as NSError
+            if nsErr.domain == NSURLErrorDomain && nsErr.code == NSURLErrorCancelled { return }
+        }
+    }
+
+    func addSubtask(taskId: String, title: String) async {
+        guard let pid = project?.id else { return }
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            let created = try await service.createSubtask(projectId: pid, taskId: taskId, title: trimmed)
+            await MainActor.run {
+                var existing = taskSubtasks[taskId] ?? []
+                existing.append(created)
+                taskSubtasks[taskId] = existing
+                syncSubtaskCounts(taskId: taskId)
+            }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func toggleSubtask(taskId: String, subtaskId: String, isDone: Bool) async {
+        guard let pid = project?.id else { return }
+        // Optimistic flip so the checkbox feels instant.
+        await MainActor.run {
+            if var list = taskSubtasks[taskId],
+               let i = list.firstIndex(where: { $0.id == subtaskId }) {
+                list[i].isDone = isDone
+                taskSubtasks[taskId] = list
+                syncSubtaskCounts(taskId: taskId)
+            }
+        }
+        do {
+            let updated = try await service.setSubtaskDone(
+                projectId: pid, taskId: taskId, subtaskId: subtaskId, isDone: isDone
+            )
+            await MainActor.run {
+                if var list = taskSubtasks[taskId],
+                   let i = list.firstIndex(where: { $0.id == subtaskId }) {
+                    list[i] = updated
+                    taskSubtasks[taskId] = list
+                    syncSubtaskCounts(taskId: taskId)
+                }
+            }
+        } catch {
+            await MainActor.run {
+                // Revert the optimistic flip on failure.
+                if var list = taskSubtasks[taskId],
+                   let i = list.firstIndex(where: { $0.id == subtaskId }) {
+                    list[i].isDone = !isDone
+                    taskSubtasks[taskId] = list
+                    syncSubtaskCounts(taskId: taskId)
+                }
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func deleteSubtask(taskId: String, subtaskId: String) async {
+        guard let pid = project?.id else { return }
+        let snapshot = taskSubtasks[taskId]
+        await MainActor.run {
+            taskSubtasks[taskId] = (taskSubtasks[taskId] ?? []).filter { $0.id != subtaskId }
+            syncSubtaskCounts(taskId: taskId)
+        }
+        do {
+            try await service.deleteSubtask(projectId: pid, taskId: taskId, subtaskId: subtaskId)
+        } catch {
+            await MainActor.run {
+                if let snap = snapshot { taskSubtasks[taskId] = snap }
+                syncSubtaskCounts(taskId: taskId)
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    /// Mirror the cached checklist's counts onto the matching `tasks` entry so
+    /// the kanban card's "done/total" updates immediately, without a reload.
+    @MainActor
+    private func syncSubtaskCounts(taskId: String) {
+        guard let list = taskSubtasks[taskId],
+              let i = tasks.firstIndex(where: { $0.id == taskId }) else { return }
+        tasks[i].subtaskTotal = list.count
+        tasks[i].subtaskDone = list.filter { $0.isDone }.count
     }
 
     func loadCollaborators() async {
@@ -776,11 +897,7 @@ class ProjectDetailViewModel {
                 projectId: pid, taskId: id,
                 patch: MatchaWorkService.ProjectTaskPatch(boardColumn: column)
             )
-            await MainActor.run {
-                if let idx = tasks.firstIndex(where: { $0.id == id }) {
-                    tasks[idx] = updated
-                }
-            }
+            await MainActor.run { replacePreservingAggregates(updated) }
         } catch {
             await loadTasks()
             await MainActor.run { errorMessage = error.localizedDescription }
@@ -799,11 +916,7 @@ class ProjectDetailViewModel {
                 projectId: pid, taskId: id,
                 patch: MatchaWorkService.ProjectTaskPatch(pipelineColumn: stage)
             )
-            await MainActor.run {
-                if let idx = tasks.firstIndex(where: { $0.id == id }) {
-                    tasks[idx] = updated
-                }
-            }
+            await MainActor.run { replacePreservingAggregates(updated) }
         } catch {
             await loadTasks()
             await MainActor.run { errorMessage = error.localizedDescription }
@@ -853,7 +966,7 @@ class ProjectDetailViewModel {
                     } else if fixed.status == "pending" && fixed.boardColumn == "done" {
                         fixed.boardColumn = "todo"
                     }
-                    tasks[i] = fixed
+                    replacePreservingAggregates(fixed)
                 }
             }
         } catch {
@@ -867,27 +980,22 @@ class ProjectDetailViewModel {
         guard let pid = project?.id else { return }
         do {
             let updated = try await service.updateProjectTask(projectId: pid, taskId: id, patch: patch)
-            await MainActor.run {
-                if let i = tasks.firstIndex(where: { $0.id == id }) {
-                    tasks[i] = updated
-                }
-            }
+            await MainActor.run { replacePreservingAggregates(updated) }
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }
     }
 
-    /// Reviewer sends a task back for changes — bounces it to todo with a note
-    /// and emails the assignee (server-side). Returns true on success.
+    /// Reviewer sends a task back for changes — bounces it to the
+    /// changes_requested lane with a note and emails the assignee (server-side).
+    /// Returns true on success.
     @discardableResult
     func rejectTask(id: String, note: String) async -> Bool {
         guard let pid = project?.id else { return false }
         do {
             let updated = try await service.rejectTask(projectId: pid, taskId: id, note: note)
             await MainActor.run {
-                if let i = tasks.firstIndex(where: { $0.id == id }) {
-                    tasks[i] = updated
-                }
+                replacePreservingAggregates(updated)
                 logActivity("arrow.uturn.backward", "sent “\(updated.title)” back for changes")
             }
             return true

@@ -5,6 +5,7 @@ import AppKit
 private let kanbanColumns: [(key: String, label: String)] = [
     ("todo", "Todo"),
     ("in_progress", "In Progress"),
+    ("changes_requested", "Changes Requested"),
     ("review", "Review"),
     ("done", "Done"),
 ]
@@ -925,6 +926,22 @@ private struct KanbanCardView: View {
                     }
                 }
 
+                // Why it bounced — surfaced on the card face while it sits in
+                // the rework lane, so you don't have to open the card to know.
+                if task.boardColumn == "changes_requested",
+                   let rnote = task.reviewNote?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !rnote.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.uturn.backward")
+                            .font(.system(size: 8))
+                            .foregroundColor(.orange)
+                        Text(rnote)
+                            .font(.system(size: 10))
+                            .foregroundColor(.orange.opacity(0.85))
+                            .lineLimit(2)
+                    }
+                }
+
                 if pipelineMode, let contact = contactDisplay {
                     HStack(spacing: 4) {
                         Image(systemName: "building.2")
@@ -939,6 +956,21 @@ private struct KanbanCardView: View {
 
                 HStack(spacing: 5) {
                     Circle().fill(priorityColor).frame(width: 5, height: 5)
+
+                    // Review churn — how many times this card has been kicked
+                    // back. Only shows once it's bounced at least once.
+                    if let cycles = task.reviewCycleCount, cycles > 0 {
+                        HStack(spacing: 1) {
+                            Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 7))
+                            Text("×\(cycles)").font(.system(size: 8, weight: .bold))
+                        }
+                        .foregroundColor(.orange)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.orange.opacity(0.15))
+                        .cornerRadius(3)
+                        .help("Sent back from review \(cycles) time\(cycles == 1 ? "" : "s")")
+                    }
 
                     if pipelineMode {
                         if let dv = task.dealValue, dv > 0 {
@@ -1029,6 +1061,26 @@ private struct KanbanCardView: View {
                             .foregroundColor(.secondary)
                         Text(due.prefix(10))
                             .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                if let total = task.subtaskTotal, total > 0 {
+                    let done = task.subtaskDone ?? 0
+                    let frac = CGFloat(done) / CGFloat(total)
+                    let complete = done >= total
+                    HStack(spacing: 5) {
+                        Image(systemName: complete ? "checkmark.circle.fill" : "checklist")
+                            .font(.system(size: 8))
+                            .foregroundColor(complete ? .matcha500 : .secondary)
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(appState.themeText.opacity(0.12))
+                                .frame(width: 54, height: 3)
+                            Capsule().fill(complete ? Color.matcha500 : appState.themeAccent)
+                                .frame(width: 54 * frac, height: 3)
+                        }
+                        Text("\(done)/\(total)")
+                            .font(.system(size: 9, weight: .medium))
                             .foregroundColor(.secondary)
                     }
                 }

@@ -312,14 +312,27 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
     var expectedClose: String? = nil
 
     /// Reviewer's "needs work" note set when a task is sent back from review
-    /// to todo. Cleared server-side once it re-enters review/done. Drives the
-    /// bounce-back banner in TaskViewerSheet.
+    /// to the changes_requested lane. Cleared server-side once it re-enters
+    /// review/done. Drives the bounce-back banner in TaskViewerSheet and the
+    /// one-line reason on the card face.
     var reviewNote: String? = nil
+    /// How many times this card has been sent back from review (count of
+    /// `review_rejected` history events). Optional because only the list query
+    /// and the reject response carry it — create/update RETURNING clauses
+    /// don't. Drives the "↻ ×N" churn chip; treat nil as 0.
+    var reviewCycleCount: Int? = nil
+    /// Checklist progress, present only on the list query (nil elsewhere).
+    /// Card face shows "done/total" with a thin bar. Treat nil as 0.
+    var subtaskTotal: Int? = nil
+    var subtaskDone: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, title, description, priority, status, attachments, category
         case probability, outcome
         case reviewNote = "review_note"
+        case reviewCycleCount = "review_cycle_count"
+        case subtaskTotal = "subtask_total"
+        case subtaskDone = "subtask_done"
         case projectId = "project_id"
         case boardColumn = "board_column"
         case pipelineColumn = "pipeline_column"
@@ -346,6 +359,35 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
 
     /// Convenience for the card chip — "open" when unset.
     var dealOutcome: String { outcome ?? "open" }
+}
+
+/// A checklist item under a kanban task (`mw_subtasks`). Ordered by `position`.
+/// Lets a complex feature card decompose into trackable child items; the board
+/// shows done/total and a reviewer can re-open specific items on send-back.
+struct MWSubtask: Codable, Identifiable, Hashable {
+    let id: String
+    var taskId: String?
+    var projectId: String?
+    var title: String
+    var isDone: Bool
+    var position: Int
+    var assignedTo: String?
+    var createdBy: String?
+    var completedAt: String?
+    var createdAt: String?
+    var updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, position
+        case taskId = "task_id"
+        case projectId = "project_id"
+        case isDone = "is_done"
+        case assignedTo = "assigned_to"
+        case createdBy = "created_by"
+        case completedAt = "completed_at"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
 }
 
 // MARK: - Sales pipeline

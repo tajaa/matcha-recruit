@@ -4227,9 +4227,9 @@ async def reject_project_task_endpoint(
     body: dict = Body(...),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Reviewer sends a task back for changes: bounce review → todo, store the
-    reason, and email the assignee. Requires the task to be in the review
-    column and a non-empty note explaining what's incomplete.
+    """Reviewer sends a task back for changes: bounce review → changes_requested,
+    store the reason, and email the assignee. Requires the task to be in the
+    review column and a non-empty note explaining what's incomplete.
     """
     from ..services import project_task_service as pt_svc
 
@@ -4414,6 +4414,97 @@ async def delete_project_task_endpoint(
         project_id, task_id, actor_user_id=current_user.id
     ):
         raise HTTPException(status_code=404, detail="Task not found")
+    return {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# Project Task Subtasks (checklist items under a kanban task)
+# ---------------------------------------------------------------------------
+
+@router.get("/projects/{project_id}/tasks/{task_id}/subtasks")
+async def list_task_subtasks_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    from ..services import project_subtask_service as st_svc
+    await _verify_project_access(project_id, current_user)
+    rows = await st_svc.list_subtasks(project_id, task_id)
+    if rows is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return rows
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}/subtasks")
+async def create_task_subtask_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    from ..services import project_subtask_service as st_svc
+    await _verify_project_access(project_id, current_user)
+    assigned_raw = body.get("assigned_to")
+    try:
+        row = await st_svc.create_subtask(
+            project_id,
+            task_id,
+            title=body.get("title", ""),
+            created_by=current_user.id,
+            assigned_to=UUID(assigned_raw) if assigned_raw else None,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return row
+
+
+@router.patch("/projects/{project_id}/tasks/{task_id}/subtasks/{subtask_id}")
+async def update_task_subtask_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    subtask_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    from ..services import project_subtask_service as st_svc
+    await _verify_project_access(project_id, current_user)
+
+    patch: dict = {}
+    if "is_done" in body:
+        patch["is_done"] = bool(body["is_done"])
+    if "title" in body:
+        patch["title"] = body["title"]
+    if "position" in body:
+        try:
+            patch["position"] = int(body["position"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid position")
+    if "assigned_to" in body:
+        v = body["assigned_to"]
+        patch["assigned_to"] = UUID(v) if v else None
+
+    try:
+        row = await st_svc.update_subtask(project_id, task_id, subtask_id, patch)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Subtask not found")
+    return row
+
+
+@router.delete("/projects/{project_id}/tasks/{task_id}/subtasks/{subtask_id}")
+async def delete_task_subtask_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    subtask_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    from ..services import project_subtask_service as st_svc
+    await _verify_project_access(project_id, current_user)
+    if not await st_svc.delete_subtask(project_id, task_id, subtask_id):
+        raise HTTPException(status_code=404, detail="Subtask not found")
     return {"deleted": True}
 
 
