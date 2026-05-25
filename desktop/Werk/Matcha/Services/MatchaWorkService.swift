@@ -968,12 +968,13 @@ class MatchaWorkService {
     }
 
     /// Natural-language → structured ticket draft via Gemini (no DB write).
-    func draftTaskFromPrompt(projectId: String, prompt: String) async throws -> MWTaskDraft {
-        struct Req: Encodable { let prompt: String }
+    /// `model` is the header selector's value (same plumbing as threads).
+    func draftTaskFromPrompt(projectId: String, prompt: String, model: String? = nil) async throws -> MWTaskDraft {
+        struct Req: Encodable { let prompt: String; let model: String? }
         return try await client.request(
             method: "POST",
             path: "\(basePath)/projects/\(projectId)/tasks/ai-draft",
-            body: Req(prompt: prompt)
+            body: Req(prompt: prompt, model: model)
         )
     }
 

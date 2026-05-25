@@ -49,6 +49,11 @@ struct KanbanBoardView: View {
     @State private var aiDraft: MWTaskDraft?
     @State private var showAIReview = false
     @State private var aiError: String?
+    /// Header model selector (shared with threads/blog via the same AppStorage key).
+    @AppStorage("mw-model") private var selectedModelId = "flash"
+    private var selectedModelValue: String? {
+        mwModelOptions.first { $0.id == selectedModelId }?.value
+    }
     /// Template-compose sheet. `newTaskColumn` is the destination column;
     /// `composeTemplate` the picked template (scaffold + default priority +
     /// category). Reuses the single legacy sheet slot to avoid a 4th `.sheet`.
@@ -212,7 +217,7 @@ struct KanbanBoardView: View {
         aiError = nil
         Task {
             do {
-                let draft = try await MatchaWorkService.shared.draftTaskFromPrompt(projectId: pid, prompt: prompt)
+                let draft = try await MatchaWorkService.shared.draftTaskFromPrompt(projectId: pid, prompt: prompt, model: selectedModelValue)
                 await MainActor.run {
                     aiDrafting = false
                     aiDraft = draft

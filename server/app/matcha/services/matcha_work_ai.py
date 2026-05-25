@@ -1701,6 +1701,8 @@ async def generate_task_draft(
     collaborator_names: list[str],
     elements: list[dict],
     recent_done: Optional[list[str]] = None,
+    model_override: Optional[str] = None,
+    company_id: Optional[str] = None,
 ) -> dict:
     """Turn a natural-language request into a structured kanban-ticket draft via
     Gemini Flash Lite. Returns a dict of fields (no DB write) — the route maps
@@ -1760,10 +1762,13 @@ Request:
 {prompt}"""
 
     provider = get_ai_provider()
+    # Honor the header model selector the same way threads do (_get_model picks
+    # the override when valid, else the configured mode/default).
+    model = await _get_model(provider.settings, model_override, company_id=company_id)
 
     def _call() -> str:
         resp = provider.client.models.generate_content(
-            model="gemini-3.1-flash-lite-preview",
+            model=model,
             contents=instruction,
             config=types.GenerateContentConfig(
                 temperature=0.2,

@@ -4338,6 +4338,8 @@ async def ai_draft_task_endpoint(
             collaborator_names=[c["name"] for c in collaborators if c.get("name")],
             elements=elements,
             recent_done=recent_done,
+            model_override=(body.get("model") or None),
+            company_id=str(project.get("company_id")) if project.get("company_id") else None,
         )
     except Exception as e:
         logger.warning("AI task draft failed project=%s: %s", project_id, e)
