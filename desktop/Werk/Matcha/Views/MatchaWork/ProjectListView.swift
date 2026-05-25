@@ -437,6 +437,17 @@ private struct ProjectSidebarRowContent: View {
                 .foregroundColor(appState.themeText)
                 .lineLimit(1)
 
+            if let type = project.projectType, !type.isEmpty {
+                Text(type)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(typeBadgeColor)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(typeBadgeColor.opacity(0.14))
+                    .cornerRadius(3)
+                    .lineLimit(1)
+            }
+
             Spacer(minLength: 4)
 
             // Hover → star toggle; otherwise a small collaborator avatar.
@@ -454,6 +465,16 @@ private struct ProjectSidebarRowContent: View {
         }
         .padding(.vertical, 3)
         .onHover { isHovered = $0 }
+    }
+
+    /// Project-type badge gray, tuned per theme: light gray on dark, dark gray
+    /// on light, mid gray on cappuchin (so it reads as muted, not as an accent).
+    private var typeBadgeColor: Color {
+        switch appState.appTheme {
+        case "light": return Color(white: 0.35)
+        case "cappuchin": return Color(white: 0.5)
+        default: return Color(white: 0.72)  // dark
+        }
     }
 
     private var firstCollaborator: MWProjectCollaborator? {

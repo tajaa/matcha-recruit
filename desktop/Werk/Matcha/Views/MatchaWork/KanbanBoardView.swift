@@ -309,8 +309,8 @@ struct KanbanBoardView: View {
         let isInlineAdding = inlineAddColumn == key
         let isHovered = hoveredEmptyColumn == key
         // Empty columns shrink to ~110px so populated columns get the breathing
-        // room. Hovering or starting an inline-add expands them back to 220px.
-        let columnWidth: CGFloat = (isEmpty && !isInlineAdding && !isHovered) ? 110 : 220
+        // room. Hovering or starting an inline-add expands them back to full.
+        let columnWidth: CGFloat = (isEmpty && !isInlineAdding && !isHovered) ? 110 : 300
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(label.uppercased())
