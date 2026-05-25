@@ -5,8 +5,8 @@ import AppKit
 private let kanbanColumns: [(key: String, label: String)] = [
     ("todo", "Todo"),
     ("in_progress", "In Progress"),
-    ("changes_requested", "Changes Requested"),
     ("review", "Review"),
+    ("changes_requested", "Changes Requested"),
     ("done", "Done"),
 ]
 
