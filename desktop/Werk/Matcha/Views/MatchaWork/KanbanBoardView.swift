@@ -221,7 +221,11 @@ struct KanbanBoardView: View {
             } catch {
                 await MainActor.run {
                     aiDrafting = false
-                    aiError = "Couldn't draft that — try rephrasing."
+                    if case APIError.httpError(let code, _) = error, code == 429 {
+                        aiError = "Daily AI limit reached (50 per 24 hours). Create tickets manually or try again later."
+                    } else {
+                        aiError = "Couldn't draft that — try rephrasing."
+                    }
                 }
             }
         }

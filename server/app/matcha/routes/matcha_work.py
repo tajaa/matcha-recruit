@@ -4271,6 +4271,26 @@ async def ai_draft_task_endpoint(
     if not prompt:
         raise HTTPException(status_code=400, detail="Describe the task you want to create")
 
+    # Rate limit: 50 AI drafts per user per rolling 24h (Redis fixed-window from
+    # first call). Best-effort — a Redis hiccup never blocks drafting.
+    from ...core.services.redis_cache import get_redis_cache
+    _redis = get_redis_cache()
+    if _redis is not None:
+        try:
+            _key = f"ai_draft_limit:{current_user.id}"
+            _count = await _redis.incr(_key)
+            if _count == 1:
+                await _redis.expire(_key, 86400)
+            if _count > 50:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Daily AI ticket limit reached (50 per 24 hours). Create tickets manually or try again later.",
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning("AI draft rate-limit check failed (allowing): %s", e)
+
     collaborators = await proj_svc.list_collaborators(project_id)
     async with get_connection() as conn:
         element_rows = await conn.fetch(
