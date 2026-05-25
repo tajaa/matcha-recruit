@@ -1757,6 +1757,7 @@ Return ONLY a JSON object with these keys:
 - "board_column": almost always "todo".
 - "assignee_name": EXACTLY one name from this list, or null. People: [{people}]. Match the person the user names (e.g. "assign to haley" → the matching name); null if none clearly named or no match.
 - "element_name": EXACTLY one element name from the Elements list above, or null per the rule above.
+- "subtasks": an array of 2-6 short imperative checklist steps that break the work into verifiable pieces — ONLY for engineering/bug/product tickets that genuinely benefit from decomposition; otherwise return []. Each item <=80 chars, no leading numbers or bullets, ordered so a teammate can work top to bottom.
 
 Request:
 {prompt}"""
@@ -1798,6 +1799,17 @@ Request:
     if board_column not in _TASK_DRAFT_COLUMNS:
         board_column = "todo"
 
+    # Optional decomposition checklist. Clean to non-empty trimmed strings,
+    # cap length + count so a runaway model can't flood the ticket.
+    subtasks: list[str] = []
+    raw_sub = data.get("subtasks")
+    if isinstance(raw_sub, list):
+        for s in raw_sub:
+            t = str(s).strip().lstrip("-*0123456789. ").strip()
+            if t:
+                subtasks.append(t[:200])
+        subtasks = subtasks[:10]
+
     def _clean_opt(v) -> Optional[str]:
         s = str(v).strip() if v is not None else ""
         return s or None
@@ -1810,4 +1822,5 @@ Request:
         "board_column": board_column,
         "assignee_name": _clean_opt(data.get("assignee_name")),
         "element_name": _clean_opt(data.get("element_name")),
+        "subtasks": subtasks,
     }

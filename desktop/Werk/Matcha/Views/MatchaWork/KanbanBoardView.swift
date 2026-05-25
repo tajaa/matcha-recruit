@@ -1743,6 +1743,14 @@ private struct AttachmentRow: View {
 /// Reviews a Gemini-drafted ticket before it's created. Every field is editable
 /// (the AI can be wrong about assignee/priority); "Create" routes through the
 /// normal task-create path. Co-located here to avoid a new pbxproj file ref.
+/// One editable AI-suggested checklist step in the draft review sheet. Local
+/// Identifiable row (UUID) so editing/removing stays stable; mapped back to
+/// [String] on Create.
+private struct DraftStep: Identifiable, Equatable {
+    let id = UUID()
+    var text: String
+}
+
 private struct AIDraftReviewSheet: View {
     @Environment(AppState.self) private var appState
     let draft: MWTaskDraft
@@ -1757,6 +1765,8 @@ private struct AIDraftReviewSheet: View {
     @State private var assignedTo: String?
     @State private var selectedElementId: String?
     @State private var creating = false
+    @State private var steps: [DraftStep]
+    @State private var newStep = ""
 
     private let priorities = ["critical", "high", "medium", "low"]
     private let categories = ["manual", "engineering", "bug", "product", "sales", "general"]
@@ -1772,6 +1782,51 @@ private struct AIDraftReviewSheet: View {
         _boardColumn = State(initialValue: draft.boardColumn)
         _assignedTo = State(initialValue: draft.assignedTo)
         _selectedElementId = State(initialValue: draft.elementId)
+        _steps = State(initialValue: (draft.subtasks ?? []).map { DraftStep(text: $0) })
+    }
+
+    /// Editable checklist of AI-suggested steps. Rows can be edited, removed, or
+    /// appended; cleaned to non-empty [String] on Create.
+    @ViewBuilder
+    private var checklistEditor: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Image(systemName: "checklist").font(.system(size: 10)).foregroundColor(appState.themeAccent)
+                Text("CHECKLIST").font(.system(size: 9, weight: .semibold)).foregroundColor(.secondary).tracking(0.5)
+                if !steps.isEmpty {
+                    Text("\(steps.count)").font(.system(size: 9)).foregroundColor(.secondary)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(appState.themeText.opacity(0.08)).cornerRadius(4)
+                }
+                Spacer()
+            }
+            ForEach($steps) { $step in
+                HStack(spacing: 6) {
+                    Image(systemName: "circle").font(.system(size: 9)).foregroundColor(.secondary)
+                    TextField("Step", text: $step.text)
+                        .textFieldStyle(.plain).font(.system(size: 12)).foregroundColor(appState.themeText)
+                    Button { steps.removeAll { $0.id == step.id } } label: {
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 10)).foregroundColor(.secondary)
+                    }.buttonStyle(.plain)
+                }
+            }
+            HStack(spacing: 6) {
+                Image(systemName: "plus").font(.system(size: 9)).foregroundColor(.secondary)
+                TextField("Add a step…", text: $newStep)
+                    .textFieldStyle(.plain).font(.system(size: 12)).foregroundColor(appState.themeText)
+                    .onSubmit { addStep() }
+            }
+        }
+        .padding(8)
+        .background(appState.themeText.opacity(0.05))
+        .cornerRadius(6)
+    }
+
+    private func addStep() {
+        let t = newStep.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        steps.append(DraftStep(text: t))
+        newStep = ""
     }
 
     var body: some View {
@@ -1840,6 +1895,8 @@ private struct AIDraftReviewSheet: View {
                 }
             }
 
+            checklistEditor
+
             HStack {
                 Button("Cancel") { onClose() }
                     .buttonStyle(.plain).foregroundColor(.secondary)
@@ -1849,12 +1906,16 @@ private struct AIDraftReviewSheet: View {
                     guard !t.isEmpty else { return }
                     creating = true
                     let desc = description.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let cleanedSteps = steps
+                        .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { !$0.isEmpty }
                     Task {
                         await viewModel.addTask(
                             title: t, column: boardColumn, priority: priority,
                             assignedTo: assignedTo,
                             description: desc.isEmpty ? nil : desc,
-                            category: category, elementId: selectedElementId
+                            category: category, elementId: selectedElementId,
+                            subtasks: cleanedSteps.isEmpty ? nil : cleanedSteps
                         )
                         onClose()
                     }

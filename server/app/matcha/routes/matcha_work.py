@@ -4118,7 +4118,7 @@ async def create_project_task_endpoint(
     assigned_to = UUID(assigned_raw) if assigned_raw else None
 
     try:
-        return await pt_svc.create_project_task(
+        result = await pt_svc.create_project_task(
             project_id=project_id,
             company_id=project["company_id"],
             created_by=current_user.id,
@@ -4147,6 +4147,32 @@ async def create_project_task_endpoint(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    # Optional sub-task checklist (e.g. AI-drafted). Best-effort: create each in
+    # order; a bad item is skipped rather than failing the whole task create.
+    raw_subtasks = body.get("subtasks")
+    if isinstance(raw_subtasks, list) and result.get("id"):
+        from ..services import project_subtask_service as st_svc
+        task_uuid = UUID(result["id"]) if isinstance(result["id"], str) else result["id"]
+        created = 0
+        for item in raw_subtasks[:50]:
+            title = (item if isinstance(item, str) else "").strip()
+            if not title:
+                continue
+            try:
+                await st_svc.create_subtask(
+                    project_id, task_uuid, title=title[:500], created_by=current_user.id
+                )
+                created += 1
+            except ValueError:
+                continue
+        if created:
+            # Surface counts on the returned task so the new card shows N/0
+            # immediately, without waiting for a board reload.
+            result["subtask_total"] = created
+            result["subtask_done"] = 0
+
+    return result
 
 
 @router.patch("/projects/{project_id}/tasks/{task_id}")
@@ -4382,6 +4408,7 @@ async def ai_draft_task_endpoint(
         "assigned_name": assigned_name,
         "element_id": element_id,
         "element_name": element_name,
+        "subtasks": draft.get("subtasks", []),
     }
 
 

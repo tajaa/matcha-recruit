@@ -177,9 +177,12 @@ struct MWTaskDraft: Codable {
     var assignedName: String?
     var elementId: String?
     var elementName: String?
+    /// AI-suggested checklist steps. Reviewed/edited in AIDraftReviewSheet, then
+    /// created as mw_subtasks after the task on Create.
+    var subtasks: [String]?
 
     enum CodingKeys: String, CodingKey {
-        case title, description, priority, category
+        case title, description, priority, category, subtasks
         case boardColumn = "board_column"
         case assignedTo = "assigned_to"
         case assignedName = "assigned_name"

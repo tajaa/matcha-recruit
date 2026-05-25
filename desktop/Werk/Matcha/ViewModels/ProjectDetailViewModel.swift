@@ -553,14 +553,15 @@ class ProjectDetailViewModel {
         }
     }
 
-    func addTask(title: String, column: String = "todo", pipelineColumn: String = "lead", priority: String = "medium", assignedTo: String? = nil, description: String? = nil, category: String? = nil, elementId: String? = nil) async {
+    func addTask(title: String, column: String = "todo", pipelineColumn: String = "lead", priority: String = "medium", assignedTo: String? = nil, description: String? = nil, category: String? = nil, elementId: String? = nil, subtasks: [String]? = nil) async {
         guard let pid = project?.id else { return }
         do {
             let task = try await service.createProjectTask(
                 projectId: pid, title: title,
                 boardColumn: column, pipelineColumn: pipelineColumn,
                 description: description,
-                priority: priority, assignedTo: assignedTo, category: category, elementId: elementId
+                priority: priority, assignedTo: assignedTo, category: category, elementId: elementId,
+                subtasks: subtasks
             )
             await MainActor.run {
                 tasks.insert(task, at: 0)

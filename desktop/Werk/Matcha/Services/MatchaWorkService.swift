@@ -758,7 +758,8 @@ class MatchaWorkService {
         outcome: String? = nil,
         lossReason: String? = nil,
         nextActionAt: String? = nil,
-        expectedClose: String? = nil
+        expectedClose: String? = nil,
+        subtasks: [String]? = nil
     ) async throws -> MWProjectTask {
         struct Body: Encodable {
             let title: String
@@ -780,6 +781,8 @@ class MatchaWorkService {
             let loss_reason: String?
             let next_action_at: String?
             let expected_close: String?
+            // Optional checklist created alongside the task (AI-drafted tickets).
+            let subtasks: [String]?
         }
         return try await client.request(
             method: "POST",
@@ -793,7 +796,8 @@ class MatchaWorkService {
                 contact_name: contactName, contact_company: contactCompany,
                 contact_email: contactEmail, contact_phone: contactPhone,
                 outcome: outcome, loss_reason: lossReason,
-                next_action_at: nextActionAt, expected_close: expectedClose
+                next_action_at: nextActionAt, expected_close: expectedClose,
+                subtasks: subtasks
             )
         )
     }
