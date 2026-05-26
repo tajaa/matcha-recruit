@@ -10094,6 +10094,14 @@ async def deal_flow_proposal(inp: DealInputs):
     )
 
 
+@router.get("/deal-flow/lite-defaults", dependencies=[Depends(require_admin)])
+async def deal_flow_lite_defaults():
+    """Default editable blocks for the Lite Edition one-pager (UI pre-fills from this)."""
+    from ..services.deal_proposal_template import DEFAULT_LITE_BLOCKS
+
+    return {"blocks": DEFAULT_LITE_BLOCKS}
+
+
 @router.get("/deal-flow/full-defaults", dependencies=[Depends(require_admin)])
 async def deal_flow_full_defaults():
     """Default editable document blocks for the full proposal (UI pre-fills from this)."""

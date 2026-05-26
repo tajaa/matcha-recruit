@@ -312,12 +312,105 @@ def _lite_buildup(q: DealQuote, broker_label: str) -> str:
     return "".join(rows) + save
 
 
+# ── Lite Edition editable document ────────────────────────────────────────────
+# Prose blocks are editable; "card" is computed from the Lite quote. `column` places
+# blocks in the 2-column layout. Kinds: lead, h2, h3, h2c (centered), p, pc (centered),
+# bullets ("Label: text" → bold label), card (computed).
+LITE_COMPUTED_KINDS = {"card"}
+
+DEFAULT_LITE_BLOCKS: list[dict] = [
+    {"id": "lead", "kind": "lead", "column": "",
+     "text": "A lite commitment that compounds into real risk insight. Incident capture built for the modern "
+             "workforce, turning “we should track this” into a live, audit-ready record."},
+    {"id": "card", "kind": "card", "column": "left"},
+    {"id": "audit_h", "kind": "h3", "column": "left", "text": "Audit-Ready Compliance"},
+    {"id": "audit_p", "kind": "p", "column": "left",
+     "text": "Your OSHA 300, 300A, and 301 logs are available with a single click."},
+    {"id": "audit_b", "kind": "bullets", "column": "left", "items": [
+        "Multi-Location Management: Seamlessly track and report across different sites with centralized oversight.",
+        "Reporting: Pull reports by date, location, and incident type to prep for board meetings, broker reviews, or renewal packages.",
+    ]},
+    {"id": "assist_h", "kind": "h3", "column": "left", "text": "Assistive, Not Unattended"},
+    {"id": "assist_p", "kind": "p", "column": "left",
+     "text": "Our AI is built to research, draft, and surface patterns, but it never acts alone. It flags exposure "
+             "early so your team can make the final call. Every decision stays with your people."},
+    {"id": "inc_h", "kind": "h2", "column": "right", "text": "What Lite Includes"},
+    {"id": "copilot_h", "kind": "h3", "column": "right", "text": "The Reporting Copilot: Your Assistive Intake Partner"},
+    {"id": "copilot_b", "kind": "bullets", "column": "right", "items": [
+        "Conversational Intake: Type naturally to report incidents across Safety, Behavioral, Near Miss, Property, and more.",
+        "Dynamic Guidance: As you provide details, the Copilot updates its guidance in real-time, asking the right follow-up questions to identify root causes.",
+        "Compliance Guardrails: Automatically flags OSHA-reportable events and logs recordable details, including days away from work and restricted duty.",
+        "Evidence Vault: Upload photos, witness statements, and documents directly to the incident record. Export any incident to a professional PDF with one click.",
+    ]},
+    {"id": "analysis_h", "kind": "h3", "column": "right", "text": "Incident Analysis & Theme Detection"},
+    {"id": "analysis_b", "kind": "bullets", "column": "right", "items": [
+        "Pattern Recognition: AI surfaces recurring themes and suggests actionable improvements for your team to review.",
+        "Hotspot Monitoring: Immediately identify which locations are trending above baseline to prioritize your safety resources.",
+        "Workers Comp Posture: See the direct financial narrative of your safety data with premium impact estimates based on your TRIR and DART trends.",
+    ]},
+    {"id": "hris_h", "kind": "h2c", "column": "right", "text": "HRIS Connect"},
+    {"id": "hris_p", "kind": "pc", "column": "right",
+     "text": "Auro Connect for supported vendors, CSV upload for out of network vendors."},
+    {"id": "agree_h", "kind": "h2c", "column": "right", "text": "Agreement"},
+    {"id": "agree_p", "kind": "pc", "column": "right",
+     "text": "12-month initial term · all rates locked for the term · quarterly headcount true-up · 60-day opt-out."},
+]
+
+
+def _lite_card_html(quote_lite: DealQuote, broker_label: str) -> str:
+    setup_note = "no setup fees" if quote_lite.onboarding == 0 else "setup included"
+    return f"""<div class="card">
+          <div class="tag">Your Tier &middot; Locked for the Term</div>
+          <div class="name">{escape(quote_lite.tier_label)}</div>
+          <div class="pepm">${quote_lite.pepm}.00 PEPM &middot; {setup_note}</div>
+          {_lite_buildup(quote_lite, broker_label)}
+          <div class="net"><span class="lbl">Your Price</span><span class="amt">{_fmt(quote_lite.your_price_yr)}<span class="yr">/yr</span></span></div>
+        </div>"""
+
+
+def _lite_bullets(items: list[str]) -> str:
+    lis = []
+    for it in items:
+        if ": " in it:
+            lab, rest = it.split(": ", 1)
+            lis.append(f"<li><b>{escape(lab)}:</b> {escape(rest)}</li>")
+        else:
+            lis.append(f"<li>{escape(it)}</li>")
+    return f"<ul>{''.join(lis)}</ul>"
+
+
+def _lite_block_html(b, quote_lite: DealQuote, broker_label: str) -> str:
+    k = b.kind
+    if k == "h3":
+        return f"<h3>{escape(b.text)}</h3>"
+    if k == "h2":
+        return f"<h2>{escape(b.text)}</h2>"
+    if k == "h2c":
+        return f'<h2 style="text-align:center">{escape(b.text)}</h2>'
+    if k == "p":
+        return f'<p class="sec">{escape(b.text)}</p>'
+    if k == "pc":
+        return f'<p style="text-align:center">{escape(b.text)}</p>'
+    if k == "bullets":
+        return _lite_bullets(b.items)
+    if k == "card":
+        return _lite_card_html(quote_lite, broker_label)
+    return ""
+
+
 def render_lite_proposal_html(inp: DealInputs, quote_lite: DealQuote) -> str:
+    from .deal_pricing import Block
+
     proposal_date = inp.proposal_date or date.today()
     date_str = _fmt_date(proposal_date)
     broker_label = (inp.broker_name or "Broker").strip() if inp.broker else "Broker"
     company = escape(inp.company_name).upper()
-    setup_note = "no setup fees" if quote_lite.onboarding == 0 else "setup included"
+
+    blocks = inp.lite_blocks if inp.lite_blocks is not None else [Block(**b) for b in DEFAULT_LITE_BLOCKS]
+    lead = next((b for b in blocks if b.kind == "lead"), None)
+    lead_html = f'<p class="lead">{escape(lead.text)}</p>' if lead else ""
+    left_html = "".join(_lite_block_html(b, quote_lite, broker_label) for b in blocks if b.column == "left")
+    right_html = "".join(_lite_block_html(b, quote_lite, broker_label) for b in blocks if b.column == "right")
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -391,53 +484,10 @@ def render_lite_proposal_html(inp: DealInputs, quote_lite: DealQuote) -> str:
   </div>
 
   <div class="body">
-    <p class="lead">A <i>lite</i> commitment that compounds into <span class="hl">real risk insight</span>. Incident capture built for the modern workforce, turning &ldquo;we should track this&rdquo; into a live, audit-ready record.</p>
-
+    {lead_html}
     <div class="cols">
-      <div class="col">
-        <div class="card">
-          <div class="tag">Your Tier &middot; Locked for the Term</div>
-          <div class="name">{quote_lite.tier_label}</div>
-          <div class="pepm">${quote_lite.pepm}.00 PEPM &middot; {setup_note}</div>
-          {_lite_buildup(quote_lite, broker_label)}
-          <div class="net"><span class="lbl">Your Price</span><span class="amt">{_fmt(quote_lite.your_price_yr)}<span class="yr">/yr</span></span></div>
-        </div>
-
-        <h3>Audit-Ready Compliance</h3>
-        <p class="sec">Your OSHA 300, 300A, and 301 logs are available with a single click.</p>
-        <ul>
-          <li><b>Multi-Location Management:</b> Seamlessly track and report across different sites with centralized oversight.</li>
-          <li><b>Reporting:</b> Pull reports by date, location, and incident type to prep for board meetings, broker reviews, or renewal packages.</li>
-        </ul>
-
-        <h3>Assistive, Not Unattended</h3>
-        <p class="sec">Our AI is built to research, draft, and surface patterns, but it never acts alone. It flags exposure early so your team can make the final call. Every decision stays with your people.</p>
-      </div>
-
-      <div class="col">
-        <h2>What Lite Includes</h2>
-        <h3>The Reporting Copilot: Your Assistive Intake Partner</h3>
-        <ul>
-          <li><b>Conversational Intake:</b> Type naturally to report incidents across Safety, Behavioral, Near Miss, Property, and more.</li>
-          <li><b>Dynamic Guidance:</b> As you provide details, the Copilot updates its guidance in real-time, asking the right follow-up questions to identify root causes.</li>
-          <li><b>Compliance Guardrails:</b> Automatically flags OSHA-reportable events and logs recordable details, including days away from work and restricted duty.</li>
-          <li><b>Evidence Vault:</b> Upload photos, witness statements, and documents directly to the incident record. Export any incident to a professional PDF with one click.</li>
-        </ul>
-
-        <h3>Incident Analysis &amp; Theme Detection</h3>
-        <ul>
-          <li><b>Pattern Recognition:</b> AI surfaces recurring themes and suggests actionable improvements for your team to review.</li>
-          <li><b>Hotspot Monitoring:</b> Immediately identify which locations are trending above baseline to prioritize your safety resources.</li>
-          <li><b>Workers Comp Posture:</b> See the direct financial narrative of your safety data with premium impact estimates based on your TRIR and DART trends.</li>
-        </ul>
-
-        <div class="centered">
-          <h2>HRIS Connect</h2>
-          <p>Auro Connect for supported vendors, CSV upload for out of network vendors.</p>
-          <h2 style="margin-top:18px">Agreement</h2>
-          <p>12-month initial term &middot; all rates locked for the term<br>quarterly headcount true-up &middot; 60-day opt-out.</p>
-        </div>
-      </div>
+      <div class="col">{left_html}</div>
+      <div class="col">{right_html}</div>
     </div>
   </div>
 

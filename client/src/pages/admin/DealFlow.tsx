@@ -3,6 +3,7 @@ import { Loader2, Download, FileText } from 'lucide-react'
 import { Button, Input, Toggle } from '../../components/ui'
 import { api } from '../../api/client'
 import FullDealTab from './FullDealTab'
+import LiteEditionPanel from './LiteEditionPanel'
 
 type Tier = 'lite' | 'mid' | 'max'
 
@@ -260,16 +261,18 @@ export default function DealFlow() {
             <p className="text-sm text-zinc-500">
               Configure off the Lite / Mid / Max structure and generate a proposal PDF.
             </p>
-            <div className="flex items-center gap-2">
-              <Button variant="secondary" onClick={() => setShowPreview((v) => !v)} disabled={!validHeadcount}>
-                <FileText className="mr-2 h-4 w-4" />
-                {showPreview ? 'Hide preview' : 'Preview'}
-              </Button>
-              <Button onClick={downloadProposal} disabled={!validHeadcount || downloading}>
-                {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-                Download Proposal PDF
-              </Button>
-            </div>
+            {template === 'standard' && (
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" onClick={() => setShowPreview((v) => !v)} disabled={!validHeadcount}>
+                  <FileText className="mr-2 h-4 w-4" />
+                  {showPreview ? 'Hide preview' : 'Preview'}
+                </Button>
+                <Button onClick={downloadProposal} disabled={!validHeadcount || downloading}>
+                  {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                  Download Proposal PDF
+                </Button>
+              </div>
+            )}
           </div>
 
           {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
@@ -379,7 +382,9 @@ export default function DealFlow() {
 
         {/* Live summary */}
         <div>
-          {showPreview ? (
+          {template === 'lite_edition' ? (
+            <LiteEditionPanel baseInputs={inputs} validHeadcount={validHeadcount} filenameBase={companyName} />
+          ) : showPreview ? (
             <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-200">
               {previewing && (
                 <div className="flex items-center gap-2 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-400">

@@ -52,6 +52,21 @@ TIER_LABEL: dict[str, str] = {"lite": "Lite", "mid": "Mid", "max": "Max"}
 
 
 # ── Models ───────────────────────────────────────────────────────────────────
+class Block(BaseModel):
+    """Generic editable-document block, shared by the Lite Edition + Full Deal docs.
+
+    `kind` is a free string interpreted by each renderer; prose kinds carry `text`/`items`,
+    "computed" kinds are rendered from pricing. `column` places a block in a 2-column layout
+    (Lite Edition); `new_page` starts a fresh PDF page (Full Deal).
+    """
+    id: str
+    kind: str
+    text: str = ""
+    items: list[str] = Field(default_factory=list)
+    new_page: bool = False
+    column: str = ""
+
+
 class TierOverride(BaseModel):
     """Per-deal override of a tier's PEPM / onboarding fee."""
     pepm: int = Field(..., ge=0, le=10_000)
@@ -72,6 +87,8 @@ class DealInputs(BaseModel):
     # Which proposal layout to render. "standard" = navy 3-tier comparison;
     # "lite_edition" = the green single-tier Lite one-pager.
     template: Literal["standard", "lite_edition"] = "standard"
+    # Editable Lite Edition document (None → defaults in deal_proposal_template).
+    lite_blocks: Optional[list[Block]] = None
 
 
 class DealQuote(BaseModel):

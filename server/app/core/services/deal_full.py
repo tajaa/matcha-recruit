@@ -23,6 +23,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from .deal_pricing import Block
+
 
 def _r2(x: float) -> float:
     """Round half-up to cents (matches how the proposals present PEPM)."""
@@ -53,20 +55,6 @@ JURISDICTION_TIERS = [
 
 # Block kinds that are rendered from computed pricing (not editable as free text).
 COMPUTED_KINDS = {"cover", "t_pepm", "t_costs", "hr_rate", "t_savings", "t_jurisdiction", "t_roi", "sign", "disclaimer"}
-
-BlockKind = Literal[
-    "h2", "h3", "h4", "p", "note", "callout", "highlight", "bullets",
-    "cover", "t_pepm", "t_costs", "hr_rate", "t_savings", "t_jurisdiction", "t_roi", "sign", "disclaimer",
-]
-
-
-class Block(BaseModel):
-    id: str
-    kind: BlockKind
-    text: str = ""
-    items: list[str] = Field(default_factory=list)
-    new_page: bool = False  # start a fresh PDF page before this block
-
 
 def _b(id, kind, text="", items=None, new_page=False) -> dict:
     return {"id": id, "kind": kind, "text": text, "items": items or [], "new_page": new_page}
