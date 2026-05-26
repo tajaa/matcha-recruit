@@ -47,7 +47,7 @@ DEFAULT_BOOK_BLOCKS: list[dict] = [
     _b("cover", "cover"),
     _b("intro_h", "h2", "Matcha Lite for Your Book"),
     _b("intro_p", "p",
-       "Offer Matcha Lite to the clients you choose &mdash; it can be part of your book, not all of it. "
+       "Offer Matcha Lite to the clients you choose — it can be part of your book, not all of it. "
        "Pricing scales with the seats you commit across those clients: the more you enroll, the deeper the "
        "volume discount, and every enrolled client gets that same pooled rate. There is nothing for you to "
        "build or host; each client is configured during implementation and runs independently afterward."),
@@ -61,7 +61,7 @@ DEFAULT_BOOK_BLOCKS: list[dict] = [
     ]),
     _b("sched_h", "h2", "Volume Discount Schedule"),
     _b("sched_note", "note",
-       "Your discount is set by the total committed seats &mdash; the combined headcount of the clients you "
+       "Your discount is set by the total committed seats — the combined headcount of the clients you "
        "enroll. Pooling many small clients unlocks the higher-volume rate. Rates lock for the 12-month term "
        "and are reviewed at renewal as you enroll more."),
     _b("t_discount", "t_discount"),

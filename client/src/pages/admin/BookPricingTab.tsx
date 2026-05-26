@@ -208,7 +208,7 @@ export default function BookPricingTab() {
           ) : !blocks ? (
             <p className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading template…</p>
           ) : (
-            <div className="max-w-[680px] space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+            <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
               <p className="text-xs text-zinc-500">Edit the one-pager copy. Tables fill from the inputs at left. Preview to see the styled packet.</p>
               {blocks.map((b) => (
                 <BlockEditor key={b.id} block={b} onChange={(patch) => updateBlock(b.id, patch)} />
