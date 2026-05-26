@@ -16,6 +16,7 @@ sandbox (no credentials at scaffold time). Validate ``fetch_workers`` / ``normal
 against a Finch sandbox company before enabling for real connections.
 """
 
+import asyncio
 import logging
 import os
 from decimal import Decimal, InvalidOperation
@@ -87,6 +88,44 @@ class FinchHRISService:
             )
         return token
 
+    async def _request_with_retry(
+        self,
+        client: httpx.AsyncClient,
+        method: str,
+        url: str,
+        *,
+        max_attempts: int = 4,
+        **kwargs,
+    ) -> httpx.Response:
+        """Issue a request, retrying transient failures (5xx + transport errors).
+
+        Finch — especially the sandbox right after a connection is created — returns
+        intermittent 5xx on /employer/* before settling. Retry with linear backoff so
+        a flaky first call doesn't fail the whole sync. 4xx is returned as-is (caller
+        decides), only 5xx and network errors are retried.
+        """
+        last_exc: Optional[Exception] = None
+        for attempt in range(max_attempts):
+            try:
+                resp = await client.request(method, url, **kwargs)
+                if resp.status_code < 500:
+                    return resp
+                logger.warning(
+                    "[Finch] %s %s -> %d (attempt %d/%d), retrying",
+                    method, url, resp.status_code, attempt + 1, max_attempts,
+                )
+            except httpx.TransportError as exc:
+                last_exc = exc
+                logger.warning(
+                    "[Finch] %s %s transport error %s (attempt %d/%d), retrying",
+                    method, url, exc, attempt + 1, max_attempts,
+                )
+            if attempt < max_attempts - 1:
+                await asyncio.sleep(1.0 * (attempt + 1))
+        if last_exc is not None:
+            raise last_exc
+        return resp  # last 5xx response — caller raises a descriptive error
+
     async def fetch_workers(self, config: dict, secrets: dict) -> list[dict]:
         """List the employer directory, then hydrate each individual with
         identity + employment detail. Returns a list of merged raw Finch records."""
@@ -101,11 +140,14 @@ class FinchHRISService:
                 # 1. Directory — paginated list of individuals (id + lightweight fields).
                 ids: list[str] = []
                 offset = 0
+                page_limit = 100
                 while True:
-                    resp = await client.get(
+                    resp = await self._request_with_retry(
+                        client,
+                        "GET",
                         f"{FINCH_BASE_URL}/employer/directory",
                         headers=headers,
-                        params={"limit": 100, "offset": offset},
+                        params={"limit": page_limit, "offset": offset},
                     )
                     if resp.status_code != 200:
                         raise HRISProvisioningError(
@@ -114,11 +156,16 @@ class FinchHRISService:
                     body = resp.json()
                     individuals = body.get("individuals") or []
                     ids.extend(i["id"] for i in individuals if i.get("id"))
-                    paging = body.get("paging") or {}
-                    count = paging.get("count", len(individuals))
-                    total = paging.get("total")
-                    offset += count
-                    if not individuals or (total is not None and offset >= total):
+                    # Terminate on a short page. Finch's sandbox (and some providers)
+                    # omit paging.total, and requesting an out-of-range offset 500s —
+                    # so never rely on total; stop as soon as a page is under-full.
+                    total = (body.get("paging") or {}).get("total")
+                    offset += len(individuals)
+                    if (
+                        not individuals
+                        or len(individuals) < page_limit
+                        or (total is not None and offset >= total)
+                    ):
                         break
 
                 # 2. Hydrate identity + employment in batches.
@@ -148,7 +195,9 @@ class FinchHRISService:
         out: dict[str, dict] = {}
         for start in range(0, len(ids), _FINCH_BATCH):
             chunk = ids[start:start + _FINCH_BATCH]
-            resp = await client.post(
+            resp = await self._request_with_retry(
+                client,
+                "POST",
                 f"{FINCH_BASE_URL}/employer/{kind}",
                 headers=headers,
                 json={"requests": [{"individual_id": i} for i in chunk]},
@@ -185,8 +234,14 @@ class FinchHRISService:
         phones = individual.get("phone_numbers") or []
         phone = next((p.get("data") for p in phones if p.get("data")), None)
 
-        # Work location → state/city. Finch puts location on employment; residence on individual.
-        work_loc = employment.get("work_location") or individual.get("residence") or {}
+        # Work location → state/city. Finch puts the work location on employment under
+        # `location` (older docs say `work_location`); fall back to individual residence.
+        work_loc = (
+            employment.get("location")
+            or employment.get("work_location")
+            or individual.get("residence")
+            or {}
+        )
 
         # Employment type → Matcha enum (full_time|part_time|contractor|intern).
         emp = employment.get("employment") or {}
@@ -211,13 +266,17 @@ class FinchHRISService:
             except (InvalidOperation, ValueError):
                 pay_rate = None
 
-        # Pay classification → Matcha enum (hourly|exempt). Finch rarely exposes FLSA,
-        # so infer from income.unit the same way the Gusto path infers from payment_unit.
-        # NOTE: this is a heuristic — "salaried non-exempt" cannot be distinguished here.
+        # Pay classification → Matcha enum (hourly|exempt). Prefer the explicit FLSA
+        # status when present (Finch sandbox + many providers expose employment.flsa_status
+        # = "exempt"/"nonexempt"); else infer from income.unit. "fixed" = fixed salary →
+        # exempt. NOTE: "salaried non-exempt" can't be distinguished from unit alone.
+        flsa = (employment.get("flsa_status") or "").lower()
         unit = (income.get("unit") or "").lower()
-        if unit == "hourly":
+        if "nonexempt" in flsa or unit == "hourly":
             pay_classification = "hourly"
-        elif unit in ("yearly", "monthly", "weekly", "biweekly", "semimonthly", "daily"):
+        elif "exempt" in flsa:
+            pay_classification = "exempt"
+        elif unit in ("yearly", "monthly", "weekly", "biweekly", "semimonthly", "daily", "fixed"):
             pay_classification = "exempt"
         else:
             pay_classification = None

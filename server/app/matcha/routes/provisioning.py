@@ -1336,7 +1336,7 @@ async def list_provisioning_runs(
 # =======================================================================
 
 class HRISConnectionRequest(BaseModel):
-    mode: str = Field(default="mock", pattern="^(mock|adp|gusto)$")
+    mode: str = Field(default="mock", pattern="^(mock|adp|gusto|finch)$")
     base_url: Optional[str] = Field(default=None, max_length=500)
     client_id: Optional[str] = Field(default=None, max_length=255)
     client_secret: Optional[str] = None
@@ -1914,3 +1914,236 @@ async def gusto_webhook(request: Request, background_tasks: BackgroundTasks):
             _whlog.info(f"[Gusto Webhook] Queued re-sync for company={matcha_company_id}")
 
     return {"received": True}
+
+
+# =======================================================================
+# Finch Connect OAuth Flow (unified HRIS — any Finch-supported provider)
+# =======================================================================
+# Unlike Gusto, Finch credentials are optional at boot (secret added later), so
+# these are read without an import-time raise and validated per-request instead.
+
+FINCH_CLIENT_ID = os.getenv("FINCH_CLIENT_ID")
+FINCH_CLIENT_SECRET = os.getenv("FINCH_CLIENT_SECRET")
+FINCH_OAUTH_REDIRECT_URI = os.getenv("FINCH_OAUTH_REDIRECT_URI")
+# Blank = live providers. "finch" routes through Finch's own sandbox; "provider"
+# uses a real provider's sandbox. Only forwarded when set.
+FINCH_SANDBOX = (os.getenv("FINCH_SANDBOX") or "").strip()
+FINCH_CONNECT_URL = os.getenv("FINCH_CONNECT_URL", "https://connect.tryfinch.com/authorize")
+FINCH_API_BASE_URL = os.getenv("FINCH_BASE_URL", "https://api.tryfinch.com")
+FINCH_TOKEN_URL = f"{FINCH_API_BASE_URL}/auth/token"
+# Products requested at Connect time — must cover directory + individual +
+# employment so FinchHRISService.fetch_workers can hydrate every record.
+FINCH_PRODUCTS = os.getenv("FINCH_PRODUCTS", "company directory individual employment")
+
+
+def _require_finch_oauth_config() -> None:
+    """Raise 503 unless the Finch Connect env vars are present."""
+    missing = [
+        name
+        for name, value in (
+            ("FINCH_CLIENT_ID", FINCH_CLIENT_ID),
+            ("FINCH_CLIENT_SECRET", FINCH_CLIENT_SECRET),
+            ("FINCH_OAUTH_REDIRECT_URI", FINCH_OAUTH_REDIRECT_URI),
+        )
+        if not value
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Finch Connect is not configured (missing {', '.join(missing)})",
+        )
+
+
+@router.get("/hris/finch/authorize",
+            dependencies=[Depends(require_feature("hris_import"))])
+async def authorize_finch_oauth(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Return the Finch Connect authorization URL for this company."""
+    _require_finch_oauth_config()
+    company_id = await get_client_company_id(current_user)
+
+    state = secrets.token_urlsafe(32)
+    async with get_connection() as conn:
+        await conn.execute(
+            "INSERT INTO oauth_states (state, company_id, created_at) VALUES ($1, $2, NOW())",
+            state,
+            company_id,
+        )
+
+    params = {
+        "client_id": FINCH_CLIENT_ID,
+        "products": FINCH_PRODUCTS,
+        "redirect_uri": FINCH_OAUTH_REDIRECT_URI,
+        "response_type": "code",
+        "state": state,
+    }
+    if FINCH_SANDBOX:
+        params["sandbox"] = FINCH_SANDBOX
+    oauth_url = f"{FINCH_CONNECT_URL}?{urlencode(params)}"
+    return {"oauth_url": oauth_url}
+
+
+class FinchSandboxConnectRequest(BaseModel):
+    # Finch sandbox provider id, e.g. "gusto", "bamboo_hr", "justworks".
+    provider_id: str = Field(default="gusto", max_length=64)
+    employee_size: int = Field(default=20, ge=1, le=100)
+
+
+@router.post("/hris/finch/sandbox",
+             dependencies=[Depends(require_feature("hris_import"))])
+async def create_finch_sandbox_connection(
+    request: FinchSandboxConnectRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Mint a Finch **sandbox** connection and store its token — no OAuth redirect.
+
+    Finch Sandbox doesn't support the Connect redirect flow, so testing goes through
+    POST /sandbox/connections (HTTP Basic auth with client_id:client_secret). The
+    returned access_token works directly against /employer/* and lets `/hris/sync`
+    pull Finch's mock employees to validate FinchHRISService field paths.
+    """
+    if not (FINCH_CLIENT_ID and FINCH_CLIENT_SECRET):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Finch is not configured (missing FINCH_CLIENT_ID / FINCH_CLIENT_SECRET)",
+        )
+    company_id = await get_client_company_id(current_user)
+
+    basic = base64.b64encode(f"{FINCH_CLIENT_ID}:{FINCH_CLIENT_SECRET}".encode()).decode()
+    products = [p for p in FINCH_PRODUCTS.split() if p]
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{FINCH_API_BASE_URL}/sandbox/connections",
+                headers={"Authorization": f"Basic {basic}", "Content-Type": "application/json"},
+                json={
+                    "provider_id": request.provider_id,
+                    "products": products,
+                    "employee_size": request.employee_size,
+                },
+            )
+            if resp.status_code not in (200, 201):
+                logger.error(f"[Finch Sandbox] {resp.status_code}: {resp.text[:300]}")
+                raise HTTPException(status_code=400, detail=f"Finch sandbox connection failed: {resp.status_code}")
+            data = resp.json()
+            access_token = data["access_token"]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Finch sandbox error: {str(e)}")
+
+    config = {
+        "mode": "finch",
+        "finch_connection_id": data.get("connection_id"),
+        "finch_account_id": data.get("account_id"),
+        "finch_company_id": data.get("company_id"),
+        "finch_provider_id": data.get("provider_id") or request.provider_id,
+        "finch_products": data.get("products") or products,
+        "finch_sandbox": True,
+    }
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO integration_connections
+                (company_id, provider, status, config, secrets, last_tested_at, created_by, updated_by)
+            VALUES ($1, $2, 'connected', $3::jsonb, $4::jsonb, NOW(), $5, $5)
+            ON CONFLICT (company_id, provider) DO UPDATE SET
+                status = 'connected',
+                config = EXCLUDED.config,
+                secrets = EXCLUDED.secrets,
+                last_tested_at = NOW(),
+                updated_at = NOW(),
+                updated_by = EXCLUDED.updated_by
+            RETURNING *
+            """,
+            company_id,
+            PROVIDER_HRIS,
+            json.dumps(config),
+            json.dumps({"access_token": encrypt_secret(access_token)}),
+            current_user.id,
+        )
+
+    return _hris_connection_status_payload(row)
+
+
+@router.get("/hris/finch/callback")
+async def finch_oauth_callback(
+    code: str = Query(...),
+    state: str = Query(...),
+):
+    """Handle the Finch Connect callback — exchange the code for an access token."""
+    _require_finch_oauth_config()
+
+    async with get_connection() as conn:
+        oauth_state = await conn.fetchrow(
+            "SELECT company_id FROM oauth_states WHERE state = $1 AND created_at > NOW() - INTERVAL '10 minutes'",
+            state,
+        )
+        if not oauth_state:
+            raise HTTPException(status_code=400, detail="Invalid or expired state")
+
+        company_id = oauth_state["company_id"]
+
+        # Exchange the authorization code. Finch's /auth/token takes a JSON body
+        # with the client credentials inline (no Basic auth, unlike Gusto).
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    FINCH_TOKEN_URL,
+                    json={
+                        "client_id": FINCH_CLIENT_ID,
+                        "client_secret": FINCH_CLIENT_SECRET,
+                        "code": code,
+                        "redirect_uri": FINCH_OAUTH_REDIRECT_URI,
+                    },
+                )
+                if resp.status_code != 200:
+                    logger.error(f"[Finch Token] {resp.status_code}: {resp.text[:300]}")
+                    raise HTTPException(status_code=400, detail=f"Finch token exchange failed: {resp.status_code}")
+                token_data = resp.json()
+                access_token = token_data["access_token"]
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Finch token exchange error: {str(e)}")
+
+        # Finch tokens are per-connection — the token itself scopes to one employer,
+        # so no company UUID lookup is needed (unlike Gusto). Persist provider/account
+        # identifiers from the token response for traceability.
+        config = {
+            "mode": "finch",
+            "finch_connection_id": token_data.get("connection_id"),
+            "finch_account_id": token_data.get("account_id"),
+            "finch_company_id": token_data.get("company_id"),
+            "finch_provider_id": token_data.get("provider_id"),
+            "finch_products": token_data.get("products"),
+        }
+        secrets_payload = {
+            "access_token": encrypt_secret(access_token),
+        }
+
+        await conn.execute(
+            """
+            INSERT INTO integration_connections
+                (company_id, provider, status, config, secrets, last_tested_at, created_by, updated_by)
+            VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, NOW(), $6, $6)
+            ON CONFLICT (company_id, provider) DO UPDATE SET
+                status = EXCLUDED.status,
+                config = EXCLUDED.config,
+                secrets = EXCLUDED.secrets,
+                last_tested_at = NOW(),
+                updated_at = NOW(),
+                updated_by = EXCLUDED.updated_by
+            """,
+            company_id,
+            PROVIDER_HRIS,
+            "connected",
+            json.dumps(config),
+            json.dumps(secrets_payload),
+            None,  # created_by — anonymous callback
+        )
+
+        await conn.execute("DELETE FROM oauth_states WHERE state = $1", state)
+
+    return RedirectResponse(url="/app/employees?hris=connected")
