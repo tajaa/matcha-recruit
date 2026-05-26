@@ -8,7 +8,7 @@ import { LazyMount } from './landing/LazyMount'
 
 const AgentReasoningAnimation = lazy(() => import('./landing/AgentReasoningAnimation'))
 import { ANIMATION_BY_SIZZLE_ID } from './landing/animations'
-import { ComplianceTicker } from '../components/landing/ComplianceTicker'
+import { EnforcementTotalsTicker } from '../components/landing/EnforcementTotalsTicker'
 import { PricingContactModal } from '../components/PricingContactModal'
 import { useLandingMedia } from '../hooks/useLandingMedia'
 import type { LandingMedia, LandingSizzleVideo, LandingCustomerLogo, LandingTestimonial } from '../api/client'
@@ -65,7 +65,7 @@ export default function Landing() {
       {/* <LandingIntro> muted — WIP, revisit */}
       <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
       <MarketingNav onDemoClick={() => setIsPricingOpen(true)} />
-      <ComplianceTicker />
+      <EnforcementTotalsTicker />
 
       <Hero data={data} onContactClick={() => setIsPricingOpen(true)} />
 
