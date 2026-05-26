@@ -19,6 +19,7 @@
 		208F703F48307B35717A911B /* LoadingDots.swift in Sources */ = {isa = PBXBuildFile; fileRef = B13338371A8BC76142D4A946 /* LoadingDots.swift */; };
 		2200E28DD83F146D6E9B397B /* PresentationPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC65D71C638B8C8239D71F61 /* PresentationPreview.swift */; };
 		27D89F55D2042BB60126C2E5 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A53863E4FE1105A953775B9 /* ContentView.swift */; };
+		DETA11PANE000000000000B1 /* DetailPanes.swift in Sources */ = {isa = PBXBuildFile; fileRef = DETA11PANE000000000000F2 /* DetailPanes.swift */; };
 		29E4BDC2148FC96D831C7A74 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87CD3FA8F0164D2F29731B2D /* KeychainHelper.swift */; };
 		2F0C483E53DBB74921718596 /* MultipartUploadBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5C3CE5229A938126E840ABD /* MultipartUploadBuilder.swift */; };
 		35A88FEB1B7D4BDCB23DE5F5 /* JournalService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73F38747B7DF91D0B1AD3216 /* JournalService.swift */; };
@@ -143,6 +144,7 @@
 		88DD03E26D63AB66B7AF4B39 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		94FBACAA706BADE04CF26DE2 /* DashboardModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DashboardModels.swift; sourceTree = "<group>"; };
 		9A53863E4FE1105A953775B9 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		DETA11PANE000000000000F2 /* DetailPanes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailPanes.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F60708BB000001 /* ProfileSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileSheet.swift; sourceTree = "<group>"; };
 		A4B5C6D7E8F9011A2B3C4D5E /* ResumeBatchPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeBatchPanelView.swift; sourceTree = "<group>"; };
 		A7C07C71E59F24539F32D490 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
@@ -424,6 +426,7 @@
 				CC995D9793AD79440F7616A7 /* MatchaApp.swift */,
 				88DD03E26D63AB66B7AF4B39 /* AppState.swift */,
 				9A53863E4FE1105A953775B9 /* ContentView.swift */,
+				DETA11PANE000000000000F2 /* DetailPanes.swift */,
 				AD198140CC378D9E843FA827 /* Color+Extensions.swift */,
 			);
 			path = App;
@@ -629,6 +632,7 @@
 				B2C7DB8AE33E886529C5BF99 /* MatchaApp.swift in Sources */,
 				A8B0E4F8719EE4B839FFBCBC /* AppState.swift in Sources */,
 				27D89F55D2042BB60126C2E5 /* ContentView.swift in Sources */,
+				DETA11PANE000000000000B1 /* DetailPanes.swift in Sources */,
 				E6875027B0F5CBDE47D488EF /* Color+Extensions.swift in Sources */,
 				1FEDFFD4BC1C7F59E9CFD687 /* AuthModels.swift in Sources */,
 				29E4BDC2148FC96D831C7A74 /* KeychainHelper.swift in Sources */,

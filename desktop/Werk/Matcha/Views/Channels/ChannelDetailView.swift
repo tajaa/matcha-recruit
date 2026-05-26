@@ -33,6 +33,8 @@ struct ChannelDetailView: View {
     @State private var showTicketReview = false
     @State private var draftingTicket = false
     @State private var ticketDraftError: String?
+    /// True while the bottom sentinel is on screen — gates message auto-scroll.
+    @State private var isAtBottom = true
     // Chat → ticket always drafts with Flash Lite (cheap/fast for this
     // lightweight action), regardless of the header model selector.
     private var ticketDraftModel: String? {
@@ -452,15 +454,23 @@ struct ChannelDetailView: View {
                         }
                         .transition(.opacity)
                     }
+                    // Bottom sentinel — visible only when scrolled to the end.
+                    // Gates auto-scroll so inbound messages don't yank the view
+                    // down while the user reads history (macOS 14: no
+                    // onScrollGeometryChange).
+                    Color.clear
+                        .frame(height: 1)
+                        .id("__bottom_anchor")
+                        .onAppear { isAtBottom = true }
+                        .onDisappear { isAtBottom = false }
                 }
                 .padding(.vertical, 14)
                 .padding(.horizontal, 16)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .onChange(of: vm.messages.count) {
-                if let last = vm.messages.last {
-                    withAnimation { proxy.scrollTo(last.stableKey, anchor: .bottom) }
-                }
+                guard isAtBottom, let last = vm.messages.last else { return }
+                withAnimation { proxy.scrollTo(last.stableKey, anchor: .bottom) }
             }
             // Initial render scroll-to-bottom. .onChange above fires when
             // the REST load flips messages.count 0→N, but proxy.scrollTo

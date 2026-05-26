@@ -43,6 +43,8 @@ struct ChatPanelView: View {
     @State private var isDragOver = false
     @State private var uploadProgress: String? = nil
     @State private var pendingFiles: [(data: Data, filename: String, mimeType: String)] = []
+    /// True while the bottom sentinel is on screen — gates message auto-scroll.
+    @State private var isAtBottom = true
 
     // Matches server-side `SendMessageRequest.content` Field(max_length=4000)
     private static let messageCharLimit = 4000
@@ -287,20 +289,30 @@ struct ChatPanelView: View {
                         StreamingBubbleView(content: viewModel.streamingContent)
                             .id("streaming")
                     }
+                    // Bottom sentinel — visible only when the user is scrolled to
+                    // the end. Gates auto-scroll so new messages don't yank the
+                    // view down while the user is reading history (macOS 14 has no
+                    // onScrollGeometryChange, so we detect via appear/disappear).
+                    Color.clear
+                        .frame(height: 1)
+                        .id("__bottom_anchor")
+                        .onAppear { isAtBottom = true }
+                        .onDisappear { isAtBottom = false }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
             .onChange(of: viewModel.messages.count) {
-                if let lastId = viewModel.messages.last?.id {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo(lastId, anchor: .bottom)
-                    }
+                guard isAtBottom, let lastId = viewModel.messages.last?.id else { return }
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo(lastId, anchor: .bottom)
                 }
             }
             .onChange(of: viewModel.isStreaming) {
-                if viewModel.isStreaming {
-                    withAnimation { proxy.scrollTo("streaming", anchor: .bottom) }
+                // No animation during streaming — token-rate scrolls churn the
+                // main thread; only follow if the user is already at the bottom.
+                if viewModel.isStreaming, isAtBottom {
+                    proxy.scrollTo("streaming", anchor: .bottom)
                 }
             }
         }

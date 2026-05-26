@@ -3,7 +3,6 @@ import AppKit
 
 struct ContentView: View {
     @Environment(AppState.self) private var appState
-    @Environment(\.openWindow) private var openWindow
     @State private var threadListVM = ThreadListViewModel()
     @State private var isOpeningCheckout = false
     @State private var upgradeError: String?
@@ -36,13 +35,13 @@ struct ContentView: View {
                 WorkTabBar()
                 if let split = appState.splitTarget {
                     HSplitView {
-                        primaryDetailPane
+                        PrimaryDetailPane()
                             .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
-                        splitSecondaryPane(split)
+                        SplitSecondaryPane(target: split)
                             .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
                     }
                 } else {
-                    primaryDetailPane
+                    PrimaryDetailPane()
                 }
             }
             .background(appState.themeBg)
@@ -118,22 +117,7 @@ struct ContentView: View {
                         Button {
                             showNotifications.toggle()
                         } label: {
-                            ZStack(alignment: .topTrailing) {
-                                Image(systemName: "bell")
-                                    .font(.system(size: 13))
-                                    .foregroundColor(appState.themeText.opacity(0.7))
-                                if appState.notificationsUnreadCount > 0 {
-                                    Text(appState.notificationsUnreadCount > 9 ? "9+" : "\(appState.notificationsUnreadCount)")
-                                        .font(.system(size: 8, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .padding(.horizontal, 3)
-                                        .padding(.vertical, 1)
-                                        .background(Color.red)
-                                        .clipShape(Capsule())
-                                        .offset(x: 6, y: -5)
-                                }
-                            }
-                            .frame(width: 22, height: 16)
+                            NotificationBellBadge()
                         }
                         .buttonStyle(.plain)
                         .help("Notifications")
@@ -199,12 +183,7 @@ struct ContentView: View {
 
             // Footer — Inbox + People always-visible buttons with live badges
             HStack(spacing: 6) {
-                sidebarFooterButton(
-                    icon: "envelope",
-                    label: "Inbox",
-                    badge: appState.unreadInboxCount,
-                    isActive: appState.showInbox
-                ) {
+                InboxFooterButton {
                     appState.showInbox = true
                     appState.showPeople = false
                     appState.showHome = false
@@ -637,80 +616,8 @@ struct ContentView: View {
     // MARK: - Sidebar building blocks
 
     /// The primary (left) detail pane — routed off the shared `selectedX`
-    /// nav state. Used standalone, or as the left side of the in-window split.
-    @ViewBuilder
-    private var primaryDetailPane: some View {
-        Group {
-            if let threadId = appState.selectedThreadId {
-                ThreadDetailView(threadId: threadId)
-                    .onChange(of: threadId) { appState.showSkills = false }
-            } else if let projectId = appState.selectedProjectId {
-                ProjectDetailView(projectId: projectId)
-            } else if let journalId = appState.selectedJournalId {
-                JournalDetailView(journalId: journalId)
-            } else if let channelId = appState.selectedChannelId {
-                ChannelDetailView(channelId: channelId)
-            } else if appState.showChannelBrowse {
-                ChannelBrowseView()
-            } else if appState.showInbox {
-                InboxView()
-            } else if appState.showPeople {
-                PeopleView()
-            } else if appState.showSkills {
-                SkillsView()
-            } else if appState.showArchive {
-                ArchiveView()
-            } else {
-                HomeDashboardView()
-            }
-        }
-    }
-
-    /// The secondary (right) split pane — pinned to `splitTarget`. Renders via
-    /// AuxWindowRootView (isEmbedded, so it never writes shared nav state).
-    private func splitSecondaryPane(_ target: AuxWindowTarget) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "rectangle.split.2x1")
-                    .font(.system(size: 11))
-                    .foregroundColor(appState.themeTextSecondary)
-                Text(splitLabel(target))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(appState.themeTextSecondary)
-                Spacer()
-                Button {
-                    openWindow(id: "aux", value: target)
-                    appState.splitTarget = nil
-                } label: {
-                    Image(systemName: "macwindow.on.rectangle")
-                        .font(.system(size: 11))
-                        .foregroundColor(appState.themeTextSecondary)
-                }
-                .buttonStyle(.plain)
-                .help("Pop out to a window")
-                Button { appState.splitTarget = nil } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(appState.themeTextSecondary)
-                }
-                .buttonStyle(.plain)
-                .help("Close split")
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            Divider().opacity(0.2)
-            AuxWindowRootView(target: target)
-        }
-    }
-
-    private func splitLabel(_ target: AuxWindowTarget) -> String {
-        switch target {
-        case .project: return "Project"
-        case .channel: return "Channel"
-        case .thread: return "Thread"
-        case .journal: return "Journal"
-        }
-    }
+    /// nav state. The detail panes live in DetailPanes.swift (PrimaryDetailPane /
+    /// SplitSecondaryPane) so churning unread counters don't rebuild them.
 
     /// Navigate to the full-pane Channels browse view. Clears any active
     /// thread/project/channel/journal/inbox selection so the detail pane
