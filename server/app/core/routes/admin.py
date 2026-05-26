@@ -60,6 +60,7 @@ from ..services.stripe_service import StripeService, StripeServiceError
 from ..feature_flags import DEFAULT_COMPANY_FEATURES
 from ..services.deal_pricing import DealInputs
 from ..services.deal_full import FullDealInputs
+from ..services.deal_broker import BrokerInputs
 
 router = APIRouter()
 
@@ -10091,6 +10092,50 @@ async def deal_flow_proposal(inp: DealInputs):
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/deal-flow/broker-defaults", dependencies=[Depends(require_admin)])
+async def deal_flow_broker_defaults():
+    """Default editable blocks + margin tiers for the broker packet."""
+    from ..services.deal_broker import DEFAULT_BROKER_BLOCKS, DEFAULT_MARGIN_TIERS
+
+    return {"blocks": DEFAULT_BROKER_BLOCKS, "margin_tiers": DEFAULT_MARGIN_TIERS}
+
+
+@router.post("/deal-flow/broker-proposal/preview", dependencies=[Depends(require_admin)])
+async def deal_flow_broker_preview(inp: BrokerInputs):
+    """Styled HTML preview of the broker packet (for in-app iframe)."""
+    from ..services.deal_broker import compute_broker_quote
+    from ..services.deal_broker_template import render_broker_proposal_html
+
+    return {"html": render_broker_proposal_html(inp, compute_broker_quote(inp))}
+
+
+@router.post("/deal-flow/broker-proposal", dependencies=[Depends(require_admin)])
+async def deal_flow_broker_proposal(inp: BrokerInputs):
+    """Render the broker partner-program packet to PDF."""
+    from ..services.deal_broker import compute_broker_quote
+    from ..services.deal_broker_template import render_broker_proposal_html
+
+    html_str = render_broker_proposal_html(inp, compute_broker_quote(inp))
+    try:
+        from weasyprint import HTML
+    except ImportError as ie:
+        logger.error("weasyprint import failed: %s", ie)
+        raise HTTPException(status_code=501, detail="PDF generation not available — install weasyprint on the server.")
+    try:
+        pdf_bytes = await asyncio.wait_for(
+            asyncio.to_thread(lambda: HTML(string=html_str).write_pdf()), timeout=60,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="PDF render timed out.")
+
+    safe_name = re.sub(r"[^A-Za-z0-9]+", "_", inp.broker_name).strip("_") or "Broker"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}_Matcha_Partner_Program.pdf"'},
     )
 
 

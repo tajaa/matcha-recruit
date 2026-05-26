@@ -61,12 +61,12 @@ def _build_up_rows(q: DealQuote, broker_label: str) -> str:
         rows.append(f'<div class="r sub"><span>Subtotal</span><span>{_fmt(q.subtotal)}</span></div>')
         if q.broker_disc:
             rows.append(
-                f'<div class="r"><span>&minus;10% {escape(broker_label)}</span>'
+                f'<div class="r"><span>&minus;{q.broker_pct}% {escape(broker_label)}</span>'
                 f'<span>&minus;{_fmt(q.broker_disc)}</span></div>'
             )
         if q.partner_disc:
             rows.append(
-                f'<div class="r"><span>&minus;5% partner</span>'
+                f'<div class="r"><span>&minus;{q.partner_pct}% partner</span>'
                 f'<span>&minus;{_fmt(q.partner_disc)}</span></div>'
             )
     rows.append(
@@ -129,9 +129,9 @@ def render_proposal_html(inp: DealInputs, quotes: dict[str, DealQuote]) -> str:
     if ref.discount_pct:
         parts = []
         if ref.broker_disc:
-            parts.append(f"{escape(broker_label)} <b>(&minus;10%)</b>")
+            parts.append(f"{escape(broker_label)} <b>(&minus;{ref.broker_pct}%)</b>")
         if ref.partner_disc:
-            parts.append("Partner <b>(&minus;5%)</b>")
+            parts.append(f"Partner <b>(&minus;{ref.partner_pct}%)</b>")
         detail = " + ".join(parts) + ", applied to subscription &amp; onboarding and locked for the term."
         svband = f"""
     <div class="svband">
@@ -303,9 +303,9 @@ def _lite_buildup(q: DealQuote, broker_label: str) -> str:
     if q.onboarding:
         rows.append(f'<div class="ln"><span>Setup</span><span>+{_fmt(q.onboarding)}</span></div>')
     if q.broker_disc:
-        rows.append(f'<div class="ln disc"><span>&minus;10% {escape(broker_label)}</span><span>&minus;{_fmt(q.broker_disc)}</span></div>')
+        rows.append(f'<div class="ln disc"><span>&minus;{q.broker_pct}% {escape(broker_label)}</span><span>&minus;{_fmt(q.broker_disc)}</span></div>')
     if q.partner_disc:
-        rows.append(f'<div class="ln disc"><span>&minus;5% partner</span><span>&minus;{_fmt(q.partner_disc)}</span></div>')
+        rows.append(f'<div class="ln disc"><span>&minus;{q.partner_pct}% partner</span><span>&minus;{_fmt(q.partner_disc)}</span></div>')
     save = ""
     if q.you_save_yr:
         save = f'<div class="save">YOU SAVE {_fmt(q.you_save_yr)} &middot; {q.discount_pct}% OFF</div>'

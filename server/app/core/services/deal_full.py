@@ -287,7 +287,9 @@ class FullDealInputs(BaseModel):
     volume_discount: Optional[bool] = None   # None → auto (headcount >= 500)
     broker: bool = False
     broker_name: Optional[str] = Field(default=None, max_length=120)
+    broker_pct: int = Field(default=10, ge=0, le=100)
     partner: bool = False
+    partner_pct: int = Field(default=5, ge=0, le=100)
 
     roi_hard_savings: int = Field(default=DEFAULT_ROI_HARD_SAVINGS, ge=0, le=100_000_000)
     roi_risk_reduction: int = Field(default=DEFAULT_ROI_RISK_REDUCTION, ge=0, le=100_000_000)
@@ -354,7 +356,7 @@ def compute_full_pricing(inp: FullDealInputs) -> FullQuote:
     volume_cut = _r2(rack * VOLUME_RATE) if volume_applied else 0.0
     subtotal_pepm = _r2(rack - volume_cut)
 
-    bp_rate = (BROKER_RATE if inp.broker else 0.0) + (PARTNER_RATE if inp.partner else 0.0)
+    bp_rate = (inp.broker_pct / 100 if inp.broker else 0.0) + (inp.partner_pct / 100 if inp.partner else 0.0)
     bp_rate_pct = int(round(bp_rate * 100))
     your_pepm = _r2(subtotal_pepm * (1 - bp_rate))
     bp_pepm_cut = _r2(subtotal_pepm - your_pepm)

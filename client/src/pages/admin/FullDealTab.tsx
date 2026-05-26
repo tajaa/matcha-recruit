@@ -37,7 +37,9 @@ export default function FullDealTab() {
   const [jurisExtra, setJurisExtra] = useState('0')
   const [broker, setBroker] = useState(true)
   const [brokerName, setBrokerName] = useState('Alliant')
+  const [brokerPct, setBrokerPct] = useState('10')
   const [partner, setPartner] = useState(true)
+  const [partnerPct, setPartnerPct] = useState('5')
   const [volume, setVolume] = useState(true)
   const [volumeManual, setVolumeManual] = useState(false)
   const [hardSavings, setHardSavings] = useState('223000')
@@ -80,7 +82,9 @@ export default function FullDealTab() {
       volume_discount: volume,
       broker,
       broker_name: broker ? brokerName.trim() || 'Broker' : null,
+      broker_pct: int(brokerPct, 10),
       partner,
+      partner_pct: int(partnerPct, 5),
       roi_hard_savings: int(hardSavings, 0),
       roi_risk_reduction: int(riskReduction, 0),
       blocks: blocks
@@ -88,7 +92,7 @@ export default function FullDealTab() {
         : null,
     }),
     [companyName, headcountNum, validHeadcount, location, proposalDate, rackPepm, platformFee,
-     implementation, jurisExtra, volume, broker, brokerName, partner, hardSavings, riskReduction, blocks],
+     implementation, jurisExtra, volume, broker, brokerName, brokerPct, partner, partnerPct, hardSavings, riskReduction, blocks],
   )
 
   // Refresh the preview when in preview mode (debounced).
@@ -154,9 +158,15 @@ export default function FullDealTab() {
             <Input label="Implementation — standard ($)" type="number" min={0} value={implementation} onChange={(e) => setImplementation(e.target.value)} />
             <Input label="Additional jurisdictions" type="number" min={0} value={jurisExtra} onChange={(e) => setJurisExtra(e.target.value)} />
             <ToggleRow label="Volume (−10% PEPM)" checked={volume} onChange={(v) => { setVolumeManual(true); setVolume(v) }} />
-            <ToggleRow label="Broker (−10%)" checked={broker} onChange={setBroker} />
-            {broker && <Input label="Broker name" value={brokerName} onChange={(e) => setBrokerName(e.target.value)} />}
-            <ToggleRow label="Partner (−5%)" checked={partner} onChange={setPartner} />
+            <ToggleRow label="Broker discount" checked={broker} onChange={setBroker} />
+            {broker && (
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="Broker name" value={brokerName} onChange={(e) => setBrokerName(e.target.value)} />
+                <Input label="Broker %" type="number" min={0} max={100} value={brokerPct} onChange={(e) => setBrokerPct(e.target.value)} />
+              </div>
+            )}
+            <ToggleRow label="Partner program" checked={partner} onChange={setPartner} />
+            {partner && <Input label="Partner %" type="number" min={0} max={100} value={partnerPct} onChange={(e) => setPartnerPct(e.target.value)} />}
           </Section>
           <Section title="ROI assumptions">
             <Input label="Annual hard savings ($)" type="number" min={0} value={hardSavings} onChange={(e) => setHardSavings(e.target.value)} />

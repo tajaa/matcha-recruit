@@ -79,7 +79,9 @@ class DealInputs(BaseModel):
     tier: Tier = "max"  # the recommended / highlighted tier
     broker: bool = False
     broker_name: Optional[str] = Field(default=None, max_length=120)
+    broker_pct: int = Field(default=10, ge=0, le=100)
     partner: bool = False
+    partner_pct: int = Field(default=5, ge=0, le=100)
     hr_partner_addon: bool = False
     proposal_date: Optional[date] = None
     # Optional per-tier PEPM/onboarding overrides, keyed by tier ("lite"/"mid"/"max").
@@ -100,6 +102,8 @@ class DealQuote(BaseModel):
     subtotal: int
     broker_disc: int
     partner_disc: int
+    broker_pct: int
+    partner_pct: int
     discount_pct: int
     your_price_yr: int
     you_save_yr: int
@@ -112,19 +116,24 @@ def compute_quote(
     partner: bool = False,
     pepm: Optional[int] = None,
     onboarding: Optional[int] = None,
+    broker_rate: float = BROKER_RATE,
+    partner_rate: float = PARTNER_RATE,
 ) -> DealQuote:
     """Compute a single tier's quote. Pure function — no IO.
 
     `pepm` / `onboarding` override the tier defaults when provided.
+    `broker_rate` / `partner_rate` are fractional (0.10 = 10%) and editable per deal.
     """
     pepm = default_pepm(tier, headcount) if pepm is None else pepm
     onboarding = TIER_ONBOARDING[tier] if onboarding is None else onboarding
     subscription_yr = pepm * headcount * MONTHS
     subtotal = subscription_yr + onboarding
 
-    broker_disc = int(round(subtotal * BROKER_RATE)) if broker else 0
-    partner_disc = int(round(subtotal * PARTNER_RATE)) if partner else 0
-    discount_pct = (10 if broker else 0) + (5 if partner else 0)
+    broker_disc = int(round(subtotal * broker_rate)) if broker else 0
+    partner_disc = int(round(subtotal * partner_rate)) if partner else 0
+    broker_pct = int(round(broker_rate * 100)) if broker else 0
+    partner_pct = int(round(partner_rate * 100)) if partner else 0
+    discount_pct = broker_pct + partner_pct
 
     your_price_yr = subtotal - broker_disc - partner_disc
     you_save_yr = subtotal - your_price_yr
@@ -138,6 +147,8 @@ def compute_quote(
         subtotal=subtotal,
         broker_disc=broker_disc,
         partner_disc=partner_disc,
+        broker_pct=broker_pct,
+        partner_pct=partner_pct,
         discount_pct=discount_pct,
         your_price_yr=your_price_yr,
         you_save_yr=you_save_yr,
@@ -160,5 +171,7 @@ def compute_all(inp: DealInputs) -> dict[str, DealQuote]:
             inp.partner,
             pepm=ov.pepm if ov else None,
             onboarding=ov.onboarding if ov else None,
+            broker_rate=inp.broker_pct / 100,
+            partner_rate=inp.partner_pct / 100,
         )
     return out
