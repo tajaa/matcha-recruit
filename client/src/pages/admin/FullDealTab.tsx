@@ -1,27 +1,29 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Loader2, Download } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Loader2, Download, FileText, PencilLine } from 'lucide-react'
 import { Button, Input, Toggle } from '../../components/ui'
 import { api } from '../../api/client'
 
-// Defaults mirror server/app/core/services/deal_full.py (kept in sync by hand).
-const DEFAULT_EXEC_SUMMARY = `Matcha is a compliance, employee relations, and workforce risk platform built for organizations that carry heavy regulatory and funding obligations on lean administrative budgets. Your compliance and HR team stops manually checking regulatory pages and opens one dashboard. Every requirement that applies to your workforce is monitored continuously. When something changes, they get an alert with severity, which team is affected, and what action to take.
+type BlockKind =
+  | 'h2' | 'h3' | 'h4' | 'p' | 'note' | 'callout' | 'highlight' | 'bullets'
+  | 'cover' | 't_pepm' | 't_costs' | 'hr_rate' | 't_savings' | 't_jurisdiction' | 't_roi' | 'sign' | 'disclaimer'
 
-From employment law and local ordinances to data privacy, ER investigations, pre-termination risk scoring, and intelligent policy documents, Matcha consolidates fragmented HR operations into a single platform. The system is configured during implementation with the categories that apply to your operation, alongside your core labor obligations: minimum wage, local wage ordinances, meal and rest breaks, paid sick leave, and workers' compensation.
+type Block = { id: string; kind: BlockKind; text: string; items: string[]; new_page: boolean }
 
-When your team has a compliance question, they type it into the system, and it walks through the jurisdiction hierarchy, identifies which level of law governs, cites the statutes, and shows the penalty range and enforcing agency. Sourced from government databases with citation links and verification timestamps, not generated from thin air.
-
-What your team owns after go-live: the system. We build it during implementation, then hand it off. The CSM stays assigned, but the platform runs independently. You're not paying for a service — you're buying infrastructure.`
-
-const DEFAULT_ROI_INTRO = `Organizations in regulated, multi-site environments carry a disproportionately high compliance burden relative to their administrative budgets — and a disproportionately high consequence when something goes wrong. A single wage-and-hour class action can run well into six figures in back pay and penalties before defense costs. A retaliation or wrongful-termination claim can generate $150,000+ in defense costs. The hard savings below reflect what the platform replaces. The risk-reduction value reflects what it prevents.`
-
-const num = (s: string, fallback: number) => {
-  const n = parseFloat(s)
-  return Number.isFinite(n) ? n : fallback
+const COMPUTED_LABEL: Partial<Record<BlockKind, string>> = {
+  cover: 'Cover page (auto)',
+  t_pepm: 'PEPM build-up table (auto from pricing)',
+  t_costs: 'Annual cost table (auto from pricing)',
+  hr_rate: 'HR Advisory rate card (standard)',
+  t_savings: 'Savings table (auto from pricing)',
+  t_jurisdiction: 'Jurisdiction fee schedule (auto)',
+  t_roi: 'ROI table + highlight (auto)',
+  sign: 'Signature blocks (auto)',
+  disclaimer: 'Disclaimer (auto)',
 }
-const int = (s: string, fallback: number) => {
-  const n = parseInt(s, 10)
-  return Number.isFinite(n) ? n : fallback
-}
+const EDITABLE = new Set<BlockKind>(['h2', 'h3', 'h4', 'p', 'note', 'callout', 'highlight', 'bullets'])
+
+const int = (s: string, fb: number) => { const n = parseInt(s, 10); return Number.isFinite(n) ? n : fb }
+const num = (s: string, fb: number) => { const n = parseFloat(s); return Number.isFinite(n) ? n : fb }
 
 export default function FullDealTab() {
   const today = useMemo(() => new Date().toISOString().slice(0, 10), [])
@@ -29,31 +31,36 @@ export default function FullDealTab() {
   const [headcount, setHeadcount] = useState('500')
   const [location, setLocation] = useState('')
   const [proposalDate, setProposalDate] = useState(today)
-
   const [rackPepm, setRackPepm] = useState('15.00')
   const [platformFee, setPlatformFee] = useState('5000')
   const [implementation, setImplementation] = useState('8000')
   const [jurisExtra, setJurisExtra] = useState('0')
-
   const [broker, setBroker] = useState(true)
   const [brokerName, setBrokerName] = useState('Alliant')
   const [partner, setPartner] = useState(true)
   const [volume, setVolume] = useState(true)
   const [volumeManual, setVolumeManual] = useState(false)
-
   const [hardSavings, setHardSavings] = useState('223000')
   const [riskReduction, setRiskReduction] = useState('60000')
 
-  const [execSummary, setExecSummary] = useState(DEFAULT_EXEC_SUMMARY)
-  const [roiIntro, setRoiIntro] = useState(DEFAULT_ROI_INTRO)
-
+  const [blocks, setBlocks] = useState<Block[] | null>(null)
+  const [view, setView] = useState<'edit' | 'preview'>('edit')
+  const [previewHtml, setPreviewHtml] = useState('')
+  const [previewing, setPreviewing] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const headcountNum = int(headcount, 0)
   const validHeadcount = headcountNum > 0
 
-  // Volume discount auto-tracks 500+ until manually toggled.
+  // Load the default document once.
+  useEffect(() => {
+    api.get<{ blocks: Block[] }>('/admin/deal-flow/full-defaults')
+      .then((r) => setBlocks(r.blocks))
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load template'))
+  }, [])
+
+  // Volume auto-tracks 500+ until manually toggled.
   useEffect(() => {
     if (volumeManual || !validHeadcount) return
     setVolume(headcountNum >= 500)
@@ -76,13 +83,32 @@ export default function FullDealTab() {
       partner,
       roi_hard_savings: int(hardSavings, 0),
       roi_risk_reduction: int(riskReduction, 0),
-      exec_summary: execSummary,
-      roi_intro: roiIntro,
+      blocks: blocks
+        ? blocks.map((b) => (b.kind === 'bullets' ? { ...b, items: b.items.filter((i) => i.trim()) } : b))
+        : null,
     }),
     [companyName, headcountNum, validHeadcount, location, proposalDate, rackPepm, platformFee,
-     implementation, jurisExtra, volume, broker, brokerName, partner, hardSavings, riskReduction,
-     execSummary, roiIntro],
+     implementation, jurisExtra, volume, broker, brokerName, partner, hardSavings, riskReduction, blocks],
   )
+
+  // Refresh the preview when in preview mode (debounced).
+  const inputsRef = useRef(inputs)
+  inputsRef.current = inputs
+  useEffect(() => {
+    if (view !== 'preview' || !validHeadcount) return
+    setPreviewing(true)
+    const t = setTimeout(() => {
+      api.post<{ html: string }>('/admin/deal-flow/full-proposal/preview', inputsRef.current)
+        .then((r) => { setPreviewHtml(r.html); setError(null) })
+        .catch((e) => setError(e instanceof Error ? e.message : 'Preview failed'))
+        .finally(() => setPreviewing(false))
+    }, 350)
+    return () => clearTimeout(t)
+  }, [view, inputs, validHeadcount])
+
+  function updateBlock(id: string, patch: Partial<Block>) {
+    setBlocks((prev) => prev && prev.map((b) => (b.id === id ? { ...b, ...patch } : b)))
+  }
 
   async function downloadFull() {
     if (!validHeadcount) return
@@ -100,10 +126,11 @@ export default function FullDealTab() {
 
   return (
     <div>
-      <div className="mt-6 flex items-center justify-between">
-        <p className="text-sm text-zinc-500">
-          Full multi-page service proposal (rack-rate model). Numbers come from inputs; prose is editable below.
-        </p>
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex rounded-lg border border-zinc-700 p-0.5">
+          <ToggleBtn active={view === 'edit'} onClick={() => setView('edit')} icon={<PencilLine className="h-4 w-4" />}>Edit</ToggleBtn>
+          <ToggleBtn active={view === 'preview'} onClick={() => setView('preview')} icon={<FileText className="h-4 w-4" />}>Preview</ToggleBtn>
+        </div>
         <Button onClick={downloadFull} disabled={!validHeadcount || downloading}>
           {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
           Download Full Proposal PDF
@@ -112,44 +139,126 @@ export default function FullDealTab() {
 
       {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Deal facts */}
-        <Section title="Deal">
-          <Input label="Company name" value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="LA Non-Profit" />
-          <Input label="Headcount" type="number" min={1} value={headcount} onChange={(e) => setHeadcount(e.target.value)} />
-          <Input label="Location" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="California (Los Angeles)" />
-          <Input label="Proposal date" type="date" value={proposalDate} onChange={(e) => setProposalDate(e.target.value)} />
-        </Section>
+      <div className="mt-5 grid grid-cols-1 gap-6 lg:grid-cols-[320px_1fr]">
+        {/* Inputs */}
+        <div className="space-y-5">
+          <Section title="Deal">
+            <Input label="Company name" value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="LA Non-Profit" />
+            <Input label="Headcount" type="number" min={1} value={headcount} onChange={(e) => setHeadcount(e.target.value)} />
+            <Input label="Location" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="California (Los Angeles)" />
+            <Input label="Proposal date" type="date" value={proposalDate} onChange={(e) => setProposalDate(e.target.value)} />
+          </Section>
+          <Section title="Pricing">
+            <Input label="Rack PEPM ($)" type="number" step="0.01" min={0} value={rackPepm} onChange={(e) => setRackPepm(e.target.value)} />
+            <Input label="Platform fee — standard ($/yr)" type="number" min={0} value={platformFee} onChange={(e) => setPlatformFee(e.target.value)} />
+            <Input label="Implementation — standard ($)" type="number" min={0} value={implementation} onChange={(e) => setImplementation(e.target.value)} />
+            <Input label="Additional jurisdictions" type="number" min={0} value={jurisExtra} onChange={(e) => setJurisExtra(e.target.value)} />
+            <ToggleRow label="Volume (−10% PEPM)" checked={volume} onChange={(v) => { setVolumeManual(true); setVolume(v) }} />
+            <ToggleRow label="Broker (−10%)" checked={broker} onChange={setBroker} />
+            {broker && <Input label="Broker name" value={brokerName} onChange={(e) => setBrokerName(e.target.value)} />}
+            <ToggleRow label="Partner (−5%)" checked={partner} onChange={setPartner} />
+          </Section>
+          <Section title="ROI assumptions">
+            <Input label="Annual hard savings ($)" type="number" min={0} value={hardSavings} onChange={(e) => setHardSavings(e.target.value)} />
+            <Input label="Risk-reduction value ($)" type="number" min={0} value={riskReduction} onChange={(e) => setRiskReduction(e.target.value)} />
+          </Section>
+        </div>
 
-        {/* Pricing */}
-        <Section title="Pricing">
-          <Input label="Rack PEPM ($)" type="number" step="0.01" min={0} value={rackPepm} onChange={(e) => setRackPepm(e.target.value)} />
-          <Input label="Platform fee — standard ($/yr)" type="number" min={0} value={platformFee} onChange={(e) => setPlatformFee(e.target.value)} />
-          <Input label="Implementation — standard ($)" type="number" min={0} value={implementation} onChange={(e) => setImplementation(e.target.value)} />
-          <Input label="Additional jurisdictions (count)" type="number" min={0} value={jurisExtra} onChange={(e) => setJurisExtra(e.target.value)} />
-          <ToggleRow label="Volume discount (−10% PEPM)" checked={volume} onChange={(v) => { setVolumeManual(true); setVolume(v) }} />
-          <ToggleRow label="Broker discount (−10%)" checked={broker} onChange={setBroker} />
-          {broker && <Input label="Broker name" value={brokerName} onChange={(e) => setBrokerName(e.target.value)} />}
-          <ToggleRow label="Partner program (−5%)" checked={partner} onChange={setPartner} />
-        </Section>
-
-        {/* ROI */}
-        <Section title="ROI assumptions">
-          <Input label="Annual hard savings ($)" type="number" min={0} value={hardSavings} onChange={(e) => setHardSavings(e.target.value)} />
-          <Input label="Annual risk-reduction value ($)" type="number" min={0} value={riskReduction} onChange={(e) => setRiskReduction(e.target.value)} />
-          <p className="text-xs text-zinc-500">
-            Investment rows compute from pricing; net savings = total value − investment.
-          </p>
-        </Section>
-
-        {/* Prose */}
-        <Section title="Prose (editable)">
-          <Textarea label="Executive Summary" value={execSummary} onChange={setExecSummary} rows={10} />
-          <Textarea label="ROI intro" value={roiIntro} onChange={setRoiIntro} rows={5} />
-          <p className="text-xs text-zinc-500">Separate paragraphs with a blank line. First Exec Summary paragraph becomes the highlighted callout.</p>
-        </Section>
+        {/* Document / Preview */}
+        <div>
+          {view === 'preview' ? (
+            <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-200">
+              {previewing && (
+                <div className="flex items-center gap-2 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-400">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Rendering…
+                </div>
+              )}
+              <iframe title="proposal preview" srcDoc={previewHtml} className="h-[80vh] w-full bg-white" />
+            </div>
+          ) : !blocks ? (
+            <p className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading template…</p>
+          ) : (
+            <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+              <p className="text-xs text-zinc-500">Edit any heading or paragraph. Pricing tables fill in from the inputs at left. Switch to Preview to see the styled document.</p>
+              {blocks.map((b) => (
+                <BlockEditor key={b.id} block={b} onChange={(patch) => updateBlock(b.id, patch)} />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
+  )
+}
+
+function BlockEditor({ block, onChange }: { block: Block; onChange: (patch: Partial<Block>) => void }) {
+  if (!EDITABLE.has(block.kind)) {
+    return (
+      <div className="rounded-md border border-dashed border-zinc-700 bg-zinc-800/40 px-3 py-2 text-xs italic text-zinc-500">
+        ▦ {COMPUTED_LABEL[block.kind] ?? block.kind}
+      </div>
+    )
+  }
+  if (block.kind === 'h2' || block.kind === 'h3' || block.kind === 'h4') {
+    const size = block.kind === 'h2' ? 'text-lg font-bold' : block.kind === 'h3' ? 'text-base font-semibold' : 'text-sm font-semibold'
+    return (
+      <input
+        value={block.text}
+        onChange={(e) => onChange({ text: e.target.value })}
+        className={`w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-zinc-100 hover:border-zinc-700 focus:border-violet-500 focus:outline-none ${size}`}
+      />
+    )
+  }
+  if (block.kind === 'bullets') {
+    return (
+      <AutoTextarea
+        value={block.items.join('\n')}
+        onChange={(v) => onChange({ items: v.split('\n') })}
+        className="text-sm text-zinc-300"
+        placeholder="One bullet per line"
+      />
+    )
+  }
+  const cls =
+    block.kind === 'note' ? 'text-xs italic text-zinc-400'
+    : block.kind === 'callout' ? 'text-sm text-zinc-200 border-l-2 border-violet-500/50 pl-3'
+    : block.kind === 'highlight' ? 'text-sm font-medium text-zinc-100'
+    : 'text-sm text-zinc-300'
+  return <AutoTextarea value={block.text} onChange={(v) => onChange({ text: v })} className={cls} />
+}
+
+function AutoTextarea({
+  value, onChange, className = '', placeholder,
+}: { value: string; onChange: (v: string) => void; className?: string; placeholder?: string }) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px` }
+  }, [value])
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+      rows={1}
+      className={`w-full resize-none rounded-md border border-transparent bg-transparent px-2 py-1 leading-relaxed hover:border-zinc-700 focus:border-violet-500 focus:outline-none ${className}`}
+    />
+  )
+}
+
+function ToggleBtn({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+        active ? 'bg-violet-500/15 text-violet-200' : 'text-zinc-400 hover:text-zinc-200'
+      }`}
+    >
+      {icon}
+      {children}
+    </button>
   )
 }
 
@@ -162,39 +271,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-function Textarea({
-  label,
-  value,
-  onChange,
-  rows,
-}: {
-  label: string
-  value: string
-  onChange: (v: string) => void
-  rows: number
-}) {
-  return (
-    <div>
-      <label className="mb-1.5 block text-sm font-medium text-zinc-300">{label}</label>
-      <textarea
-        value={value}
-        rows={rows}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm leading-relaxed text-zinc-100 focus:border-violet-500 focus:outline-none"
-      />
-    </div>
-  )
-}
-
-function ToggleRow({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string
-  checked: boolean
-  onChange: (v: boolean) => void
-}) {
+function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <div className="flex items-center justify-between">
       <span className="text-sm text-zinc-300">{label}</span>

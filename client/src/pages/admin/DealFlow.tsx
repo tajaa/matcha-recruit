@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Loader2, Download } from 'lucide-react'
+import { Loader2, Download, FileText } from 'lucide-react'
 import { Button, Input, Toggle } from '../../components/ui'
 import { api } from '../../api/client'
 import FullDealTab from './FullDealTab'
@@ -139,6 +139,9 @@ export default function DealFlow() {
   const [error, setError] = useState<string | null>(null)
   const [downloading, setDownloading] = useState(false)
   const [view, setView] = useState<'onepager' | 'full'>('onepager')
+  const [showPreview, setShowPreview] = useState(false)
+  const [previewHtml, setPreviewHtml] = useState('')
+  const [previewing, setPreviewing] = useState(false)
 
   const headcountNum = parseInt(headcount, 10)
   const validHeadcount = Number.isFinite(headcountNum) && headcountNum > 0
@@ -197,6 +200,19 @@ export default function DealFlow() {
     return () => clearTimeout(t)
   }, [inputs, validHeadcount])
 
+  // Styled preview (same HTML as the PDF), fetched on demand.
+  useEffect(() => {
+    if (!showPreview || !validHeadcount) return
+    setPreviewing(true)
+    const t = setTimeout(() => {
+      api.post<{ html: string }>('/admin/deal-flow/proposal/preview', inputs)
+        .then((r) => { setPreviewHtml(r.html); setError(null) })
+        .catch((e) => setError(e instanceof Error ? e.message : 'Preview failed'))
+        .finally(() => setPreviewing(false))
+    }, 300)
+    return () => clearTimeout(t)
+  }, [showPreview, inputs, validHeadcount])
+
   async function downloadProposal() {
     if (!validHeadcount) return
     setDownloading(true)
@@ -244,10 +260,16 @@ export default function DealFlow() {
             <p className="text-sm text-zinc-500">
               Configure off the Lite / Mid / Max structure and generate a proposal PDF.
             </p>
-            <Button onClick={downloadProposal} disabled={!validHeadcount || downloading}>
-              {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-              Download Proposal PDF
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" onClick={() => setShowPreview((v) => !v)} disabled={!validHeadcount}>
+                <FileText className="mr-2 h-4 w-4" />
+                {showPreview ? 'Hide preview' : 'Preview'}
+              </Button>
+              <Button onClick={downloadProposal} disabled={!validHeadcount || downloading}>
+                {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                Download Proposal PDF
+              </Button>
+            </div>
           </div>
 
           {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
@@ -357,7 +379,16 @@ export default function DealFlow() {
 
         {/* Live summary */}
         <div>
-          {!validHeadcount ? (
+          {showPreview ? (
+            <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-200">
+              {previewing && (
+                <div className="flex items-center gap-2 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-400">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Rendering…
+                </div>
+              )}
+              <iframe title="proposal preview" srcDoc={previewHtml} className="h-[80vh] w-full bg-white" />
+            </div>
+          ) : !validHeadcount ? (
             <p className="text-sm text-zinc-500">Enter a headcount to see pricing.</p>
           ) : !quotes ? (
             <p className="flex items-center gap-2 text-sm text-zinc-500">

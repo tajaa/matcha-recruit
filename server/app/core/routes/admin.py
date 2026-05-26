@@ -10094,6 +10094,38 @@ async def deal_flow_proposal(inp: DealInputs):
     )
 
 
+@router.get("/deal-flow/full-defaults", dependencies=[Depends(require_admin)])
+async def deal_flow_full_defaults():
+    """Default editable document blocks for the full proposal (UI pre-fills from this)."""
+    from ..services.deal_full import DEFAULT_FULL_BLOCKS
+
+    return {"blocks": DEFAULT_FULL_BLOCKS}
+
+
+@router.post("/deal-flow/proposal/preview", dependencies=[Depends(require_admin)])
+async def deal_flow_proposal_preview(inp: DealInputs):
+    """Styled HTML preview of the one-pager (for in-app iframe, no PDF render)."""
+    from ..services.deal_pricing import compute_all
+    from ..services.deal_proposal_template import render_proposal_html, render_lite_proposal_html
+
+    quotes = compute_all(inp)
+    if inp.template == "lite_edition":
+        html_str = render_lite_proposal_html(inp, quotes["lite"])
+    else:
+        html_str = render_proposal_html(inp, quotes)
+    return {"html": html_str}
+
+
+@router.post("/deal-flow/full-proposal/preview", dependencies=[Depends(require_admin)])
+async def deal_flow_full_proposal_preview(inp: FullDealInputs):
+    """Styled HTML preview of the full proposal (for in-app iframe, no PDF render)."""
+    from ..services.deal_full import compute_full_pricing
+    from ..services.deal_full_template import render_full_proposal_html
+
+    q = compute_full_pricing(inp)
+    return {"html": render_full_proposal_html(inp, q)}
+
+
 @router.post("/deal-flow/full-proposal", dependencies=[Depends(require_admin)])
 async def deal_flow_full_proposal(inp: FullDealInputs):
     """Render the full multi-page service proposal (rack-rate model) to PDF."""
