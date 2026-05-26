@@ -5,6 +5,7 @@ import { api } from '../../api/client'
 import FullDealTab from './FullDealTab'
 import LiteEditionPanel from './LiteEditionPanel'
 import BrokerTab from './BrokerTab'
+import BookPricingTab from './BookPricingTab'
 
 type Tier = 'lite' | 'mid' | 'max'
 
@@ -142,7 +143,7 @@ export default function DealFlow() {
   const [quotes, setQuotes] = useState<QuoteResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [downloading, setDownloading] = useState(false)
-  const [view, setView] = useState<'onepager' | 'full' | 'broker'>('onepager')
+  const [view, setView] = useState<'onepager' | 'full' | 'broker' | 'book'>('onepager')
   const [showPreview, setShowPreview] = useState(false)
   const [previewHtml, setPreviewHtml] = useState('')
   const [previewing, setPreviewing] = useState(false)
@@ -243,6 +244,7 @@ export default function DealFlow() {
           ['onepager', 'One-Pager'],
           ['full', 'Full Deal'],
           ['broker', 'Broker'],
+          ['book', 'Book Pricing'],
         ] as const).map(([val, label]) => (
           <button
             key={val}
@@ -263,6 +265,8 @@ export default function DealFlow() {
         <FullDealTab />
       ) : view === 'broker' ? (
         <BrokerTab />
+      ) : view === 'book' ? (
+        <BookPricingTab />
       ) : (
         <div>
           <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
