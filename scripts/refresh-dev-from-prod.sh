@@ -20,7 +20,29 @@ PROD_CONTAINER="${PROD_CONTAINER:-matcha-postgres-prod}"   # source (read-only)
 DEV_CONTAINER="${DEV_CONTAINER:-matcha-postgres}"          # target (rebuilt)
 DB_NAME="${DB_NAME:-matcha}"
 DB_USER="${DB_USER:-matcha}"
-DEV_LOGIN_PASSWORD="${DEV_LOGIN_PASSWORD:-devpass123}"     # password for every dev user after refresh
+DEV_LOGIN_PASSWORD="${DEV_LOGIN_PASSWORD:-devpass123}"     # password for every NON-preserved dev user
+# Emails to PRESERVE through anonymization (the dev owner's own accounts): they
+# keep their REAL email + REAL password so you can sign into dev as yourself
+# rather than being gated to anonymized test users. Comma-separated. Falls back
+# to a DEV_PRESERVE_EMAILS line in server/.env so you set it once.
+DEV_PRESERVE_EMAILS="${DEV_PRESERVE_EMAILS:-}"
+if [[ -z "$DEV_PRESERVE_EMAILS" && -f "$REPO_ROOT/server/.env" ]]; then
+    DEV_PRESERVE_EMAILS="$(sed -n 's/^DEV_PRESERVE_EMAILS=//p' "$REPO_ROOT/server/.env" | head -1 | tr -d "\"'")"
+fi
+
+# Turn anonymization OFF entirely: clone prod -> dev verbatim (real emails +
+# passwords, every account usable, no allowlist to maintain). Pre-customer
+# convenience — UNSET it (or =0) once real customer data exists so dev goes back
+# to scrubbed. Env var or a SKIP_ANONYMIZE line in server/.env.
+SKIP_ANONYMIZE="${SKIP_ANONYMIZE:-}"
+if [[ -z "$SKIP_ANONYMIZE" && -f "$REPO_ROOT/server/.env" ]]; then
+    SKIP_ANONYMIZE="$(sed -n 's/^SKIP_ANONYMIZE=//p' "$REPO_ROOT/server/.env" | head -1 | tr -d "\"'")"
+fi
+case "$(echo "${SKIP_ANONYMIZE:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on) SKIP_ANON=true;;
+    *)             SKIP_ANON=false;;
+esac
+
 ANON_SQL="$REPO_ROOT/scripts/sql/anonymize_dev.sql"
 KEEP_OLD=1   # how many matcha_old_* DBs to retain on the host
 
@@ -48,11 +70,19 @@ fi
 DRY_RUN=false
 [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=true
 
+if [[ "$SKIP_ANON" == true ]]; then
+    ANON_STATUS="${RED}OFF — dev becomes a FULL, UNSCRUBBED copy of prod (real emails/passwords/PII)${NC}"
+else
+    ANON_STATUS="on (PII scrubbed; preserve list keeps your real logins)"
+fi
+
 cat <<EOF
-${YELLOW}This will REPLACE the dev database with an anonymized copy of PRODUCTION.${NC}
+${YELLOW}This will REPLACE the dev database with a copy of PRODUCTION.${NC}
   source (prod, read-only): $DB_EC2  ->  $PROD_CONTAINER : $DB_NAME
   target (dev,  REBUILT)  : $DB_EC2  ->  $DEV_CONTAINER  : $DB_NAME
-  every dev user password becomes: $DEV_LOGIN_PASSWORD
+  anonymize PII: $ANON_STATUS
+  non-preserved dev user password becomes: $DEV_LOGIN_PASSWORD
+  preserved real logins (keep real email + password): ${DEV_PRESERVE_EMAILS:-(none)}
   dry run (clone+anonymize into staging, NO swap): $DRY_RUN
 EOF
 read -r -p "Type 'refresh-dev' to proceed: " CONFIRM
@@ -67,10 +97,24 @@ PY
 )"
 [[ "$DEV_PW_HASH" == \$2* ]] || { echo "${RED}bcrypt hash generation failed.${NC}"; exit 1; }
 
+# Build the SQL allowlist literal from DEV_PRESERVE_EMAILS: 'a@x.com','b@y.com'.
+# Empty => "" => ARRAY[]::text[] in the SQL => every user scrubbed (default).
+PRESERVE_SQL=""
+if [[ -n "$DEV_PRESERVE_EMAILS" ]]; then
+    IFS=',' read -ra _PE <<< "$DEV_PRESERVE_EMAILS"
+    for _e in "${_PE[@]}"; do
+        _e="$(echo "$_e" | tr '[:upper:]' '[:lower:]' | xargs)"   # trim + lowercase
+        [[ -z "$_e" ]] && continue
+        [[ -n "$PRESERVE_SQL" ]] && PRESERVE_SQL+=","
+        PRESERVE_SQL+="'$_e'"
+    done
+fi
+
 RENDERED="$(mktemp -t anonymize_dev.XXXXXX.sql)"
 REMOTE_SCRIPT="$(mktemp -t refresh_dev_remote.XXXXXX.sh)"
 trap 'rm -f "$RENDERED" "$REMOTE_SCRIPT"' EXIT
-sed "s|__DEV_PW_HASH__|$DEV_PW_HASH|g" "$ANON_SQL" > "$RENDERED"
+sed -e "s|__DEV_PW_HASH__|$DEV_PW_HASH|g" \
+    -e "s|__PRESERVE_EMAILS__|$PRESERVE_SQL|g" "$ANON_SQL" > "$RENDERED"
 
 # Remote driver shipped as a FILE (not piped to `bash -s`): if it were on stdin,
 # the first `docker exec -i` would swallow the rest of the script as its stdin.
@@ -98,10 +142,14 @@ echo "[3/6] Cloning prod -> ${DB}_new (host-local pipe, no egress)..."
 docker exec "$PROD" pg_dump -U "$U" -Fc "$DB" \
   | docker exec -i "$DEV" pg_restore -U "$U" -d "${DB}_new" --no-owner --no-privileges --exit-on-error
 
-echo "[4/6] Anonymizing ${DB}_new..."
-# Read the SQL from the HOST file via stdin: `-f /path` would look inside the
-# container, where the scp'd file doesn't exist.
-docker exec -i "$DEV" psql -U "$U" -d "${DB}_new" -v ON_ERROR_STOP=1 < /tmp/anonymize_dev.sql
+if [ "${SKIP_ANON:-false}" = "true" ]; then
+    echo "[4/6] SKIPPING anonymization — dev will be a FULL UNSCRUBBED prod mirror (SKIP_ANONYMIZE set)."
+else
+    echo "[4/6] Anonymizing ${DB}_new..."
+    # Read the SQL from the HOST file via stdin: `-f /path` would look inside the
+    # container, where the scp'd file doesn't exist.
+    docker exec -i "$DEV" psql -U "$U" -d "${DB}_new" -v ON_ERROR_STOP=1 < /tmp/anonymize_dev.sql
+fi
 
 if [ "$DRY_RUN" = "true" ]; then
     echo "[5/6] DRY RUN — leaving anonymized clone as ${DB}_new, NOT swapping."
@@ -125,11 +173,15 @@ done
 
 echo "[6/6] Verifying live dev DB..."
 ddev -tA -d "$DB" -c "SELECT 'companies='||count(*) FROM companies UNION ALL SELECT 'users='||count(*) FROM users;"
-LEAK=$(ddev -tA -d "$DB" -c "SELECT count(*) FROM users WHERE email NOT LIKE '%@example.com';")
-echo "      non-reserved user emails (must be 0): $LEAK"
+if [ "${SKIP_ANON:-false}" = "true" ]; then
+    echo "      anonymization SKIPPED — dev holds REAL prod data by request; leak check not applicable."
+else
+    LEAK=$(ddev -tA -d "$DB" -c "SELECT count(*) FROM users WHERE email NOT LIKE '%@example.com' AND email <> ALL(ARRAY[${PRESERVE_SQL}]::text[]);")
+    echo "      non-reserved user emails, excl. preserved (must be 0): $LEAK"
+    [ "$LEAK" = "0" ] || { echo "PII LEAK DETECTED — anonymizer missed rows."; exit 1; }
+fi
 echo "      sample logins:"
 ddev -tA -d "$DB" -c "SELECT '        '||role||'  ->  '||email FROM users WHERE role IN ('admin','client','individual') ORDER BY role LIMIT 6;"
-[ "$LEAK" = "0" ] || { echo "PII LEAK DETECTED — anonymizer missed rows."; exit 1; }
 REMOTE
 
 scp -q -i "$PEM" "$RENDERED" "$DB_EC2:/tmp/anonymize_dev.sql"
@@ -137,13 +189,22 @@ scp -q -i "$PEM" "$REMOTE_SCRIPT" "$DB_EC2:/tmp/refresh_dev_remote.sh"
 
 # -n: don't let our local stdin (the confirm pipe) leak into the remote command.
 ssh -n -i "$PEM" "$DB_EC2" \
-    "PROD='$PROD_CONTAINER' DEV='$DEV_CONTAINER' DB='$DB_NAME' U='$DB_USER' DRY_RUN='$DRY_RUN' KEEP_OLD='$KEEP_OLD' bash /tmp/refresh_dev_remote.sh; rc=\$?; rm -f /tmp/refresh_dev_remote.sh /tmp/anonymize_dev.sql; exit \$rc"
+    "PROD='$PROD_CONTAINER' DEV='$DEV_CONTAINER' DB='$DB_NAME' U='$DB_USER' DRY_RUN='$DRY_RUN' KEEP_OLD='$KEEP_OLD' PRESERVE_SQL=\"$PRESERVE_SQL\" SKIP_ANON='$SKIP_ANON' bash /tmp/refresh_dev_remote.sh; rc=\$?; rm -f /tmp/refresh_dev_remote.sh /tmp/anonymize_dev.sql; exit \$rc"
 
 echo
 if [[ "$DRY_RUN" == "true" ]]; then
     echo "${GREEN}Dry run complete. Review matcha_new on the host, then re-run without --dry-run.${NC}"
 else
-    echo "${GREEN}Dev DB refreshed from prod (anonymized).${NC}"
-    echo "${GREEN}Log in to local dev with any listed email + password: ${DEV_LOGIN_PASSWORD}${NC}"
+    if [[ "$SKIP_ANON" == true ]]; then
+        echo "${GREEN}Dev DB refreshed from prod — UNSCRUBBED full mirror.${NC}"
+        echo "${GREEN}Log in with your REAL prod email + REAL password (every account works).${NC}"
+        echo "${YELLOW}Re-enable scrubbing once you have customers: unset SKIP_ANONYMIZE.${NC}"
+    else
+        echo "${GREEN}Dev DB refreshed from prod (anonymized).${NC}"
+        echo "${GREEN}Anonymized test users: any listed email + password: ${DEV_LOGIN_PASSWORD}${NC}"
+        if [[ -n "$DEV_PRESERVE_EMAILS" ]]; then
+            echo "${GREEN}Preserved accounts: real email + real password: ${DEV_PRESERVE_EMAILS}${NC}"
+        fi
+    fi
     echo "Restart your stack: ./scripts/dev-remote.sh"
 fi

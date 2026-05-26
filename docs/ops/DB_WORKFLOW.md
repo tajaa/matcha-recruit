@@ -84,6 +84,41 @@ After a refresh, **all dev users share one password** (`devpass123`, override wi
 log in with. Refresh also resets dev's `alembic_version` to prod's — re-run
 `migrate-dev.sh` afterward if you have un-shipped local migrations.
 
+#### Logging into dev as yourself (`DEV_PRESERVE_EMAILS`)
+
+By default anonymization rewrites **every** user email to `user_<uuid>@example.com`, so
+your real prod accounts can't be used in dev — you're gated to the scrubbed test users.
+To keep your own accounts usable, set an allowlist of emails that **skip the scrub** and
+keep their **real email + real password**:
+
+```bash
+# in server/.env (set once; gitignored), or inline before the command:
+DEV_PRESERVE_EMAILS="you@yourco.com,admin@yourco.com"
+./scripts/refresh-dev-from-prod.sh
+```
+
+Those users come through with their real email and their actual (prod) password —
+everyone else is still fully anonymized, and the PII-leak check excludes only the
+allowlisted addresses. Empty/unset = the old behavior (every user scrubbed). This only
+takes effect on the **next refresh** (the current dev DB is already scrubbed), so set it
+and re-run the refresh to restore your logins.
+
+#### Pre-customer escape hatch: `SKIP_ANONYMIZE`
+
+Before there's any real customer data, the scrub is pure friction. Set
+`SKIP_ANONYMIZE=1` (env or `server/.env`) and the refresh clones prod → dev **verbatim**
+— no anonymization, every account usable with its real email + password, no allowlist to
+maintain. The refresh prints a red warning, skips the anonymize step, and skips the
+PII-leak assertion.
+
+```bash
+SKIP_ANONYMIZE=1 ./scripts/refresh-dev-from-prod.sh
+```
+
+**Turn it back on the moment you onboard real customers** — just unset `SKIP_ANONYMIZE`
+(default is off / scrubbed). With it on, dev holds real PII and the dev backend can email
+/ bill real people, so it's only safe while you're the only data in the system.
+
 ### What anonymize_dev.sql scrubs
 
 Emails → reserved domains; person + company names → synthetic; phones/addresses →

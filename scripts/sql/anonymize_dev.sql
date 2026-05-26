@@ -26,14 +26,21 @@
 BEGIN;
 
 -- ============================================================================
--- 1. AUTH — reset every login to a known dev password, drop OAuth tokens.
---    All users share one password (printed by the refresh script); log in with
---    any anonymized email below.
+-- 1. AUTH — reset logins to a known dev password, drop OAuth tokens.
+--    All users share one password (printed by the refresh script).
+--    EXCEPTION: emails in the preserve allowlist (the dev owner's own
+--    accounts, substituted as __PRESERVE_EMAILS__ by the refresh script) keep
+--    their REAL email + REAL password_hash, so you can sign into dev with your
+--    traditional credentials instead of being gated to anonymized test users.
+--    Empty allowlist => ARRAY[]::text[] => every user scrubbed (the default).
 -- ============================================================================
+-- Drop the Gmail OAuth token for EVERY user (a live secret) — even preserved.
+UPDATE users SET gmail_token = NULL;
+-- Scrub email + password only for users NOT in the preserve allowlist.
 UPDATE users SET
     password_hash = '__DEV_PW_HASH__',
-    email         = 'user_' || replace(id::text, '-', '') || '@example.com',
-    gmail_token   = NULL;
+    email         = 'user_' || replace(id::text, '-', '') || '@example.com'
+WHERE email <> ALL(ARRAY[__PRESERVE_EMAILS__]::text[]);
 
 -- ============================================================================
 -- 2. EMAILS (identifiers) -> RFC-2606 reserved domains (never deliverable).
@@ -120,6 +127,9 @@ UPDATE mw_stripe_sessions SET stripe_session_id      = 'cs_dev_'  || replace(id:
 
 COMMIT;
 
--- Sanity (outside the txn): must return 0.
+-- Sanity (outside the txn): must return 0. Preserved (allowlisted) emails are
+-- intentionally real, so they're excluded from the leak count.
 SELECT 'LEAK: non-reserved user emails = ' || count(*) AS check
-FROM users WHERE email NOT LIKE '%@example.com';
+FROM users
+WHERE email NOT LIKE '%@example.com'
+  AND email <> ALL(ARRAY[__PRESERVE_EMAILS__]::text[]);
