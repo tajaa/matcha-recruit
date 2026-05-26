@@ -1,4 +1,4 @@
-import { Building2, ToggleRight, Settings, MapPin, Globe, ClipboardList, Microscope, FileText, Briefcase, ShieldCheck, User, Mail, Image as ImageIcon, AlertOctagon, AlertTriangle, BookOpen, Users, Wand2, Leaf } from 'lucide-react'
+import { Building2, ToggleRight, Settings, MapPin, Globe, ClipboardList, Microscope, FileText, Briefcase, ShieldCheck, User, Mail, Image as ImageIcon, AlertOctagon, AlertTriangle, BookOpen, Users, Wand2, Leaf, Calculator } from 'lucide-react'
 import SidebarShell from './SidebarShell'
 
 const nav = [
@@ -7,6 +7,7 @@ const nav = [
   { to: '/admin/companies', icon: Building2, label: 'Companies' },
   { to: '/admin/individuals', icon: User, label: 'Individuals' },
   { to: '/admin/brokers', icon: Briefcase, label: 'Brokers' },
+  { to: '/admin/deal-flow', icon: Calculator, label: 'Deal Flow' },
   { to: '/admin/matcha-lite', icon: Leaf, label: 'Matcha Lite' },
   { to: '/admin/features', icon: ToggleRight, label: 'Business Features' },
   { to: '/admin/compliance-mgmt', icon: ShieldCheck, label: 'Compliance Mgmt' },

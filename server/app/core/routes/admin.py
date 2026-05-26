@@ -12,7 +12,7 @@ from uuid import UUID
 
 import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Depends, Query, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, EmailStr, Field
 
 logger = logging.getLogger(__name__)
@@ -58,6 +58,7 @@ from ...matcha.services import billing_service as mw_billing_service
 from ...config import get_settings
 from ..services.stripe_service import StripeService, StripeServiceError
 from ..feature_flags import DEFAULT_COMPANY_FEATURES
+from ..services.deal_pricing import DealInputs
 
 router = APIRouter()
 
@@ -10038,3 +10039,54 @@ async def admin_soft_delete_user(user_id: UUID):
     if result == "UPDATE 0":
         raise HTTPException(status_code=404, detail="User not found")
     return {"ok": True}
+
+
+# ── Deal Flow — pricing calculator + proposal PDF (stateless; no DB) ──────────
+
+
+@router.post("/deal-flow/quote", dependencies=[Depends(require_admin)])
+async def deal_flow_quote(inp: DealInputs):
+    """Compute Mid + Max quotes from one set of inputs (headcount + discounts).
+
+    Stateless — nothing persisted. Single source of pricing truth so the UI and
+    the generated PDF never drift.
+    """
+    from ..services.deal_pricing import compute_both
+
+    quotes = compute_both(inp)
+    return {"mid": quotes["mid"], "max": quotes["max"]}
+
+
+@router.post("/deal-flow/proposal", dependencies=[Depends(require_admin)])
+async def deal_flow_proposal(inp: DealInputs):
+    """Render a single-page pricing proposal (Mid + Max) to PDF via WeasyPrint."""
+    from ..services.deal_pricing import compute_quote
+    from ..services.deal_proposal_template import render_proposal_html
+
+    quote_mid = compute_quote("mid", inp.headcount, inp.broker, inp.partner)
+    quote_max = compute_quote("max", inp.headcount, inp.broker, inp.partner)
+    html_str = render_proposal_html(inp, quote_mid, quote_max)
+
+    try:
+        from weasyprint import HTML
+    except ImportError as ie:
+        logger.error("weasyprint import failed: %s", ie)
+        raise HTTPException(
+            status_code=501,
+            detail="PDF generation not available — install weasyprint on the server (`pip install weasyprint`).",
+        )
+    try:
+        pdf_bytes = await asyncio.wait_for(
+            asyncio.to_thread(lambda: HTML(string=html_str).write_pdf()),
+            timeout=60,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="PDF render timed out.")
+
+    safe_name = re.sub(r"[^A-Za-z0-9]+", "_", inp.company_name).strip("_") or "Matcha"
+    filename = f"{safe_name}_Matcha_Proposal.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

@@ -257,6 +257,26 @@ export const api = {
     a.click()
     URL.revokeObjectURL(url)
   },
+  // POST a JSON body and download the binary response as a file.
+  downloadPost: async (path: string, body: unknown, filename?: string) => {
+    const token = localStorage.getItem('matcha_access_token')
+    const res = await fetch(`${BASE}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename ?? path.split('/').pop() ?? 'download'
+    a.click()
+    URL.revokeObjectURL(url)
+  },
 }
 
 export function uploadAvatar(file: File) {
