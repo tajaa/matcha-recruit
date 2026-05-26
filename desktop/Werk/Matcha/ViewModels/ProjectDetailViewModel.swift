@@ -553,19 +553,32 @@ class ProjectDetailViewModel {
         }
     }
 
-    func addTask(title: String, column: String = "todo", pipelineColumn: String = "lead", priority: String = "medium", assignedTo: String? = nil, description: String? = nil, category: String? = nil, elementId: String? = nil, subtasks: [String]? = nil) async {
+    func addTask(title: String, column: String = "todo", pipelineColumn: String = "lead", priority: String = "medium", assignedTo: String? = nil, description: String? = nil, category: String? = nil, elementId: String? = nil, subtasks: [String]? = nil,
+                 dealValue: Double? = nil, probability: Int? = nil,
+                 contactName: String? = nil, contactCompany: String? = nil,
+                 contactEmail: String? = nil, contactPhone: String? = nil,
+                 outcome: String? = nil, lossReason: String? = nil,
+                 nextActionAt: String? = nil, expectedClose: String? = nil) async {
         guard let pid = project?.id else { return }
+        // A deal (sales-pipeline create) carries any deal field — used for the
+        // activity-log verb so the timeline reads "added deal" not "added task".
+        let isDeal = category == "sales" || dealValue != nil || contactCompany != nil || contactName != nil
         do {
             let task = try await service.createProjectTask(
                 projectId: pid, title: title,
                 boardColumn: column, pipelineColumn: pipelineColumn,
                 description: description,
                 priority: priority, assignedTo: assignedTo, category: category, elementId: elementId,
+                dealValue: dealValue, probability: probability,
+                contactName: contactName, contactCompany: contactCompany,
+                contactEmail: contactEmail, contactPhone: contactPhone,
+                outcome: outcome, lossReason: lossReason,
+                nextActionAt: nextActionAt, expectedClose: expectedClose,
                 subtasks: subtasks
             )
             await MainActor.run {
                 tasks.insert(task, at: 0)
-                logActivity("plus.circle", "added task “\(title)”")
+                logActivity("plus.circle", isDeal ? "added deal “\(title)”" : "added task “\(title)”")
             }
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
