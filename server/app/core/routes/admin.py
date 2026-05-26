@@ -59,6 +59,7 @@ from ...config import get_settings
 from ..services.stripe_service import StripeService, StripeServiceError
 from ..feature_flags import DEFAULT_COMPANY_FEATURES
 from ..services.deal_pricing import DealInputs
+from ..services.deal_full import FullDealInputs
 
 router = APIRouter()
 
@@ -10060,10 +10061,13 @@ async def deal_flow_quote(inp: DealInputs):
 async def deal_flow_proposal(inp: DealInputs):
     """Render a single-page pricing proposal (Lite + Mid + Max) to PDF via WeasyPrint."""
     from ..services.deal_pricing import compute_all
-    from ..services.deal_proposal_template import render_proposal_html
+    from ..services.deal_proposal_template import render_proposal_html, render_lite_proposal_html
 
     quotes = compute_all(inp)
-    html_str = render_proposal_html(inp, quotes)
+    if inp.template == "lite_edition":
+        html_str = render_lite_proposal_html(inp, quotes["lite"])
+    else:
+        html_str = render_proposal_html(inp, quotes)
 
     try:
         from weasyprint import HTML
@@ -10087,4 +10091,37 @@ async def deal_flow_proposal(inp: DealInputs):
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/deal-flow/full-proposal", dependencies=[Depends(require_admin)])
+async def deal_flow_full_proposal(inp: FullDealInputs):
+    """Render the full multi-page service proposal (rack-rate model) to PDF."""
+    from ..services.deal_full import compute_full_pricing
+    from ..services.deal_full_template import render_full_proposal_html
+
+    q = compute_full_pricing(inp)
+    html_str = render_full_proposal_html(inp, q)
+
+    try:
+        from weasyprint import HTML
+    except ImportError as ie:
+        logger.error("weasyprint import failed: %s", ie)
+        raise HTTPException(
+            status_code=501,
+            detail="PDF generation not available — install weasyprint on the server (`pip install weasyprint`).",
+        )
+    try:
+        pdf_bytes = await asyncio.wait_for(
+            asyncio.to_thread(lambda: HTML(string=html_str).write_pdf()),
+            timeout=90,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="PDF render timed out.")
+
+    safe_name = re.sub(r"[^A-Za-z0-9]+", "_", inp.company_name).strip("_") or "Matcha"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}_Matcha_Full_Proposal.pdf"'},
     )

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Loader2, Download } from 'lucide-react'
 import { Button, Input, Toggle } from '../../components/ui'
 import { api } from '../../api/client'
+import FullDealTab from './FullDealTab'
 
 type Tier = 'lite' | 'mid' | 'max'
 
@@ -32,6 +33,14 @@ type QuoteResponse = Record<Tier, DealQuote>
 type TierConfig = { pepm: string; onboarding: string }
 
 const usd = (n: number) => `$${n.toLocaleString('en-US')}`
+
+// Lite PEPM is volume-tiered (mirrors deal_pricing.lite_pepm): $5 base, −$1 over
+// 100 employees, −$2 over 500. Mid/Max are flat.
+function liteDefaultPepm(hc: number): number {
+  if (hc > 500) return 3
+  if (hc > 100) return 4
+  return 5
+}
 
 function QuoteCard({ q, recommended }: { q: DealQuote; recommended: boolean }) {
   const note = q.onboarding === 0 ? 'no onboarding fee' : 'incl. onboarding'
@@ -115,6 +124,9 @@ export default function DealFlow() {
   const [partner, setPartner] = useState(true)
   const [hrPartner, setHrPartner] = useState(false)
   const [proposalDate, setProposalDate] = useState(today)
+  const [template, setTemplate] = useState<'standard' | 'lite_edition'>('standard')
+  // Lite PEPM auto-tracks headcount until the admin overrides it manually.
+  const [liteManual, setLiteManual] = useState(false)
 
   // Editable per-tier price config (pre-filled with the standard structure).
   const [config, setConfig] = useState<Record<Tier, TierConfig>>(() => ({
@@ -126,12 +138,22 @@ export default function DealFlow() {
   const [quotes, setQuotes] = useState<QuoteResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [downloading, setDownloading] = useState(false)
+  const [view, setView] = useState<'onepager' | 'full'>('onepager')
 
   const headcountNum = parseInt(headcount, 10)
   const validHeadcount = Number.isFinite(headcountNum) && headcountNum > 0
 
-  const setTierField = (t: Tier, field: keyof TierConfig, value: string) =>
+  const setTierField = (t: Tier, field: keyof TierConfig, value: string) => {
+    if (t === 'lite' && field === 'pepm') setLiteManual(true)
     setConfig((prev) => ({ ...prev, [t]: { ...prev[t], [field]: value } }))
+  }
+
+  // Auto-fill Lite PEPM from the volume rule until the admin overrides it.
+  useEffect(() => {
+    if (liteManual || !validHeadcount) return
+    const auto = String(liteDefaultPepm(headcountNum))
+    setConfig((prev) => (prev.lite.pepm === auto ? prev : { ...prev, lite: { ...prev.lite, pepm: auto } }))
+  }, [headcountNum, validHeadcount, liteManual])
 
   const inputs = useMemo(() => {
     const overrides: Record<string, { pepm: number; onboarding: number }> = {}
@@ -153,8 +175,9 @@ export default function DealFlow() {
       hr_partner_addon: hrPartner,
       proposal_date: proposalDate || null,
       overrides,
+      template,
     }
-  }, [companyName, headcountNum, validHeadcount, tier, broker, brokerName, partner, hrPartner, proposalDate, config])
+  }, [companyName, headcountNum, validHeadcount, tier, broker, brokerName, partner, hrPartner, proposalDate, config, template])
 
   // Live quote — server is the single source of pricing truth (debounced).
   useEffect(() => {
@@ -190,22 +213,46 @@ export default function DealFlow() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Deal Flow</h1>
-          <p className="mt-2 text-sm text-zinc-500">
-            Configure a deal off the Lite / Mid / Max structure and generate a proposal PDF. Nothing is saved.
-          </p>
-        </div>
-        <Button onClick={downloadProposal} disabled={!validHeadcount || downloading}>
-          {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-          Download Proposal PDF
-        </Button>
+      <h1 className="text-2xl font-semibold text-zinc-100">Deal Flow</h1>
+      <p className="mt-2 text-sm text-zinc-500">Generate Matcha proposals. Nothing is saved.</p>
+
+      <div className="mt-5 flex gap-2 border-b border-zinc-800">
+        {([
+          ['onepager', 'One-Pager'],
+          ['full', 'Full Deal'],
+        ] as const).map(([val, label]) => (
+          <button
+            key={val}
+            type="button"
+            onClick={() => setView(val)}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+              view === val
+                ? 'border-violet-500 text-violet-200'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
-      {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
+      {view === 'full' ? (
+        <FullDealTab />
+      ) : (
+        <div>
+          <div className="mt-6 flex items-center justify-between">
+            <p className="text-sm text-zinc-500">
+              Configure off the Lite / Mid / Max structure and generate a proposal PDF.
+            </p>
+            <Button onClick={downloadProposal} disabled={!validHeadcount || downloading}>
+              {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+              Download Proposal PDF
+            </Button>
+          </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[380px_1fr]">
+          {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
+
+          <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[380px_1fr]">
         {/* Form */}
         <div className="space-y-5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
           <Input
@@ -221,6 +268,34 @@ export default function DealFlow() {
             value={headcount}
             onChange={(e) => setHeadcount(e.target.value)}
           />
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium text-zinc-300">Proposal template</label>
+            <div className="flex gap-2">
+              {([
+                ['standard', 'Standard (3-tier)'],
+                ['lite_edition', 'Lite Edition'],
+              ] as const).map(([val, label]) => (
+                <button
+                  key={val}
+                  type="button"
+                  onClick={() => setTemplate(val)}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                    template === val
+                      ? 'border-violet-500/60 bg-violet-500/10 text-violet-200'
+                      : 'border-zinc-700 text-zinc-400 hover:border-zinc-600'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {template === 'lite_edition' && (
+              <p className="mt-1.5 text-xs text-zinc-500">
+                Single-page green Lite one-pager. Uses the Lite tier pricing.
+              </p>
+            )}
+          </div>
 
           <div>
             <label className="mb-1.5 block text-sm font-medium text-zinc-300">Recommended tier</label>
@@ -295,8 +370,10 @@ export default function DealFlow() {
               ))}
             </div>
           )}
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

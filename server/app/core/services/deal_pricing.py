@@ -29,6 +29,20 @@ TIERS: tuple[Tier, ...] = ("lite", "mid", "max")
 # ── Default constants (overridable per-deal via DealInputs.overrides) ─────────
 TIER_PEPM: dict[str, int] = {"lite": 5, "mid": 10, "max": 13}
 TIER_ONBOARDING: dict[str, int] = {"lite": 0, "mid": 4_000, "max": 10_000}
+
+
+def lite_pepm(headcount: int) -> int:
+    """Lite has volume-based PEPM: base $5, −$1 over 100 employees, −$2 over 500."""
+    if headcount > 500:
+        return 3
+    if headcount > 100:
+        return 4
+    return 5
+
+
+def default_pepm(tier: Tier, headcount: int) -> int:
+    """Default PEPM for a tier at a given headcount (Lite is volume-tiered)."""
+    return lite_pepm(headcount) if tier == "lite" else TIER_PEPM[tier]
 BROKER_RATE = 0.10
 PARTNER_RATE = 0.05
 HR_PARTNER_MONTHLY = 2_000
@@ -55,6 +69,9 @@ class DealInputs(BaseModel):
     proposal_date: Optional[date] = None
     # Optional per-tier PEPM/onboarding overrides, keyed by tier ("lite"/"mid"/"max").
     overrides: Optional[Dict[str, TierOverride]] = None
+    # Which proposal layout to render. "standard" = navy 3-tier comparison;
+    # "lite_edition" = the green single-tier Lite one-pager.
+    template: Literal["standard", "lite_edition"] = "standard"
 
 
 class DealQuote(BaseModel):
@@ -83,7 +100,7 @@ def compute_quote(
 
     `pepm` / `onboarding` override the tier defaults when provided.
     """
-    pepm = TIER_PEPM[tier] if pepm is None else pepm
+    pepm = default_pepm(tier, headcount) if pepm is None else pepm
     onboarding = TIER_ONBOARDING[tier] if onboarding is None else onboarding
     subscription_yr = pepm * headcount * MONTHS
     subtotal = subscription_yr + onboarding

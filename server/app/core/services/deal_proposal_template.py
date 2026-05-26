@@ -1,9 +1,14 @@
-"""Render a single-page Matcha pricing proposal (Mid + Max) to HTML for WeasyPrint.
+"""Matcha pricing-proposal renderers for WeasyPrint.
 
-CSS + structure ported from deals/la-nonprofit/LA_NonProfit_Pricing_OnePager_v2.1.html.
-The Lite card from the source is dropped; only Mid + Max are rendered, with the selected
-tier highlighted (`.tier.feature`). All money lines come from the pricing engine
-(`deal_pricing.compute_quote`) so the PDF and the live UI never drift.
+Two layouts, selected by `DealInputs.template`:
+
+- `render_proposal_html` ("standard") — the navy/purple 3-tier comparison ported from
+  deals/la-nonprofit/LA_NonProfit_Pricing_OnePager_v2.1.html. The default.
+- `render_lite_proposal_html` ("lite_edition") — alternate green single-tier Lite one-pager
+  (copy from deals/lite_proposal_copy.md). Selected explicitly, not auto-applied to the Lite tier.
+
+All money lines come from the pricing engine (`deal_pricing.compute_quote`) so the PDF and
+the live UI never drift.
 """
 
 from __future__ import annotations
@@ -284,5 +289,164 @@ def render_proposal_html(inp: DealInputs, quotes: dict[str, DealQuote]) -> str:
   </div>
 
 </div>
+</body>
+</html>"""
+
+
+# ── Lite Edition — single-tier full-page proposal ─────────────────────────────
+# Copy verbatim from deals/lite_proposal_copy.md (the "Matcha Lite — Lite Edition"
+# one-pager). Used when the recommended tier is "lite".
+
+
+def _lite_buildup(q: DealQuote, broker_label: str) -> str:
+    rows = [f'<div class="ln"><span>Standard / yr</span><span>{_fmt(q.subscription_yr)}</span></div>']
+    if q.onboarding:
+        rows.append(f'<div class="ln"><span>Setup</span><span>+{_fmt(q.onboarding)}</span></div>')
+    if q.broker_disc:
+        rows.append(f'<div class="ln disc"><span>&minus;10% {escape(broker_label)}</span><span>&minus;{_fmt(q.broker_disc)}</span></div>')
+    if q.partner_disc:
+        rows.append(f'<div class="ln disc"><span>&minus;5% partner</span><span>&minus;{_fmt(q.partner_disc)}</span></div>')
+    save = ""
+    if q.you_save_yr:
+        save = f'<div class="save">YOU SAVE {_fmt(q.you_save_yr)} &middot; {q.discount_pct}% OFF</div>'
+    return "".join(rows) + save
+
+
+def render_lite_proposal_html(inp: DealInputs, quote_lite: DealQuote) -> str:
+    proposal_date = inp.proposal_date or date.today()
+    date_str = _fmt_date(proposal_date)
+    broker_label = (inp.broker_name or "Broker").strip() if inp.broker else "Broker"
+    company = escape(inp.company_name).upper()
+    setup_note = "no setup fees" if quote_lite.onboarding == 0 else "setup included"
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  @page {{ size: letter; margin: 0; }}
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{ font-family: Georgia, 'Times New Roman', serif; color: #2c3318; background: #ece3cf; font-size: 9pt; line-height: 1.4; }}
+  .mono {{ font-family: 'Courier New', monospace; }}
+  /* HEADER */
+  .head {{ background: #2f3b1c; color: #ece3cf; padding: 13px 44px 15px; position: relative; }}
+  .head .eyebrow {{ display: flex; justify-content: space-between; font-family: 'Courier New', monospace; font-size: 7pt; letter-spacing: 2.5px; text-transform: uppercase; color: rgba(236,227,207,0.65); }}
+  .head h1 {{ font-size: 40pt; font-weight: 700; line-height: 0.88; margin-top: 5px; letter-spacing: -1px; }}
+  .head h1 .lite {{ display: block; font-style: italic; font-size: 26pt; color: #c2a24e; font-weight: 400; }}
+  .head .tag {{ font-style: italic; font-size: 11pt; margin-top: 7px; color: #ece3cf; }}
+  .head .rail {{ position: absolute; right: 44px; bottom: 15px; text-align: right; font-family: 'Courier New', monospace; font-size: 7.5pt; letter-spacing: 1.5px; color: rgba(236,227,207,0.8); line-height: 1.7; }}
+  .head .rail .lab {{ text-transform: uppercase; }}
+  .head .rail .it {{ font-style: italic; }}
+  /* GOLD META BAND */
+  .meta {{ background: #b8923f; color: #2f3b1c; padding: 8px 44px; display: flex; justify-content: space-between; font-family: 'Courier New', monospace; font-size: 8.5pt; letter-spacing: 2px; text-transform: uppercase; font-weight: 700; }}
+  /* BODY */
+  .body {{ padding: 14px 44px 0; }}
+  .lead {{ font-size: 12pt; line-height: 1.4; margin-bottom: 13px; }}
+  .lead i {{ font-style: italic; }}
+  .lead .hl {{ font-style: italic; color: #8a6d24; }}
+  .cols {{ display: flex; gap: 34px; align-items: flex-start; }}
+  .col {{ flex: 1; }}
+  /* TIER CARD */
+  .card {{ background: #2f3b1c; color: #ece3cf; border-radius: 4px; padding: 13px 18px 14px; margin-bottom: 14px; }}
+  .card .tag {{ font-family: 'Courier New', monospace; font-size: 6.5pt; letter-spacing: 1.8px; text-transform: uppercase; color: #c2a24e; }}
+  .card .name {{ font-size: 30pt; font-weight: 700; line-height: 1; margin: 2px 0; }}
+  .card .pepm {{ font-family: 'Courier New', monospace; font-style: italic; color: #c2a24e; font-size: 9pt; margin-bottom: 12px; }}
+  .card .ln {{ display: flex; justify-content: space-between; font-family: 'Courier New', monospace; font-size: 11pt; padding: 2px 0; }}
+  .card .ln.disc {{ color: #c2a24e; }}
+  .card .net {{ display: flex; justify-content: space-between; align-items: baseline; border-top: 1px solid rgba(236,227,207,0.3); margin-top: 10px; padding-top: 12px; }}
+  .card .net .lbl {{ font-family: 'Courier New', monospace; font-size: 8.5pt; letter-spacing: 1.5px; text-transform: uppercase; color: #c2a24e; line-height: 1.1; max-width: 70px; }}
+  .card .net .amt {{ font-size: 30pt; font-weight: 700; }}
+  .card .net .amt .yr {{ font-size: 11pt; font-weight: 400; }}
+  .card .save {{ font-family: 'Courier New', monospace; font-size: 9pt; letter-spacing: 1px; text-align: center; border-top: 1px solid rgba(236,227,207,0.3); margin-top: 12px; padding-top: 12px; }}
+  /* SECTIONS */
+  h2 {{ font-family: 'Courier New', monospace; font-size: 10pt; letter-spacing: 2.5px; text-transform: uppercase; color: #8a6d24; margin-bottom: 9px; }}
+  h3 {{ font-size: 11pt; font-weight: 700; color: #2c3318; margin: 10px 0 4px; }}
+  h3:first-child {{ margin-top: 0; }}
+  p.sec {{ font-size: 9.5pt; margin-bottom: 5px; }}
+  ul {{ list-style: none; }}
+  li {{ font-size: 9.5pt; padding-left: 14px; position: relative; margin-bottom: 4px; line-height: 1.35; }}
+  li::before {{ content: '\\2022'; position: absolute; left: 2px; color: #8a6d24; }}
+  li b {{ font-style: italic; font-weight: 700; }}
+  .centered {{ text-align: center; }}
+  .centered h2 {{ text-align: center; }}
+  .centered p {{ font-size: 9.5pt; }}
+  /* FOOTER */
+  .conf {{ text-align: center; font-family: 'Courier New', monospace; font-size: 7.5pt; letter-spacing: 0.5px; color: #6b6a52; margin: 13px 44px 0; padding-top: 11px; border-top: 1px solid rgba(44,51,24,0.18); }}
+  .foot {{ background: #b8923f; color: #2f3b1c; padding: 9px 44px; display: flex; justify-content: space-between; align-items: center; font-family: 'Courier New', monospace; font-size: 8pt; letter-spacing: 1px; margin-top: 11px; }}
+  .foot .talk {{ font-family: Georgia, serif; font-style: italic; }}
+</style>
+</head>
+<body>
+
+  <div class="head">
+    <div class="eyebrow"><span>Risk Management &middot; Made Simple</span><span>Proposal &mdash; Lite Edition</span></div>
+    <h1>Matcha<span class="lite">Lite</span></h1>
+    <div class="tag">A Low-Friction Entry to High-Impact Risk Management.</div>
+    <div class="rail"><div class="lab">Edition &middot; Lite</div><div class="it">Pricing Proposal &middot; MMXXVI</div></div>
+  </div>
+
+  <div class="meta">
+    <span>{company} &nbsp;&middot;&nbsp; {inp.headcount:,} Employees</span>
+    <span>{date_str}</span>
+  </div>
+
+  <div class="body">
+    <p class="lead">A <i>lite</i> commitment that compounds into <span class="hl">real risk insight</span>. Incident capture built for the modern workforce, turning &ldquo;we should track this&rdquo; into a live, audit-ready record.</p>
+
+    <div class="cols">
+      <div class="col">
+        <div class="card">
+          <div class="tag">Your Tier &middot; Locked for the Term</div>
+          <div class="name">{quote_lite.tier_label}</div>
+          <div class="pepm">${quote_lite.pepm}.00 PEPM &middot; {setup_note}</div>
+          {_lite_buildup(quote_lite, broker_label)}
+          <div class="net"><span class="lbl">Your Price</span><span class="amt">{_fmt(quote_lite.your_price_yr)}<span class="yr">/yr</span></span></div>
+        </div>
+
+        <h3>Audit-Ready Compliance</h3>
+        <p class="sec">Your OSHA 300, 300A, and 301 logs are available with a single click.</p>
+        <ul>
+          <li><b>Multi-Location Management:</b> Seamlessly track and report across different sites with centralized oversight.</li>
+          <li><b>Reporting:</b> Pull reports by date, location, and incident type to prep for board meetings, broker reviews, or renewal packages.</li>
+        </ul>
+
+        <h3>Assistive, Not Unattended</h3>
+        <p class="sec">Our AI is built to research, draft, and surface patterns, but it never acts alone. It flags exposure early so your team can make the final call. Every decision stays with your people.</p>
+      </div>
+
+      <div class="col">
+        <h2>What Lite Includes</h2>
+        <h3>The Reporting Copilot: Your Assistive Intake Partner</h3>
+        <ul>
+          <li><b>Conversational Intake:</b> Type naturally to report incidents across Safety, Behavioral, Near Miss, Property, and more.</li>
+          <li><b>Dynamic Guidance:</b> As you provide details, the Copilot updates its guidance in real-time, asking the right follow-up questions to identify root causes.</li>
+          <li><b>Compliance Guardrails:</b> Automatically flags OSHA-reportable events and logs recordable details, including days away from work and restricted duty.</li>
+          <li><b>Evidence Vault:</b> Upload photos, witness statements, and documents directly to the incident record. Export any incident to a professional PDF with one click.</li>
+        </ul>
+
+        <h3>Incident Analysis &amp; Theme Detection</h3>
+        <ul>
+          <li><b>Pattern Recognition:</b> AI surfaces recurring themes and suggests actionable improvements for your team to review.</li>
+          <li><b>Hotspot Monitoring:</b> Immediately identify which locations are trending above baseline to prioritize your safety resources.</li>
+          <li><b>Workers Comp Posture:</b> See the direct financial narrative of your safety data with premium impact estimates based on your TRIR and DART trends.</li>
+        </ul>
+
+        <div class="centered">
+          <h2>HRIS Connect</h2>
+          <p>Auro Connect for supported vendors, CSV upload for out of network vendors.</p>
+          <h2 style="margin-top:18px">Agreement</h2>
+          <p>12-month initial term &middot; all rates locked for the term<br>quarterly headcount true-up &middot; 60-day opt-out.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="conf">Confidential &mdash; proprietary pricing for the named recipient. Valid 30 days from {date_str}.</div>
+  <div class="foot">
+    <span>DIRECT &nbsp; aaron@hey-matcha.com</span>
+    <span class="talk">&larr; Let&rsquo;s talk &rarr;</span>
+    <span>WEB &nbsp; hey-matcha.com</span>
+  </div>
+
 </body>
 </html>"""
