@@ -18,7 +18,6 @@ const COMPUTED_LABEL: Record<string, string> = {
 const EDITABLE = new Set(['h2', 'h3', 'h4', 'p', 'note', 'callout', 'bullets'])
 const int = (s: string, fb: number) => { const n = parseInt(s, 10); return Number.isFinite(n) ? n : fb }
 const num = (s: string, fb: number) => { const n = parseFloat(s); return Number.isFinite(n) ? n : fb }
-const usd = (n: number) => `$${n.toLocaleString('en-US')}`
 
 // Pooled discount: highest tier whose min_seats <= total committed seats (mirrors deal_book).
 function discountFor(tiers: DiscountTier[], total: number): number {
