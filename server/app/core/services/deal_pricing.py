@@ -19,24 +19,31 @@ Pricing constants live here so a future per-field override is a small add.
 from __future__ import annotations
 
 from datetime import date
-from typing import Literal, Optional
+from typing import Dict, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-Tier = Literal["mid", "max"]
+Tier = Literal["lite", "mid", "max"]
+TIERS: tuple[Tier, ...] = ("lite", "mid", "max")
 
-# ── Constants ────────────────────────────────────────────────────────────────
-TIER_PEPM: dict[str, int] = {"mid": 10, "max": 13}
-TIER_ONBOARDING: dict[str, int] = {"mid": 4_000, "max": 10_000}
+# ── Default constants (overridable per-deal via DealInputs.overrides) ─────────
+TIER_PEPM: dict[str, int] = {"lite": 5, "mid": 10, "max": 13}
+TIER_ONBOARDING: dict[str, int] = {"lite": 0, "mid": 4_000, "max": 10_000}
 BROKER_RATE = 0.10
 PARTNER_RATE = 0.05
 HR_PARTNER_MONTHLY = 2_000
 MONTHS = 12
 
-TIER_LABEL: dict[str, str] = {"mid": "Mid", "max": "Max"}
+TIER_LABEL: dict[str, str] = {"lite": "Lite", "mid": "Mid", "max": "Max"}
 
 
 # ── Models ───────────────────────────────────────────────────────────────────
+class TierOverride(BaseModel):
+    """Per-deal override of a tier's PEPM / onboarding fee."""
+    pepm: int = Field(..., ge=0, le=10_000)
+    onboarding: int = Field(..., ge=0, le=10_000_000)
+
+
 class DealInputs(BaseModel):
     company_name: str = Field(..., min_length=1, max_length=200)
     headcount: int = Field(..., gt=0, le=1_000_000)
@@ -46,6 +53,8 @@ class DealInputs(BaseModel):
     partner: bool = False
     hr_partner_addon: bool = False
     proposal_date: Optional[date] = None
+    # Optional per-tier PEPM/onboarding overrides, keyed by tier ("lite"/"mid"/"max").
+    overrides: Optional[Dict[str, TierOverride]] = None
 
 
 class DealQuote(BaseModel):
@@ -67,10 +76,15 @@ def compute_quote(
     headcount: int,
     broker: bool = False,
     partner: bool = False,
+    pepm: Optional[int] = None,
+    onboarding: Optional[int] = None,
 ) -> DealQuote:
-    """Compute a single tier's quote. Pure function — no IO."""
-    pepm = TIER_PEPM[tier]
-    onboarding = TIER_ONBOARDING[tier]
+    """Compute a single tier's quote. Pure function — no IO.
+
+    `pepm` / `onboarding` override the tier defaults when provided.
+    """
+    pepm = TIER_PEPM[tier] if pepm is None else pepm
+    onboarding = TIER_ONBOARDING[tier] if onboarding is None else onboarding
     subscription_yr = pepm * headcount * MONTHS
     subtotal = subscription_yr + onboarding
 
@@ -96,9 +110,21 @@ def compute_quote(
     )
 
 
-def compute_both(inp: DealInputs) -> dict[str, DealQuote]:
-    """Compute Mid + Max quotes from one set of inputs (same headcount + discounts)."""
-    return {
-        "mid": compute_quote("mid", inp.headcount, inp.broker, inp.partner),
-        "max": compute_quote("max", inp.headcount, inp.broker, inp.partner),
-    }
+def compute_all(inp: DealInputs) -> dict[str, DealQuote]:
+    """Compute Lite + Mid + Max quotes from one set of inputs (same headcount + discounts).
+
+    Applies per-tier PEPM/onboarding overrides from `inp.overrides` when present.
+    """
+    out: dict[str, DealQuote] = {}
+    overrides = inp.overrides or {}
+    for t in TIERS:
+        ov = overrides.get(t)
+        out[t] = compute_quote(
+            t,
+            inp.headcount,
+            inp.broker,
+            inp.partner,
+            pepm=ov.pepm if ov else None,
+            onboarding=ov.onboarding if ov else None,
+        )
+    return out

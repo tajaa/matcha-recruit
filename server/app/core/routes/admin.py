@@ -10046,26 +10046,24 @@ async def admin_soft_delete_user(user_id: UUID):
 
 @router.post("/deal-flow/quote", dependencies=[Depends(require_admin)])
 async def deal_flow_quote(inp: DealInputs):
-    """Compute Mid + Max quotes from one set of inputs (headcount + discounts).
+    """Compute Lite + Mid + Max quotes from one set of inputs (headcount + discounts + overrides).
 
     Stateless — nothing persisted. Single source of pricing truth so the UI and
     the generated PDF never drift.
     """
-    from ..services.deal_pricing import compute_both
+    from ..services.deal_pricing import compute_all
 
-    quotes = compute_both(inp)
-    return {"mid": quotes["mid"], "max": quotes["max"]}
+    return compute_all(inp)
 
 
 @router.post("/deal-flow/proposal", dependencies=[Depends(require_admin)])
 async def deal_flow_proposal(inp: DealInputs):
-    """Render a single-page pricing proposal (Mid + Max) to PDF via WeasyPrint."""
-    from ..services.deal_pricing import compute_quote
+    """Render a single-page pricing proposal (Lite + Mid + Max) to PDF via WeasyPrint."""
+    from ..services.deal_pricing import compute_all
     from ..services.deal_proposal_template import render_proposal_html
 
-    quote_mid = compute_quote("mid", inp.headcount, inp.broker, inp.partner)
-    quote_max = compute_quote("max", inp.headcount, inp.broker, inp.partner)
-    html_str = render_proposal_html(inp, quote_mid, quote_max)
+    quotes = compute_all(inp)
+    html_str = render_proposal_html(inp, quotes)
 
     try:
         from weasyprint import HTML

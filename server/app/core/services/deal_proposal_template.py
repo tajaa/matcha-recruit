@@ -14,6 +14,11 @@ from html import escape
 from .deal_pricing import DealInputs, DealQuote, HR_PARTNER_MONTHLY
 
 # Tier feature bullets (verbatim from the v2.1 onepager).
+_LITE_BULLETS = [
+    ("Incident Reporting", "workplace &amp; field safety intake, photo/witness capture, anonymous channel"),
+    ("IR Analysis", "AI categorization, severity scoring, cross-incident pattern detection"),
+    ("OSHA 300 / 300A Logs", "recordable tracking, auto-tallied, audit-ready export"),
+]
 _MID_BULLETS = [
     ("Compliance Engine", "continuous Fed + state + local tracking, mapped to your sites &amp; roles"),
     ("Legislative Tracker", "alerts on min-wage, sick-leave &amp; fair-workweek changes before they take effect"),
@@ -41,9 +46,10 @@ def _fmt_date(d: date) -> str:
 
 def _build_up_rows(q: DealQuote, broker_label: str) -> str:
     """The per-tier price build-up (subscription → onboarding → discounts → net)."""
+    onb_val = "None" if q.onboarding == 0 else f"+{_fmt(q.onboarding)}"
     rows = [
         f'<div class="r std"><span>Subscription / yr</span><span>{_fmt(q.subscription_yr)}</span></div>',
-        f'<div class="r"><span>Onboarding</span><span>+{_fmt(q.onboarding)}</span></div>',
+        f'<div class="r"><span>Onboarding</span><span>{onb_val}</span></div>',
     ]
     has_discount = q.broker_disc or q.partner_disc
     if has_discount:
@@ -88,11 +94,12 @@ def _tier_card(
     tag_html = f'<div class="tag">{tag}</div>' if tag else '<div class="tag"></div>'
     inc_html = f'<li class="inc">{inc_line}</li>' if inc_line else ""
     why_html = f'<div class="why"><b>Why {q.tier_label} for you:</b> {why}</div>' if why else ""
+    note = "no onboarding fee" if q.onboarding == 0 else pepm_note
     return f"""
       <div class="{cls}">
         {tag_html}
         <div class="name">{q.tier_label}</div>
-        <div class="pepm"><b>${q.pepm}</b> PEPM &middot; {pepm_note}</div>
+        <div class="pepm"><b>${q.pepm}</b> PEPM &middot; {note}</div>
         <div class="rb">
           {_build_up_rows(q, broker_label)}
         </div>
@@ -105,11 +112,12 @@ def _tier_card(
       </div>"""
 
 
-def render_proposal_html(inp: DealInputs, quote_mid: DealQuote, quote_max: DealQuote) -> str:
+def render_proposal_html(inp: DealInputs, quotes: dict[str, DealQuote]) -> str:
     proposal_date = inp.proposal_date or date.today()
     date_str = _fmt_date(proposal_date)
     broker_label = (inp.broker_name or "Broker").strip() if inp.broker else "Broker"
     company = escape(inp.company_name)
+    quote_lite, quote_mid, quote_max = quotes["lite"], quotes["mid"], quotes["max"]
 
     # Savings banner (only when a discount applies; uses Max as the discount reference).
     ref = quote_max
@@ -128,6 +136,15 @@ def render_proposal_html(inp: DealInputs, quote_mid: DealQuote, quote_max: DealQ
     else:
         svband = ""
 
+    lite_card = _tier_card(
+        quote_lite,
+        is_feature=(inp.tier == "lite"),
+        pepm_note="guided onboarding",
+        div_label="Includes",
+        bullets_html=_bullets(_LITE_BULLETS),
+        broker_label=broker_label,
+        tag="Recommended &mdash; best fit" if inp.tier == "lite" else "",
+    )
     mid_card = _tier_card(
         quote_mid,
         is_feature=(inp.tier == "mid"),
@@ -244,6 +261,7 @@ def render_proposal_html(inp: DealInputs, quote_mid: DealQuote, quote_max: DealQ
     <p class="lead">Matcha is <span class="hl">assistive risk management</span> &mdash; it tracks every jurisdiction, assists the investigation workflow, and monitors credentials in real time, surfacing what needs attention before it becomes exposure. But <strong>assistive isn&rsquo;t unattended: every decision is made by your team.</strong> State-of-the-science AI coupled with the judgment of people who&rsquo;ve spent their careers in the HR, compliance, and employee-relations seat &mdash; all in one platform.</p>
     {svband}
     <div class="tiers">
+      {lite_card}
       {mid_card}
       {max_card}
     </div>

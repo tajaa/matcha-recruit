@@ -3,7 +3,15 @@ import { Loader2, Download } from 'lucide-react'
 import { Button, Input, Toggle } from '../../components/ui'
 import { api } from '../../api/client'
 
-type Tier = 'mid' | 'max'
+type Tier = 'lite' | 'mid' | 'max'
+
+const TIERS: Tier[] = ['lite', 'mid', 'max']
+const TIER_LABEL: Record<Tier, string> = { lite: 'Lite', mid: 'Mid', max: 'Max' }
+const TIER_DEFAULTS: Record<Tier, { pepm: number; onboarding: number }> = {
+  lite: { pepm: 5, onboarding: 0 },
+  mid: { pepm: 10, onboarding: 4000 },
+  max: { pepm: 13, onboarding: 10000 },
+}
 
 type DealQuote = {
   tier: Tier
@@ -19,33 +27,18 @@ type DealQuote = {
   you_save_yr: number
 }
 
-type QuoteResponse = { mid: DealQuote; max: DealQuote }
+type QuoteResponse = Record<Tier, DealQuote>
 
-type DealInputs = {
-  company_name: string
-  headcount: number
-  tier: Tier
-  broker: boolean
-  broker_name: string | null
-  partner: boolean
-  hr_partner_addon: boolean
-  proposal_date: string | null
-}
+type TierConfig = { pepm: string; onboarding: string }
 
 const usd = (n: number) => `$${n.toLocaleString('en-US')}`
 
-const TIER_PEPM_NOTE: Record<Tier, string> = {
-  mid: '$10 PEPM · guided onboarding',
-  max: '$13 PEPM · white-glove implementation',
-}
-
 function QuoteCard({ q, recommended }: { q: DealQuote; recommended: boolean }) {
+  const note = q.onboarding === 0 ? 'no onboarding fee' : 'incl. onboarding'
   return (
     <div
       className={`rounded-xl border p-5 ${
-        recommended
-          ? 'border-violet-500/60 bg-violet-500/5'
-          : 'border-zinc-800 bg-zinc-900/40'
+        recommended ? 'border-violet-500/60 bg-violet-500/5' : 'border-zinc-800 bg-zinc-900/40'
       }`}
     >
       <div className="flex items-baseline justify-between">
@@ -56,20 +49,18 @@ function QuoteCard({ q, recommended }: { q: DealQuote; recommended: boolean }) {
           </span>
         )}
       </div>
-      <p className="mt-0.5 text-xs text-zinc-500">{TIER_PEPM_NOTE[q.tier]}</p>
+      <p className="mt-0.5 text-xs text-zinc-500">
+        ${q.pepm} PEPM · {note}
+      </p>
 
       <div className="mt-4 space-y-1.5 text-sm">
         <Row label="Subscription / yr" value={usd(q.subscription_yr)} />
-        <Row label="Onboarding" value={`+${usd(q.onboarding)}`} />
+        <Row label="Onboarding" value={q.onboarding === 0 ? 'None' : `+${usd(q.onboarding)}`} />
         {(q.broker_disc > 0 || q.partner_disc > 0) && (
           <>
             <Row label="Subtotal" value={usd(q.subtotal)} bold border />
-            {q.broker_disc > 0 && (
-              <Row label="−10% broker" value={`−${usd(q.broker_disc)}`} muted />
-            )}
-            {q.partner_disc > 0 && (
-              <Row label="−5% partner" value={`−${usd(q.partner_disc)}`} muted />
-            )}
+            {q.broker_disc > 0 && <Row label="−10% broker" value={`−${usd(q.broker_disc)}`} muted />}
+            {q.partner_disc > 0 && <Row label="−5% partner" value={`−${usd(q.partner_disc)}`} muted />}
           </>
         )}
         <div className="mt-2 flex items-center justify-between border-t border-zinc-700 pt-2.5">
@@ -125,6 +116,13 @@ export default function DealFlow() {
   const [hrPartner, setHrPartner] = useState(false)
   const [proposalDate, setProposalDate] = useState(today)
 
+  // Editable per-tier price config (pre-filled with the standard structure).
+  const [config, setConfig] = useState<Record<Tier, TierConfig>>(() => ({
+    lite: { pepm: String(TIER_DEFAULTS.lite.pepm), onboarding: String(TIER_DEFAULTS.lite.onboarding) },
+    mid: { pepm: String(TIER_DEFAULTS.mid.pepm), onboarding: String(TIER_DEFAULTS.mid.onboarding) },
+    max: { pepm: String(TIER_DEFAULTS.max.pepm), onboarding: String(TIER_DEFAULTS.max.onboarding) },
+  }))
+
   const [quotes, setQuotes] = useState<QuoteResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [downloading, setDownloading] = useState(false)
@@ -132,8 +130,20 @@ export default function DealFlow() {
   const headcountNum = parseInt(headcount, 10)
   const validHeadcount = Number.isFinite(headcountNum) && headcountNum > 0
 
-  const inputs: DealInputs = useMemo(
-    () => ({
+  const setTierField = (t: Tier, field: keyof TierConfig, value: string) =>
+    setConfig((prev) => ({ ...prev, [t]: { ...prev[t], [field]: value } }))
+
+  const inputs = useMemo(() => {
+    const overrides: Record<string, { pepm: number; onboarding: number }> = {}
+    for (const t of TIERS) {
+      const pepm = parseInt(config[t].pepm, 10)
+      const onboarding = parseInt(config[t].onboarding, 10)
+      overrides[t] = {
+        pepm: Number.isFinite(pepm) && pepm >= 0 ? pepm : TIER_DEFAULTS[t].pepm,
+        onboarding: Number.isFinite(onboarding) && onboarding >= 0 ? onboarding : TIER_DEFAULTS[t].onboarding,
+      }
+    }
+    return {
       company_name: companyName.trim() || 'Prospect',
       headcount: validHeadcount ? headcountNum : 0,
       tier,
@@ -142,9 +152,9 @@ export default function DealFlow() {
       partner,
       hr_partner_addon: hrPartner,
       proposal_date: proposalDate || null,
-    }),
-    [companyName, headcountNum, validHeadcount, tier, broker, brokerName, partner, hrPartner, proposalDate],
-  )
+      overrides,
+    }
+  }, [companyName, headcountNum, validHeadcount, tier, broker, brokerName, partner, hrPartner, proposalDate, config])
 
   // Live quote — server is the single source of pricing truth (debounced).
   useEffect(() => {
@@ -184,22 +194,18 @@ export default function DealFlow() {
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100">Deal Flow</h1>
           <p className="mt-2 text-sm text-zinc-500">
-            Configure a deal off the standard Mid / Max structure and generate a proposal PDF. Nothing is saved.
+            Configure a deal off the Lite / Mid / Max structure and generate a proposal PDF. Nothing is saved.
           </p>
         </div>
         <Button onClick={downloadProposal} disabled={!validHeadcount || downloading}>
-          {downloading ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Download className="mr-2 h-4 w-4" />
-          )}
+          {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
           Download Proposal PDF
         </Button>
       </div>
 
       {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
 
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[360px_1fr]">
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[380px_1fr]">
         {/* Form */}
         <div className="space-y-5 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
           <Input
@@ -219,19 +225,37 @@ export default function DealFlow() {
           <div>
             <label className="mb-1.5 block text-sm font-medium text-zinc-300">Recommended tier</label>
             <div className="flex gap-2">
-              {(['mid', 'max'] as Tier[]).map((t) => (
+              {TIERS.map((t) => (
                 <button
                   key={t}
                   type="button"
                   onClick={() => setTier(t)}
-                  className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium capitalize transition-colors ${
+                  className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
                     tier === t
                       ? 'border-violet-500/60 bg-violet-500/10 text-violet-200'
                       : 'border-zinc-700 text-zinc-400 hover:border-zinc-600'
                   }`}
                 >
-                  {t}
+                  {TIER_LABEL[t]}
                 </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Per-tier price overrides */}
+          <div className="space-y-3 rounded-lg border border-zinc-800 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Pricing per tier</p>
+            <div className="grid grid-cols-[auto_1fr_1fr] items-center gap-x-3 gap-y-2 text-xs">
+              <span />
+              <span className="font-medium text-zinc-500">PEPM ($)</span>
+              <span className="font-medium text-zinc-500">Onboarding ($)</span>
+              {TIERS.map((t) => (
+                <FragmentRow
+                  key={t}
+                  label={TIER_LABEL[t]}
+                  cfg={config[t]}
+                  onChange={(field, v) => setTierField(t, field, v)}
+                />
               ))}
             </div>
           </div>
@@ -265,14 +289,45 @@ export default function DealFlow() {
               <Loader2 className="h-4 w-4 animate-spin" /> Calculating…
             </p>
           ) : (
-            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-              <QuoteCard q={quotes.mid} recommended={tier === 'mid'} />
-              <QuoteCard q={quotes.max} recommended={tier === 'max'} />
+            <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+              {TIERS.map((t) => (
+                <QuoteCard key={t} q={quotes[t]} recommended={tier === t} />
+              ))}
             </div>
           )}
         </div>
       </div>
     </div>
+  )
+}
+
+function FragmentRow({
+  label,
+  cfg,
+  onChange,
+}: {
+  label: string
+  cfg: TierConfig
+  onChange: (field: keyof TierConfig, value: string) => void
+}) {
+  return (
+    <>
+      <span className="text-sm font-medium text-zinc-300">{label}</span>
+      <input
+        type="number"
+        min={0}
+        value={cfg.pepm}
+        onChange={(e) => onChange('pepm', e.target.value)}
+        className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 focus:border-violet-500 focus:outline-none"
+      />
+      <input
+        type="number"
+        min={0}
+        value={cfg.onboarding}
+        onChange={(e) => onChange('onboarding', e.target.value)}
+        className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 focus:border-violet-500 focus:outline-none"
+      />
+    </>
   )
 }
 
