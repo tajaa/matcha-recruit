@@ -157,7 +157,7 @@ class HRISService:
         if "part" in worker_type_code.lower():
             employment_type = "part_time"
         elif "contract" in worker_type_code.lower():
-            employment_type = "contract"
+            employment_type = "contractor"
 
         # Extract custom fields (credentials)
         custom = adp_worker.get("customFieldGroup", {})

@@ -5,7 +5,7 @@ from pydantic import BaseModel, EmailStr
 from decimal import Decimal
 
 
-EmploymentType = Literal["full_time", "part_time", "contractor"]
+EmploymentType = Literal["full_time", "part_time", "contractor", "intern"]
 PTORequestType = Literal["vacation", "sick", "personal", "other"]
 PTORequestStatus = Literal["pending", "approved", "denied", "cancelled"]
 DocumentStatus = Literal["draft", "pending_signature", "signed", "expired", "archived"]

@@ -9,7 +9,7 @@ export type EmploymentStatus =
   | 'terminated'
   | 'offboarded'
 
-export type EmploymentType = 'full_time' | 'part_time' | 'contractor'
+export type EmploymentType = 'full_time' | 'part_time' | 'contractor' | 'intern'
 
 export type PayClassification = 'exempt' | 'hourly'
 
@@ -146,6 +146,7 @@ export const typeLabel: Record<string, string> = {
   full_time: 'Full-time',
   part_time: 'Part-time',
   contractor: 'Contractor',
+  intern: 'Intern',
 }
 
 export const TYPE_OPTIONS = Object.entries(typeLabel).map(([value, label]) => ({ value, label }))
