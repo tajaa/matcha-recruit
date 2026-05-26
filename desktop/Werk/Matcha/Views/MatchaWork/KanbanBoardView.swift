@@ -290,14 +290,33 @@ struct KanbanBoardView: View {
         .buttonStyle(.plain)
     }
 
+    /// Below this container width the board stacks columns vertically (scroll
+    /// down) instead of horizontally (swipe left/right) — fewer than ~2 columns
+    /// fit horizontally in the side-by-side split pane (minWidth 360).
+    private let kanbanCompactWidth: CGFloat = 520
+
     private var boardColumns: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 8) {
-                ForEach(columnsFor(mode: viewMode), id: \.key) { col in
-                    columnView(key: col.key, label: col.label)
+        GeometryReader { geo in
+            let compact = geo.size.width < kanbanCompactWidth
+            if compact {
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(columnsFor(mode: viewMode), id: \.key) { col in
+                            columnView(key: col.key, label: col.label, compact: true)
+                        }
+                    }
+                    .padding(10)
+                }
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 8) {
+                        ForEach(columnsFor(mode: viewMode), id: \.key) { col in
+                            columnView(key: col.key, label: col.label, compact: false)
+                        }
+                    }
+                    .padding(10)
                 }
             }
-            .padding(10)
         }
     }
 
@@ -328,7 +347,7 @@ struct KanbanBoardView: View {
         }
     }
 
-    private func columnView(key: String, label: String) -> some View {
+    private func columnView(key: String, label: String, compact: Bool) -> some View {
         let cols = columnsFor(mode: viewMode)
         let colKeys = Set(cols.map { $0.key })
         let isFirstColumn = cols.first?.key == key
@@ -368,6 +387,7 @@ struct KanbanBoardView: View {
         // Hovering or starting an inline-add expands them back to full. Full
         // width is kept tight (240) so all five columns fit without much
         // horizontal scrolling now that there's a Changes Requested lane.
+        // In compact (vertical) mode every column is full pane width — no shrink.
         let columnWidth: CGFloat = (isEmpty && !isInlineAdding && !isHovered) ? 100 : 240
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
@@ -439,51 +459,23 @@ struct KanbanBoardView: View {
                 inlineAddRow(column: key)
             }
 
-            ScrollView {
-                LazyVStack(spacing: 6) {
-                    ForEach(visibleTasks) { task in
-                        KanbanCardView(
-                            task: task,
-                            attachments: viewModel.taskFiles[task.id] ?? [],
-                            pipelineMode: isPipeline,
-                            elementName: task.elementName
-                                ?? viewModel.elements.first(where: { $0.id == task.elementId })?.name,
-                            onTap: { viewingTask = task },
-                            onToggle: { Task { await viewModel.toggleTaskComplete(id: task.id) } },
-                            onMoveColumn: { col in
-                                Task {
-                                    if viewMode == .pipeline {
-                                        await viewModel.movePipelineTask(id: task.id, toStage: col)
-                                    } else {
-                                        await viewModel.moveTask(id: task.id, toColumn: col)
-                                    }
-                                }
-                            }
-                        )
-                        .draggable(task.id)
-                    }
-                    if isDoneColumn && orderedTasks.count > 5 {
-                        Button {
-                            doneExpanded.toggle()
-                        } label: {
-                            Text(doneExpanded ? "Show less" : "Show \(orderedTasks.count - 5) more")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.secondary)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 5)
-                                .background(appState.themeText.opacity(0.05))
-                                .cornerRadius(5)
-                        }
-                        .buttonStyle(.plain)
-                    }
+            // Compact (vertical) mode: render the cards inline so the board's
+            // single outer vertical ScrollView owns the scrolling — a nested
+            // vertical ScrollView with maxHeight:.infinity would have no
+            // intrinsic height inside the outer scroll. Regular mode keeps each
+            // column independently scrollable to a filled height.
+            if compact {
+                columnCards(visibleTasks: visibleTasks, isDoneColumn: isDoneColumn, orderedTasks: orderedTasks)
+            } else {
+                ScrollView {
+                    columnCards(visibleTasks: visibleTasks, isDoneColumn: isDoneColumn, orderedTasks: orderedTasks)
                 }
-                .padding(.horizontal, 6)
-                .padding(.bottom, 8)
+                .frame(maxHeight: .infinity)
             }
-            .frame(maxHeight: .infinity)
         }
-        .frame(width: columnWidth)
-        .animation(.easeOut(duration: 0.15), value: columnWidth)
+        .frame(maxWidth: compact ? .infinity : nil, alignment: .leading)
+        .frame(width: compact ? nil : columnWidth)
+        .animation(compact ? nil : .easeOut(duration: 0.15), value: columnWidth)
         // Flat tinted fill instead of a glassPanel: each column was an
         // NSVisualEffectView (live blur), and sliding 5 of them horizontally
         // recomposites every frame → the left/right scroll jank. A plain fill
@@ -514,6 +506,52 @@ struct KanbanBoardView: View {
             }
             return true
         }
+    }
+
+    /// Card stack for one column — shared by both layouts. Regular mode wraps
+    /// this in its own ScrollView; compact (vertical) mode renders it inline
+    /// under the board's single outer vertical ScrollView.
+    @ViewBuilder
+    private func columnCards(visibleTasks: [MWProjectTask], isDoneColumn: Bool, orderedTasks: [MWProjectTask]) -> some View {
+        LazyVStack(spacing: 6) {
+            ForEach(visibleTasks) { task in
+                KanbanCardView(
+                    task: task,
+                    attachments: viewModel.taskFiles[task.id] ?? [],
+                    pipelineMode: isPipeline,
+                    elementName: task.elementName
+                        ?? viewModel.elements.first(where: { $0.id == task.elementId })?.name,
+                    onTap: { viewingTask = task },
+                    onToggle: { Task { await viewModel.toggleTaskComplete(id: task.id) } },
+                    onMoveColumn: { col in
+                        Task {
+                            if viewMode == .pipeline {
+                                await viewModel.movePipelineTask(id: task.id, toStage: col)
+                            } else {
+                                await viewModel.moveTask(id: task.id, toColumn: col)
+                            }
+                        }
+                    }
+                )
+                .draggable(task.id)
+            }
+            if isDoneColumn && orderedTasks.count > 5 {
+                Button {
+                    doneExpanded.toggle()
+                } label: {
+                    Text(doneExpanded ? "Show less" : "Show \(orderedTasks.count - 5) more")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .background(appState.themeText.opacity(0.05))
+                        .cornerRadius(5)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.bottom, 8)
     }
 
     private func inlineAddRow(column: String) -> some View {
