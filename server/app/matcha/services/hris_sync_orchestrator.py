@@ -269,6 +269,9 @@ async def start_hris_sync(
     skipped_count = 0
     error_count = 0
     errors: list[dict] = []
+    # {employee_hris_id: manager_hris_id} — collected during import, resolved to
+    # manager_id (employee.id) in a second pass once every row exists.
+    manager_links: dict[str, str] = {}
 
     # ── Phase 3: Import workers (new connection) ───────────────────
     async with get_connection() as conn:
@@ -303,6 +306,11 @@ async def start_hris_sync(
                     updated_count += 1
                 else:
                     skipped_count += 1
+                # Record manager edge for the post-import resolution pass.
+                emp_hid = normalized.get("hris_id")
+                mgr_hid = normalized.get("manager_hris_id")
+                if emp_hid and mgr_hid:
+                    manager_links[emp_hid] = mgr_hid
             except Exception as exc:
                 error_count += 1
                 errors.append({
@@ -311,6 +319,30 @@ async def start_hris_sync(
                     "error": str(exc),
                 })
                 logger.exception("[HRIS] Error syncing worker %s (%s)", normalized.get("hris_id"), email)
+
+        # ── Phase 3b: Resolve manager edges ────────────────────────
+        # HRIS reports managers by their own HRIS id. Now that every worker has an
+        # employees row, map manager_hris_id → employees.id and set manager_id.
+        if manager_links:
+            id_rows = await conn.fetch(
+                "SELECT hris_id, id FROM employees WHERE org_id = $1 AND hris_id = ANY($2::text[])",
+                company_id,
+                list(set(manager_links.keys()) | set(manager_links.values())),
+            )
+            hid_to_id = {r["hris_id"]: r["id"] for r in id_rows}
+            resolved = 0
+            for emp_hid, mgr_hid in manager_links.items():
+                emp_id = hid_to_id.get(emp_hid)
+                mgr_id = hid_to_id.get(mgr_hid)
+                # Skip if either side missing, or self-reference (would violate the org chart).
+                if not emp_id or not mgr_id or emp_id == mgr_id:
+                    continue
+                await conn.execute(
+                    "UPDATE employees SET manager_id = $1, updated_at = NOW() WHERE id = $2 AND org_id = $3",
+                    mgr_id, emp_id, company_id,
+                )
+                resolved += 1
+            logger.info("[HRIS] Resolved %d/%d manager edges", resolved, len(manager_links))
 
         # ── Finalize sync run ──────────────────────────────────────
         final_status = "completed" if error_count == 0 else "partial"
@@ -435,6 +467,8 @@ async def _sync_single_employee(
                 work_city = COALESCE($10, work_city),
                 pay_rate = COALESCE($11, pay_rate),
                 pay_classification = COALESCE($12, pay_classification),
+                address = COALESCE($13, address),
+                termination_date = COALESCE($14, termination_date),
                 updated_at = NOW()
             WHERE id = $1 AND org_id = $2
             """,
@@ -450,6 +484,8 @@ async def _sync_single_employee(
             normalized.get("work_city"),
             normalized.get("pay_rate"),
             normalized.get("pay_classification"),
+            normalized.get("address"),
+            _parse_date(normalized.get("termination_date")),
         )
         action_label = "updated"
     else:
@@ -459,9 +495,10 @@ async def _sync_single_employee(
             INSERT INTO employees (
                 org_id, email, personal_email, first_name, last_name,
                 work_state, employment_type, start_date, phone, job_title, department, hris_id,
-                employment_status, work_city, pay_rate, pay_classification
+                employment_status, work_city, pay_rate, pay_classification,
+                address, termination_date
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
             RETURNING id
             """,
             company_id,
@@ -480,6 +517,8 @@ async def _sync_single_employee(
             normalized.get("work_city"),
             normalized.get("pay_rate"),
             normalized.get("pay_classification"),
+            normalized.get("address"),
+            _parse_date(normalized.get("termination_date")),
         )
         employee_id = row["id"]
         action_label = "created"

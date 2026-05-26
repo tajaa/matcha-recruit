@@ -276,13 +276,35 @@ class FinchHRISService:
             pay_classification = "hourly"
         elif "exempt" in flsa:
             pay_classification = "exempt"
-        elif unit in ("yearly", "monthly", "weekly", "biweekly", "semimonthly", "daily", "fixed"):
+        elif unit in ("yearly", "quarterly", "monthly", "weekly", "biweekly", "semimonthly", "daily", "fixed"):
             pay_classification = "exempt"
         else:
             pay_classification = None
 
         is_active = employment.get("is_active")
         employment_status = "active" if is_active in (True, None) else "terminated"
+
+        # Home address — Finch carries the residence on the individual. Flatten the
+        # structured object into the single `address` text column (line1/line2/city/
+        # state/zip). Work `location` is kept separately (we already map work_city/state).
+        residence = individual.get("residence") or {}
+        addr_parts = [
+            residence.get("line1"),
+            residence.get("line2"),
+            residence.get("city"),
+            residence.get("state"),
+            residence.get("postal_code"),
+        ]
+        address = ", ".join(p for p in addr_parts if p) or None
+
+        # Termination date — Finch `employment.end_date` (null while active).
+        termination_date = employment.get("end_date")
+
+        # Manager — Finch gives the manager's individual_id (not a name). Carry the
+        # raw HRIS id; the sync orchestrator resolves it to a Matcha employee.id in a
+        # second pass once every worker in this org has a row.
+        manager_obj = employment.get("manager") or individual.get("manager") or {}
+        manager_hris_id = manager_obj.get("id")
 
         return {
             "hris_id": finch_record.get("id") or individual.get("id"),
@@ -299,6 +321,9 @@ class FinchHRISService:
             "pay_rate": pay_rate,
             "pay_classification": pay_classification,
             "start_date": employment.get("start_date"),
+            "termination_date": termination_date,
+            "address": address,
+            "manager_hris_id": manager_hris_id,
             "is_manager": False,
             "employment_status": employment_status,
             # Finch (like Gusto) does not carry clinical credentials — stays CSV/manual.
