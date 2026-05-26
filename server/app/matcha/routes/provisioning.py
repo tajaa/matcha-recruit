@@ -1925,12 +1925,14 @@ async def gusto_webhook(request: Request, background_tasks: BackgroundTasks):
 FINCH_CLIENT_ID = os.getenv("FINCH_CLIENT_ID")
 FINCH_CLIENT_SECRET = os.getenv("FINCH_CLIENT_SECRET")
 FINCH_OAUTH_REDIRECT_URI = os.getenv("FINCH_OAUTH_REDIRECT_URI")
-# Blank = live providers. "finch" routes through Finch's own sandbox; "provider"
-# uses a real provider's sandbox. Only forwarded when set.
+# Connect-session sandbox mode. Blank = live providers (real employer payroll).
+# "provider" = connect to a provider's TEST environment (e.g. Gusto demo) through
+# the real Connect UI — the way to rehearse onboarding a customer end-to-end.
+# "finch" = Finch's own mock provider. Only forwarded to /connect/sessions when set.
 FINCH_SANDBOX = (os.getenv("FINCH_SANDBOX") or "").strip()
-FINCH_CONNECT_URL = os.getenv("FINCH_CONNECT_URL", "https://connect.tryfinch.com/authorize")
 FINCH_API_BASE_URL = os.getenv("FINCH_BASE_URL", "https://api.tryfinch.com")
 FINCH_TOKEN_URL = f"{FINCH_API_BASE_URL}/auth/token"
+FINCH_SESSIONS_URL = f"{FINCH_API_BASE_URL}/connect/sessions"
 # Products requested at Connect time — must cover directory + individual +
 # employment so FinchHRISService.fetch_workers can hydrate every record.
 FINCH_PRODUCTS = os.getenv("FINCH_PRODUCTS", "company directory individual employment")
@@ -1957,30 +1959,71 @@ def _require_finch_oauth_config() -> None:
 @router.get("/hris/finch/authorize",
             dependencies=[Depends(require_feature("hris_import"))])
 async def authorize_finch_oauth(
+    provider: Optional[str] = Query(default=None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Return the Finch Connect authorization URL for this company."""
+    """Create a Finch Connect session for this company and return its connect URL.
+
+    Uses the Connect Sessions API (POST /connect/sessions, Basic auth) — the current
+    flow, and the only one that supports `sandbox="provider"` for rehearsing a real
+    customer onboarding against a provider's test environment. The legacy
+    `connect.tryfinch.com/authorize?client_id=…` URL is deprecated.
+
+    `provider` (optional) pre-selects an integration (e.g. "gusto") and skips the
+    Connect picker — handy for a scripted provider-sandbox test.
+    """
     _require_finch_oauth_config()
     company_id = await get_client_company_id(current_user)
 
+    async with get_connection() as conn:
+        company = await conn.fetchrow(
+            "SELECT name FROM companies WHERE id = $1", company_id
+        )
+        if not company:
+            raise HTTPException(status_code=404, detail="Company not found")
+        customer_name = company["name"] or f"Company {company_id}"
+
     state = secrets.token_urlsafe(32)
+
+    body: dict = {
+        "customer_id": str(company_id),
+        "customer_name": customer_name,
+        # Sessions API wants an array (the legacy authorize URL took a space string).
+        "products": [p for p in FINCH_PRODUCTS.split() if p],
+        "redirect_uri": FINCH_OAUTH_REDIRECT_URI,
+    }
+    if FINCH_SANDBOX:
+        body["sandbox"] = FINCH_SANDBOX
+    if provider:
+        body["integration"] = {"provider": provider}
+
+    basic = base64.b64encode(f"{FINCH_CLIENT_ID}:{FINCH_CLIENT_SECRET}".encode()).decode()
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                FINCH_SESSIONS_URL,
+                headers={"Authorization": f"Basic {basic}", "Content-Type": "application/json"},
+                json=body,
+            )
+            if resp.status_code not in (200, 201):
+                logger.error(f"[Finch Connect Session] {resp.status_code}: {resp.text[:300]}")
+                raise HTTPException(status_code=400, detail=f"Finch Connect session failed: {resp.status_code}")
+            connect_url = resp.json()["connect_url"]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Finch Connect session error: {str(e)}")
+
+    # Persist state only after the session is created, then append it to the connect
+    # URL for CSRF validation on the callback (Finch echoes ?state= back).
     async with get_connection() as conn:
         await conn.execute(
             "INSERT INTO oauth_states (state, company_id, created_at) VALUES ($1, $2, NOW())",
             state,
             company_id,
         )
-
-    params = {
-        "client_id": FINCH_CLIENT_ID,
-        "products": FINCH_PRODUCTS,
-        "redirect_uri": FINCH_OAUTH_REDIRECT_URI,
-        "response_type": "code",
-        "state": state,
-    }
-    if FINCH_SANDBOX:
-        params["sandbox"] = FINCH_SANDBOX
-    oauth_url = f"{FINCH_CONNECT_URL}?{urlencode(params)}"
+    sep = "&" if "?" in connect_url else "?"
+    oauth_url = f"{connect_url}{sep}{urlencode({'state': state})}"
     return {"oauth_url": oauth_url}
 
 
