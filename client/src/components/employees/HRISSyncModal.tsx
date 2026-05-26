@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { CheckCircle2, Loader2, RefreshCw, Unlink } from 'lucide-react'
 import { api } from '../../api/client'
 import { Modal } from '../ui/Modal'
+import { useMe } from '../../hooks/useMe'
 
 type ConnectionStatus = {
   connected: boolean
@@ -31,6 +32,12 @@ type Props = {
 }
 
 export function HRISSyncModal({ open, onClose, onSuccess }: Props) {
+  const { hasFeature } = useMe()
+  // Legacy hris_import umbrella enables both providers.
+  const legacyBoth = hasFeature('hris_import')
+  const showGusto = hasFeature('hris_gusto') || legacyBoth
+  const showFinch = hasFeature('hris_finch') || legacyBoth
+
   const [loading, setLoading] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus | null>(null)
   const [fetchError, setFetchError] = useState<string | null>(null)
@@ -131,6 +138,8 @@ export function HRISSyncModal({ open, onClose, onSuccess }: Props) {
         <ConnectProviders
           connecting={connecting}
           error={connectError}
+          showGusto={showGusto}
+          showFinch={showFinch}
           onConnectGusto={() => handleConnect('/provisioning/hris/authorize')}
           onConnectFinch={() => handleConnect('/provisioning/hris/finch/authorize')}
         />
@@ -144,11 +153,15 @@ export function HRISSyncModal({ open, onClose, onSuccess }: Props) {
 function ConnectProviders({
   connecting,
   error,
+  showGusto,
+  showFinch,
   onConnectGusto,
   onConnectFinch,
 }: {
   connecting: boolean
   error: string | null
+  showGusto: boolean
+  showFinch: boolean
   onConnectGusto: () => void
   onConnectFinch: () => void
 }) {
@@ -163,25 +176,31 @@ function ConnectProviders({
           {error}
         </p>
       )}
-      <button
-        onClick={onConnectGusto}
-        disabled={connecting}
-        className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
-      >
-        {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
-        {connecting ? 'Redirecting…' : 'Connect with Gusto'}
-      </button>
-      <button
-        onClick={onConnectFinch}
-        disabled={connecting}
-        className="w-full bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-100 text-sm font-medium py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
-      >
-        {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
-        {connecting ? 'Redirecting…' : 'Connect another HRIS (via Finch)'}
-      </button>
-      <p className="text-[11px] text-zinc-600">
-        Finch supports ADP, Paychex, Workday, Rippling, and 200+ other providers.
-      </p>
+      {showGusto && (
+        <button
+          onClick={onConnectGusto}
+          disabled={connecting}
+          className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
+        >
+          {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
+          {connecting ? 'Redirecting…' : 'Connect with Gusto'}
+        </button>
+      )}
+      {showFinch && (
+        <button
+          onClick={onConnectFinch}
+          disabled={connecting}
+          className="w-full bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-100 text-sm font-medium py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
+        >
+          {connecting && <Loader2 className="w-4 h-4 animate-spin" />}
+          {connecting ? 'Redirecting…' : 'Connect another HRIS (via Finch)'}
+        </button>
+      )}
+      {showFinch && (
+        <p className="text-[11px] text-zinc-600">
+          Finch supports ADP, Paychex, Workday, Rippling, and 200+ other providers.
+        </p>
+      )}
     </div>
   )
 }

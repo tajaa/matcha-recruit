@@ -24,7 +24,12 @@ from ...core.models.auth import CurrentUser
 from ...core.dependencies import require_admin
 from ...core.services.secret_crypto import decrypt_secret, encrypt_secret
 from ...database import get_connection
-from ..dependencies import get_client_company_id, require_admin_or_client, require_feature
+from ..dependencies import (
+    get_client_company_id,
+    require_admin_or_client,
+    require_any_feature,
+    require_feature,
+)
 from ..services.google_workspace_service import GoogleWorkspaceService
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
@@ -1405,7 +1410,7 @@ def _hris_connection_status_payload(row) -> HRISConnectionStatus:
 
 
 @router.get("/hris/status", response_model=HRISConnectionStatus,
-            dependencies=[Depends(require_feature("hris_import"))])
+            dependencies=[Depends(require_any_feature("hris_gusto", "hris_finch", "hris_import"))])
 async def get_hris_connection_status(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
@@ -1434,7 +1439,7 @@ async def get_hris_connection_status(
 
 
 @router.post("/hris/connect", response_model=HRISConnectionStatus,
-             dependencies=[Depends(require_feature("hris_import"))])
+             dependencies=[Depends(require_any_feature("hris_gusto", "hris_finch", "hris_import"))])
 async def connect_hris(
     request: HRISConnectionRequest,
     current_user: CurrentUser = Depends(require_admin_or_client),
@@ -1509,7 +1514,7 @@ async def connect_hris(
 
 
 @router.post("/hris/disconnect",
-             dependencies=[Depends(require_feature("hris_import"))])
+             dependencies=[Depends(require_any_feature("hris_gusto", "hris_finch", "hris_import"))])
 async def disconnect_hris(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
@@ -1524,7 +1529,7 @@ async def disconnect_hris(
 
 
 @router.post("/hris/sync", response_model=HRISSyncRunResponse,
-             dependencies=[Depends(require_feature("hris_import"))])
+             dependencies=[Depends(require_any_feature("hris_gusto", "hris_finch", "hris_import"))])
 async def trigger_hris_sync(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
@@ -1557,7 +1562,7 @@ async def trigger_hris_sync(
 
 
 @router.get("/hris/sync/history",
-            dependencies=[Depends(require_feature("hris_import"))])
+            dependencies=[Depends(require_any_feature("hris_gusto", "hris_finch", "hris_import"))])
 async def get_hris_sync_history(
     current_user: CurrentUser = Depends(require_admin_or_client),
     limit: int = Query(default=20, ge=1, le=100),
@@ -1596,7 +1601,7 @@ async def get_hris_sync_history(
 
 
 @router.get("/hris/sync/{run_id}", response_model=HRISSyncRunResponse,
-            dependencies=[Depends(require_feature("hris_import"))])
+            dependencies=[Depends(require_any_feature("hris_gusto", "hris_finch", "hris_import"))])
 async def get_hris_sync_run(
     run_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
@@ -1658,8 +1663,9 @@ async def authorize_gusto_oauth(
             raise HTTPException(status_code=404, detail="Company not found")
         from ...core.feature_flags import merge_company_features
         features = merge_company_features(company["enabled_features"])
-        if not features.get("hris_import"):
-            raise HTTPException(status_code=403, detail="HRIS import not enabled")
+        # Gusto-direct path: gated by hris_gusto (or the legacy hris_import umbrella).
+        if not (features.get("hris_gusto") or features.get("hris_import")):
+            raise HTTPException(status_code=403, detail="Gusto HRIS import not enabled")
 
     state = secrets.token_urlsafe(32)
 
@@ -1957,7 +1963,7 @@ def _require_finch_oauth_config() -> None:
 
 
 @router.get("/hris/finch/authorize",
-            dependencies=[Depends(require_feature("hris_import"))])
+            dependencies=[Depends(require_any_feature("hris_finch", "hris_import"))])
 async def authorize_finch_oauth(
     provider: Optional[str] = Query(default=None),
     current_user: CurrentUser = Depends(require_admin_or_client),
@@ -2034,7 +2040,7 @@ class FinchSandboxConnectRequest(BaseModel):
 
 
 @router.post("/hris/finch/sandbox",
-             dependencies=[Depends(require_feature("hris_import"))])
+             dependencies=[Depends(require_any_feature("hris_finch", "hris_import"))])
 async def create_finch_sandbox_connection(
     request: FinchSandboxConnectRequest,
     current_user: CurrentUser = Depends(require_admin_or_client),

@@ -463,6 +463,53 @@ def require_feature(feature_name: str):
     return checker
 
 
+def require_any_feature(*feature_names: str):
+    """Like ``require_feature`` but passes if ANY of the named flags is enabled.
+
+    Used for routes shared across providers (e.g. the HRIS status/sync endpoints,
+    reachable whether the company is on ``hris_gusto`` or ``hris_finch``). Admins
+    bypass. These flags are not platform items, so no platform-visibility check.
+    """
+    async def checker(current_user=Depends(get_current_user)):
+        if current_user.role == "admin":
+            return current_user
+
+        scope = await resolve_accessible_company_scope(current_user)
+        company_id = scope.get("company_id")
+        if not company_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No company associated with this account",
+            )
+
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT COALESCE(enabled_features, $2::jsonb) AS enabled_features,
+                       signup_source
+                FROM companies
+                WHERE id = $1
+                """,
+                company_id,
+                default_company_features_json(),
+            )
+            if row is None or row["enabled_features"] is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Company not found",
+                )
+
+            features = merge_company_features(row["enabled_features"], row["signup_source"])
+            if not any(features.get(name, False) for name in feature_names):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"None of the required features ({', '.join(feature_names)}) are enabled for your company",
+                )
+
+        return current_user
+    return checker
+
+
 async def verify_manager_access(
     current_user,
     target_employee_id: UUID

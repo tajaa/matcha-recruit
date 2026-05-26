@@ -11,7 +11,13 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "cobra": False,
     "separation_agreements": False,
     "credential_templates": False,
+    # HRIS import. `hris_gusto` = connect directly to Gusto (OAuth); `hris_finch` =
+    # connect via Finch unified API (Rippling, BambooHR, ADP, …). Independent per
+    # company. `hris_import` is the legacy umbrella — treated as "both" by the gates
+    # for back-compat with companies provisioned before the split.
     "hris_import": False,
+    "hris_gusto": False,
+    "hris_finch": False,
     "paid_channel_creator": False,
     "channel_job_postings": False,
     "discipline": True,

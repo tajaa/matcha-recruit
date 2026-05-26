@@ -205,7 +205,9 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 | `cobra` | ❌ | COBRA admin |
 | `separation_agreements` | ❌ | Separation doc workflow |
 | `credential_templates` | ❌ | Credentialing templates |
-| `hris_import` | ❌ | HRIS sync |
+| `hris_import` | ❌ | HRIS sync — legacy umbrella; gates treat it as "both providers" |
+| `hris_gusto` | ❌ | HRIS via Gusto OAuth (direct) |
+| `hris_finch` | ❌ | HRIS via Finch unified API (Rippling, BambooHR, ADP, …) |
 | `paid_channel_creator` | ❌ | Stripe-gated paid channels |
 | `channel_job_postings` | ❌ | Stripe-gated job postings in channels |
 

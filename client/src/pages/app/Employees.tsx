@@ -68,7 +68,7 @@ export default function Employees() {
         </div>
         <div className="flex gap-2 w-full sm:w-auto flex-wrap">
           <Button variant="ghost" onClick={() => setShowUpload(true)}>Upload CSV</Button>
-          {hasFeature('hris_import') && (
+          {(hasFeature('hris_gusto') || hasFeature('hris_finch') || hasFeature('hris_import')) && (
             <Button variant="ghost" onClick={() => setShowHRIS(true)}>Sync from HRIS</Button>
           )}
           <Button onClick={() => setShowBatch(true)}>Add Employees</Button>
