@@ -206,7 +206,7 @@ export function MatchaLiteMockup() {
                 <div className="p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5">
                   <div className="flex items-center gap-2 mb-1.5">
                     <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">AI categorization + severity</span>
+                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Suggested categorization + severity</span>
                   </div>
                   <div className="text-[11px] text-zinc-300 leading-relaxed">
                     Category: <span className="text-zinc-200 font-medium">Customer escalation / behavioral</span>. Severity: <span className="text-amber-400">Medium</span>. <span className="text-amber-400">Pattern:</span> 3rd escalation at this location in 14 days.
@@ -292,7 +292,7 @@ export function MatchaLiteMockup() {
                 ))}
                 <div className="p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5">
                   <div className="text-[11px] text-zinc-300 leading-relaxed">
-                    <span className="font-semibold text-emerald-400">AI theme:</span> Weekend evening shift escalations clustered at Atlanta · Store 7 — recommend additional manager coverage Fri/Sat 6–10pm.
+                    <span className="font-semibold text-emerald-400">Detected pattern:</span> Weekend evening escalations clustered at Atlanta · Store 7 — flagged for review, consider additional manager coverage Fri/Sat 6–10pm.
                   </div>
                 </div>
               </motion.div>

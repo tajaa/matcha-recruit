@@ -4,7 +4,6 @@ import { Link } from 'react-router-dom'
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
 import { ComplianceTicker } from '../../components/landing/ComplianceTicker'
-import { MatchaWorkMockup } from '../../components/landing/MatchaWorkMockup'
 import { PricingContactModal } from '../../components/PricingContactModal'
 import { api } from '../../api/client'
 
@@ -15,17 +14,6 @@ const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 
 const PILLARS: { id: string; title: string; caption: string; stats: { label: string; value: string }[] }[] = [
-  {
-    id: 'pipeline',
-    title: 'AI Recruiting Pipeline',
-    caption:
-      'Post roles, upload resumes, and let an AI ranker surface the top candidates by fit score. The full pipeline lives in one place — from posting to shortlist to offer letter.',
-    stats: [
-      { label: 'Sourced', value: '247' },
-      { label: 'Ranked', value: '42' },
-      { label: 'Shortlisted', value: '6' },
-    ],
-  },
   {
     id: 'interviews',
     title: 'Voice Interviews',
@@ -115,13 +103,13 @@ function Hero() {
               fontSize: 'clamp(2.25rem, 7vw, 5.25rem)',
             }}
           >
-            Recruiting, re-engineered.
+            Your AI-assisted HR workspace.
           </h1>
           <p
             className="mt-5 sm:mt-6 mx-auto max-w-xl text-[15px] sm:text-base px-2"
             style={{ color: MUTED, lineHeight: 1.55 }}
           >
-            An AI-powered pipeline, live voice interviews, and a document workspace — all in a single place built for senior HR and recruiting teams.
+            Live voice interviews and a multi-threaded document workspace — built for senior HR and compliance teams.
           </p>
           <div className="mt-8 sm:mt-10 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <Link
@@ -141,18 +129,6 @@ function Hero() {
           </div>
         </div>
 
-        {/* Product mockup inside dark frame */}
-        <div className="mt-12 sm:mt-16 max-w-6xl mx-auto -mx-2 sm:mx-auto">
-          <div
-            className="relative rounded-lg sm:rounded-xl overflow-hidden ring-1 shadow-2xl"
-            style={{
-              boxShadow: '0 40px 80px -25px rgba(31, 29, 26, 0.3)',
-              borderColor: 'rgba(0,0,0,0.08)',
-            }}
-          >
-            <MatchaWorkMockup />
-          </div>
-        </div>
       </div>
     </section>
   )
@@ -178,7 +154,7 @@ function ProductPillar({ pillar, reverse }: { pillar: Pillar; reverse: boolean }
               className="text-[11px] uppercase tracking-wider font-medium mb-3 sm:mb-4"
               style={{ color: MUTED }}
             >
-              {pillar.id === 'pipeline' ? '01 · Pipeline' : pillar.id === 'interviews' ? '02 · Interviews' : '03 · Workspace'}
+              {pillar.id === 'interviews' ? '01 · Interviews' : '02 · Workspace'}
             </div>
             <h2
               className="tracking-tight"
@@ -240,7 +216,6 @@ function ProductPillar({ pillar, reverse }: { pillar: Pillar; reverse: boolean }
 // ---------------------------------------------------------------------------
 
 function PillarVisual({ pillar }: { pillar: Pillar }) {
-  if (pillar.id === 'pipeline') return <PipelineMock />
   if (pillar.id === 'interviews') return <InterviewMock />
   return <WorkspaceMock />
 }
@@ -272,116 +247,6 @@ function DarkFrame({ label, children }: { label: string; children: React.ReactNo
       </div>
       <div className="relative flex-1 min-h-0">{children}</div>
     </div>
-  )
-}
-
-const CANDIDATES = [
-  { name: 'Maya Chen',    role: 'Sr. Engineer · Stripe',  score: 94, status: 'Top pick' },
-  { name: 'James Park',   role: 'Staff Eng · Airbnb',      score: 91, status: 'Interview' },
-  { name: 'Priya Sharma', role: 'SDE III · Amazon',        score: 88, status: 'Screened' },
-  { name: 'Alex Rivera',  role: 'Engineer · Notion',       score: 85, status: 'Ranked' },
-  { name: 'Sam Okafor',   role: 'Sr. Eng · Shopify',       score: 82, status: 'Ranked' },
-]
-
-function PipelineMock() {
-  const [revealed, setRevealed] = useState(-1)
-  const [sourced, setSourced] = useState(0)
-
-  useEffect(() => {
-    let cancelled = false
-    let timers: number[] = []
-    const clear = () => { timers.forEach((t) => window.clearTimeout(t)); timers = [] }
-
-    const tickSourced = (from: number, to: number, durationMs: number) => {
-      const start = performance.now()
-      const loop = () => {
-        if (cancelled) return
-        const elapsed = performance.now() - start
-        const t = Math.min(1, elapsed / durationMs)
-        setSourced(Math.round(from + (to - from) * t))
-        if (t < 1) timers.push(window.setTimeout(loop, 16))
-      }
-      loop()
-    }
-
-    const run = () => {
-      if (cancelled) return
-      setRevealed(-1)
-      setSourced(0)
-      tickSourced(0, 247, 3200)
-      CANDIDATES.forEach((_, idx) => {
-        timers.push(window.setTimeout(() => {
-          if (cancelled) return
-          setRevealed(idx)
-        }, idx * 700 + 400))
-      })
-      timers.push(window.setTimeout(run, CANDIDATES.length * 700 + 3200))
-    }
-
-    run()
-    return () => { cancelled = true; clear() }
-  }, [])
-
-  return (
-    <DarkFrame label={`Candidate Pipeline · ${sourced} sourced`}>
-      <div className="flex flex-col h-full p-3 gap-1.5">
-        {CANDIDATES.map((c, idx) => {
-          const color = c.score >= 90 ? '#86efac' : c.score >= 85 ? '#d7ba7d' : '#9a8a70'
-          const visible = revealed >= idx
-          const isTop = idx === 0 && visible
-          return (
-            <div
-              key={idx}
-              className="flex items-center gap-3 px-3 py-2 rounded border transition-all duration-500"
-              style={{
-                borderColor: isTop ? 'rgba(134,239,172,0.35)' : 'rgba(255,255,255,0.06)',
-                backgroundColor: isTop ? 'rgba(134,239,172,0.06)' : 'rgba(255,255,255,0.015)',
-                opacity: visible ? 1 : 0,
-                transform: visible ? 'translateY(0)' : 'translateY(4px)',
-                boxShadow: isTop ? '0 0 20px rgba(134,239,172,0.08)' : 'none',
-              }}
-            >
-              <div
-                className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-mono font-medium shrink-0"
-                style={{ backgroundColor: 'rgba(255,255,255,0.06)', color: '#e4ded2' }}
-              >
-                {c.name.split(' ').map((p) => p[0]).join('')}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-[11px] font-mono truncate" style={{ color: '#e4ded2' }}>
-                  {c.name}
-                </div>
-                <div className="text-[9px] truncate" style={{ color: '#6a737d' }}>
-                  {c.role}
-                </div>
-              </div>
-              <div className="w-28 h-1 rounded-full shrink-0" style={{ backgroundColor: 'rgba(255,255,255,0.06)' }}>
-                <div
-                  className="h-full rounded-full transition-all duration-700"
-                  style={{
-                    width: visible ? `${c.score}%` : '0%',
-                    backgroundColor: color,
-                    boxShadow: visible ? `0 0 6px ${color}60` : 'none',
-                  }}
-                />
-              </div>
-              <span
-                className="text-[10px] tabular-nums font-mono w-7 text-right shrink-0 transition-opacity duration-500"
-                style={{ color, opacity: visible ? 1 : 0 }}
-              >
-                {c.score}
-              </span>
-              <span
-                className="text-[8px] uppercase tracking-wider font-mono w-[72px] text-right shrink-0 transition-opacity duration-500"
-                style={{ color: '#9a8a70', opacity: visible ? 1 : 0 }}
-              >
-                {c.status}
-              </span>
-            </div>
-          )
-        })}
-      </div>
-    </DarkFrame>
   )
 }
 

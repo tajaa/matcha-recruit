@@ -382,7 +382,7 @@ function WaitlistSection({ waitlistRef }: { waitlistRef: React.RefObject<HTMLDiv
 // ---------------------------------------------------------------------------
 
 const IR_BULLETS = [
-  { label: 'Auto-categorization', desc: 'Behavioral, safety, property, or harassment — tagged on submission.' },
+  { label: 'Suggested categorization', desc: 'Behavioral, safety, property, or harassment — flagged for manager review on submission.' },
   { label: 'Severity scoring', desc: 'Low / Medium / High with AI justification attached to every incident.' },
   { label: 'Pattern detection', desc: 'Cross-incident analysis surfaces recurring patterns across locations, shifts, and case types — for your team to review.' },
 ]
@@ -400,7 +400,7 @@ function IrAnalysisSection() {
               className="tracking-tight"
               style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(1.875rem, 4vw, 3rem)', lineHeight: 1.05 }}
             >
-              AI that reads every incident.
+              Pattern analysis that surfaces what your team needs to see.
             </h2>
             <p className="mt-4 text-base" style={{ color: MUTED, lineHeight: 1.6 }}>
               Cross-incident pattern detection surfaces what no single manager would catch — repeat locations, shift clusters, escalating severity trends.
