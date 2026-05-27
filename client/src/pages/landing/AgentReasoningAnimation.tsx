@@ -237,7 +237,7 @@ export default function AgentReasoningAnimation() {
         <div className="flex items-center gap-2">
           <GitBranch className="w-3.5 h-3.5" style={{ color: '#9a8a70' }} />
           <span className="text-[10px] font-medium tracking-wide font-mono uppercase" style={{ color: '#e4ded2' }}>
-            AI Analysis · CA Compliance Audit
+            Compliance Analysis · CA Audit
           </span>
           <span
             className="text-[7.5px] uppercase tracking-wider px-1.5 py-[1px] rounded font-mono"

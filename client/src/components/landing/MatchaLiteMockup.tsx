@@ -114,7 +114,7 @@ export function MatchaLiteMockup() {
             </button>
           ) : (
             <div className="flex items-center gap-1.5">
-              {(['List', 'New report', 'AI insights'] as const).map((t, i) => (
+              {(['List', 'New report', 'Risk insights'] as const).map((t, i) => (
                 <span key={t} className={`px-2 py-0.5 rounded text-[9px] font-medium transition-colors ${
                   activeTab === i ? 'bg-zinc-800 text-zinc-200 border border-zinc-600' : 'text-zinc-600'
                 }`}>{t}</span>

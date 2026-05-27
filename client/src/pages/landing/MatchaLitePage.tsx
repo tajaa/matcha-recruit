@@ -30,7 +30,7 @@ const FEATURES: { id: string; icon: typeof ShieldAlert; title: string; caption: 
     icon: Brain,
     title: 'IR analysis',
     caption:
-      'AI categorization and severity scoring on every incident. Cross-incident pattern detection surfaces repeat behaviors and emerging risk clusters before they compound.',
+      'Intelligent Theme Analysis flags suggested categorization and severity on every incident. Cross-incident pattern detection surfaces repeat behaviors and emerging risk clusters for your team to review.',
     visual: SeverityGauge,
   },
   {
@@ -150,7 +150,7 @@ function Hero({ onWaitlistClick }: { onWaitlistClick: () => void }) {
             className="mt-5 sm:mt-6 mx-auto max-w-xl text-[15px] sm:text-base px-2"
             style={{ color: MUTED, lineHeight: 1.55 }}
           >
-            Incident reporting, AI analysis, and OSHA 300 logs — plus a
+            Incident reporting, intelligent analysis, and OSHA 300 logs — plus a
             full HR library with state guides, calculators, templates, and
             a compliance audit. Bundled for small teams that don't need a
             bespoke engagement.
@@ -215,7 +215,7 @@ function FeatureGrid() {
               lineHeight: 1.05,
             }}
           >
-            Safety intake, AI analysis, OSHA logs — and a full HR library.
+            Safety intake, intelligent analysis, OSHA logs — and a full HR library.
           </h2>
           <p className="mt-4 sm:mt-5 text-base sm:text-lg" style={{ color: MUTED, lineHeight: 1.6 }}>
             Each tool stands on its own. Together they cover the everyday
@@ -383,7 +383,7 @@ function WaitlistSection({ waitlistRef }: { waitlistRef: React.RefObject<HTMLDiv
 
 const IR_BULLETS = [
   { label: 'Suggested categorization', desc: 'Behavioral, safety, property, or harassment — flagged for manager review on submission.' },
-  { label: 'Severity scoring', desc: 'Low / Medium / High with AI justification attached to every incident.' },
+  { label: 'Severity scoring', desc: 'Low / Medium / High with justification attached to every incident — reviewed and confirmed by your team.' },
   { label: 'Pattern detection', desc: 'Cross-incident analysis surfaces recurring patterns across locations, shifts, and case types — for your team to review.' },
 ]
 
