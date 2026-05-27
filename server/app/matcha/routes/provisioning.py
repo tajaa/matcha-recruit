@@ -29,6 +29,7 @@ from ..dependencies import (
     require_admin_or_client,
     require_any_feature,
     require_feature,
+    require_feature,
 )
 from ..services.google_workspace_service import GoogleWorkspaceService
 from ..services.onboarding_orchestrator import (
@@ -1944,6 +1945,28 @@ FINCH_SESSIONS_URL = f"{FINCH_API_BASE_URL}/connect/sessions"
 FINCH_PRODUCTS = os.getenv("FINCH_PRODUCTS", "company directory individual employment")
 
 
+async def _finch_products_for_company(company_id) -> list[str]:
+    """Products to request at Finch connect time for this company.
+
+    Base set (FINCH_PRODUCTS) + the `benefits` product **only** when the company
+    has the `hris_deductions` feature on — so deductions-write clients get a
+    benefits-scoped token while everyone else connects unchanged. Never request
+    benefits globally: an unsupported provider (e.g. Square) rejects it at connect.
+    """
+    from ...core.feature_flags import merge_company_features
+    products = [p for p in FINCH_PRODUCTS.split() if p]
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT enabled_features, signup_source FROM companies WHERE id = $1",
+            company_id,
+        )
+    if row:
+        feats = merge_company_features(row["enabled_features"], row["signup_source"])
+        if feats.get("hris_deductions") and "benefits" not in products:
+            products.append("benefits")
+    return products
+
+
 def _require_finch_oauth_config() -> None:
     """Raise 503 unless the Finch Connect env vars are present."""
     missing = [
@@ -1995,7 +2018,8 @@ async def authorize_finch_oauth(
         "customer_id": str(company_id),
         "customer_name": customer_name,
         # Sessions API wants an array (the legacy authorize URL took a space string).
-        "products": [p for p in FINCH_PRODUCTS.split() if p],
+        # Adds `benefits` only when the company has hris_deductions enabled.
+        "products": await _finch_products_for_company(company_id),
         "redirect_uri": FINCH_OAUTH_REDIRECT_URI,
     }
     if FINCH_SANDBOX:
@@ -2060,7 +2084,7 @@ async def create_finch_sandbox_connection(
     company_id = await get_client_company_id(current_user)
 
     basic = base64.b64encode(f"{FINCH_CLIENT_ID}:{FINCH_CLIENT_SECRET}".encode()).decode()
-    products = [p for p in FINCH_PRODUCTS.split() if p]
+    products = await _finch_products_for_company(company_id)
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
@@ -2162,7 +2186,7 @@ class BenefitCreateRequest(BaseModel):
 
 
 @router.get("/hris/benefits/meta",
-            dependencies=[Depends(require_any_feature("hris_finch", "hris_import"))])
+            dependencies=[Depends(require_feature("hris_deductions"))])
 async def get_hris_benefit_meta(current_user: CurrentUser = Depends(require_admin_or_client)):
     """List the benefit/deduction types the connected provider supports (the write schema)."""
     company_id = await get_client_company_id(current_user)
@@ -2174,7 +2198,7 @@ async def get_hris_benefit_meta(current_user: CurrentUser = Depends(require_admi
 
 
 @router.get("/hris/benefits",
-            dependencies=[Depends(require_any_feature("hris_finch", "hris_import"))])
+            dependencies=[Depends(require_feature("hris_deductions"))])
 async def list_hris_benefits(current_user: CurrentUser = Depends(require_admin_or_client)):
     """List company-level benefits already configured in the connected provider."""
     company_id = await get_client_company_id(current_user)
@@ -2186,7 +2210,7 @@ async def list_hris_benefits(current_user: CurrentUser = Depends(require_admin_o
 
 
 @router.post("/hris/benefits",
-             dependencies=[Depends(require_any_feature("hris_finch", "hris_import"))])
+             dependencies=[Depends(require_feature("hris_deductions"))])
 async def create_hris_benefit(
     request: BenefitCreateRequest,
     current_user: CurrentUser = Depends(require_admin_or_client),
@@ -2209,7 +2233,7 @@ async def create_hris_benefit(
 
 
 @router.get("/hris/benefits/job/{job_id}",
-            dependencies=[Depends(require_any_feature("hris_finch", "hris_import"))])
+            dependencies=[Depends(require_feature("hris_deductions"))])
 async def get_hris_benefit_job(
     job_id: str,
     current_user: CurrentUser = Depends(require_admin_or_client),

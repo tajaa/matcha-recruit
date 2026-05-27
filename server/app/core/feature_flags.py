@@ -18,6 +18,11 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "hris_import": False,
     "hris_gusto": False,
     "hris_finch": False,
+    # Deductions/benefits WRITE-back through Finch. Per-client: when on, the Finch
+    # connect flow requests the `benefits` product so the company's token can write
+    # benefits/deductions (provider must support it — QuickBooks/Gusto/ADP yes,
+    # Square no). Gates the /provisioning/hris/benefits endpoints.
+    "hris_deductions": False,
     "paid_channel_creator": False,
     "channel_job_postings": False,
     "discipline": True,

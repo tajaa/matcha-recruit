@@ -208,6 +208,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 | `hris_import` | ❌ | HRIS sync — legacy umbrella; gates treat it as "both providers" |
 | `hris_gusto` | ❌ | HRIS via Gusto OAuth (direct) |
 | `hris_finch` | ❌ | HRIS via Finch unified API (Rippling, BambooHR, ADP, …) |
+| `hris_deductions` | ❌ | Deductions/benefits **write**-back via Finch — requests the `benefits` product at connect; gates `/provisioning/hris/benefits` (provider must support it) |
 | `paid_channel_creator` | ❌ | Stripe-gated paid channels |
 | `channel_job_postings` | ❌ | Stripe-gated job postings in channels |
 

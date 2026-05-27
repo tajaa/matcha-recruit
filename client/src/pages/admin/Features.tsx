@@ -22,6 +22,7 @@ const FEATURE_LABELS: Record<string, string> = {
   discipline: 'Performance Action',
   hris_gusto: 'HRIS — Gusto (direct)',
   hris_finch: 'HRIS — Finch (Rippling, BambooHR, ADP…)',
+  hris_deductions: 'HRIS — Deductions/benefits write (Finch)',
   hris_import: 'HRIS Import (legacy — enables both)',
   inventory: 'Inventory',
 }
