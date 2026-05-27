@@ -454,24 +454,13 @@ function ConvergenceSection() {
           </p>
         </div>
 
-        {/* Animation card — the three domains routing signal around one graph */}
-        <div className="mt-10 sm:mt-14 mx-auto max-w-4xl">
-          <div
-            className="relative rounded-xl overflow-hidden ring-1 shadow-2xl"
-            style={{
-              backgroundColor: '#151412',
-              boxShadow: '0 40px 80px -20px rgba(31, 29, 26, 0.28)',
-              borderColor: 'rgba(0,0,0,0.08)',
-            }}
-          >
-            <div className="aspect-[16/10] w-full">
-              <LazyMount fallback={<div className="w-full h-full" style={{ backgroundColor: '#0e0d0b' }} />}>
-                <Suspense fallback={<div className="w-full h-full" style={{ backgroundColor: '#0e0d0b' }} />}>
-                  <ConvergenceAnimation />
-                </Suspense>
-              </LazyMount>
-            </div>
-          </div>
+        {/* Animation card — one incident fanning out to all three domains */}
+        <div className="mt-10 sm:mt-14">
+          <LazyMount minHeight={480} fallback={<div className="w-full max-w-[900px] mx-auto rounded-xl" style={{ height: 480, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}>
+            <Suspense fallback={<div className="w-full max-w-[900px] mx-auto rounded-xl" style={{ height: 480, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}>
+              <ConvergenceAnimation />
+            </Suspense>
+          </LazyMount>
         </div>
 
         <div className="mt-10 sm:mt-12 grid md:grid-cols-3 gap-px rounded-xl overflow-hidden" style={{ backgroundColor: LINE }}>

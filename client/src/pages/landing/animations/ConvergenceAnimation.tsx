@@ -1,213 +1,554 @@
-import { useEffect, useState } from 'react'
-import { Share2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Share2, AlertTriangle } from 'lucide-react'
 
-// Convergence graph — EHS, GRC, and ER orbit one shared data model.
-// A signal routes domain -> hub -> domain, so every hop visibly passes
-// through the central model: a safety incident raises a compliance flag,
-// which opens an ER case, whose pattern feeds back to safety.
+// ───────────────────────────────────────────────────────────────────────────
+// Convergence story: one safety incident lands once, then fans out to all
+// three usually-siloed domains — EHS logs it, GRC flags the compliance gap it
+// exposes, ER opens a case off the behavioral pattern. One record, three
+// synchronized workflows, zero manual re-entry. Mirrors the visual vocabulary
+// of AgentReasoningAnimation (scenario → root → fan-out → columns → synthesis).
+// ───────────────────────────────────────────────────────────────────────────
 
-const VB_W = 480
-const VB_H = 300
+const EMERALD = '#34d399'
+const AMBER = '#d7ba7d'
+const CORAL = '#e0916b'
+const ZINC_LINE = 'rgba(255,255,255,0.08)'
 
-type Pt = { x: number; y: number }
-const HUB: Pt = { x: 240, y: 170 }
+interface Domain {
+  key: string
+  tag: string
+  sub: string
+  color: string
+  pill: string
+  cite: string
+  question: string
+  action: string
+  status: string
+}
 
-type Domain = { key: 'ehs' | 'grc' | 'er'; tag: string; title: string; metric: string; color: string; at: Pt }
 const DOMAINS: Domain[] = [
-  { key: 'ehs', tag: 'EHS', title: 'Safety',     metric: '12 incidents', color: '#86efac', at: { x: 240, y: 58 } },
-  { key: 'grc', tag: 'GRC', title: 'Compliance', metric: '3 gaps',       color: '#d7ba7d', at: { x: 80,  y: 250 } },
-  { key: 'er',  tag: 'ER',  title: 'Relations',  metric: '5 cases',      color: '#ce9178', at: { x: 400, y: 250 } },
+  {
+    key: 'ehs',
+    tag: 'EHS',
+    sub: 'Safety',
+    color: EMERALD,
+    pill: 'LOGGED',
+    cite: 'OSHA 300 · §1904',
+    question: 'Recordable? Witnesses + photos attached?',
+    action: 'Recordable entry · 5-yr retention',
+    status: 'Routing → EHS · recordkeeping check',
+  },
+  {
+    key: 'grc',
+    tag: 'GRC',
+    sub: 'Compliance',
+    color: AMBER,
+    pill: 'FLAGGED',
+    cite: 'CA SB 553 · §6401.9(e)',
+    question: 'WVP training current across all 8 sites?',
+    action: 'Schedule training · 87 emp · bilingual',
+    status: 'Routing → GRC · SB 553 cadence check',
+  },
+  {
+    key: 'er',
+    tag: 'ER',
+    sub: 'Relations',
+    color: CORAL,
+    pill: 'CASE OPENED',
+    cite: 'Case #C391',
+    question: '3rd escalation at this location in 14 days?',
+    action: 'Open ER case · assign investigator',
+    status: 'Routing → ER · behavioral pattern match',
+  },
 ]
-const BY_KEY: Record<string, Domain> = Object.fromEntries(DOMAINS.map((d) => [d.key, d]))
 
-type NodeRef = 'hub' | Domain['key']
-const ptOf = (n: NodeRef): Pt => (n === 'hub' ? HUB : BY_KEY[n].at)
-const colorOf = (n: NodeRef): string => (n === 'hub' ? '#e4ded2' : BY_KEY[n].color)
+const SCENARIO = {
+  id: 'Incident #4827',
+  when: 'Just now · Atlanta · Store 7',
+  facts: 'Customer escalation · raised voice · crew de-escalated, no contact',
+  severity: 'Medium',
+}
 
-// Ordered signal path. Every domain hop is mediated by the hub.
-type Seg = { from: NodeRef; to: NodeRef; event: string }
-const SEGS: Seg[] = [
-  { from: 'ehs', to: 'hub', event: 'Safety incident logged · Atlanta · Store 7' },
-  { from: 'hub', to: 'grc', event: 'Compliance gap flagged · SB 553' },
-  { from: 'grc', to: 'hub', event: 'Routing through shared model…' },
-  { from: 'hub', to: 'er',  event: 'ER case opened · #C391' },
-  { from: 'er',  to: 'hub', event: 'Pattern matched across cases' },
-  { from: 'hub', to: 'ehs', event: 'Risk surfaced back to safety' },
-]
+const SYNTHESIS = {
+  stats: [
+    { label: 'Domains updated', value: '3' },
+    { label: 'Manual re-entry', value: '0' },
+    { label: 'Context shared', value: 'Full' },
+    { label: 'Routed in', value: '1.4s' },
+  ],
+}
 
-const TRAVEL_MS = 850
-const HOLD_MS = 240
-const SEG_MS = TRAVEL_MS + HOLD_MS
-const RESET_MS = 1200
-const CYCLE_MS = SEGS.length * SEG_MS + RESET_MS
+type Phase = 'pending' | 'routing' | 'done'
 
-// Precompute when the signal arrives at each segment's target.
-const ARRIVALS = SEGS.map((s, i) => ({ node: s.to, t: i * SEG_MS + TRAVEL_MS }))
-
-const easeInOut = (p: number) => (p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2)
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+const INITIAL: Phase[] = DOMAINS.map(() => 'pending')
 
 export function ConvergenceAnimation() {
-  const [clock, setClock] = useState(0)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [scenarioVisible, setScenarioVisible] = useState(false)
+  const [rootVisible, setRootVisible] = useState(false)
+  const [phases, setPhases] = useState<Phase[]>(INITIAL)
+  const [synthesisVisible, setSynthesisVisible] = useState(false)
+  const [stage, setStage] = useState<'idle' | 'routing' | 'synced' | 'reset'>('idle')
+  const [hud, setHud] = useState('Listening for new events…')
+  const [routedCount, setRoutedCount] = useState(0)
 
   useEffect(() => {
-    let raf = 0
-    const start = performance.now()
-    const tick = () => {
-      setClock((performance.now() - start) % CYCLE_MS)
-      raf = requestAnimationFrame(tick)
+    let cancelled = false
+    const visible = { current: true }
+    const el = containerRef.current
+    let obs: IntersectionObserver | null = null
+    if (el) {
+      obs = new IntersectionObserver(([e]) => { visible.current = e.isIntersecting }, { rootMargin: '200px' })
+      obs.observe(el)
     }
-    tick()
-    return () => cancelAnimationFrame(raf)
+
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => {
+        const start = performance.now()
+        const tick = () => {
+          if (cancelled) return resolve()
+          if (!visible.current) { setTimeout(tick, 200); return }
+          const elapsed = performance.now() - start
+          const remaining = ms - elapsed
+          if (remaining <= 0) resolve()
+          else setTimeout(tick, Math.min(remaining, 200))
+        }
+        tick()
+      })
+
+    const setPhase = (idx: number, p: Phase) =>
+      setPhases((prev) => prev.map((x, i) => (i === idx ? p : x)))
+
+    async function loop() {
+      while (!cancelled) {
+        // RESET
+        setScenarioVisible(false)
+        setRootVisible(false)
+        setPhases(INITIAL)
+        setSynthesisVisible(false)
+        setRoutedCount(0)
+        setStage('idle')
+        setHud('Listening for new events…')
+        await sleep(500)
+        if (cancelled) return
+
+        // INCIDENT LANDS
+        setStage('routing')
+        setHud('New incident captured · Atlanta · Store 7')
+        setScenarioVisible(true)
+        await sleep(1100)
+        if (cancelled) return
+
+        // ONE RECORD
+        setHud('One record created · routing to 3 domains…')
+        setRootVisible(true)
+        await sleep(900)
+        if (cancelled) return
+
+        // FAN OUT TO EACH DOMAIN
+        for (let i = 0; i < DOMAINS.length; i++) {
+          if (cancelled) return
+          setHud(DOMAINS[i].status)
+          setPhase(i, 'routing')
+          await sleep(620)
+          setPhase(i, 'done')
+          setRoutedCount((c) => c + 1)
+          await sleep(420)
+        }
+
+        // SYNTHESIS
+        if (cancelled) return
+        setHud('All three workflows synchronized · full context shared')
+        await sleep(600)
+        setSynthesisVisible(true)
+        setStage('synced')
+        await sleep(6000)
+        if (cancelled) return
+
+        // FADE → loop
+        setStage('reset')
+        await sleep(1000)
+      }
+    }
+
+    loop()
+    return () => { cancelled = true; obs?.disconnect() }
   }, [])
 
-  // Active segment + pulse position.
-  let activeSeg = -1
-  let pulse: { x: number; y: number; color: string } | null = null
-  for (let i = 0; i < SEGS.length; i++) {
-    const segStart = i * SEG_MS
-    if (clock >= segStart && clock < segStart + TRAVEL_MS) {
-      activeSeg = i
-      const p = easeInOut((clock - segStart) / TRAVEL_MS)
-      const a = ptOf(SEGS[i].from)
-      const b = ptOf(SEGS[i].to)
-      pulse = { x: lerp(a.x, b.x, p), y: lerp(a.y, b.y, p), color: colorOf(SEGS[i].to) }
-      break
-    }
-    if (clock >= segStart + TRAVEL_MS && clock < segStart + SEG_MS) { activeSeg = i; break }
-  }
-
-  // Node glow = exponential decay since its most recent arrival.
-  const glowOf = (node: NodeRef): number => {
-    let best = -1
-    for (const a of ARRIVALS) if (a.node === node && a.t <= clock && a.t > best) best = a.t
-    if (best < 0) return node === 'ehs' ? 0.5 : 0.28 // EHS is the resting origin
-    const since = clock - best
-    return 0.32 + 0.68 * Math.exp(-since / 650)
-  }
-
-  const currentEvent = activeSeg >= 0 ? SEGS[activeSeg].event : SEGS[SEGS.length - 1].event
-  const hubGlow = glowOf('hub')
-
   return (
-    <div className="w-full h-full flex flex-col relative" style={{ backgroundColor: '#0e0d0b', color: '#d4d4d4' }}>
-      {/* Grid bg */}
-      <div
-        className="absolute inset-0 pointer-events-none opacity-[0.08]"
-        style={{
-          backgroundImage:
-            'linear-gradient(rgba(255,255,255,0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.15) 1px, transparent 1px)',
-          backgroundSize: '24px 24px',
-        }}
-      />
-
+    <div
+      ref={containerRef}
+      className="relative w-full max-w-[900px] rounded-xl overflow-hidden mx-auto flex flex-col"
+      style={{
+        backgroundColor: '#0a0a08',
+        color: '#d4d4d4',
+        border: '1px solid rgba(255,255,255,0.08)',
+        boxShadow: '0 40px 80px -20px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04) inset',
+      }}
+    >
       {/* Header */}
-      <div className="relative flex items-center justify-between px-4 py-2.5 border-b shrink-0" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+      <div className="relative flex items-center justify-between px-4 py-2.5 border-b shrink-0" style={{ borderColor: ZINC_LINE }}>
         <div className="flex items-center gap-2">
           <Share2 className="w-3.5 h-3.5" style={{ color: '#9a8a70' }} />
-          <span className="text-[11px] font-medium tracking-wide font-mono uppercase" style={{ color: '#e4ded2' }}>
-            Unified Risk Graph
+          <span className="text-[10px] font-medium tracking-wide font-mono uppercase" style={{ color: '#e4ded2' }}>
+            Unified Risk Graph · EHS / GRC / ER
+          </span>
+          <span className="text-[7.5px] uppercase tracking-wider px-1.5 py-[1px] rounded font-mono" style={{ color: AMBER, border: `1px solid ${AMBER}55` }}>
+            1 data model
           </span>
         </div>
-        <div className="flex items-center gap-3 font-mono text-[9.5px]">
-          <span style={{ color: '#6a737d' }}>3 domains</span>
-          <span style={{ color: '#3f3f46' }}>|</span>
-          <span style={{ color: '#86efac' }}>real-time</span>
+        <div className="flex items-center gap-2 font-mono text-[8.5px]">
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ backgroundColor: EMERALD }} />
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ backgroundColor: EMERALD }} />
+          </span>
+          <span style={{ color: '#9a8a70' }}>Live · real-time routing</span>
         </div>
       </div>
 
-      {/* Graph — fills the card */}
-      <div className="relative flex-1 min-h-0">
-        <svg viewBox={`0 0 ${VB_W} ${VB_H}`} width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style={{ display: 'block' }}>
-          <defs>
-            <radialGradient id="hubGlow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#e4ded2" stopOpacity="0.18" />
-              <stop offset="100%" stopColor="#e4ded2" stopOpacity="0" />
-            </radialGradient>
-          </defs>
+      {/* Body */}
+      <div
+        className="relative overflow-hidden"
+        style={{ height: 430, transition: 'opacity 600ms ease', opacity: stage === 'reset' ? 0.15 : 1 }}
+      >
+        {/* Scan-line bg */}
+        <div
+          className="absolute inset-0 pointer-events-none opacity-[0.06]"
+          style={{
+            backgroundImage:
+              'linear-gradient(rgba(255,255,255,0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.15) 1px, transparent 1px)',
+            backgroundSize: '20px 20px',
+          }}
+        />
+        <ParticleField />
 
-          {/* Spokes: hub <-> each domain */}
-          {DOMAINS.map((d) => {
-            const lit = activeSeg >= 0 && (
-              (SEGS[activeSeg].from === 'hub' && SEGS[activeSeg].to === d.key) ||
-              (SEGS[activeSeg].from === d.key && SEGS[activeSeg].to === 'hub')
-            )
-            return (
-              <line
-                key={`spoke-${d.key}`}
-                x1={HUB.x} y1={HUB.y} x2={d.at.x} y2={d.at.y}
-                stroke={lit ? d.color : 'rgba(255,255,255,0.10)'}
-                strokeWidth={lit ? 1.8 : 1}
-                strokeDasharray="4 4"
-                style={{ transition: 'stroke 250ms, stroke-width 250ms' }}
-              />
-            )
-          })}
+        <div className="relative w-full h-full px-4 py-4 flex flex-col">
+          {/* SCENARIO — the incoming incident */}
+          <AnimatePresence>
+            {scenarioVisible && !synthesisVisible && (
+              <motion.div
+                key="scenario"
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.4 }}
+                className="relative mx-auto"
+                style={{ width: 500 }}
+              >
+                <div
+                  className="rounded-lg px-4 py-2.5 flex items-start gap-3"
+                  style={{
+                    backgroundColor: 'rgba(224,145,107,0.06)',
+                    border: `1px solid ${CORAL}55`,
+                    boxShadow: `0 0 20px ${CORAL}22, inset 0 0 12px ${CORAL}10`,
+                  }}
+                >
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" style={{ color: CORAL }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-mono text-[12px] font-semibold" style={{ color: CORAL }}>{SCENARIO.id}</span>
+                      <span className="font-mono text-[8.5px] uppercase tracking-wider" style={{ color: '#9a8a70' }}>{SCENARIO.when}</span>
+                    </div>
+                    <div className="font-mono text-[10px] mt-1" style={{ color: '#cbd5e1' }}>{SCENARIO.facts}</div>
+                    <div className="font-mono text-[9px] mt-1.5 flex items-baseline gap-2">
+                      <span style={{ color: '#6a737d' }}>Captured once</span>
+                      <span style={{ color: '#3f3f46' }}>·</span>
+                      <span style={{ color: '#9a8a70' }}>no duplicate entry</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-mono text-[8px] uppercase tracking-wider" style={{ color: '#6a737d' }}>Severity</div>
+                    <div className="font-mono text-[14px] font-bold mt-0.5" style={{ color: AMBER }}>{SCENARIO.severity}</div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-          {/* Faint perimeter between domains — shows they're all connected */}
-          {[['ehs', 'grc'], ['grc', 'er'], ['er', 'ehs']].map(([a, b]) => (
-            <line
-              key={`perim-${a}-${b}`}
-              x1={BY_KEY[a].at.x} y1={BY_KEY[a].at.y} x2={BY_KEY[b].at.x} y2={BY_KEY[b].at.y}
-              stroke="rgba(255,255,255,0.05)" strokeWidth={0.75} strokeDasharray="2 5"
-            />
-          ))}
+          {/* ROOT + FAN-OUT TREE */}
+          {!synthesisVisible && (
+            <div className="relative flex-1 mt-4">
+              <ConnectorSvg rootVisible={rootVisible} phases={phases} />
 
-          {/* Hub */}
-          <circle cx={HUB.x} cy={HUB.y} r={46} fill="url(#hubGlow)" opacity={0.4 + hubGlow * 0.6} />
-          <circle
-            cx={HUB.x} cy={HUB.y} r={26}
-            fill="#0e0d0b"
-            stroke="#e4ded2" strokeOpacity={0.3 + hubGlow * 0.6} strokeWidth={1.4}
-            style={{ filter: hubGlow > 0.7 ? 'drop-shadow(0 0 10px rgba(228,222,210,0.5))' : 'none', transition: 'all 200ms' }}
-          />
-          <text x={HUB.x} y={HUB.y + 2} textAnchor="middle" fontSize={8} fontFamily="ui-monospace, monospace" fill="#e4ded2" style={{ letterSpacing: '0.04em' }}>
-            DATA
-          </text>
-          <text x={HUB.x} y={HUB.y + 11} textAnchor="middle" fontSize={8} fontFamily="ui-monospace, monospace" fill="#e4ded2" style={{ letterSpacing: '0.04em' }}>
-            MODEL
-          </text>
+              <AnimatePresence>
+                {rootVisible && (
+                  <motion.div
+                    key="root"
+                    initial={{ opacity: 0, scale: 0.92 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.35 }}
+                    className="absolute"
+                    style={{ top: 0, left: '50%', transform: 'translateX(-50%)' }}
+                  >
+                    <RootNode routed={routedCount} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
-          {/* Traveling signal */}
-          {pulse && (
-            <>
-              <circle cx={pulse.x} cy={pulse.y} r={9} fill={pulse.color} opacity={0.18} />
-              <circle cx={pulse.x} cy={pulse.y} r={4.5} fill={pulse.color} style={{ filter: `drop-shadow(0 0 7px ${pulse.color})` }} />
-            </>
+              <div className="absolute inset-x-0 grid grid-cols-3 gap-3 px-6" style={{ top: 76 }}>
+                {DOMAINS.map((d, i) => (
+                  <DomainColumn key={d.key} domain={d} phase={phases[i]} index={i} />
+                ))}
+              </div>
+            </div>
           )}
 
-          {/* Domain nodes */}
-          {DOMAINS.map((d) => {
-            const g = glowOf(d.key)
-            return (
-              <g key={d.key}>
-                <circle
-                  cx={d.at.x} cy={d.at.y} r={30}
-                  fill={d.color} fillOpacity={0.05 + g * 0.10}
-                  stroke={d.color} strokeOpacity={0.28 + g * 0.72} strokeWidth={1.6}
-                  style={{ filter: g > 0.7 ? `drop-shadow(0 0 10px ${d.color}90)` : 'none', transition: 'all 200ms' }}
-                />
-                <text x={d.at.x} y={d.at.y + 4} textAnchor="middle" fontSize={15} fontWeight={700} fontFamily="ui-monospace, monospace" fill={d.color}>
-                  {d.tag}
-                </text>
-                {/* Title + metric below the circle */}
-                <text x={d.at.x} y={d.at.y + 47} textAnchor="middle" fontSize={9} fontFamily="ui-monospace, monospace" fill="#cfc7b8" style={{ textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                  {d.title}
-                </text>
-                <text x={d.at.x} y={d.at.y + 59} textAnchor="middle" fontSize={7.5} fontFamily="ui-monospace, monospace" fill="#6a737d">
-                  {d.metric}
-                </text>
-              </g>
-            )
-          })}
-        </svg>
+          {/* SYNTHESIS */}
+          <div className="absolute inset-0 flex items-center justify-center px-4 pointer-events-none">
+            <AnimatePresence>
+              {synthesisVisible && (
+                <motion.div
+                  key="synthesis"
+                  initial={{ opacity: 0, y: 30, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.5, ease: 'easeOut' }}
+                  className="pointer-events-auto"
+                  style={{ width: 640, maxWidth: '100%' }}
+                >
+                  <SynthesisCard />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
       </div>
 
-      {/* Footer — live event ticker */}
-      <div className="relative px-4 py-2 border-t flex items-center gap-2 shrink-0 font-mono text-[9px]" style={{ borderColor: 'rgba(255,255,255,0.08)', backgroundColor: 'rgba(255,255,255,0.015)' }}>
-        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: '#86efac', boxShadow: '0 0 6px #86efac' }} />
-        <span className="truncate" style={{ color: '#9a8a70' }}>{currentEvent}</span>
+      {/* Footer HUD */}
+      <div
+        className="relative px-4 py-2 border-t flex items-center justify-between shrink-0 font-mono text-[7.5px]"
+        style={{ borderColor: ZINC_LINE, backgroundColor: 'rgba(255,255,255,0.015)' }}
+      >
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <span style={{ color: '#6a737d' }}>Status</span>
+          <span className="truncate" style={{ color: stage === 'synced' ? EMERALD : AMBER }}>{hud}</span>
+          <span style={{ color: AMBER, animation: 'convergence-cursor 0.9s steps(1) infinite' }}>▎</span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span style={{ color: '#6a737d' }}>Domains</span>
+          <span style={{ color: '#9a8a70' }}>EHS · GRC · ER</span>
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes convergence-cursor {
+          0%, 50% { opacity: 1; }
+          51%, 100% { opacity: 0; }
+        }
+        @keyframes convergence-weigh {
+          0%, 100% { opacity: 0.35; }
+          50% { opacity: 1; }
+        }
+      `}</style>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sub-components
+// ─────────────────────────────────────────────────────────────────────────────
+
+function RootNode({ routed }: { routed: number }) {
+  return (
+    <div
+      className="rounded-md px-3 py-1.5 flex items-center gap-2"
+      style={{ backgroundColor: 'rgba(20,20,16,0.95)', border: `1px solid ${AMBER}66`, boxShadow: `0 0 16px ${AMBER}30` }}
+    >
+      <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: AMBER, boxShadow: `0 0 6px ${AMBER}` }} />
+      <span className="font-mono text-[10px] font-semibold tracking-wide uppercase" style={{ color: '#e4ded2' }}>One record</span>
+      <span className="font-mono text-[9px]" style={{ color: '#6a737d' }}>·</span>
+      <span className="font-mono text-[9px]" style={{ color: '#9a8a70' }}>routed to {routed}/3</span>
+    </div>
+  )
+}
+
+function DomainColumn({ domain, phase, index }: { domain: Domain; phase: Phase; index: number }) {
+  const isPending = phase === 'pending'
+  const isRouting = phase === 'routing'
+  const isDone = phase === 'done'
+  const c = domain.color
+
+  return (
+    <div className="relative flex flex-col items-center gap-1.5">
+      {/* Routing strip — the citation the domain matches against */}
+      <div className="h-4 flex items-center justify-center w-full">
+        <AnimatePresence>
+          {isRouting && (
+            <motion.div
+              key="routing"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="font-mono text-[8px] tabular-nums"
+              style={{ color: c, animation: 'convergence-weigh 0.6s ease-in-out infinite' }}
+            >
+              {domain.cite}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Domain node */}
+      <motion.div
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: isPending ? 0.3 : 1, y: 0, scale: isRouting ? 1.04 : 1 }}
+        transition={{ duration: 0.35, delay: index * 0.05 }}
+        className="rounded-md w-full px-2 py-1.5 text-center"
+        style={{
+          backgroundColor: 'rgba(20,20,16,0.85)',
+          backdropFilter: 'blur(6px)',
+          border: `1px solid ${isDone ? `${c}88` : isRouting ? `${c}88` : 'rgba(255,255,255,0.1)'}`,
+          boxShadow: isRouting || isDone ? `0 0 14px ${c}44, inset 0 0 8px ${c}20` : 'none',
+          transition: 'border-color 220ms, box-shadow 220ms',
+        }}
+      >
+        <div className="font-mono text-[11px] font-bold tracking-wide" style={{ color: c }}>{domain.tag}</div>
+        <div className="font-mono text-[8px] uppercase tracking-wider mt-0.5" style={{ color: '#9a8a70' }}>{domain.sub}</div>
+      </motion.div>
+
+      {/* Status pill */}
+      <AnimatePresence>
+        {isDone && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.7 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 380, damping: 22 }}
+            className="rounded-full px-2 py-[2px] font-mono text-[8.5px] font-bold tracking-wider uppercase flex items-center gap-1"
+            style={{ color: c, backgroundColor: `${c}15`, border: `1px solid ${c}55` }}
+          >
+            <span>✓</span>
+            <span>{domain.pill}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Question / what it checked */}
+      <AnimatePresence>
+        {isDone && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            transition={{ duration: 0.3 }}
+            className="font-mono text-[8px] italic text-center px-1"
+            style={{ color: '#6a737d' }}
+          >
+            "{domain.question}"
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Action sprout */}
+      <AnimatePresence>
+        {isDone && (
+          <motion.div
+            initial={{ opacity: 0, y: -6, scale: 0.92 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.32, ease: 'easeOut' }}
+            className="rounded-md w-full px-2 py-1.5 text-center mt-1"
+            style={{ backgroundColor: `${c}0f`, border: `1px solid ${c}55`, boxShadow: `0 0 10px ${c}25` }}
+          >
+            <div className="font-mono text-[7.5px] uppercase tracking-wider mb-0.5" style={{ color: c }}>Action</div>
+            <div className="font-mono text-[9px] leading-tight" style={{ color: '#cbd5e1' }}>{domain.action}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+function ConnectorSvg({ rootVisible, phases }: { rootVisible: boolean; phases: Phase[] }) {
+  const cols = 3
+  return (
+    <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ top: 18, height: 72 }} preserveAspectRatio="none">
+      {Array.from({ length: cols }).map((_, i) => {
+        const xPct = ((i + 0.5) / cols) * 100
+        const active = phases[i] !== 'pending'
+        return (
+          <motion.line
+            key={i}
+            x1="50%"
+            y1="6"
+            x2={`${xPct}%`}
+            y2="62"
+            stroke={active ? DOMAINS[i].color : 'rgba(255,255,255,0.12)'}
+            strokeWidth={active ? 1.3 : 0.8}
+            initial={{ pathLength: 0, opacity: 0 }}
+            animate={{ pathLength: rootVisible ? 1 : 0, opacity: rootVisible ? 1 : 0 }}
+            transition={{ duration: 0.5, delay: i * 0.08 }}
+            style={{
+              filter: active ? `drop-shadow(0 0 4px ${DOMAINS[i].color}aa)` : 'none',
+              transition: 'stroke 240ms, filter 240ms',
+            }}
+          />
+        )
+      })}
+    </svg>
+  )
+}
+
+function SynthesisCard() {
+  return (
+    <div
+      className="rounded-lg px-5 py-4"
+      style={{
+        backgroundColor: 'rgba(20,30,22,0.92)',
+        backdropFilter: 'blur(8px)',
+        border: `1px solid ${EMERALD}66`,
+        boxShadow: `0 0 36px ${EMERALD}33, inset 0 0 16px ${EMERALD}10`,
+      }}
+    >
+      <div className="flex items-baseline gap-2 mb-3">
+        <span className="font-mono text-[11px] font-semibold uppercase tracking-wider" style={{ color: EMERALD }}>
+          One incident → three synchronized workflows
+        </span>
+      </div>
+
+      <div className="grid grid-cols-4 gap-3">
+        {SYNTHESIS.stats.map((s, i) => (
+          <div key={s.label}>
+            <div className="font-mono text-[8px] uppercase tracking-wider" style={{ color: '#6a737d' }}>{s.label}</div>
+            <div
+              className="font-mono font-semibold tabular-nums text-[16px]"
+              style={{ color: i === 1 ? EMERALD : i === 0 ? EMERALD : '#cbd5e1', marginTop: 2 }}
+            >
+              {s.value}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 pt-3 border-t flex items-center gap-3 font-mono text-[9px]" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+        <span style={{ color: '#6a737d' }}>Siloed tools: <span style={{ color: '#cbd5e1' }}>3 separate entries across 3 systems, context lost</span></span>
+        <span style={{ color: '#3f3f46' }}>·</span>
+        <span>Matcha: <span style={{ color: EMERALD, fontWeight: 600 }}>1 record, shared everywhere</span></span>
       </div>
     </div>
+  )
+}
+
+function ParticleField() {
+  const particles = Array.from({ length: 12 }).map((_, i) => ({
+    id: i,
+    x: Math.random() * 100,
+    y: Math.random() * 100,
+    duration: 4 + Math.random() * 5,
+    delay: Math.random() * 3,
+  }))
+  return (
+    <>
+      {particles.map((p) => (
+        <motion.div
+          key={p.id}
+          className="absolute rounded-full"
+          style={{ width: 2, height: 2, backgroundColor: EMERALD, opacity: 0.3, left: `${p.x}%`, top: `${p.y}%` }}
+          animate={{ y: [0, -40, 0], opacity: [0, 0.5, 0], scale: [0.5, 1.2, 0.5] }}
+          transition={{ duration: p.duration, repeat: Infinity, delay: p.delay, ease: 'easeInOut' }}
+        />
+      ))}
+    </>
   )
 }
