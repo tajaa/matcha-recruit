@@ -213,6 +213,81 @@ class FinchHRISService:
                     out[iid] = body
         return out
 
+    # ------------------------------------------------------------------
+    # Benefits / deductions WRITE (Finch Deductions product)
+    #
+    # Only providers Finch supports for deductions-write expose these (e.g.
+    # QuickBooks, Gusto, ADP). Square Payroll does NOT — calls 404/501 there.
+    # Writes are async: POST returns a job_id; poll get_job() until complete.
+    # ------------------------------------------------------------------
+    async def get_benefit_meta(self, config: dict, secrets: dict) -> list[dict]:
+        """List the benefit types the connected provider supports (the write schema)."""
+        token = await self.authenticate(config, secrets)
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            resp = await self._request_with_retry(
+                client, "GET", f"{FINCH_BASE_URL}/employer/benefits/meta",
+                headers=self._headers(token),
+            )
+        if resp.status_code != 200:
+            raise HRISProvisioningError(
+                "benefits_unsupported",
+                f"Finch benefits not supported for this connection ({resp.status_code})",
+            )
+        body = resp.json()
+        return body if isinstance(body, list) else (body.get("supported_benefits") or [])
+
+    async def list_benefits(self, config: dict, secrets: dict) -> list[dict]:
+        """List company-level benefits already configured in the provider."""
+        token = await self.authenticate(config, secrets)
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            resp = await self._request_with_retry(
+                client, "GET", f"{FINCH_BASE_URL}/employer/benefits",
+                headers=self._headers(token),
+            )
+        if resp.status_code != 200:
+            raise HRISProvisioningError(
+                "benefits_read_failed", f"Finch list benefits failed: {resp.status_code}",
+            )
+        body = resp.json()
+        return body if isinstance(body, list) else (body.get("benefits") or [])
+
+    async def create_benefit(
+        self, config: dict, secrets: dict, *,
+        benefit_type: str, description: str, frequency: str,
+    ) -> dict:
+        """Create a company-level benefit/deduction. Returns {benefit_id, job_id}.
+
+        The write is async — Finch returns a job_id; the benefit becomes readable
+        once the job completes. Poll get_job(job_id) for status.
+        """
+        token = await self.authenticate(config, secrets)
+        payload = {"type": benefit_type, "description": description, "frequency": frequency}
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            resp = await self._request_with_retry(
+                client, "POST", f"{FINCH_BASE_URL}/employer/benefits",
+                headers=self._headers(token), json=payload,
+            )
+        if resp.status_code not in (200, 201):
+            raise HRISProvisioningError(
+                "benefit_create_failed",
+                f"Finch create benefit failed ({resp.status_code}): {resp.text[:200]}",
+            )
+        return resp.json()
+
+    async def get_job(self, config: dict, secrets: dict, job_id: str) -> dict:
+        """Poll an async Finch job (e.g. a benefits write). Returns the job body."""
+        token = await self.authenticate(config, secrets)
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            resp = await self._request_with_retry(
+                client, "GET", f"{FINCH_BASE_URL}/jobs/automated/{job_id}",
+                headers=self._headers(token),
+            )
+        if resp.status_code != 200:
+            raise HRISProvisioningError(
+                "job_read_failed", f"Finch job poll failed: {resp.status_code}",
+            )
+        return resp.json()
+
     @staticmethod
     def normalize_worker(finch_record: dict) -> dict:
         """Convert a merged Finch record to flat Matcha employee format.

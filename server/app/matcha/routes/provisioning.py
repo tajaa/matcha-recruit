@@ -38,7 +38,7 @@ from ..services.onboarding_orchestrator import (
     start_google_workspace_onboarding,
     start_slack_onboarding,
 )
-from ..services.hris_service import PROVIDER_HRIS
+from ..services.hris_service import PROVIDER_HRIS, HRISProvisioningError
 
 router = APIRouter()
 
@@ -2114,6 +2114,113 @@ async def create_finch_sandbox_connection(
         )
 
     return _hris_connection_status_payload(row)
+
+
+# ---------------------------------------------------------------------------
+# Finch benefits / deductions WRITE
+#
+# Matcha -> Finch -> payroll provider. Only providers Finch supports for
+# deductions-write expose these (QuickBooks, Gusto, ADP, …). Square Payroll does
+# NOT. Writes are async — POST returns a job_id; poll the job endpoint.
+# ---------------------------------------------------------------------------
+async def _load_finch_for_benefits(company_id):
+    """Load the company's HRIS connection for a benefits write; return (config, secrets, service).
+
+    Raises 404 if not connected, 400 if the connection isn't a Finch connection
+    (benefits write is routed through Finch's Deductions product only).
+    """
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT config, secrets FROM integration_connections WHERE company_id = $1 AND provider = $2",
+            company_id, PROVIDER_HRIS,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="HRIS is not connected for this company")
+
+    config = row["config"] if isinstance(row["config"], dict) else json.loads(row["config"])
+    if config.get("mode") != "finch":
+        raise HTTPException(
+            status_code=400,
+            detail="Benefits write is available only on Finch-connected HRIS.",
+        )
+    secrets_raw = row["secrets"] if isinstance(row["secrets"], dict) else json.loads(row["secrets"] or "{}")
+    secrets = {}
+    for key, value in secrets_raw.items():
+        try:
+            secrets[key] = decrypt_secret(value)
+        except Exception:
+            secrets[key] = value
+
+    from ..services.finch_service import FinchHRISService
+    return config, secrets, FinchHRISService()
+
+
+class BenefitCreateRequest(BaseModel):
+    type: str = Field(..., description="Benefit type, e.g. '401k' — must be in /hris/benefits/meta")
+    description: str = Field(..., min_length=1, max_length=255)
+    frequency: str = Field("every_paycheck", description="Deduction frequency the provider supports")
+
+
+@router.get("/hris/benefits/meta",
+            dependencies=[Depends(require_any_feature("hris_finch", "hris_import"))])
+async def get_hris_benefit_meta(current_user: CurrentUser = Depends(require_admin_or_client)):
+    """List the benefit/deduction types the connected provider supports (the write schema)."""
+    company_id = await get_client_company_id(current_user)
+    config, secrets, service = await _load_finch_for_benefits(company_id)
+    try:
+        return await service.get_benefit_meta(config, secrets)
+    except HRISProvisioningError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/hris/benefits",
+            dependencies=[Depends(require_any_feature("hris_finch", "hris_import"))])
+async def list_hris_benefits(current_user: CurrentUser = Depends(require_admin_or_client)):
+    """List company-level benefits already configured in the connected provider."""
+    company_id = await get_client_company_id(current_user)
+    config, secrets, service = await _load_finch_for_benefits(company_id)
+    try:
+        return await service.list_benefits(config, secrets)
+    except HRISProvisioningError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/hris/benefits",
+             dependencies=[Depends(require_any_feature("hris_finch", "hris_import"))])
+async def create_hris_benefit(
+    request: BenefitCreateRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Create a company-level benefit/deduction in the provider via Finch.
+
+    Async: returns {benefit_id, job_id}. Poll GET /hris/benefits/job/{job_id}
+    until complete; the benefit is then readable via GET /hris/benefits.
+    """
+    company_id = await get_client_company_id(current_user)
+    config, secrets, service = await _load_finch_for_benefits(company_id)
+    try:
+        result = await service.create_benefit(
+            config, secrets,
+            benefit_type=request.type, description=request.description, frequency=request.frequency,
+        )
+    except HRISProvisioningError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
+
+
+@router.get("/hris/benefits/job/{job_id}",
+            dependencies=[Depends(require_any_feature("hris_finch", "hris_import"))])
+async def get_hris_benefit_job(
+    job_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Poll an async Finch benefits-write job."""
+    company_id = await get_client_company_id(current_user)
+    config, secrets, service = await _load_finch_for_benefits(company_id)
+    try:
+        return await service.get_job(config, secrets, job_id)
+    except HRISProvisioningError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/hris/finch/callback")
