@@ -69,7 +69,7 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
       return
     }
     if (!form.description.trim()) {
-      setSubmitError('Add a description so the AI can categorize the incident.')
+      setSubmitError('Add a description so Intelligent Theme Analysis can categorize the incident.')
       return
     }
     setSaving(true)
@@ -149,7 +149,7 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
           required
           value={form.description}
           onChange={(e) => setForm({ ...form, description: e.target.value })}
-          placeholder="What happened? Include relevant details — the AI will categorize from this."
+          placeholder="What happened? Include relevant details — Intelligent Theme Analysis will categorize from this."
         />
 
         {/* These names persist to the witnesses column (role=witness in the

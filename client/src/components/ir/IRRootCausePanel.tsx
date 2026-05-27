@@ -26,7 +26,7 @@ export function IRRootCausePanel({ incidentId, result: externalResult, onResult 
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">AI Root Cause Analysis</h3>
+        <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Intelligent Theme Analysis · Root Cause</h3>
         <Button variant="ghost" size="sm" disabled={stream.streaming}
           onClick={() => stream.runAnalysis('root-cause')}>
           {stream.streaming ? 'Analyzing...' : 'Run'}

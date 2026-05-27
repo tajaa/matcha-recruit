@@ -167,7 +167,7 @@ export default function LocationIntake() {
             onChange={(e) => setDescription(e.target.value)}
             rows={6}
             maxLength={10000}
-            placeholder="What happened? Include relevant details — the AI will categorize from this."
+            placeholder="What happened? Include relevant details — Intelligent Theme Analysis will categorize from this."
             className={inputCls}
           />
         </Field>

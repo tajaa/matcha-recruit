@@ -225,7 +225,7 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
             <div className="flex items-center justify-between mb-3">
               <h2 className="flex items-center gap-2 text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
                 <AlertTriangle className="w-3.5 h-3.5" />
-                AI Themes · last {insights?.period_days ?? days} days
+                Intelligent Theme Analysis · last {insights?.period_days ?? days} days
               </h2>
               {insights && (
                 <span className="text-[10px] text-zinc-600 font-mono">

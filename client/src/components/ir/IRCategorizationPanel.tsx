@@ -30,7 +30,7 @@ export function IRCategorizationPanel({ incidentId, result: externalResult, onRe
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">AI Categorization</h3>
+        <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Intelligent Theme Analysis</h3>
         <Button variant="ghost" size="sm" disabled={loading} onClick={run}>
           {loading ? 'Running...' : 'Run'}
         </Button>

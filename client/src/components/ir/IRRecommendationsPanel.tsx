@@ -26,7 +26,7 @@ export function IRRecommendationsPanel({ incidentId, result: externalResult, onR
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">AI Recommendations</h3>
+        <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Intelligent Theme Analysis · Recommendations</h3>
         <Button variant="ghost" size="sm" disabled={stream.streaming}
           onClick={() => stream.runAnalysis('recommendations')}>
           {stream.streaming ? 'Analyzing...' : 'Run'}
