@@ -34,6 +34,7 @@ from .candidate import CandidateEmailMixin
 from .compliance import ComplianceEmailMixin
 from .training import TrainingEmailMixin
 from .misc import MiscEmailMixin
+from .broker import BrokerEmailMixin
 
 
 class EmailService(
@@ -43,6 +44,7 @@ class EmailService(
     ComplianceEmailMixin,
     TrainingEmailMixin,
     MiscEmailMixin,
+    BrokerEmailMixin,
 ):
     """Service for sending emails via Gmail API.
 

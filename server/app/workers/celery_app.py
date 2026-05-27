@@ -40,6 +40,7 @@ celery_app = Celery(
         "app.workers.tasks.training_cadence",
         "app.workers.tasks.mention_email",
         "app.workers.tasks.handbook_audit",
+        "app.workers.tasks.broker_risk_alerts",
     ],
 )
 
@@ -213,6 +214,13 @@ def on_worker_ready(**kwargs):
         run_training_cadence.delay()
     else:
         print("[Worker] Training cadence scheduler is disabled, skipping.")
+
+    from app.workers.tasks.broker_risk_alerts import run_broker_risk_alerts
+
+    if _is_scheduler_enabled("broker_risk_alerts"):
+        run_broker_risk_alerts.delay()
+    else:
+        print("[Worker] Broker risk alerts scheduler is disabled, skipping.")
 
 
 # ── Server error reporter integration ───────────────────────────────────────

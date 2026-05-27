@@ -6,6 +6,7 @@ import type {
   BrokerClientDetailResponse,
   BrokerLiteReferralToken,
   BrokerLiteReferralTokenListResponse,
+  BrokerRiskAlertsResponse,
 } from '../types/broker'
 
 export function fetchBrokerPortfolio() {
@@ -38,4 +39,14 @@ export function createLiteReferralToken(label?: string, expiresDays?: number, pa
 
 export function deactivateLiteReferralToken(tokenId: string) {
   return api.delete<{ status: string }>(`/brokers/lite-referral-tokens/${tokenId}`)
+}
+
+export function fetchBrokerRiskAlerts(includeResolved = false) {
+  return api.get<BrokerRiskAlertsResponse>(
+    `/brokers/risk-alerts${includeResolved ? '?include_resolved=true' : ''}`,
+  )
+}
+
+export function markBrokerRiskAlertRead(alertId: string) {
+  return api.post<{ status: string }>(`/brokers/risk-alerts/${alertId}/read`, {})
 }

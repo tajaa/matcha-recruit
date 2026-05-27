@@ -1,3 +1,33 @@
+// --- Risk-trend alerts ---
+
+export type BrokerRiskMetricKey =
+  | 'trir'
+  | 'dart'
+  | 'lost_days'
+  | 'claim_free_broken'
+  | 'premium_increase'
+
+export interface BrokerRiskAlert {
+  id: string
+  company_id: string
+  company_name: string
+  metric_key: BrokerRiskMetricKey
+  severity: 'warning' | 'critical'
+  current_value: number | null
+  prior_value: number | null
+  delta_pct: number | null
+  message: string
+  is_read: boolean
+  first_alerted_at: string | null
+  last_alerted_at: string | null
+  resolved_at: string | null
+}
+
+export interface BrokerRiskAlertsResponse {
+  alerts: BrokerRiskAlert[]
+  active_unread: number
+}
+
 // --- Portfolio reporting ---
 
 export interface BrokerPortfolioSummary {
