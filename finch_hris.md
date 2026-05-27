@@ -109,3 +109,34 @@ Sources: Merge Time Off (https://docs.merge.dev/hris/time-off/), Merge Timesheet
 (https://docs.merge.dev/hris/timesheet-entries/), Merge Employer Benefits (read)
 (https://docs.merge.dev/hris/employer-benefits/), Finch Write Data
 (https://developer.tryfinch.com/implementation-guide/API-Calls/Write-Data)
+
+QuickBooks via Finch = easy. The hoops are on the direct Intuit API, and Finch absorbs them.
+
+From Finch's QuickBooks Online Payroll page:
+
+- Automated integration — read and write, near-real-time (not the slow "assisted" path).
+- Supports the Deductions product (benefits write). Sandbox gave 15 benefit types — testable now.
+- On gating: "All Intuit APIs and SDKs are gated — you must become an approved partner before production
+  credentials, plus an annual security assessment." That's the direct path. The Finch path lists no
+  app-review/partnership requirement — Finch is the approved partner; you ride on top. That's the whole point of
+  going through Finch.
+
+Contrast: Gusto and ADP stay "gated APIs requiring business-development efforts" even through Finch (provider-side
+approval/marketplace). QuickBooks doesn't push that onto you.
+
+So your easy, non-Gusto/non-ADP, deductions-write options:
+
+- QuickBooks Online Payroll — automated, write, no provider hoops. Best pick.
+- Rippling — automated; Finch is an approved developer partner, so no per-customer Rippling approval.
+- Paycor — listed as automated and assisted (write may route through the slower 2-business-day assisted path).
+
+One caveat that's Finch-side, not provider-side: enabling write/Deductions in production usually requires Finch to
+turn that product on for your Finch app (a one-time Finch onboarding step) — but that's per-Finch-app, not the
+per-provider partner gauntlet Gusto/ADP impose.
+
+Sources:
+
+- QuickBooks Online Payroll | Finch (https://www.tryfinch.com/integrations/quickbooks-online-payroll)
+- Finch Deductions API (https://www.tryfinch.com/product/deductions)
+- Rippling | Finch (https://www.tryfinch.com/integrations/rippling)
+- Write Deductions — Finch dev guide (https://developer.tryfinch.com/implementation-guide/API-Calls/Write-Data)
