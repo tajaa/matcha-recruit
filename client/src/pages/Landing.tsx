@@ -46,10 +46,10 @@ const DEFAULT_SIZZLES: LandingSizzleVideo[] = [
     url: null,
   },
   {
-    id: 'ai',
-    title: 'AI integration, analyzed.',
+    id: 'termination',
+    title: 'Separation risk, mapped.',
     caption:
-      'Independent evaluation of the AI tools you\u2019re considering — surfacing compliance, bias, and operational risk before you deploy.',
+      'Pre-termination analysis across documentation, policy adherence, legal exposure, and consistency — so every separation decision is defensible.',
     url: null,
   },
 ]

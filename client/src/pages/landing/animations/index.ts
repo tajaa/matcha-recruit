@@ -9,15 +9,15 @@ const RiskAssessmentAnimation = lazy(() =>
 const InvestigationTimelineAnimation = lazy(() =>
   import('./InvestigationTimelineAnimation').then((m) => ({ default: m.InvestigationTimelineAnimation })),
 )
-const AIEvaluationAnimation = lazy(() =>
-  import('./AIEvaluationAnimation').then((m) => ({ default: m.AIEvaluationAnimation })),
+const PreTerminationAnimation = lazy(() =>
+  import('./PreTerminationAnimation').then((m) => ({ default: m.PreTerminationAnimation })),
 )
 
-export { CompensationAnimation, RiskAssessmentAnimation, InvestigationTimelineAnimation, AIEvaluationAnimation }
+export { CompensationAnimation, RiskAssessmentAnimation, InvestigationTimelineAnimation, PreTerminationAnimation }
 
 export const ANIMATION_BY_SIZZLE_ID: Record<string, LazyExoticComponent<ComponentType>> = {
   hr: CompensationAnimation,
   grc: RiskAssessmentAnimation,
   er: InvestigationTimelineAnimation,
-  ai: AIEvaluationAnimation,
+  termination: PreTerminationAnimation,
 }
