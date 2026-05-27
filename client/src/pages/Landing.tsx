@@ -21,7 +21,7 @@ const DISPLAY = 'var(--font-display)'
 
 const HERO_HEADLINE = 'The Platform: Agentic Risk Management'
 const HERO_SUBCOPY =
-  'Bespoke HR, governance, employee relations, and AI integration consulting — for organizations that can\u2019t afford to guess.'
+  'EHS, governance & compliance, and employee relations — usually three siloed systems. Matcha runs them on one platform, where every signal talks to the others.'
 
 const DEFAULT_SIZZLES: LandingSizzleVideo[] = [
   {
@@ -70,6 +70,8 @@ export default function Landing() {
       <Hero data={data} onContactClick={() => setIsPricingOpen(true)} />
 
       <main>
+        <ConvergenceSection />
+
         {sizzles.map((s, i) => (
           <ProductSizzle key={s.id} sizzle={s} reverse={i % 2 === 1} />
         ))}
@@ -403,6 +405,73 @@ function SizzleVisual({ sizzle }: { sizzle: LandingSizzleVideo }) {
         )}
       </div>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Convergence — the "EHS + GRC + ER on one platform" selling point
+// ---------------------------------------------------------------------------
+
+const CONVERGENCE_DOMAINS: { tag: string; title: string; blurb: string }[] = [
+  {
+    tag: 'EHS',
+    title: 'Environmental, Health & Safety',
+    blurb: 'Incident intake, OSHA logs, workplace-violence prevention, and hazard tracking.',
+  },
+  {
+    tag: 'GRC',
+    title: 'Governance, Risk & Compliance',
+    blurb: 'Jurisdiction-aware compliance monitoring, policy gaps, and audit-ready frameworks.',
+  },
+  {
+    tag: 'ER',
+    title: 'Employee Relations',
+    blurb: 'Investigations, progressive discipline, separation risk, and ER case strategy.',
+  },
+]
+
+function ConvergenceSection() {
+  return (
+    <section className="py-20 sm:py-28 border-t" style={{ borderColor: LINE }}>
+      <div className="max-w-[1440px] mx-auto px-5 sm:px-10">
+        <div className="max-w-3xl">
+          <div className="text-[11px] uppercase tracking-wider font-medium mb-3" style={{ color: MUTED }}>
+            One platform
+          </div>
+          <h2
+            className="tracking-tight"
+            style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(1.875rem, 4vw, 3rem)', lineHeight: 1.05 }}
+          >
+            Three disciplines that finally talk to each other.
+          </h2>
+          <p className="mt-5 text-lg" style={{ color: MUTED, lineHeight: 1.6 }}>
+            EHS, GRC, and employee relations are usually bought as separate tools that never share a record. On
+            Matcha they run on one data model — a safety incident, a compliance gap, and an ER case all inform each
+            other in real time, so risk surfaces before it compounds.
+          </p>
+        </div>
+
+        <div className="mt-10 sm:mt-14 grid md:grid-cols-3 gap-px rounded-xl overflow-hidden" style={{ backgroundColor: LINE }}>
+          {CONVERGENCE_DOMAINS.map((d) => (
+            <div key={d.tag} className="flex flex-col p-6 sm:p-7" style={{ backgroundColor: BG }}>
+              <span
+                className="inline-flex items-center self-start text-[11px] font-mono font-medium px-2 py-1 rounded mb-4"
+                style={{ color: INK, border: `1px solid ${LINE}` }}
+              >
+                {d.tag}
+              </span>
+              <h3 className="text-base font-medium" style={{ color: INK }}>{d.title}</h3>
+              <p className="mt-2 text-sm" style={{ color: MUTED, lineHeight: 1.55 }}>{d.blurb}</p>
+            </div>
+          ))}
+        </div>
+
+        <p className="mt-6 text-sm" style={{ color: MUTED }}>
+          Shared signal across all three: an incident pattern raises a compliance flag, which opens an ER case —
+          automatically, with the full thread of context attached.
+        </p>
+      </div>
+    </section>
   )
 }
 
