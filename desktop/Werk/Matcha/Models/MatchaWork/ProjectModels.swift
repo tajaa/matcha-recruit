@@ -1152,43 +1152,57 @@ enum KanbanTemplate: String, CaseIterable, Identifiable {
 enum PacificDateFormatter {
     private static let pacific = TimeZone(identifier: "America/Los_Angeles") ?? .current
 
+    // Formatters are expensive to allocate (each builds ICU state, ~10–50µs).
+    // The kanban board parses/formats timestamps inside a GeometryReader that
+    // re-evaluates every frame on window resize, across every card and every
+    // sort comparison — allocating per call pinned resize to ~11fps. These are
+    // reused statics instead. Two ISO parsers (one per formatOptions variant)
+    // so nothing mutates `formatOptions` at call time, which keeps them safe to
+    // share; DateFormatter read methods are documented thread-safe likewise.
+    private static let isoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let isoPlain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+    private static func makeFormatter(_ format: String) -> DateFormatter {
+        let f = DateFormatter()
+        f.timeZone = pacific
+        f.dateFormat = format
+        return f
+    }
+    private static let shortFmt = makeFormatter("MMM d")
+    private static let absoluteFmt = makeFormatter("MMM d, h:mm a")
+    private static let dateTimeFmt = makeFormatter("MMM d 'at' h:mm a")
+
     /// Parse an ISO8601 string, tolerating both fractional-seconds and plain
     /// internet-datetime variants (mirrors TaskClipboardExporter.formatHistoryDate).
     static func parse(_ iso: String?) -> Date? {
         guard let iso, !iso.isEmpty else { return nil }
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f.date(from: iso) { return d }
-        f.formatOptions = [.withInternetDateTime]
-        return f.date(from: iso)
+        return isoFractional.date(from: iso) ?? isoPlain.date(from: iso)
     }
 
     /// Short Pacific date, e.g. "May 20" (no time). For compact card lines.
     static func shortDate(_ iso: String?) -> String? {
         guard let date = parse(iso) else { return nil }
-        let out = DateFormatter()
-        out.timeZone = pacific
-        out.dateFormat = "MMM d"
-        return out.string(from: date)
+        return shortFmt.string(from: date)
     }
 
     /// Absolute Pacific time, e.g. "May 20, 2:15 PM PT".
     static func absolute(_ iso: String?) -> String? {
         guard let date = parse(iso) else { return nil }
-        let out = DateFormatter()
-        out.timeZone = pacific
-        out.dateFormat = "MMM d, h:mm a"
-        return out.string(from: date) + " PT"
+        return absoluteFmt.string(from: date) + " PT"
     }
 
     /// Pacific date + time, e.g. "May 20 at 5:23 PM". For the kanban card
     /// timestamp line so the exact wait-start is visible.
     static func dateTime(_ iso: String?) -> String? {
         guard let date = parse(iso) else { return nil }
-        let out = DateFormatter()
-        out.timeZone = pacific
-        out.dateFormat = "MMM d 'at' h:mm a"
-        return out.string(from: date)
+        return dateTimeFmt.string(from: date)
     }
 
     /// Compact relative ("just now", "2h ago", "3d ago"); falls back to a short
@@ -1200,9 +1214,6 @@ enum PacificDateFormatter {
         if secs < 3600 { return "\(secs / 60)m ago" }
         if secs < 86400 { return "\(secs / 3600)h ago" }
         if secs < 7 * 86400 { return "\(secs / 86400)d ago" }
-        let out = DateFormatter()
-        out.timeZone = pacific
-        out.dateFormat = "MMM d"
-        return out.string(from: date)
+        return shortFmt.string(from: date)
     }
 }

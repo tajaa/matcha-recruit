@@ -48,6 +48,14 @@
 		AA11BB22CC33DD44EE550009 /* InboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660009 /* InboxView.swift */; };
 		AA11BB22CC33DD44EE55000A /* InboxComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66000A /* InboxComposeView.swift */; };
 		AA11BB22CC33DD44EE55000B /* KanbanBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66000B /* KanbanBoardView.swift */; };
+		DEADBEEF000000000000B001 /* AIComposeBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F001 /* AIComposeBar.swift */; };
+		DEADBEEF000000000000B002 /* AttachmentRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F002 /* AttachmentRow.swift */; };
+		DEADBEEF000000000000B003 /* AIDraftReview.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F003 /* AIDraftReview.swift */; };
+		DEADBEEF000000000000B004 /* TaskCompose.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F004 /* TaskCompose.swift */; };
+		DEADBEEF000000000000B005 /* DealCompose.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F005 /* DealCompose.swift */; };
+		DEADBEEF000000000000B006 /* TaskEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F006 /* TaskEditor.swift */; };
+		DEADBEEF000000000000B007 /* KanbanCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F007 /* KanbanCard.swift */; };
+		DEADBEEF000000000000B008 /* KanbanSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F008 /* KanbanSearch.swift */; };
 		AA11BB22CC33DD44EE55000C /* ProjectFilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66000C /* ProjectFilesView.swift */; };
 		AA11BB22CC33DD44EE5500F1 /* AttachmentPreviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE6600F1 /* AttachmentPreviewSheet.swift */; };
 		AA11BB22CC33DD44EE5500F2 /* TaskViewerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE6600F2 /* TaskViewerSheet.swift */; };
@@ -160,6 +168,14 @@
 		AA11BB22CC33DD44EE660009 /* InboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE66000A /* InboxComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxComposeView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE66000B /* KanbanBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanbanBoardView.swift; sourceTree = "<group>"; };
+		DEADBEEF000000000000F001 /* AIComposeBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIComposeBar.swift; sourceTree = "<group>"; };
+		DEADBEEF000000000000F002 /* AttachmentRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentRow.swift; sourceTree = "<group>"; };
+		DEADBEEF000000000000F003 /* AIDraftReview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIDraftReview.swift; sourceTree = "<group>"; };
+		DEADBEEF000000000000F004 /* TaskCompose.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskCompose.swift; sourceTree = "<group>"; };
+		DEADBEEF000000000000F005 /* DealCompose.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DealCompose.swift; sourceTree = "<group>"; };
+		DEADBEEF000000000000F006 /* TaskEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskEditor.swift; sourceTree = "<group>"; };
+		DEADBEEF000000000000F007 /* KanbanCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanbanCard.swift; sourceTree = "<group>"; };
+		DEADBEEF000000000000F008 /* KanbanSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanbanSearch.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE66000C /* ProjectFilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFilesView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE6600F1 /* AttachmentPreviewSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentPreviewSheet.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE6600F2 /* TaskViewerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskViewerSheet.swift; sourceTree = "<group>"; };
@@ -332,6 +348,14 @@
 				BB01CC22DD33EE44FF660002 /* BlogEditorView.swift */,
 				BB01CC22DD33EE44FF660003 /* MarkdownPreviewView.swift */,
 				AA11BB22CC33DD44EE66000B /* KanbanBoardView.swift */,
+				DEADBEEF000000000000F001 /* AIComposeBar.swift */,
+				DEADBEEF000000000000F002 /* AttachmentRow.swift */,
+				DEADBEEF000000000000F003 /* AIDraftReview.swift */,
+				DEADBEEF000000000000F004 /* TaskCompose.swift */,
+				DEADBEEF000000000000F005 /* DealCompose.swift */,
+				DEADBEEF000000000000F006 /* TaskEditor.swift */,
+				DEADBEEF000000000000F007 /* KanbanCard.swift */,
+				DEADBEEF000000000000F008 /* KanbanSearch.swift */,
 				AA11BB22CC33DD44EE66000C /* ProjectFilesView.swift */,
 				AA11BB22CC33DD44EE6600F1 /* AttachmentPreviewSheet.swift */,
 				AA11BB22CC33DD44EE6600F2 /* TaskViewerSheet.swift */,
@@ -668,6 +692,14 @@
 				AA11BB22CC33DD44EE550009 /* InboxView.swift in Sources */,
 				AA11BB22CC33DD44EE55000A /* InboxComposeView.swift in Sources */,
 				AA11BB22CC33DD44EE55000B /* KanbanBoardView.swift in Sources */,
+				DEADBEEF000000000000B001 /* AIComposeBar.swift in Sources */,
+				DEADBEEF000000000000B002 /* AttachmentRow.swift in Sources */,
+				DEADBEEF000000000000B003 /* AIDraftReview.swift in Sources */,
+				DEADBEEF000000000000B004 /* TaskCompose.swift in Sources */,
+				DEADBEEF000000000000B005 /* DealCompose.swift in Sources */,
+				DEADBEEF000000000000B006 /* TaskEditor.swift in Sources */,
+				DEADBEEF000000000000B007 /* KanbanCard.swift in Sources */,
+				DEADBEEF000000000000B008 /* KanbanSearch.swift in Sources */,
 				AA11BB22CC33DD44EE55000C /* ProjectFilesView.swift in Sources */,
 				AA11BB22CC33DD44EE5500F1 /* AttachmentPreviewSheet.swift in Sources */,
 				AA11BB22CC33DD44EE5500F2 /* TaskViewerSheet.swift in Sources */,
