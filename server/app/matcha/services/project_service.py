@@ -153,6 +153,7 @@ async def create_project(
     title: str = "Untitled Project",
     project_type: str = "general",
     hiring_client_id: Optional[UUID] = None,
+    icon: Optional[str] = None,
     extra_data: Optional[dict] = None,
 ) -> dict:
     if project_type not in _ALLOWED_PROJECT_TYPES:
@@ -193,12 +194,12 @@ async def create_project(
         async with conn.transaction():
             row = await conn.fetchrow(
                 """
-                INSERT INTO mw_projects (company_id, created_by, title, project_type, hiring_client_id, project_data)
-                VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+                INSERT INTO mw_projects (company_id, created_by, title, project_type, hiring_client_id, project_data, icon)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
                 RETURNING *
                 """,
                 company_id, user_id, title, project_type, hiring_client_id,
-                json.dumps(initial_project_data),
+                json.dumps(initial_project_data), icon,
             )
 
             # Optional starter template — seed the project's `sections` JSONB
@@ -450,7 +451,7 @@ async def update_project(project_id: UUID, updates: dict) -> dict:
             # per-user via mw_project_pins. The route intercepts is_pinned
             # before calling this service. The global column on mw_projects
             # is kept for backfill/legacy reads only.
-            allowed = {"title", "status", "hiring_client_id"}
+            allowed = {"title", "status", "hiring_client_id", "icon"}
             sets = []
             vals = []
             idx = 1

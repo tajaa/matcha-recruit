@@ -2942,6 +2942,7 @@ async def create_project_endpoint(
         raise HTTPException(status_code=400, detail="No company associated")
     title = body.get("title", "Untitled Project")
     project_type = body.get("project_type", "general")
+    icon = body.get("icon")
     hiring_client_id_raw = body.get("hiring_client_id")
     hiring_client_id = UUID(hiring_client_id_raw) if hiring_client_id_raw else None
 
@@ -2967,7 +2968,7 @@ async def create_project_endpoint(
     try:
         return await proj_svc.create_project(
             company_id, current_user.id, title, project_type,
-            hiring_client_id=hiring_client_id, extra_data=extra_data,
+            hiring_client_id=hiring_client_id, icon=icon, extra_data=extra_data,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -3079,6 +3080,58 @@ async def get_project_endpoint(
     """Get a project with its chat list."""
     project, _role = await _verify_project_access(project_id, current_user)
     return project
+
+
+@router.get("/projects/{project_id}/bundle")
+async def get_project_bundle_endpoint(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """One-shot collab project open for the desktop (werk) client: project
+    detail + kanban tasks (with embedded attachments) + files + folders + links
+    + collaborators + elements in a single round-trip.
+
+    Each field is produced by the SAME service call + post-processing as the
+    individual endpoint (GET …/tasks, …/files, …/folders, …/links,
+    …/collaborators, …/elements), so the client decodes + caches them
+    identically. Verifies access ONCE, then runs the six independent reads
+    concurrently — replacing the ~6 sequential round-trips the client used to
+    fire on every project open."""
+    from ..services import project_task_service as pt_svc
+    from ..services import project_file_service
+    from ..services import project_service as proj_svc
+
+    project, _role = await _verify_project_access(project_id, current_user)
+
+    async def _tasks_with_attachments() -> list[dict]:
+        # Mirror list_project_tasks_endpoint: embed presigned attachments per
+        # task so kanban cards render thumbnails without N+1 follow-ups.
+        tasks = await pt_svc.list_project_tasks(project_id)
+        if not tasks:
+            return tasks
+        task_ids = [UUID(t["id"]) for t in tasks if t.get("id")]
+        grouped = await project_file_service.list_files_for_tasks(project_id, task_ids)
+        for t in tasks:
+            t["attachments"] = _resolve_file_urls(grouped.get(t["id"], []))
+        return tasks
+
+    tasks, files, folders, links, collaborators, elements = await asyncio.gather(
+        _tasks_with_attachments(),
+        project_file_service.list_project_files(project_id),
+        project_file_service.list_project_folders(project_id),
+        proj_svc.list_project_links(project_id),
+        proj_svc.list_collaborators(project_id),
+        _list_project_elements(project_id),
+    )
+    return {
+        "project": project,
+        "tasks": tasks,
+        "files": files,
+        "folders": folders,
+        "links": links,
+        "collaborators": collaborators,
+        "elements": elements,
+    }
 
 
 @router.patch("/projects/{project_id}")
@@ -4547,12 +4600,9 @@ async def delete_task_subtask_endpoint(
 # Project Elements
 # ---------------------------------------------------------------------------
 
-@router.get("/projects/{project_id}/elements")
-async def list_project_elements(
-    project_id: UUID,
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    await _verify_project_access(project_id, current_user)
+async def _list_project_elements(project_id: UUID) -> list[dict]:
+    """Project elements with resolved assignee names. Shared by the /elements
+    endpoint and the /bundle aggregate so the query stays in one place."""
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
@@ -4569,6 +4619,15 @@ async def list_project_elements(
             str(project_id),
         )
     return [_serialize_element(dict(r)) for r in rows]
+
+
+@router.get("/projects/{project_id}/elements")
+async def list_project_elements(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    await _verify_project_access(project_id, current_user)
+    return await _list_project_elements(project_id)
 
 
 @router.post("/projects/{project_id}/elements", status_code=201)

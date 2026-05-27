@@ -37,6 +37,8 @@ struct KanbanBoardView: View {
     /// clicks "Edit" inside the viewer to escalate to `editingTask`. Keeps
     /// passive viewing from accidentally entering edit mode.
     @State private var viewingTask: MWProjectTask?
+    /// Card right-click → Delete target; drives the confirmation dialog.
+    @State private var taskToDelete: MWProjectTask?
     /// Inline-add: which column has its inline TextField visible. Set by the
     /// `+` button on the column header; cleared by Esc / blur / submit.
     @State private var inlineAddColumn: String?
@@ -153,6 +155,23 @@ struct KanbanBoardView: View {
         // re-renders them and recomputes task.aging against the current time.
         .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { now in
             agingClock = now
+        }
+        .confirmationDialog(
+            "Delete this task?",
+            isPresented: Binding(
+                get: { taskToDelete != nil },
+                set: { if !$0 { taskToDelete = nil } }
+            ),
+            presenting: taskToDelete
+        ) { task in
+            Button("Delete", role: .destructive) {
+                let id = task.id
+                taskToDelete = nil
+                Task { await viewModel.deleteTask(id: id) }
+            }
+            Button("Cancel", role: .cancel) { taskToDelete = nil }
+        } message: { task in
+            Text("\"\(task.title)\" will be permanently removed. This cannot be undone.")
         }
         .sheet(item: $viewingTask) { task in
             TaskViewerSheet(
@@ -546,6 +565,14 @@ struct KanbanBoardView: View {
                     }
                 )
                 .draggable(task.id)
+                .contextMenu {
+                    Button {
+                        viewingTask = task
+                    } label: { Label("Open", systemImage: "arrow.up.right.square") }
+                    Button(role: .destructive) {
+                        taskToDelete = task
+                    } label: { Label("Delete", systemImage: "trash") }
+                }
             }
             if isDoneColumn && orderedTasks.count > 5 {
                 Button {

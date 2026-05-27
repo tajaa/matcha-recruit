@@ -100,7 +100,7 @@ struct JournalListView: View {
                     .frame(width: 16)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(j.title)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 12, weight: selected ? .bold : .regular))
                         .foregroundColor(appState.themeText.opacity(0.9))
                         .lineLimit(1)
                     if let n = j.entryCount, n > 0 {

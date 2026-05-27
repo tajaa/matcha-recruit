@@ -63,11 +63,7 @@ struct ProjectFilesView: View {
         .task {
             viewModel.errorMessage = nil
             fileError = nil
-            if viewModel.files.isEmpty {
-                await viewModel.loadFiles()
-            } else {
-                Task.detached { await viewModel.loadFiles() }
-            }
+            await viewModel.ensureFilesFresh()
         }
         .onChange(of: viewModel.errorMessage) { _, msg in
             fileError = msg
@@ -651,18 +647,10 @@ struct ProjectMediaView: View {
             newFolderSheet
         }
         .task {
-            // Always re-fetch on appear so chat-mirrored uploads (e.g. pasted
-            // screenshots synced into project files on message-send) show up
-            // when switching Chat → Media. Matches the Files tab's behavior.
-            if viewModel.files.isEmpty {
-                await viewModel.loadFiles()
-            } else {
-                Task.detached { await viewModel.loadFiles() }
-            }
-            // Backfill any chat attachments (e.g. screenshots) that weren't
-            // mirrored into Files yet, then links.
-            Task.detached { await viewModel.syncChatFiles() }
-            Task.detached { await viewModel.loadLinks() }
+            // SWR: paint from cache/state, then revalidate only if stale.
+            // Throttles the files + chat-sync + links refetch so re-opening
+            // Media within 30s isn't 3 fresh network calls every entry.
+            await viewModel.ensureMediaFresh()
         }
     }
 

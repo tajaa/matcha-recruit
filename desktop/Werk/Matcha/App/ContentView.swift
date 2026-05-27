@@ -11,6 +11,8 @@ struct ContentView: View {
     @AppStorage("mw-sidebar-projects-open") private var projectsSectionOpen = false
     @AppStorage("mw-sidebar-journals-open") private var journalsSectionOpen = false
     @AppStorage("mw-sidebar-threads-open") private var threadsSectionOpen = false
+    // Collapse the wide sidebar to a thin icon rail (icons stay clickable).
+    @AppStorage("mw-sidebar-collapsed") private var sidebarCollapsed = false
     @State private var showNewJournal = false
     @State private var showNewBlog = false
     @State private var pendingConnectionsCount = 0
@@ -170,7 +172,39 @@ struct ContentView: View {
 
     @ViewBuilder
     private var sidebarColumn: some View {
+        Group {
+            if sidebarCollapsed {
+                sidebarRail
+            } else {
+                sidebarExpanded
+            }
+        }
+        .navigationSplitViewColumnWidth(
+            min: sidebarCollapsed ? 56 : 260,
+            ideal: sidebarCollapsed ? 56 : 300,
+            max: sidebarCollapsed ? 56 : 380
+        )
+        .task {
+            await refreshPendingConnections()
+        }
+    }
+
+    private var sidebarExpanded: some View {
         VStack(spacing: 0) {
+            // Collapse → thin icon rail.
+            HStack {
+                Spacer()
+                Button { withAnimation(.easeOut(duration: 0.15)) { sidebarCollapsed = true } } label: {
+                    Image(systemName: "sidebar.left")
+                        .font(.system(size: 13))
+                        .foregroundColor(appState.themeTextSecondary)
+                }
+                .buttonStyle(.plain)
+                .help("Collapse sidebar")
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+
             ScrollView {
                 VStack(spacing: 0) {
                     sidebarHomeButton
@@ -237,10 +271,98 @@ struct ContentView: View {
             .background(appState.themeBg.opacity(0.5))
         }
         .background(sidebarBackground)
-        .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 380)
-        .task {
-            await refreshPendingConnections()
+    }
+
+    /// Collapsed sidebar: a thin vertical rail of icons. Section icons re-expand
+    /// to that section; Home/Inbox/People/Archive navigate in place.
+    private var sidebarRail: some View {
+        VStack(spacing: 4) {
+            railButton(icon: "sidebar.left", help: "Expand sidebar") {
+                withAnimation(.easeOut(duration: 0.15)) { sidebarCollapsed = false }
+            }
+            Divider().opacity(0.15).padding(.horizontal, 10)
+            railButton(icon: "house", help: "Home", isActive: appState.showHome) {
+                appState.showHome = true
+                appState.showInbox = false; appState.showPeople = false
+                appState.showSkills = false; appState.showChannelBrowse = false
+                appState.showArchive = false
+                appState.selectedThreadId = nil; appState.selectedProjectId = nil
+                appState.selectedChannelId = nil; appState.selectedJournalId = nil
+            }
+            railButton(icon: "magnifyingglass", help: "Search") {
+                withAnimation(.easeOut(duration: 0.15)) { sidebarCollapsed = false }
+            }
+            Divider().opacity(0.15).padding(.horizontal, 10)
+            railButton(icon: "number", help: "Channels") {
+                channelsSectionOpen = true
+                withAnimation(.easeOut(duration: 0.15)) { sidebarCollapsed = false }
+            }
+            railButton(icon: "folder", help: "Projects") {
+                projectsSectionOpen = true
+                withAnimation(.easeOut(duration: 0.15)) { sidebarCollapsed = false }
+            }
+            railButton(icon: "book.closed", help: "Journals") {
+                journalsSectionOpen = true
+                withAnimation(.easeOut(duration: 0.15)) { sidebarCollapsed = false }
+            }
+            railButton(icon: "bubble.left.and.bubble.right", help: "Threads") {
+                threadsSectionOpen = true
+                withAnimation(.easeOut(duration: 0.15)) { sidebarCollapsed = false }
+            }
+            Spacer()
+            railButton(icon: "envelope", help: "Inbox", isActive: appState.showInbox, badge: appState.unreadInboxCount) {
+                appState.showInbox = true
+                appState.showPeople = false; appState.showHome = false
+                appState.showChannelBrowse = false; appState.showArchive = false
+                appState.selectedThreadId = nil; appState.selectedProjectId = nil
+                appState.selectedChannelId = nil; appState.selectedJournalId = nil
+                appState.showSkills = false
+            }
+            railButton(icon: "person.2", help: "People", isActive: appState.showPeople, badge: pendingConnectionsCount) {
+                appState.showPeople = true
+                appState.showInbox = false; appState.showHome = false
+                appState.showChannelBrowse = false; appState.showArchive = false
+                appState.selectedThreadId = nil; appState.selectedProjectId = nil
+                appState.selectedChannelId = nil; appState.selectedJournalId = nil
+                appState.showSkills = false
+            }
+            railButton(icon: "archivebox", help: "Archive", isActive: appState.showArchive) {
+                appState.showArchive = true
+                appState.showInbox = false; appState.showPeople = false; appState.showHome = false
+                appState.showChannelBrowse = false; appState.showSkills = false
+                appState.selectedThreadId = nil; appState.selectedProjectId = nil
+                appState.selectedChannelId = nil; appState.selectedJournalId = nil
+            }
         }
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(sidebarBackground)
+    }
+
+    @ViewBuilder
+    private func railButton(icon: String, help: String, isActive: Bool = false, badge: Int = 0, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: icon)
+                    .font(.system(size: 15))
+                    .foregroundColor(isActive ? appState.themeAccent : appState.themeText.opacity(0.75))
+                    .frame(width: 38, height: 30)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(isActive ? appState.themeAccent.opacity(0.15) : Color.clear)
+                    )
+                if badge > 0 {
+                    Text(badge > 9 ? "9+" : "\(badge)")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 3).padding(.vertical, 1)
+                        .background(Color.red).clipShape(Capsule())
+                        .offset(x: 5, y: -2)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 
     @ViewBuilder

@@ -225,7 +225,7 @@ struct ChannelsSidebarView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(channel.name)
-                            .font(.system(size: 13, weight: (selected || unread > 0) ? .semibold : .regular))
+                            .font(.system(size: 13, weight: selected ? .bold : (unread > 0 ? .semibold : .regular)))
                             .foregroundColor(selected ? appState.themeText : appState.themeText.opacity(0.9))
                             .lineLimit(1)
                         if channel.projectId != nil {

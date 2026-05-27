@@ -146,6 +146,7 @@ struct ThreadListView: View {
                         } label: {
                             ThreadRowView(
                                 thread: thread,
+                                isSelected: selected,
                                 onDelete: {
                                     threadToDelete = thread
                                     showDeleteConfirm = true
@@ -296,6 +297,7 @@ struct MWProjectTitlePatch {
 struct ThreadRowView: View {
     @Environment(AppState.self) private var appState
     let thread: MWThread
+    var isSelected: Bool = false
     let onDelete: () -> Void
     var onTogglePin: (() -> Void)? = nil
     @State private var isHovered = false
@@ -303,13 +305,18 @@ struct ThreadRowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top) {
+                // Per-type icon (chat → bubble, offer letter → doc, …).
+                Image(systemName: thread.resolvedTaskType.icon)
+                    .font(.system(size: 10))
+                    .foregroundColor(appState.themeTextSecondary)
+                    .frame(width: 14)
                 if thread.isPinned {
                     Image(systemName: "star.fill")
                         .font(.system(size: 9))
                         .foregroundColor(appState.themeAccent)
                 }
-                Text(thread.title)
-                    .font(.system(size: 13, weight: .medium))
+                Text(thread.displayName)
+                    .font(.system(size: 13, weight: isSelected ? .bold : .regular))
                     .foregroundColor(appState.themeText)
                     .lineLimit(1)
                 Spacer()
@@ -333,7 +340,9 @@ struct ThreadRowView: View {
                 }
             }
             HStack(spacing: 4) {
-                Text("\(thread.resolvedTaskType.label) · \(formatThreadDate(thread.lastActivityAt))")
+                Text(thread.resolvedTaskType == .chat
+                     ? formatThreadDate(thread.lastActivityAt)
+                     : "\(thread.resolvedTaskType.label) · \(formatThreadDate(thread.lastActivityAt))")
                     .font(.system(size: 10))
                     .foregroundColor(appState.themeTextSecondary)
                     .lineLimit(1)

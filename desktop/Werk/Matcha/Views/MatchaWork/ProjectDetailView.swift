@@ -128,6 +128,26 @@ struct ProjectDetailView: View {
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 if let project = viewModel.project {
+                    Menu {
+                        ForEach(mwProjectIconOptions, id: \.self) { sym in
+                            Button {
+                                Task { await viewModel.setProjectIcon(sym) }
+                            } label: {
+                                Label(sym, systemImage: sym)
+                            }
+                        }
+                    } label: {
+                        Image(systemName: project.icon ?? "folder")
+                            .font(.system(size: 13))
+                            .foregroundColor(appState.themeAccent)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .help("Change project icon")
+                }
+            }
+            ToolbarItem(placement: .navigation) {
+                if let project = viewModel.project {
                     Button {
                         renameDraft = project.title
                         showRenameAlert = true

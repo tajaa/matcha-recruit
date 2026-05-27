@@ -535,12 +535,21 @@ extension MWProjectTask {
     }
 }
 
+/// SF Symbols offered in the project icon picker (mirrors the journal grid).
+/// `"folder"` is the default fallback when a project has no chosen icon.
+let mwProjectIconOptions = [
+    "folder", "doc.text", "list.bullet.clipboard", "briefcase",
+    "lightbulb", "chart.bar.xaxis", "paintbrush", "hammer",
+    "megaphone", "calendar", "star", "flag",
+]
+
 struct MWProject: Codable, Identifiable {
     let id: String
     var title: String
     let projectType: String?
     var status: String?
     var isPinned: Bool?
+    var icon: String?
     var version: Int?
     var sections: [MWProjectSection]?
     var projectData: [String: AnyCodable]?
@@ -552,7 +561,7 @@ struct MWProject: Codable, Identifiable {
     var updatedAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, status, version, sections, chats
+        case id, title, status, version, sections, chats, icon
         case projectType = "project_type"
         case isPinned = "is_pinned"
         case projectData = "project_data"
@@ -562,6 +571,20 @@ struct MWProject: Codable, Identifiable {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
+}
+
+/// One-shot project-open payload (GET /matcha-work/projects/{id}/bundle):
+/// project detail + every per-project sub-resource in a single response, so a
+/// cold collab-project open is one round-trip instead of ~6. Top-level keys map
+/// 1:1 to the individual endpoints; each field reuses that endpoint's model.
+struct MWProjectBundle: Codable {
+    let project: MWProject
+    let tasks: [MWProjectTask]
+    let files: [MWProjectFile]
+    let folders: [MWProjectFolder]
+    let links: [MWProjectLink]
+    let collaborators: [MWProjectCollaborator]
+    let elements: [MWProjectElement]
 }
 
 struct MWProjectChat: Codable, Identifiable, Hashable {

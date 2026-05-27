@@ -103,7 +103,7 @@ struct ThreadDetailView: View {
                             }
                             .buttonStyle(.plain)
                         } else {
-                            Text(thread.title)
+                            Text(thread.displayName)
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(.white)
                                 .onTapGesture {
@@ -310,7 +310,7 @@ struct ThreadDetailView: View {
             await viewModel.loadThread(id: threadId)
             if !isEmbedded {
                 appState.setActiveContext(WorkTab(kind: .thread, entityId: threadId,
-                                                  title: viewModel.thread?.title ?? "Chat"))
+                                                  title: viewModel.thread?.displayName ?? "Chat"))
             }
         }
         .alert("Finalize Thread?", isPresented: $showFinalizeConfirm) {

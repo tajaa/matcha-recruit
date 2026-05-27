@@ -12,6 +12,17 @@ class MatchaWorkService {
     private var pdfCache: [String: MWCacheEntry<Data>] = [:]
     private var projectListCache: [String: MWCacheEntry<[MWProject]>] = [:]
     private var projectDetailCache: [String: MWCacheEntry<MWProject>] = [:]
+    // Per-project sub-resource caches (keyed by projectId), so tab- and
+    // project-switches paint instantly from cache (stale-while-revalidate)
+    // instead of re-fetching 6 endpoints cold every time. Same MWCacheEntry +
+    // 60s TTL pattern as projectDetailCache. Populated by the list getters and
+    // wholesale by getProjectBundle; invalidated by the matching mutations.
+    private var projectTasksCache: [String: MWCacheEntry<[MWProjectTask]>] = [:]
+    private var projectFilesCache: [String: MWCacheEntry<[MWProjectFile]>] = [:]
+    private var projectFoldersCache: [String: MWCacheEntry<[MWProjectFolder]>] = [:]
+    private var projectLinksCache: [String: MWCacheEntry<[MWProjectLink]>] = [:]
+    private var projectCollaboratorsCache: [String: MWCacheEntry<[MWProjectCollaborator]>] = [:]
+    private var projectElementsCache: [String: MWCacheEntry<[MWProjectElement]>] = [:]
     private init() {}
 
     private func cachedValue<Value>(_ entry: MWCacheEntry<Value>?) -> Value? {
@@ -41,6 +52,12 @@ class MatchaWorkService {
         pdfCache.removeAll()
         projectListCache.removeAll()
         projectDetailCache.removeAll()
+        projectTasksCache.removeAll()
+        projectFilesCache.removeAll()
+        projectFoldersCache.removeAll()
+        projectLinksCache.removeAll()
+        projectCollaboratorsCache.removeAll()
+        projectElementsCache.removeAll()
         JournalService.shared.invalidateLists()
     }
 
@@ -508,11 +525,11 @@ class MatchaWorkService {
         return result
     }
 
-    func createProject(title: String, projectType: String = "general") async throws -> MWProject {
-        struct Body: Codable { let title: String; let projectType: String
-            enum CodingKeys: String, CodingKey { case title; case projectType = "project_type" }
+    func createProject(title: String, projectType: String = "general", icon: String? = nil) async throws -> MWProject {
+        struct Body: Codable { let title: String; let projectType: String; let icon: String?
+            enum CodingKeys: String, CodingKey { case title; case projectType = "project_type"; case icon }
         }
-        let project: MWProject = try await client.request(method: "POST", path: "\(basePath)/projects", body: Body(title: title, projectType: projectType))
+        let project: MWProject = try await client.request(method: "POST", path: "\(basePath)/projects", body: Body(title: title, projectType: projectType, icon: icon))
         invalidateProjectLists()
         return project
     }
@@ -530,6 +547,24 @@ class MatchaWorkService {
         return proj
     }
 
+    /// One-shot project open: detail + tasks (with attachments) + files +
+    /// folders + links + collaborators + elements in a single round-trip.
+    /// Warms every per-project cache so the detail view + each tab paint from
+    /// cache without firing the six individual GETs. Used on the cold path of
+    /// ProjectDetailViewModel.loadProject.
+    func getProjectBundle(id: String) async throws -> MWProjectBundle {
+        let bundle: MWProjectBundle = try await client.request(method: "GET", path: "\(basePath)/projects/\(id)/bundle")
+        let exp = Date().addingTimeInterval(cacheTTL)
+        projectDetailCache[id] = MWCacheEntry(value: bundle.project, expiresAt: exp)
+        projectTasksCache[id] = MWCacheEntry(value: bundle.tasks, expiresAt: exp)
+        projectFilesCache[id] = MWCacheEntry(value: bundle.files, expiresAt: exp)
+        projectFoldersCache[id] = MWCacheEntry(value: bundle.folders, expiresAt: exp)
+        projectLinksCache[id] = MWCacheEntry(value: bundle.links, expiresAt: exp)
+        projectCollaboratorsCache[id] = MWCacheEntry(value: bundle.collaborators, expiresAt: exp)
+        projectElementsCache[id] = MWCacheEntry(value: bundle.elements, expiresAt: exp)
+        return bundle
+    }
+
     @discardableResult
     func setProjectPinned(id: String, pinned: Bool) async throws -> Bool {
         struct Body: Codable { let is_pinned: Bool }
@@ -544,12 +579,12 @@ class MatchaWorkService {
     }
 
     @discardableResult
-    func updateProjectMeta(id: String, title: String? = nil, isPinned: Bool? = nil, status: String? = nil) async throws -> MWProject {
-        defer { invalidateProjectLists() }
-        struct Body: Codable { let title: String?; let isPinned: Bool?; let status: String?
-            enum CodingKeys: String, CodingKey { case title; case isPinned = "is_pinned"; case status }
+    func updateProjectMeta(id: String, title: String? = nil, isPinned: Bool? = nil, status: String? = nil, icon: String? = nil) async throws -> MWProject {
+        defer { invalidateProjectLists(); invalidateProjectDetail(id: id) }
+        struct Body: Codable { let title: String?; let isPinned: Bool?; let status: String?; let icon: String?
+            enum CodingKeys: String, CodingKey { case title; case isPinned = "is_pinned"; case status; case icon }
         }
-        return try await client.request(method: "PATCH", path: "\(basePath)/projects/\(id)", body: Body(title: title, isPinned: isPinned, status: status))
+        return try await client.request(method: "PATCH", path: "\(basePath)/projects/\(id)", body: Body(title: title, isPinned: isPinned, status: status, icon: icon))
     }
 
     /// Toggle sales-pipeline mode for a project. Persisted to
@@ -705,17 +740,25 @@ class MatchaWorkService {
 
     // MARK: - Collaborators
 
-    func listCollaborators(projectId: String) async throws -> [MWProjectCollaborator] {
-        try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/collaborators")
+    func cachedCollaborators(_ projectId: String) -> [MWProjectCollaborator]? { cachedValue(projectCollaboratorsCache[projectId]) }
+    func invalidateCollaborators(projectId: String) { projectCollaboratorsCache.removeValue(forKey: projectId) }
+
+    func listCollaborators(projectId: String, forceRefresh: Bool = false) async throws -> [MWProjectCollaborator] {
+        if !forceRefresh, let cached = cachedValue(projectCollaboratorsCache[projectId]) { return cached }
+        let result: [MWProjectCollaborator] = try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/collaborators")
+        projectCollaboratorsCache[projectId] = MWCacheEntry(value: result, expiresAt: Date().addingTimeInterval(cacheTTL))
+        return result
     }
 
     func addCollaborator(projectId: String, userId: String) async throws {
         struct Body: Codable { let userId: String; let role: String; enum CodingKeys: String, CodingKey { case userId = "user_id"; case role } }
         _ = try await client.requestData(method: "POST", path: "\(basePath)/projects/\(projectId)/collaborators", body: Body(userId: userId, role: "collaborator"))
+        invalidateCollaborators(projectId: projectId)
     }
 
     func removeCollaborator(projectId: String, userId: String) async throws {
         _ = try await client.requestData(method: "DELETE", path: "\(basePath)/projects/\(projectId)/collaborators/\(userId)")
+        invalidateCollaborators(projectId: projectId)
     }
 
     func searchAdminUsers(query: String) async throws -> [MWAdminSearchUser] {
@@ -734,8 +777,14 @@ class MatchaWorkService {
 
     // MARK: - Project-scoped kanban tasks (collab projects)
 
-    func listProjectTasks(projectId: String) async throws -> [MWProjectTask] {
-        try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/tasks")
+    func cachedProjectTasks(_ projectId: String) -> [MWProjectTask]? { cachedValue(projectTasksCache[projectId]) }
+    func invalidateProjectTasks(projectId: String) { projectTasksCache.removeValue(forKey: projectId) }
+
+    func listProjectTasks(projectId: String, forceRefresh: Bool = false) async throws -> [MWProjectTask] {
+        if !forceRefresh, let cached = cachedValue(projectTasksCache[projectId]) { return cached }
+        let result: [MWProjectTask] = try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/tasks")
+        projectTasksCache[projectId] = MWCacheEntry(value: result, expiresAt: Date().addingTimeInterval(cacheTTL))
+        return result
     }
 
     func createProjectTask(
@@ -784,6 +833,7 @@ class MatchaWorkService {
             // Optional checklist created alongside the task (AI-drafted tickets).
             let subtasks: [String]?
         }
+        defer { invalidateProjectTasks(projectId: projectId) }
         return try await client.request(
             method: "POST",
             path: "\(basePath)/projects/\(projectId)/tasks",
@@ -804,8 +854,14 @@ class MatchaWorkService {
 
     // MARK: - Project Elements
 
-    func listProjectElements(projectId: String) async throws -> [MWProjectElement] {
-        try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/elements")
+    func cachedProjectElements(_ projectId: String) -> [MWProjectElement]? { cachedValue(projectElementsCache[projectId]) }
+    func invalidateProjectElements(projectId: String) { projectElementsCache.removeValue(forKey: projectId) }
+
+    func listProjectElements(projectId: String, forceRefresh: Bool = false) async throws -> [MWProjectElement] {
+        if !forceRefresh, let cached = cachedValue(projectElementsCache[projectId]) { return cached }
+        let result: [MWProjectElement] = try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/elements")
+        projectElementsCache[projectId] = MWCacheEntry(value: result, expiresAt: Date().addingTimeInterval(cacheTTL))
+        return result
     }
 
     func createProjectElement(
@@ -821,6 +877,7 @@ class MatchaWorkService {
             let description: String?
             let assigned_to: String?
         }
+        defer { invalidateProjectElements(projectId: projectId) }
         return try await client.request(
             method: "POST",
             path: "\(basePath)/projects/\(projectId)/elements",
@@ -842,6 +899,7 @@ class MatchaWorkService {
             let description: String?
             let assigned_to: String?
         }
+        defer { invalidateProjectElements(projectId: projectId) }
         return try await client.request(
             method: "PATCH",
             path: "\(basePath)/projects/\(projectId)/elements/\(elementId)",
@@ -854,6 +912,7 @@ class MatchaWorkService {
             method: "DELETE",
             path: "\(basePath)/projects/\(projectId)/elements/\(elementId)"
         )
+        invalidateProjectElements(projectId: projectId)
     }
 
     struct ProjectTaskPatch: Encodable {
@@ -941,7 +1000,8 @@ class MatchaWorkService {
         taskId: String,
         patch: ProjectTaskPatch
     ) async throws -> MWProjectTask {
-        try await client.request(
+        defer { invalidateProjectTasks(projectId: projectId) }
+        return try await client.request(
             method: "PATCH",
             path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)",
             body: patch
@@ -965,6 +1025,7 @@ class MatchaWorkService {
     /// updated task.
     func rejectTask(projectId: String, taskId: String, note: String) async throws -> MWProjectTask {
         struct Req: Encodable { let note: String }
+        defer { invalidateProjectTasks(projectId: projectId) }
         return try await client.request(
             method: "POST",
             path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/reject",
@@ -988,6 +1049,7 @@ class MatchaWorkService {
             method: "DELETE",
             path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)"
         )
+        invalidateProjectTasks(projectId: projectId)
     }
 
     // MARK: - Dashboard
@@ -1011,13 +1073,25 @@ class MatchaWorkService {
 
     // MARK: - Project files
 
-    func listProjectFiles(projectId: String) async throws -> [MWProjectFile] {
-        try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/files")
+    func cachedProjectFiles(_ projectId: String) -> [MWProjectFile]? { cachedValue(projectFilesCache[projectId]) }
+    func invalidateProjectFiles(projectId: String) { projectFilesCache.removeValue(forKey: projectId) }
+
+    func listProjectFiles(projectId: String, forceRefresh: Bool = false) async throws -> [MWProjectFile] {
+        if !forceRefresh, let cached = cachedValue(projectFilesCache[projectId]) { return cached }
+        let result: [MWProjectFile] = try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/files")
+        projectFilesCache[projectId] = MWCacheEntry(value: result, expiresAt: Date().addingTimeInterval(cacheTTL))
+        return result
     }
 
+    func cachedProjectLinks(_ projectId: String) -> [MWProjectLink]? { cachedValue(projectLinksCache[projectId]) }
+    func invalidateProjectLinks(projectId: String) { projectLinksCache.removeValue(forKey: projectId) }
+
     /// Links shared in the project's collab chat (URLs pulled from messages).
-    func listProjectLinks(projectId: String) async throws -> [MWProjectLink] {
-        try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/links")
+    func listProjectLinks(projectId: String, forceRefresh: Bool = false) async throws -> [MWProjectLink] {
+        if !forceRefresh, let cached = cachedValue(projectLinksCache[projectId]) { return cached }
+        let result: [MWProjectLink] = try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/links")
+        projectLinksCache[projectId] = MWCacheEntry(value: result, expiresAt: Date().addingTimeInterval(cacheTTL))
+        return result
     }
 
     /// Backfill Files/Media with all discussion-chat attachments (idempotent).
@@ -1029,6 +1103,9 @@ class MatchaWorkService {
             method: "POST",
             path: "\(basePath)/projects/\(projectId)/files/sync-chat"
         )
+        // Server may have added file rows and surfaced new chat links.
+        invalidateProjectFiles(projectId: projectId)
+        invalidateProjectLinks(projectId: projectId)
         return r.added
     }
 
@@ -1036,6 +1113,7 @@ class MatchaWorkService {
         projectId: String,
         file: (data: Data, filename: String, mimeType: String)
     ) async throws -> MWProjectFile {
+        defer { invalidateProjectFiles(projectId: projectId) }
         var multipart = MultipartUploadBuilder()
         multipart.addFile(name: "file", filename: file.filename, mimeType: file.mimeType, data: file.data)
         let (body, contentType) = multipart.finalize()
@@ -1064,16 +1142,24 @@ class MatchaWorkService {
             method: "DELETE",
             path: "\(basePath)/projects/\(projectId)/files/\(fileId)"
         )
+        invalidateProjectFiles(projectId: projectId)
     }
 
     // MARK: - Project file folders
 
-    func listProjectFolders(projectId: String) async throws -> [MWProjectFolder] {
-        try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/folders")
+    func cachedProjectFolders(_ projectId: String) -> [MWProjectFolder]? { cachedValue(projectFoldersCache[projectId]) }
+    func invalidateProjectFolders(projectId: String) { projectFoldersCache.removeValue(forKey: projectId) }
+
+    func listProjectFolders(projectId: String, forceRefresh: Bool = false) async throws -> [MWProjectFolder] {
+        if !forceRefresh, let cached = cachedValue(projectFoldersCache[projectId]) { return cached }
+        let result: [MWProjectFolder] = try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/folders")
+        projectFoldersCache[projectId] = MWCacheEntry(value: result, expiresAt: Date().addingTimeInterval(cacheTTL))
+        return result
     }
 
     func createProjectFolder(projectId: String, name: String, parentId: String? = nil) async throws -> MWProjectFolder {
         struct Body: Encodable { let name: String; let parent_id: String? }
+        defer { invalidateProjectFolders(projectId: projectId) }
         return try await client.request(
             method: "POST",
             path: "\(basePath)/projects/\(projectId)/folders",
@@ -1083,6 +1169,7 @@ class MatchaWorkService {
 
     func renameProjectFolder(projectId: String, folderId: String, name: String) async throws -> MWProjectFolder {
         struct Body: Encodable { let name: String }
+        defer { invalidateProjectFolders(projectId: projectId) }
         return try await client.request(
             method: "PATCH",
             path: "\(basePath)/projects/\(projectId)/folders/\(folderId)",
@@ -1095,11 +1182,16 @@ class MatchaWorkService {
             method: "DELETE",
             path: "\(basePath)/projects/\(projectId)/folders/\(folderId)"
         )
+        // Server re-parents the folder's files to root (folder_id SET NULL),
+        // so the files list changes too.
+        invalidateProjectFolders(projectId: projectId)
+        invalidateProjectFiles(projectId: projectId)
     }
 
     /// Move a file into a folder, or to the root when folderId is nil.
     func moveProjectFile(projectId: String, fileId: String, folderId: String?) async throws -> MWProjectFile {
         struct Body: Encodable { let folder_id: String? }
+        defer { invalidateProjectFiles(projectId: projectId) }
         return try await client.request(
             method: "PATCH",
             path: "\(basePath)/projects/\(projectId)/files/\(fileId)",
@@ -1110,6 +1202,7 @@ class MatchaWorkService {
     /// Copy a file into a folder, leaving the original at root (Media "Add to Files").
     func copyProjectFile(projectId: String, fileId: String, folderId: String) async throws -> MWProjectFile {
         struct Body: Encodable { let folder_id: String }
+        defer { invalidateProjectFiles(projectId: projectId) }
         return try await client.request(
             method: "POST",
             path: "\(basePath)/projects/\(projectId)/files/\(fileId)/copy",
@@ -1223,6 +1316,8 @@ class MatchaWorkService {
         taskId: String,
         file: (data: Data, filename: String, mimeType: String)
     ) async throws -> MWProjectFile {
+        // Task attachments are embedded in the kanban task list rows.
+        defer { invalidateProjectTasks(projectId: projectId) }
         var multipart = MultipartUploadBuilder()
         multipart.addFile(name: "file", filename: file.filename, mimeType: file.mimeType, data: file.data)
         let (body, contentType) = multipart.finalize()
@@ -1251,6 +1346,7 @@ class MatchaWorkService {
             method: "DELETE",
             path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/files/\(fileId)"
         )
+        invalidateProjectTasks(projectId: projectId)
     }
 
     // MARK: - Task subtasks (checklist)
@@ -1264,6 +1360,8 @@ class MatchaWorkService {
 
     func createSubtask(projectId: String, taskId: String, title: String) async throws -> MWSubtask {
         struct Req: Encodable { let title: String }
+        // Subtask counts are aggregated onto the kanban task list rows.
+        defer { invalidateProjectTasks(projectId: projectId) }
         return try await client.request(
             method: "POST",
             path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/subtasks",
@@ -1275,6 +1373,7 @@ class MatchaWorkService {
     /// blank the title/position (the backend treats any present key as an edit).
     func setSubtaskDone(projectId: String, taskId: String, subtaskId: String, isDone: Bool) async throws -> MWSubtask {
         struct Req: Encodable { let is_done: Bool }
+        defer { invalidateProjectTasks(projectId: projectId) }
         return try await client.request(
             method: "PATCH",
             path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/subtasks/\(subtaskId)",
@@ -1287,6 +1386,7 @@ class MatchaWorkService {
             method: "DELETE",
             path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/subtasks/\(subtaskId)"
         )
+        invalidateProjectTasks(projectId: projectId)
     }
 
     struct BlogSubmitResult: Codable {

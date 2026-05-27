@@ -36,6 +36,16 @@ class ProjectDetailViewModel {
     var recentActivity: [CollabActivityItem] = []
 
     private let service = MatchaWorkService.shared
+    // Per-project "last fetched" stamps so a tab re-entry within 30s is a no-op:
+    // the per-entity service cache + these in-memory arrays are already fresh,
+    // and the project WS pushes task deltas live. Keyed by projectId.
+    private var lastFilesFetch: [String: Date] = [:]
+    private var lastLinksFetch: [String: Date] = [:]
+    private var lastChatSyncFetch: [String: Date] = [:]
+    private func isFresh(_ map: [String: Date], _ pid: String, within: TimeInterval = 30) -> Bool {
+        if let t = map[pid] { return Date().timeIntervalSince(t) < within }
+        return false
+    }
     /// Logged-in user — used to suppress self-echoes from the project WS
     /// task event fan-out (we already applied the change optimistically).
     var currentUserId: String?
@@ -117,24 +127,48 @@ class ProjectDetailViewModel {
         }
     }
 
+    /// Change the project's sidebar/header icon (SF Symbol name). Optimistic:
+    /// paints the new icon immediately; on failure surfaces an error and the
+    /// next project load revalidates from the server.
+    func setProjectIcon(_ icon: String) async {
+        guard let pid = project?.id else { return }
+        await MainActor.run { project?.icon = icon }
+        do {
+            _ = try await service.updateProjectMeta(id: pid, icon: icon)
+        } catch {
+            await MainActor.run { errorMessage = "Failed to update icon" }
+        }
+    }
+
     func loadProject(id: String) async {
-        // Switching projects: clear the per-project secondary arrays so the
-        // prior project's tasks/files/activity don't leak into the new overview.
-        // But paint the project detail INSTANTLY from cache when we have it,
-        // so there's no blank-header flash; a fresh copy revalidates below.
+        // Stale-while-revalidate. Switching projects paints EVERY surface
+        // (header + tasks/files/folders/links/collaborators/elements) instantly
+        // from the per-entity service cache instead of blanking the tabs, then
+        // revalidates in the background. A cold open (no cache) does a single
+        // /bundle round-trip rather than ~6 separate GETs.
         let switchingProjects = project?.id != id
+        let cachedDetail = service.cachedProjectDetail(id)
         if switchingProjects {
             await MainActor.run {
-                tasks = []
-                files = []
-                elements = []
-                recentActivity = []
                 errorMessage = nil
-                if let cached = service.cachedProjectDetail(id) {
-                    project = cached
-                    activeChatId = cached.chats?.first?.id
+                // Paint per-entity caches if present; cold => empty until the
+                // bundle/loaders land below (never leak the prior project's data).
+                tasks = service.cachedProjectTasks(id) ?? []
+                files = service.cachedProjectFiles(id) ?? []
+                folders = service.cachedProjectFolders(id) ?? []
+                links = service.cachedProjectLinks(id) ?? []
+                collaborators = service.cachedCollaborators(id) ?? []
+                elements = service.cachedProjectElements(id) ?? []
+                // taskFiles re-seeds from each task's embedded attachments below;
+                // clear the prior project's map so ids don't bleed across projects.
+                taskFiles = [:]
+                recentActivity = []   // Overview's .task(id:) reloads the server feed
+                if let cachedDetail {
+                    project = cachedDetail
+                    activeChatId = cachedDetail.chats?.first?.id
                     isLoading = false
                 } else {
+                    project = nil      // keeps projectLoadingView until detail lands
                     isLoading = true
                 }
             }
@@ -142,33 +176,66 @@ class ProjectDetailViewModel {
             await MainActor.run { isLoading = true; errorMessage = nil }
         }
         do {
-            // forceRefresh: always revalidate (and repopulate the cache) so the
-            // instant-paint above can never go stale across opens.
-            let proj = try await service.getProjectDetail(id: id, forceRefresh: true)
-            await MainActor.run {
-                project = proj
-                // Reset to the new project's first chat (the VM is reused across
-                // projects, so a prior activeChatId would otherwise leak in).
-                activeChatId = proj.chats?.first?.id
-                isLoading = false
+            if cachedDetail != nil {
+                // WARM: header already painted; revalidate detail + every entity
+                // in the background (the loaders force-refresh + diff-update).
+                let proj = try await service.getProjectDetail(id: id, forceRefresh: true)
+                await MainActor.run {
+                    guard project?.id == id else { return }
+                    project = proj
+                    activeChatId = proj.chats?.first?.id
+                    isLoading = false
+                }
+                Task { await self.loadTasks() }
+                Task { await self.loadFiles() }
+                Task { await self.loadCollaborators() }
+                Task { await self.loadElements() }
+            } else {
+                // COLD: one /bundle call warms detail + all six sub-resources.
+                // Fall back to the pre-bundle path (detail + parallel loaders) if
+                // the endpoint is unavailable (older server) or fails.
+                var bundle: MWProjectBundle?
+                do {
+                    bundle = try await service.getProjectBundle(id: id)
+                } catch is CancellationError {
+                    await MainActor.run { isLoading = false }
+                    return
+                } catch {
+                    bundle = nil
+                }
+                if let bundle {
+                    await MainActor.run {
+                        project = bundle.project
+                        activeChatId = bundle.project.chats?.first?.id
+                        tasks = bundle.tasks
+                        var seeded: [String: [MWProjectFile]] = [:]
+                        for t in bundle.tasks { if let atts = t.attachments { seeded[t.id] = atts } }
+                        taskFiles = seeded
+                        files = bundle.files
+                        folders = bundle.folders
+                        links = bundle.links
+                        collaborators = bundle.collaborators
+                        elements = bundle.elements
+                        // Bundle already returned files+folders+links fresh — stamp
+                        // so the first Files/Media open doesn't redundantly refetch
+                        // (chat-sync is left unstamped so Media still backfills once).
+                        lastFilesFetch[id] = Date()
+                        lastLinksFetch[id] = Date()
+                        isLoading = false
+                    }
+                } else {
+                    let proj = try await service.getProjectDetail(id: id, forceRefresh: true)
+                    await MainActor.run {
+                        project = proj
+                        activeChatId = proj.chats?.first?.id
+                        isLoading = false
+                    }
+                    Task { await self.loadTasks() }
+                    Task { await self.loadFiles() }
+                    Task { await self.loadCollaborators() }
+                    Task { await self.loadElements() }
+                }
             }
-            // Prefetch tasks/files/collaborators on every project open,
-            // regardless of `project_type`. Earlier the prefetch was gated
-            // on `projectType == "collab"`, which left Overview's UP NEXT
-            // card stuck on "No open tasks" for projects whose row had a
-            // legacy or NULL project_type — even though Kanban renders the
-            // same tasks fine via its own .task block. Cost: one GET per
-            // surface; server returns empty arrays for project types that
-            // have no rows so the payload is zero-bytes.
-            //
-            // Use Task { } not `async let _ = ...` — `async let` requires
-            // an await before scope exit; without it Swift implicitly
-            // cancels the child task and the network request never
-            // completes.
-            Task { await self.loadTasks() }
-            Task { await self.loadFiles() }
-            Task { await self.loadCollaborators() }
-            Task { await self.loadElements() }
         } catch is CancellationError {
             // Rapid project switch cancelled the in-flight load. Don't show
             // a red banner — the new project's .task is already loading.
@@ -525,10 +592,15 @@ class ProjectDetailViewModel {
 
     func loadTasks() async {
         guard let pid = project?.id else { return }
-        await MainActor.run { isLoadingTasks = true }
+        // Only show the spinner on a cold load; a warm revalidate diff-updates
+        // in place so there's no flicker. forceRefresh: this IS the revalidate
+        // half of SWR (the cache was already painted by loadProject).
+        let wasEmpty = tasks.isEmpty
+        await MainActor.run { if wasEmpty { isLoadingTasks = true } }
         do {
-            let list = try await service.listProjectTasks(projectId: pid)
+            let list = try await service.listProjectTasks(projectId: pid, forceRefresh: true)
             await MainActor.run {
+                guard project?.id == pid else { return }   // ignore late landing after a switch
                 tasks = list
                 var seeded: [String: [MWProjectFile]] = [:]
                 for t in list {
@@ -821,8 +893,11 @@ class ProjectDetailViewModel {
     func loadCollaborators() async {
         guard let pid = project?.id else { return }
         do {
-            let list = try await service.listCollaborators(projectId: pid)
-            await MainActor.run { collaborators = list }
+            let list = try await service.listCollaborators(projectId: pid, forceRefresh: true)
+            await MainActor.run {
+                guard project?.id == pid else { return }
+                collaborators = list
+            }
         } catch is CancellationError {
             return
         } catch {
@@ -839,8 +914,11 @@ class ProjectDetailViewModel {
     func loadElements() async {
         guard let pid = project?.id else { return }
         do {
-            let list = try await service.listProjectElements(projectId: pid)
-            await MainActor.run { elements = list }
+            let list = try await service.listProjectElements(projectId: pid, forceRefresh: true)
+            await MainActor.run {
+                guard project?.id == pid else { return }
+                elements = list
+            }
         } catch is CancellationError { return
         } catch {
             let nsErr = error as NSError
@@ -1049,17 +1127,21 @@ class ProjectDetailViewModel {
 
     func loadFiles() async {
         guard let pid = project?.id else { return }
-        await MainActor.run { isLoadingFiles = true }
+        // Spinner only on a cold load; a warm revalidate diff-updates in place.
+        let wasEmpty = files.isEmpty && folders.isEmpty
+        await MainActor.run { if wasEmpty { isLoadingFiles = true } }
         do {
             // Files + folders concurrently (was serial → doubled the latency).
-            async let filesReq = service.listProjectFiles(projectId: pid)
-            async let foldersReq = service.listProjectFolders(projectId: pid)
+            async let filesReq = service.listProjectFiles(projectId: pid, forceRefresh: true)
+            async let foldersReq = service.listProjectFolders(projectId: pid, forceRefresh: true)
             let list = try await filesReq
             let fetchedFolders = try? await foldersReq
             await MainActor.run {
+                guard project?.id == pid else { return }
                 files = list
                 if let fetchedFolders { folders = fetchedFolders }
                 isLoadingFiles = false
+                lastFilesFetch[pid] = Date()
             }
         } catch is CancellationError {
             await MainActor.run { isLoadingFiles = false }
@@ -1080,6 +1162,8 @@ class ProjectDetailViewModel {
     /// then reload if anything was added. Idempotent + best-effort.
     func syncChatFiles() async {
         guard let pid = project?.id else { return }
+        // Stamp up front so concurrent re-entries throttle even mid-sync.
+        await MainActor.run { lastChatSyncFetch[pid] = Date() }
         if let added = try? await service.syncChatFiles(projectId: pid), added > 0 {
             await loadFiles()
         }
@@ -1089,9 +1173,31 @@ class ProjectDetailViewModel {
     /// failures leave the previous list intact rather than surfacing an error.
     func loadLinks() async {
         guard let pid = project?.id else { return }
-        if let list = try? await service.listProjectLinks(projectId: pid) {
-            await MainActor.run { links = list }
+        if let list = try? await service.listProjectLinks(projectId: pid, forceRefresh: true) {
+            await MainActor.run {
+                guard project?.id == pid else { return }
+                links = list
+                lastLinksFetch[pid] = Date()
+            }
         }
+    }
+
+    /// Files-tab onAppear: never blank — paint from current state, revalidate
+    /// only when empty or the last fetch is stale (>30s). Replaces the old
+    /// unconditional per-entry refetch; the service cache + WS keep data fresh.
+    func ensureFilesFresh() async {
+        guard let pid = project?.id else { return }
+        if files.isEmpty && folders.isEmpty { await loadFiles(); return }
+        if !isFresh(lastFilesFetch, pid) { await loadFiles() }
+    }
+
+    /// Media-tab onAppear: files + (throttled) chat-file sync + links. Collapses
+    /// the old always-3-network-calls-per-entry into throttled first-entry work.
+    func ensureMediaFresh() async {
+        guard let pid = project?.id else { return }
+        await ensureFilesFresh()
+        if !isFresh(lastChatSyncFetch, pid) { Task { await self.syncChatFiles() } }
+        if !isFresh(lastLinksFetch, pid) { Task { await self.loadLinks() } }
     }
 
     func uploadFile(data: Data, filename: String, mimeType: String) async {
@@ -1133,8 +1239,11 @@ class ProjectDetailViewModel {
 
     func loadFolders() async {
         guard let pid = project?.id else { return }
-        if let list = try? await service.listProjectFolders(projectId: pid) {
-            await MainActor.run { folders = list }
+        if let list = try? await service.listProjectFolders(projectId: pid, forceRefresh: true) {
+            await MainActor.run {
+                guard project?.id == pid else { return }
+                folders = list
+            }
         }
     }
 

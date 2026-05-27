@@ -112,6 +112,14 @@ struct MWThread: Codable, Identifiable {
         updatedAt ?? createdAt
     }
 
+    /// Sidebar/title text: a blank or default ("Untitled Chat"/"Untitled")
+    /// title reads as "(UNNAMED)" until the user names the thread.
+    var displayName: String {
+        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty || t == "Untitled Chat" || t == "Untitled" { return "(UNNAMED)" }
+        return t
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, title, status, version
         case taskType = "task_type"

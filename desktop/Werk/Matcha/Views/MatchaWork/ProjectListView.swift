@@ -224,6 +224,7 @@ struct ProjectListView: View {
         } label: {
             ProjectSidebarRowContent(
                 project: p,
+                isSelected: selected,
                 onTogglePin: { Task { await togglePin(project: p) } },
                 onArchive: { projectToArchive = p }
             )
@@ -413,6 +414,7 @@ struct ProjectListView: View {
 private struct ProjectSidebarRowContent: View {
     @Environment(AppState.self) private var appState
     let project: MWProject
+    var isSelected: Bool = false
     let onTogglePin: () -> Void
     let onArchive: () -> Void
 
@@ -420,20 +422,15 @@ private struct ProjectSidebarRowContent: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            // Leading: star only if pinned (else a blank to keep titles aligned).
-            Group {
-                if project.isPinned ?? false {
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 9))
-                        .foregroundColor(appState.themeAccent)
-                } else {
-                    Color.clear
-                }
-            }
-            .frame(width: 12)
+            // Leading: the project's chosen icon (defaults to "folder"), like
+            // journals. Pin state is shown via the hover star + context menu.
+            Image(systemName: project.icon ?? "folder")
+                .font(.system(size: 11))
+                .foregroundColor(appState.themeAccent)
+                .frame(width: 16)
 
             Text(project.title)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 13, weight: isSelected ? .bold : .regular))
                 .foregroundColor(appState.themeText)
                 .lineLimit(1)
 
