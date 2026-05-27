@@ -799,7 +799,7 @@ export function Step6Review({ session, onUpdated }: StepProps) {
       <div className="mt-6">
         {finalized ? (
           <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-4 text-sm text-emerald-200 space-y-1">
-            <div className="font-medium">Onboarding finalized.</div>
+            <div className="font-medium">Gap analysis finalized.</div>
             <div>Scope rows written: {finalized.scope_rows_written}</div>
             <div>Certifications: {finalized.certifications_written} · Licenses: {finalized.licenses_written}</div>
             {finalized.invite_token && (

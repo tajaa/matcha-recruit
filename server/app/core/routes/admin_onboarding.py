@@ -31,7 +31,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 
 from app.database import get_connection
 from app.core.dependencies import require_admin
@@ -42,6 +42,7 @@ from app.core.models.admin_onboarding import (
     CreateSessionRequest,
     DispatchResearchRequest,
     DispatchResearchResponse,
+    EnrichRosterResponse,
     ExpandScopeResponse,
     FinalizeResponse,
     GapAnalysisDossier,
@@ -64,6 +65,10 @@ from app.core.services.onboarding_scope_ai import (
     expand_scope as ai_expand_scope,
     gap_check as ai_gap_check,
     map_to_bank,
+)
+from app.core.services.compliance_service import (
+    ensure_location_for_employee,
+    run_compliance_check_stream,
 )
 
 logger = logging.getLogger(__name__)
@@ -171,6 +176,75 @@ def _dossier_from_row(row) -> dict:
         "ai_scope": _safe_jsonb(row["ai_scope"], {}),
         "resolved_scope": _safe_jsonb(row["resolved_scope"], {}),
     })
+
+
+async def _write_compliance_scope_rows(
+    conn,
+    *,
+    company_id: UUID,
+    existing_items: list[dict],
+    admin_user_id: UUID,
+    source: str,
+) -> int:
+    """Attach resolved 'existing' bank requirements to a company's locations.
+
+    Federal scope → the company-wide sentinel; state/county/city → first
+    matching real location (multi-location attach is Phase 2). Idempotent via
+    the ``(company_id, requirement_id, location_id)`` unique constraint.
+    Shared by ``finalize`` (source='onboarding_wizard') and the employee-sync
+    enrichment (source='employee_sync'). Returns rows attempted-written.
+    """
+    sentinel = await conn.fetchrow(
+        "SELECT id FROM business_locations WHERE company_id = $1 AND is_company_wide = TRUE LIMIT 1",
+        company_id,
+    )
+    sentinel_id = sentinel["id"] if sentinel else None
+    real_locs = await conn.fetch(
+        """
+        SELECT id, state, county, city FROM business_locations
+        WHERE company_id = $1 AND is_company_wide = FALSE AND is_active = TRUE
+        """,
+        company_id,
+    )
+
+    written = 0
+    for item in existing_items:
+        scope_level = (item.get("scope_level") or "federal").lower()
+        target_location_id = sentinel_id
+        if scope_level != "federal" and real_locs:
+            want_state = (item.get("state") or "").upper()
+            want_county = (item.get("county") or "").lower()
+            want_city = (item.get("city") or "").lower()
+            best = None
+            for loc in real_locs:
+                if want_state and (loc["state"] or "").upper() != want_state:
+                    continue
+                if want_county and (loc["county"] or "").lower() != want_county:
+                    continue
+                if want_city and (loc["city"] or "").lower() != want_city:
+                    continue
+                best = loc
+                break
+            target_location_id = best["id"] if best else (real_locs[0]["id"] if real_locs else sentinel_id)
+        if target_location_id is None:
+            continue
+        try:
+            await conn.execute(
+                """
+                INSERT INTO company_compliance_scope (
+                    company_id, requirement_id, location_id, scope_level,
+                    source, status, admin_reviewed_by
+                )
+                VALUES ($1, $2, $3, $4, $5, 'active', $6)
+                ON CONFLICT (company_id, requirement_id, location_id) DO NOTHING
+                """,
+                company_id, item["requirement_id"], target_location_id,
+                scope_level, source, admin_user_id,
+            )
+            written += 1
+        except Exception as exc:
+            logger.warning("scope insert failed for %s: %s", item.get("requirement_id"), exc)
+    return written
 
 
 # ── Catalog endpoint ────────────────────────────────────────────────────
@@ -433,6 +507,369 @@ async def create_company(
         session_id=session_id,
         company_id=company_id,
         company_wide_location_id=sentinel_id,
+    )
+
+
+# ── Employee-sync enrichment (existing company) ─────────────────────────
+
+
+async def _collect_roster(conn, company_id: UUID) -> tuple[list[str], dict, set]:
+    """Distinct active-employee work locations + roles for a company.
+
+    Returns (roles, emp_locs, existing_location_keys) where emp_locs is keyed
+    by (lower_city, upper_state) → (display_city, upper_state), and
+    existing_location_keys are the same keys already tracked as
+    business_locations (so callers know which jurisdictions are NEW).
+    """
+    emp_rows = await conn.fetch(
+        """
+        SELECT DISTINCT work_city, work_state, job_title
+        FROM employees
+        WHERE org_id = $1 AND termination_date IS NULL AND work_state IS NOT NULL
+        """,
+        company_id,
+    )
+    roles = sorted({
+        r["job_title"].strip()
+        for r in emp_rows
+        if r["job_title"] and r["job_title"].strip()
+    })
+    emp_locs: dict[tuple[str, str], tuple[str, str]] = {}
+    for r in emp_rows:
+        state = (r["work_state"] or "").upper().strip()
+        if not state:
+            continue
+        city = (r["work_city"] or "").strip()
+        emp_locs.setdefault((city.lower(), state), (city, state))
+
+    existing_loc_rows = await conn.fetch(
+        """
+        SELECT city, state FROM business_locations
+        WHERE company_id = $1 AND is_active = TRUE AND is_company_wide = FALSE
+        """,
+        company_id,
+    )
+    existing_keys = {
+        ((r["city"] or "").lower(), (r["state"] or "").upper())
+        for r in existing_loc_rows
+    }
+    return roles, emp_locs, existing_keys
+
+
+async def _enrich_scope_and_persist(
+    conn, *, company, roles: list[str], admin_user_id: UUID,
+) -> dict:
+    """Role-aware scope expansion → bank reconciliation → write
+    company_compliance_scope → upsert the per-company enrichment session.
+
+    Assumes any new locations have already been filled into business_locations.
+    Returns {session_id, resolved (ResolvedScope), ai_scope (AIScope),
+    scope_written (int)}. Raises HTTPException(502) if expansion fails.
+    """
+    company_id = company["id"]
+    specialties = list(company["healthcare_specialties"] or [])
+    basics = {
+        "business_name": company["name"],
+        "industry": company["industry"] or "general",
+        "specialty": specialties[0] if specialties else None,
+    }
+    all_loc_rows = await conn.fetch(
+        """
+        SELECT name, address, city, state, county, zipcode FROM business_locations
+        WHERE company_id = $1 AND is_active = TRUE AND is_company_wide = FALSE
+        """,
+        company_id,
+    )
+    locations = [
+        {
+            "name": r["name"], "address": r["address"], "city": r["city"],
+            "state": r["state"], "county": r["county"], "zipcode": r["zipcode"],
+            "facility_attributes": {},
+        }
+        for r in all_loc_rows
+    ]
+
+    try:
+        ai_scope_raw = await ai_expand_scope(
+            basics=basics, locations=locations, conn=conn, employee_roles=roles,
+        )
+    except Exception as exc:
+        logger.exception("enrich: expand_scope failed for company %s", company_id)
+        raise HTTPException(status_code=502, detail=f"Scope expansion failed: {exc}")
+    try:
+        ai_scope = AIScope.model_validate(ai_scope_raw)
+    except Exception:
+        ai_scope = AIScope()
+    resolved_raw = await map_to_bank(ai_scope.model_dump(), conn)
+    try:
+        resolved = ResolvedScope.model_validate(resolved_raw)
+    except Exception:
+        resolved = ResolvedScope()
+
+    scope_written = await _write_compliance_scope_rows(
+        conn,
+        company_id=company_id,
+        existing_items=resolved.model_dump(mode="json").get("existing") or [],
+        admin_user_id=admin_user_id,
+        source="employee_sync",
+    )
+
+    # Per-company enrichment session (idempotent) so the gap-analysis UI can
+    # show the result + dispatch research on the remaining missing items.
+    idem = f"enrich-{company_id}"
+    basics_blob = json.dumps({**basics, "enrichment_run": True})
+    locations_blob = json.dumps(locations)
+    ai_blob = json.dumps(ai_scope.model_dump())
+    resolved_blob = json.dumps(resolved.model_dump(mode="json"))
+    existing_session = await conn.fetchrow(
+        "SELECT id FROM onboarding_sessions WHERE idempotency_key = $1", idem,
+    )
+    if existing_session:
+        session_id = existing_session["id"]
+        await conn.execute(
+            """
+            UPDATE onboarding_sessions
+            SET created_by = $1, company_id = $2, basics = $3::jsonb,
+                locations = $4::jsonb, ai_scope = $5::jsonb,
+                resolved_scope = $6::jsonb, step = 'gaps',
+                status = 'in_progress', updated_at = NOW()
+            WHERE id = $7
+            """,
+            admin_user_id, company_id, basics_blob, locations_blob,
+            ai_blob, resolved_blob, session_id,
+        )
+    else:
+        session_id = await conn.fetchval(
+            """
+            INSERT INTO onboarding_sessions (
+                created_by, company_id, idempotency_key, step, status,
+                basics, size, locations, ai_scope, resolved_scope
+            )
+            VALUES ($1, $2, $3, 'gaps', 'in_progress',
+                    $4::jsonb, '{}'::jsonb, $5::jsonb, $6::jsonb, $7::jsonb)
+            RETURNING id
+            """,
+            admin_user_id, company_id, idem,
+            basics_blob, locations_blob, ai_blob, resolved_blob,
+        )
+
+    return {
+        "session_id": session_id,
+        "resolved": resolved,
+        "ai_scope": ai_scope,
+        "scope_written": scope_written,
+    }
+
+
+@router.post("/onboarding/enrich/{company_id}", response_model=EnrichRosterResponse)
+async def enrich_company_from_roster(
+    company_id: UUID,
+    current_user: CurrentUser = Depends(require_master_admin),
+):
+    """Employee-sync gap analysis for an EXISTING company (non-streaming).
+
+    Reads the live roster, FILLS new work jurisdictions into business_locations
+    (→ weekly cadence) via ``ensure_location_for_employee``, then re-runs the
+    role-aware scope engine to BOLSTER/FILL the company's compliance scope.
+    Idempotent + additive. The streaming variant (``/enrich/{id}/stream``)
+    drives the performative demo; this one returns the summary in one shot.
+    """
+    async with get_connection() as conn:
+        company = await conn.fetchrow(
+            "SELECT id, name, industry, healthcare_specialties FROM companies WHERE id = $1",
+            company_id,
+        )
+        if not company:
+            raise HTTPException(status_code=404, detail="Company not found")
+
+        roles, emp_locs, existing_keys = await _collect_roster(conn, company_id)
+
+        new_jurisdictions: list[dict] = []
+        for key, (city, state) in emp_locs.items():
+            if key in existing_keys:
+                continue
+            try:
+                await ensure_location_for_employee(conn, company_id, city or None, state)
+                new_jurisdictions.append({"city": city or None, "state": state})
+            except Exception:
+                logger.exception("enrich: ensure_location failed for %s, %s", city, state)
+
+        result = await _enrich_scope_and_persist(
+            conn, company=company, roles=roles, admin_user_id=current_user.id,
+        )
+        resolved = result["resolved"]
+
+    return EnrichRosterResponse(
+        session_id=result["session_id"],
+        company_id=company_id,
+        employee_roles=roles,
+        new_jurisdictions=new_jurisdictions,
+        locations_filled=len(new_jurisdictions),
+        scope_rows_written=result["scope_written"],
+        covered_count=len(resolved.existing),
+        missing_count=len(resolved.missing),
+        resolved_scope=resolved,
+    )
+
+
+@router.post("/onboarding/enrich/{company_id}/stream")
+async def enrich_company_stream(
+    company_id: UUID,
+    current_user: CurrentUser = Depends(require_master_admin),
+):
+    """Performative employee-sync gap analysis (SSE).
+
+    Same outcome as ``/enrich/{id}`` but streamed as staged events so the UI
+    can show it "scoping out" live: roster scan → each NEW jurisdiction is
+    filled + researched live (delegating to ``run_compliance_check_stream``,
+    which pulls source-of-truth requirements for jurisdictions not yet in the
+    bank) → role-aware scope → done. Mirrors the SSE shape used by the
+    compliance check stream (``data: {json}\\n\\n``, ``: heartbeat``, terminal
+    ``data: [DONE]``).
+    """
+
+    async def events():
+        # 1. Roster scan (short-lived connection).
+        async with get_connection() as conn:
+            company = await conn.fetchrow(
+                "SELECT id, name, industry, healthcare_specialties FROM companies WHERE id = $1",
+                company_id,
+            )
+            if not company:
+                yield {"type": "error", "message": "Company not found"}
+                return
+            roles, emp_locs, existing_keys = await _collect_roster(conn, company_id)
+
+        new_keys = [k for k in emp_locs if k not in existing_keys]
+        yield {
+            "type": "roster_scanned",
+            "locations_total": len(emp_locs),
+            "locations_new": len(new_keys),
+            "roles": roles,
+            "message": (
+                f"Scanned roster — {len(emp_locs)} work location(s), "
+                f"{len(new_keys)} not yet tracked, {len(roles)} role(s)."
+            ),
+        }
+        if roles:
+            yield {"type": "roles_detected", "roles": roles,
+                   "message": f"Roles on staff: {', '.join(roles)}"}
+
+        # 2. Fill + live-research each NEW jurisdiction.
+        new_jurisdictions: list[dict] = []
+        for key in new_keys:
+            city, state = emp_locs[key]
+            label = f"{city + ', ' if city else ''}{state}"
+            yield {"type": "jurisdiction_new", "city": city or None, "state": state,
+                   "message": f"New work jurisdiction: {label} — not in the compliance engine yet."}
+            location_id = None
+            try:
+                async with get_connection() as conn:
+                    # background_tasks=None → creates + links jurisdiction (and
+                    # clones repo data for known jurisdictions) WITHOUT firing an
+                    # inline check; the streamed check below owns the research.
+                    location_id = await ensure_location_for_employee(
+                        conn, company_id, city or None, state,
+                    )
+            except Exception:
+                logger.exception("enrich-stream: ensure_location failed for %s", label)
+                yield {"type": "warning", "message": f"Could not create location for {label}."}
+            if not location_id:
+                continue
+            new_jurisdictions.append({"city": city or None, "state": state})
+            yield {"type": "jurisdiction_tracking", "city": city or None, "state": state,
+                   "message": f"{label} is now tracked weekly."}
+            yield {"type": "researching", "jurisdiction": label,
+                   "message": f"Pulling compliance requirements for {label}…"}
+            # Delegate to the live-research stream; pass its events through with
+            # the jurisdiction label attached for UI context.
+            try:
+                async for ev in run_compliance_check_stream(
+                    location_id, company_id, allow_live_research=True,
+                ):
+                    etype = ev.get("type")
+                    if etype == "heartbeat":
+                        yield {"type": "heartbeat"}
+                    elif etype == "error":
+                        # A recoverable per-jurisdiction research hiccup — NOT a
+                        # run failure. Downgrade to a warning so it doesn't trip
+                        # the client's fatal-error handling; the run continues.
+                        yield {"type": "warning",
+                               "message": ev.get("message") or f"Research issue for {label}",
+                               "jurisdiction": label}
+                    else:
+                        yield {**ev, "jurisdiction": label}
+            except Exception as exc:
+                logger.exception("enrich-stream: research failed for %s", label)
+                yield {"type": "warning", "message": f"Research incomplete for {label}: {exc}",
+                       "jurisdiction": label}
+
+        # 3. Role-aware scope + persist.
+        yield {"type": "scoping", "roles": roles,
+               "message": "Scoping role-specific compliance from the roster…"}
+        try:
+            async with get_connection() as conn:
+                company = await conn.fetchrow(
+                    "SELECT id, name, industry, healthcare_specialties FROM companies WHERE id = $1",
+                    company_id,
+                )
+                if not company:
+                    yield {"type": "error", "message": "Company no longer exists."}
+                    return
+                result = await _enrich_scope_and_persist(
+                    conn, company=company, roles=roles, admin_user_id=current_user.id,
+                )
+        except HTTPException as exc:
+            yield {"type": "error", "message": str(exc.detail)}
+            return
+        except Exception as exc:
+            logger.exception("enrich-stream: scope/persist failed for %s", company_id)
+            yield {"type": "error", "message": f"Scope step failed: {exc}"}
+            return
+
+        resolved = result["resolved"]
+        ai_scope = result["ai_scope"]
+        credentials = [
+            {"name": c.name, "applies_to_role": c.applies_to_role}
+            for c in ai_scope.required_credentials
+        ]
+        yield {
+            "type": "scoped",
+            "covered": len(resolved.existing),
+            "missing": len(resolved.missing),
+            "scope_rows_written": result["scope_written"],
+            "credentials": credentials,
+            "message": (
+                f"Scoped {len(resolved.existing)} in-bank requirement(s); "
+                f"{len(resolved.missing)} gap(s) flagged for research."
+            ),
+        }
+        yield {
+            "type": "complete",
+            "session_id": str(result["session_id"]),
+            "company_id": str(company_id),
+            "new_jurisdictions": new_jurisdictions,
+            "roles": roles,
+            "covered": len(resolved.existing),
+            "missing": len(resolved.missing),
+            "message": "Gap analysis complete.",
+        }
+
+    async def sse():
+        try:
+            async for ev in events():
+                if ev.get("type") == "heartbeat":
+                    yield ": heartbeat\n\n"
+                else:
+                    yield f"data: {json.dumps(ev)}\n\n"
+        except Exception as exc:  # last-resort guard so the stream always closes
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        sse(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no"},
     )
 
 
@@ -725,61 +1162,13 @@ async def finalize_session(
         licenses = ai_scope.get("required_licenses") or []
 
         company_id = row["company_id"]
-        # Cache the company-wide sentinel id once.
-        sentinel = await conn.fetchrow(
-            "SELECT id FROM business_locations WHERE company_id = $1 AND is_company_wide = TRUE LIMIT 1",
-            company_id,
+        scope_rows_written = await _write_compliance_scope_rows(
+            conn,
+            company_id=company_id,
+            existing_items=existing,
+            admin_user_id=current_user.id,
+            source="onboarding_wizard",
         )
-        sentinel_id = sentinel["id"] if sentinel else None
-
-        # For state/county/city scope, pick the FIRST matching real location.
-        # Federal scope → sentinel. Multi-location attach is Phase 2.
-        real_locs = await conn.fetch(
-            """
-            SELECT id, state, county, city FROM business_locations
-            WHERE company_id = $1 AND is_company_wide = FALSE AND is_active = TRUE
-            """,
-            company_id,
-        )
-
-        scope_rows_written = 0
-        for item in existing:
-            scope_level = (item.get("scope_level") or "federal").lower()
-            target_location_id = sentinel_id
-            if scope_level != "federal" and real_locs:
-                # Match by state when present, else first real location.
-                want_state = (item.get("state") or "").upper()
-                want_county = (item.get("county") or "").lower()
-                want_city = (item.get("city") or "").lower()
-                best = None
-                for loc in real_locs:
-                    if want_state and (loc["state"] or "").upper() != want_state:
-                        continue
-                    if want_county and (loc["county"] or "").lower() != want_county:
-                        continue
-                    if want_city and (loc["city"] or "").lower() != want_city:
-                        continue
-                    best = loc
-                    break
-                target_location_id = best["id"] if best else (real_locs[0]["id"] if real_locs else sentinel_id)
-            if target_location_id is None:
-                continue
-            try:
-                await conn.execute(
-                    """
-                    INSERT INTO company_compliance_scope (
-                        company_id, requirement_id, location_id, scope_level,
-                        source, status, admin_reviewed_by
-                    )
-                    VALUES ($1, $2, $3, $4, 'onboarding_wizard', 'active', $5)
-                    ON CONFLICT (company_id, requirement_id, location_id) DO NOTHING
-                    """,
-                    company_id, item["requirement_id"], target_location_id,
-                    scope_level, current_user.id,
-                )
-                scope_rows_written += 1
-            except Exception as exc:
-                logger.warning("scope insert failed for %s: %s", item.get("requirement_id"), exc)
 
         # Upsert catalogs + per-company manifests for certs/licenses.
         certifications_written = 0

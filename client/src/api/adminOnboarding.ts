@@ -227,6 +227,18 @@ export type FinalizeResponse = {
   licenses_written: number
 }
 
+export type EnrichRosterResponse = {
+  session_id: string
+  company_id: string
+  employee_roles: string[]
+  new_jurisdictions: Array<{ city?: string | null; state: string }>
+  locations_filled: number
+  scope_rows_written: number
+  covered_count: number
+  missing_count: number
+  resolved_scope: ResolvedScope
+}
+
 export type GapAnalysisDossier = {
   generated_at?: string | null
   session_id?: string | null
@@ -271,6 +283,14 @@ export type GapAnalysisDossier = {
 
 const BASE = '/admin/onboarding'
 
+// Absolute URL for the SSE enrichment stream — consumed via fetch + ReadableStream
+// (not EventSource) so the Authorization header can be attached. Mirrors
+// getComplianceCheckUrl in api/compliance.ts.
+export function getEnrichStreamUrl(companyId: string): string {
+  const base = import.meta.env.VITE_API_URL || '/api'
+  return `${base}/admin/onboarding/enrich/${companyId}/stream`
+}
+
 export const adminOnboarding = {
   specialties: () =>
     api.get<Record<string, string[]>>(`${BASE}/specialties`),
@@ -299,6 +319,12 @@ export const adminOnboarding = {
 
   createCompany: (id: string) =>
     api.post<CreateCompanyResponse>(`${BASE}/sessions/${id}/create-company`),
+
+  // Employee-sync enrichment for an EXISTING company: pulls the live roster's
+  // work locations + roles, fills new jurisdictions, re-runs the scope engine,
+  // and returns the per-company enrichment session id.
+  enrichFromRoster: (companyId: string) =>
+    api.post<EnrichRosterResponse>(`${BASE}/enrich/${companyId}`),
 
   expand: (id: string) =>
     api.post<ExpandScopeResponse>(`${BASE}/sessions/${id}/expand`),

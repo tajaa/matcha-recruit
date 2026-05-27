@@ -333,6 +333,25 @@ class DispatchResearchResponse(BaseModel):
     skipped: list[str] = Field(default_factory=list)
 
 
+class EnrichRosterResponse(BaseModel):
+    """Result of an employee-sync enrichment run for an existing company.
+
+    `new_jurisdictions` are work locations pulled from the live roster that
+    weren't tracked yet (now filled into business_locations). `missing` (via
+    resolved_scope) are AI-suggested requirements with no bank match — the
+    research-dispatch targets.
+    """
+    session_id: UUID
+    company_id: UUID
+    employee_roles: list[str] = Field(default_factory=list)
+    new_jurisdictions: list[dict[str, Any]] = Field(default_factory=list)
+    locations_filled: int = 0
+    scope_rows_written: int = 0
+    covered_count: int = 0
+    missing_count: int = 0
+    resolved_scope: ResolvedScope = Field(default_factory=ResolvedScope)
+
+
 # ── Gap-analysis dossier ────────────────────────────────────────────────
 
 

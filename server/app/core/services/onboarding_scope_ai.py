@@ -309,6 +309,7 @@ async def expand_scope(
     basics: dict[str, Any],
     locations: list[dict[str, Any]],
     conn,
+    employee_roles: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run Gemini to expand industry+specialty+locations into a scope manifest.
 
@@ -349,6 +350,20 @@ async def expand_scope(
         )
     locations_yaml = "\n".join(locations_yaml_lines) or "- (no locations supplied — federal scope only)"
 
+    # Employee roles (from the live roster — work_title/job_title). When present,
+    # these are an authoritative signal for required_credentials/licenses: the
+    # actual occupations on staff, not just inferred from the description.
+    roles_block = ""
+    cleaned_roles = sorted({r.strip() for r in (employee_roles or []) if r and r.strip()})
+    if cleaned_roles:
+        roles_lines = "\n".join(f"  - {r}" for r in cleaned_roles)
+        roles_block = (
+            "\nEMPLOYEE ROLES PRESENT (authoritative — these are the actual job titles "
+            "on staff; treat as a primary signal for required_credentials and "
+            "role-specific licensing/categories):\n"
+            f"{roles_lines}\n"
+        )
+
     description_block = (
         f"\nCOMPANY DETAILS (most authoritative — read carefully):\n  {description}\n"
         if description
@@ -384,7 +399,8 @@ async def expand_scope(
         f"  Industry: {industry}\n"
         f"  Specialty: {specialty or '(none)'}\n"
         f"  Locations:\n{locations_yaml}\n"
-        f"{description_block}\n"
+        f"{description_block}"
+        f"{roles_block}\n"
         f"For each location, list the compliance categories, required certifications,\n"
         f"and required licenses that THIS business must track. Distinguish federal,\n"
         f"state, county, and city scope. Be specific: a 'cardiology practice in\n"
@@ -425,7 +441,8 @@ async def expand_scope(
         f"  handling → bloodborne pathogens exposure control plan; cash →\n"
         f"  robbery/cash-handling policy). Stable slug + name + scope_level.\n"
         f"- required_credentials: EMPLOYEE / PROFESSIONAL credentials, inferred\n"
-        f"  from the STAFF ROLES named in the description (this is the key\n"
+        f"  from the EMPLOYEE ROLES PRESENT list (when supplied — authoritative)\n"
+        f"  and the STAFF ROLES named in the description (this is the key\n"
         f"  signal — read it carefully). e.g. 'BCBAs / Clinical Supervisors'\n"
         f"  → Board Certified Behavior Analyst (BACB); 'RBTs / Behavior\n"
         f"  Interventionists' → Registered Behavior Technician (BACB);\n"
@@ -742,6 +759,7 @@ async def gap_check(
     ai_scope: Optional[dict[str, Any]],
     resolved_scope: Optional[dict[str, Any]],
     conn,
+    employee_roles: list[str] | None = None,
 ) -> dict[str, Any]:
     """End-of-wizard safety net — Gemini reviews the full captured state
     and surfaces anything the AI scope expansion missed.
@@ -783,6 +801,12 @@ async def gap_check(
         f"  Specialty: {specialty or '(none)'}\n"
         f"  Locations: {json.dumps(locations)}\n"
         + (f"  Description: {description}\n" if description else "")
+        + (
+            "  Employee roles on staff (authoritative — surface role-specific "
+            "licensing/credentials/categories these imply): "
+            f"{json.dumps(sorted({r.strip() for r in (employee_roles or []) if r and r.strip()}))}\n"
+            if employee_roles else ""
+        )
         + f"\nALREADY-CAPTURED AI SCOPE:\n"
         f"  Categories: {json.dumps([c.get('category_slug') for c in (ai_scope.get('compliance_categories') or [])])}\n"
         f"  Certifications: {json.dumps([c.get('slug') for c in (ai_scope.get('required_certifications') or [])])}\n"

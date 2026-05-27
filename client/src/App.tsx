@@ -32,6 +32,7 @@ import Individuals from './pages/admin/Individuals'
 import Customers from './pages/admin/Customers'
 import AdminOnboarding from './pages/admin/AdminOnboarding'
 import AdminOnboardingWizard from './pages/admin/AdminOnboardingWizard'
+import AdminGapAnalysisRun from './pages/admin/AdminGapAnalysisRun'
 import GapAnalysisReport from './features/admin-onboarding/GapAnalysisReport'
 import ClientErrors from './pages/admin/ClientErrors'
 import ServerErrors from './pages/admin/ServerErrors'
@@ -178,6 +179,7 @@ export default function App() {
         <Route index element={<Navigate to="customers" replace />} />
         <Route path="customers" element={<Customers />} />
         <Route path="onboarding" element={<AdminOnboarding />} />
+        <Route path="onboarding/company/:companyId" element={<AdminGapAnalysisRun />} />
         <Route path="onboarding/:sessionId" element={<AdminOnboardingWizard />} />
         <Route path="onboarding/:sessionId/report" element={<GapAnalysisReport />} />
         <Route path="companies" element={<Companies />} />

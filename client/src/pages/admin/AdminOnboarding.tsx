@@ -1,13 +1,16 @@
 /**
- * Master-admin onboarding wizard index page.
+ * Master-admin gap-analysis index page.
  *
- * Shows in-progress + finalized sessions and a "New Onboarding" CTA. The
- * wizard shell lives at `/admin/onboarding/:sessionId`.
+ * Two entry points: a NEW company (the onboarding wizard at
+ * `/admin/onboarding/:sessionId`) or an EXISTING company (employee-sync
+ * enrichment run at `/admin/onboarding/company/:companyId`). Lists prior
+ * sessions below.
  */
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Loader2, Plus, Wand2 } from 'lucide-react'
+import { Loader2, Plus, Sparkles, Building2, Search, X } from 'lucide-react'
 
+import { api } from '../../api/client'
 import { adminOnboarding } from '../../api/adminOnboarding'
 import type {
   OnboardingSessionSummary,
@@ -28,6 +31,7 @@ export default function AdminOnboarding() {
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -66,22 +70,32 @@ export default function AdminOnboarding() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-3">
-          <Wand2 className="w-5 h-5 text-emerald-400" />
-          <h1 className="text-lg font-semibold text-zinc-100">Onboarding wizard</h1>
+          <Sparkles className="w-5 h-5 text-emerald-400" />
+          <h1 className="text-lg font-semibold text-zinc-100">Gap Analysis</h1>
         </div>
-        <button
-          onClick={() => void startNew()}
-          disabled={creating}
-          className="inline-flex items-center gap-2 px-4 h-9 rounded-md bg-emerald-500/90 hover:bg-emerald-500 text-zinc-950 text-sm font-medium disabled:opacity-50"
-        >
-          {creating ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Plus className="w-4 h-4" />
-          )}
-          New onboarding
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setPickerOpen(true)}
+            className="inline-flex items-center gap-2 px-4 h-9 rounded-md border border-zinc-700 hover:border-zinc-500 text-zinc-200 text-sm font-medium transition-colors"
+          >
+            <Building2 className="w-4 h-4" />
+            Existing company
+          </button>
+          <button
+            onClick={() => void startNew()}
+            disabled={creating}
+            className="inline-flex items-center gap-2 px-4 h-9 rounded-md bg-emerald-500/90 hover:bg-emerald-500 text-zinc-950 text-sm font-medium disabled:opacity-50 transition-colors"
+          >
+            {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            New company
+          </button>
+        </div>
       </div>
+      <p className="text-xs text-zinc-500 -mt-3 mb-5">
+        Run a gap analysis on a <span className="text-zinc-300">new company</span> (onboarding wizard)
+        or sync an <span className="text-zinc-300">existing company's</span> employee roster to enrich
+        its compliance &amp; jurisdictional coverage.
+      </p>
 
       <div className="flex items-center gap-2 mb-4 text-xs">
         {STATUS_FILTERS.map((f) => (
@@ -111,7 +125,8 @@ export default function AdminOnboarding() {
         </div>
       ) : sessions.length === 0 ? (
         <div className="rounded-md border border-zinc-800 bg-zinc-900/50 p-8 text-center text-sm text-zinc-400">
-          No sessions yet. Click <span className="text-zinc-100">New onboarding</span> to start one.
+          No gap analyses yet. Start one for a <span className="text-zinc-100">New company</span> or
+          an <span className="text-zinc-100">Existing company</span>.
         </div>
       ) : (
         <div className="rounded-md border border-zinc-800 overflow-hidden">
@@ -166,6 +181,83 @@ export default function AdminOnboarding() {
           </table>
         </div>
       )}
+
+      {pickerOpen && (
+        <CompanyPicker
+          onClose={() => setPickerOpen(false)}
+          onPick={(id) => navigate(`/admin/onboarding/company/${id}`)}
+        />
+      )}
+    </div>
+  )
+}
+
+type PickerCompany = { id: string; company_name: string; signup_source?: string | null }
+
+function CompanyPicker({ onClose, onPick }: { onClose: () => void; onPick: (id: string) => void }) {
+  const [companies, setCompanies] = useState<PickerCompany[]>([])
+  const [loading, setLoading] = useState(true)
+  const [q, setQ] = useState('')
+
+  useEffect(() => {
+    api.get<{ registrations?: PickerCompany[] }>('/admin/business-registrations')
+      .then((r) => setCompanies(r.registrations ?? []))
+      .catch(() => setCompanies([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const filtered = companies.filter((c) =>
+    c.company_name.toLowerCase().includes(q.toLowerCase()),
+  )
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-lg max-h-[70vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between p-4 border-b border-zinc-800">
+          <div className="flex items-center gap-2">
+            <Building2 className="w-4 h-4 text-emerald-400" />
+            <h3 className="text-sm font-semibold text-zinc-100">Pick a company</h3>
+          </div>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="p-3 border-b border-zinc-800">
+          <div className="relative">
+            <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search companies…"
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 pl-9 pr-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
+            />
+          </div>
+        </div>
+        <div className="overflow-y-auto flex-1">
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-zinc-500 p-4">
+              <Loader2 className="w-4 h-4 animate-spin" /> Loading companies…
+            </div>
+          ) : filtered.length === 0 ? (
+            <p className="text-sm text-zinc-500 p-4 text-center">No companies match.</p>
+          ) : (
+            filtered.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => onPick(c.id)}
+                className="w-full text-left px-4 py-2.5 border-b border-zinc-800/50 hover:bg-zinc-800/50 transition-colors flex items-center justify-between"
+              >
+                <span className="text-sm text-zinc-200">{c.company_name}</span>
+                {c.signup_source && (
+                  <span className="text-[10px] text-zinc-500 uppercase tracking-wider">{c.signup_source}</span>
+                )}
+              </button>
+            ))
+          )}
+        </div>
+      </div>
     </div>
   )
 }
