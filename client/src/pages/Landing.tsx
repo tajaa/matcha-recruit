@@ -10,9 +10,10 @@ const AgentReasoningAnimation = lazy(() => import('./landing/AgentReasoningAnima
 const ConvergenceAnimation = lazy(() =>
   import('./landing/animations/ConvergenceAnimation').then((m) => ({ default: m.ConvergenceAnimation })),
 )
-const NeuralConvergenceAnimation = lazy(() =>
-  import('./landing/animations/NeuralConvergenceAnimation').then((m) => ({ default: m.NeuralConvergenceAnimation })),
-)
+// Muted for now — revisit the mesh concept.
+// const NeuralConvergenceAnimation = lazy(() =>
+//   import('./landing/animations/NeuralConvergenceAnimation').then((m) => ({ default: m.NeuralConvergenceAnimation })),
+// )
 import { ANIMATION_BY_SIZZLE_ID } from './landing/animations'
 import { EnforcementTotalsTicker } from '../components/landing/EnforcementTotalsTicker'
 import { PricingContactModal } from '../components/PricingContactModal'
@@ -457,29 +458,14 @@ function ConvergenceSection() {
           </p>
         </div>
 
-        {/* Two animation cards — the step-by-step routing, and the live mesh */}
-        <div className="mt-10 sm:mt-14 flex flex-col gap-10 sm:gap-12">
-          <div>
-            <div className="max-w-[900px] mx-auto mb-3 text-[11px] uppercase tracking-wider font-medium" style={{ color: MUTED }}>
-              How one record routes
-            </div>
-            <LazyMount minHeight={480} fallback={<div className="w-full max-w-[900px] mx-auto rounded-xl" style={{ height: 480, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}>
-              <Suspense fallback={<div className="w-full max-w-[900px] mx-auto rounded-xl" style={{ height: 480, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}>
-                <ConvergenceAnimation />
-              </Suspense>
-            </LazyMount>
-          </div>
-
-          <div>
-            <div className="max-w-[900px] mx-auto mb-3 text-[11px] uppercase tracking-wider font-medium" style={{ color: MUTED }}>
-              The live mesh
-            </div>
-            <LazyMount minHeight={480} fallback={<div className="w-full max-w-[900px] mx-auto rounded-xl" style={{ height: 480, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}>
-              <Suspense fallback={<div className="w-full max-w-[900px] mx-auto rounded-xl" style={{ height: 480, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}>
-                <NeuralConvergenceAnimation />
-              </Suspense>
-            </LazyMount>
-          </div>
+        {/* Animation card — one incident fanning out to all three domains.
+            (Neural-mesh card muted for now — revisit.) */}
+        <div className="mt-10 sm:mt-14">
+          <LazyMount minHeight={480} fallback={<div className="w-full max-w-[900px] mx-auto rounded-xl" style={{ height: 480, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}>
+            <Suspense fallback={<div className="w-full max-w-[900px] mx-auto rounded-xl" style={{ height: 480, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}>
+              <ConvergenceAnimation />
+            </Suspense>
+          </LazyMount>
         </div>
 
         <div className="mt-10 sm:mt-12 grid md:grid-cols-3 gap-px rounded-xl overflow-hidden" style={{ backgroundColor: LINE }}>
