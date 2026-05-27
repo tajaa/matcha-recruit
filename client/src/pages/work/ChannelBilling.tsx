@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Hash, Loader2, AlertTriangle, ExternalLink, XCircle, Clock, CreditCard } from 'lucide-react'
 import { getMyChannelBilling, getMyPaymentHistory, cancelChannelSubscription } from '../../api/channels'
 import type { ChannelSubscription, PaymentEvent } from '../../api/channels'
+import { useWorkBase } from '../../routes/WorkSurfaceContext'
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; label: string }> = {
   active: { bg: 'bg-emerald-900/30', text: 'text-emerald-400', label: 'Active' },
@@ -25,6 +26,7 @@ function formatDate(iso: string): string {
 
 export default function ChannelBilling() {
   const navigate = useNavigate()
+  const base = useWorkBase()
   const [subs, setSubs] = useState<ChannelSubscription[]>([])
   const [history, setHistory] = useState<PaymentEvent[]>([])
   const [loading, setLoading] = useState(true)
@@ -79,7 +81,7 @@ export default function ChannelBilling() {
       {subs.length === 0 ? (
         <div className="text-center py-16 text-zinc-500">
           <p>No paid channel subscriptions.</p>
-          <button onClick={() => navigate('/work/channels')} className="mt-3 text-emerald-400 hover:text-emerald-300 text-sm">
+          <button onClick={() => navigate(`${base}/channels`)} className="mt-3 text-emerald-400 hover:text-emerald-300 text-sm">
             Browse channels
           </button>
         </div>
@@ -121,7 +123,7 @@ export default function ChannelBilling() {
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <button
-                            onClick={() => navigate(`/work/channels/${sub.channel_id}`)}
+                            onClick={() => navigate(`${base}/channels/${sub.channel_id}`)}
                             className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 px-2 py-1 rounded hover:bg-zinc-800 transition-colors"
                           >
                             <ExternalLink size={12} />

@@ -33,7 +33,7 @@ interface Step {
 
 const steps: Step[] = [
   {
-    title: 'Welcome to Matcha Work',
+    title: 'Welcome to Werk',
     description:
       'Your AI-powered workspace for research, documents, and collaboration.',
     icon: <Sparkles size={48} className="text-emerald-400" />,

@@ -17,6 +17,7 @@ import ProjectPanel from '../../components/matcha-work/ProjectPanel'
 import AgentPanel from '../../components/matcha-work/AgentPanel'
 import LanguageTutorPanel from '../../components/matcha-work/LanguageTutorPanel'
 import { MODEL_OPTIONS, formatTokens } from '../../components/matcha-work/constants'
+import { useWorkBase } from '../../routes/WorkSurfaceContext'
 
 const RESUME_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt']
 const RESUME_MAX_SIZE = 10 * 1024 * 1024
@@ -66,6 +67,7 @@ export default function MatchaWorkThread() {
   const { me } = useMe()
   const isIndividual = me?.user?.role === 'individual'
   const { threadId } = useParams<{ threadId: string }>()
+  const base = useWorkBase()
   const [thread, setThread] = useState<MWThreadDetail | null>(null)
   const [messages, setMessages] = useState<MWMessage[]>([])
   const [input, setInput] = useState('')
@@ -537,7 +539,7 @@ export default function MatchaWorkThread() {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-49px)] gap-4">
         <p className="text-red-400">{error}</p>
-        <Link to="/work" className="text-sm text-zinc-400 hover:text-white">
+        <Link to={base} className="text-sm text-zinc-400 hover:text-white">
           Back to threads
         </Link>
       </div>
@@ -550,7 +552,7 @@ export default function MatchaWorkThread() {
       <div className={`${mobileView === 'panel' && hasRightPanel ? 'hidden md:flex' : 'flex'} flex-col ${hasRightPanel ? 'w-full md:w-1/2' : 'w-full'} border-r ${th.border} ${th.panelBg}`}>
         {/* Header */}
         <div className={`flex items-center gap-3 px-4 py-3 border-b ${th.border}`}>
-          <Link to="/work" className={`${th.backArrow} transition-colors`}>
+          <Link to={base} className={`${th.backArrow} transition-colors`}>
             <ArrowLeft size={18} />
           </Link>
 

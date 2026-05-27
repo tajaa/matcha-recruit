@@ -12,6 +12,7 @@ import CreateChannelModal from '../channels/CreateChannelModal'
 import HiringClientPickerModal from '../matcha-work/HiringClientPickerModal'
 import TemplatePickerModal from '../matcha-work/TemplatePickerModal'
 import type { RecruitingClient } from '../../types/matcha-work'
+import { useWorkBase } from '../../routes/WorkSurfaceContext'
 
 interface Props {
   open: boolean
@@ -23,6 +24,7 @@ type RenameItem = { type: 'channel' | 'project' | 'thread'; id: string; name: st
 export default function WorkSidebar({ open, onToggle }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
+  const base = useWorkBase()
   const { me, isPersonal, mwBetaLite } = useMe()
   const canCreateChannel = ['client', 'admin', 'individual'].includes(me?.user?.role ?? '')
 
@@ -63,7 +65,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   }, [])
 
   useEffect(() => {
-    if (location.pathname === '/work') {
+    if (location.pathname === base) {
       listChannels().then(setChannels).catch(() => {})
     }
   }, [location.pathname])
@@ -137,7 +139,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
     try {
       const project = await createProjectNew(titles[type], type)
       setProjects((prev) => [project, ...prev])
-      navigate(`/work/projects/${project.id}`)
+      navigate(`${base}/projects/${project.id}`)
     } catch {}
   }
 
@@ -154,7 +156,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
     try {
       const project = await createProjectNew(title, 'general', null, templateId)
       setProjects((prev) => [project, ...prev])
-      navigate(`/work/projects/${project.id}`)
+      navigate(`${base}/projects/${project.id}`)
     } catch {}
   }
 
@@ -176,7 +178,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
       const project = await createProjectNew(title, 'recruiting', client?.id ?? null)
       const enriched = { ...project, hiring_client_name: client?.name ?? null }
       setProjects((prev) => [enriched, ...prev])
-      navigate(`/work/projects/${project.id}`)
+      navigate(`${base}/projects/${project.id}`)
     } catch {}
   }
 
@@ -188,7 +190,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   }
 
   const isActive = (path: string) => location.pathname === path
-  const inboxPath = '/work/inbox'
+  const inboxPath = `${base}/inbox`
   const totalChannelUnread = channels.reduce((sum, ch) => sum + ch.unread_count, 0)
   const userName = me?.profile?.name || me?.user?.email?.split('@')[0] || 'User'
   const userEmail = me?.user?.email || ''
@@ -208,16 +210,16 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         <div className="w-6 border-t border-zinc-800/40 mb-1" />
 
         <button
-          onClick={() => navigate('/work')}
-          className={`p-2 rounded-lg transition-colors ${isActive('/work') ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
+          onClick={() => navigate(base)}
+          className={`p-2 rounded-lg transition-colors ${isActive(base) ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
           title="Home"
         >
           <Home size={16} />
         </button>
 
         <button
-          onClick={() => navigate('/work/email')}
-          className={`p-2 rounded-lg transition-colors ${isActive('/work/email') ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
+          onClick={() => navigate(`${base}/email`)}
+          className={`p-2 rounded-lg transition-colors ${isActive(`${base}/email`) ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
           title="Email"
         >
           <MailOpen size={16} />
@@ -248,7 +250,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
         <button
           onClick={() => { onToggle(); setThreadsOpen(true) }}
-          className={`p-2 rounded-lg transition-colors ${location.pathname.match(/\/work\/[^/]+$/) && !location.pathname.includes('/channels/') && !location.pathname.includes('/projects/') && location.pathname !== '/work' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
+          className={`p-2 rounded-lg transition-colors ${new RegExp(`^${base}/[^/]+$`).test(location.pathname) && !location.pathname.includes('/channels/') && !location.pathname.includes('/projects/') ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
           title="Threads"
         >
           <MessageSquare size={16} />
@@ -257,8 +259,8 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         <div className="flex-1" />
 
         <button
-          onClick={() => navigate('/work/connections')}
-          className={`relative p-2 rounded-lg transition-colors ${isActive('/work/connections') ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
+          onClick={() => navigate(`${base}/connections`)}
+          className={`relative p-2 rounded-lg transition-colors ${isActive(`${base}/connections`) ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
           title="People"
         >
           <Users size={16} />
@@ -323,9 +325,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         <nav className="flex-1 overflow-y-auto px-2 space-y-1 pb-3">
           {/* Home */}
           <button
-            onClick={() => navigate('/work')}
+            onClick={() => navigate(base)}
             className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
-              location.pathname === '/work'
+              location.pathname === base
                 ? 'bg-zinc-800/60 text-white font-medium'
                 : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
             }`}
@@ -336,9 +338,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
           {/* Email */}
           <button
-            onClick={() => navigate('/work/email')}
+            onClick={() => navigate(`${base}/email`)}
             className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
-              location.pathname === '/work/email'
+              location.pathname === `${base}/email`
                 ? 'bg-zinc-800/60 text-white font-medium'
                 : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
             }`}
@@ -356,7 +358,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
               Channels
               <div className="flex items-center gap-1">
                 <span
-                  onClick={(e) => { e.stopPropagation(); navigate('/work/channels') }}
+                  onClick={(e) => { e.stopPropagation(); navigate(`${base}/channels`) }}
                   className="hover:text-emerald-400 cursor-pointer"
                   title="Browse channels"
                 >
@@ -382,11 +384,11 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                   <div
                     key={ch.id}
                     className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors cursor-pointer ${
-                      isActive(`/work/channels/${ch.id}`)
+                      isActive(`${base}/channels/${ch.id}`)
                         ? 'bg-zinc-800/60 text-white font-medium'
                         : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
                     }`}
-                    onClick={() => navigate(`/work/channels/${ch.id}`)}
+                    onClick={() => navigate(`${base}/channels/${ch.id}`)}
                   >
                     <Hash size={14} className="text-zinc-500 shrink-0" strokeWidth={1.6} />
                     {ch.is_paid && (
@@ -446,7 +448,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                     <div
                       key={p.id}
                       className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
-                        isActive(`/work/projects/${p.id}`)
+                        isActive(`${base}/projects/${p.id}`)
                           ? 'bg-zinc-800/60 text-white font-medium'
                           : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
                       }`}
@@ -457,7 +459,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                       ) : (
                         <>
                           <button
-                            onClick={() => navigate(`/work/projects/${p.id}`)}
+                            onClick={() => navigate(`${base}/projects/${p.id}`)}
                             className="flex-1 min-w-0 text-left truncate"
                           >
                             {p.title}
@@ -526,7 +528,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                 <div
                   key={t.id}
                   className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
-                    isActive(`/work/${t.id}`)
+                    isActive(`${base}/${t.id}`)
                       ? 'bg-zinc-800/60 text-white font-medium'
                       : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
                   }`}
@@ -537,7 +539,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                   ) : (
                     <>
                       <button
-                        onClick={() => navigate(`/work/${t.id}`)}
+                        onClick={() => navigate(`${base}/${t.id}`)}
                         className="flex-1 min-w-0 text-left truncate"
                       >
                         {t.title}
@@ -595,16 +597,16 @@ export default function WorkSidebar({ open, onToggle }: Props) {
             </div>
           )}
           <button
-            onClick={() => navigate('/work/billing')}
+            onClick={() => navigate(`${base}/billing`)}
             className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30 transition-colors"
           >
             <CreditCard size={14} strokeWidth={1.6} />
             Billing
           </button>
           <button
-            onClick={() => navigate('/work/connections')}
+            onClick={() => navigate(`${base}/connections`)}
             className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
-              isActive('/work/connections')
+              isActive(`${base}/connections`)
                 ? 'bg-zinc-800/60 text-white font-medium'
                 : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
             }`}
@@ -661,7 +663,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           onCreated={(ch) => {
             setShowCreateChannel(false)
             setChannels((prev) => [{ ...ch, member_count: 1, unread_count: 0, last_message_at: null, last_message_preview: null, is_member: true } as ChannelSummary, ...prev])
-            navigate(`/work/channels/${ch.id}`)
+            navigate(`${base}/channels/${ch.id}`)
           }}
         />
       )}

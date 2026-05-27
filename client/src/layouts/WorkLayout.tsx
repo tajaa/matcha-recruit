@@ -1,4 +1,4 @@
-import { Link, Outlet, useLocation } from 'react-router-dom'
+import { Link, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { ArrowLeft, Zap, Menu, X } from 'lucide-react'
 import { usePresenceHeartbeat } from '../hooks/usePresenceHeartbeat'
 import { useChannelNotifications } from '../hooks/useChannelNotifications'
@@ -9,6 +9,7 @@ import WorkSidebar from '../components/work/WorkSidebar'
 import { useEffect, useState } from 'react'
 import { useMe } from '../hooks/useMe'
 import { api } from '../api/client'
+import { useWorkSurface, useWorkBrand } from '../routes/WorkSurfaceContext'
 
 interface TokenBudget {
   free_tokens_used: number
@@ -84,8 +85,10 @@ function TokenIndicator() {
 export default function WorkLayout() {
   usePresenceHeartbeat()
   useChannelNotifications()
-  const { isPersonal } = useMe()
-  const { pathname } = useLocation()
+  const { isPersonal, loading } = useMe()
+  const { pathname, search } = useLocation()
+  const surface = useWorkSurface()
+  const brand = useWorkBrand()
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     const saved = localStorage.getItem('mw-sidebar')
     return saved !== 'closed'
@@ -105,6 +108,18 @@ export default function WorkLayout() {
     })
   }
 
+  // Identity ↔ surface alignment: personal users live under /werk, business
+  // users under /work. Bounce stale/cross bookmarks, preserving subpath + query
+  // ('/work' and '/werk' are both 5 chars, so slice(5) yields the shared tail).
+  if (!loading) {
+    if (surface === 'matcha-work' && isPersonal) {
+      return <Navigate to={`/werk${pathname.slice(5)}${search}`} replace />
+    }
+    if (surface === 'werk' && !isPersonal) {
+      return <Navigate to={`/work${pathname.slice(5)}${search}`} replace />
+    }
+  }
+
   return (
     <div className="h-screen bg-zinc-950 flex flex-col overflow-hidden">
       <header className="flex items-center gap-2 sm:gap-3 px-3 sm:px-6 py-3 border-b border-zinc-800 shrink-0">
@@ -114,7 +129,7 @@ export default function WorkLayout() {
         >
           <Menu className="h-5 w-5" />
         </button>
-        {!isPersonal && (
+        {surface === 'matcha-work' && (
           <>
             <Link
               to="/app"
@@ -132,7 +147,7 @@ export default function WorkLayout() {
             <div className="hidden sm:block h-4 w-px bg-zinc-700" />
           </>
         )}
-        <span className="hidden sm:inline text-sm font-medium text-white">Matcha Work</span>
+        <span className="hidden sm:inline text-sm font-medium text-white">{brand}</span>
 
         <div className="ml-auto flex items-center gap-3 sm:gap-4">
           <TokenIndicator />

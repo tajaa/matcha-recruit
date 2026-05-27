@@ -9,6 +9,7 @@ const AdminRoutes = lazy(() => import('./routes/AdminRoutes'))
 const AppRoutes = lazy(() => import('./routes/AppRoutes'))
 const BrokerRoutes = lazy(() => import('./routes/BrokerRoutes'))
 const WorkRoutes = lazy(() => import('./routes/WorkRoutes'))
+const WerkRoutes = lazy(() => import('./routes/WerkRoutes'))
 const PortalRoutes = lazy(() => import('./routes/PortalRoutes'))
 
 // Public / marketing / auth-funnel pages — lazy so marketing visitors only
@@ -105,6 +106,7 @@ export default function App() {
         <Route path="/report/:token" element={<AnonymousReport />} />
         <Route path="/intake/:token" element={<LocationIntake />} />
         <Route path="/work/*" element={<WorkRoutes />} />
+        <Route path="/werk/*" element={<WerkRoutes />} />
         <Route path="/admin/*" element={<AdminRoutes />} />
         <Route path="/broker/*" element={<BrokerRoutes />} />
         <Route path="/portal/*" element={<PortalRoutes />} />

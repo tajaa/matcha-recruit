@@ -4,6 +4,7 @@ import { Hash, Search, Users, Lock, Loader2, LogIn, Crown } from 'lucide-react'
 import { listChannels, discoverChannels, joinChannel, createChannelCheckout } from '../../api/channels'
 import type { ChannelSummary } from '../../api/channels'
 import { useMe } from '../../hooks/useMe'
+import { useWorkBase } from '../../routes/WorkSurfaceContext'
 
 const CreateChannelModal = lazy(() => import('../../components/channels/CreateChannelModal'))
 
@@ -16,6 +17,7 @@ function formatPrice(cents: number | null | undefined, _currency?: string): stri
 
 export default function ChannelBrowse() {
   const navigate = useNavigate()
+  const base = useWorkBase()
   const { me } = useMe()
   const [channels, setChannels] = useState<ChannelSummary[]>([])
   const [discoverList, setDiscoverList] = useState<ChannelSummary[]>([])
@@ -66,7 +68,7 @@ export default function ChannelBrowse() {
     setActionLoading(ch.id)
     try {
       await joinChannel(ch.id)
-      navigate(`/work/channels/${ch.id}`)
+      navigate(`${base}/channels/${ch.id}`)
     } catch {
       setActionLoading(null)
     }
@@ -158,7 +160,7 @@ export default function ChannelBrowse() {
                 <div
                   key={ch.id}
                   onClick={() => {
-                    if (ch.is_member) navigate(`/work/channels/${ch.id}`)
+                    if (ch.is_member) navigate(`${base}/channels/${ch.id}`)
                   }}
                   className="cursor-pointer rounded-xl border border-zinc-800 bg-zinc-900 p-4 hover:border-zinc-700 transition-colors"
                 >
@@ -201,7 +203,7 @@ export default function ChannelBrowse() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
-                          navigate(`/work/channels/${ch.id}`)
+                          navigate(`${base}/channels/${ch.id}`)
                         }}
                         className="rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-700 transition-colors"
                       >
@@ -260,7 +262,7 @@ export default function ChannelBrowse() {
             canCreatePaid={me?.user?.role === 'individual' || me?.user?.role === 'admin'}
             onCreated={(ch) => {
               setShowCreate(false)
-              navigate(`/work/channels/${ch.id}`)
+              navigate(`${base}/channels/${ch.id}`)
             }}
           />
         </Suspense>

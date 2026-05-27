@@ -9,6 +9,7 @@ import type { TaskBoardResponse } from '../../api/matchaWork'
 import TaskBoard from '../../components/work/TaskBoard'
 import { useMe } from '../../hooks/useMe'
 import OnboardingWizard, { ONBOARDING_STORAGE_KEY } from '../../components/work/OnboardingWizard'
+import { useWorkBase, useWorkBrand } from '../../routes/WorkSurfaceContext'
 
 const TASK_LABELS: Record<string, string> = {
   chat: 'Chat',
@@ -25,6 +26,8 @@ type Tab = 'all' | 'active' | 'pinned' | 'archived' | 'tasks'
 
 export default function MatchaWorkList() {
   const navigate = useNavigate()
+  const base = useWorkBase()
+  const brand = useWorkBrand()
   const { me } = useMe() // auth guard
   const [threads, setThreads] = useState<MWThread[]>([])
   const [channels, setChannels] = useState<ChannelSummary[]>([])
@@ -87,7 +90,7 @@ export default function MatchaWorkList() {
     setCreating(true)
     try {
       const res = await createThread()
-      navigate(`/work/${res.id}`)
+      navigate(`${base}/${res.id}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create')
       setCreating(false)
@@ -105,7 +108,7 @@ export default function MatchaWorkList() {
     }
     try {
       const res = await createProjectNew(titles[type], type)
-      navigate(`/work/projects/${res.id}`)
+      navigate(`${base}/projects/${res.id}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create')
       setCreating(false)
@@ -141,7 +144,7 @@ export default function MatchaWorkList() {
   return (
     <div className="max-w-4xl mx-auto px-3 sm:px-6 py-4 sm:py-8">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold text-white">Matcha Work</h1>
+        <h1 className="text-2xl font-semibold text-white">{brand}</h1>
         {tab !== 'tasks' && (
           <div className="flex items-center gap-2">
             <button
@@ -169,7 +172,7 @@ export default function MatchaWorkList() {
         <div className="mb-6">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-wider">Your Channels</h2>
-            <button onClick={() => navigate('/work/channels')} className="text-xs text-zinc-500 hover:text-emerald-400 flex items-center gap-1">
+            <button onClick={() => navigate(`${base}/channels`)} className="text-xs text-zinc-500 hover:text-emerald-400 flex items-center gap-1">
               <Compass size={12} />
               Browse All
             </button>
@@ -178,7 +181,7 @@ export default function MatchaWorkList() {
             {channels.filter(ch => ch.is_member).slice(0, 8).map((ch) => (
               <button
                 key={ch.id}
-                onClick={() => navigate(`/work/channels/${ch.id}`)}
+                onClick={() => navigate(`${base}/channels/${ch.id}`)}
                 className="flex-shrink-0 w-48 bg-zinc-900 border border-zinc-800 rounded-lg p-3 hover:border-zinc-700 transition-colors text-left"
               >
                 <div className="flex items-center gap-2 mb-1">
@@ -278,7 +281,7 @@ export default function MatchaWorkList() {
           {filtered.map((t) => (
             <div
               key={t.id}
-              onClick={() => navigate(`/work/${t.id}`)}
+              onClick={() => navigate(`${base}/${t.id}`)}
               className="group flex items-center gap-4 p-4 bg-zinc-900 hover:bg-zinc-800/80 border border-zinc-800 rounded-lg cursor-pointer transition-colors"
             >
               <div className="flex-1 min-w-0">

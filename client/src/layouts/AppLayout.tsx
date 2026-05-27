@@ -66,7 +66,7 @@ export default function AppLayout({ sidebar, logoLabel }: { sidebar: ReactNode; 
   }, [sidebarCollapsed])
 
   if (!loading && isPersonal && !PERSONAL_ALLOWED.has(pathname)) {
-    return <Navigate to="/work" replace />
+    return <Navigate to="/werk" replace />
   }
 
   const pageTitle = getPageTitle(pathname)

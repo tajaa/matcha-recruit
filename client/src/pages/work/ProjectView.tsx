@@ -19,6 +19,7 @@ import CollaboratorsPill from '../../components/matcha-work/CollaboratorsPill'
 import PresenceLayer from '../../components/matcha-work/PresenceLayer'
 import ProjectTour, { type TourStep } from '../../components/matcha-work/ProjectTour'
 import { useProjectPresence } from '../../hooks/useProjectPresence'
+import { useWorkBase } from '../../routes/WorkSurfaceContext'
 
 const TOUR_DISMISSED_KEY = 'mw_project_tour_dismissed'
 
@@ -52,6 +53,7 @@ import { MODEL_OPTIONS, formatTokens } from '../../components/matcha-work/consta
 
 export default function ProjectView() {
   const { projectId } = useParams<{ projectId: string }>()
+  const base = useWorkBase()
   const [project, setProject] = useState<MWProject | null>(null)
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
   const [activeThread, setActiveThread] = useState<MWThreadDetail | null>(null)
@@ -431,7 +433,7 @@ export default function ProjectView() {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-49px)] gap-4">
         <p className="text-red-400">{error || 'Project not found'}</p>
-        <Link to="/work" className="text-sm text-zinc-400 hover:text-white">Back to threads</Link>
+        <Link to={base} className="text-sm text-zinc-400 hover:text-white">Back to threads</Link>
       </div>
     )
   }
@@ -449,7 +451,7 @@ export default function ProjectView() {
     <>
       {/* Top: back + (new chat, non-recruiting only) */}
       <div className="px-3 py-3 flex items-center justify-between shrink-0" style={{ borderBottom: '1px solid #333' }}>
-        <Link to="/work" className="text-[#6a737d] hover:text-[#e8e8e8]">
+        <Link to={base} className="text-[#6a737d] hover:text-[#e8e8e8]">
           <ArrowLeft size={14} />
         </Link>
         {!isRecruiting && (
@@ -628,7 +630,7 @@ export default function ProjectView() {
         {/* Header */}
         <div className="px-4 py-2 flex items-center gap-2" style={{ borderBottom: '1px solid #333' }}>
           {isRecruiting ? (
-            <Link to="/work" className="text-[#6a737d] hover:text-[#e8e8e8]" title="Back to workspace">
+            <Link to={base} className="text-[#6a737d] hover:text-[#e8e8e8]" title="Back to workspace">
               <ArrowLeft size={14} />
             </Link>
           ) : (

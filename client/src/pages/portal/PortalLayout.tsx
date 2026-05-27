@@ -31,7 +31,7 @@ export default function PortalLayout() {
     const fallback =
       role === 'admin' ? '/admin' :
       role === 'broker' ? '/broker' :
-      role === 'individual' ? '/work' :
+      role === 'individual' ? '/werk' :
       '/app'
     return <Navigate to={fallback} replace />
   }

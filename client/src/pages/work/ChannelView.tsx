@@ -19,6 +19,7 @@ import { listOpenPostings } from '../../api/channelJobPostings'
 import type { OpenPostingSummary } from '../../api/channelJobPostings'
 import VoiceCallBar from '../../components/channels/VoiceCallBar'
 import { useVoiceCall } from '../../hooks/useVoiceCall'
+import { useWorkBase, useWorkBrand } from '../../routes/WorkSurfaceContext'
 
 // @-mention rendering — splits message content into plain-text + mention-chip
 // nodes. Server stamps `mentioned_user_ids` on the broadcast payload so we can
@@ -80,6 +81,8 @@ export default function ChannelView() {
   const { channelId } = useParams<{ channelId: string }>()
   const navigate = useNavigate()
   const { me } = useMe()
+  const base = useWorkBase()
+  const brand = useWorkBrand()
   const userId = me?.user?.id
 
   const [channel, setChannel] = useState<ChannelDetail | null>(null)
@@ -447,7 +450,7 @@ export default function ChannelView() {
     if (!channelId) return
     try {
       await leaveChannel(channelId)
-      navigate('/work')
+      navigate(base)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to leave channel')
     }
@@ -479,7 +482,7 @@ export default function ChannelView() {
           canRejoin={paymentInfo.can_rejoin ?? true}
           onJoin={handleJoin}
           joining={joining}
-          onBack={() => navigate('/work')}
+          onBack={() => navigate(base)}
         />
       )
     }
@@ -501,8 +504,8 @@ export default function ChannelView() {
             Join Channel
           </button>
         )}
-        <button onClick={() => navigate('/work')} className="text-zinc-500 text-xs hover:text-zinc-300">
-          Back to Matcha Work
+        <button onClick={() => navigate(base)} className="text-zinc-500 text-xs hover:text-zinc-300">
+          Back to {brand}
         </button>
       </div>
     )
@@ -512,8 +515,8 @@ export default function ChannelView() {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4">
         <p className="text-red-400 text-sm">{error}</p>
-        <button onClick={() => navigate('/work')} className="text-zinc-500 text-xs hover:text-zinc-300">
-          Back to Matcha Work
+        <button onClick={() => navigate(base)} className="text-zinc-500 text-xs hover:text-zinc-300">
+          Back to {brand}
         </button>
       </div>
     )
@@ -523,7 +526,7 @@ export default function ChannelView() {
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-800 shrink-0">
-        <button onClick={() => navigate('/work')} className="text-zinc-500 hover:text-white sm:hidden">
+        <button onClick={() => navigate(base)} className="text-zinc-500 hover:text-white sm:hidden">
           <ArrowLeft size={18} />
         </button>
         <Hash size={18} className="text-emerald-500 shrink-0" />
@@ -641,7 +644,7 @@ export default function ChannelView() {
           {onlineUsers.length > 0 && <span>{onlineUsers.length} online</span>}
           {paymentInfo.subscription_status === 'active' && (
             <button
-              onClick={() => navigate('/work/billing')}
+              onClick={() => navigate(`${base}/billing`)}
               className="ml-auto text-zinc-600 hover:text-zinc-400"
             >
               Manage subscription

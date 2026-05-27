@@ -6,6 +6,7 @@ import { useToast } from '../components/ui/Toast'
 import { useMe } from './useMe'
 import { getChannelSoundEnabled, getChannelToastEnabled } from './useNotificationSettings'
 import { playNotificationSound } from '../utils/notificationSound'
+import { useWorkBase } from '../routes/WorkSurfaceContext'
 
 /**
  * Mount once at the top of WorkLayout. Owns:
@@ -14,7 +15,7 @@ import { playNotificationSound } from '../utils/notificationSound'
  *   broadcasts messages for all of them, not just the one being viewed)
  * - Dispatching a sound + toast when a new message arrives, unless:
  *     - The message was sent by the current user
- *     - The user is actively viewing that channel (`/work/channels/<id>`)
+ *     - The user is actively viewing that channel (`<base>/channels/<id>`, /work or /werk)
  *     - The corresponding setting is disabled
  * - Clicking the toast navigates to the channel
  *
@@ -26,6 +27,7 @@ export function useChannelNotifications() {
   const { toast } = useToast()
   const navigate = useNavigate()
   const location = useLocation()
+  const base = useWorkBase()
 
   // Keep pathname in a ref so the message listener (set up once) always
   // reads the current value without needing to re-subscribe on every nav.
@@ -64,7 +66,7 @@ export function useChannelNotifications() {
       if (msg.sender_id === userId) return
 
       // Skip if the user is currently viewing this channel
-      if (pathnameRef.current.includes(`/work/channels/${msg.channel_id}`)) return
+      if (pathnameRef.current.includes(`${base}/channels/${msg.channel_id}`)) return
 
       const channelName = channelNamesRef.current.get(msg.channel_id) ?? 'a channel'
       const preview = truncate(msg.content || '(attachment)', 80)
@@ -77,7 +79,7 @@ export function useChannelNotifications() {
         toast(message, {
           type: 'info',
           duration: 5000,
-          onClick: () => navigate(`/work/channels/${msg.channel_id}`),
+          onClick: () => navigate(`${base}/channels/${msg.channel_id}`),
         })
       }
     }
@@ -90,7 +92,7 @@ export function useChannelNotifications() {
       // Note: we don't leave rooms or disconnect — the shared socket lives
       // for the app's lifetime and other components may still depend on it.
     }
-  }, [userId, toast, navigate])
+  }, [userId, toast, navigate, base])
 }
 
 function truncate(s: string, n: number): string {

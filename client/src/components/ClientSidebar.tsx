@@ -52,17 +52,17 @@ const nav: (NavItem | NavGroup)[] = [
   {
     label: 'AI',
     items: [
-      { to: '/work', icon: Sparkles, label: 'Matcha Work' },
+      { to: '/work', icon: Sparkles, label: 'Matcha-Work' },
     ],
   },
 ]
 
-// Personal accounts only see Matcha Work — no platform/HR items
+// Personal accounts only see Werk — no platform/HR items
 const personalNav: (NavItem | NavGroup)[] = [
   {
     label: 'AI',
     items: [
-      { to: '/work', icon: Sparkles, label: 'Matcha Work' },
+      { to: '/werk', icon: Sparkles, label: 'Werk' },
     ],
   },
 ]
@@ -110,7 +110,7 @@ export default function ClientSidebar() {
 
   return (
     <SidebarShell
-      logoTo={isPersonal ? '/work' : '/app'}
+      logoTo={isPersonal ? '/werk' : '/app'}
       logoLabel="Matcha"
       nav={loading ? [] : isPersonal ? personalNav : withBadges(filterByFeatures(nav))}
       user={footerName ? {

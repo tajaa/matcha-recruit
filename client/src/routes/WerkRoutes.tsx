@@ -12,12 +12,12 @@ import ConnectionsPanel from '../components/work/ConnectionsPanel'
 import Inbox from '../pages/app/Inbox'
 import { WorkSurfaceProvider } from './WorkSurfaceContext'
 
-// Matcha-Work — the business product surface (role='client', inside a Matcha
-// company), served at /work. Shares the same page components as the personal
-// Werk tree (WerkRoutes); only the surface value differs.
-export default function WorkRoutes() {
+// Werk — the personal product surface (role='individual'), served at /werk.
+// Reuses the same page components as the business /work tree (WorkRoutes); the
+// only difference is the surface value, which drives branding + nav base paths.
+export default function WerkRoutes() {
   return (
-    <WorkSurfaceProvider value="matcha-work">
+    <WorkSurfaceProvider value="werk">
       <Routes>
         <Route element={<WorkLayout />}>
           <Route index element={<MatchaWorkList />} />

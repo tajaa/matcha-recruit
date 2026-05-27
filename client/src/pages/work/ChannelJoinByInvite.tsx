@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { Hash, Loader2, AlertCircle } from 'lucide-react'
 import { joinByInvite } from '../../api/channels'
+import { useWorkBase, useWorkBrand } from '../../routes/WorkSurfaceContext'
 
 export default function ChannelJoinByInvite() {
   const { code } = useParams<{ code: string }>()
   const navigate = useNavigate()
+  const base = useWorkBase()
+  const brand = useWorkBrand()
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -17,7 +20,7 @@ export default function ChannelJoinByInvite() {
     joinByInvite(code)
       .then((res) => {
         if (res.ok && res.channel_id) {
-          navigate(`/work/channels/${res.channel_id}`, { replace: true })
+          navigate(`${base}/channels/${res.channel_id}`, { replace: true })
         } else if (res.requires_payment && res.checkout_url) {
           window.location.href = res.checkout_url
         } else {
@@ -36,10 +39,10 @@ export default function ChannelJoinByInvite() {
           <AlertCircle className="w-10 h-10 text-red-400 mx-auto" />
           <p className="text-sm text-zinc-400">{error}</p>
           <Link
-            to="/work"
+            to={base}
             className="inline-block text-sm text-emerald-400 hover:text-emerald-300 transition-colors"
           >
-            Back to Work
+            Back to {brand}
           </Link>
         </div>
       </div>

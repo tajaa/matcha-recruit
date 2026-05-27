@@ -20,6 +20,7 @@ import {
 import type { JobPostingDetail as JobPostingDetailData, ApplicationSummary } from '../../api/channelJobPostings'
 import { getMyResume, getApplicantResume, getMyTier, startRecruiterCheckout } from '../../api/profileResume'
 import type { ProfileResume, ParsedResume, TierInfo } from '../../api/profileResume'
+import { useWorkBrand } from '../../routes/WorkSurfaceContext'
 
 interface Props {
   channelId: string
@@ -36,6 +37,7 @@ const APP_STATUS_BADGE: Record<string, string> = {
 }
 
 export default function JobPostingDetail({ channelId, postingId, myRole, onClose }: Props) {
+  const brand = useWorkBrand()
   const [posting, setPosting] = useState<JobPostingDetailData | null>(null)
   const [applicants, setApplicants] = useState<ApplicationSummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -688,7 +690,7 @@ export default function JobPostingDetail({ channelId, postingId, myRole, onClose
               <div className="flex-1">
                 <h3 className="text-sm font-semibold text-zinc-100">Upload your resume to apply</h3>
                 <p className="text-xs text-zinc-400 mt-1">
-                  Matcha Work uses your parsed profile resume to auto-fill job applications.
+                  {brand} uses your parsed profile resume to auto-fill job applications.
                   Upload one once and reuse it for every role you apply to.
                 </p>
                 <div className="mt-4 flex items-center gap-2">

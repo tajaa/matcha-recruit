@@ -16,6 +16,7 @@ const roleRoutes: Record<string, string> = {
   employee: '/portal',
   candidate: '/candidate',
   broker: '/broker',
+  individual: '/werk',
 }
 
 const INK = 'var(--color-ivory-ink)'
