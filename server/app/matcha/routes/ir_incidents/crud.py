@@ -40,17 +40,13 @@ from app.matcha.models.ir_incident import (
 )
 
 from ._shared import (
-    _auto_classify_incident_task,
     _company_filter,
-    _detect_osha_reportable_keywords,
     _gather_incident_people,
-    _parse_occurred_at,
-    _persist_osha_emergency_alert,
     _resolve_employee_refs,
     _safe_json_loads,
     _sync_incident_people,
     _to_naive_utc,
-    generate_incident_number,
+    create_incident_core,
     log_audit,
     parse_witnesses,
     row_to_response,
@@ -74,7 +70,6 @@ async def create_incident(
     current_user=Depends(require_admin_or_client),
 ):
     """Create a new incident report."""
-    incident_number = generate_incident_number()
     scoped_company_id = await get_client_company_id(current_user)
     if current_user.role == "admin":
         effective_company_id = (
@@ -85,31 +80,6 @@ async def create_incident(
     else:
         # Clients are always scoped to their own company.
         effective_company_id = str(scoped_company_id) if scoped_company_id else None
-
-    # The slim submit form sends free-text dates ("yesterday at 3pm"); the
-    # rich admin path still sends ISO datetimes. Helper handles both and
-    # falls back to NOW() on parse failure.
-    occurred_at = _parse_occurred_at(incident.occurred_at)
-
-    # Track whether the caller explicitly set type/severity so the
-    # background classifier knows whether to override.
-    user_passed_type = incident.incident_type is not None
-    user_passed_severity = (
-        incident.severity is not None and incident.severity != "medium"
-    )
-
-    effective_type = incident.incident_type or "other"
-    effective_severity = incident.severity or "medium"
-
-    # Title derives from the description if the caller didn't provide one
-    # (the slim form drops the Title field entirely).
-    raw_title = (incident.title or "").strip()
-    if not raw_title:
-        body = (incident.description or "Incident").strip()
-        # First line, capped at 80 chars, falls back to "Incident" for empty.
-        first_line = body.splitlines()[0] if body else "Incident"
-        raw_title = first_line[:80].strip() or "Incident"
-    effective_title = raw_title
 
     # Client-submitted incidents must be tied to one of the company's
     # business_locations. Admins are allowed to create cross-tenant or
@@ -142,141 +112,41 @@ async def create_incident(
         resolved_employee_ids = await _resolve_employee_refs(
             conn, incident.involved_employee_ids, effective_company_id
         )
-        row = await conn.fetchrow(
-            """
-            INSERT INTO ir_incidents (
-                incident_number, title, description, incident_type, severity,
-                occurred_at, location, reported_by_name, reported_by_email,
-                witnesses, category_data, involved_employee_ids,
-                company_id, location_id, created_by, corrective_actions
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-            RETURNING *
-            """,
-            incident_number,
-            effective_title,
-            incident.description,
-            effective_type,
-            effective_severity,
-            occurred_at,
-            incident.location,
-            incident.reported_by_name,
-            incident.reported_by_email,
-            json.dumps([w.model_dump() for w in incident.witnesses]),
-            json.dumps(incident.category_data or {}),
-            resolved_employee_ids,
-            effective_company_id,
-            str(incident.location_id) if incident.location_id else None,
-            str(current_user.id),
-            (incident.corrective_actions or None),
-        )
 
-        # Fetch company/location names for response
-        company_name = None
-        location_name = None
-        location_city = None
-        location_state = None
-
-        if row.get("company_id"):
-            company = await conn.fetchrow(
-                "SELECT name FROM companies WHERE id = $1",
-                row["company_id"],
-            )
-            if company:
-                company_name = company["name"]
-
-        if row.get("location_id"):
-            loc = await conn.fetchrow(
-                "SELECT name, city, state FROM business_locations WHERE id = $1",
-                row["location_id"],
-            )
-            if loc:
-                location_name = loc["name"]
-                location_city = loc["city"]
-                location_state = loc["state"]
-
-        # Log audit
-        await log_audit(
+        # Shared INSERT + people index + OSHA detection + background-task
+        # assembly. The authenticated path and the public location magic-link
+        # intake (inbound_email.submit_location_report) both go through
+        # create_incident_core so incidents are identical-quality regardless of
+        # entry point. occurred_at parsing, title derivation, and type/severity
+        # defaulting all live inside the core now.
+        response_row, bg_tasks = await create_incident_core(
             conn,
-            str(row["id"]),
-            str(current_user.id),
-            "incident_created",
-            "incident",
-            str(row["id"]),
-            {"title": effective_title, "type": effective_type},
-            request.client.host if request.client else None,
+            company_id=effective_company_id,
+            description=incident.description,
+            occurred_at=incident.occurred_at,
+            reported_by_name=incident.reported_by_name,
+            title=incident.title,
+            incident_type=incident.incident_type,
+            severity=incident.severity,
+            location=incident.location,
+            location_id=incident.location_id,
+            reported_by_email=incident.reported_by_email,
+            witnesses=incident.witnesses,
+            category_data=incident.category_data,
+            involved_employee_ids=resolved_employee_ids,
+            corrective_actions=incident.corrective_actions,
+            created_by=str(current_user.id),
+            actor_user_id=str(current_user.id),
+            actor_email=current_user.email,
+            actor_ip=request.client.host if request.client else None,
+            current_user=current_user,
         )
 
-        # Per-person identity (matcha-lite, no roster): index reporter +
-        # involved + witness names into ir_people / ir_incident_people so
-        # an individual's incident history is queryable. Best-effort —
-        # never block submit on an identity-tracking hiccup.
-        if row.get("company_id"):
-            try:
-                people = _gather_incident_people(
-                    reported_by_name=row.get("reported_by_name"),
-                    reported_by_email=row.get("reported_by_email"),
-                    witnesses=incident.witnesses,
-                    category_data=incident.category_data,
-                )
-                await _sync_incident_people(
-                    conn, str(row["company_id"]), str(row["id"]), people
-                )
-            except Exception:
-                logger.exception("[IR] people sync failed for incident %s", row.get("id"))
+    # Schedule notifications + AI auto-classify + policy-map after the write.
+    for fn, args, kwargs in bg_tasks:
+        background_tasks.add_task(fn, *args, **kwargs)
 
-        # OSHA reportable-event (29 CFR 1904.39) emergency detection. If the
-        # initial title/description mentions a fatality, amputation, in-patient
-        # hospitalization, or eye loss, flip severity to critical and drop the
-        # emergency alert card into the Copilot transcript so the user sees the
-        # call-OSHA-within-8-to-24-hours guidance immediately. The card is
-        # blocking — the close-via-copilot path will refuse to close the
-        # incident until the user acknowledges with notes.
-        if _detect_osha_reportable_keywords(f"{effective_title}\n{incident.description or ''}"):
-            await _persist_osha_emergency_alert(conn, str(row["id"]), current_user)
-            row = await conn.fetchrow(
-                "SELECT * FROM ir_incidents WHERE id = $1",
-                row["id"],
-            )
-
-        # Build response with context
-        response_row = dict(row)
-        response_row["company_name"] = company_name
-        response_row["location_name"] = location_name
-        response_row["location_city"] = location_city
-        response_row["location_state"] = location_state
-
-        effective_company_id = row.get("company_id") or scoped_company_id
-        if effective_company_id:
-            background_tasks.add_task(
-                send_ir_notifications_task,
-                company_id=str(effective_company_id),
-                incident_id=str(row["id"]),
-                incident_number=row["incident_number"],
-                incident_title=row["title"],
-                event_type="created",
-                current_status=row["status"],
-                changed_by_email=current_user.email,
-                previous_status=None,
-                location_name=location_name or row.get("location"),
-                occurred_at=row.get("occurred_at"),
-            )
-            # Auto-classify incident_type + severity from the description.
-            # Best-effort; the task swallows any failure so submit never blocks.
-            background_tasks.add_task(
-                _auto_classify_incident_task,
-                str(row["id"]),
-                user_passed_type=user_passed_type,
-                user_passed_severity=user_passed_severity,
-            )
-            from .ai_analysis import _auto_map_policy_violations
-            background_tasks.add_task(
-                _auto_map_policy_violations,
-                str(row["id"]),
-                str(effective_company_id),
-            )
-
-        return row_to_response(response_row, 0)
+    return row_to_response(response_row, 0)
 
 
 @router.get("", response_model=IRIncidentListResponse)

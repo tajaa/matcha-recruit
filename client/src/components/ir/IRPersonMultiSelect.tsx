@@ -8,19 +8,24 @@ type Props = {
   value: string[]
   onChange: (names: string[]) => void
   placeholder?: string
+  // Public surfaces (e.g. the location magic-link intake form) set this to skip
+  // the authed /ir/incidents/people/search lookup — it would 401 and would also
+  // leak the company's employee names to an unauthenticated reporter.
+  disableSuggestions?: boolean
 }
 
 // Tag-style picker for naming people on an incident. Suggestions come from
 // the company's existing IR people index — picking one reuses the exact
 // spelling so the backend's name-based dedup actually catches repeats.
 // Free text is always allowed (contractors, customers, anyone not seen yet).
-export function IRPersonMultiSelect({ label, value, onChange, placeholder }: Props) {
+export function IRPersonMultiSelect({ label, value, onChange, placeholder, disableSuggestions }: Props) {
   const [input, setInput] = useState('')
   const [suggestions, setSuggestions] = useState<IRPersonSummary[]>([])
   const [open, setOpen] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    if (disableSuggestions) return
     const q = input.trim()
     if (!q) {
       setSuggestions([])
@@ -33,7 +38,7 @@ export function IRPersonMultiSelect({ label, value, onChange, placeholder }: Pro
         .catch(() => { if (!cancelled) setSuggestions([]) })
     }, 200)
     return () => { cancelled = true; clearTimeout(t) }
-  }, [input])
+  }, [input, disableSuggestions])
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
