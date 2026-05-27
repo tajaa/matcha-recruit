@@ -2,41 +2,36 @@ import { useEffect, useRef, useState } from 'react'
 import { Activity } from 'lucide-react'
 
 // ───────────────────────────────────────────────────────────────────────────
-// Neural-mesh take on the convergence story: EHS, GRC, and ER sit at the
-// points of a triangle around a central DATA MODEL hub. Neon signal particles
-// fire continuously between them — mostly routed through the hub, like a
-// network passing context around. Canvas-rendered for additive neon glow +
-// motion trails. Shares the dark card chrome of the other landing animations.
+// Quiet mesh take on the convergence story: EHS, GRC, and ER sit at the points
+// of a triangle around a central DATA MODEL hub. Signals drift between them —
+// mostly routed through the hub — passing context around. Rendered as crisp SVG
+// hairlines with a muted palette to match the other landing cards (no neon
+// bloom, no trails). Calm and deliberate rather than arcade-y.
 // ───────────────────────────────────────────────────────────────────────────
 
-const EMERALD = '#34d399'
-const AMBER = '#fbbf24'
-const ROSE = '#fb7185'
-const CYAN = '#7dd3fc'
+const EMERALD = '#86efac'
+const AMBER = '#d7ba7d'
+const CORAL = '#ce9178'
+const IVORY = '#e4ded2'
 const ZINC_LINE = 'rgba(255,255,255,0.08)'
 
+const VB_W = 480
+const VB_H = 300
+
 type NodeId = 'hub' | 'ehs' | 'grc' | 'er'
+interface NodeDef { id: NodeId; tag: string; sub: string; color: string; x: number; y: number; r: number }
 
-interface NodeDef {
-  id: NodeId
-  tag: string
-  sub: string
-  color: string
-  // position as fractions of the canvas (cssW, cssH)
-  fx: number
-  fy: number
-}
-
-const NODE_DEFS: NodeDef[] = [
-  { id: 'hub', tag: 'DATA MODEL', sub: '', color: CYAN, fx: 0.5, fy: 0.54 },
-  { id: 'ehs', tag: 'EHS', sub: 'Safety', color: EMERALD, fx: 0.5, fy: 0.17 },
-  { id: 'grc', tag: 'GRC', sub: 'Compliance', color: AMBER, fx: 0.18, fy: 0.86 },
-  { id: 'er', tag: 'ER', sub: 'Relations', color: ROSE, fx: 0.82, fy: 0.86 },
+const NODES: NodeDef[] = [
+  { id: 'hub', tag: 'DATA MODEL', sub: '', color: IVORY, x: 240, y: 158, r: 22 },
+  { id: 'ehs', tag: 'EHS', sub: 'Safety', color: EMERALD, x: 240, y: 56, r: 27 },
+  { id: 'grc', tag: 'GRC', sub: 'Compliance', color: AMBER, x: 80, y: 248, r: 27 },
+  { id: 'er', tag: 'ER', sub: 'Relations', color: CORAL, x: 400, y: 248, r: 27 },
 ]
 
-// Edges by node index into NODE_DEFS. Spokes first (routed through hub), then perimeter.
+// Edges by index into NODES. Spokes (through hub) first, then perimeter.
 const SPOKES: [number, number][] = [[0, 1], [0, 2], [0, 3]]
 const PERIMETER: [number, number][] = [[1, 2], [2, 3], [3, 1]]
+const ALL_EDGES = [...SPOKES, ...PERIMETER]
 
 const HUD_LINES = [
   'EHS → model · incident synced',
@@ -47,214 +42,91 @@ const HUD_LINES = [
   'model → EHS · risk surfaced',
 ]
 
-interface Particle {
-  from: number
-  to: number
-  t: number
-  speed: number
-  color: string
-}
+interface Particle { id: number; from: number; to: number; t: number; speed: number; color: string }
+interface FrameState { particles: { x: number; y: number; color: string }[]; pulses: number[]; activeEdges: Set<string> }
+
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+const easeInOut = (p: number) => (p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2)
+const edgeKey = (a: number, b: number) => (a < b ? `${a}-${b}` : `${b}-${a}`)
 
 export function NeuralConvergenceAnimation() {
   const containerRef = useRef<HTMLDivElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
   const [hud, setHud] = useState(HUD_LINES[0])
+  const [frame, setFrame] = useState<FrameState>({ particles: [], pulses: NODES.map(() => 0), activeEdges: new Set() })
 
-  // Cycle the footer ticker independently of the canvas loop.
   useEffect(() => {
     let i = 0
     const id = window.setInterval(() => {
       i = (i + 1) % HUD_LINES.length
       setHud(HUD_LINES[i])
-    }, 2000)
+    }, 2200)
     return () => window.clearInterval(id)
   }, [])
 
   useEffect(() => {
-    const canvas = canvasRef.current
-    const container = containerRef.current
-    if (!canvas || !container) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    let cssW = 0
-    let cssH = 0
-    let dpr = window.devicePixelRatio || 1
-
-    const resize = () => {
-      const rect = canvas.getBoundingClientRect()
-      cssW = rect.width
-      cssH = rect.height
-      dpr = window.devicePixelRatio || 1
-      canvas.width = Math.round(cssW * dpr)
-      canvas.height = Math.round(cssH * dpr)
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    }
-    resize()
-    const ro = new ResizeObserver(resize)
-    ro.observe(canvas)
-
     let visible = true
     const io = new IntersectionObserver(([e]) => { visible = e.isIntersecting }, { rootMargin: '200px' })
-    io.observe(container)
+    if (containerRef.current) io.observe(containerRef.current)
 
-    const nodes = NODE_DEFS.map((d) => ({ ...d, x: 0, y: 0, r: 0, pulse: 0 }))
     const particles: Particle[] = []
+    const pulses = NODES.map(() => 0)
+    let nextId = 1
+    let last = performance.now()
+    let spawnAcc = 0
 
     const pickEdge = (): [number, number] => {
-      // 72% route through the hub (spokes), 28% perimeter.
       const pool = Math.random() < 0.72 ? SPOKES : PERIMETER
       const e = pool[(Math.random() * pool.length) | 0]
       return Math.random() < 0.5 ? e : [e[1], e[0]]
     }
-
     const spawn = (from?: number, to?: number) => {
       let f: number, t: number
       if (from !== undefined && to !== undefined) { f = from; t = to }
       else { const e = pickEdge(); f = e[0]; t = e[1] }
-      const srcColor = nodes[f].id === 'hub' ? nodes[t].color : nodes[f].color
-      particles.push({ from: f, to: t, t: 0, speed: 0.5 + Math.random() * 0.5, color: srcColor })
+      const color = NODES[f].id === 'hub' ? NODES[t].color : NODES[f].color
+      particles.push({ id: nextId++, from: f, to: t, t: 0, speed: 0.34 + Math.random() * 0.16, color })
     }
-
-    // seed a few
-    for (let i = 0; i < 5; i++) spawn()
+    for (let k = 0; k < 3; k++) spawn()
 
     let raf = 0
-    let last = performance.now()
-    let spawnAcc = 0
-
-    const draw = (now: number) => {
-      raf = requestAnimationFrame(draw)
+    const tick = (now: number) => {
+      raf = requestAnimationFrame(tick)
       const dt = Math.min(0.05, (now - last) / 1000)
       last = now
-      if (!visible || cssW === 0) return
+      if (!visible) return
 
-      // Resolve node geometry
-      const baseR = Math.max(16, Math.min(cssW, cssH) * 0.052)
-      for (const n of nodes) {
-        n.x = n.fx * cssW
-        n.y = n.fy * cssH
-        n.r = n.id === 'hub' ? baseR * 0.92 : baseR
-        n.pulse *= 0.9
-      }
-
-      // Spawn cadence
+      // spawn cadence — sparse and calm
       spawnAcc += dt
-      while (spawnAcc > 0.13) {
-        spawnAcc -= 0.13
-        if (particles.length < 60) spawn()
+      while (spawnAcc > 0.55) {
+        spawnAcc -= 0.55
+        if (particles.length < 9) spawn()
       }
 
-      // Trail fade (normal compositing)
-      ctx.globalCompositeOperation = 'source-over'
-      ctx.fillStyle = 'rgba(8,8,6,0.30)'
-      ctx.fillRect(0, 0, cssW, cssH)
+      for (let n = 0; n < pulses.length; n++) pulses[n] *= 0.94
 
-      // Edges — additive faint neon
-      ctx.globalCompositeOperation = 'lighter'
-      const allEdges = [...SPOKES, ...PERIMETER]
-      for (const [a, b] of allEdges) {
-        const na = nodes[a], nb = nodes[b]
-        const grad = ctx.createLinearGradient(na.x, na.y, nb.x, nb.y)
-        grad.addColorStop(0, hexA(na.color, 0.10))
-        grad.addColorStop(1, hexA(nb.color, 0.10))
-        ctx.strokeStyle = grad
-        ctx.lineWidth = 1
-        ctx.beginPath()
-        ctx.moveTo(na.x, na.y)
-        ctx.lineTo(nb.x, nb.y)
-        ctx.stroke()
-      }
-
-      // Particles
-      for (let i = particles.length - 1; i >= 0; i--) {
-        const p = particles[i]
-        p.t += p.speed * dt
-        const a = nodes[p.from], b = nodes[p.to]
-        const e = easeInOut(Math.min(1, p.t))
-        const x = a.x + (b.x - a.x) * e
-        const y = a.y + (b.y - a.y) * e
-
-        ctx.shadowBlur = 14
-        ctx.shadowColor = p.color
-        ctx.fillStyle = p.color
-        ctx.beginPath()
-        ctx.arc(x, y, 2.6, 0, Math.PI * 2)
-        ctx.fill()
-        // bright core
-        ctx.shadowBlur = 0
-        ctx.fillStyle = 'rgba(255,255,255,0.85)'
-        ctx.beginPath()
-        ctx.arc(x, y, 1, 0, Math.PI * 2)
-        ctx.fill()
-
-        if (p.t >= 1) {
-          nodes[p.to].pulse = 1
-          // Chain through the hub: arriving at hub re-emits to another domain.
-          if (nodes[p.to].id === 'hub' && Math.random() < 0.65) {
-            const domains = [1, 2, 3].filter((d) => d !== p.from)
-            spawn(p.to, domains[(Math.random() * domains.length) | 0])
+      const active = new Set<string>()
+      const rendered: { x: number; y: number; color: string }[] = []
+      for (let p = particles.length - 1; p >= 0; p--) {
+        const part = particles[p]
+        part.t += part.speed * dt
+        const a = NODES[part.from], b = NODES[part.to]
+        const e = easeInOut(Math.min(1, part.t))
+        rendered.push({ x: lerp(a.x, b.x, e), y: lerp(a.y, b.y, e), color: part.color })
+        active.add(edgeKey(part.from, part.to))
+        if (part.t >= 1) {
+          pulses[part.to] = 1
+          if (NODES[part.to].id === 'hub' && Math.random() < 0.55) {
+            const domains = [1, 2, 3].filter((d) => d !== part.from)
+            spawn(part.to, domains[(Math.random() * domains.length) | 0])
           }
-          particles.splice(i, 1)
+          particles.splice(p, 1)
         }
       }
 
-      // Nodes — glow + ring (additive), then crisp labels (source-over)
-      for (const n of nodes) {
-        const glowR = n.r * (1.9 + n.pulse * 1.1)
-        const g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, glowR)
-        g.addColorStop(0, hexA(n.color, 0.30 + n.pulse * 0.4))
-        g.addColorStop(1, hexA(n.color, 0))
-        ctx.fillStyle = g
-        ctx.beginPath()
-        ctx.arc(n.x, n.y, glowR, 0, Math.PI * 2)
-        ctx.fill()
-
-        ctx.shadowBlur = 12 + n.pulse * 18
-        ctx.shadowColor = n.color
-        ctx.strokeStyle = hexA(n.color, 0.65 + n.pulse * 0.35)
-        ctx.lineWidth = n.id === 'hub' ? 2 : 1.6
-        ctx.beginPath()
-        ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2)
-        ctx.stroke()
-
-        if (n.id === 'hub') {
-          // pulsing core dot
-          ctx.fillStyle = hexA(CYAN, 0.5 + n.pulse * 0.5)
-          ctx.beginPath()
-          ctx.arc(n.x, n.y, n.r * 0.28, 0, Math.PI * 2)
-          ctx.fill()
-        }
-      }
-
-      // Labels — crisp, no glow
-      ctx.shadowBlur = 0
-      ctx.globalCompositeOperation = 'source-over'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      for (const n of nodes) {
-        if (n.id === 'hub') {
-          ctx.fillStyle = CYAN
-          ctx.font = '700 9px ui-monospace, SFMono-Regular, monospace'
-          ctx.fillText('DATA', n.x, n.y - 4)
-          ctx.fillText('MODEL', n.x, n.y + 5)
-        } else {
-          ctx.fillStyle = n.color
-          ctx.font = '700 14px ui-monospace, SFMono-Regular, monospace'
-          ctx.fillText(n.tag, n.x, n.y)
-          ctx.fillStyle = 'rgba(154,138,112,0.95)'
-          ctx.font = '8px ui-monospace, SFMono-Regular, monospace'
-          ctx.fillText(n.sub.toUpperCase(), n.x, n.y + n.r + 11)
-        }
-      }
+      setFrame({ particles: rendered, pulses: [...pulses], activeEdges: active })
     }
-
-    raf = requestAnimationFrame(draw)
-    return () => {
-      cancelAnimationFrame(raf)
-      ro.disconnect()
-      io.disconnect()
-    }
+    raf = requestAnimationFrame(tick)
+    return () => { cancelAnimationFrame(raf); io.disconnect() }
   }, [])
 
   return (
@@ -275,22 +147,21 @@ export function NeuralConvergenceAnimation() {
           <span className="text-[10px] font-medium tracking-wide font-mono uppercase" style={{ color: '#e4ded2' }}>
             Live Mesh · EHS / GRC / ER
           </span>
-          <span className="text-[7.5px] uppercase tracking-wider px-1.5 py-[1px] rounded font-mono" style={{ color: CYAN, border: `1px solid ${CYAN}55` }}>
-            routing
+          <span className="text-[7.5px] uppercase tracking-wider px-1.5 py-[1px] rounded font-mono" style={{ color: AMBER, border: `1px solid ${AMBER}55` }}>
+            1 data model
           </span>
         </div>
         <div className="flex items-center gap-2 font-mono text-[8.5px]">
           <span className="relative flex h-1.5 w-1.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ backgroundColor: CYAN }} />
-            <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ backgroundColor: CYAN }} />
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ backgroundColor: EMERALD }} />
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ backgroundColor: EMERALD }} />
           </span>
-          <span style={{ color: '#9a8a70' }}>1 data model</span>
+          <span style={{ color: '#9a8a70' }}>real-time routing</span>
         </div>
       </div>
 
-      {/* Canvas body */}
+      {/* Body */}
       <div className="relative" style={{ height: 430 }}>
-        {/* Scan-line bg under the canvas */}
         <div
           className="absolute inset-0 pointer-events-none opacity-[0.05]"
           style={{
@@ -299,7 +170,67 @@ export function NeuralConvergenceAnimation() {
             backgroundSize: '24px 24px',
           }}
         />
-        <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ display: 'block' }} />
+        <svg viewBox={`0 0 ${VB_W} ${VB_H}`} width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style={{ display: 'block' }}>
+          {/* Edges — fine dotted hairlines; the carrying edge tints to its color */}
+          {ALL_EDGES.map(([a, b], i) => {
+            const na = NODES[a], nb = NODES[b]
+            const isActive = frame.activeEdges.has(edgeKey(a, b))
+            return (
+              <line
+                key={i}
+                x1={na.x} y1={na.y} x2={nb.x} y2={nb.y}
+                stroke={isActive ? nb.color : 'rgba(255,255,255,0.10)'}
+                strokeOpacity={isActive ? 0.32 : 1}
+                strokeWidth={isActive ? 1.1 : 0.8}
+                strokeDasharray="1.5 5"
+                style={{ transition: 'stroke 400ms, stroke-opacity 400ms' }}
+              />
+            )
+          })}
+
+          {/* Particles — small soft dots, no bloom */}
+          {frame.particles.map((p, i) => (
+            <g key={i}>
+              <circle cx={p.x} cy={p.y} r={5} fill={p.color} opacity={0.12} />
+              <circle cx={p.x} cy={p.y} r={2.2} fill={p.color} opacity={0.9} />
+            </g>
+          ))}
+
+          {/* Nodes */}
+          {NODES.map((n, idx) => {
+            const pulse = frame.pulses[idx]
+            return (
+              <g key={n.id}>
+                {/* gentle pulse ring on arrival */}
+                {pulse > 0.02 && (
+                  <circle cx={n.x} cy={n.y} r={n.r + pulse * 9} fill="none" stroke={n.color} strokeOpacity={pulse * 0.35} strokeWidth={0.75} />
+                )}
+                <circle
+                  cx={n.x} cy={n.y} r={n.r}
+                  fill={n.color} fillOpacity={0.04 + pulse * 0.06}
+                  stroke={n.color} strokeOpacity={0.28 + pulse * 0.5} strokeWidth={1.3}
+                />
+                {n.id === 'hub' ? (
+                  <>
+                    <circle cx={n.x} cy={n.y} r={3.5} fill={IVORY} opacity={0.45 + pulse * 0.4} />
+                    <text x={n.x} y={n.y + n.r + 13} textAnchor="middle" fontSize={7.5} fontFamily="ui-monospace, monospace" fill="#9a8a70" style={{ letterSpacing: '0.12em' }}>
+                      DATA MODEL
+                    </text>
+                  </>
+                ) : (
+                  <>
+                    <text x={n.x} y={n.y + 4} textAnchor="middle" fontSize={14} fontWeight={700} fontFamily="ui-monospace, monospace" fill={n.color}>
+                      {n.tag}
+                    </text>
+                    <text x={n.x} y={n.y + n.r + 13} textAnchor="middle" fontSize={7.5} fontFamily="ui-monospace, monospace" fill="#6a737d" style={{ textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                      {n.sub}
+                    </text>
+                  </>
+                )}
+              </g>
+            )
+          })}
+        </svg>
       </div>
 
       {/* Footer HUD */}
@@ -309,8 +240,8 @@ export function NeuralConvergenceAnimation() {
       >
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <span style={{ color: '#6a737d' }}>Routing</span>
-          <span className="truncate" style={{ color: CYAN }}>{hud}</span>
-          <span style={{ color: CYAN, animation: 'neural-cursor 0.9s steps(1) infinite' }}>▎</span>
+          <span className="truncate" style={{ color: AMBER }}>{hud}</span>
+          <span style={{ color: AMBER, animation: 'neural-cursor 0.9s steps(1) infinite' }}>▎</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span style={{ color: '#6a737d' }}>Mesh</span>
@@ -326,17 +257,4 @@ export function NeuralConvergenceAnimation() {
       `}</style>
     </div>
   )
-}
-
-// Apply alpha to a #rrggbb hex.
-function hexA(hex: string, a: number): string {
-  const h = hex.replace('#', '')
-  const r = parseInt(h.slice(0, 2), 16)
-  const g = parseInt(h.slice(2, 4), 16)
-  const b = parseInt(h.slice(4, 6), 16)
-  return `rgba(${r},${g},${b},${a})`
-}
-
-function easeInOut(p: number) {
-  return p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2
 }
