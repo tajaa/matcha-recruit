@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, Loader2, RefreshCw, Unlink } from 'lucide-react'
+import { CheckCircle2, Loader2, RefreshCw, Unlink, Wallet, Plus } from 'lucide-react'
 import { api } from '../../api/client'
 import { Modal } from '../ui/Modal'
 import { useMe } from '../../hooks/useMe'
@@ -288,6 +288,8 @@ function ConnectedPanel({
         {syncing ? 'Syncing…' : 'Sync now'}
       </button>
 
+      <BenefitsManager mode={status.mode} />
+
       <div className="flex justify-center pt-1">
         <button
           onClick={onDisconnect}
@@ -298,6 +300,157 @@ function ConnectedPanel({
           {disconnecting ? 'Disconnecting…' : `Disconnect ${providerLabel}`}
         </button>
       </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+
+type BenefitMeta = { type: string; description: string; frequencies?: string[] }
+type Benefit = { benefit_id: string; type: string; description: string; frequency?: string }
+
+/**
+ * Create + list company benefits/deductions, written to the payroll provider
+ * via Finch's Deductions API. Only shown for Finch connections on companies with
+ * the `hris_deductions` feature — and only QuickBooks/Gusto/ADP-class providers
+ * actually support it (others surface a "not supported" notice from /meta).
+ */
+function BenefitsManager({ mode }: { mode: string | null }) {
+  const { hasFeature } = useMe()
+  const enabled = mode === 'finch' && hasFeature('hris_deductions')
+
+  const [loading, setLoading] = useState(false)
+  const [meta, setMeta] = useState<BenefitMeta[]>([])
+  const [benefits, setBenefits] = useState<Benefit[]>([])
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  const [type, setType] = useState('')
+  const [description, setDescription] = useState('')
+  const [frequency, setFrequency] = useState('every_paycheck')
+  const [creating, setCreating] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!enabled) return
+    setLoading(true)
+    setLoadError(null)
+    Promise.allSettled([
+      api.get<BenefitMeta[]>('/provisioning/hris/benefits/meta'),
+      api.get<Benefit[]>('/provisioning/hris/benefits'),
+    ]).then(([m, b]) => {
+      if (m.status === 'fulfilled') {
+        setMeta(m.value)
+        const first = m.value[0]
+        if (first) {
+          setType(first.type)
+          setFrequency(first.frequencies?.[0] ?? 'every_paycheck')
+        }
+      } else {
+        setLoadError(
+          m.reason instanceof Error ? m.reason.message : 'Benefits not supported for this provider',
+        )
+      }
+      if (b.status === 'fulfilled') setBenefits(b.value)
+    }).finally(() => setLoading(false))
+  }, [enabled])
+
+  const selectedMeta = meta.find((m) => m.type === type)
+  const freqs = selectedMeta?.frequencies?.length ? selectedMeta.frequencies : ['every_paycheck']
+
+  async function create() {
+    if (!type || !description.trim()) return
+    setCreating(true)
+    setMsg(null)
+    try {
+      await api.post('/provisioning/hris/benefits', {
+        type,
+        description: description.trim(),
+        frequency,
+      })
+      setDescription('')
+      setMsg('Created — written to provider via Finch.')
+      // Benefit is readable immediately even while the async job settles.
+      const list = await api.get<Benefit[]>('/provisioning/hris/benefits')
+      setBenefits(list)
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'Create failed')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  if (!enabled) return null
+
+  return (
+    <div className="border-t border-zinc-800 pt-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <Wallet className="w-4 h-4 text-zinc-500" />
+        <span className="text-xs font-medium text-zinc-300">Benefits &amp; deductions</span>
+      </div>
+
+      {loading ? (
+        <Loader2 className="w-4 h-4 animate-spin text-zinc-500" />
+      ) : loadError ? (
+        <p className="text-[11px] text-amber-400 bg-amber-950/20 border border-amber-900/30 rounded px-3 py-2">
+          {loadError}
+        </p>
+      ) : (
+        <>
+          {benefits.length > 0 && (
+            <ul className="space-y-1">
+              {benefits.map((b) => (
+                <li key={b.benefit_id} className="text-[11px] text-zinc-400 flex justify-between gap-2">
+                  <span className="truncate">{b.description}</span>
+                  <span className="text-zinc-600 font-mono shrink-0">{b.type}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="space-y-2">
+            <select
+              value={type}
+              onChange={(e) => {
+                setType(e.target.value)
+                const m = meta.find((x) => x.type === e.target.value)
+                setFrequency(m?.frequencies?.[0] ?? 'every_paycheck')
+              }}
+              className="w-full bg-zinc-900 border border-zinc-700 rounded text-xs text-zinc-200 px-2 py-1.5"
+            >
+              {meta.map((m) => (
+                <option key={m.type} value={m.type}>{m.description} ({m.type})</option>
+              ))}
+            </select>
+            <input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Description (e.g. Company 401(k))"
+              className="w-full bg-zinc-900 border border-zinc-700 rounded text-xs text-zinc-200 px-2 py-1.5"
+            />
+            {freqs.length > 1 && (
+              <select
+                value={frequency}
+                onChange={(e) => setFrequency(e.target.value)}
+                className="w-full bg-zinc-900 border border-zinc-700 rounded text-xs text-zinc-200 px-2 py-1.5"
+              >
+                {freqs.map((f) => <option key={f} value={f}>{f}</option>)}
+              </select>
+            )}
+            <button
+              onClick={create}
+              disabled={creating || !description.trim()}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-medium py-2 rounded-lg transition-colors flex items-center justify-center gap-2"
+            >
+              {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+              {creating ? 'Creating…' : 'Create benefit'}
+            </button>
+            {msg && <p className="text-[11px] text-zinc-400">{msg}</p>}
+            <p className="text-[10px] text-zinc-600">
+              Written to the payroll provider via Finch. Async — provider-side confirmation may lag.
+            </p>
+          </div>
+        </>
+      )}
     </div>
   )
 }
