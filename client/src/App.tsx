@@ -15,6 +15,7 @@ import VerifyEmail from './pages/auth/VerifyEmail'
 import RequireBusinessAccount from './components/auth/RequireBusinessAccount'
 import IrOnboardingWizard from './features/ir-onboarding/IrOnboardingWizard'
 import AnonymousReport from './pages/shared/AnonymousReport'
+import LocationIntake from './pages/shared/LocationIntake'
 import Companies from './pages/admin/Companies'
 import AdminCompanyDetail from './pages/admin/AdminCompanyDetail'
 import Features from './pages/admin/Features'
@@ -222,6 +223,7 @@ export default function App() {
       <Route path="/lite/signup" element={<MatchaLiteSignup />} />
       <Route path="/ir/onboarding" element={<IrOnboardingWizard />} />
       <Route path="/report/:token" element={<AnonymousReport />} />
+      <Route path="/intake/:token" element={<LocationIntake />} />
       <Route path="/app" element={<AppLayout sidebar={<TenantSidebar />} />}>
         <Route index element={<Dashboard />} />
         <Route path="company" element={<CompanySettings />} />

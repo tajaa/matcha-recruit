@@ -17,7 +17,7 @@
 | `ir_incidents/` | `/ir/incidents` | Incident reporting (matcha-lite) — **already a package** (50 routes incl. no-roster people index), see `ir_incidents/CLAUDE.md` |
 | `ir_onboarding.py` | `/ir-onboarding` | IR-only onboarding wizard backend |
 | `ir_surveys.py` | `/ir/surveys` | Security survey CRUD (matcha-lite) |
-| `inbound_email.py` | (none) | Public anonymous-report `/report/:token` form |
+| `inbound_email.py` | (none) | Public intake: anonymous `/report/:token` + per-location magic-link `/intake/:token` forms |
 | `accommodations.py` | `/accommodations` | ADA accommodation cases (1,175 lines) |
 | `discipline.py` | `/discipline` | Progressive discipline workflow + signatures |
 | `risk_assessment.py` | `/risk` | Risk-assessment dashboard data (849 lines) |

@@ -16,11 +16,11 @@ Backend routes for matcha-lite's Incident Reporting product. Package was split f
 | `people.py` | Per-person identity (no-roster): search + per-person role-aware history | 2 |
 | `osha.py` | 300/301/300A logs + CSV + recordability + AI determine | 7 |
 | `documents.py` | Upload, list, delete incident documents | 3 |
-| `anonymous_reporting.py` | Public token mgmt for `/report/:token` form | 3 |
+| `anonymous_reporting.py` | Token mgmt: company-wide `/report/:token` + per-location `/intake/:token` magic links | 6 |
 | `audit_log.py` | Get audit trail for an incident | 1 |
-| **Total** | | **50 routes** |
+| **Total** | | **53 routes** |
 
-**No-roster people index** (`people.py` + `ir_people` / `ir_incident_people` tables, migration `irp1a2b3c4d5e`): people named in incidents (reporter / involved / witness / interviewee) are auto-indexed for per-person history WITHOUT a managed employee roster. Identity = the typed name, normalized for dedup (`_normalize_person_name`, `_gather_incident_people`, `_sync_incident_people` in `_shared.py`). Wired into `crud.create_incident` / `update_incident` (roles reporter/involved/witness, re-synced on edit) and `investigation_interviews` (role interviewee, managed separately so an incident edit's re-sync won't drop it). Distinct from `involved_employee_ids`, which targets the real `employees` roster. Anonymous intake (`inbound_email.py`) intentionally does NOT auto-mint people. Endpoints use 2+ segment paths (`/people/search`, `/people/{id}/incidents`) to avoid the `/{incident_id}` shadow.
+**No-roster people index** (`people.py` + `ir_people` / `ir_incident_people` tables, migration `irp1a2b3c4d5e`): people named in incidents (reporter / involved / witness / interviewee) are auto-indexed for per-person history WITHOUT a managed employee roster. Identity = the typed name, normalized for dedup (`_normalize_person_name`, `_gather_incident_people`, `_sync_incident_people` in `_shared.py`). Wired into `crud.create_incident` / `update_incident` (roles reporter/involved/witness, re-synced on edit) and `investigation_interviews` (role interviewee, managed separately so an incident edit's re-sync won't drop it). Distinct from `involved_employee_ids`, which targets the real `employees` roster. The truly-anonymous `/report/:token` intake (`inbound_email.py`) intentionally does NOT auto-mint people; the attributed per-location `/intake/:token` magic link DOES, since it shares `create_incident_core` with the authed create. Endpoints use 2+ segment paths (`/people/search`, `/people/{id}/incidents`) to avoid the `/{incident_id}` shadow.
 
 ## Package router pattern
 
@@ -50,7 +50,7 @@ When the AI emits a new action card type (currently `run_analysis`, `set_field`,
 Other routers consume these via `from .ir_incidents import …`. Keep the re-exports working when moving things around:
 
 - `compute_wc_metrics` ← `analytics.py` (used by `broker_portfolio.py`)
-- `_parse_occurred_at`, `generate_incident_number`, `send_ir_notifications_task` ← `_shared.py` (used by `inbound_email.py` — public anonymous-report intake)
+- `_parse_occurred_at`, `generate_incident_number`, `send_ir_notifications_task`, `create_incident_core`, `_location_label` ← `_shared.py` (used by `inbound_email.py` — public `/report` + `/intake` intake). `create_incident_core` is the shared INSERT→people-index→OSHA→bg-task tail used by both `crud.create_incident` and the public location magic-link submit; the caller owns the (tenant-scoped) connection and schedules the returned bg tasks.
 - `_close_incident_via_copilot` ← `copilot.py` (future cross-router; currently only used internally)
 
 ## Mounting + feature gate
@@ -79,7 +79,7 @@ Safe because `/{incident_id}` (1-segment) cannot match any 2+segment submodule p
 
 ## Common pitfalls
 
-- **Circular imports between `_legacy`-era modules**: ai_analysis.py and crud.py both reference `_auto_map_policy_violations`. To avoid a circular module-level import, CRUD does a **lazy** `from .ai_analysis import _auto_map_policy_violations` inside its function bodies (three callsites: `create_incident`, `update_incident`, and an inline copilot path that was already moved). Keep this pattern if any submodule needs to call functions defined in a later-loaded submodule.
+- **Circular imports between `_legacy`-era modules**: ai_analysis.py, crud.py, and `_shared.py` all reference `_auto_map_policy_violations`. To avoid a circular module-level import it's a **lazy** `from .ai_analysis import _auto_map_policy_violations` inside function bodies (callsites: `_shared.create_incident_core` — the shared create tail, now used by both `crud.create_incident` and the public location intake — `crud.update_incident`, and an inline copilot path). Keep this pattern if any submodule needs to call functions defined in a later-loaded submodule.
 - **Absolute imports throughout**: every submodule uses `from app.X import …`, not `from ..X` or `from ...X`. The relative-imports-to-absolute conversion was pre-step-0 of the split; new code should keep using absolute paths so the file can be moved without breaking imports.
 - **Don't define `_safe_json_loads` again**: it's in `_shared.py` (singular definition — the original flat file had two duplicate defs that got deduped during the migration). Same for `_sse`, `log_audit`, `parse_witnesses`, `row_to_response`.
 

@@ -62,7 +62,9 @@ router.include_router(_audit_log_router)
 # re-exports, not local usages.
 from .analytics import compute_wc_metrics  # noqa: F401  (used by broker_portfolio.py)
 from ._shared import (  # noqa: F401  (used by inbound_email.py)
+    _location_label,
     _parse_occurred_at,
+    create_incident_core,
     generate_incident_number,
     send_ir_notifications_task,
 )
