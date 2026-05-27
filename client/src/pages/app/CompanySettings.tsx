@@ -21,6 +21,11 @@ interface CompanyData {
   work_arrangement: string | null
   default_employment_type: string | null
   healthcare_specialties: string[] | null
+  legal_name: string | null
+  ein: string | null
+  naics: string | null
+  address: string | null
+  zip: string | null
 }
 
 const SIZE_OPTIONS = [
@@ -340,6 +345,22 @@ export default function CompanySettings() {
                 <EditableField label="HQ State" value={company.headquarters_state} onSave={(v) => updateField('headquarters_state', v)} />
                 <EditableSelect label="Work Arrangement" value={company.work_arrangement} options={ARRANGEMENT_OPTIONS} onSave={(v) => updateField('work_arrangement', v)} />
                 <EditableSelect label="Default Employment Type" value={company.default_employment_type} options={EMPLOYMENT_TYPE_OPTIONS} onSave={(v) => updateField('default_employment_type', v)} />
+              </dl>
+            </Card>
+
+            {/* OSHA / ITA Filing Identity */}
+            <Card>
+              <h3 className="text-sm font-medium text-zinc-300 mb-1">OSHA / ITA Filing Identity</h3>
+              <p className="text-xs text-zinc-600 mb-4">
+                Employer-level defaults used on OSHA Form 300A and ITA electronic filing. Establishments
+                inherit EIN / NAICS unless overridden per location.
+              </p>
+              <dl className="space-y-1">
+                <EditableField label="Legal Name" value={company.legal_name} onSave={(v) => updateField('legal_name', v)} />
+                <EditableField label="EIN" value={company.ein} onSave={(v) => updateField('ein', v)} />
+                <EditableField label="NAICS Code" value={company.naics} onSave={(v) => updateField('naics', v)} />
+                <EditableField label="Street Address" value={company.address} onSave={(v) => updateField('address', v)} />
+                <EditableField label="ZIP" value={company.zip} onSave={(v) => updateField('zip', v)} />
               </dl>
             </Card>
 

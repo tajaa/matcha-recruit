@@ -12,7 +12,10 @@ type Props = {
   saving: boolean
 }
 
-const EMPTY = { name: '', address: '', city: '', state: '', county: '', zipcode: '' }
+const EMPTY = {
+  name: '', address: '', city: '', state: '', county: '', zipcode: '',
+  ein: '', naics: '', max_employees: '', annual_avg_employees: '',
+}
 
 export function ComplianceLocationModal({ open, onClose, editingLocation, jurisdictions, onSubmit, saving }: Props) {
   const [form, setForm] = useState(EMPTY)
@@ -29,6 +32,10 @@ export function ComplianceLocationModal({ open, onClose, editingLocation, jurisd
         state: editingLocation.state,
         county: editingLocation.county || '',
         zipcode: editingLocation.zipcode || '',
+        ein: editingLocation.ein || '',
+        naics: editingLocation.naics || '',
+        max_employees: editingLocation.max_employees != null ? String(editingLocation.max_employees) : '',
+        annual_avg_employees: editingLocation.annual_avg_employees != null ? String(editingLocation.annual_avg_employees) : '',
       })
       setUseManual(true)
     } else {
@@ -49,6 +56,10 @@ export function ComplianceLocationModal({ open, onClose, editingLocation, jurisd
       state: form.state,
       county: form.county || undefined,
       zipcode: form.zipcode || undefined,
+      ein: form.ein || undefined,
+      naics: form.naics || undefined,
+      max_employees: form.max_employees.trim() === '' ? undefined : Number(form.max_employees),
+      annual_avg_employees: form.annual_avg_employees.trim() === '' ? undefined : Number(form.annual_avg_employees),
     }
     onSubmit(data, editingLocation?.id)
   }
@@ -136,6 +147,25 @@ export function ComplianceLocationModal({ open, onClose, editingLocation, jurisd
             </div>
           </>
         )}
+
+        <div className="border-t border-zinc-800 pt-3 space-y-3">
+          <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">OSHA / ITA Filing (optional)</p>
+          <p className="text-[11px] text-zinc-600">
+            Per-establishment EIN / NAICS for OSHA 300A + ITA. Leave blank to inherit the company-level values.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="EIN" value={form.ein}
+              onChange={(e) => setForm({ ...form, ein: e.target.value })} placeholder="12-3456789" />
+            <Input label="NAICS Code" value={form.naics}
+              onChange={(e) => setForm({ ...form, naics: e.target.value })} placeholder="e.g. 621111" maxLength={10} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Annual Avg. Employees" type="number" value={form.annual_avg_employees}
+              onChange={(e) => setForm({ ...form, annual_avg_employees: e.target.value })} />
+            <Input label="Peak Employees" type="number" value={form.max_employees}
+              onChange={(e) => setForm({ ...form, max_employees: e.target.value })} />
+          </div>
+        </div>
 
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>

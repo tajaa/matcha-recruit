@@ -127,6 +127,11 @@ class BusinessLocation(BaseModel):
     coverage_status: Optional[str] = "covered"
     employee_count: Optional[int] = 0
     facility_attributes: Optional[dict] = None
+    # OSHA / ITA establishment identity (EIN/NAICS fall back to company-level when null).
+    ein: Optional[str] = None
+    naics: Optional[str] = None
+    max_employees: Optional[int] = None
+    annual_avg_employees: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
@@ -192,6 +197,10 @@ class LocationCreate(BaseModel):
     zipcode: Optional[str] = None
     country_code: str = "US"
     facility_attributes: Optional[dict] = None
+    ein: Optional[str] = None
+    naics: Optional[str] = None
+    max_employees: Optional[int] = None
+    annual_avg_employees: Optional[int] = None
 
 
 class LocationUpdate(BaseModel):
@@ -202,6 +211,10 @@ class LocationUpdate(BaseModel):
     county: Optional[str] = None
     zipcode: Optional[str] = None
     is_active: Optional[bool] = None
+    ein: Optional[str] = None
+    naics: Optional[str] = None
+    max_employees: Optional[int] = None
+    annual_avg_employees: Optional[int] = None
 
 
 class FacilityAttributesUpdate(BaseModel):

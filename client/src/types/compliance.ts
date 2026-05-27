@@ -27,6 +27,10 @@ export interface LocationCreate {
   county?: string
   zipcode?: string
   facility_attributes?: FacilityAttributes
+  ein?: string
+  naics?: string
+  max_employees?: number
+  annual_avg_employees?: number
 }
 
 export interface LocationUpdate {
@@ -37,6 +41,10 @@ export interface LocationUpdate {
   county?: string
   zipcode?: string
   is_active?: boolean
+  ein?: string
+  naics?: string
+  max_employees?: number
+  annual_avg_employees?: number
 }
 
 export interface BusinessLocation {
@@ -62,6 +70,10 @@ export interface BusinessLocation {
   has_local_ordinance: boolean
   facility_attributes?: FacilityAttributes | null
   source?: 'manual' | 'employee_derived'
+  ein: string | null
+  naics: string | null
+  max_employees: number | null
+  annual_avg_employees: number | null
   created_at: string
 }
 

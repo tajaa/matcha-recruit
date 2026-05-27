@@ -803,6 +803,58 @@ class TestRouteHelpers:
 
 
 # ============================================================
+# OSHA ITA export helpers
+# ============================================================
+
+# The osha routes module pulls heavy transitive imports, so — per this file's
+# convention (see TestRouteHelpers) — the pure ITA helpers are re-implemented
+# here verbatim rather than imported. Keep these in sync with
+# app/matcha/routes/ir_incidents/osha.py.
+def _ita_size_category(avg_employees) -> int:
+    n = avg_employees or 0
+    if n >= 250:
+        return 3
+    if n >= 20:
+        return 2
+    return 1
+
+
+def _missing_ita_fields(est: dict) -> list:
+    missing = []
+    for field in ("ein", "naics", "street_address"):
+        val = est.get(field)
+        if val is None or (isinstance(val, str) and not val.strip()):
+            missing.append(field)
+    if est.get("total_hours_worked") is None:
+        missing.append("total_hours_worked")
+    return missing
+
+
+class TestOshaItaHelpers:
+    def test_size_category_thresholds(self):
+        assert _ita_size_category(None) == 1
+        assert _ita_size_category(0) == 1
+        assert _ita_size_category(19) == 1
+        assert _ita_size_category(20) == 2
+        assert _ita_size_category(249) == 2
+        assert _ita_size_category(250) == 3
+        assert _ita_size_category(5000) == 3
+
+    def test_missing_fields_all_present(self):
+        est = {"ein": "12-3456789", "naics": "621111", "street_address": "1 Main St", "total_hours_worked": 410000}
+        assert _missing_ita_fields(est) == []
+
+    def test_missing_fields_flags_blank_and_none(self):
+        est = {"ein": "", "naics": "  ", "street_address": None, "total_hours_worked": None}
+        assert set(_missing_ita_fields(est)) == {"ein", "naics", "street_address", "total_hours_worked"}
+
+    def test_missing_fields_hours_zero_is_present(self):
+        # 0 hours is a valid (if unusual) entry — only None flags as missing.
+        est = {"ein": "12-3456789", "naics": "621111", "street_address": "1 Main St", "total_hours_worked": 0}
+        assert _missing_ita_fields(est) == []
+
+
+# ============================================================
 # Constants sanity checks
 # ============================================================
 

@@ -4131,8 +4131,9 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
         fa_json = json.dumps(data.facility_attributes) if data.facility_attributes else None
         location_id = await conn.fetchval(
             """
-            INSERT INTO business_locations (company_id, name, address, city, state, county, zipcode, facility_attributes)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO business_locations (company_id, name, address, city, state, county, zipcode, facility_attributes,
+                                            ein, naics, max_employees, annual_avg_employees)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             RETURNING id
             """,
             company_id,
@@ -4143,6 +4144,10 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
             data.county,
             data.zipcode or "",
             fa_json,
+            data.ein,
+            data.naics,
+            data.max_employees,
+            data.annual_avg_employees,
         )
 
         # Resolve county from zip if not provided
@@ -5571,6 +5576,22 @@ async def update_location(
         if data.is_active is not None:
             updates.append(f"is_active = ${param_idx}")
             params.append(data.is_active)
+            param_idx += 1
+        if data.ein is not None:
+            updates.append(f"ein = ${param_idx}")
+            params.append(data.ein)
+            param_idx += 1
+        if data.naics is not None:
+            updates.append(f"naics = ${param_idx}")
+            params.append(data.naics)
+            param_idx += 1
+        if data.max_employees is not None:
+            updates.append(f"max_employees = ${param_idx}")
+            params.append(data.max_employees)
+            param_idx += 1
+        if data.annual_avg_employees is not None:
+            updates.append(f"annual_avg_employees = ${param_idx}")
+            params.append(data.annual_avg_employees)
             param_idx += 1
 
         if not updates:

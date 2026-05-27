@@ -15,7 +15,7 @@ import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from app.config import get_settings
 from app.database import get_connection
@@ -23,8 +23,10 @@ from app.matcha.dependencies import require_admin_or_client, get_client_company_
 from app.matcha.models.ir_incident import (
     Osha300LogEntry,
     Osha300ASummary,
+    Osha300ASaveRequest,
     OshaRecordabilityUpdate,
 )
+from ._shared import log_audit
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,49 @@ VALID_OSHA_CLASSIFICATIONS = {
     "death", "days_away", "restricted_duty",
     "medical_treatment", "loss_of_consciousness", "significant_injury",
 }
+
+# OSHA ITA "Establishment and Summary" CSV header tokens, in upload order.
+# Exact casing/underscores matter — the ITA validator rejects any deviation.
+# (Confirm against the live OSHA ITA data dictionary before a production filing;
+# the box→column G–M6 mapping is stable, only header strings could drift.)
+ITA_CSV_COLUMNS = [
+    "ein", "company_name", "establishment_name", "street_address", "city",
+    "state", "zip_code", "naics_code", "industry_description", "size",
+    "establishment_type", "year_filing_for", "annual_average_employees",
+    "total_hours_worked", "no_injuries_illnesses", "total_deaths",
+    "total_dafw_cases", "total_djtr_cases", "total_other_cases",
+    "total_dafw_days", "total_djtr_days", "total_injuries",
+    "total_skin_disorders", "total_respiratory_conditions", "total_poisonings",
+    "total_hearing_loss", "total_other_illnesses",
+]
+
+
+def _ita_size_category(avg_employees) -> int:
+    """OSHA ITA establishment size code: 1 (<20), 2 (20–249), 3 (>=250)."""
+    n = avg_employees or 0
+    if n >= 250:
+        return 3
+    if n >= 20:
+        return 2
+    return 1
+
+
+# Mandatory ITA fields that can realistically be missing (city/state/zipcode are
+# NOT NULL on business_locations; address/ein/naics/hours are the gaps).
+def _missing_ita_fields(est: dict) -> list[str]:
+    """Return the list of required ITA fields absent from an establishment dict.
+
+    Pure (no DB) so it can be unit-tested. `est` carries the EIN/NAICS already
+    resolved with company-level fallback, plus street_address + total_hours_worked.
+    """
+    missing = []
+    for field in ("ein", "naics", "street_address"):
+        val = est.get(field)
+        if val is None or (isinstance(val, str) and not val.strip()):
+            missing.append(field)
+    if est.get("total_hours_worked") is None:
+        missing.append("total_hours_worked")
+    return missing
 
 
 def _safe_json_loads(val, default=None):
@@ -47,6 +92,71 @@ def _safe_json_loads(val, default=None):
         return json.loads(val)
     except (json.JSONDecodeError, TypeError):
         return default
+
+
+async def _aggregate_300a(conn, company_id, location_id, year) -> dict:
+    """Aggregate recordable-incident totals for one establishment in one year.
+
+    Single source of the 300A column math — shared by the summary endpoint, the
+    PDF, and the ITA export so the three can never drift. M-column injury/illness
+    type lives in osha_form_301_data->>'injury_type'; NULL falls back to 'injury'
+    so legacy rows still land in the Standard Injury column.
+    """
+    return await conn.fetchrow(
+        """
+        SELECT
+            COUNT(*) AS total_cases,
+            COALESCE(SUM(CASE WHEN osha_classification = 'death' THEN 1 ELSE 0 END), 0) AS total_deaths,
+            COALESCE(SUM(CASE WHEN osha_classification = 'days_away' THEN 1 ELSE 0 END), 0) AS total_days_away_cases,
+            COALESCE(SUM(CASE WHEN osha_classification = 'restricted_duty' THEN 1 ELSE 0 END), 0) AS total_restricted_cases,
+            COALESCE(SUM(CASE WHEN osha_classification NOT IN ('death','days_away','restricted_duty') THEN 1 ELSE 0 END), 0) AS total_other_recordable,
+            COALESCE(SUM(days_away_from_work), 0) AS total_days_away,
+            COALESCE(SUM(days_restricted_duty), 0) AS total_days_restricted,
+            COALESCE(SUM(CASE WHEN COALESCE(osha_form_301_data->>'injury_type','injury') = 'injury' THEN 1 ELSE 0 END), 0) AS total_injuries,
+            COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'skin_disorder' THEN 1 ELSE 0 END), 0) AS total_skin_disorders,
+            COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'respiratory' THEN 1 ELSE 0 END), 0) AS total_respiratory,
+            COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'poisoning' THEN 1 ELSE 0 END), 0) AS total_poisonings,
+            COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'hearing_loss' THEN 1 ELSE 0 END), 0) AS total_hearing_loss,
+            COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'other_illness' THEN 1 ELSE 0 END), 0) AS total_other_illnesses
+        FROM ir_incidents
+        WHERE company_id = $1
+          AND location_id = $2
+          AND osha_recordable = true
+          AND EXTRACT(YEAR FROM occurred_at) = $3
+        """,
+        company_id, location_id, year,
+    )
+
+
+async def _active_headcount(conn, company_id, location_id) -> int:
+    """Count active employees mapped to an establishment (employees key on org_id)."""
+    return await conn.fetchval(
+        """
+        SELECT COUNT(*) FROM employees
+        WHERE org_id = $1 AND work_location_id = $2 AND employment_status = 'active'
+        """,
+        company_id, location_id,
+    ) or 0
+
+
+async def _resolve_establishment(conn, company_id, location_id):
+    """Fetch a company's location row with EIN/NAICS company-level fallback.
+
+    Returns the asyncpg Record (location fields + resolved ein/naics) or None if
+    the location does not belong to the company (caller raises 404).
+    """
+    return await conn.fetchrow(
+        """
+        SELECT
+            bl.id, bl.name, bl.address, bl.city, bl.state, bl.zipcode,
+            COALESCE(bl.ein, c.ein) AS ein,
+            COALESCE(bl.naics, c.naics) AS naics
+        FROM business_locations bl
+        JOIN companies c ON c.id = bl.company_id
+        WHERE bl.id = $1 AND bl.company_id = $2
+        """,
+        location_id, company_id,
+    )
 
 
 @router.get("/osha/300-log", response_model=list[Osha300LogEntry])
@@ -235,74 +345,53 @@ async def get_osha_301_form(
 @router.get("/osha/300a", response_model=Osha300ASummary)
 async def get_osha_300a_summary(
     year: int = Query(..., description="Calendar year for the 300A summary"),
+    location_id: UUID = Query(..., description="business_locations.id — 300A is per establishment"),
     current_user=Depends(require_admin_or_client),
 ):
-    """Generate OSHA 300A annual summary for a given year."""
+    """Generate the per-establishment OSHA 300A annual summary for a given year.
+
+    Strict per-establishment: requires a location_id, and 400s if the company has
+    no active locations. average_employees auto-computes from the active roster at
+    the location (overridable via the saved row); total_hours_worked is manual.
+    """
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated with user")
 
     async with get_connection() as conn:
-        cached = await conn.fetchrow(
-            "SELECT * FROM osha_annual_summaries WHERE company_id = $1 AND year = $2",
-            company_id, year,
+        loc_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM business_locations WHERE company_id = $1 AND is_active = true",
+            company_id,
         )
-        if cached:
-            return Osha300ASummary(
-                year=cached["year"],
-                establishment_name=cached["establishment_name"],
-                total_cases=cached["total_cases"],
-                total_deaths=cached["total_deaths"],
-                total_days_away_cases=cached["total_days_away_cases"],
-                total_restricted_cases=cached["total_restricted_cases"],
-                total_other_recordable=cached["total_other_recordable"],
-                total_days_away=cached["total_days_away"],
-                total_days_restricted=cached["total_days_restricted"],
-                total_injuries=cached["total_injuries"],
-                total_skin_disorders=cached["total_skin_disorders"],
-                total_respiratory=cached["total_respiratory"],
-                total_poisonings=cached["total_poisonings"],
-                total_hearing_loss=cached["total_hearing_loss"],
-                total_other_illnesses=cached["total_other_illnesses"],
-                average_employees=cached["average_employees"],
-                total_hours_worked=cached["total_hours_worked"],
+        if not loc_count:
+            raise HTTPException(
+                status_code=400,
+                detail="No business locations defined. OSHA 300A summaries are per "
+                       "establishment — add at least one location first.",
             )
 
-        # M-column injury/illness type is stashed in osha_form_301_data->>'injury_type'
-        # (set by the IR Copilot OSHA recordable chain — see _shared.OSHA_INJURY_TYPES).
-        # When the value is NULL we fall back to "injury" so legacy rows still get counted
-        # under the Standard Injury column rather than vanishing from totals.
-        agg = await conn.fetchrow(
-            """
-            SELECT
-                COUNT(*) AS total_cases,
-                COALESCE(SUM(CASE WHEN osha_classification = 'death' THEN 1 ELSE 0 END), 0) AS total_deaths,
-                COALESCE(SUM(CASE WHEN osha_classification = 'days_away' THEN 1 ELSE 0 END), 0) AS total_days_away_cases,
-                COALESCE(SUM(CASE WHEN osha_classification = 'restricted_duty' THEN 1 ELSE 0 END), 0) AS total_restricted_cases,
-                COALESCE(SUM(CASE WHEN osha_classification NOT IN ('death','days_away','restricted_duty') THEN 1 ELSE 0 END), 0) AS total_other_recordable,
-                COALESCE(SUM(days_away_from_work), 0) AS total_days_away,
-                COALESCE(SUM(days_restricted_duty), 0) AS total_days_restricted,
-                COALESCE(SUM(CASE WHEN COALESCE(osha_form_301_data->>'injury_type','injury') = 'injury' THEN 1 ELSE 0 END), 0) AS total_injuries,
-                COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'skin_disorder' THEN 1 ELSE 0 END), 0) AS total_skin_disorders,
-                COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'respiratory' THEN 1 ELSE 0 END), 0) AS total_respiratory,
-                COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'poisoning' THEN 1 ELSE 0 END), 0) AS total_poisonings,
-                COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'hearing_loss' THEN 1 ELSE 0 END), 0) AS total_hearing_loss,
-                COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'other_illness' THEN 1 ELSE 0 END), 0) AS total_other_illnesses
-            FROM ir_incidents
-            WHERE company_id = $1
-              AND osha_recordable = true
-              AND EXTRACT(YEAR FROM occurred_at) = $2
-            """,
-            company_id, year,
-        )
+        est = await _resolve_establishment(conn, company_id, location_id)
+        if est is None:
+            raise HTTPException(status_code=404, detail="Location not found")
 
-        company = await conn.fetchrow(
-            "SELECT name FROM companies WHERE id = $1", company_id,
+        auto_headcount = await _active_headcount(conn, company_id, location_id)
+        agg = await _aggregate_300a(conn, company_id, location_id, year)
+
+        cached = await conn.fetchrow(
+            "SELECT * FROM osha_annual_summaries WHERE company_id = $1 AND location_id = $2 AND year = $3",
+            company_id, location_id, year,
         )
 
         return Osha300ASummary(
             year=year,
-            establishment_name=company["name"] if company else None,
+            establishment_name=est["name"],
+            establishment_id=str(est["id"]),
+            ein=est["ein"],
+            naics=est["naics"],
+            address=est["address"],
+            city=est["city"],
+            state=est["state"],
+            zipcode=est["zipcode"],
             total_cases=agg["total_cases"],
             total_deaths=agg["total_deaths"],
             total_days_away_cases=agg["total_days_away_cases"],
@@ -316,18 +405,123 @@ async def get_osha_300a_summary(
             total_poisonings=agg["total_poisonings"],
             total_hearing_loss=agg["total_hearing_loss"],
             total_other_illnesses=agg["total_other_illnesses"],
-            average_employees=None,
-            total_hours_worked=None,
+            # Saved override wins; else the live roster count.
+            average_employees=(cached["average_employees"] if cached and cached["average_employees"] is not None else auto_headcount),
+            total_hours_worked=cached["total_hours_worked"] if cached else None,
+            certified_by=cached["certified_by"] if cached else None,
+            certified_title=cached["certified_title"] if cached else None,
+            certified_date=cached["certified_date"] if cached else None,
         )
+
+
+@router.put("/osha/300a/save")
+async def save_osha_300a(
+    body: Osha300ASaveRequest,
+    current_user=Depends(require_admin_or_client),
+):
+    """Upsert manual hours / headcount override / certification for a 300A.
+
+    Recomputes the total_* counts server-side so the persisted snapshot is
+    consistent with the recordable incidents at the establishment.
+    """
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with user")
+
+    async with get_connection() as conn:
+        est = await _resolve_establishment(conn, company_id, body.location_id)
+        if est is None:
+            raise HTTPException(status_code=404, detail="Location not found")
+
+        agg = await _aggregate_300a(conn, company_id, body.location_id, body.year)
+        avg_emp = body.average_employees
+        if avg_emp is None:
+            avg_emp = await _active_headcount(conn, company_id, body.location_id)
+
+        await conn.execute(
+            """
+            INSERT INTO osha_annual_summaries (
+                company_id, location_id, year, establishment_name,
+                total_cases, total_deaths, total_days_away_cases, total_restricted_cases,
+                total_other_recordable, total_days_away, total_days_restricted,
+                total_injuries, total_skin_disorders, total_respiratory, total_poisonings,
+                total_hearing_loss, total_other_illnesses,
+                average_employees, total_hours_worked,
+                certified_by, certified_title, certified_date
+            ) VALUES (
+                $1, $2, $3, $4,
+                $5, $6, $7, $8,
+                $9, $10, $11,
+                $12, $13, $14, $15,
+                $16, $17,
+                $18, $19,
+                $20, $21, $22
+            )
+            ON CONFLICT (company_id, COALESCE(location_id, '00000000-0000-0000-0000-000000000000'::uuid), year)
+            DO UPDATE SET
+                establishment_name = EXCLUDED.establishment_name,
+                total_cases = EXCLUDED.total_cases,
+                total_deaths = EXCLUDED.total_deaths,
+                total_days_away_cases = EXCLUDED.total_days_away_cases,
+                total_restricted_cases = EXCLUDED.total_restricted_cases,
+                total_other_recordable = EXCLUDED.total_other_recordable,
+                total_days_away = EXCLUDED.total_days_away,
+                total_days_restricted = EXCLUDED.total_days_restricted,
+                total_injuries = EXCLUDED.total_injuries,
+                total_skin_disorders = EXCLUDED.total_skin_disorders,
+                total_respiratory = EXCLUDED.total_respiratory,
+                total_poisonings = EXCLUDED.total_poisonings,
+                total_hearing_loss = EXCLUDED.total_hearing_loss,
+                total_other_illnesses = EXCLUDED.total_other_illnesses,
+                average_employees = EXCLUDED.average_employees,
+                total_hours_worked = EXCLUDED.total_hours_worked,
+                certified_by = EXCLUDED.certified_by,
+                certified_title = EXCLUDED.certified_title,
+                certified_date = EXCLUDED.certified_date
+            """,
+            company_id, body.location_id, body.year, est["name"],
+            agg["total_cases"], agg["total_deaths"], agg["total_days_away_cases"], agg["total_restricted_cases"],
+            agg["total_other_recordable"], agg["total_days_away"], agg["total_days_restricted"],
+            agg["total_injuries"], agg["total_skin_disorders"], agg["total_respiratory"], agg["total_poisonings"],
+            agg["total_hearing_loss"], agg["total_other_illnesses"],
+            avg_emp, body.total_hours_worked,
+            body.certified_by, body.certified_title, body.certified_date,
+        )
+
+        await log_audit(
+            conn, None, str(current_user.id), "osha_300a_saved",
+            entity_type="osha_annual_summary", entity_id=str(body.location_id),
+            details={"year": body.year},
+        )
+
+    return {"message": "OSHA 300A summary saved", "location_id": str(body.location_id), "year": body.year}
+
+
+@router.get("/osha/300a/pdf")
+async def get_osha_300a_pdf(
+    year: int = Query(..., description="Calendar year for the 300A PDF"),
+    location_id: UUID = Query(..., description="business_locations.id — 300A is per establishment"),
+    current_user=Depends(require_admin_or_client),
+):
+    """Render the faithful federal OSHA Form 300A as a PDF for one establishment."""
+    summary = await get_osha_300a_summary(year=year, location_id=location_id, current_user=current_user)
+    from ._osha_pdf import render_300a_pdf
+    pdf_bytes = await render_300a_pdf(summary.model_dump())
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="osha_300a_{year}.pdf"'},
+    )
 
 
 @router.get("/osha/300a/csv")
 async def get_osha_300a_csv(
     year: int = Query(..., description="Calendar year for the 300A summary CSV"),
+    location_id: UUID = Query(..., description="business_locations.id — 300A is per establishment"),
     current_user=Depends(require_admin_or_client),
 ):
     """Export OSHA 300A annual summary as CSV."""
-    summary = await get_osha_300a_summary(year=year, current_user=current_user)
+    summary = await get_osha_300a_summary(year=year, location_id=location_id, current_user=current_user)
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -356,6 +550,174 @@ async def get_osha_300a_csv(
         iter([output.getvalue()]),
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+async def _gather_ita_establishments(conn, company_id, year) -> list[dict]:
+    """Build one ITA row dict per active establishment for the year.
+
+    Each dict carries the resolved identity (EIN/NAICS with company fallback),
+    the manual hours + headcount from the saved summary row (auto headcount when
+    unsaved), and the recomputed 300A totals. Shared by validate + export.
+    """
+    company = await conn.fetchrow(
+        "SELECT COALESCE(legal_name, name) AS company_name FROM companies WHERE id = $1",
+        company_id,
+    )
+    company_name = company["company_name"] if company else ""
+
+    locations = await conn.fetch(
+        """
+        SELECT bl.id, bl.name, bl.address, bl.city, bl.state, bl.zipcode,
+               COALESCE(bl.ein, c.ein) AS ein,
+               COALESCE(bl.naics, c.naics) AS naics
+        FROM business_locations bl
+        JOIN companies c ON c.id = bl.company_id
+        WHERE bl.company_id = $1 AND bl.is_active = true
+        ORDER BY bl.name
+        """,
+        company_id,
+    )
+
+    rows = []
+    for loc in locations:
+        agg = await _aggregate_300a(conn, company_id, loc["id"], year)
+        saved = await conn.fetchrow(
+            "SELECT average_employees, total_hours_worked FROM osha_annual_summaries "
+            "WHERE company_id = $1 AND location_id = $2 AND year = $3",
+            company_id, loc["id"], year,
+        )
+        avg_emp = saved["average_employees"] if saved and saved["average_employees"] is not None else \
+            await _active_headcount(conn, company_id, loc["id"])
+        hours = saved["total_hours_worked"] if saved else None
+
+        rows.append({
+            "location_id": str(loc["id"]),
+            "establishment_name": loc["name"] or "",
+            "company_name": company_name,
+            "ein": loc["ein"],
+            "naics": loc["naics"],
+            "street_address": loc["address"],
+            "city": loc["city"],
+            "state": loc["state"],
+            "zip_code": loc["zipcode"],
+            "annual_average_employees": avg_emp,
+            "total_hours_worked": hours,
+            "agg": agg,
+        })
+    return rows
+
+
+@router.get("/osha/ita/validate")
+async def validate_ita_export(
+    year: int = Query(..., description="Calendar year to validate for ITA filing"),
+    current_user=Depends(require_admin_or_client),
+):
+    """Pre-flight: list establishments missing required ITA fields (EIN/NAICS/etc.).
+
+    Returns [] when every active establishment is filing-ready. Lets the UI show
+    a checklist without triggering a download attempt.
+    """
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with user")
+
+    async with get_connection() as conn:
+        establishments = await _gather_ita_establishments(conn, company_id, year)
+
+    problems = []
+    for est in establishments:
+        missing = _missing_ita_fields(est)
+        if missing:
+            problems.append({
+                "location_id": est["location_id"],
+                "establishment_name": est["establishment_name"],
+                "missing": missing,
+            })
+    return problems
+
+
+@router.get("/osha/ita/export.csv")
+async def export_ita_csv(
+    year: int = Query(..., description="Calendar year for the ITA bulk export"),
+    current_user=Depends(require_admin_or_client),
+):
+    """Master ITA Establishment-and-Summary CSV — one row per establishment.
+
+    Validates mandatory fields first; returns 400 with a structured list of
+    offending establishments before streaming anything.
+    """
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with user")
+
+    async with get_connection() as conn:
+        establishments = await _gather_ita_establishments(conn, company_id, year)
+
+    if not establishments:
+        raise HTTPException(
+            status_code=400,
+            detail="No active business locations to file. Add at least one establishment.",
+        )
+
+    problems = []
+    for est in establishments:
+        missing = _missing_ita_fields(est)
+        if missing:
+            problems.append({
+                "location_id": est["location_id"],
+                "establishment_name": est["establishment_name"],
+                "missing": missing,
+            })
+    if problems:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Cannot export ITA file — establishments are missing required fields.",
+                "establishments": problems,
+            },
+        )
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=ITA_CSV_COLUMNS)
+    writer.writeheader()
+    for est in establishments:
+        agg = est["agg"]
+        writer.writerow({
+            "ein": est["ein"] or "",
+            "company_name": est["company_name"],
+            "establishment_name": est["establishment_name"],
+            "street_address": est["street_address"] or "",
+            "city": est["city"] or "",
+            "state": est["state"] or "",
+            "zip_code": est["zip_code"] or "",
+            "naics_code": est["naics"] or "",
+            "industry_description": "",  # optional; derivable from NAICS, left blank
+            "size": _ita_size_category(est["annual_average_employees"]),
+            "establishment_type": 1,  # 1 = private (not a government establishment)
+            "year_filing_for": year,
+            "annual_average_employees": est["annual_average_employees"] or 0,
+            "total_hours_worked": est["total_hours_worked"] or 0,
+            "no_injuries_illnesses": 1 if agg["total_cases"] == 0 else 0,
+            "total_deaths": agg["total_deaths"],
+            "total_dafw_cases": agg["total_days_away_cases"],
+            "total_djtr_cases": agg["total_restricted_cases"],
+            "total_other_cases": agg["total_other_recordable"],
+            "total_dafw_days": agg["total_days_away"],
+            "total_djtr_days": agg["total_days_restricted"],
+            "total_injuries": agg["total_injuries"],
+            "total_skin_disorders": agg["total_skin_disorders"],
+            "total_respiratory_conditions": agg["total_respiratory"],
+            "total_poisonings": agg["total_poisonings"],
+            "total_hearing_loss": agg["total_hearing_loss"],
+            "total_other_illnesses": agg["total_other_illnesses"],
+        })
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=osha_ita_{year}.csv"},
     )
 
 

@@ -37,6 +37,12 @@ class CompanyUpdate(BaseModel):
     company_values: Optional[str] = None
     ai_guidance_notes: Optional[str] = None
     healthcare_specialties: Optional[list[str]] = None
+    # OSHA / ITA employer identity
+    legal_name: Optional[str] = None
+    ein: Optional[str] = None
+    naics: Optional[str] = None
+    address: Optional[str] = None
+    zip: Optional[str] = None
 
 
 class Company(BaseModel):
@@ -83,6 +89,11 @@ class CompanyResponse(BaseModel):
     company_values: Optional[str] = None
     ai_guidance_notes: Optional[str] = None
     healthcare_specialties: Optional[list[str]] = None
+    legal_name: Optional[str] = None
+    ein: Optional[str] = None
+    naics: Optional[str] = None
+    address: Optional[str] = None
+    zip: Optional[str] = None
     created_at: datetime
     culture_profile: Optional[dict[str, Any]] = None
     interview_count: int = 0

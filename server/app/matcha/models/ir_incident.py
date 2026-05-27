@@ -552,9 +552,18 @@ class Osha300LogEntry(BaseModel):
 
 
 class Osha300ASummary(BaseModel):
-    """OSHA 300A annual summary."""
+    """OSHA 300A annual summary — per establishment (business_location)."""
     year: int
     establishment_name: Optional[str]
+    # Establishment identity (EIN/NAICS fall back to company-level when the
+    # location row leaves them null). Needed for the 300A PDF + ITA filing.
+    establishment_id: Optional[str] = None
+    ein: Optional[str] = None
+    naics: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zipcode: Optional[str] = None
     total_cases: int
     total_deaths: int
     total_days_away_cases: int
@@ -568,8 +577,29 @@ class Osha300ASummary(BaseModel):
     total_poisonings: int
     total_hearing_loss: int
     total_other_illnesses: int
+    # average_employees auto-computes from the active roster at the location but
+    # is overridable; total_hours_worked is manual (Finch HRIS cannot supply it).
     average_employees: Optional[int]
     total_hours_worked: Optional[int]
+    certified_by: Optional[str] = None
+    certified_title: Optional[str] = None
+    certified_date: Optional[date] = None
+
+
+class Osha300ASaveRequest(BaseModel):
+    """Persist manual hours / headcount override / certification for a 300A.
+
+    Upserts osha_annual_summaries for (company, location, year). The total_*
+    counts are recomputed server-side from recordable incidents so the saved
+    snapshot stays consistent — only the fields below come from the user.
+    """
+    location_id: UUID
+    year: int
+    total_hours_worked: Optional[int] = None
+    average_employees: Optional[int] = None  # override of the auto roster count
+    certified_by: Optional[str] = None
+    certified_title: Optional[str] = None
+    certified_date: Optional[date] = None
 
 
 # ===========================================
