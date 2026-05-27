@@ -333,6 +333,25 @@ class DispatchResearchResponse(BaseModel):
     skipped: list[str] = Field(default_factory=list)
 
 
+class ResearchGapItem(BaseModel):
+    """One gap the admin selected to research/fill (a category in a jurisdiction)."""
+    category_slug: str
+    scope_level: Optional[str] = None
+    state: Optional[str] = None
+    county: Optional[str] = None
+    city: Optional[str] = None
+
+    _coerce_empty = field_validator("scope_level", "state", "county", "city", mode="before")(
+        lambda cls, v: _empty_to_none(v)
+    )
+
+
+class ResearchGapsRequest(BaseModel):
+    """Selective gap-fill request — only the chosen gaps are researched, so a run
+    never triggers a long all-jurisdictions Gemini sweep."""
+    items: list[ResearchGapItem] = Field(default_factory=list, max_length=100)
+
+
 class EnrichRosterResponse(BaseModel):
     """Result of an employee-sync enrichment run for an existing company.
 

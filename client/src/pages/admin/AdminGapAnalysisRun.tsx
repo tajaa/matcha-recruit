@@ -6,14 +6,18 @@
  * so it visibly "scopes out" the compliance/jurisdictional apparatus.
  * Route: /admin/onboarding/company/:companyId
  */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, Loader2, Play, Users, Briefcase, MapPin, CalendarCheck,
   Search, Scale, CheckCircle2, AlertTriangle, XCircle, Sparkles, FileSearch,
+  Square, CheckSquare, FlaskConical, Lightbulb,
 } from 'lucide-react'
 import { api } from '../../api/client'
+import { adminOnboarding } from '../../api/adminOnboarding'
+import type { ResolvedScope, ResolvedScopeMissing, GapCheckResult } from '../../api/adminOnboarding'
 import { useEnrichStream, type EnrichEvent } from '../../hooks/useEnrichStream'
+import { useResearchGaps, type ResearchGapItem } from '../../hooks/useResearchGaps'
 
 type IconDef = { icon: React.ElementType; color: string; spin?: boolean }
 
@@ -166,6 +170,174 @@ export default function AdminGapAnalysisRun() {
               View full gap analysis →
             </Link>
           )}
+        </div>
+      )}
+
+      {done?.session_id && <GapsToFill companyId={companyId} sessionId={done.session_id} />}
+    </div>
+  )
+}
+
+
+// ── Gaps to fill (selective research) ────────────────────────────────────────
+
+function missingId(m: ResolvedScopeMissing): string {
+  return [m.category_slug, m.scope_level, m.state || '-', m.county || '-', m.city || '-'].join('::')
+}
+
+function jLabel(m: { city?: string | null; state?: string | null }): string {
+  return `${m.city ? `${m.city}, ` : ''}${m.state || 'federal'}`
+}
+
+function GapsToFill({ companyId, sessionId }: { companyId: string; sessionId: string }) {
+  const [missing, setMissing] = useState<ResolvedScopeMissing[]>([])
+  const [gapCheck, setGapCheck] = useState<GapCheckResult | null>(null)
+  const [thin, setThin] = useState<string[]>([])
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const { running, events, done, error, run } = useResearchGaps()
+  const feedRef = useRef<HTMLDivElement>(null)
+
+  const load = useCallback(() => {
+    adminOnboarding.getSession(sessionId).then((s) => {
+      const rs = s.resolved_scope as (ResolvedScope & { gap_check?: GapCheckResult }) | null
+      setMissing(rs?.missing ?? [])
+      setGapCheck(rs?.gap_check ?? null)
+      const nudges: string[] = []
+      const b = s.basics ?? {}
+      if (!b.industry || b.industry === 'general') nudges.push('industry')
+      if (!b.description) nudges.push('business description')
+      if (!s.locations || s.locations.length === 0) nudges.push('work locations')
+      setThin(nudges)
+    }).catch(() => {})
+  }, [sessionId])
+
+  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: 'smooth' })
+  }, [events])
+  // After a fill run completes, reload (coverage up, missing down) + clear selection.
+  useEffect(() => { if (done) { load(); setSelected(new Set()) } }, [done, load])
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const n = new Set(prev)
+      if (n.has(id)) n.delete(id); else n.add(id)
+      return n
+    })
+  }
+
+  function researchSelected() {
+    const items: ResearchGapItem[] = missing
+      .filter((m) => selected.has(missingId(m)))
+      .map((m) => ({
+        category_slug: m.category_slug, scope_level: m.scope_level,
+        state: m.state, county: m.county, city: m.city,
+      }))
+    if (items.length) void run(companyId, items)
+  }
+
+  const suggestionCount =
+    (gapCheck?.suggested_compliance_categories?.length ?? 0) +
+    (gapCheck?.suggested_certifications?.length ?? 0) +
+    (gapCheck?.suggested_licenses?.length ?? 0) +
+    (gapCheck?.suggested_jurisdictions?.length ?? 0)
+
+  return (
+    <div className="mt-5 space-y-4">
+      {thin.length > 0 && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+          <div className="text-xs text-amber-200">
+            Thin profile — fill in <span className="font-medium">{thin.join(', ')}</span> on the
+            company record for sharper analysis.
+          </div>
+        </div>
+      )}
+
+      {missing.length > 0 && (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-2">
+              <FlaskConical className="w-4 h-4 text-violet-400" />
+              <h3 className="text-sm font-medium text-zinc-200">Gaps to fill ({missing.length})</h3>
+            </div>
+            <button
+              onClick={researchSelected}
+              disabled={running || selected.size === 0}
+              className="text-xs px-3 py-1.5 rounded-lg bg-violet-600 text-white font-medium hover:bg-violet-500 disabled:opacity-40 inline-flex items-center gap-2"
+            >
+              {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+              Research selected ({selected.size})
+            </button>
+          </div>
+          <p className="text-[11px] text-zinc-500 mb-2">
+            Pick which gaps to research — only the selected ones run, so it stays fast.
+          </p>
+          <div className="space-y-1 max-h-60 overflow-y-auto">
+            {missing.map((m) => {
+              const id = missingId(m)
+              const on = selected.has(id)
+              return (
+                <button
+                  key={id}
+                  onClick={() => toggle(id)}
+                  disabled={running}
+                  className="w-full flex items-center gap-2 text-left px-2 py-1.5 rounded hover:bg-zinc-800/50 disabled:opacity-50"
+                >
+                  {on ? <CheckSquare className="w-4 h-4 text-violet-400 shrink-0" /> : <Square className="w-4 h-4 text-zinc-600 shrink-0" />}
+                  <span className="text-xs text-zinc-300">{m.category_slug.replace(/_/g, ' ')}</span>
+                  <span className="text-[10px] text-zinc-500 ml-auto">{jLabel(m)}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          {events.length > 0 && (
+            <div ref={feedRef} className="mt-3 border-t border-zinc-800 pt-3 max-h-48 overflow-y-auto space-y-1.5">
+              {events.filter((e) => e.type !== 'complete').map((ev, i) => {
+                const { icon: Icon, color, spin } = eventStyle(ev.type)
+                return (
+                  <div key={i} className="flex items-start gap-2 text-xs">
+                    <Icon className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${color} ${spin ? 'animate-pulse' : ''}`} />
+                    <span className="text-zinc-400">{eventText(ev)}</span>
+                  </div>
+                )
+              })}
+              {running && (
+                <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+                  <Loader2 className="w-3 h-3 animate-spin" /> researching…
+                </div>
+              )}
+            </div>
+          )}
+          {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
+        </div>
+      )}
+
+      {suggestionCount > 0 && (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Lightbulb className="w-4 h-4 text-amber-400" />
+            <h3 className="text-sm font-medium text-zinc-200">AI suggestions ({suggestionCount})</h3>
+          </div>
+          {gapCheck?.summary && <p className="text-[11px] text-zinc-500 mb-2">{gapCheck.summary}</p>}
+          <div className="flex flex-wrap gap-1.5">
+            {gapCheck?.suggested_compliance_categories?.map((c) => (
+              <span key={`c-${c.category_slug}`} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">
+                {c.category_slug.replace(/_/g, ' ')} · {c.scope}
+              </span>
+            ))}
+            {gapCheck?.suggested_licenses?.map((l) => (
+              <span key={`l-${l.slug}`} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">
+                {l.name}
+              </span>
+            ))}
+            {gapCheck?.suggested_jurisdictions?.map((j, i) => (
+              <span key={`j-${i}`} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">
+                {jLabel(j)}
+              </span>
+            ))}
+          </div>
         </div>
       )}
     </div>

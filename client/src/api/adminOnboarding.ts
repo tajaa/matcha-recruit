@@ -291,6 +291,13 @@ export function getEnrichStreamUrl(companyId: string): string {
   return `${base}/admin/onboarding/enrich/${companyId}/stream`
 }
 
+// SSE selective gap-fill — researches only the chosen (jurisdiction, category)
+// items. POST with a JSON body, consumed via fetch + ReadableStream.
+export function getResearchGapsUrl(companyId: string): string {
+  const base = import.meta.env.VITE_API_URL || '/api'
+  return `${base}/admin/onboarding/research-gaps/${companyId}/stream`
+}
+
 export const adminOnboarding = {
   specialties: () =>
     api.get<Record<string, string[]>>(`${BASE}/specialties`),

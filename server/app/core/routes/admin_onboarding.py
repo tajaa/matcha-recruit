@@ -44,6 +44,7 @@ from app.core.models.admin_onboarding import (
     DispatchResearchResponse,
     EnrichRosterResponse,
     ExpandScopeResponse,
+    ResearchGapsRequest,
     FinalizeResponse,
     GapAnalysisDossier,
     GapCheckResponse,
@@ -69,7 +70,14 @@ from app.core.services.onboarding_scope_ai import (
 from app.core.services.compliance_service import (
     ensure_location_for_employee,
     run_compliance_check_stream,
+    _refresh_repository_missing_categories,
+    _get_or_create_jurisdiction,
+    _lookup_has_local_ordinance,
+    _load_jurisdiction_requirements,
+    _jurisdiction_row_to_dict,
+    _heartbeat_while,
 )
+from app.core.services.gemini_compliance import get_gemini_compliance_service
 
 logger = logging.getLogger(__name__)
 
@@ -556,6 +564,53 @@ async def _collect_roster(conn, company_id: UUID) -> tuple[list[str], dict, set]
     return roles, emp_locs, existing_keys
 
 
+# Company columns the enrichment loads to ground the scope analysis.
+_COMPANY_PROFILE_COLS = (
+    "id, name, industry, healthcare_specialties, size, company_values, "
+    "benefits_summary, pto_policy_summary, compensation_notes, ir_guidance_blurb, "
+    "ai_guidance_notes, work_arrangement, default_employment_type, "
+    "headquarters_city, headquarters_state"
+)
+
+
+def _build_enrichment_basics(company) -> dict:
+    """Assemble the scope-engine `basics` from the full company profile.
+
+    `companies` has no dedicated `description` column, so synthesize one from the
+    profile fields that exist — this is the richest grounding signal `expand_scope`
+    has (it reads `description` + `specialty`). All specialties are folded into the
+    description so the single `specialty` field isn't lossy.
+    """
+    specialties = [s for s in (company["healthcare_specialties"] or []) if s]
+    parts: list[str] = []
+    if specialties:
+        parts.append(f"Specialties: {', '.join(specialties)}.")
+    if company["work_arrangement"]:
+        parts.append(f"Work arrangement: {company['work_arrangement']}.")
+    if company["default_employment_type"]:
+        parts.append(f"Default employment type: {company['default_employment_type']}.")
+    hq = ", ".join(x for x in [company["headquarters_city"], company["headquarters_state"]] if x)
+    if hq:
+        parts.append(f"Headquarters: {hq}.")
+    for label, key in (
+        ("Company values", "company_values"),
+        ("Benefits", "benefits_summary"),
+        ("PTO policy", "pto_policy_summary"),
+        ("Compensation", "compensation_notes"),
+        ("IR guidance", "ir_guidance_blurb"),
+        ("Notes", "ai_guidance_notes"),
+    ):
+        val = (company[key] or "").strip()
+        if val:
+            parts.append(f"{label}: {val}")
+    return {
+        "business_name": company["name"],
+        "industry": company["industry"] or "general",
+        "specialty": specialties[0] if specialties else None,
+        "description": " ".join(parts).strip() or None,
+    }
+
+
 async def _enrich_scope_and_persist(
     conn, *, company, roles: list[str], admin_user_id: UUID,
 ) -> dict:
@@ -567,15 +622,11 @@ async def _enrich_scope_and_persist(
     scope_written (int)}. Raises HTTPException(502) if expansion fails.
     """
     company_id = company["id"]
-    specialties = list(company["healthcare_specialties"] or [])
-    basics = {
-        "business_name": company["name"],
-        "industry": company["industry"] or "general",
-        "specialty": specialties[0] if specialties else None,
-    }
+    basics = _build_enrichment_basics(company)
     all_loc_rows = await conn.fetch(
         """
-        SELECT name, address, city, state, county, zipcode FROM business_locations
+        SELECT name, address, city, state, county, zipcode, facility_attributes
+        FROM business_locations
         WHERE company_id = $1 AND is_active = TRUE AND is_company_wide = FALSE
         """,
         company_id,
@@ -584,7 +635,9 @@ async def _enrich_scope_and_persist(
         {
             "name": r["name"], "address": r["address"], "city": r["city"],
             "state": r["state"], "county": r["county"], "zipcode": r["zipcode"],
-            "facility_attributes": {},
+            # Real facility attributes (entity_type, payer_contracts) sharpen
+            # expand_scope + trigger-based category expansion.
+            "facility_attributes": _safe_jsonb(r["facility_attributes"], {}),
         }
         for r in all_loc_rows
     ]
@@ -606,6 +659,19 @@ async def _enrich_scope_and_persist(
     except Exception:
         resolved = ResolvedScope()
 
+    # Final safety-net gap check (role-aware) → surfaced as fill prompts. Persisted
+    # under resolved_scope.gap_check (same slot the wizard's Step-6 uses).
+    gap_check_dict: dict = {}
+    try:
+        gap_raw = await ai_gap_check(
+            basics=basics, locations=locations, ai_scope=ai_scope.model_dump(),
+            resolved_scope=resolved.model_dump(mode="json"), conn=conn,
+            employee_roles=roles,
+        )
+        gap_check_dict = GapCheckResult.model_validate(gap_raw).model_dump()
+    except Exception:
+        logger.exception("enrich: gap_check failed for company %s", company_id)
+
     scope_written = await _write_compliance_scope_rows(
         conn,
         company_id=company_id,
@@ -620,7 +686,11 @@ async def _enrich_scope_and_persist(
     basics_blob = json.dumps({**basics, "enrichment_run": True})
     locations_blob = json.dumps(locations)
     ai_blob = json.dumps(ai_scope.model_dump())
-    resolved_blob = json.dumps(resolved.model_dump(mode="json"))
+    # Persist gap_check alongside resolved_scope so the UI surfaces fill prompts.
+    resolved_persist = resolved.model_dump(mode="json")
+    if gap_check_dict:
+        resolved_persist["gap_check"] = gap_check_dict
+    resolved_blob = json.dumps(resolved_persist)
     existing_session = await conn.fetchrow(
         "SELECT id FROM onboarding_sessions WHERE idempotency_key = $1", idem,
     )
@@ -653,11 +723,19 @@ async def _enrich_scope_and_persist(
             basics_blob, locations_blob, ai_blob, resolved_blob,
         )
 
+    # Existing coverage (for display) — what this company already tracks.
+    covered_existing = await conn.fetchval(
+        "SELECT COUNT(*) FROM company_compliance_scope WHERE company_id = $1 AND status = 'active'",
+        company_id,
+    )
+
     return {
         "session_id": session_id,
         "resolved": resolved,
         "ai_scope": ai_scope,
         "scope_written": scope_written,
+        "gap_check": gap_check_dict,
+        "existing_scope_count": covered_existing or 0,
     }
 
 
@@ -676,7 +754,7 @@ async def enrich_company_from_roster(
     """
     async with get_connection() as conn:
         company = await conn.fetchrow(
-            "SELECT id, name, industry, healthcare_specialties FROM companies WHERE id = $1",
+            f"SELECT {_COMPANY_PROFILE_COLS} FROM companies WHERE id = $1",
             company_id,
         )
         if not company:
@@ -732,7 +810,7 @@ async def enrich_company_stream(
         # 1. Roster scan (short-lived connection).
         async with get_connection() as conn:
             company = await conn.fetchrow(
-                "SELECT id, name, industry, healthcare_specialties FROM companies WHERE id = $1",
+                f"SELECT {_COMPANY_PROFILE_COLS} FROM companies WHERE id = $1",
                 company_id,
             )
             if not company:
@@ -755,7 +833,8 @@ async def enrich_company_stream(
             yield {"type": "roles_detected", "roles": roles,
                    "message": f"Roles on staff: {', '.join(roles)}"}
 
-        # 2. Fill + live-research each NEW jurisdiction.
+        # 2. Fill each NEW jurisdiction (FAST — repo sync only, no Gemini sweep).
+        #    Unknown jurisdictions surface as gaps to fill selectively afterward.
         new_jurisdictions: list[dict] = []
         for key in new_keys:
             city, state = emp_locs[key]
@@ -767,7 +846,7 @@ async def enrich_company_stream(
                 async with get_connection() as conn:
                     # background_tasks=None → creates + links jurisdiction (and
                     # clones repo data for known jurisdictions) WITHOUT firing an
-                    # inline check; the streamed check below owns the research.
+                    # inline check.
                     location_id = await ensure_location_for_employee(
                         conn, company_id, city or None, state,
                     )
@@ -780,12 +859,12 @@ async def enrich_company_stream(
             yield {"type": "jurisdiction_tracking", "city": city or None, "state": state,
                    "message": f"{label} is now tracked weekly."}
             yield {"type": "researching", "jurisdiction": label,
-                   "message": f"Pulling compliance requirements for {label}…"}
-            # Delegate to the live-research stream; pass its events through with
-            # the jurisdiction label attached for UI context.
+                   "message": f"Checking known requirements for {label}…"}
+            # Repo-sync only (allow_live_research=False) so the analyze pass stays
+            # fast; anything missing becomes a gap the admin fills selectively.
             try:
                 async for ev in run_compliance_check_stream(
-                    location_id, company_id, allow_live_research=True,
+                    location_id, company_id, allow_live_research=False,
                 ):
                     etype = ev.get("type")
                     if etype == "heartbeat":
@@ -810,15 +889,21 @@ async def enrich_company_stream(
         try:
             async with get_connection() as conn:
                 company = await conn.fetchrow(
-                    "SELECT id, name, industry, healthcare_specialties FROM companies WHERE id = $1",
+                    f"SELECT {_COMPANY_PROFILE_COLS} FROM companies WHERE id = $1",
                     company_id,
                 )
                 if not company:
                     yield {"type": "error", "message": "Company no longer exists."}
                     return
-                result = await _enrich_scope_and_persist(
+                # expand_scope + gap_check are two sequential Gemini calls; keep the
+                # SSE alive with heartbeats so a proxy/client doesn't time out the
+                # silent gap.
+                scope_task = asyncio.create_task(_enrich_scope_and_persist(
                     conn, company=company, roles=roles, admin_user_id=current_user.id,
-                )
+                ))
+                async for evt in _heartbeat_while(scope_task):
+                    yield evt
+                result = scope_task.result()
         except HTTPException as exc:
             yield {"type": "error", "message": str(exc.detail)}
             return
@@ -844,6 +929,13 @@ async def enrich_company_stream(
                 f"{len(resolved.missing)} gap(s) flagged for research."
             ),
         }
+        gc = result.get("gap_check") or {}
+        suggestions = (
+            len(gc.get("suggested_compliance_categories") or [])
+            + len(gc.get("suggested_certifications") or [])
+            + len(gc.get("suggested_licenses") or [])
+            + len(gc.get("suggested_jurisdictions") or [])
+        )
         yield {
             "type": "complete",
             "session_id": str(result["session_id"]),
@@ -852,6 +944,8 @@ async def enrich_company_stream(
             "roles": roles,
             "covered": len(resolved.existing),
             "missing": len(resolved.missing),
+            "existing_scope_count": result.get("existing_scope_count", 0),
+            "suggestions": suggestions,
             "message": "Gap analysis complete.",
         }
 
@@ -863,6 +957,148 @@ async def enrich_company_stream(
                 else:
                     yield f"data: {json.dumps(ev)}\n\n"
         except Exception as exc:  # last-resort guard so the stream always closes
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        sse(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no"},
+    )
+
+
+# ── Selective gap fill (research only the chosen gaps) ──────────────────
+
+
+@router.post("/onboarding/research-gaps/{company_id}/stream")
+async def research_gaps_stream(
+    company_id: UUID,
+    body: ResearchGapsRequest,
+    current_user: CurrentUser = Depends(require_master_admin),
+):
+    """Research the admin-SELECTED gaps only (SSE) — never a full sweep, so
+    Gemini runs stay short. Groups the chosen (jurisdiction, category) items by
+    jurisdiction, researches just those categories (`_refresh_repository_missing_categories`,
+    which discovers sources for brand-new jurisdictions), upserts the bank, writes
+    the manifest rows to the company's matching location, and re-syncs that
+    location's tracked requirements. Streams progress like the enrich stream.
+    """
+    # Group selected gaps by jurisdiction.
+    groups: dict[tuple, list[str]] = {}
+    for it in body.items:
+        state = (it.state or "").upper().strip()
+        if not state or not it.category_slug:
+            continue
+        county = (it.county or "").strip() or None
+        city = (it.city or "").strip() or None
+        cats = groups.setdefault((state, county, city), [])
+        if it.category_slug not in cats:
+            cats.append(it.category_slug)
+
+    async def events():
+        if not groups:
+            yield {"type": "error", "message": "No gaps selected to research."}
+            return
+        async with get_connection() as conn:
+            comp = await conn.fetchrow("SELECT industry FROM companies WHERE id = $1", company_id)
+        if not comp:
+            yield {"type": "error", "message": "Company not found."}
+            return
+        industry_context = comp["industry"] or ""
+        service = get_gemini_compliance_service()
+        total_cats = sum(len(v) for v in groups.values())
+        yield {"type": "started", "jurisdictions": len(groups), "categories": total_cats,
+               "message": f"Researching {total_cats} selected gap(s) across {len(groups)} jurisdiction(s)…"}
+
+        filled = 0
+        for (state, county, city), cats in groups.items():
+            label = f"{city + ', ' if city else ''}{state}"
+            yield {"type": "researching", "jurisdiction": label, "categories": cats,
+                   "message": f"Researching {', '.join(cats)} for {label}…"}
+            loc = None
+            try:
+                async with get_connection() as conn:
+                    jid = await _get_or_create_jurisdiction(conn, city or state, state, county)
+                    has_local = await _lookup_has_local_ordinance(conn, city, state) if city else None
+                    cur = [_jurisdiction_row_to_dict(jr)
+                           for jr in await _load_jurisdiction_requirements(conn, jid)]
+
+                    rq: asyncio.Queue = asyncio.Queue()
+
+                    def _on_retry(attempt, err, _q=rq, _l=label):
+                        _q.put_nowait({"type": "retrying", "jurisdiction": _l,
+                                       "message": f"Retrying research for {_l} (attempt {attempt + 1})…"})
+
+                    task = asyncio.create_task(_refresh_repository_missing_categories(
+                        conn, service, jurisdiction_id=jid, city=city or "", state=state,
+                        county=county, has_local_ordinance=has_local,
+                        current_requirements=cur, missing_categories=cats,
+                        on_retry=_on_retry, industry_context=industry_context,
+                    ))
+                    # Heartbeat + drain retry messages while research runs.
+                    async for evt in _heartbeat_while(task, queue=rq):
+                        yield evt
+                    task.result()  # propagate research exceptions
+
+                    loc = await conn.fetchrow(
+                        "SELECT id FROM business_locations WHERE company_id = $1 AND jurisdiction_id = $2 "
+                        "AND is_active = TRUE ORDER BY is_company_wide ASC LIMIT 1",
+                        company_id, jid,
+                    )
+                    scope_rows = 0
+                    if loc:
+                        bank_rows = await conn.fetch(
+                            "SELECT id, jurisdiction_level FROM jurisdiction_requirements "
+                            "WHERE jurisdiction_id = $1 AND category = ANY($2::text[])",
+                            jid, cats,
+                        )
+                        for br in bank_rows:
+                            try:
+                                await conn.execute(
+                                    "INSERT INTO company_compliance_scope "
+                                    "(company_id, requirement_id, location_id, scope_level, source, status, admin_reviewed_by) "
+                                    "VALUES ($1, $2, $3, $4, 'employee_sync', 'active', $5) "
+                                    "ON CONFLICT (company_id, requirement_id, location_id) DO NOTHING",
+                                    company_id, br["id"], loc["id"],
+                                    (br["jurisdiction_level"] or "state"), current_user.id,
+                                )
+                                scope_rows += 1
+                            except Exception:
+                                logger.warning("research-gaps: scope insert failed for %s", br["id"])
+                filled += 1
+                # Re-sync the location's tracked requirements from the updated repo.
+                if loc:
+                    async for ev in run_compliance_check_stream(
+                        loc["id"], company_id, allow_live_research=False,
+                    ):
+                        etype = ev.get("type")
+                        if etype == "heartbeat":
+                            yield {"type": "heartbeat"}
+                        elif etype == "error":
+                            yield {"type": "warning",
+                                   "message": ev.get("message") or f"Sync issue for {label}",
+                                   "jurisdiction": label}
+                        else:
+                            yield {**ev, "jurisdiction": label}
+                yield {"type": "jurisdiction_done", "jurisdiction": label,
+                       "message": f"Filled {label} ({len(cats)} categor{'y' if len(cats) == 1 else 'ies'})."}
+            except Exception as exc:
+                logger.exception("research-gaps: failed for %s", label)
+                yield {"type": "warning", "jurisdiction": label,
+                       "message": f"Research failed for {label}: {exc}"}
+
+        yield {"type": "complete", "company_id": str(company_id),
+               "jurisdictions_filled": filled,
+               "message": f"Done — filled {filled} of {len(groups)} jurisdiction(s)."}
+
+    async def sse():
+        try:
+            async for ev in events():
+                if ev.get("type") == "heartbeat":
+                    yield ": heartbeat\n\n"
+                else:
+                    yield f"data: {json.dumps(ev)}\n\n"
+        except Exception as exc:
             yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
         yield "data: [DONE]\n\n"
 
