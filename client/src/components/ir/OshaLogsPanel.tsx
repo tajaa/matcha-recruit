@@ -330,9 +330,17 @@ export function OshaLogsPanel() {
       {summary && (
         <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5 space-y-4">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
-              300A Establishment Data
-            </span>
+            <div className="flex flex-col">
+              <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
+                300A Establishment Data
+              </span>
+              <span className="text-[13px] text-zinc-200 font-medium mt-0.5">
+                {summary.establishment_name || 'Unnamed establishment'}
+                {summary.city && (
+                  <span className="text-zinc-500 font-normal"> · {summary.city}, {summary.state}</span>
+                )}
+              </span>
+            </div>
             <span className="text-[11px] text-zinc-600">
               EIN {summary.ein || '—'} · NAICS {summary.naics || '—'}
             </span>
@@ -364,7 +372,7 @@ export function OshaLogsPanel() {
                 className="mt-1.5 w-full bg-zinc-950 border border-white/10 rounded-lg text-zinc-200 text-sm px-3 py-2 font-mono"
               />
               <span className="text-[10px] text-zinc-600 mt-1 block">
-                Auto-counted from the active roster; override if needed.
+                Auto-counted from the active roster (incl. HRIS/Finch-synced employees); override if needed.
               </span>
             </label>
           </div>

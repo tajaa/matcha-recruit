@@ -128,14 +128,43 @@ async def _aggregate_300a(conn, company_id, location_id, year) -> dict:
     )
 
 
-async def _active_headcount(conn, company_id, location_id) -> int:
-    """Count active employees mapped to an establishment (employees key on org_id)."""
+async def _active_headcount(conn, company_id, location_id, *, city=None, state=None, sole_location=False) -> int:
+    """Active-employee count for an establishment — the OSHA 300A avg-employees default.
+
+    HRIS/Finch sync populates work_city/work_state but never the work_location_id
+    FK (and Finch sandbox cities are random), so an FK-only count returns ~0 for an
+    imported roster. Resolution order:
+      1. sole_location → every active employee in the org belongs to it. This is the
+         common single-site matcha-lite case and what lets Finch-synced headcount
+         actually flow into the 300A.
+      2. else FK match OR a work_city/work_state heuristic, mirroring
+         compliance_service.get_employee_impact_for_location (the FK is set on only a
+         minority of rows; the heuristic catches the rest).
+    'active' = termination_date IS NULL, matching the rest of the location-headcount
+    code (delete_location guard, compliance dashboard) so counts stay consistent.
+    Always overridable via the saved average_employees.
+    """
+    if sole_location:
+        return await conn.fetchval(
+            "SELECT COUNT(*) FROM employees WHERE org_id = $1 AND termination_date IS NULL",
+            company_id,
+        ) or 0
     return await conn.fetchval(
         """
         SELECT COUNT(*) FROM employees
-        WHERE org_id = $1 AND work_location_id = $2 AND employment_status = 'active'
+        WHERE org_id = $1
+          AND termination_date IS NULL
+          AND (
+            work_location_id = $2
+            OR (
+              work_location_id IS NULL
+              AND $3::text IS NOT NULL
+              AND LOWER(work_city) = LOWER($3)
+              AND UPPER(work_state) = UPPER($4)
+            )
+          )
         """,
-        company_id, location_id,
+        company_id, location_id, city, state,
     ) or 0
 
 
@@ -374,7 +403,10 @@ async def get_osha_300a_summary(
         if est is None:
             raise HTTPException(status_code=404, detail="Location not found")
 
-        auto_headcount = await _active_headcount(conn, company_id, location_id)
+        auto_headcount = await _active_headcount(
+            conn, company_id, location_id,
+            city=est["city"], state=est["state"], sole_location=(loc_count == 1),
+        )
         agg = await _aggregate_300a(conn, company_id, location_id, year)
 
         cached = await conn.fetchrow(
@@ -436,7 +468,14 @@ async def save_osha_300a(
         agg = await _aggregate_300a(conn, company_id, body.location_id, body.year)
         avg_emp = body.average_employees
         if avg_emp is None:
-            avg_emp = await _active_headcount(conn, company_id, body.location_id)
+            loc_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM business_locations WHERE company_id = $1 AND is_active = true",
+                company_id,
+            )
+            avg_emp = await _active_headcount(
+                conn, company_id, body.location_id,
+                city=est["city"], state=est["state"], sole_location=(loc_count == 1),
+            )
 
         await conn.execute(
             """
@@ -579,6 +618,7 @@ async def _gather_ita_establishments(conn, company_id, year) -> list[dict]:
         company_id,
     )
 
+    sole = len(locations) == 1
     rows = []
     for loc in locations:
         agg = await _aggregate_300a(conn, company_id, loc["id"], year)
@@ -588,7 +628,10 @@ async def _gather_ita_establishments(conn, company_id, year) -> list[dict]:
             company_id, loc["id"], year,
         )
         avg_emp = saved["average_employees"] if saved and saved["average_employees"] is not None else \
-            await _active_headcount(conn, company_id, loc["id"])
+            await _active_headcount(
+                conn, company_id, loc["id"],
+                city=loc["city"], state=loc["state"], sole_location=sole,
+            )
         hours = saved["total_hours_worked"] if saved else None
 
         rows.append({

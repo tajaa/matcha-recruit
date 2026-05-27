@@ -38,6 +38,32 @@ def _parse_date(value: Optional[str]) -> Optional[date]:
         return None
 
 
+async def _resolve_work_location_id(conn, company_id, work_city, work_state):
+    """Map an HRIS work city/state to a business_locations.id (the OSHA establishment FK).
+
+    HRIS feeds carry a work location as free text (city/state), not a Matcha
+    location id. When the city+state uniquely identify one active establishment we
+    set employees.work_location_id so per-establishment headcount (OSHA 300A, the
+    compliance dashboard) is exact instead of leaning on the query-time heuristic.
+
+    Confident-or-nothing: returns the id only on an unambiguous single match;
+    0 matches or >1 (same city/state) → None, so an ambiguous feed never
+    misassigns. Callers COALESCE the result, so None never clobbers an existing FK.
+    """
+    if not work_city or not work_state:
+        return None
+    rows = await conn.fetch(
+        """
+        SELECT id FROM business_locations
+        WHERE company_id = $1 AND is_active = true
+          AND LOWER(city) = LOWER($2) AND UPPER(state) = UPPER($3)
+        LIMIT 2
+        """,
+        company_id, work_city, work_state,
+    )
+    return rows[0]["id"] if len(rows) == 1 else None
+
+
 async def _insert_audit_log(
     conn,
     *,
@@ -444,6 +470,11 @@ async def _sync_single_employee(
             email,
         )
 
+    # Map the HRIS work city/state to an establishment FK (None unless unambiguous).
+    resolved_location_id = await _resolve_work_location_id(
+        conn, company_id, normalized.get("work_city"), normalized.get("work_state"),
+    )
+
     if existing:
         employee_id = existing["id"]
         await conn.execute(
@@ -469,6 +500,9 @@ async def _sync_single_employee(
                 pay_classification = COALESCE($12, pay_classification),
                 address = COALESCE($13, address),
                 termination_date = COALESCE($14, termination_date),
+                -- COALESCE: a confident match sets/updates the establishment FK; an
+                -- ambiguous feed (None) keeps any existing (incl. manual) assignment.
+                work_location_id = COALESCE($15, work_location_id),
                 updated_at = NOW()
             WHERE id = $1 AND org_id = $2
             """,
@@ -486,6 +520,7 @@ async def _sync_single_employee(
             normalized.get("pay_classification"),
             normalized.get("address"),
             _parse_date(normalized.get("termination_date")),
+            resolved_location_id,
         )
         action_label = "updated"
     else:
@@ -496,9 +531,9 @@ async def _sync_single_employee(
                 org_id, email, personal_email, first_name, last_name,
                 work_state, employment_type, start_date, phone, job_title, department, hris_id,
                 employment_status, work_city, pay_rate, pay_classification,
-                address, termination_date
+                address, termination_date, work_location_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             RETURNING id
             """,
             company_id,
@@ -519,6 +554,7 @@ async def _sync_single_employee(
             normalized.get("pay_classification"),
             normalized.get("address"),
             _parse_date(normalized.get("termination_date")),
+            resolved_location_id,
         )
         employee_id = row["id"]
         action_label = "created"
