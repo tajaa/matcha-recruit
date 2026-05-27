@@ -7,6 +7,9 @@ import { LazyMount } from './landing/LazyMount'
 // import LandingIntro from '../components/landing/LandingIntro' // muted — WIP, revisit
 
 const AgentReasoningAnimation = lazy(() => import('./landing/AgentReasoningAnimation'))
+const ConvergenceAnimation = lazy(() =>
+  import('./landing/animations/ConvergenceAnimation').then((m) => ({ default: m.ConvergenceAnimation })),
+)
 import { ANIMATION_BY_SIZZLE_ID } from './landing/animations'
 import { EnforcementTotalsTicker } from '../components/landing/EnforcementTotalsTicker'
 import { PricingContactModal } from '../components/PricingContactModal'
@@ -451,7 +454,27 @@ function ConvergenceSection() {
           </p>
         </div>
 
-        <div className="mt-10 sm:mt-14 grid md:grid-cols-3 gap-px rounded-xl overflow-hidden" style={{ backgroundColor: LINE }}>
+        {/* Animation card — the three domains routing signal around one graph */}
+        <div className="mt-10 sm:mt-14 mx-auto max-w-4xl">
+          <div
+            className="relative rounded-xl overflow-hidden ring-1 shadow-2xl"
+            style={{
+              backgroundColor: '#151412',
+              boxShadow: '0 40px 80px -20px rgba(31, 29, 26, 0.28)',
+              borderColor: 'rgba(0,0,0,0.08)',
+            }}
+          >
+            <div className="aspect-[16/10] w-full">
+              <LazyMount fallback={<div className="w-full h-full" style={{ backgroundColor: '#0e0d0b' }} />}>
+                <Suspense fallback={<div className="w-full h-full" style={{ backgroundColor: '#0e0d0b' }} />}>
+                  <ConvergenceAnimation />
+                </Suspense>
+              </LazyMount>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-10 sm:mt-12 grid md:grid-cols-3 gap-px rounded-xl overflow-hidden" style={{ backgroundColor: LINE }}>
           {CONVERGENCE_DOMAINS.map((d) => (
             <div key={d.tag} className="flex flex-col p-6 sm:p-7" style={{ backgroundColor: BG }}>
               <span
@@ -465,11 +488,6 @@ function ConvergenceSection() {
             </div>
           ))}
         </div>
-
-        <p className="mt-6 text-sm" style={{ color: MUTED }}>
-          Shared signal across all three: an incident pattern raises a compliance flag, which opens an ER case —
-          automatically, with the full thread of context attached.
-        </p>
       </div>
     </section>
   )
