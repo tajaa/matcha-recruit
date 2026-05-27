@@ -34,7 +34,6 @@ function locationLabel(loc: LocationRow): string {
 export function IRAnonymousReportingPanel() {
   const [status, setStatus] = useState<{ enabled: boolean; link?: string } | null>(null)
   const [loading, setLoading] = useState(false)
-  const [expanded, setExpanded] = useState(false)
 
   // Per-location magic links (attributed intake at /intake/:token)
   const [locations, setLocations] = useState<LocationRow[]>([])
@@ -43,23 +42,18 @@ export function IRAnonymousReportingPanel() {
   const [genLoading, setGenLoading] = useState(false)
   const [qrOpen, setQrOpen] = useState<string | null>(null)
 
+  // Always-on panel (not collapsible — admins must not miss it). Load on mount.
   useEffect(() => {
-    if (expanded && !status) {
-      api.get<{ enabled: boolean; link?: string }>('/ir/incidents/anonymous-reporting/status')
-        .then(setStatus)
-        .catch(() => setStatus({ enabled: false }))
-    }
-  }, [expanded, status])
-
-  useEffect(() => {
-    if (!expanded) return
+    api.get<{ enabled: boolean; link?: string }>('/ir/incidents/anonymous-reporting/status')
+      .then(setStatus)
+      .catch(() => setStatus({ enabled: false }))
     api.get<LocationRow[]>('/ir-onboarding/locations')
       .then((rows) => setLocations((rows || []).filter((r) => r.is_active)))
       .catch(() => setLocations([]))
     api.get<LocationLink[]>('/ir/incidents/anonymous-reporting/location-links')
       .then((rows) => setLinks(rows || []))
       .catch(() => setLinks([]))
-  }, [expanded])
+  }, [])
 
   async function generateLink() {
     setLoading(true)
@@ -108,17 +102,11 @@ export function IRAnonymousReportingPanel() {
   const pickable = locations.filter((l) => !linkedIds.has(l.id))
 
   return (
-    <div className="bg-zinc-900 border border-white/10 rounded-2xl overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-5 py-3 bg-zinc-950/50 hover:bg-zinc-950/70 text-left transition-colors"
-      >
+    <div className="bg-zinc-900 border border-white/10 rounded-2xl">
+      <div className="px-5 py-3 border-b border-white/5">
         <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Anonymous Reporting</span>
-        <span className="text-zinc-500 text-xs font-mono">{expanded ? '−' : '+'}</span>
-      </button>
-      {expanded && (
-        <div className="p-5 space-y-5">
+      </div>
+      <div className="p-5 space-y-5">
           {/* Company-wide anonymous link */}
           <div className="space-y-3">
             <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Company-wide link</p>
@@ -242,7 +230,6 @@ export function IRAnonymousReportingPanel() {
             )}
           </div>
         </div>
-      )}
     </div>
   )
 }
