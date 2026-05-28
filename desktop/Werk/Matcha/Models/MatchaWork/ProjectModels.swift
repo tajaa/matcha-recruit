@@ -223,6 +223,10 @@ struct MWTaskHistoryEntry: Codable, Identifiable, Hashable {
     let taskId: String?
     let actorUserId: String?
     let actorName: String?
+    /// users.avatar_url for the actor of this event. Joined server-side from
+    /// the users table. nil for system-generated events or users that never
+    /// uploaded an avatar (initials fallback handled by ChannelAvatarView).
+    let actorAvatarUrl: String?
     let eventType: String
     let fromValue: String?
     let toValue: String?
@@ -238,6 +242,7 @@ struct MWTaskHistoryEntry: Codable, Identifiable, Hashable {
         case taskId = "task_id"
         case actorUserId = "actor_user_id"
         case actorName = "actor_name"
+        case actorAvatarUrl = "actor_avatar_url"
         case eventType = "event_type"
         case fromValue = "from_value"
         case toValue = "to_value"

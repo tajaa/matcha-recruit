@@ -507,10 +507,15 @@ final class AvatarImageCache {
 /// when available; otherwise colored initials. Only a genuinely missing URL or
 /// a failed fetch leaves initials up — a successful load is cached so it never
 /// reverts on the next row.
-private struct ChannelAvatarView: View {
+///
+/// `size` controls the rendered diameter. Defaults to 36pt for channel chat;
+/// the task-history rounds feed in `TaskViewerSheet` passes a smaller value
+/// so per-event avatars sit alongside body text.
+struct ChannelAvatarView: View {
     let senderId: String
     let payloadURL: String?
     let name: String
+    var size: CGFloat = 36
     @State private var image: NSImage?
 
     private var resolvedURL: String? {
@@ -527,7 +532,7 @@ private struct ChannelAvatarView: View {
                 fallback
             }
         }
-        .frame(width: 36, height: 36)
+        .frame(width: size, height: size)
         .clipShape(Circle())
         .task(id: resolvedURL) { await load() }
     }
@@ -540,11 +545,14 @@ private struct ChannelAvatarView: View {
             .joined()
             .uppercased()
         let hue = Double(abs(name.hashValue) % 360) / 360.0
+        // Scale initials font with the requested diameter so the same view
+        // looks right at 18pt (rounds feed) and 36pt (channel chat).
+        let initialsFontSize = max(8, size * 0.38)
         return Circle()
             .fill(Color(hue: hue, saturation: 0.55, brightness: 0.6))
             .overlay(
                 Text(initials.isEmpty ? "?" : initials)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: initialsFontSize, weight: .semibold))
                     .foregroundColor(.white)
             )
     }

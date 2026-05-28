@@ -4945,7 +4945,8 @@ async def get_task_history_endpoint(
             """
             SELECT h.id, h.task_id, h.event_type, h.from_value, h.to_value,
                    h.metadata, h.created_at, h.actor_user_id,
-                   COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS actor_name
+                   COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS actor_name,
+                   u.avatar_url AS actor_avatar_url
             FROM mw_task_history h
             LEFT JOIN users u ON u.id = h.actor_user_id
             LEFT JOIN clients c ON c.user_id = h.actor_user_id
