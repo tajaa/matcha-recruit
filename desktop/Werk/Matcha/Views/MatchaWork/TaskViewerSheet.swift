@@ -1597,31 +1597,40 @@ private struct SubtaskRow: View {
                 Button("Unassign") { onAssign(nil) }
             }
         } label: {
-            if let id = item.assignedTo {
-                ChannelAvatarView(
-                    senderId: id,
-                    payloadURL: assignee?.avatarUrl,
-                    name: assignee?.name ?? "",
-                    size: 18
-                )
-            } else {
-                // Same 18×18 footprint as the avatar, muted + monochrome so it
-                // never renders the oversized green multicolor badge glyph.
-                Circle()
-                    .strokeBorder(Color.secondary.opacity(isHovered ? 0.7 : 0.35),
-                                  style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
-                    .frame(width: 18, height: 18)
-                    .overlay(
-                        Image(systemName: "plus")
-                            .symbolRenderingMode(.monochrome)
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.secondary.opacity(isHovered ? 0.9 : 0.45))
+            // HARD-clamp the label: a macOS Menu label ignores a resizable
+            // image's internal frame, so ChannelAvatarView would otherwise draw
+            // at full intrinsic size (a giant square). The explicit 18×18 frame
+            // + .clipped() in SubtaskRow's own view tree forces a fixed footprint.
+            Group {
+                if let id = item.assignedTo {
+                    ChannelAvatarView(
+                        senderId: id,
+                        payloadURL: assignee?.avatarUrl,
+                        name: assignee?.name ?? "",
+                        size: 18
                     )
+                } else {
+                    // Muted + monochrome placeholder — never the oversized green
+                    // multicolor badge glyph.
+                    Circle()
+                        .strokeBorder(Color.secondary.opacity(isHovered ? 0.7 : 0.35),
+                                      style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
+                        .overlay(
+                            Image(systemName: "plus")
+                                .symbolRenderingMode(.monochrome)
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(.secondary.opacity(isHovered ? 0.9 : 0.45))
+                        )
+                }
             }
+            .frame(width: 18, height: 18)
+            .clipShape(Circle())
+            .clipped()
+            .contentShape(Circle())
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .fixedSize()
+        .frame(width: 18, height: 18)
         .help(assignee?.name ?? "Assign")
     }
 }
