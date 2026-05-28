@@ -97,6 +97,11 @@ struct MWProjectFile: Codable, Identifiable, Hashable {
     var projectId: String?
     var taskId: String?
     var uploadedBy: String?
+    /// Display name of the uploader (joined server-side from users/clients/
+    /// employees/admins). nil when no uploader is recorded.
+    var uploaderName: String?
+    /// users.avatar_url for the uploader. Drives the pfp on attachment rows.
+    var uploaderAvatarUrl: String?
     var filename: String
     var storageUrl: String
     var contentType: String?
@@ -112,6 +117,8 @@ struct MWProjectFile: Codable, Identifiable, Hashable {
         case projectId = "project_id"
         case taskId = "task_id"
         case uploadedBy = "uploaded_by"
+        case uploaderName = "uploader_name"
+        case uploaderAvatarUrl = "uploader_avatar_url"
         case storageUrl = "storage_url"
         case contentType = "content_type"
         case fileSize = "file_size"

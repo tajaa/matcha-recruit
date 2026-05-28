@@ -1144,17 +1144,35 @@ private struct EventRow: View {
     let files: [MWProjectFile]
     let onPreview: (MWProjectFile) -> Void
 
+    /// Only "ownership-meaningful" events show an avatar: notes (via NoteRow),
+    /// subtask additions, ticket creation, and round openings. Status moves,
+    /// reassignments, edits, and subtask state-flips revert to the original
+    /// SF-Symbol-only row — the actor name in the secondary line is enough
+    /// for those low-signal audit events.
+    private static let avatarBearingEvents: Set<String> = [
+        "created", "round_started", "subtask_added",
+    ]
+
     var body: some View {
         if event.eventType == "activity" {
             // Notes get the full card treatment (body + actor + thumbs).
             NoteRow(entry: event, files: files, onPreview: onPreview)
         } else {
             HStack(alignment: .top, spacing: 8) {
-                // Avatar + tiny event-type badge overlay so the reader sees
-                // both "who" (avatar) and "what" (badge) without two
-                // separate visual slots. System-generated events (no
-                // actor_user_id) fall back to the symbol-only grey circle.
-                avatarBadge
+                if Self.avatarBearingEvents.contains(event.eventType),
+                   let actorId = event.actorUserId {
+                    ChannelAvatarView(
+                        senderId: actorId,
+                        payloadURL: event.actorAvatarUrl,
+                        name: event.actorName ?? "",
+                        size: 22
+                    )
+                } else {
+                    Image(systemName: Self.icon(for: event.eventType))
+                        .font(.system(size: 11))
+                        .foregroundColor(Self.tint(for: event.eventType))
+                        .frame(width: 22, alignment: .center)
+                }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(Self.describe(event))
                         .font(.system(size: 11))
@@ -1168,44 +1186,6 @@ private struct EventRow: View {
             }
             .padding(.vertical, 1)
         }
-    }
-
-    @ViewBuilder
-    private var avatarBadge: some View {
-        ZStack(alignment: .bottomTrailing) {
-            if let actorId = event.actorUserId {
-                ChannelAvatarView(
-                    senderId: actorId,
-                    payloadURL: event.actorAvatarUrl,
-                    name: event.actorName ?? "",
-                    size: 22
-                )
-            } else {
-                // System-generated event — keep the SF Symbol-only look.
-                Circle()
-                    .fill(Color.zinc800)
-                    .frame(width: 22, height: 22)
-                    .overlay(
-                        Image(systemName: Self.icon(for: event.eventType))
-                            .font(.system(size: 10))
-                            .foregroundColor(Self.tint(for: event.eventType))
-                    )
-            }
-            // Event-type badge in the bottom-right corner — small enough
-            // not to obscure the avatar, but tinted by event type so a
-            // glance still reads "this was a subtask completion" vs a
-            // column move.
-            if event.actorUserId != nil {
-                Image(systemName: Self.icon(for: event.eventType))
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(2)
-                    .background(Circle().fill(Self.tint(for: event.eventType)))
-                    .overlay(Circle().stroke(Color.zinc800, lineWidth: 1.5))
-                    .offset(x: 3, y: 3)
-            }
-        }
-        .frame(width: 22, height: 22, alignment: .topLeading)
     }
 
     private static func icon(for event: String) -> String {
@@ -1539,6 +1519,16 @@ private struct ViewerAttachmentRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            // Uploader pfp so "who attached this" is visible at a glance —
+            // matches the per-event avatar pattern in the rounds feed.
+            if let uploaderId = file.uploadedBy {
+                ChannelAvatarView(
+                    senderId: uploaderId,
+                    payloadURL: file.uploaderAvatarUrl,
+                    name: file.uploaderName ?? "",
+                    size: 20
+                )
+            }
             Image(systemName: file.isImage ? "photo" : "doc")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)

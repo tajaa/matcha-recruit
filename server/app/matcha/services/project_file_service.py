@@ -46,11 +46,19 @@ async def list_element_files(project_id: UUID, element_id: str) -> list[dict[str
 async def list_task_files(project_id: UUID, task_id: UUID) -> list[dict[str, Any]]:
     async with get_connection() as conn:
         rows = await conn.fetch(
-            """SELECT id, project_id, task_id, uploaded_by, filename, storage_url,
-                      content_type, file_size, folder_id, created_at
-               FROM mw_project_files
-               WHERE project_id = $1 AND task_id = $2
-               ORDER BY created_at DESC""",
+            """SELECT f.id, f.project_id, f.task_id, f.uploaded_by, f.filename,
+                      f.storage_url, f.content_type, f.file_size, f.folder_id,
+                      f.created_at,
+                      COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name),
+                               a.name, u.email)            AS uploader_name,
+                      u.avatar_url                          AS uploader_avatar_url
+               FROM mw_project_files f
+               LEFT JOIN users u     ON u.id      = f.uploaded_by
+               LEFT JOIN clients c   ON c.user_id = f.uploaded_by
+               LEFT JOIN employees e ON e.user_id = f.uploaded_by
+               LEFT JOIN admins a    ON a.user_id = f.uploaded_by
+               WHERE f.project_id = $1 AND f.task_id = $2
+               ORDER BY f.created_at DESC""",
             project_id, task_id,
         )
     return [dict(r) for r in rows]
@@ -63,11 +71,19 @@ async def list_files_for_tasks(project_id: UUID, task_ids: list[UUID]) -> dict[s
         return {}
     async with get_connection() as conn:
         rows = await conn.fetch(
-            """SELECT id, project_id, task_id, uploaded_by, filename, storage_url,
-                      content_type, file_size, folder_id, created_at
-               FROM mw_project_files
-               WHERE project_id = $1 AND task_id = ANY($2::uuid[])
-               ORDER BY created_at DESC""",
+            """SELECT f.id, f.project_id, f.task_id, f.uploaded_by, f.filename,
+                      f.storage_url, f.content_type, f.file_size, f.folder_id,
+                      f.created_at,
+                      COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name),
+                               a.name, u.email)            AS uploader_name,
+                      u.avatar_url                          AS uploader_avatar_url
+               FROM mw_project_files f
+               LEFT JOIN users u     ON u.id      = f.uploaded_by
+               LEFT JOIN clients c   ON c.user_id = f.uploaded_by
+               LEFT JOIN employees e ON e.user_id = f.uploaded_by
+               LEFT JOIN admins a    ON a.user_id = f.uploaded_by
+               WHERE f.project_id = $1 AND f.task_id = ANY($2::uuid[])
+               ORDER BY f.created_at DESC""",
             project_id, task_ids,
         )
     grouped: dict[str, list[dict[str, Any]]] = {}
@@ -109,7 +125,25 @@ async def add_project_file(
             project_id, task_id, uploaded_by, filename, storage_url, content_type,
             file_size, element_id, folder_id,
         )
-    return dict(row)
+        # Enrich with uploader name + avatar so the freshly-uploaded file
+        # row matches list_task_files' shape — UI can render the uploader
+        # pfp immediately without a follow-up refetch.
+        uploader = await conn.fetchrow(
+            """SELECT COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name),
+                               a.name, u.email) AS uploader_name,
+                      u.avatar_url             AS uploader_avatar_url
+               FROM users u
+               LEFT JOIN clients c   ON c.user_id = u.id
+               LEFT JOIN employees e ON e.user_id = u.id
+               LEFT JOIN admins a    ON a.user_id = u.id
+               WHERE u.id = $1""",
+            uploaded_by,
+        )
+    out = dict(row)
+    if uploader:
+        out["uploader_name"] = uploader["uploader_name"]
+        out["uploader_avatar_url"] = uploader["uploader_avatar_url"]
+    return out
 
 
 async def get_project_file(file_id: UUID, project_id: UUID) -> Optional[dict[str, Any]]:
