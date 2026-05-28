@@ -1010,13 +1010,20 @@ class MatchaWorkService {
 
     /// Log a sales follow-up activity (call/email/note/meeting) onto a task's
     /// history timeline. Renders in the existing task-viewer timeline.
-    func logTaskActivity(projectId: String, taskId: String, kind: String, body: String?) async throws {
-        struct Req: Encodable { let kind: String; let body: String? }
+    /// `attachmentIds` (optional) links the note to existing mw_project_files
+    /// rows for the task — upload via `uploadTaskFile` first, then pass the
+    /// returned ids here so the note renders inline thumbnails.
+    func logTaskActivity(projectId: String, taskId: String, kind: String, body: String?, attachmentIds: [String]? = nil) async throws {
+        struct Req: Encodable {
+            let kind: String
+            let body: String?
+            let attachment_ids: [String]?
+        }
         struct Res: Decodable { let ok: Bool? }
         let _: Res = try await client.request(
             method: "POST",
             path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/activity",
-            body: Req(kind: kind, body: body)
+            body: Req(kind: kind, body: body, attachment_ids: (attachmentIds?.isEmpty ?? true) ? nil : attachmentIds)
         )
     }
 

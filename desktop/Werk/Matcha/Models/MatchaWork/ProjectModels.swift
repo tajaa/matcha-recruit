@@ -227,6 +227,10 @@ struct MWTaskHistoryEntry: Codable, Identifiable, Hashable {
     let fromValue: String?
     let toValue: String?
     let metadata: [String: String]?
+    /// mw_project_files row ids tied to THIS note. Server pulls them out of
+    /// the metadata JSONB so the client decoder sees a flat field. nil/empty
+    /// = a plain text note.
+    let attachmentIds: [String]?
     let createdAt: String
 
     enum CodingKeys: String, CodingKey {
@@ -238,6 +242,7 @@ struct MWTaskHistoryEntry: Codable, Identifiable, Hashable {
         case fromValue = "from_value"
         case toValue = "to_value"
         case metadata
+        case attachmentIds = "attachment_ids"
         case createdAt = "created_at"
     }
 }

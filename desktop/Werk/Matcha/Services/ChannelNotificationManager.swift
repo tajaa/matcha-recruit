@@ -7,6 +7,10 @@ final class ChannelNotificationManager {
     static let enabledKey = "mw-channel-notifications-enabled"
     static let appNotificationsEnabledKey = "mw-app-notifications-enabled"
     static let promptSuppressedKey = "mw-notification-prompt-suppressed"
+    /// Independent gate for the "ting" sound that plays on incoming channel
+    /// messages while Werk is frontmost. Split out from `enabledKey` so users
+    /// can keep visual toasts on while muting the sound. Default true.
+    static let soundEnabledKey = "mw-channel-sound-enabled"
 
     private init() {}
 
@@ -80,8 +84,16 @@ final class ChannelNotificationManager {
             : UserDefaults.standard.bool(forKey: Self.enabledKey)
     }
 
+    /// Independent of `isEnabled` so toasts can remain on while sounds are
+    /// muted. Default true (missing key = enabled).
+    var soundEnabled: Bool {
+        UserDefaults.standard.object(forKey: Self.soundEnabledKey) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: Self.soundEnabledKey)
+    }
+
     func playInAppSound() {
-        guard isEnabled else { return }
+        guard soundEnabled else { return }
         (NSSound(named: "Tink") ?? NSSound(named: "Pop"))?.play()
     }
 

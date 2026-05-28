@@ -123,11 +123,16 @@ async def log_task_activity(
     actor_user_id: Optional[UUID],
     kind: str,
     body: Optional[str] = None,
+    attachment_ids: Optional[list[UUID]] = None,
 ) -> Optional[dict]:
     """Log a sales follow-up activity (call/email/note/meeting) onto a task's
     history timeline. Reuses mw_task_history (event_type='activity') so it
     renders in the existing task viewer timeline — no separate table.
     Returns None if the task doesn't belong to the project.
+
+    `attachment_ids` (optional) links this note to N existing mw_project_files
+    rows for the task. Caller is responsible for validating ownership before
+    invoking. Stored inside metadata JSONB so no schema change is needed.
     """
     kind = (kind or "note").strip().lower()
     if kind not in _ALLOWED_ACTIVITY_KINDS:
@@ -139,13 +144,16 @@ async def log_task_activity(
         )
         if not exists:
             return None
+        metadata: dict = {"kind": kind, "body": (body or "").strip()}
+        if attachment_ids:
+            metadata["attachment_ids"] = [str(a) for a in attachment_ids]
         await _log_task_history(
             conn,
             task_id=task_id,
             project_id=project_id,
             actor_user_id=actor_user_id,
             event_type="activity",
-            metadata={"kind": kind, "body": (body or "").strip()},
+            metadata=metadata,
         )
     return {"ok": True, "kind": kind}
 

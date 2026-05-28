@@ -58,6 +58,7 @@ private struct NotificationsSettingsTab: View {
     /// observer paths read.
     @State private var appNotificationsEnabled = ChannelNotificationManager.shared.appNotificationsEnabled
     @State private var channelNotificationsEnabled = ChannelNotificationManager.shared.isEnabled
+    @State private var channelSoundEnabled = ChannelNotificationManager.shared.soundEnabled
     @State private var promptSuppressed = ChannelNotificationManager.shared.promptSuppressed
     @State private var permissionStatus: String = "checking…"
 
@@ -72,15 +73,22 @@ private struct NotificationsSettingsTab: View {
                 }
 
                 Toggle(isOn: $channelNotificationsEnabled) {
-                    Text("Channel chat sound + starred toasts")
+                    Text("Starred channel toasts")
                 }
                 .onChange(of: channelNotificationsEnabled) { _, v in
                     UserDefaults.standard.set(v, forKey: ChannelNotificationManager.enabledKey)
                 }
+
+                Toggle(isOn: $channelSoundEnabled) {
+                    Text("Play sound for incoming messages")
+                }
+                .onChange(of: channelSoundEnabled) { _, v in
+                    UserDefaults.standard.set(v, forKey: ChannelNotificationManager.soundEnabledKey)
+                }
             } header: {
                 Text("In-app").font(.subheadline).bold()
             } footer: {
-                Text("Both are on by default. Toggle off to mute Werk completely without changing the system permission.")
+                Text("All on by default. Toggle off to mute Werk completely without changing the system permission. Sound is independent of toasts — keep visual notifications and silence the ting.")
                     .font(.caption).foregroundColor(.secondary)
             }
 

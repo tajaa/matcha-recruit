@@ -225,7 +225,7 @@ struct TaskEditorSheet: View {
             }
         }
         .padding(16)
-        .frame(width: 420)
+        .frame(width: 600)
         .background(Color.appBackground)
         .task {
             if viewModel.taskFiles[task.id] == nil {

@@ -68,7 +68,12 @@ async def create_subtask(
 ) -> Optional[dict]:
     """Append a checklist item at the end of the task's list. Returns the new
     row, or None if the task isn't in the project. Raises ValueError on a blank
-    title."""
+    title.
+
+    Also logs a `subtask_added` row to mw_task_history so the rounds feed in
+    the task viewer can attribute each checklist item to who created it and
+    when (which round the reviewer added their follow-up items in).
+    """
     title = (title or "").strip()
     if not title:
         raise ValueError("Title required")
@@ -92,6 +97,18 @@ async def create_subtask(
             task_id, project_id, parent["company_id"], title, next_pos,
             assigned_to, created_by,
         )
+        # Lazy import dodges the routes→services→routes circular at module
+        # load. _log_task_history is best-effort: a logging failure must not
+        # roll back the subtask insert.
+        from .project_task_service import _log_task_history
+        await _log_task_history(
+            conn,
+            task_id=task_id,
+            project_id=project_id,
+            actor_user_id=created_by,
+            event_type="subtask_added",
+            metadata={"title": title, "subtask_id": str(row["id"])},
+        )
     return _row_to_subtask(dict(row))
 
 
@@ -100,10 +117,17 @@ async def update_subtask(
     task_id: UUID,
     subtask_id: UUID,
     patch: dict,
+    *,
+    actor_user_id: Optional[UUID] = None,
 ) -> Optional[dict]:
     """Partial update of one checklist item: is_done (stamps/clears completed_at),
     title, position, assigned_to. Returns the updated row or None if the subtask
-    isn't found under that task/project."""
+    isn't found under that task/project.
+
+    Logs a `subtask_completed` / `subtask_uncompleted` row to mw_task_history
+    on an is_done flip (only — title/position/assignee tweaks are too noisy
+    for the rounds feed and can stay silent).
+    """
     async with get_connection() as conn:
         if not await _task_in_project(conn, task_id, project_id):
             return None
@@ -120,6 +144,18 @@ async def update_subtask(
             title = title.strip()
             if not title:
                 raise ValueError("Title cannot be blank")
+
+        # Snapshot the previous is_done so we can detect a real flip and emit
+        # the matching history row. Skipped when the patch isn't toggling
+        # is_done — saves the read round-trip.
+        previous_is_done: Optional[bool] = None
+        if is_done is not None:
+            prev = await conn.fetchrow(
+                "SELECT is_done, title FROM mw_subtasks WHERE id = $1 AND task_id = $2 AND project_id = $3",
+                subtask_id, task_id, project_id,
+            )
+            if prev is not None:
+                previous_is_done = bool(prev["is_done"])
 
         row = await conn.fetchrow(
             """
@@ -143,8 +179,25 @@ async def update_subtask(
             "assigned_to" in patch,
             patch.get("assigned_to"),
         )
-    if not row:
-        return None
+        if not row:
+            return None
+
+        # Only log a flip — same-value patches (e.g. UI re-asserting state)
+        # would otherwise spam the feed.
+        if (
+            is_done is not None
+            and previous_is_done is not None
+            and bool(is_done) != previous_is_done
+        ):
+            from .project_task_service import _log_task_history
+            await _log_task_history(
+                conn,
+                task_id=task_id,
+                project_id=project_id,
+                actor_user_id=actor_user_id,
+                event_type=("subtask_completed" if is_done else "subtask_uncompleted"),
+                metadata={"title": row["title"], "subtask_id": str(row["id"])},
+            )
     return _row_to_subtask(dict(row))
 
 
@@ -152,14 +205,37 @@ async def delete_subtask(
     project_id: UUID,
     task_id: UUID,
     subtask_id: UUID,
+    *,
+    actor_user_id: Optional[UUID] = None,
 ) -> bool:
-    """Delete one checklist item. Returns True if a row was removed."""
+    """Delete one checklist item. Returns True if a row was removed.
+
+    Logs a `subtask_deleted` row to mw_task_history with the title we
+    snapshotted right before the delete (so the rounds feed can still
+    say "Reviewer removed: 'Validate EIN'" after the row is gone).
+    """
     async with get_connection() as conn:
         if not await _task_in_project(conn, task_id, project_id):
             return False
+        prev = await conn.fetchrow(
+            "SELECT title FROM mw_subtasks WHERE id = $1 AND task_id = $2 AND project_id = $3",
+            subtask_id, task_id, project_id,
+        )
+        title = prev["title"] if prev else None
         result = await conn.execute(
             "DELETE FROM mw_subtasks WHERE id = $1 AND task_id = $2 AND project_id = $3",
             subtask_id, task_id, project_id,
         )
+        deleted = result.endswith("1")
+        if deleted:
+            from .project_task_service import _log_task_history
+            await _log_task_history(
+                conn,
+                task_id=task_id,
+                project_id=project_id,
+                actor_user_id=actor_user_id,
+                event_type="subtask_deleted",
+                metadata={"title": title or "", "subtask_id": str(subtask_id)},
+            )
     # asyncpg returns a command tag like "DELETE 1".
-    return result.endswith("1")
+    return deleted

@@ -4574,7 +4574,10 @@ async def update_task_subtask_endpoint(
         patch["assigned_to"] = UUID(v) if v else None
 
     try:
-        row = await st_svc.update_subtask(project_id, task_id, subtask_id, patch)
+        row = await st_svc.update_subtask(
+            project_id, task_id, subtask_id, patch,
+            actor_user_id=current_user.id,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if row is None:
@@ -4591,7 +4594,10 @@ async def delete_task_subtask_endpoint(
 ):
     from ..services import project_subtask_service as st_svc
     await _verify_project_access(project_id, current_user)
-    if not await st_svc.delete_subtask(project_id, task_id, subtask_id):
+    if not await st_svc.delete_subtask(
+        project_id, task_id, subtask_id,
+        actor_user_id=current_user.id,
+    ):
         raise HTTPException(status_code=404, detail="Subtask not found")
     return {"deleted": True}
 
@@ -4916,6 +4922,13 @@ def _serialize_history_row(r) -> dict:
             d["metadata"] = _json.loads(d["metadata"])
         except Exception:
             d["metadata"] = {}
+    # Surface attachment_ids at the top level so the Swift decoder sees a
+    # flat field. Storage stays inside metadata JSONB (no schema change),
+    # but the client should not have to introspect the metadata dict.
+    meta = d.get("metadata") if isinstance(d.get("metadata"), dict) else {}
+    raw_ids = meta.get("attachment_ids") if isinstance(meta, dict) else None
+    if isinstance(raw_ids, list):
+        d["attachment_ids"] = [str(x) for x in raw_ids]
     return d
 
 
@@ -4954,10 +4967,36 @@ async def log_task_activity_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Log a sales follow-up activity (call/email/note/meeting) onto a task's
-    history timeline so collaborators see the deal's touchpoints."""
+    history timeline so collaborators see the deal's touchpoints.
+
+    Optional `attachment_ids` links the note to existing mw_project_files
+    rows for this task (each must already be uploaded via the /files endpoint
+    and own `task_id == task_id`). Stored in metadata JSONB; surfaced back
+    out as a top-level field on history-row responses.
+    """
     from ..services import project_task_service as pt_svc
 
     await _verify_project_access(project_id, current_user)
+
+    raw_attachments = body.get("attachment_ids") or []
+    attachment_ids: list[UUID] = []
+    if raw_attachments:
+        if not isinstance(raw_attachments, list):
+            raise HTTPException(status_code=400, detail="attachment_ids must be a list")
+        try:
+            attachment_ids = [UUID(str(x)) for x in raw_attachments]
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="attachment_ids contains invalid UUID")
+        # All ids must belong to mw_project_files rows for THIS task — never
+        # store a dangling or cross-task ref.
+        async with get_connection() as conn:
+            found = await conn.fetch(
+                "SELECT id FROM mw_project_files WHERE task_id = $1 AND id = ANY($2::uuid[])",
+                task_id, attachment_ids,
+            )
+        if len(found) != len(attachment_ids):
+            raise HTTPException(status_code=400, detail="attachment not found on this task")
+
     try:
         result = await pt_svc.log_task_activity(
             project_id=project_id,
@@ -4965,6 +5004,7 @@ async def log_task_activity_endpoint(
             actor_user_id=current_user.id,
             kind=body.get("kind", "note"),
             body=body.get("body"),
+            attachment_ids=attachment_ids or None,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

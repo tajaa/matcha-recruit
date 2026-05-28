@@ -820,8 +820,12 @@ class ProjectDetailViewModel {
         }
     }
 
-    func uploadTaskFile(taskId: String, data: Data, filename: String, mimeType: String) async {
-        guard let pid = project?.id else { return }
+    /// Returns the uploaded file's id on success, nil on failure. The id lets
+    /// the note composer link a freshly-uploaded screenshot to the note it's
+    /// being submitted with (`logTaskActivity(attachmentIds:)`).
+    @discardableResult
+    func uploadTaskFile(taskId: String, data: Data, filename: String, mimeType: String) async -> String? {
+        guard let pid = project?.id else { return nil }
         do {
             let uploaded = try await service.uploadTaskFile(
                 projectId: pid, taskId: taskId,
@@ -833,8 +837,10 @@ class ProjectDetailViewModel {
                 taskFiles[taskId] = existing
                 logActivity("paperclip", "attached \(filename)")
             }
+            return uploaded.id
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
+            return nil
         }
     }
 
