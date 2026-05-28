@@ -14,6 +14,7 @@ struct TaskViewerSheet: View {
     @Bindable var viewModel: ProjectDetailViewModel
     let onEdit: () -> Void
     let onClose: () -> Void
+    @Environment(AppState.self) private var appState
 
     @State private var previewFile: MWProjectFile?
     @State private var history: [MWTaskHistoryEntry] = []
@@ -59,6 +60,49 @@ struct TaskViewerSheet: View {
         return viewModel.collaborators.first(where: { $0.userId == id })?.name
     }
 
+    /// Inline assignee control on the viewer: assign to me, any collaborator, or
+    /// unassign — no need to open the editor. Writes via the existing task PATCH.
+    private var assigneeMenu: some View {
+        Menu {
+            if let uid = appState.currentUser?.id, uid != task.assignedTo {
+                Button { assign(uid) } label: { Label("Assign to me", systemImage: "person.fill") }
+            }
+            ForEach(viewModel.collaborators) { c in
+                Button { assign(c.userId) } label: {
+                    if c.userId == task.assignedTo {
+                        Label(c.name, systemImage: "checkmark")
+                    } else {
+                        Text(c.name)
+                    }
+                }
+            }
+            if task.assignedTo != nil {
+                Divider()
+                Button("Unassign") { assign(nil) }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "person.crop.circle").font(.system(size: 8))
+                Text(assigneeName ?? "Assign").font(.system(size: 9, weight: .semibold))
+                Image(systemName: "chevron.down").font(.system(size: 6, weight: .bold))
+            }
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Color.zinc800).cornerRadius(3)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Assign this task")
+    }
+
+    private func assign(_ userId: String?) {
+        // nil → "" clears server-side; a UUID assigns. Other patch fields stay
+        // nil so encodeIfPresent leaves them untouched.
+        let patch = MatchaWorkService.ProjectTaskPatch(assignedTo: userId ?? "")
+        Task { await viewModel.updateTask(id: task.id, patch: patch) }
+    }
+
     private var columnLabel: String {
         task.boardColumn
             .replacingOccurrences(of: "_", with: " ")
@@ -101,9 +145,7 @@ struct TaskViewerSheet: View {
                 if let due = task.dueDate, !due.isEmpty {
                     metaPill(label: "Due \(String(due.prefix(10)))", color: .secondary)
                 }
-                if let name = assigneeName {
-                    metaPill(label: name, color: .secondary)
-                }
+                assigneeMenu
                 if let elName = task.elementName
                     ?? viewModel.elements.first(where: { $0.id == task.elementId })?.name {
                     HStack(spacing: 3) {
@@ -650,11 +692,16 @@ struct TaskViewerSheet: View {
             ForEach(subtasks) { item in
                 SubtaskRow(
                     item: item,
+                    collaborators: viewModel.collaborators,
+                    currentUserId: appState.currentUser?.id,
                     onToggle: {
                         Task { await viewModel.toggleSubtask(taskId: task.id, subtaskId: item.id, isDone: !item.isDone) }
                     },
                     onDelete: {
                         Task { await viewModel.deleteSubtask(taskId: task.id, subtaskId: item.id) }
+                    },
+                    onAssign: { newAssignee in
+                        Task { await viewModel.assignSubtask(taskId: task.id, subtaskId: item.id, assignedTo: newAssignee) }
                     }
                 )
             }
@@ -1467,9 +1514,22 @@ private struct NoteAttachmentThumb: View {
 /// hover. Done items strike through and dim. Dark-themed to match the sheet.
 private struct SubtaskRow: View {
     let item: MWSubtask
+    let collaborators: [MWProjectCollaborator]
+    let currentUserId: String?
     let onToggle: () -> Void
     let onDelete: () -> Void
+    let onAssign: (String?) -> Void
     @State private var isHovered = false
+
+    private var assignee: MWProjectCollaborator? {
+        guard let id = item.assignedTo else { return nil }
+        return collaborators.first { $0.userId == id }
+    }
+    private var assigneeInitial: String? {
+        guard item.assignedTo != nil else { return nil }
+        if let f = assignee?.name.first { return String(f).uppercased() }
+        return "?"
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -1486,6 +1546,7 @@ private struct SubtaskRow: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
             Spacer(minLength: 0)
+            assigneeMenu
             if isHovered {
                 Button(action: onDelete) {
                     Image(systemName: "trash")
@@ -1502,6 +1563,46 @@ private struct SubtaskRow: View {
         .cornerRadius(4)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
+    }
+
+    private var assigneeMenu: some View {
+        Menu {
+            if let uid = currentUserId, uid != item.assignedTo {
+                Button { onAssign(uid) } label: { Label("Assign to me", systemImage: "person.fill") }
+            }
+            ForEach(collaborators) { c in
+                Button { onAssign(c.userId) } label: {
+                    if c.userId == item.assignedTo {
+                        Label(c.name, systemImage: "checkmark")
+                    } else {
+                        Text(c.name)
+                    }
+                }
+            }
+            if item.assignedTo != nil {
+                Divider()
+                Button("Unassign") { onAssign(nil) }
+            }
+        } label: {
+            if let initial = assigneeInitial {
+                Circle()
+                    .fill(Color.matcha600)
+                    .frame(width: 18, height: 18)
+                    .overlay(
+                        Text(initial)
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.white)
+                    )
+            } else {
+                Image(systemName: "person.crop.circle.badge.plus")
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary.opacity(isHovered ? 0.9 : 0.4))
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(assignee?.name ?? "Assign")
     }
 }
 

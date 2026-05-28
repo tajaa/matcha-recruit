@@ -691,6 +691,29 @@ struct MWProjectSection: Codable, Identifiable {
     }
 }
 
+/// An in-app comment on a project note (section). Author name + avatar are
+/// resolved server-side so the client can render without an extra join.
+struct MWSectionComment: Codable, Identifiable, Hashable {
+    let id: String
+    var sectionId: String?
+    var userId: String
+    var authorName: String?
+    var avatarUrl: String?
+    var content: String
+    var replyToCommentId: String?
+    var createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, content
+        case sectionId = "section_id"
+        case userId = "user_id"
+        case authorName = "author_name"
+        case avatarUrl = "avatar_url"
+        case replyToCommentId = "reply_to_comment_id"
+        case createdAt = "created_at"
+    }
+}
+
 struct MWProjectCollaborator: Codable, Identifiable {
     var id: String { userId }
     let userId: String

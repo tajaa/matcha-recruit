@@ -1446,6 +1446,43 @@ class MatchaWorkService {
         invalidateProjectTasks(projectId: projectId)
     }
 
+    /// Assign (or unassign) a subtask. Send `assigned_to` only so the title /
+    /// done state aren't touched. `nil` → empty string → server clears it.
+    func setSubtaskAssignee(projectId: String, taskId: String, subtaskId: String, assignedTo: String?) async throws -> MWSubtask {
+        struct Req: Encodable { let assigned_to: String }
+        defer { invalidateProjectTasks(projectId: projectId) }
+        return try await client.request(
+            method: "PATCH",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/subtasks/\(subtaskId)",
+            body: Req(assigned_to: assignedTo ?? "")
+        )
+    }
+
+    // MARK: - Note (section) comments
+
+    func listSectionComments(projectId: String, sectionId: String) async throws -> [MWSectionComment] {
+        try await client.request(
+            method: "GET",
+            path: "\(basePath)/projects/\(projectId)/sections/\(sectionId)/comments"
+        )
+    }
+
+    func addSectionComment(projectId: String, sectionId: String, content: String, replyToCommentId: String? = nil) async throws -> MWSectionComment {
+        struct Body: Encodable { let content: String; let reply_to_comment_id: String? }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/sections/\(sectionId)/comments",
+            body: Body(content: content, reply_to_comment_id: replyToCommentId)
+        )
+    }
+
+    func deleteSectionComment(projectId: String, sectionId: String, commentId: String) async throws {
+        _ = try await client.requestData(
+            method: "DELETE",
+            path: "\(basePath)/projects/\(projectId)/sections/\(sectionId)/comments/\(commentId)"
+        )
+    }
+
     struct BlogSubmitResult: Codable {
         let id: String
         let slug: String

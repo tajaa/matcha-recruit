@@ -5163,6 +5163,25 @@ async def init_db():
         """)
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_subtasks_task ON mw_subtasks(task_id, position)")
 
+        # In-app comments on project notes (sections). Sections live in
+        # mw_projects.sections JSONB with short hex string ids (not UUIDs), so
+        # section_id is TEXT. reply_to_comment_id is reserved for threading
+        # (v1 UI renders a flat list). Migration mwseccmt01.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_section_comments (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                project_id UUID NOT NULL,
+                section_id TEXT NOT NULL,
+                company_id UUID NOT NULL,
+                user_id UUID NOT NULL,
+                content TEXT NOT NULL,
+                reply_to_comment_id UUID,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_section_comments_section ON mw_section_comments(project_id, section_id, created_at)")
+
         # Per-user project pin (independent across collaborators)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS mw_project_pins (

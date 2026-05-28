@@ -3702,6 +3702,106 @@ async def _resolve_actor_name_safe(user_id) -> str:
         return "Someone"
 
 
+# ── Note (section) comment endpoints ──
+
+
+@router.get("/projects/{project_id}/sections/{section_id}/comments")
+async def list_section_comments_endpoint(
+    project_id: UUID,
+    section_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Comments on a single note, oldest first."""
+    await _verify_project_access(project_id, current_user)
+    from ..services import project_comment_service as cmt_svc
+    return await cmt_svc.list_section_comments(project_id, section_id)
+
+
+@router.post("/projects/{project_id}/sections/{section_id}/comments")
+async def create_section_comment_endpoint(
+    project_id: UUID,
+    section_id: str,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Add a comment to a note. Body: {content, reply_to_comment_id?}."""
+    project, _role = await _verify_project_access(project_id, current_user)
+
+    content = str(body.get("content") or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Comment cannot be empty")
+    if len(content) > 10_000:
+        raise HTTPException(status_code=400, detail="Comment is too long")
+
+    reply_raw = body.get("reply_to_comment_id")
+    try:
+        reply_to = UUID(reply_raw) if reply_raw else None
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid reply_to_comment_id")
+
+    company_id = await get_client_company_id(current_user)
+
+    from ..services import project_comment_service as cmt_svc
+    comment = await cmt_svc.create_section_comment(
+        project_id=project_id,
+        section_id=section_id,
+        company_id=company_id,
+        user_id=current_user.id,
+        content=content,
+        reply_to_comment_id=reply_to,
+    )
+
+    # Notify the note's last editor and, on a reply, the parent comment's
+    # author — excluding the commenter themselves. Best-effort.
+    try:
+        section = next(
+            (s for s in (project.get("sections") or []) if s.get("id") == section_id),
+            None,
+        )
+        note_title = (section.get("title") if section else None) or "a note"
+        targets: set = set()
+        if section and section.get("last_edited_by"):
+            targets.add(str(section["last_edited_by"]))
+        if reply_to:
+            parent_author = await cmt_svc.get_comment_author(reply_to)
+            if parent_author:
+                targets.add(str(parent_author))
+        targets.discard(str(current_user.id))
+        if targets and company_id:
+            from ..services import notification_service as notif_svc
+            actor = await _resolve_actor_name_safe(current_user.id)
+            for uid in targets:
+                await notif_svc.create_notification(
+                    user_id=UUID(uid),
+                    company_id=company_id,
+                    type="section_comment",
+                    title=f"New comment on {note_title}",
+                    body=f"{actor}: {content[:140]}",
+                    link=f"/work?project={project_id}",
+                    metadata={"project_id": str(project_id), "section_id": section_id},
+                )
+    except Exception as exc:
+        logger.warning("Failed to send section-comment notifications: %s", exc)
+
+    return comment
+
+
+@router.delete("/projects/{project_id}/sections/{section_id}/comments/{comment_id}")
+async def delete_section_comment_endpoint(
+    project_id: UUID,
+    section_id: str,
+    comment_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Delete one of your own comments."""
+    await _verify_project_access(project_id, current_user)
+    from ..services import project_comment_service as cmt_svc
+    ok = await cmt_svc.delete_section_comment(comment_id, current_user.id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    return {"ok": True}
+
+
 # ── Project file attachment endpoints ──
 
 ALLOWED_PROJECT_FILE_EXTENSIONS = {

@@ -950,6 +950,26 @@ class ProjectDetailViewModel {
         }
     }
 
+    /// Assign or unassign a subtask (pass nil to clear). Replaces the cached
+    /// row with the server's response on success.
+    func assignSubtask(taskId: String, subtaskId: String, assignedTo: String?) async {
+        guard let pid = project?.id else { return }
+        do {
+            let updated = try await service.setSubtaskAssignee(
+                projectId: pid, taskId: taskId, subtaskId: subtaskId, assignedTo: assignedTo
+            )
+            await MainActor.run {
+                if var list = taskSubtasks[taskId],
+                   let i = list.firstIndex(where: { $0.id == subtaskId }) {
+                    list[i] = updated
+                    taskSubtasks[taskId] = list
+                }
+            }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
     /// Mirror the cached checklist's counts onto the matching `tasks` entry so
     /// the kanban card's "done/total" updates immediately, without a reload.
     @MainActor

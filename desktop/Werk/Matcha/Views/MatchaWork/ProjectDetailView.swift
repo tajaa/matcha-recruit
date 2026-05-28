@@ -13,6 +13,7 @@ struct ProjectDetailView: View {
     @State private var presenceVM = ProjectPresenceViewModel()
     @State private var editingSectionId: String?
     @State private var emailingSection: MWProjectSection?
+    @State private var commentingSection: MWProjectSection?
     @State private var newSectionTitle = ""
     @State private var showCollaborators = false
     @State private var showExportMenu = false
@@ -603,6 +604,7 @@ struct ProjectDetailView: View {
                         },
                         onBack: { editingSectionId = nil },
                         onEmail: { emailingSection = section },
+                        onComments: { commentingSection = section },
                         onRestore: { restored in
                             // Pass the current title (a null title would blank it
                             // server-side) — restore only rolls back content.
@@ -682,6 +684,14 @@ struct ProjectDetailView: View {
                 section: section,
                 collaborators: viewModel.project?.collaborators ?? [],
                 onClose: { emailingSection = nil }
+            )
+        }
+        .sheet(item: $commentingSection) { section in
+            NoteCommentsView(
+                projectId: viewModel.project?.id ?? "",
+                section: section,
+                currentUserId: appState.currentUser?.id,
+                onClose: { commentingSection = nil }
             )
         }
     }

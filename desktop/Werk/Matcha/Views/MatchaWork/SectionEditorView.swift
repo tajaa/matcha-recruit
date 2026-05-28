@@ -11,6 +11,9 @@ struct SectionEditorView: View {
     /// Opens the email-this-note composer. When non-nil an envelope button
     /// renders next to back.
     var onEmail: (() -> Void)? = nil
+    /// Opens the note comments panel. When non-nil a comment button renders in
+    /// the title row.
+    var onComments: (() -> Void)? = nil
     var onAcceptRevision: (() -> Void)? = nil
     var onRejectRevision: (() -> Void)? = nil
     var onRestore: ((String) -> Void)? = nil
@@ -62,6 +65,19 @@ struct SectionEditorView: View {
                     .help("Back to notes (⌘[)")
                 }
                 Spacer()
+                if let onComments {
+                    Button {
+                        onComments()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 11))
+                            Text("Comments").font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(.white.opacity(0.85))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Comments on this note")
+                }
                 if let onEmail {
                     Button {
                         flushSaveIfDirty()
@@ -744,6 +760,171 @@ private struct FlowChips: View {
                 .background(Color.matcha600.opacity(0.25))
                 .cornerRadius(10)
             }
+        }
+    }
+}
+
+// MARK: - Note comments
+
+/// In-app comments on a note. Collaborators can read the thread and post a
+/// reply; you can delete your own comments. Flat list (newest at the bottom);
+/// the backend keeps a reply_to column for future threading.
+struct NoteCommentsView: View {
+    let projectId: String
+    let section: MWProjectSection
+    let currentUserId: String?
+    var onClose: () -> Void
+
+    @State private var comments: [MWSectionComment] = []
+    @State private var draft: String = ""
+    @State private var loading = true
+    @State private var sending = false
+    @State private var errorText: String? = nil
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Comments").font(.system(size: 15, weight: .semibold)).foregroundColor(.white)
+                    Text(section.title.isEmpty ? "Untitled note" : section.title)
+                        .font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
+                }
+                Spacer()
+                Button { onClose() } label: {
+                    Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 20).padding(.vertical, 14)
+
+            Divider().opacity(0.2)
+
+            ScrollView {
+                if loading {
+                    ProgressView().controlSize(.small).padding(.vertical, 40)
+                } else if comments.isEmpty {
+                    Text("No comments yet. Start the discussion.")
+                        .font(.system(size: 12)).foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity).padding(.vertical, 40)
+                } else {
+                    VStack(alignment: .leading, spacing: 14) {
+                        ForEach(comments) { c in commentRow(c) }
+                    }
+                    .padding(16)
+                }
+            }
+
+            if let errorText {
+                Text(errorText)
+                    .font(.system(size: 10)).foregroundColor(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16).padding(.bottom, 4)
+            }
+
+            Divider().opacity(0.2)
+
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Write a comment…", text: $draft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundColor(.white)
+                    .lineLimit(1...5)
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .background(Color.zinc800).cornerRadius(8)
+                Button {
+                    Task { await send() }
+                } label: {
+                    if sending {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "paperplane.fill").font(.system(size: 13))
+                            .foregroundColor(canSend ? .matcha500 : .secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSend || sending)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+        }
+        .frame(width: 440, height: 560)
+        .background(Color(white: 0.11))
+        .task { await load() }
+    }
+
+    private var canSend: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    @ViewBuilder
+    private func commentRow(_ c: MWSectionComment) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            ChannelAvatarView(senderId: c.userId, payloadURL: c.avatarUrl, name: c.authorName ?? "?", size: 28)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(c.authorName ?? "Someone")
+                        .font(.system(size: 12, weight: .semibold)).foregroundColor(.white)
+                    if let ts = c.createdAt, let d = parseMWDate(ts) {
+                        Text(relativeShort(d)).font(.system(size: 9)).foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    if c.userId == currentUserId {
+                        Button { Task { await delete(c) } } label: {
+                            Image(systemName: "trash").font(.system(size: 9)).foregroundColor(.red.opacity(0.7))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Delete comment")
+                    }
+                }
+                Text(c.content)
+                    .font(.system(size: 12)).foregroundColor(.white.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+        }
+    }
+
+    private func relativeShort(_ date: Date) -> String {
+        let secs = Int(Date().timeIntervalSince(date))
+        if secs < 60 { return "just now" }
+        if secs < 3600 { return "\(secs/60)m" }
+        if secs < 86400 { return "\(secs/3600)h" }
+        return "\(secs/86400)d"
+    }
+
+    private func load() async {
+        await MainActor.run { loading = true; errorText = nil }
+        do {
+            let list = try await MatchaWorkService.shared.listSectionComments(projectId: projectId, sectionId: section.id)
+            await MainActor.run { comments = list; loading = false }
+        } catch {
+            await MainActor.run { errorText = error.localizedDescription; loading = false }
+        }
+    }
+
+    private func send() async {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        await MainActor.run { sending = true; errorText = nil }
+        do {
+            let created = try await MatchaWorkService.shared.addSectionComment(
+                projectId: projectId, sectionId: section.id, content: text
+            )
+            await MainActor.run {
+                comments.append(created)
+                draft = ""
+                sending = false
+            }
+        } catch {
+            await MainActor.run { errorText = error.localizedDescription; sending = false }
+        }
+    }
+
+    private func delete(_ c: MWSectionComment) async {
+        do {
+            try await MatchaWorkService.shared.deleteSectionComment(projectId: projectId, sectionId: section.id, commentId: c.id)
+            await MainActor.run { comments.removeAll { $0.id == c.id } }
+        } catch {
+            await MainActor.run { errorText = error.localizedDescription }
         }
     }
 }
