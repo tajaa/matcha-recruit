@@ -19,7 +19,7 @@ from ..celery_app import celery_app
 from ..utils import get_db_connection
 
 # ── Tunables (code constants per design; no per-broker settings UI) ──────────
-COOLDOWN_DAYS = 14
+COOLDOWN_DAYS = 1               # re-email once per day until broker marks viewed
 CRITICAL_MULTIPLIER = 2.0  # delta >= threshold × this → severity "critical"
 PREMIUM_CRITICAL_DOLLARS = 25_000  # est. annual premium impact → critical
 
@@ -175,15 +175,22 @@ def decide_action(existing: Optional[dict], candidate: dict, *, now: datetime) -
     """Decide what to do with a candidate given its existing state-table row.
 
     Returns one of: 'insert' (new), 'send' (resend: re-arm / cooldown elapsed /
-    escalation), 'skip' (still in cooldown — bump evaluated only).
+    escalation), 'skip' (still in cooldown OR already viewed — bump evaluated).
+
+    Cadence policy: re-email once per day while the trend persists, UNTIL the
+    broker marks the alert as viewed (`is_read = true`). After that we only
+    re-email if severity escalates (warning → critical) or the alert resolves
+    and re-arms.
     """
     if existing is None:
         return "insert"
     if existing.get("resolved_at") is not None:
         return "send"  # re-arm a previously-resolved alert
+    escalated = candidate["severity"] == "critical" and existing.get("severity") != "critical"
+    if existing.get("is_read"):
+        return "send" if escalated else "skip"
     last = existing.get("last_alerted_at") or _EPOCH
     cooldown_elapsed = last < now - timedelta(days=COOLDOWN_DAYS)
-    escalated = candidate["severity"] == "critical" and existing.get("severity") != "critical"
     if cooldown_elapsed or escalated:
         return "send"
     return "skip"
@@ -308,7 +315,8 @@ async def _run_broker_risk_alerts() -> dict:
                             premium_direction = EXCLUDED.premium_direction,
                             message = EXCLUDED.message,
                             resolved_at = NULL,
-                            last_evaluated_at = NOW()
+                            last_evaluated_at = NOW(),
+                            is_read = false
                         RETURNING id
                         """,
                         broker_id, company_id, cand["metric_key"], cand["severity"],
@@ -321,7 +329,8 @@ async def _run_broker_risk_alerts() -> dict:
                         UPDATE broker_risk_alerts SET
                             severity = $2, current_value = $3, prior_value = $4,
                             delta_pct = $5, premium_direction = $6, message = $7,
-                            resolved_at = NULL, last_alerted_at = 'epoch', last_evaluated_at = NOW()
+                            resolved_at = NULL, last_alerted_at = 'epoch',
+                            last_evaluated_at = NOW(), is_read = false
                         WHERE id = $1
                         """,
                         row_id, cand["severity"], cur, prv, dlt,

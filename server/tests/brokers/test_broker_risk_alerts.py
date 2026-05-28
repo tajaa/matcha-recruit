@@ -199,3 +199,29 @@ def test_decide_send_on_escalation_within_cooldown():
 def test_epoch_last_alerted_always_sends():
     existing = {"id": "x", "resolved_at": None, "severity": "warning", "last_alerted_at": _EPOCH}
     assert decide_action(existing, _CAND, now=_NOW) == "send"
+
+
+# ── is_read suppression (broker has acknowledged the alert) ──────────────────
+def test_is_read_suppresses_daily_resend():
+    # Past the 1-day cooldown but broker already marked it viewed — stay silent.
+    existing = {"id": "x", "resolved_at": None, "severity": "warning",
+                "last_alerted_at": _NOW - timedelta(days=COOLDOWN_DAYS + 2),
+                "is_read": True}
+    assert decide_action(existing, _CAND, now=_NOW) == "skip"
+
+
+def test_is_read_does_not_block_escalation():
+    # Already read, but trend escalated warning→critical — re-notify.
+    existing = {"id": "x", "resolved_at": None, "severity": "warning",
+                "last_alerted_at": _NOW - timedelta(hours=1),
+                "is_read": True}
+    crit = {"metric_key": "trir", "severity": "critical"}
+    assert decide_action(existing, crit, now=_NOW) == "send"
+
+
+def test_unread_and_cooldown_elapsed_resends():
+    # New default cooldown is 1 day; >1 day since last alert and unread → send.
+    existing = {"id": "x", "resolved_at": None, "severity": "warning",
+                "last_alerted_at": _NOW - timedelta(days=COOLDOWN_DAYS, hours=1),
+                "is_read": False}
+    assert decide_action(existing, _CAND, now=_NOW) == "send"
