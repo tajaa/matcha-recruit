@@ -245,6 +245,11 @@ struct ProjectListView: View {
             } label: {
                 Label("Open in split", systemImage: "rectangle.split.2x1")
             }
+            Button {
+                appState.bottomSplitTarget = .project(p.id)
+            } label: {
+                Label("Open in bottom split", systemImage: "rectangle.split.1x2")
+            }
             Divider()
             Button((p.isPinned ?? false) ? "Unstar" : "Star") {
                 Task { await togglePin(project: p) }

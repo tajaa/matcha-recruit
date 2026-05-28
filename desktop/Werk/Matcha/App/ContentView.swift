@@ -33,15 +33,15 @@ struct ContentView: View {
         } detail: {
             VStack(spacing: 0) {
                 WorkTabBar()
-                if let split = appState.splitTarget {
-                    HSplitView {
-                        PrimaryDetailPane()
-                            .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
-                        SplitSecondaryPane(target: split)
-                            .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+                if let bottom = appState.bottomSplitTarget {
+                    VSplitView {
+                        topPanes
+                            .frame(minHeight: 200, maxHeight: .infinity)
+                        BottomSplitPane(target: bottom)
+                            .frame(minHeight: 160, maxHeight: .infinity)
                     }
                 } else {
-                    PrimaryDetailPane()
+                    topPanes
                 }
             }
             .background(appState.themeBg)
@@ -163,6 +163,25 @@ struct ContentView: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: - Top split row
+
+    /// The top region of the detail area: primary pane alone, or primary +
+    /// secondary side by side when `splitTarget` is set. Pulled out so it can
+    /// nest inside the outer VSplitView once a bottom pane is open.
+    @ViewBuilder
+    private var topPanes: some View {
+        if let split = appState.splitTarget {
+            HSplitView {
+                PrimaryDetailPane()
+                    .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+                SplitSecondaryPane(target: split)
+                    .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+            }
+        } else {
+            PrimaryDetailPane()
         }
     }
 

@@ -128,6 +128,11 @@ struct JournalListView: View {
             } label: {
                 Label("Open in split", systemImage: "rectangle.split.2x1")
             }
+            Button {
+                appState.bottomSplitTarget = .journal(j.id)
+            } label: {
+                Label("Open in bottom split", systemImage: "rectangle.split.1x2")
+            }
             Divider()
             Button("Archive") {
                 Task {

@@ -38,6 +38,11 @@ class AppState {
     /// When set, the main window shows a second (pinned) detail pane beside the
     /// primary one — the in-window split. nil = no split. Reuses AuxWindowTarget.
     var splitTarget: AuxWindowTarget? = nil
+    /// When set, a third (pinned) detail pane stacks horizontally beneath the
+    /// top row — tmux-style: primary + `splitTarget` side by side on top, this
+    /// one full-width below. nil = no bottom pane. Reuses AuxWindowTarget; its
+    /// header carries a switcher to swap between any of the four surfaces.
+    var bottomSplitTarget: AuxWindowTarget? = nil
     /// Deep-link hint: when set, the project detail view switches its collab
     /// panel to this tab once it mounts/updates, then clears it. Used by
     /// notification taps so a task notification opens the kanban board.

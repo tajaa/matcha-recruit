@@ -98,6 +98,149 @@ struct SplitSecondaryPane: View {
     }
 }
 
+/// Bottom (horizontal) split pane — stacks full-width beneath the top row.
+/// Unlike `SplitSecondaryPane` (pinned to one target), its header carries a
+/// switcher so the user can swap the pane between any thread / channel /
+/// project / journal without leaving the split. Body renders via
+/// AuxWindowRootView (isEmbedded), so it never touches shared nav state.
+struct BottomSplitPane: View {
+    let target: AuxWindowTarget
+    @Environment(AppState.self) private var appState
+    @Environment(\.openWindow) private var openWindow
+    @State private var switcher = SplitSwitcherModel()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "rectangle.split.1x2")
+                    .font(.system(size: 11))
+                    .foregroundColor(appState.themeTextSecondary)
+                Menu {
+                    switcherMenu
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(switcher.title(for: target))
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(appState.themeTextSecondary)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundColor(appState.themeTextSecondary)
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Switch what's shown here")
+                Spacer()
+                Button {
+                    openWindow(id: "aux", value: target)
+                    appState.bottomSplitTarget = nil
+                } label: {
+                    Image(systemName: "macwindow.on.rectangle")
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.themeTextSecondary)
+                }
+                .buttonStyle(.plain)
+                .help("Pop out to a window")
+                Button { appState.bottomSplitTarget = nil } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(appState.themeTextSecondary)
+                }
+                .buttonStyle(.plain)
+                .help("Close bottom split")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            Divider().opacity(0.2)
+            AuxWindowRootView(target: target)
+        }
+        .task { await switcher.loadIfNeeded() }
+    }
+
+    @ViewBuilder
+    private var switcherMenu: some View {
+        if !switcher.threads.isEmpty {
+            Section("Threads") {
+                ForEach(switcher.threads) { t in
+                    Button(t.title) { appState.bottomSplitTarget = .thread(t.id) }
+                }
+            }
+        }
+        if !switcher.channels.isEmpty {
+            Section("Channels") {
+                ForEach(switcher.channels) { c in
+                    Button("#\(c.name)") { appState.bottomSplitTarget = .channel(c.id) }
+                }
+            }
+        }
+        if !switcher.projects.isEmpty {
+            Section("Projects") {
+                ForEach(switcher.projects) { p in
+                    Button(p.title) { appState.bottomSplitTarget = .project(p.id) }
+                }
+            }
+        }
+        if !switcher.journals.isEmpty {
+            Section("Journals") {
+                ForEach(switcher.journals) { j in
+                    Button(j.title) { appState.bottomSplitTarget = .journal(j.id) }
+                }
+            }
+        }
+        Divider()
+        Button("Reload list") { Task { await switcher.load() } }
+    }
+}
+
+/// Loads the four surface lists once so the bottom-pane switcher can offer
+/// them and resolve a target id back to a human title. Cheap, list-only
+/// fetches; refreshed on demand via the menu's "Reload list".
+@Observable
+final class SplitSwitcherModel {
+    var threads: [MWThread] = []
+    var channels: [ChannelSummary] = []
+    var projects: [MWProject] = []
+    var journals: [MWJournal] = []
+    private var loaded = false
+
+    func loadIfNeeded() async {
+        if !loaded { await load() }
+    }
+
+    func load() async {
+        async let t = MatchaWorkService.shared.listThreads()
+        async let c = ChannelsService.shared.listChannels()
+        async let p = MatchaWorkService.shared.listProjects()
+        async let j = MatchaWorkService.shared.listJournals()
+        let tt = (try? await t) ?? []
+        let cc = (try? await c) ?? []
+        let pp = (try? await p) ?? []
+        let jj = (try? await j) ?? []
+        await MainActor.run {
+            threads = tt
+            channels = cc.filter { $0.isMember }
+            projects = pp
+            journals = jj
+            loaded = true
+        }
+    }
+
+    func title(for target: AuxWindowTarget) -> String {
+        switch target {
+        case .thread(let id):
+            return threads.first { $0.id == id }?.title ?? "Thread"
+        case .channel(let id):
+            return channels.first { $0.id == id }.map { "#\($0.name)" } ?? "Channel"
+        case .project(let id):
+            return projects.first { $0.id == id }?.title ?? "Project"
+        case .journal(let id):
+            return journals.first { $0.id == id }?.title ?? "Journal"
+        }
+    }
+}
+
 // MARK: - Churning-counter leaf badges
 
 /// Toolbar bell label. Reads `notificationsUnreadCount` here so its ticks
