@@ -179,7 +179,8 @@ async def _resolve_establishment(conn, company_id, location_id):
         SELECT
             bl.id, bl.name, bl.address, bl.city, bl.state, bl.zipcode,
             COALESCE(bl.ein, c.ein) AS ein,
-            COALESCE(bl.naics, c.naics) AS naics
+            COALESCE(bl.naics, c.naics) AS naics,
+            c.executive_name, c.executive_title, c.executive_phone
         FROM business_locations bl
         JOIN companies c ON c.id = bl.company_id
         WHERE bl.id = $1 AND bl.company_id = $2
@@ -424,6 +425,9 @@ async def get_osha_300a_summary(
             city=est["city"],
             state=est["state"],
             zipcode=est["zipcode"],
+            executive_name=est["executive_name"],
+            executive_title=est["executive_title"],
+            executive_phone=est["executive_phone"],
             total_cases=agg["total_cases"],
             total_deaths=agg["total_deaths"],
             total_days_away_cases=agg["total_days_away_cases"],

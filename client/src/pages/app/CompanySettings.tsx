@@ -26,6 +26,10 @@ interface CompanyData {
   naics: string | null
   address: string | null
   zip: string | null
+  // OSHA 300A "Sign here" defaults — rendered on every 300A PDF cert block.
+  executive_name: string | null
+  executive_title: string | null
+  executive_phone: string | null
 }
 
 const SIZE_OPTIONS = [
@@ -353,7 +357,8 @@ export default function CompanySettings() {
               <h3 className="text-sm font-medium text-zinc-300 mb-1">OSHA / ITA Filing Identity</h3>
               <p className="text-xs text-zinc-600 mb-4">
                 Employer-level defaults used on OSHA Form 300A and ITA electronic filing. Establishments
-                inherit EIN / NAICS unless overridden per location.
+                inherit EIN / NAICS unless overridden per location. The executive block populates the
+                300A "Sign here" certification on every PDF.
               </p>
               <dl className="space-y-1">
                 <EditableField label="Legal Name" value={company.legal_name} onSave={(v) => updateField('legal_name', v)} />
@@ -361,6 +366,9 @@ export default function CompanySettings() {
                 <EditableField label="NAICS Code" value={company.naics} onSave={(v) => updateField('naics', v)} />
                 <EditableField label="Street Address" value={company.address} onSave={(v) => updateField('address', v)} />
                 <EditableField label="ZIP" value={company.zip} onSave={(v) => updateField('zip', v)} />
+                <EditableField label="Company Executive" value={company.executive_name} onSave={(v) => updateField('executive_name', v)} />
+                <EditableField label="Executive Title" value={company.executive_title} onSave={(v) => updateField('executive_title', v)} />
+                <EditableField label="Executive Phone" value={company.executive_phone} onSave={(v) => updateField('executive_phone', v)} />
               </dl>
             </Card>
 

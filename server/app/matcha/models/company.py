@@ -43,6 +43,10 @@ class CompanyUpdate(BaseModel):
     naics: Optional[str] = None
     address: Optional[str] = None
     zip: Optional[str] = None
+    # OSHA 300A "Sign here" defaults (company-level).
+    executive_name: Optional[str] = None
+    executive_title: Optional[str] = None
+    executive_phone: Optional[str] = None
 
 
 class Company(BaseModel):
@@ -94,6 +98,9 @@ class CompanyResponse(BaseModel):
     naics: Optional[str] = None
     address: Optional[str] = None
     zip: Optional[str] = None
+    executive_name: Optional[str] = None
+    executive_title: Optional[str] = None
+    executive_phone: Optional[str] = None
     created_at: datetime
     culture_profile: Optional[dict[str, Any]] = None
     interview_count: int = 0

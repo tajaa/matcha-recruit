@@ -577,6 +577,11 @@ class Osha300ASummary(BaseModel):
     total_poisonings: int
     total_hearing_loss: int
     total_other_illnesses: int
+    # Company-level "Sign here" defaults — render in the 300A PDF cert block.
+    # Sourced from companies.executive_*, NOT per-establishment.
+    executive_name: Optional[str] = None
+    executive_title: Optional[str] = None
+    executive_phone: Optional[str] = None
     # average_employees auto-computes from the active roster at the location but
     # is overridable; total_hours_worked is manual (Finch HRIS cannot supply it).
     average_employees: Optional[int]

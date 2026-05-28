@@ -3,6 +3,25 @@
 Standalone WeasyPrint helper (kept out of the route file like matcha_work's
 _render_project_pdf). Builds an HTML replica of the federal Form 300A
 "Summary of Work-Related Injuries and Illnesses" and rasterizes to PDF bytes.
+
+Layout follows the official federal Form 300A (OMB approved OSHA-0042204):
+
+  Header           OSHA's Form 300A   |   Year box  |  USDOL · OSHA
+  Note             Three short paragraphs on Part 1904 completion + review
+  ┌─────────────────────────────┬──────────────────────────┐
+  │ Number of Cases (G H I J)   │ Establishment Information│
+  │ Number of Days (K L)        │   name / street / city / │
+  │ Injury & Illness Types      │   state / zip /          │
+  │   (M1 M2 M3 M4 M5 M6)       │   industry desc / NAICS  │
+  │                             │ Employment Information   │
+  │                             │   avg employees / hours  │
+  └─────────────────────────────┴──────────────────────────┘
+  Sign here   …   Company executive · Title · Phone · Date
+
+Note: not a 1:1 pixel match to the federal scanned PDF — that's not necessary
+for posting/recordkeeping (the rule is that the *content* be correct, posted
+in a "conspicuous place"). The block names, column letter codes (G–M6), and
+field labels are what regulators look for.
 """
 import asyncio
 import html as _html
@@ -25,35 +44,69 @@ def _num(val) -> str:
     return "0" if val in (None, "") else _html.escape(str(val))
 
 
+def _hours(val) -> str:
+    """Render total hours worked with thousands separators ('410,000')."""
+    if val in (None, ""):
+        return ""
+    try:
+        return f"{int(val):,}"
+    except (TypeError, ValueError):
+        return _html.escape(str(val))
+
+
 def _build_300a_html(s: dict) -> str:
     """Assemble the Form 300A HTML from a summary dict (Osha300ASummary.model_dump())."""
-    establishment = _esc(s.get("establishment_name"))
-    addr_line = ", ".join(
-        p for p in [_esc(s.get("address")), _esc(s.get("city")), _esc(s.get("state")), _esc(s.get("zipcode"))] if p
-    )
     year = _esc(s.get("year"))
 
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
-  @page {{ size: letter; margin: 0.5in 0.6in; }}
-  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 9.5pt; color: #111; }}
-  .formhdr {{ display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #111; padding-bottom: 6px; }}
-  .formhdr h1 {{ font-size: 15pt; margin: 0; }}
+  @page {{ size: letter; margin: 0.4in; }}
+  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 9pt; color: #111; line-height: 1.3; }}
+
+  /* Header */
+  .formhdr {{ display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1.5px solid #111; padding-bottom: 6px; }}
+  .formhdr h1 {{ font-size: 15pt; margin: 0; font-weight: 700; }}
   .formhdr .sub {{ font-size: 8pt; color: #444; margin-top: 2px; }}
-  .formhdr .agency {{ text-align: right; font-size: 8pt; color: #444; }}
-  .yearbox {{ border: 1.5px solid #111; padding: 4px 10px; font-size: 12pt; font-weight: 700; }}
-  .note {{ font-size: 7.5pt; color: #555; margin: 8px 0 14px; line-height: 1.35; }}
-  table {{ border-collapse: collapse; width: 100%; margin: 6px 0 16px; }}
-  th, td {{ border: 1px solid #111; padding: 6px 8px; text-align: center; vertical-align: top; }}
-  th {{ background: #f0f0f0; font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.04em; }}
-  .grouphdr {{ background: #e2e2e2; font-weight: 700; text-align: left; font-size: 8.5pt; }}
-  .bignum {{ font-size: 15pt; font-weight: 300; }}
-  .colcode {{ font-size: 7pt; color: #666; }}
-  .estab td {{ text-align: left; font-size: 9pt; }}
-  .estab th {{ text-align: left; width: 28%; background: #fafafa; }}
-  .cert {{ margin-top: 18px; border-top: 1px solid #111; padding-top: 10px; font-size: 8.5pt; line-height: 1.5; }}
-  .sigline {{ display: inline-block; border-bottom: 1px solid #111; min-width: 220px; margin: 0 6px; }}
-  .footer {{ margin-top: 22px; font-size: 7pt; color: #888; text-align: center; }}
+  .formhdr .agency {{ text-align: right; font-size: 7.5pt; color: #333; }}
+  .yearbox {{ display: inline-block; border: 1.5px solid #111; padding: 4px 14px; font-size: 13pt; font-weight: 700; margin-top: 4px; }}
+
+  /* Intro / instruction paragraphs */
+  .note {{ font-size: 7.5pt; color: #444; margin: 8px 0 10px; line-height: 1.45; }}
+  .note p {{ margin: 0 0 4px; }}
+
+  /* Two-column main area */
+  .main {{ display: flex; gap: 10px; align-items: stretch; }}
+  .col-left {{ flex: 1.45; min-width: 0; }}
+  .col-right {{ flex: 1; min-width: 0; }}
+
+  /* Block — a bordered card with a grey title bar */
+  .block {{ border: 1px solid #111; margin-bottom: 8px; }}
+  .block-hdr {{ background: #d8d8d8; padding: 4px 8px; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }}
+
+  /* Number grids (cases / days / illness types) */
+  .row4 {{ display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; }}
+  .row2 {{ display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid #111; }}
+  .row6 {{ display: grid; grid-template-columns: repeat(6, 1fr); }}
+  .cell {{ padding: 5px 6px; border-right: 1px solid #111; min-height: 78px; position: relative; }}
+  .cell:last-child {{ border-right: none; }}
+  .cell .label {{ font-size: 7pt; line-height: 1.25; color: #222; }}
+  .cell .code {{ font-size: 7pt; color: #666; font-weight: 700; }}
+  .cell .value {{ font-size: 16pt; font-weight: 300; text-align: center; margin-top: 8px; font-family: 'Courier New', monospace; }}
+
+  /* Establishment / Employment Info — labeled fields with underline values */
+  .field {{ display: flex; padding: 5px 8px; border-top: 1px solid #ddd; align-items: baseline; gap: 6px; }}
+  .info-block .field:first-of-type {{ border-top: none; }}
+  .field .lbl {{ font-size: 6.5pt; color: #555; text-transform: uppercase; letter-spacing: 0.03em; min-width: 38%; }}
+  .field .val {{ font-size: 9pt; font-weight: 500; flex: 1; border-bottom: 1px solid #aaa; min-height: 14px; padding-bottom: 1px; }}
+
+  /* Cert block */
+  .cert {{ margin-top: 14px; border-top: 1.5px solid #111; padding-top: 8px; font-size: 8.5pt; }}
+  .cert .signline {{ font-style: italic; color: #444; font-size: 7.5pt; margin-top: 2px; }}
+  .sigrow {{ display: grid; grid-template-columns: 2fr 1.4fr 1.2fr 1fr; gap: 14px; margin-top: 18px; }}
+  .sigrow .siglbl {{ font-size: 6.5pt; color: #555; text-transform: uppercase; letter-spacing: 0.04em; }}
+  .sigrow .sigval {{ border-bottom: 1px solid #111; padding: 4px 2px; font-size: 9.5pt; min-height: 16px; }}
+
+  .footer {{ margin-top: 18px; font-size: 7pt; color: #888; text-align: center; }}
 </style></head><body>
 
   <div class="formhdr">
@@ -62,85 +115,151 @@ def _build_300a_html(s: dict) -> str:
       <div class="sub">Summary of Work-Related Injuries and Illnesses</div>
     </div>
     <div class="agency">
-      U.S. Department of Labor<br>Occupational Safety and Health Administration<br>
-      <div class="yearbox" style="margin-top:6px;">Year {year}</div>
+      U.S. Department of Labor<br>
+      Occupational Safety and Health Administration<br>
+      <div class="yearbox">Year {year}</div>
     </div>
   </div>
 
   <div class="note">
-    All establishments covered by Part 1904 must complete this Summary page, even if no work-related
-    injuries or illnesses occurred during the year. Remember to review the Log to verify that the
-    entries are complete and accurate before completing this summary.
+    <p>All establishments covered by Part 1904 must complete this Summary page, even if no work-related
+    injuries or illnesses occurred during the year. Remember to review the Log to verify that the entries are
+    complete and accurate before completing this summary.</p>
+    <p>Using the Log, count the individual entries you made for each category. Then write the totals below,
+    making sure you've added the entries from every page of the Log. If you had no cases, write &quot;0.&quot;</p>
+    <p>Employees, former employees, and their representatives have the right to review the OSHA Form 300 in
+    its entirety. They also have limited access to the OSHA Form 301 or its equivalent. See 29 CFR
+    Part 1904.35, in OSHA's recordkeeping rule, for further details on the access provisions for these forms.</p>
   </div>
 
-  <table>
-    <tr>
-      <td class="grouphdr" colspan="2">Number of Cases</td>
-      <td class="grouphdr" colspan="2">Number of Days</td>
-    </tr>
-    <tr>
-      <th>Total number of<br>deaths <span class="colcode">(G)</span></th>
-      <th>Cases with days away<br>from work <span class="colcode">(H)</span></th>
-      <th>Total days away<br>from work <span class="colcode">(K)</span></th>
-      <th>Total days of job transfer<br>or restriction <span class="colcode">(L)</span></th>
-    </tr>
-    <tr>
-      <td class="bignum">{_num(s.get('total_deaths'))}</td>
-      <td class="bignum">{_num(s.get('total_days_away_cases'))}</td>
-      <td class="bignum">{_num(s.get('total_days_away'))}</td>
-      <td class="bignum">{_num(s.get('total_days_restricted'))}</td>
-    </tr>
-    <tr>
-      <th>Cases with job transfer<br>or restriction <span class="colcode">(I)</span></th>
-      <th>Other recordable<br>cases <span class="colcode">(J)</span></th>
-      <th colspan="2">Total recordable cases</th>
-    </tr>
-    <tr>
-      <td class="bignum">{_num(s.get('total_restricted_cases'))}</td>
-      <td class="bignum">{_num(s.get('total_other_recordable'))}</td>
-      <td class="bignum" colspan="2">{_num(s.get('total_cases'))}</td>
-    </tr>
-  </table>
+  <div class="main">
+    <div class="col-left">
+      <div class="block">
+        <div class="block-hdr">Number of Cases</div>
+        <div class="row4">
+          <div class="cell">
+            <div class="label">Total number of deaths</div>
+            <div class="code">(G)</div>
+            <div class="value">{_num(s.get('total_deaths'))}</div>
+          </div>
+          <div class="cell">
+            <div class="label">Total number of cases with days away from work</div>
+            <div class="code">(H)</div>
+            <div class="value">{_num(s.get('total_days_away_cases'))}</div>
+          </div>
+          <div class="cell">
+            <div class="label">Total number of cases with job transfer or restriction</div>
+            <div class="code">(I)</div>
+            <div class="value">{_num(s.get('total_restricted_cases'))}</div>
+          </div>
+          <div class="cell">
+            <div class="label">Total number of other recordable cases</div>
+            <div class="code">(J)</div>
+            <div class="value">{_num(s.get('total_other_recordable'))}</div>
+          </div>
+        </div>
+      </div>
 
-  <table>
-    <tr><td class="grouphdr" colspan="6">Injury and Illness Types — Total number of …</td></tr>
-    <tr>
-      <th>(M1) Injuries</th>
-      <th>(M2) Skin<br>disorders</th>
-      <th>(M3) Respiratory<br>conditions</th>
-      <th>(M4) Poisonings</th>
-      <th>(M5) Hearing<br>loss</th>
-      <th>(M6) All other<br>illnesses</th>
-    </tr>
-    <tr>
-      <td class="bignum">{_num(s.get('total_injuries'))}</td>
-      <td class="bignum">{_num(s.get('total_skin_disorders'))}</td>
-      <td class="bignum">{_num(s.get('total_respiratory'))}</td>
-      <td class="bignum">{_num(s.get('total_poisonings'))}</td>
-      <td class="bignum">{_num(s.get('total_hearing_loss'))}</td>
-      <td class="bignum">{_num(s.get('total_other_illnesses'))}</td>
-    </tr>
-  </table>
+      <div class="block">
+        <div class="block-hdr">Number of Days</div>
+        <div class="row2">
+          <div class="cell">
+            <div class="label">Total number of days away from work</div>
+            <div class="code">(K)</div>
+            <div class="value">{_num(s.get('total_days_away'))}</div>
+          </div>
+          <div class="cell">
+            <div class="label">Total number of days of job transfer or restriction</div>
+            <div class="code">(L)</div>
+            <div class="value">{_num(s.get('total_days_restricted'))}</div>
+          </div>
+        </div>
+      </div>
 
-  <table class="estab">
-    <tr><th>Establishment name</th><td>{establishment}</td></tr>
-    <tr><th>Street / City / State / ZIP</th><td>{addr_line}</td></tr>
-    <tr><th>Employer Identification No. (EIN)</th><td>{_esc(s.get('ein'))}</td></tr>
-    <tr><th>Industry code (NAICS)</th><td>{_esc(s.get('naics'))}</td></tr>
-    <tr><th>Annual average number of employees</th><td>{_esc(s.get('average_employees'))}</td></tr>
-    <tr><th>Total hours worked by all employees last year</th><td>{_esc(s.get('total_hours_worked'))}</td></tr>
-  </table>
+      <div class="block">
+        <div class="block-hdr">Injury and Illness Types — Total number of …</div>
+        <div class="row6">
+          <div class="cell">
+            <div class="label">Injuries</div>
+            <div class="code">(M1)</div>
+            <div class="value">{_num(s.get('total_injuries'))}</div>
+          </div>
+          <div class="cell">
+            <div class="label">Skin disorders</div>
+            <div class="code">(M2)</div>
+            <div class="value">{_num(s.get('total_skin_disorders'))}</div>
+          </div>
+          <div class="cell">
+            <div class="label">Respiratory conditions</div>
+            <div class="code">(M3)</div>
+            <div class="value">{_num(s.get('total_respiratory'))}</div>
+          </div>
+          <div class="cell">
+            <div class="label">Poisonings</div>
+            <div class="code">(M4)</div>
+            <div class="value">{_num(s.get('total_poisonings'))}</div>
+          </div>
+          <div class="cell">
+            <div class="label">Hearing loss</div>
+            <div class="code">(M5)</div>
+            <div class="value">{_num(s.get('total_hearing_loss'))}</div>
+          </div>
+          <div class="cell">
+            <div class="label">All other illnesses</div>
+            <div class="code">(M6)</div>
+            <div class="value">{_num(s.get('total_other_illnesses'))}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-right">
+      <div class="block info-block">
+        <div class="block-hdr">Establishment Information</div>
+        <div class="field"><span class="lbl">Your establishment name</span><span class="val">{_esc(s.get('establishment_name'))}</span></div>
+        <div class="field"><span class="lbl">Street</span><span class="val">{_esc(s.get('address'))}</span></div>
+        <div class="field"><span class="lbl">City</span><span class="val">{_esc(s.get('city'))}</span></div>
+        <div class="field"><span class="lbl">State</span><span class="val">{_esc(s.get('state'))}</span></div>
+        <div class="field"><span class="lbl">ZIP</span><span class="val">{_esc(s.get('zipcode'))}</span></div>
+        <div class="field"><span class="lbl">Industry description (e.g. Manufacture of motor trailers)</span><span class="val">&nbsp;</span></div>
+        <div class="field"><span class="lbl">NAICS code (e.g. 336212), if known</span><span class="val">{_esc(s.get('naics'))}</span></div>
+      </div>
+
+      <div class="block info-block">
+        <div class="block-hdr">Employment Information</div>
+        <div class="field"><span class="lbl">Annual average number of employees</span><span class="val">{_esc(s.get('average_employees'))}</span></div>
+        <div class="field"><span class="lbl">Total hours worked by all employees last year</span><span class="val">{_hours(s.get('total_hours_worked'))}</span></div>
+      </div>
+    </div>
+  </div>
 
   <div class="cert">
-    <strong>Sign here.</strong> Knowingly falsifying this document may result in a fine.<br>
-    I certify that I have examined this document and that to the best of my knowledge the entries are
-    true, accurate, and complete.<br><br>
-    Signed by <span class="sigline">{_esc(s.get('certified_by'))}</span>
-    Title <span class="sigline">{_esc(s.get('certified_title'))}</span>
-    Date <span class="sigline">{_esc(s.get('certified_date'))}</span>
+    <strong>Sign here.</strong> Knowingly falsifying this document may result in a fine.
+    <div class="signline">I certify that I have examined this document and that to the best of my knowledge the entries are true, accurate, and complete.</div>
+    <div class="sigrow">
+      <div>
+        <div class="siglbl">Company executive</div>
+        <div class="sigval">{_esc(s.get('executive_name'))}</div>
+      </div>
+      <div>
+        <div class="siglbl">Title</div>
+        <div class="sigval">{_esc(s.get('executive_title'))}</div>
+      </div>
+      <div>
+        <div class="siglbl">Phone</div>
+        <div class="sigval">{_esc(s.get('executive_phone'))}</div>
+      </div>
+      <div>
+        <div class="siglbl">Date</div>
+        <div class="sigval">{_esc(s.get('certified_date'))}</div>
+      </div>
+    </div>
   </div>
 
-  <div class="footer">Generated by Matcha — replica of OSHA Form 300A for posting/recordkeeping.</div>
+  <div class="footer">
+    Post this Summary page from February 1 to April 30 of the year following the year covered by the form.
+    &nbsp;·&nbsp; Generated by Matcha — replica of OSHA Form 300A for posting/recordkeeping.
+  </div>
 </body></html>"""
 
 

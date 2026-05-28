@@ -32,6 +32,10 @@ PROFILE_FIELDS = [
     "naics",
     "address",
     "zip",
+    # OSHA 300A "Sign here" defaults (rendered in the 300A PDF cert block).
+    "executive_name",
+    "executive_title",
+    "executive_phone",
 ]
 
 ALL_RETURNING = (
@@ -39,7 +43,8 @@ ALL_RETURNING = (
     "headquarters_state, headquarters_city, work_arrangement, "
     "default_employment_type, benefits_summary, pto_policy_summary, "
     "compensation_notes, company_values, ai_guidance_notes, "
-    "healthcare_specialties, legal_name, ein, naics, address, zip, created_at"
+    "healthcare_specialties, legal_name, ein, naics, address, zip, "
+    "executive_name, executive_title, executive_phone, created_at"
 )
 
 
@@ -66,6 +71,9 @@ def _row_to_response(row, *, culture_profile=None, interview_count=0):
         naics=row.get("naics"),
         address=row.get("address"),
         zip=row.get("zip"),
+        executive_name=row.get("executive_name"),
+        executive_title=row.get("executive_title"),
+        executive_phone=row.get("executive_phone"),
         created_at=row["created_at"],
         culture_profile=culture_profile,
         interview_count=interview_count,
