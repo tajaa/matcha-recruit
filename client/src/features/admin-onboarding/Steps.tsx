@@ -628,7 +628,7 @@ export function Step5GapAnalysis({ session, onUpdated, onNext }: StepProps) {
   )
 
   const suggestedJurisdictionsByState = useMemo(() => {
-    if (!gap) return new Map<string, typeof gap.suggested_jurisdictions>()
+    if (!gap) return new Map<string, GapCheckResult['suggested_jurisdictions']>()
     return groupByKey(gap.suggested_jurisdictions, (j) => j.state || 'Federal')
   }, [gap])
 
