@@ -4246,7 +4246,13 @@ async def list_open_tasks_endpoint(
     first (priority then due date), subtasks after (most-recent first) — they're
     lower-signal checklist items.
     """
-    company_id = await get_client_company_id(current_user)
+    # Scope is `assigned_to = me`, NOT company_id. matcha-work supports
+    # cross-tenant project collaborators (a task assigned to me can live in
+    # another company's project), admins/multi-company users resolve to a
+    # single default company, and personal users have no company at all — all
+    # three lose their assigned work if we gate on a resolved company_id.
+    # `assigned_to = current_user.id` is the correct (and sufficient) boundary
+    # for this personal Home view.
     async with get_connection() as conn:
         task_rows = await conn.fetch(
             """
@@ -4256,8 +4262,7 @@ async def list_open_tasks_endpoint(
                    p.title AS project_title, p.project_type
             FROM mw_tasks t
             LEFT JOIN mw_projects p ON p.id = t.project_id
-            WHERE t.company_id = $1
-              AND t.assigned_to = $2
+            WHERE t.assigned_to = $1
               AND t.status NOT IN ('completed', 'cancelled')
               AND t.project_id IS NOT NULL
             ORDER BY
@@ -4269,7 +4274,7 @@ async def list_open_tasks_endpoint(
                 t.updated_at DESC
             LIMIT 50
             """,
-            company_id, current_user.id,
+            current_user.id,
         )
         subtask_rows = await conn.fetch(
             """
@@ -4280,14 +4285,13 @@ async def list_open_tasks_endpoint(
             FROM mw_subtasks s
             JOIN mw_tasks pt ON pt.id = s.task_id
             LEFT JOIN mw_projects p ON p.id = s.project_id
-            WHERE s.company_id = $1
-              AND s.assigned_to = $2
+            WHERE s.assigned_to = $1
               AND s.is_done = false
               AND pt.status NOT IN ('completed', 'cancelled')
             ORDER BY s.updated_at DESC
             LIMIT 50
             """,
-            company_id, current_user.id,
+            current_user.id,
         )
 
     out = []

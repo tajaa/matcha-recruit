@@ -1594,9 +1594,18 @@ private struct SubtaskRow: View {
                     size: 18
                 )
             } else {
-                Image(systemName: "person.crop.circle.badge.plus")
-                    .font(.system(size: 13))
-                    .foregroundColor(.secondary.opacity(isHovered ? 0.9 : 0.4))
+                // Same 18×18 footprint as the avatar, muted + monochrome so it
+                // never renders the oversized green multicolor badge glyph.
+                Circle()
+                    .strokeBorder(Color.secondary.opacity(isHovered ? 0.7 : 0.35),
+                                  style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
+                    .frame(width: 18, height: 18)
+                    .overlay(
+                        Image(systemName: "plus")
+                            .symbolRenderingMode(.monochrome)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.secondary.opacity(isHovered ? 0.9 : 0.45))
+                    )
             }
         }
         .menuStyle(.borderlessButton)
