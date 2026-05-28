@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Pencil } from 'lucide-react'
 import { Button } from '../ui'
 import type { BusinessLocation } from '../../types/compliance'
 
@@ -59,12 +60,33 @@ export function ComplianceLocationList({ locations, selectedId, onSelect, onEdit
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0 ml-2">
+                {!loc.address?.trim() && (
+                  <span
+                    className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/20 text-amber-400 border border-amber-800/40"
+                    title="Street address required for OSHA ITA filing"
+                  >Address needed</span>
+                )}
                 {loc.data_status === 'needs_research' && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/20 text-amber-400 border border-amber-800/40">Needs Sync</span>
                 )}
                 {loc.unread_alerts_count > 0 && (
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
                 )}
+                {/* Always-visible Edit. Render as a span (not a <button>) — nesting
+                    a button inside the row's <button> is invalid HTML; we stop
+                    the click from bubbling up to onSelect. */}
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Edit ${loc.name || loc.city}`}
+                  onClick={(e) => { e.stopPropagation(); onEdit(loc) }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onEdit(loc) }
+                  }}
+                  className="p-1 -m-1 text-zinc-500 hover:text-zinc-200 cursor-pointer transition-colors rounded"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </span>
               </div>
             </button>
             {loc.id === selectedId && (
