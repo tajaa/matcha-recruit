@@ -3,7 +3,7 @@ import SidebarShell from './SidebarShell'
 
 const nav = [
   { to: '/admin/customers', icon: Users, label: 'Customers' },
-  { to: '/admin/onboarding', icon: Sparkles, label: 'Gap Analysis' },
+  { to: '/admin/gap-analysis', icon: Sparkles, label: 'Gap Analysis' },
   { to: '/admin/companies', icon: Building2, label: 'Companies' },
   { to: '/admin/matcha-work', icon: Sparkles, label: 'Matcha-Work' },
   { to: '/admin/brokers', icon: Briefcase, label: 'Brokers' },

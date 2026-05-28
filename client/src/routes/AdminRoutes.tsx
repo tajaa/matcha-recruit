@@ -34,10 +34,13 @@ export default function AdminRoutes() {
       <Route element={<AppLayout sidebar={<AdminSidebar />} logoLabel="Matcha Admin" />}>
         <Route index element={<Navigate to="customers" replace />} />
         <Route path="customers" element={<Customers />} />
-        <Route path="onboarding" element={<AdminOnboarding />} />
-        <Route path="onboarding/company/:companyId" element={<AdminGapAnalysisRun />} />
-        <Route path="onboarding/:sessionId" element={<AdminOnboardingWizard />} />
-        <Route path="onboarding/:sessionId/report" element={<GapAnalysisReport />} />
+        <Route path="gap-analysis" element={<AdminOnboarding />} />
+        <Route path="gap-analysis/company/:companyId" element={<AdminGapAnalysisRun />} />
+        <Route path="gap-analysis/:sessionId" element={<AdminOnboardingWizard />} />
+        <Route path="gap-analysis/:sessionId/report" element={<GapAnalysisReport />} />
+        {/* legacy /admin/onboarding bookmarks → gap-analysis */}
+        <Route path="onboarding" element={<Navigate to="/admin/gap-analysis" replace />} />
+        <Route path="onboarding/*" element={<Navigate to="/admin/gap-analysis" replace />} />
         <Route path="companies" element={<Companies />} />
         <Route path="companies/:companyId" element={<AdminCompanyDetail />} />
         <Route path="matcha-work" element={<MatchaWork />} />

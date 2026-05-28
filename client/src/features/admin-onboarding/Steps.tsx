@@ -66,7 +66,7 @@ function PrimaryButton({
     <button
       onClick={onClick}
       disabled={disabled || busy}
-      className="inline-flex items-center gap-2 px-5 h-10 rounded-md bg-emerald-500/90 hover:bg-emerald-500 text-zinc-950 text-sm font-medium disabled:opacity-50"
+      className="inline-flex items-center gap-2 px-5 h-10 rounded-md bg-vsc-accent text-vsc-bg hover:opacity-90 text-sm font-medium disabled:opacity-50"
     >
       {busy && <Loader2 className="w-4 h-4 animate-spin" />}
       {children}
@@ -153,7 +153,7 @@ export function Step1Basics({ session, onUpdated, onNext }: StepProps) {
             value={businessName}
             onChange={(e) => setBusinessName(e.target.value)}
             placeholder="Acme Diner"
-            className="w-full rounded-md bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+            className="w-full rounded-md bg-vsc-bg border border-vsc-border px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
           />
         </div>
         <div>
@@ -161,7 +161,7 @@ export function Step1Basics({ session, onUpdated, onNext }: StepProps) {
           <select
             value={industry}
             onChange={(e) => { setIndustry(e.target.value); setSpecialty('') }}
-            className="w-full rounded-md bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+            className="w-full rounded-md bg-vsc-bg border border-vsc-border px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
           >
             <option value="">— pick —</option>
             {industryOptions.map((i) => (
@@ -175,7 +175,7 @@ export function Step1Basics({ session, onUpdated, onNext }: StepProps) {
             value={specialty}
             onChange={(e) => setSpecialty(e.target.value)}
             disabled={specialtyOptions.length === 0}
-            className="w-full rounded-md bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500 disabled:opacity-50"
+            className="w-full rounded-md bg-vsc-bg border border-vsc-border px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500 disabled:opacity-50"
           >
             <option value="">{specialtyOptions.length ? '— optional —' : '— none —'}</option>
             {specialtyOptions.map((s) => (
@@ -190,7 +190,7 @@ export function Step1Basics({ session, onUpdated, onNext }: StepProps) {
             value={ownerEmail}
             onChange={(e) => setOwnerEmail(e.target.value)}
             placeholder="owner@example.com"
-            className="w-full rounded-md bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+            className="w-full rounded-md bg-vsc-bg border border-vsc-border px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
           />
         </div>
         <div>
@@ -199,7 +199,7 @@ export function Step1Basics({ session, onUpdated, onNext }: StepProps) {
             value={ownerName}
             onChange={(e) => setOwnerName(e.target.value)}
             placeholder="Jane Owner"
-            className="w-full rounded-md bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+            className="w-full rounded-md bg-vsc-bg border border-vsc-border px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
           />
         </div>
         <div className="col-span-2">
@@ -224,7 +224,7 @@ export function Step1Basics({ session, onUpdated, onNext }: StepProps) {
               'midnight; outdoor patio with heaters". The more detail, the ' +
               'better the AI can surface compliance the HR admin might miss.'
             }
-            className="w-full rounded-md bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500 resize-y"
+            className="w-full rounded-md bg-vsc-bg border border-vsc-border px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500 resize-y"
           />
           <div className="text-[11px] text-zinc-500 mt-1">
             {description.length} / 2000
@@ -289,7 +289,7 @@ export function Step2Size({ session, onUpdated, onNext }: StepProps) {
           <input
             type="number" min={0} value={ft}
             onChange={(e) => setFt(parseInt(e.target.value) || 0)}
-            className="w-full rounded-md bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+            className="w-full rounded-md bg-vsc-bg border border-vsc-border px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
           />
         </div>
         <div>
@@ -297,7 +297,7 @@ export function Step2Size({ session, onUpdated, onNext }: StepProps) {
           <input
             type="number" min={0} value={pt}
             onChange={(e) => setPt(parseInt(e.target.value) || 0)}
-            className="w-full rounded-md bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+            className="w-full rounded-md bg-vsc-bg border border-vsc-border px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
           />
         </div>
         <div>
@@ -305,7 +305,7 @@ export function Step2Size({ session, onUpdated, onNext }: StepProps) {
           <input
             type="number" min={0} value={contractor}
             onChange={(e) => setContractor(parseInt(e.target.value) || 0)}
-            className="w-full rounded-md bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+            className="w-full rounded-md bg-vsc-bg border border-vsc-border px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500"
           />
         </div>
       </div>
@@ -378,7 +378,7 @@ export function Step3Locations({ session, onUpdated, onNext }: StepProps) {
 
       <div className="space-y-3 mb-4">
         {locations.map((loc, idx) => (
-          <div key={idx} className="rounded-md border border-zinc-800 bg-zinc-900/50 p-3">
+          <div key={idx} className="rounded-md border border-vsc-border bg-vsc-panel p-3">
             <div className="grid grid-cols-12 gap-2 items-end">
               <div className="col-span-3">
                 <FieldLabel>Name</FieldLabel>
@@ -386,7 +386,7 @@ export function Step3Locations({ session, onUpdated, onNext }: StepProps) {
                   value={loc.name || ''}
                   onChange={(e) => update(idx, { name: e.target.value })}
                   placeholder="Main"
-                  className="w-full rounded-md bg-zinc-950 border border-zinc-700 px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                  className="w-full rounded-md bg-vsc-bg border border-vsc-border px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500"
                 />
               </div>
               <div className="col-span-3">
@@ -394,7 +394,7 @@ export function Step3Locations({ session, onUpdated, onNext }: StepProps) {
                 <input
                   value={loc.city || ''}
                   onChange={(e) => update(idx, { city: e.target.value })}
-                  className="w-full rounded-md bg-zinc-950 border border-zinc-700 px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                  className="w-full rounded-md bg-vsc-bg border border-vsc-border px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500"
                 />
               </div>
               <div className="col-span-2">
@@ -402,7 +402,7 @@ export function Step3Locations({ session, onUpdated, onNext }: StepProps) {
                 <select
                   value={loc.state || ''}
                   onChange={(e) => update(idx, { state: e.target.value })}
-                  className="w-full rounded-md bg-zinc-950 border border-zinc-700 px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                  className="w-full rounded-md bg-vsc-bg border border-vsc-border px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500"
                 >
                   <option value="">—</option>
                   {ALL_STATES.map((s) => (
@@ -415,7 +415,7 @@ export function Step3Locations({ session, onUpdated, onNext }: StepProps) {
                 <input
                   value={loc.county || ''}
                   onChange={(e) => update(idx, { county: e.target.value })}
-                  className="w-full rounded-md bg-zinc-950 border border-zinc-700 px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                  className="w-full rounded-md bg-vsc-bg border border-vsc-border px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500"
                 />
               </div>
               <div className="col-span-1">
@@ -423,7 +423,7 @@ export function Step3Locations({ session, onUpdated, onNext }: StepProps) {
                 <input
                   value={loc.zipcode || ''}
                   onChange={(e) => update(idx, { zipcode: e.target.value })}
-                  className="w-full rounded-md bg-zinc-950 border border-zinc-700 px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+                  className="w-full rounded-md bg-vsc-bg border border-vsc-border px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-emerald-500"
                 />
               </div>
               <div className="col-span-1 flex justify-end">
@@ -444,7 +444,7 @@ export function Step3Locations({ session, onUpdated, onNext }: StepProps) {
       <div className="flex items-center gap-2">
         <button
           onClick={add}
-          className="px-3 h-8 text-xs text-zinc-300 border border-zinc-700 rounded-md hover:border-zinc-500"
+          className="px-3 h-8 text-xs text-zinc-300 border border-vsc-border rounded-md hover:border-zinc-500"
         >
           + Add location
         </button>
@@ -789,7 +789,7 @@ export function Step5GapAnalysis({ session, onUpdated, onNext }: StepProps) {
 
       {/* Card B — Already covered (informational, collapsed) */}
       {existing.length > 0 && (
-        <details className="group rounded-md border border-zinc-800 bg-zinc-900/40 p-4 mb-4">
+        <details className="group rounded-md border border-vsc-border bg-vsc-panel p-4 mb-4">
           <summary className="cursor-pointer list-none flex items-center justify-between [&::-webkit-details-marker]:hidden">
             <div className="text-[11px] uppercase tracking-wider text-emerald-400">
               Already covered · {existing.length}
@@ -817,7 +817,7 @@ export function Step5GapAnalysis({ session, onUpdated, onNext }: StepProps) {
       )}
 
       {/* Card C — AI safety net (read-only suggestion) */}
-      <div className="rounded-md border border-zinc-800 bg-zinc-900/30 p-4 mb-6">
+      <div className="rounded-md border border-vsc-border bg-vsc-panel p-4 mb-6">
         <div className="flex items-start justify-between gap-3 mb-2">
           <div>
             <div className="text-sm font-medium text-zinc-100">AI safety net</div>
@@ -828,7 +828,7 @@ export function Step5GapAnalysis({ session, onUpdated, onNext }: StepProps) {
           <button
             onClick={() => void runGapCheck()}
             disabled={gapBusy}
-            className="inline-flex items-center gap-2 px-3 h-8 rounded-md border border-zinc-700 hover:border-zinc-500 text-xs text-zinc-200 disabled:opacity-50 shrink-0"
+            className="inline-flex items-center gap-2 px-3 h-8 rounded-md border border-vsc-border hover:border-zinc-500 text-xs text-zinc-200 disabled:opacity-50 shrink-0"
           >
             {gapBusy && <Loader2 className="w-3 h-3 animate-spin" />}
             {gap ? 'Re-run' : 'Run gap check'}
@@ -1000,7 +1000,7 @@ export function Step6Review({ session, onUpdated }: StepProps) {
             )}
             <div className="pt-2 border-t border-emerald-500/20">
               <Link
-                to={`/admin/onboarding/${session.id}/report`}
+                to={`/admin/gap-analysis/${session.id}/report`}
                 className="text-sm text-emerald-300 hover:underline font-medium"
               >
                 View full gap analysis →
@@ -1019,7 +1019,7 @@ export function Step6Review({ session, onUpdated }: StepProps) {
 
 function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center gap-4 py-1.5 border-b border-zinc-800 last:border-b-0">
+    <div className="flex items-center gap-4 py-1.5 border-b border-vsc-border last:border-b-0">
       <div className="w-44 text-[11px] uppercase tracking-wider text-zinc-500">{label}</div>
       <div className="text-sm text-zinc-200">{value}</div>
     </div>

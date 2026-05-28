@@ -4,7 +4,7 @@
  * The performative "Sync Employees → Gap Analysis" view: streams staged events
  * (roster scan → new jurisdiction discovery → live research → role-aware scope)
  * so it visibly "scopes out" the compliance/jurisdictional apparatus.
- * Route: /admin/onboarding/company/:companyId
+ * Route: /admin/gap-analysis/company/:companyId
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
@@ -74,7 +74,7 @@ export default function AdminGapAnalysisRun() {
   return (
     <div className="p-6 max-w-3xl">
       <div className="flex items-center gap-3 mb-1">
-        <Link to="/admin/onboarding" className="text-zinc-500 hover:text-zinc-300 transition-colors">
+        <Link to="/admin/gap-analysis" className="text-zinc-500 hover:text-zinc-300 transition-colors">
           <ArrowLeft size={18} />
         </Link>
         <Sparkles className="w-5 h-5 text-emerald-400" />
@@ -89,7 +89,7 @@ export default function AdminGapAnalysisRun() {
       <button
         onClick={() => void run(companyId)}
         disabled={running}
-        className="ml-9 inline-flex items-center gap-2 px-4 h-9 rounded-md bg-emerald-500/90 hover:bg-emerald-500 text-zinc-950 text-sm font-medium disabled:opacity-50 transition-colors"
+        className="ml-9 inline-flex items-center gap-2 px-4 h-9 rounded-md bg-vsc-accent text-vsc-bg hover:opacity-90 text-sm font-medium disabled:opacity-50 transition-colors"
       >
         {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
         {running ? 'Running…' : events.length ? 'Re-run gap analysis' : 'Run gap analysis'}
@@ -104,7 +104,7 @@ export default function AdminGapAnalysisRun() {
       {events.length > 0 && (
         <div
           ref={feedRef}
-          className="mt-5 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 max-h-[460px] overflow-y-auto space-y-2"
+          className="mt-5 rounded-xl border border-vsc-border bg-vsc-panel p-4 max-h-[460px] overflow-y-auto space-y-2"
         >
           {events.filter((e) => e.type !== 'complete').map((ev, i) => {
             const { icon: Icon, color, spin } = eventStyle(ev.type)
@@ -150,7 +150,7 @@ export default function AdminGapAnalysisRun() {
               ['Covered', done.covered ?? 0],
               ['Gaps', done.missing ?? 0],
             ].map(([label, value]) => (
-              <div key={label as string} className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
+              <div key={label as string} className="rounded-lg border border-vsc-border bg-vsc-panel p-3">
                 <div className="text-[10px] text-zinc-500 uppercase tracking-wider">{label}</div>
                 <div className="text-xl font-semibold text-zinc-100 mt-1">{value}</div>
               </div>
@@ -164,7 +164,7 @@ export default function AdminGapAnalysisRun() {
           )}
           {done.session_id && (
             <Link
-              to={`/admin/onboarding/${done.session_id}`}
+              to={`/admin/gap-analysis/${done.session_id}`}
               className="inline-block mt-4 text-[11px] font-medium text-emerald-400 hover:text-emerald-300"
             >
               View full gap analysis →
@@ -255,7 +255,7 @@ function GapsToFill({ companyId, sessionId }: { companyId: string; sessionId: st
       )}
 
       {missing.length > 0 && (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+        <div className="rounded-xl border border-vsc-border bg-vsc-panel p-4">
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
               <FlaskConical className="w-4 h-4 text-violet-400" />
@@ -282,7 +282,7 @@ function GapsToFill({ companyId, sessionId }: { companyId: string; sessionId: st
                   key={id}
                   onClick={() => toggle(id)}
                   disabled={running}
-                  className="w-full flex items-center gap-2 text-left px-2 py-1.5 rounded hover:bg-zinc-800/50 disabled:opacity-50"
+                  className="w-full flex items-center gap-2 text-left px-2 py-1.5 rounded hover:bg-vsc-panel disabled:opacity-50"
                 >
                   {on ? <CheckSquare className="w-4 h-4 text-violet-400 shrink-0" /> : <Square className="w-4 h-4 text-zinc-600 shrink-0" />}
                   <span className="text-xs text-zinc-300">{m.category_slug.replace(/_/g, ' ')}</span>
@@ -293,7 +293,7 @@ function GapsToFill({ companyId, sessionId }: { companyId: string; sessionId: st
           </div>
 
           {events.length > 0 && (
-            <div ref={feedRef} className="mt-3 border-t border-zinc-800 pt-3 max-h-48 overflow-y-auto space-y-1.5">
+            <div ref={feedRef} className="mt-3 border-t border-vsc-border pt-3 max-h-48 overflow-y-auto space-y-1.5">
               {events.filter((e) => e.type !== 'complete').map((ev, i) => {
                 const { icon: Icon, color, spin } = eventStyle(ev.type)
                 return (
@@ -315,7 +315,7 @@ function GapsToFill({ companyId, sessionId }: { companyId: string; sessionId: st
       )}
 
       {suggestionCount > 0 && (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
+        <div className="rounded-xl border border-vsc-border bg-vsc-panel p-4">
           <div className="flex items-center gap-2 mb-2">
             <Lightbulb className="w-4 h-4 text-amber-400" />
             <h3 className="text-sm font-medium text-zinc-200">AI suggestions ({suggestionCount})</h3>
@@ -323,17 +323,17 @@ function GapsToFill({ companyId, sessionId }: { companyId: string; sessionId: st
           {gapCheck?.summary && <p className="text-[11px] text-zinc-500 mb-2">{gapCheck.summary}</p>}
           <div className="flex flex-wrap gap-1.5">
             {gapCheck?.suggested_compliance_categories?.map((c) => (
-              <span key={`c-${c.category_slug}`} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">
+              <span key={`c-${c.category_slug}`} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-vsc-border">
                 {c.category_slug.replace(/_/g, ' ')} · {c.scope}
               </span>
             ))}
             {gapCheck?.suggested_licenses?.map((l) => (
-              <span key={`l-${l.slug}`} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">
+              <span key={`l-${l.slug}`} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-vsc-border">
                 {l.name}
               </span>
             ))}
             {gapCheck?.suggested_jurisdictions?.map((j, i) => (
-              <span key={`j-${i}`} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">
+              <span key={`j-${i}`} className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-vsc-border">
                 {jLabel(j)}
               </span>
             ))}

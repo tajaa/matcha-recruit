@@ -529,7 +529,7 @@ function EmployeeSyncPanel({ companyId }: { companyId: string }) {
           )}
 
           <button
-            onClick={() => navigate(`/admin/onboarding/${result.session_id}`)}
+            onClick={() => navigate(`/admin/gap-analysis/${result.session_id}`)}
             className="text-[11px] font-medium text-emerald-400 hover:text-emerald-300"
           >
             View full gap analysis →

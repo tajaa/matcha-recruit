@@ -49,10 +49,10 @@ function Table({ headers, rows }: { headers: string[]; rows: string[][] }) {
     return <div className="text-sm text-zinc-600 italic">None</div>
   }
   return (
-    <div className="overflow-x-auto rounded-md border border-zinc-800">
+    <div className="overflow-x-auto rounded-md border border-vsc-border">
       <table className="w-full text-sm">
         <thead>
-          <tr className="bg-zinc-900/60">
+          <tr className="bg-vsc-panel">
             {headers.map((h) => (
               <th key={h} className="text-left px-3 py-2 font-medium text-zinc-400 text-xs uppercase tracking-wider">
                 {h}
@@ -62,7 +62,7 @@ function Table({ headers, rows }: { headers: string[]; rows: string[][] }) {
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={i} className="border-t border-zinc-800/70">
+            <tr key={i} className="border-t border-vsc-border">
               {r.map((c, j) => (
                 <td key={j} className="px-3 py-2 text-zinc-300 align-top">{c || '—'}</td>
               ))}
@@ -128,7 +128,7 @@ export default function GapAnalysisReport() {
         <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-300">
           {error || 'No gap analysis found.'}
         </div>
-        <Link to="/admin/onboarding" className="inline-block mt-3 text-sm text-emerald-300 hover:underline">
+        <Link to="/admin/gap-analysis" className="inline-block mt-3 text-sm text-emerald-300 hover:underline">
           ← Back to onboarding
         </Link>
       </div>
@@ -144,7 +144,7 @@ export default function GapAnalysisReport() {
   return (
     <div className="p-6 max-w-4xl">
       <Link
-        to={`/admin/onboarding/${sessionId}`}
+        to={`/admin/gap-analysis/${sessionId}`}
         className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 mb-4"
       >
         <ArrowLeft className="w-3 h-3" /> Back to wizard
@@ -163,7 +163,7 @@ export default function GapAnalysisReport() {
           <button
             onClick={() => void exportAs('pdf')}
             disabled={!!exporting}
-            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-900 disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 rounded-md border border-vsc-border px-3 py-1.5 text-sm text-zinc-200 hover:bg-vsc-panel disabled:opacity-60"
           >
             {exporting === 'pdf' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
             PDF
@@ -171,7 +171,7 @@ export default function GapAnalysisReport() {
           <button
             onClick={() => void exportAs('md')}
             disabled={!!exporting}
-            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-zinc-900 disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 rounded-md border border-vsc-border px-3 py-1.5 text-sm text-zinc-200 hover:bg-vsc-panel disabled:opacity-60"
           >
             {exporting === 'md' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
             Markdown
@@ -179,7 +179,7 @@ export default function GapAnalysisReport() {
         </div>
       </div>
 
-      <div className="flex gap-8 rounded-lg border border-zinc-800 bg-zinc-900/30 px-5 py-4 my-5">
+      <div className="flex gap-8 rounded-lg border border-vsc-border bg-vsc-panel px-5 py-4 my-5">
         <Count label="Covered" value={counts.covered} />
         <Count label="Gaps" value={counts.gaps} alert />
         <Count label="Ambiguous" value={counts.ambiguous} alert />

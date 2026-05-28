@@ -96,7 +96,7 @@ export default function AdminOnboardingWizard() {
         <div className="rounded-md border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-300">
           {error || 'Session not found.'}
         </div>
-        <Link to="/admin/onboarding" className="inline-block mt-3 text-sm text-emerald-300 hover:underline">
+        <Link to="/admin/gap-analysis" className="inline-block mt-3 text-sm text-emerald-300 hover:underline">
           ← Back to onboarding
         </Link>
       </div>
@@ -107,7 +107,7 @@ export default function AdminOnboardingWizard() {
     <div className="p-6 flex gap-8">
       <aside className="w-56 shrink-0">
         <Link
-          to="/admin/onboarding"
+          to="/admin/gap-analysis"
           className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 mb-4"
         >
           <ArrowLeft className="w-3 h-3" /> All sessions
@@ -131,7 +131,7 @@ export default function AdminOnboardingWizard() {
                     active
                       ? 'bg-emerald-500/15 text-emerald-200'
                       : completed
-                        ? 'text-zinc-300 hover:bg-zinc-900/50'
+                        ? 'text-zinc-300 hover:bg-vsc-panel'
                         : 'text-zinc-500'
                   } ${!reachable ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
                 >

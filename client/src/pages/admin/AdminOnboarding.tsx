@@ -2,8 +2,8 @@
  * Master-admin gap-analysis index page.
  *
  * Two entry points: a NEW company (the onboarding wizard at
- * `/admin/onboarding/:sessionId`) or an EXISTING company (employee-sync
- * enrichment run at `/admin/onboarding/company/:companyId`). Lists prior
+ * `/admin/gap-analysis/:sessionId`) or an EXISTING company (employee-sync
+ * enrichment run at `/admin/gap-analysis/company/:companyId`). Lists prior
  * sessions below.
  */
 import { useCallback, useEffect, useState } from 'react'
@@ -59,7 +59,7 @@ export default function AdminOnboarding() {
     try {
       const idem = crypto.randomUUID()
       const detail = await adminOnboarding.createSession(idem)
-      navigate(`/admin/onboarding/${detail.id}`)
+      navigate(`/admin/gap-analysis/${detail.id}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not create session')
       setCreating(false)
@@ -76,7 +76,7 @@ export default function AdminOnboarding() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setPickerOpen(true)}
-            className="inline-flex items-center gap-2 px-4 h-9 rounded-md border border-zinc-700 hover:border-zinc-500 text-zinc-200 text-sm font-medium transition-colors"
+            className="inline-flex items-center gap-2 px-4 h-9 rounded-md border border-vsc-border hover:border-zinc-500 text-zinc-200 text-sm font-medium transition-colors"
           >
             <Building2 className="w-4 h-4" />
             Existing company
@@ -84,7 +84,7 @@ export default function AdminOnboarding() {
           <button
             onClick={() => void startNew()}
             disabled={creating}
-            className="inline-flex items-center gap-2 px-4 h-9 rounded-md bg-emerald-500/90 hover:bg-emerald-500 text-zinc-950 text-sm font-medium disabled:opacity-50 transition-colors"
+            className="inline-flex items-center gap-2 px-4 h-9 rounded-md bg-vsc-accent text-vsc-bg hover:opacity-90 text-sm font-medium disabled:opacity-50 transition-colors"
           >
             {creating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
             New company
@@ -105,7 +105,7 @@ export default function AdminOnboarding() {
             className={`px-3 h-7 rounded-full border transition-colors ${
               status === f.value
                 ? 'bg-zinc-100 text-zinc-900 border-zinc-100'
-                : 'bg-transparent text-zinc-400 border-zinc-700 hover:border-zinc-500'
+                : 'bg-transparent text-zinc-400 border-vsc-border hover:border-zinc-500'
             }`}
           >
             {f.label}
@@ -124,14 +124,14 @@ export default function AdminOnboarding() {
           <Loader2 className="w-4 h-4 animate-spin" /> Loading sessions…
         </div>
       ) : sessions.length === 0 ? (
-        <div className="rounded-md border border-zinc-800 bg-zinc-900/50 p-8 text-center text-sm text-zinc-400">
+        <div className="rounded-md border border-vsc-border bg-vsc-panel p-8 text-center text-sm text-zinc-400">
           No gap analyses yet. Start one for a <span className="text-zinc-100">New company</span> or
           an <span className="text-zinc-100">Existing company</span>.
         </div>
       ) : (
-        <div className="rounded-md border border-zinc-800 overflow-hidden">
+        <div className="rounded-md border border-vsc-border overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-zinc-900/80 text-[11px] uppercase tracking-wider text-zinc-500">
+            <thead className="bg-vsc-panel text-[11px] uppercase tracking-wider text-zinc-500">
               <tr>
                 <th className="text-left px-4 py-2">Business</th>
                 <th className="text-left px-4 py-2">Industry</th>
@@ -144,11 +144,11 @@ export default function AdminOnboarding() {
               {sessions.map((s) => (
                 <tr
                   key={s.id}
-                  className="border-t border-zinc-800 hover:bg-zinc-900/50"
+                  className="border-t border-vsc-border hover:bg-vsc-panel"
                 >
                   <td className="px-4 py-2">
                     <Link
-                      to={`/admin/onboarding/${s.id}`}
+                      to={`/admin/gap-analysis/${s.id}`}
                       className="text-emerald-300 hover:underline"
                     >
                       {s.business_name || '(unnamed)'}
@@ -160,7 +160,7 @@ export default function AdminOnboarding() {
                     )}
                     {s.status === 'finalized' && (
                       <Link
-                        to={`/admin/onboarding/${s.id}/report`}
+                        to={`/admin/gap-analysis/${s.id}/report`}
                         className="text-[11px] text-zinc-400 hover:text-emerald-300 hover:underline"
                       >
                         Gap analysis →
@@ -185,7 +185,7 @@ export default function AdminOnboarding() {
       {pickerOpen && (
         <CompanyPicker
           onClose={() => setPickerOpen(false)}
-          onPick={(id) => navigate(`/admin/onboarding/company/${id}`)}
+          onPick={(id) => navigate(`/admin/gap-analysis/company/${id}`)}
         />
       )}
     </div>
@@ -213,17 +213,17 @@ function CompanyPicker({ onClose, onPick }: { onClose: () => void; onPick: (id: 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
       <div
-        className="bg-zinc-900 border border-zinc-800 rounded-xl w-full max-w-lg max-h-[70vh] flex flex-col"
+        className="bg-vsc-panel border border-vsc-border rounded-xl w-full max-w-lg max-h-[70vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-4 border-b border-zinc-800">
+        <div className="flex items-center justify-between p-4 border-b border-vsc-border">
           <div className="flex items-center gap-2">
             <Building2 className="w-4 h-4 text-emerald-400" />
             <h3 className="text-sm font-semibold text-zinc-100">Pick a company</h3>
           </div>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X className="w-4 h-4" /></button>
         </div>
-        <div className="p-3 border-b border-zinc-800">
+        <div className="p-3 border-b border-vsc-border">
           <div className="relative">
             <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
@@ -231,7 +231,7 @@ function CompanyPicker({ onClose, onPick }: { onClose: () => void; onPick: (id: 
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Search companies…"
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 pl-9 pr-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
+              className="w-full rounded-lg border border-vsc-border bg-vsc-bg pl-9 pr-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
             />
           </div>
         </div>
@@ -247,7 +247,7 @@ function CompanyPicker({ onClose, onPick }: { onClose: () => void; onPick: (id: 
               <button
                 key={c.id}
                 onClick={() => onPick(c.id)}
-                className="w-full text-left px-4 py-2.5 border-b border-zinc-800/50 hover:bg-zinc-800/50 transition-colors flex items-center justify-between"
+                className="w-full text-left px-4 py-2.5 border-b border-vsc-border hover:bg-vsc-panel transition-colors flex items-center justify-between"
               >
                 <span className="text-sm text-zinc-200">{c.company_name}</span>
                 {c.signup_source && (
