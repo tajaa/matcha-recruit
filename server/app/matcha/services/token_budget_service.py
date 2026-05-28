@@ -21,6 +21,14 @@ SUBSCRIPTION_TOKENS = 5_000_000
 SUBSCRIPTION_AMOUNT_CENTS = 4000  # $40/month
 SUBSCRIPTION_PACK_ID = "matcha_work_pro"
 
+# Per-user rolling-window rate-limit defaults — MUST match
+# matcha_work_document.check_token_quota's _DEFAULT_TOKEN_LIMIT / _DEFAULT_WINDOW_HOURS.
+# The chat send gate enforces BOTH the company budget (this service) and this
+# per-user quota (mw_token_quotas). Admin grants must lift both, or the grant
+# raises the budget while the quota wall still blocks the user.
+QUOTA_DEFAULT_LIMIT = 100_000
+QUOTA_DEFAULT_WINDOW_HOURS = 12
+
 EXHAUSTED_MESSAGE = "Token budget exhausted. Subscribe to Matcha Work Pro for 5M tokens/month."
 EXHAUSTED_CODE = "token_budget_exhausted"
 
@@ -132,13 +140,44 @@ async def deduct_tokens(conn, company_id: UUID, total_tokens: int) -> dict[str, 
     return await get_token_budget(company_id, conn=conn)
 
 
+async def _grant_quota_for_company(conn, company_id: UUID, amount: int) -> None:
+    """Raise the company-level per-user quota (mw_token_quotas) by `amount`.
+
+    check_token_quota picks, for a user with no per-user override, the
+    company-level row (company_id set, user_id NULL). Bumping that single row
+    lifts the rate-limit wall for every default user in the company. Users with
+    an explicit per-user quota row (set via the admin quota editor) keep their
+    own limit and are managed there.
+    """
+    if amount <= 0:
+        return
+    status = await conn.execute(
+        """UPDATE mw_token_quotas
+           SET token_limit = token_limit + $2, updated_at = NOW()
+           WHERE company_id = $1 AND user_id IS NULL AND is_active = true""",
+        company_id, amount,
+    )
+    # asyncpg returns e.g. "UPDATE 0" when no company-level row existed yet.
+    if status.endswith(" 0"):
+        await conn.execute(
+            """INSERT INTO mw_token_quotas (user_id, company_id, token_limit, window_hours)
+               VALUES (NULL, $1, $2, $3)""",
+            company_id, QUOTA_DEFAULT_LIMIT + amount, QUOTA_DEFAULT_WINDOW_HOURS,
+        )
+
+
 async def grant_tokens(
     company_id: UUID,
     amount: int,
     description: Optional[str] = None,
     granted_by: Optional[UUID] = None,
 ) -> dict[str, Any]:
-    """Admin grants tokens by increasing the free_token_limit."""
+    """Admin grants tokens by increasing the free_token_limit.
+
+    Also raises the company's per-user token quota (mw_token_quotas) by the same
+    amount so the grant actually reflects to the user — otherwise the chat send
+    gate's per-user 100k/12h rate-limit keeps blocking despite the larger budget.
+    """
     async with get_connection() as conn:
         async with conn.transaction():
             await ensure_token_budget_row(conn, company_id)
@@ -148,6 +187,7 @@ async def grant_tokens(
                    WHERE company_id = $1""",
                 company_id, amount,
             )
+            await _grant_quota_for_company(conn, company_id, amount)
             budget = await get_token_budget(company_id, conn=conn)
             logger.info(
                 "Admin granted %d tokens to company %s: %s",

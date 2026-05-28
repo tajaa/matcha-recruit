@@ -415,6 +415,68 @@ async def admin_list_company_tokens(
     ]
 
 
+class MatchaWorkBusinessSummary(BaseModel):
+    company_id: UUID
+    company_name: str
+    company_status: str
+    signup_source: Optional[str] = None
+    member_count: int = 0
+    free_tokens_used: int = 0
+    free_token_limit: int = 0
+    free_tokens_remaining: int = 0
+    subscription_token_limit: int = 0
+    subscription_tokens_remaining: int = 0
+    has_active_subscription: bool = False
+    created_at: Optional[datetime] = None
+
+
+@admin_router.get("/admin/matcha-work/business")
+async def admin_list_matcha_work_business(
+    current_user: CurrentUser = Depends(require_platform_admin),
+):
+    """List non-personal companies provisioned for Matcha-Work (business vertical).
+
+    A company is on the business work plan when enabled_features.matcha_work is
+    explicitly true and it is not a personal account (personal users live under
+    the Individuals view).
+    """
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                c.id, c.name, COALESCE(c.status, 'approved') AS status,
+                c.signup_source, c.created_at,
+                (SELECT COUNT(*) FROM clients cl WHERE cl.company_id = c.id) AS member_count,
+                COALESCE(t.free_tokens_used, 0) AS free_tokens_used,
+                COALESCE(t.free_token_limit, 0) AS free_token_limit,
+                COALESCE(t.subscription_tokens_used, 0) AS subscription_tokens_used,
+                COALESCE(t.subscription_token_limit, 0) AS subscription_token_limit
+            FROM companies c
+            LEFT JOIN mw_token_budgets t ON t.company_id = c.id
+            WHERE COALESCE(c.is_personal, false) = false
+              AND c.enabled_features->>'matcha_work' = 'true'
+            ORDER BY c.name
+            """
+        )
+    return [
+        MatchaWorkBusinessSummary(
+            company_id=row["id"],
+            company_name=row["name"],
+            company_status=row["status"],
+            signup_source=row["signup_source"],
+            member_count=row["member_count"] or 0,
+            free_tokens_used=row["free_tokens_used"],
+            free_token_limit=row["free_token_limit"],
+            free_tokens_remaining=max(0, row["free_token_limit"] - row["free_tokens_used"]),
+            subscription_token_limit=row["subscription_token_limit"],
+            subscription_tokens_remaining=max(0, row["subscription_token_limit"] - row["subscription_tokens_used"]),
+            has_active_subscription=row["subscription_token_limit"] > 0,
+            created_at=row["created_at"],
+        )
+        for row in rows
+    ]
+
+
 @admin_router.post("/admin/companies/{company_id}/tokens")
 async def admin_grant_tokens(
     company_id: UUID,

@@ -1012,18 +1012,45 @@ private struct CollabThreadsView: View {
     @State private var selectedThreadId: String?
     @State private var threadVM = ThreadDetailViewModel()
     @State private var creating = false
+    /// User explicitly tapped "Threads" (back) to browse the list. Distinguishes
+    /// an intentional list browse from the initial auto-open, so the back button
+    /// can escape the auto-opened chat instead of immediately re-entering it.
+    @State private var showList = false
+    @State private var didAutoOpen = false
 
     private let service = MatchaWorkService.shared
 
     var body: some View {
         Group {
-            if let id = selectedThreadId {
+            if showList {
+                threadList
+            } else if let id = selectedThreadId {
                 threadDetail(id: id)
             } else {
-                threadList
+                // Entering the tab → drop straight into a ready chat (greeting +
+                // input + skill cards via ChatPanelView). Brief placeholder while
+                // we resolve which thread to open.
+                VStack { Spacer(); ProgressView().tint(.secondary); Spacer() }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.appBackground)
             }
         }
-        .task { await load() }
+        .task { await initialEnter() }
+    }
+
+    /// First entry: load threads, then open the most recent so the tab opens
+    /// like a regular thread. If the project has none yet, create one so the
+    /// "Hi, <name>." greeting + composer show immediately.
+    private func initialEnter() async {
+        guard !didAutoOpen else { return }
+        didAutoOpen = true
+        await load()
+        guard selectedThreadId == nil, !showList else { return }
+        if let latest = threads.max(by: { $0.lastActivityAt < $1.lastActivityAt }) {
+            openThread(id: latest.id)
+        } else {
+            await newThread()
+        }
     }
 
     // MARK: List
@@ -1145,6 +1172,7 @@ private struct CollabThreadsView: View {
             HStack(spacing: 8) {
                 Button {
                     selectedThreadId = nil
+                    showList = true
                     Task { await load() }
                 } label: {
                     HStack(spacing: 4) {
@@ -1183,6 +1211,7 @@ private struct CollabThreadsView: View {
     }
 
     private func openThread(id: String) {
+        showList = false
         selectedThreadId = id
         Task { await threadVM.loadThread(id: id) }
     }

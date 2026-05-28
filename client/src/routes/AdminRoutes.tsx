@@ -14,7 +14,7 @@ import Brokers from '../pages/admin/Brokers'
 import DealFlow from '../pages/admin/DealFlow'
 import MatchaLiteAdmin from '../pages/admin/MatchaLiteAdmin'
 import ComplianceManagement from '../pages/admin/ComplianceManagement'
-import Individuals from '../pages/admin/Individuals'
+import MatchaWork from '../pages/admin/MatchaWork'
 import Customers from '../pages/admin/Customers'
 import AdminOnboarding from '../pages/admin/AdminOnboarding'
 import AdminOnboardingWizard from '../pages/admin/AdminOnboardingWizard'
@@ -40,7 +40,8 @@ export default function AdminRoutes() {
         <Route path="onboarding/:sessionId/report" element={<GapAnalysisReport />} />
         <Route path="companies" element={<Companies />} />
         <Route path="companies/:companyId" element={<AdminCompanyDetail />} />
-        <Route path="individuals" element={<Individuals />} />
+        <Route path="matcha-work" element={<MatchaWork />} />
+        <Route path="individuals" element={<Navigate to="/admin/matcha-work" replace />} />
         <Route path="client-errors" element={<ClientErrors />} />
         <Route path="server-errors" element={<ServerErrors />} />
         <Route path="features" element={<Features />} />
