@@ -355,8 +355,16 @@ async def submit_upgrade_inquiry(
     company_id = await get_client_company_id(current_user)
 
     async with get_connection() as conn:
+        # users has no `name` column — pull it from clients via the require_client
+        # tenant's user→client link. Same pattern as stripe_webhook.py:170.
         user_row = await conn.fetchrow(
-            "SELECT email, name FROM users WHERE id = $1",
+            """
+            SELECT u.email, c.name
+            FROM users u
+            LEFT JOIN clients c ON c.user_id = u.id
+            WHERE u.id = $1
+            LIMIT 1
+            """,
             current_user.id,
         )
         company_row = None
@@ -441,8 +449,16 @@ async def request_lite_upgrade(
         company_id = await get_client_company_id(current_user)
 
         async with get_connection() as conn:
+            # users has no `name` column — pull it from clients (require_client
+            # gates this route, so the link is always present for real callers).
             user_row = await conn.fetchrow(
-                "SELECT email, name FROM users WHERE id = $1",
+                """
+                SELECT u.email, c.name
+                FROM users u
+                LEFT JOIN clients c ON c.user_id = u.id
+                WHERE u.id = $1
+                LIMIT 1
+                """,
                 current_user.id,
             )
             company_name: Optional[str] = None
