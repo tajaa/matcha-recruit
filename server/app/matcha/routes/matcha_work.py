@@ -4959,6 +4959,107 @@ async def get_task_history_endpoint(
     return [_serialize_history_row(r) for r in rows]
 
 
+@router.post("/projects/{project_id}/tasks/{task_id}/rounds", status_code=201)
+async def start_task_round_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Open a new round on a kanban ticket: creates a "suggested fix" subtask
+    (the round's headline work item), then logs a `round_started` row to
+    mw_task_history so the client can group subsequent events under the new
+    round. Rounds chain together as modular sub-todos inside one ticket —
+    each round has a title, owns the events that follow until the next
+    round_started, and surfaces what got "fixed" in the prior round.
+
+    Body:
+        suggested_fix_title (str, required): becomes a new subtask AND the
+            round's display title.
+        body (str, optional): kick-off note logged as the first activity row
+            of the new round.
+        attachment_ids ([uuid], optional): images already uploaded to this
+            task (mw_project_files) to attach to the kick-off note.
+
+    Returns: {round_event, subtask, note}. The note is None if no body+no
+    attachments were supplied.
+    """
+    from ..services import project_subtask_service as st_svc
+    from ..services import project_task_service as pt_svc
+
+    await _verify_project_access(project_id, current_user)
+    await _verify_task_belongs_to_project(project_id, task_id)
+
+    title = (body.get("suggested_fix_title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="suggested_fix_title required")
+
+    kickoff_body = (body.get("body") or "").strip() or None
+
+    raw_attachments = body.get("attachment_ids") or []
+    attachment_ids: list[UUID] = []
+    if raw_attachments:
+        if not isinstance(raw_attachments, list):
+            raise HTTPException(status_code=400, detail="attachment_ids must be a list")
+        try:
+            attachment_ids = [UUID(str(x)) for x in raw_attachments]
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="attachment_ids contains invalid UUID")
+        async with get_connection() as conn:
+            found = await conn.fetch(
+                "SELECT id FROM mw_project_files WHERE task_id = $1 AND id = ANY($2::uuid[])",
+                task_id, attachment_ids,
+            )
+        if len(found) != len(attachment_ids):
+            raise HTTPException(status_code=400, detail="attachment not found on this task")
+
+    # 1. Create the headline subtask (fires its own `subtask_added` history row).
+    try:
+        subtask = await st_svc.create_subtask(
+            project_id, task_id,
+            title=title,
+            created_by=current_user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if subtask is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # 2. Log the round boundary itself. Client groups events between
+    # consecutive round_started rows into one round; the title + headline
+    # subtask_id ride in metadata so the round card can render rich.
+    async with get_connection() as conn:
+        await pt_svc._log_task_history(
+            conn,
+            task_id=task_id,
+            project_id=project_id,
+            actor_user_id=current_user.id,
+            event_type="round_started",
+            metadata={
+                "title": title,
+                "subtask_id": str(subtask["id"]),
+            },
+        )
+
+    # 3. Optional kick-off note (text + images) — landed AFTER round_started
+    # so it falls inside the new round on the timeline.
+    note = None
+    if kickoff_body or attachment_ids:
+        try:
+            note = await pt_svc.log_task_activity(
+                project_id=project_id,
+                task_id=task_id,
+                actor_user_id=current_user.id,
+                kind="note",
+                body=kickoff_body,
+                attachment_ids=attachment_ids or None,
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    return {"ok": True, "title": title, "subtask": subtask, "note": note}
+
+
 @router.post("/projects/{project_id}/tasks/{task_id}/activity", status_code=201)
 async def log_task_activity_endpoint(
     project_id: UUID,

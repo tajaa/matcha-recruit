@@ -29,6 +29,9 @@ struct TaskViewerSheet: View {
     /// Pending image attachments queued for the next note submit. Cleared
     /// after a successful submit. Each entry is held in-memory until upload.
     @State private var pendingAttachments: [PendingAttachment] = []
+    /// Open-state for the "Start Next Round" sheet. Sheet is hosted at the
+    /// root of TaskViewerSheet so it lives above all section content.
+    @State private var showingNewRoundSheet = false
 
     private var attachments: [MWProjectFile] {
         viewModel.taskFiles[task.id] ?? []
@@ -244,6 +247,62 @@ struct TaskViewerSheet: View {
         .sheet(item: $previewFile) { file in
             AttachmentPreviewSheet(file: file)
         }
+        .sheet(isPresented: $showingNewRoundSheet) {
+            NewRoundSheet(
+                nextRoundIndex: rounds.count + 1,
+                onCancel: { showingNewRoundSheet = false },
+                onSubmit: { suggestedFix, body, pending in
+                    await submitNewRound(
+                        suggestedFix: suggestedFix,
+                        body: body,
+                        pending: pending
+                    )
+                }
+            )
+        }
+    }
+
+    /// Sheet-callback path for starting a new round. Mirrors `submitNote`:
+    /// uploads pending attachments first (so file ids exist before being
+    /// referenced in the kick-off note), then calls the rounds endpoint.
+    /// Returns true on success so the sheet can dismiss + clear state.
+    @MainActor
+    private func submitNewRound(
+        suggestedFix: String,
+        body: String,
+        pending: [PendingAttachment]
+    ) async -> Bool {
+        guard let pid = viewModel.project?.id else { return false }
+        var uploadedIds: [String] = []
+        for att in pending {
+            guard let id = await viewModel.uploadTaskFile(
+                taskId: task.id,
+                data: att.data,
+                filename: att.filename,
+                mimeType: att.mimeType
+            ) else {
+                return false
+            }
+            uploadedIds.append(id)
+        }
+        do {
+            try await MatchaWorkService.shared.startNewRound(
+                projectId: pid,
+                taskId: task.id,
+                suggestedFixTitle: suggestedFix,
+                body: body.isEmpty ? nil : body,
+                attachmentIds: uploadedIds.isEmpty ? nil : uploadedIds
+            )
+            // Reload BOTH history (for round_started + activity rows) and the
+            // subtask list (for the headline subtask just created) so the
+            // checklist + rounds feed both reflect the new state.
+            await loadHistory()
+            await viewModel.loadSubtasks(taskId: task.id)
+            showingNewRoundSheet = false
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func loadHistory() async {
@@ -341,7 +400,7 @@ struct TaskViewerSheet: View {
 
     @ViewBuilder
     private var discussionSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "bubble.left.and.bubble.right")
                     .font(.system(size: 10))
@@ -359,6 +418,24 @@ struct TaskViewerSheet: View {
                         .background(Color.zinc800)
                         .cornerRadius(4)
                 }
+                Spacer()
+                Button {
+                    showingNewRoundSheet = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.system(size: 10))
+                        Text("Start Next Round")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundColor(.matcha500)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.matcha500.opacity(0.12))
+                    .cornerRadius(4)
+                }
+                .buttonStyle(.plain)
+                .help("Open a new round with a suggested-fix subtask. Any collaborator can start one.")
             }
 
             noteComposer
@@ -366,9 +443,22 @@ struct TaskViewerSheet: View {
             // Rounds rendered newest-first so the active round sits right
             // under the composer. Within each round events stay chronological
             // (oldest → newest) so the round reads as a coherent story.
-            ForEach(rounds.reversed()) { round in
+            // `previousFixed` threads the prior round's completed subtask
+            // titles forward so round N+1 shows "Fixed in Round N · …".
+            let reversed = Array(rounds.reversed())
+            ForEach(Array(reversed.enumerated()), id: \.element.id) { idx, round in
+                // `reversed` is newest-first; the round AFTER this one in
+                // chronological time is the previous element in `reversed`
+                // (idx-1). For the latest round (idx 0) there's no "next."
+                // The summary block belongs ON round N+1, so we look at
+                // round N = reversed[idx+1] when rendering reversed[idx].
+                let previousIndex = idx + 1
+                let previousFixed: [String] = (previousIndex < reversed.count)
+                    ? reversed[previousIndex].fixedSubtaskTitles
+                    : []
                 RoundView(
                     round: round,
+                    previousFixed: round.index >= 2 ? previousFixed : [],
                     files: attachments,
                     onPreview: { previewFile = $0 }
                 )
@@ -814,14 +904,16 @@ struct TaskViewerSheet: View {
     }
 }
 
-/// One review-cycle round on a kanban task. A new round opens every time
-/// the card leaves `review` for a non-done column (sent back for changes,
-/// or assignee pulls it out of review). Round 1 covers the initial work
-/// from creation up to the first submission for review.
+/// One round on a kanban ticket — a modular sub-todo housed inside the
+/// parent ticket. Rounds chain together explicitly: any collaborator
+/// hits "Start Next Round," names the suggested fix, and a new round
+/// opens. Round 1 covers the initial work from creation up to the first
+/// `round_started` event; each subsequent `round_started` row in
+/// mw_task_history opens a new round and lands at the TOP of it.
 ///
-/// Events inside a round are kept chronological so the round reads as a
-/// story: "moved to In Progress · added subtask · note · moved to Review ·
-/// reviewer note · sent back" → next round opens.
+/// Events inside a round stay chronological so the round reads as a
+/// self-contained story: "round opened (suggested fix: X) · subtask
+/// added · note · ... · next round_started → this round closes."
 struct TaskRound: Identifiable {
     let index: Int
     let events: [MWTaskHistoryEntry]
@@ -829,51 +921,82 @@ struct TaskRound: Identifiable {
 
     var id: Int { index }
 
+    /// Round title — for round N>=2, the `suggested_fix_title` from the
+    /// opening `round_started` event. For round 1, falls back to a
+    /// generic label so the UI always has something to render.
+    var title: String {
+        if let opener = events.first, opener.eventType == "round_started",
+           let t = (opener.metadata?["title"])?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !t.isEmpty {
+            return t
+        }
+        return "Initial work"
+    }
+
+    /// True when this round was opened by an explicit `round_started`
+    /// event (vs the implicit round 1 that starts at task creation).
+    var hasExplicitOpener: Bool {
+        events.first?.eventType == "round_started"
+    }
+
+    /// Subtask titles completed during this round. Drives the "Fixed in
+    /// Round N-1" inheritance block at the top of the NEXT round so the
+    /// reviewer sees what got addressed at a glance.
+    var fixedSubtaskTitles: [String] {
+        events
+            .filter { $0.eventType == "subtask_completed" }
+            .compactMap { ($0.metadata?["title"])?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
     /// Highest-signal column the round currently sits in, used in the round
     /// header chip ("Round 3 · In Review", "Round 2 · Sent back"). Derived
-    /// from the last column_change in this round; defaults to the task's
-    /// starting column for round 1 if no moves happened yet.
-    var phaseLabel: String {
-        let last = events.reversed().first { $0.eventType == "column_change" }
-        let col = last?.toValue ?? "todo"
-        switch col {
-        case "todo": return "Todo"
-        case "in_progress": return "In Progress"
-        case "review": return "In Review"
-        case "changes_requested": return "Sent Back"
-        case "done": return "Done"
-        default: return col.replacingOccurrences(of: "_", with: " ").capitalized
+    /// from the last column_change in this round; defaults to "Active" /
+    /// "Closed" based on whether this is the latest round.
+    func phaseLabel(isLatest: Bool) -> String {
+        if let last = events.reversed().first(where: { $0.eventType == "column_change" }),
+           let col = last.toValue {
+            switch col {
+            case "todo": return "Todo"
+            case "in_progress": return "In Progress"
+            case "review": return "In Review"
+            case "changes_requested": return "Sent Back"
+            case "done": return "Done"
+            default: return col.replacingOccurrences(of: "_", with: " ").capitalized
+            }
         }
+        return isLatest ? "Active" : "Closed"
     }
 
-    var phaseColor: Color {
-        let last = events.reversed().first { $0.eventType == "column_change" }
-        switch last?.toValue ?? "" {
-        case "review": return .blue
-        case "changes_requested": return .orange
-        case "done": return .matcha500
-        case "in_progress": return .yellow
-        default: return .secondary
+    func phaseColor(isLatest: Bool) -> Color {
+        if let last = events.reversed().first(where: { $0.eventType == "column_change" }) {
+            switch last.toValue ?? "" {
+            case "review": return .blue
+            case "changes_requested": return .orange
+            case "done": return .matcha500
+            case "in_progress": return .yellow
+            default: break
+            }
         }
+        return isLatest ? .matcha500 : .secondary
     }
 
-    /// Build chronological rounds from a flat history list.
+    /// Build rounds from a flat history list. Round boundaries are EXPLICIT
+    /// — only `round_started` events open new rounds. Column moves are
+    /// informational events that live inside whatever round they fall in,
+    /// no longer triggering boundaries on their own.
     static func build(from history: [MWTaskHistoryEntry]) -> [TaskRound] {
         let sorted = history.sorted { $0.createdAt < $1.createdAt }
         var buckets: [[MWTaskHistoryEntry]] = [[]]
         for e in sorted {
-            // A new round opens when the card LEAVES review for any
-            // non-done column. The "leaving review" event itself lands at
-            // the top of the new round so reviewer-feedback notes flow
-            // straight into the assignee's response.
-            if e.eventType == "column_change",
-               let from = e.fromValue, from == "review",
-               let to = e.toValue, to != "done" {
+            if e.eventType == "round_started" {
+                // Open a new round; the round_started event itself goes at
+                // the top of the new round so the title + subtask hook
+                // render first.
                 buckets.append([])
             }
             buckets[buckets.count - 1].append(e)
         }
-        // Drop trailing empty bucket if any (defensive — shouldn't happen).
         if buckets.last?.isEmpty == true { buckets.removeLast() }
         if buckets.isEmpty { return [] }
         return buckets.enumerated().map { idx, events in
@@ -882,84 +1005,132 @@ struct TaskRound: Identifiable {
     }
 }
 
-/// Renders one TaskRound: a header row (Round N · phase chip) plus the
-/// round's events. The latest round is always expanded; older rounds are
-/// collapsed under a DisclosureGroup so a thrashing ticket doesn't bury
-/// the active conversation under audit-log noise.
+/// Renders one TaskRound as a self-contained sub-ticket card: header
+/// (Round N · CURRENT · phase) + title (suggested fix) + optional
+/// "Fixed in previous round" inheritance summary + this round's events.
+/// Latest round is expanded and gets a phase-colored border; older
+/// rounds collapse under DisclosureGroup so a thrashing ticket doesn't
+/// bury the active sub-todo under audit-log noise.
 private struct RoundView: View {
     let round: TaskRound
+    let previousFixed: [String]
     let files: [MWProjectFile]
     let onPreview: (MWProjectFile) -> Void
 
     @State private var isExpanded: Bool
 
-    init(round: TaskRound, files: [MWProjectFile], onPreview: @escaping (MWProjectFile) -> Void) {
+    init(
+        round: TaskRound,
+        previousFixed: [String],
+        files: [MWProjectFile],
+        onPreview: @escaping (MWProjectFile) -> Void
+    ) {
         self.round = round
+        self.previousFixed = previousFixed
         self.files = files
         self.onPreview = onPreview
-        // Latest round starts expanded; older rounds collapsed until
-        // explicitly opened.
         self._isExpanded = State(initialValue: round.isLatest)
     }
 
+    private var phaseLabel: String { round.phaseLabel(isLatest: round.isLatest) }
+    private var phaseColor: Color { round.phaseColor(isLatest: round.isLatest) }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
             DisclosureGroup(isExpanded: $isExpanded) {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(round.events) { event in
-                        EventRow(event: event, files: files, onPreview: onPreview)
+                VStack(alignment: .leading, spacing: 8) {
+                    // "Fixed in Round N-1" inheritance block. Only shown on
+                    // rounds 2+, only when the prior round actually
+                    // completed something. Gives the reader at-a-glance
+                    // continuity: "this round picks up from these closed
+                    // items."
+                    if !previousFixed.isEmpty {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("FIXED IN ROUND \(round.index - 1)")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundColor(.matcha500)
+                                .tracking(0.6)
+                            ForEach(Array(previousFixed.enumerated()), id: \.offset) { _, title in
+                                HStack(spacing: 6) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.matcha500)
+                                    Text(title)
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.white.opacity(0.85))
+                                        .strikethrough()
+                                        .lineLimit(2)
+                                }
+                            }
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.matcha500.opacity(0.08))
+                        .cornerRadius(5)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(round.events) { event in
+                            EventRow(event: event, files: files, onPreview: onPreview)
+                        }
                     }
                 }
                 .padding(.top, 6)
                 .padding(.leading, 4)
             } label: {
-                HStack(spacing: 6) {
-                    if round.isLatest {
-                        // Pulse-eligible "CURRENT" badge on the latest round so
-                        // the reader's eye lands here first when reopening a
-                        // long-cycled ticket.
-                        HStack(spacing: 3) {
-                            Circle()
-                                .fill(round.phaseColor)
-                                .frame(width: 6, height: 6)
-                            Text("CURRENT")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundColor(round.phaseColor)
-                                .tracking(0.7)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        if round.isLatest {
+                            HStack(spacing: 3) {
+                                Circle()
+                                    .fill(phaseColor)
+                                    .frame(width: 6, height: 6)
+                                Text("CURRENT")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundColor(phaseColor)
+                                    .tracking(0.7)
+                            }
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(phaseColor.opacity(0.18))
+                            .cornerRadius(3)
                         }
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(round.phaseColor.opacity(0.18))
-                        .cornerRadius(3)
+                        Text("Round \(round.index)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.9))
+                        Text("·")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        Text(phaseLabel)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(phaseColor)
+                            .tracking(0.5)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(phaseColor.opacity(0.15))
+                            .cornerRadius(3)
+                        Spacer()
+                        Text("\(round.events.count) event\(round.events.count == 1 ? "" : "s")")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
                     }
-                    Text("Round \(round.index)")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.9))
-                    Text("·")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                    Text(round.phaseLabel)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(round.phaseColor)
-                        .tracking(0.5)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(round.phaseColor.opacity(0.15))
-                        .cornerRadius(3)
-                    Spacer()
-                    Text("\(round.events.count) event\(round.events.count == 1 ? "" : "s")")
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
+                    // Round title (the suggested fix) — prominent because
+                    // each round is a modular sub-todo with its own scope.
+                    Text(round.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
                 }
             }
             .accentColor(.secondary)
         }
-        .padding(10)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(round.isLatest ? Color.zinc800.opacity(0.55) : Color.zinc800.opacity(0.3))
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(round.isLatest ? round.phaseColor.opacity(0.35) : Color.clear, lineWidth: 1)
+                .stroke(round.isLatest ? phaseColor.opacity(0.45) : Color.clear, lineWidth: 1.5)
         )
         .cornerRadius(6)
     }
@@ -1006,6 +1177,7 @@ private struct EventRow: View {
         case "description_change": return "text.alignleft"
         case "progress_note_change": return "note.text"
         case "review_rejected": return "arrow.uturn.backward.circle"
+        case "round_started": return "flag.circle.fill"
         case "subtask_added": return "plus.square"
         case "subtask_completed": return "checkmark.square.fill"
         case "subtask_uncompleted": return "square"
@@ -1023,6 +1195,7 @@ private struct EventRow: View {
         case "description_change": return .matcha500
         case "progress_note_change": return .matcha500
         case "review_rejected": return .orange
+        case "round_started": return .matcha500
         case "subtask_added": return .blue
         case "subtask_completed": return .matcha500
         case "subtask_uncompleted": return .orange
@@ -1053,6 +1226,11 @@ private struct EventRow: View {
             return note.isEmpty
                 ? "\(who) sent this back for changes"
                 : "\(who) sent back: \u{201C}\(note)\u{201D}"
+        case "round_started":
+            let title = (e.metadata?["title"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return title.isEmpty
+                ? "\(who) opened a new round"
+                : "\(who) opened a new round: \u{201C}\(title)\u{201D}"
         case "subtask_added":
             let title = (e.metadata?["title"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             return title.isEmpty
@@ -1384,5 +1562,201 @@ enum TaskClipboardExporter {
         if b < 1024 { return "\(bytes) B" }
         if b < 1024 * 1024 { return String(format: "%.1f KB", b / 1024) }
         return String(format: "%.1f MB", b / 1024 / 1024)
+    }
+}
+
+/// Sheet for opening a new round on a ticket. Any collaborator can hit
+/// "Start Next Round" → name the suggested fix → optionally add a
+/// kick-off note + paste a screenshot → submit. The fix becomes the
+/// new round's headline subtask AND the round's display title.
+private struct NewRoundSheet: View {
+    let nextRoundIndex: Int
+    let onCancel: () -> Void
+    /// Returns true if submit succeeded and the sheet should dismiss.
+    let onSubmit: (_ suggestedFix: String, _ body: String, _ pending: [PendingAttachment]) async -> Bool
+
+    @State private var suggestedFix = ""
+    @State private var noteBody = ""
+    @State private var pending: [PendingAttachment] = []
+    @State private var submitting = false
+    @State private var error: String?
+
+    private var canSubmit: Bool {
+        !suggestedFix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("START ROUND \(nextRoundIndex)")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.matcha500)
+                        .tracking(0.5)
+                    Text("Chain a new sub-todo onto this ticket")
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.85))
+                }
+                Spacer()
+                Button(action: onCancel) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("SUGGESTED FIX")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .tracking(0.5)
+                TextField("e.g. Add EIN validation before export", text: $suggestedFix)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .foregroundColor(.white)
+                    .padding(8)
+                    .background(Color.zinc800.opacity(0.7))
+                    .cornerRadius(5)
+                    .onSubmit {
+                        if canSubmit { Task { await submit() } }
+                    }
+                Text("Becomes a new checklist item AND this round's title.")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("KICK-OFF NOTE (optional)")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .tracking(0.5)
+                TextEditor(text: $noteBody)
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.9))
+                    .scrollContentBackground(.hidden)
+                    .padding(5)
+                    .frame(height: 80)
+                    .background(Color.zinc800.opacity(0.6))
+                    .cornerRadius(5)
+                HStack(spacing: 8) {
+                    Button {
+                        attachFileFromDisk()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "paperclip").font(.system(size: 11))
+                            Text("Attach file").font(.system(size: 11))
+                        }
+                        .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    Button {
+                        attachImageFromClipboard()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "doc.on.clipboard").font(.system(size: 11))
+                            Text("Paste screenshot").font(.system(size: 11))
+                        }
+                        .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    Spacer()
+                }
+                if !pending.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(pending) { att in
+                                PendingAttachmentChip(attachment: att) {
+                                    pending.removeAll { $0.id == att.id }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let err = error {
+                Text(err)
+                    .font(.system(size: 11))
+                    .foregroundColor(.red)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                Button {
+                    Task { await submit() }
+                } label: {
+                    if submitting {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("Open Round \(nextRoundIndex)")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(canSubmit ? .matcha500 : .secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSubmit || submitting)
+            }
+        }
+        .padding(18)
+        .frame(width: 480)
+        .background(Color.appBackground)
+    }
+
+    private func submit() async {
+        let title = suggestedFix.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, !submitting else { return }
+        submitting = true
+        error = nil
+        let ok = await onSubmit(title, noteBody, pending)
+        if !ok {
+            error = "Couldn't open the round. Try again."
+        }
+        submitting = false
+    }
+
+    private func attachFileFromDisk() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.image, .pdf]
+        panel.begin { resp in
+            guard resp == .OK else { return }
+            for url in panel.urls {
+                guard let data = try? Data(contentsOf: url) else { continue }
+                let filename = url.lastPathComponent
+                let ext = (filename as NSString).pathExtension.lowercased()
+                let mime = (UTType(filenameExtension: ext)?.preferredMIMEType) ?? "application/octet-stream"
+                pending.append(PendingAttachment(data: data, filename: filename, mimeType: mime))
+            }
+        }
+    }
+
+    private func attachImageFromClipboard() {
+        let pb = NSPasteboard.general
+        if let png = pb.data(forType: .png) {
+            pending.append(PendingAttachment(data: png, filename: clipboardScreenshotName(ext: "png"), mimeType: "image/png"))
+            return
+        }
+        if let tiff = pb.data(forType: .tiff),
+           let rep = NSBitmapImageRep(data: tiff),
+           let png = rep.representation(using: .png, properties: [:]) {
+            pending.append(PendingAttachment(data: png, filename: clipboardScreenshotName(ext: "png"), mimeType: "image/png"))
+            return
+        }
+        let jpegType = NSPasteboard.PasteboardType(UTType.jpeg.identifier)
+        if let jpeg = pb.data(forType: jpegType) {
+            pending.append(PendingAttachment(data: jpeg, filename: clipboardScreenshotName(ext: "jpg"), mimeType: "image/jpeg"))
+        }
+    }
+
+    private func clipboardScreenshotName(ext: String) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd-HHmmss"
+        return "screenshot-\(f.string(from: Date())).\(ext)"
     }
 }

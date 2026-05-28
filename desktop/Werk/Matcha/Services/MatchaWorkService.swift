@@ -1008,6 +1008,35 @@ class MatchaWorkService {
         )
     }
 
+    /// Open a new round on a kanban ticket. Creates the "suggested fix"
+    /// subtask + logs a `round_started` event + (optionally) a kick-off note
+    /// with attachments. Rounds chain together as modular sub-todos inside
+    /// one ticket; the new round inherits context from the previous round's
+    /// completed work via the client-side "Fixed in Round N-1" summary.
+    func startNewRound(
+        projectId: String,
+        taskId: String,
+        suggestedFixTitle: String,
+        body: String?,
+        attachmentIds: [String]? = nil
+    ) async throws {
+        struct Req: Encodable {
+            let suggested_fix_title: String
+            let body: String?
+            let attachment_ids: [String]?
+        }
+        struct Res: Decodable { let ok: Bool? }
+        let _: Res = try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/rounds",
+            body: Req(
+                suggested_fix_title: suggestedFixTitle,
+                body: body,
+                attachment_ids: (attachmentIds?.isEmpty ?? true) ? nil : attachmentIds
+            )
+        )
+    }
+
     /// Log a sales follow-up activity (call/email/note/meeting) onto a task's
     /// history timeline. Renders in the existing task-viewer timeline.
     /// `attachmentIds` (optional) links the note to existing mw_project_files
