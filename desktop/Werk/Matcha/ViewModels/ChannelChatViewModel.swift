@@ -62,6 +62,23 @@ final class ChannelChatViewModel {
         ws.joinRoom(channelId: channelId)
     }
 
+    /// Warm re-entry: this VM was kept alive (WorkDetailVMStore) and already
+    /// holds this channel. Re-wire the WS room and silently revalidate, instead
+    /// of a cold `start` (which blanks messages and flashes the loader). Falls
+    /// back to a full `start` if the VM isn't actually warm for this channel.
+    func resume(channelId: String) async {
+        guard self.channelId == channelId, channel != nil else {
+            await start(channelId: channelId)
+            return
+        }
+        ws.clearCallbacks()
+        cancelAllPendingTimeouts()
+        wireCallbacks(channelId: channelId)
+        ws.connect()
+        ws.joinRoom(channelId: channelId)
+        await loadChannel(channelId: channelId, isRefresh: true)
+    }
+
     func stop(channelId: String) {
         ws.clearCallbacksIfRoomMatches(channelId)
         cancelAllPendingTimeouts()

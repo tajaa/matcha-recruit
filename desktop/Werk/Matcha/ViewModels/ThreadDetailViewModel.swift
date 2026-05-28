@@ -63,17 +63,23 @@ class ThreadDetailViewModel {
     }
 
     func loadThread(id: String) async {
-        await MainActor.run {
-            isLoadingThread = true
-            errorMessage = nil
-            selectedSlideIndex = nil
-            thread = nil
-            messages = []
-            versions = []
-            currentState = [:]
-            pdfData = nil
-            isLoadingPDF = false
-            tokenUsage = nil
+        // Warm path: this VM was kept alive (WorkDetailVMStore) and already holds
+        // this thread — keep the painted content visible and just revalidate in
+        // the background. Only blank on a genuine cold load so the skeleton shows.
+        let warm = await MainActor.run { thread?.id == id }
+        if !warm {
+            await MainActor.run {
+                isLoadingThread = true
+                errorMessage = nil
+                selectedSlideIndex = nil
+                thread = nil
+                messages = []
+                versions = []
+                currentState = [:]
+                pdfData = nil
+                isLoadingPDF = false
+                tokenUsage = nil
+            }
         }
         do {
             let detail = try await service.getThread(id: id)

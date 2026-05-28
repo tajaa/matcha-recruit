@@ -12,6 +12,18 @@ struct ChannelDetailView: View {
     @Environment(AppState.self) private var appState
     @State private var vm = ChannelChatViewModel()
     @State private var inputText = ""
+
+    @MainActor
+    init(channelId: String, isEmbedded: Bool = false) {
+        self.channelId = channelId
+        self.isEmbedded = isEmbedded
+        // Main-window tabs share a cached VM for instant warm re-entry; embedded
+        // channels (collab project chat panel) keep a private VM so they never
+        // share WS callbacks with a main tab on the same channel.
+        _vm = State(initialValue: isEmbedded
+            ? ChannelChatViewModel()
+            : WorkDetailVMStore.shared.channelVM(channelId))
+    }
     @State private var pendingAttachments: [PendingChannelAttachment] = []
     @State private var isUploading = false
     @State private var isDragOver = false
@@ -65,12 +77,10 @@ struct ChannelDetailView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            if vm.isLoading {
-                Spacer()
-                Text("loading…")
-                    .font(.system(size: 11))
-                    .foregroundColor(appState.themeText.opacity(0.35))
-                Spacer()
+            if vm.isLoading && vm.channel == nil {
+                // Cold load only — warm re-entry keeps the prior messages
+                // visible and revalidates silently (no skeleton flash).
+                ChatSkeleton()
             } else if let errorMessage = vm.errorMessage {
                 Spacer()
                 VStack(spacing: 10) {
@@ -139,7 +149,14 @@ struct ChannelDetailView: View {
         }
         .background(appState.themeBg)
         .task(id: channelId) {
-            await vm.start(channelId: channelId)
+            // Re-point at this channel's cached VM (view is reused across
+            // channel→channel switches). `resume` silently revalidates when the
+            // VM is already warm for this channel, else falls back to a cold start.
+            if !isEmbedded {
+                let cached = WorkDetailVMStore.shared.channelVM(channelId)
+                if cached !== vm { vm = cached }
+            }
+            await vm.resume(channelId: channelId)
             // REST fallback so a viewer who navigates into the channel mid-stream
             // (or whose WS dropped before the broadcast.started fan-out) still
             // sees the Watch-feed banner without depending on the WS event.

@@ -3668,12 +3668,15 @@ async def email_project_section_endpoint(
     if not email_svc.is_configured():
         raise HTTPException(status_code=503, detail="Email is not configured on the server.")
 
+    # Send via the Gmail→MailerSend fallback so it uses whichever backend is
+    # live (dev typically has MailerSend but no Gmail token). Both carry the
+    # PDF attachment.
     attachment = {"filename": filename, "content": pdf_b64, "disposition": "attachment"}
     sent: list[str] = []
     failed: list[str] = []
     for email in recipients:
         try:
-            ok = await email_svc.send_email(
+            ok = await email_svc.send_email_with_fallback(
                 to_email=email,
                 to_name=email.split("@")[0],
                 subject=subject,
@@ -4128,14 +4131,24 @@ def _resolve_file_urls(files: list[dict]) -> list[dict]:
 async def list_open_tasks_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Cross-project pending tasks for the dashboard.
+    """Open work assigned to the current user, for the Home "Assigned to me" card.
 
-    Returns tasks the current user owns or created, scoped to their company,
-    sorted by priority then due date. Joins project title for display.
+    Strictly the current user's own work, scoped to their company:
+    - top-level tasks (`mw_tasks`) where `assigned_to = me` and the task is
+      still open (status not completed/cancelled), and
+    - checklist subtasks (`mw_subtasks`) where `assigned_to = me`, not yet done,
+      and whose parent task is still open.
+
+    Returns one merged list. Subtask rows carry `is_subtask=True` plus
+    `parent_task_id`/`parent_title`; they reuse `title`/`project_title` and
+    fill the task-only fields (priority/status/due_date/progress_note) with
+    neutral defaults so the shared `MWOpenTask` shape still decodes. Tasks come
+    first (priority then due date), subtasks after (most-recent first) — they're
+    lower-signal checklist items.
     """
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
-        rows = await conn.fetch(
+        task_rows = await conn.fetch(
             """
             SELECT t.id, t.project_id, t.title, t.priority, t.status,
                    t.due_date, t.progress_note, t.assigned_to, t.created_by,
@@ -4144,9 +4157,9 @@ async def list_open_tasks_endpoint(
             FROM mw_tasks t
             LEFT JOIN mw_projects p ON p.id = t.project_id
             WHERE t.company_id = $1
-              AND t.status = 'pending'
+              AND t.assigned_to = $2
+              AND t.status NOT IN ('completed', 'cancelled')
               AND t.project_id IS NOT NULL
-              AND (t.assigned_to = $2 OR t.created_by = $2 OR t.assigned_to IS NULL)
             ORDER BY
                 CASE t.priority
                     WHEN 'critical' THEN 0 WHEN 'high' THEN 1
@@ -4158,8 +4171,27 @@ async def list_open_tasks_endpoint(
             """,
             company_id, current_user.id,
         )
+        subtask_rows = await conn.fetch(
+            """
+            SELECT s.id, s.project_id, s.title, s.assigned_to, s.created_by,
+                   s.updated_at,
+                   s.task_id AS parent_task_id, pt.title AS parent_title,
+                   p.title AS project_title, p.project_type
+            FROM mw_subtasks s
+            JOIN mw_tasks pt ON pt.id = s.task_id
+            LEFT JOIN mw_projects p ON p.id = s.project_id
+            WHERE s.company_id = $1
+              AND s.assigned_to = $2
+              AND s.is_done = false
+              AND pt.status NOT IN ('completed', 'cancelled')
+            ORDER BY s.updated_at DESC
+            LIMIT 50
+            """,
+            company_id, current_user.id,
+        )
+
     out = []
-    for r in rows:
+    for r in task_rows:
         d = dict(r)
         for k in ("id", "project_id", "assigned_to", "created_by"):
             if d.get(k) is not None:
@@ -4168,6 +4200,21 @@ async def list_open_tasks_endpoint(
             d["due_date"] = d["due_date"].isoformat()
         if d.get("updated_at") is not None:
             d["updated_at"] = d["updated_at"].isoformat()
+        d["is_subtask"] = False
+        out.append(d)
+    for r in subtask_rows:
+        d = dict(r)
+        for k in ("id", "project_id", "assigned_to", "created_by", "parent_task_id"):
+            if d.get(k) is not None:
+                d[k] = str(d[k])
+        if d.get("updated_at") is not None:
+            d["updated_at"] = d["updated_at"].isoformat()
+        # Fill the task-only fields the shared MWOpenTask shape expects.
+        d["priority"] = ""
+        d["status"] = "pending"
+        d["due_date"] = None
+        d["progress_note"] = None
+        d["is_subtask"] = True
         out.append(d)
     return out
 

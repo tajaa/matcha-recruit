@@ -14,6 +14,17 @@ struct ThreadDetailView: View {
     @State private var titleDraft = ""
     @FocusState private var titleFocused: Bool
 
+    @MainActor
+    init(threadId: String, isEmbedded: Bool = false) {
+        self.threadId = threadId
+        self.isEmbedded = isEmbedded
+        // Main-window tabs share a cached VM so re-opening repaints instantly;
+        // embedded panes stay isolated. See ProjectDetailView for rationale.
+        _viewModel = State(initialValue: isEmbedded
+            ? ThreadDetailViewModel()
+            : WorkDetailVMStore.shared.threadVM(threadId))
+    }
+
     private func commitTitle() {
         let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         editingTitle = false
@@ -50,23 +61,30 @@ struct ThreadDetailView: View {
                 alignment: .top
             )
 
-            HSplitView {
-                ChatPanelView(viewModel: viewModel, lightMode: lightMode, selectedModel: selectedModelValue)
-                    .frame(minWidth: 280, idealWidth: 520)
+            if viewModel.thread == nil && viewModel.isLoadingThread {
+                // Cold load only — warm re-entry keeps prior content (the VM is
+                // retained by WorkDetailVMStore) and revalidates silently.
+                ChatSkeleton()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                HSplitView {
+                    ChatPanelView(viewModel: viewModel, lightMode: lightMode, selectedModel: selectedModelValue)
+                        .frame(minWidth: 280, idealWidth: 520)
 
-                if !previewCollapsed && (viewModel.hasPreviewContent || viewModel.isLoadingPDF) {
-                    PreviewPanelView(
-                        currentState: viewModel.currentState,
-                        pdfData: viewModel.pdfData,
-                        isLoading: viewModel.isLoadingPDF,
-                        taskType: viewModel.thread?.taskType,
-                        threadId: viewModel.thread?.id,
-                        selectedSlideIndex: Bindable(viewModel).selectedSlideIndex
-                    )
-                    .frame(minWidth: 320, idealWidth: 420, maxWidth: .infinity)
+                    if !previewCollapsed && (viewModel.hasPreviewContent || viewModel.isLoadingPDF) {
+                        PreviewPanelView(
+                            currentState: viewModel.currentState,
+                            pdfData: viewModel.pdfData,
+                            isLoading: viewModel.isLoadingPDF,
+                            taskType: viewModel.thread?.taskType,
+                            threadId: viewModel.thread?.id,
+                            selectedSlideIndex: Bindable(viewModel).selectedSlideIndex
+                        )
+                        .frame(minWidth: 320, idealWidth: 420, maxWidth: .infinity)
+                    }
                 }
+                .frame(minHeight: 500)
             }
-            .frame(minHeight: 500)
         }
         .background(Color.appBackground)
         .preferredColorScheme(lightMode ? .light : .dark)
@@ -307,6 +325,12 @@ struct ThreadDetailView: View {
             }
         }
         .task(id: threadId) {
+            // Re-point at this thread's cached VM (the view is reused across
+            // thread→thread switches, so @State still holds the prior thread's).
+            if !isEmbedded {
+                let cached = WorkDetailVMStore.shared.threadVM(threadId)
+                if cached !== viewModel { viewModel = cached }
+            }
             await viewModel.loadThread(id: threadId)
             if !isEmbedded {
                 appState.setActiveContext(WorkTab(kind: .thread, entityId: threadId,

@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Home dashboard. Surfaces active projects, in-flight blogs, open tasks, and
-/// recent activity across the company so nothing falls through the cracks.
+/// Home dashboard. Leads with the user's own work ("Assigned to me" — tasks
+/// and subtasks assigned to them), then a compact view of active projects and
+/// recent activity. Not-recently-active items tuck behind a disclosure.
 struct HomeDashboardView: View {
     @Environment(AppState.self) private var appState
 
@@ -14,6 +15,7 @@ struct HomeDashboardView: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var isCreatingChat = false
+    @State private var showOlder = false
 
     private func isRecentlyActive(_ dateString: String?, days: Int = 7) -> Bool {
         guard let ds = dateString, let date = parseMWDate(ds) else { return true }
@@ -28,15 +30,6 @@ struct HomeDashboardView: View {
             .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
             .prefix(8)
             .map { $0 }
-    }
-
-    private var inFlightBlogs: [MWProject] {
-        projects.filter { p in
-            guard p.projectType == "blog" else { return false }
-            let blogStatus = (p.projectData?["status"]?.value as? String) ?? "draft"
-            return blogStatus != "published"
-        }
-        .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
     }
 
     private var olderProjects: [MWProject] {
@@ -87,16 +80,13 @@ struct HomeDashboardView: View {
                 if let err = errorMessage {
                     errorBanner(err)
                 }
-                HStack(alignment: .top, spacing: 14) {
-                    activeProjectsCard
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                    blogsCard
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                }
-                openTasksCard
+                // Lead with the user's own work, then a compact view of what's
+                // active. Blogs moved out; older items tuck behind a disclosure.
+                assignedToMeCard
+                activeProjectsCard
                 recentActivityCard
                 if !olderProjects.isEmpty || !olderThreads.isEmpty || !olderJournals.isEmpty || !olderChannels.isEmpty {
-                    olderItemsCard
+                    olderItemsDisclosure
                 }
             }
             .padding(20)
@@ -239,51 +229,17 @@ struct HomeDashboardView: View {
         .elevatedCard(cornerRadius: 12)
     }
 
-    private var blogsCard: some View {
+    /// Hero card: the current user's own open work — assigned top-level tasks
+    /// plus assigned, not-yet-done subtasks (rendered indented with their
+    /// parent task). Data comes from /tasks/open (strict assigned-to-me).
+    private var assignedToMeCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            cardHeader(title: "BLOGS IN FLIGHT", trailing: inFlightBlogs.isEmpty ? nil : "\(inFlightBlogs.count)")
-            if inFlightBlogs.isEmpty {
-                Text("No drafts. Spin one up from the sidebar.")
-                    .font(.system(size: 11))
-                    .foregroundColor(appState.themeText.opacity(0.4))
-                    .padding(.vertical, 4)
-            } else {
-                ForEach(inFlightBlogs) { blog in
-                    Button {
-                        appState.selectedProjectId = blog.id
-                        appState.selectedJournalId = nil
-                        appState.showHome = false
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "doc.text")
-                                .font(.system(size: 10))
-                                .foregroundColor(appState.themeAccent)
-                                .frame(width: 14)
-                            Text(blog.title)
-                                .font(.system(size: 12))
-                                .foregroundColor(appState.themeText.opacity(0.85))
-                                .lineLimit(1)
-                            Spacer()
-                            blogStatusPill(for: blog)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.vertical, 2)
-                }
-            }
-        }
-        .padding(14)
-        .elevatedCard(cornerRadius: 12)
-    }
-
-    private var openTasksCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            cardHeader(title: "OPEN TASKS", trailing: openTasks.isEmpty ? nil : "\(openTasks.count)")
+            cardHeader(title: "ASSIGNED TO ME", trailing: openTasks.isEmpty ? nil : "\(openTasks.count)")
             if openTasks.isEmpty {
-                Text("No open tasks. Nice.")
-                    .font(.system(size: 11))
+                Text("Nothing assigned to you right now.")
+                    .font(.system(size: 12))
                     .foregroundColor(appState.themeText.opacity(0.4))
-                    .padding(.vertical, 4)
+                    .padding(.vertical, 6)
             } else {
                 ForEach(openTasks) { task in
                     Button {
@@ -293,47 +249,82 @@ struct HomeDashboardView: View {
                             appState.showHome = false
                         }
                     } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack(spacing: 8) {
-                                Circle().fill(priorityColor(task.priority)).frame(width: 6, height: 6)
-                                Text(task.title)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(appState.themeText.opacity(0.85))
-                                    .lineLimit(1)
-                                Spacer()
-                                if let projectTitle = task.projectTitle {
-                                    Text(projectTitle)
-                                        .font(.system(size: 9, weight: .medium))
-                                        .foregroundColor(appState.themeText.opacity(0.6))
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(Color.cardBackground)
-                                        .cornerRadius(3)
-                                }
-                                if let due = task.dueDate, !due.isEmpty {
-                                    Text(due.prefix(10))
-                                        .font(.system(size: 9))
-                                        .foregroundColor(appState.themeText.opacity(0.5))
-                                }
-                            }
-                            if let note = task.progressNote,
-                               !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                Text(note)
-                                    .font(.system(size: 10))
-                                    .italic()
-                                    .foregroundColor(appState.themeText.opacity(0.5))
-                                    .lineLimit(1)
-                                    .padding(.leading, 14)
-                            }
-                        }
+                        assignedRow(task)
                     }
                     .buttonStyle(.plain)
                     .padding(.vertical, 3)
                 }
             }
         }
-        .padding(14)
-        .elevatedCard(cornerRadius: 12)
+        .padding(16)
+        .elevatedCard(cornerRadius: 14)
+    }
+
+    @ViewBuilder
+    private func assignedRow(_ task: MWOpenTask) -> some View {
+        let isSub = task.isSubtask == true
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                if isSub {
+                    Image(systemName: "checklist")
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.themeText.opacity(0.45))
+                } else {
+                    Circle().fill(priorityColor(task.priority)).frame(width: 6, height: 6)
+                }
+                Text(task.title)
+                    .font(.system(size: 12, weight: isSub ? .regular : .medium))
+                    .foregroundColor(appState.themeText.opacity(isSub ? 0.75 : 0.9))
+                    .lineLimit(1)
+                Spacer()
+                if let projectTitle = task.projectTitle {
+                    Text(projectTitle)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(appState.themeText.opacity(0.6))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.cardBackground)
+                        .cornerRadius(3)
+                }
+                if let due = task.dueDate, !due.isEmpty {
+                    Text(due.prefix(10))
+                        .font(.system(size: 9))
+                        .foregroundColor(appState.themeText.opacity(0.5))
+                }
+            }
+            // Subtasks show their parent task; top-level tasks show progress.
+            if isSub, let parent = task.parentTitle, !parent.isEmpty {
+                Text("in: \(parent)")
+                    .font(.system(size: 9))
+                    .foregroundColor(appState.themeText.opacity(0.5))
+                    .lineLimit(1)
+                    .padding(.leading, 19)
+            } else if !isSub, let note = task.progressNote,
+                      !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(note)
+                    .font(.system(size: 10))
+                    .italic()
+                    .foregroundColor(appState.themeText.opacity(0.5))
+                    .lineLimit(1)
+                    .padding(.leading, 14)
+            }
+        }
+        .padding(.leading, isSub ? 18 : 0)
+        .contentShape(Rectangle())
+    }
+
+    /// "Show more" disclosure wrapping the not-recently-active items, collapsed
+    /// by default to keep Home focused.
+    private var olderItemsDisclosure: some View {
+        DisclosureGroup(isExpanded: $showOlder) {
+            olderItemsCard
+                .padding(.top, 8)
+        } label: {
+            Text("Show more — not recently active")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(appState.themeText.opacity(0.6))
+        }
+        .padding(.horizontal, 4)
     }
 
     private var recentActivityCard: some View {
@@ -582,19 +573,6 @@ struct HomeDashboardView: View {
         case "medium": return .yellow
         default: return .secondary
         }
-    }
-
-    private func blogStatusPill(for blog: MWProject) -> some View {
-        let status = (blog.projectData?["status"]?.value as? String) ?? "draft"
-        let label = status.capitalized
-        let color: Color = status == "scheduled" ? .matcha500 : appState.themeText.opacity(0.5)
-        return Text(label)
-            .font(.system(size: 9, weight: .medium))
-            .foregroundColor(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Color.cardBackground)
-            .cornerRadius(3)
     }
 
     private func relativeTime(from date: Date) -> String {

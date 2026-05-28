@@ -80,6 +80,7 @@ class ChannelsService {
 
     func deleteChannel(id: String) async throws {
         let _: JoinResponse = try await client.request(method: "DELETE", path: "\(basePath)/\(id)")
+        await WorkDetailVMStore.shared.evictChannel(id)
     }
 
     struct PaidChannelConfig: Encodable {

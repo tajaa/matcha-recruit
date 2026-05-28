@@ -34,6 +34,19 @@ struct ProjectDetailView: View {
     @AppStorage("mw-model") private var selectedModelId = "flash"
     @AppStorage("mw-preview-collapsed") private var previewCollapsed = false
 
+    @MainActor
+    init(projectId: String, isEmbedded: Bool = false) {
+        self.projectId = projectId
+        self.isEmbedded = isEmbedded
+        // Main-window tabs share a cached VM (WorkDetailVMStore) so re-opening a
+        // project repaints instantly from retained data. Embedded panes (split /
+        // aux window) get a private VM so they never share WS callbacks or clobber
+        // the main tab's state.
+        _viewModel = State(initialValue: isEmbedded
+            ? ProjectDetailViewModel()
+            : WorkDetailVMStore.shared.projectVM(projectId))
+    }
+
     /// True for general-shaped projects that use `standardLayout` (sections +
     /// chat). Used to gate the Edit/Preview tab toggle in the toolbar so it
     /// doesn't show on recruiting / blog (which already has its own preview tab) /
@@ -75,6 +88,14 @@ struct ProjectDetailView: View {
             }
         }
         .task(id: projectId) {
+            // Re-point at the cached VM for THIS project. On a project→project
+            // switch the view is reused (init doesn't re-run), so the @State VM
+            // would still be the previous project's — repoint it before loading
+            // so we don't load new data into another project's cached VM.
+            if !isEmbedded {
+                let cached = WorkDetailVMStore.shared.projectVM(projectId)
+                if cached !== viewModel { viewModel = cached }
+            }
             // Single .task: wire realtime callbacks → connect/join WS →
             // then load the project. Sequencing matters: the previous
             // two-block layout relied on SwiftUI's "best effort" ordering
@@ -747,10 +768,11 @@ struct ProjectDetailView: View {
         .background(Color.appBackground)
     }
 
+    @ViewBuilder
     private var projectLoadingView: some View {
-        VStack(spacing: 12) {
-            Spacer()
-            if let err = viewModel.errorMessage {
+        if let err = viewModel.errorMessage {
+            VStack(spacing: 12) {
+                Spacer()
                 Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: 28))
                     .foregroundColor(.red)
@@ -762,16 +784,16 @@ struct ProjectDetailView: View {
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
-            } else {
-                ProgressView().tint(.secondary)
-                Text("Loading project…")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary)
+                Spacer()
             }
-            Spacer()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.appBackground)
+        } else {
+            // Cold load (no cached data) → shimmer skeleton instead of a late
+            // spinner. Warm re-entry skips this entirely (project is non-nil).
+            ProjectDetailSkeleton()
+                .background(Color.appBackground)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.appBackground)
     }
 
     @ViewBuilder

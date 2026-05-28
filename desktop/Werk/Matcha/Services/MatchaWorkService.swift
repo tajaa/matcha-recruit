@@ -123,6 +123,7 @@ class MatchaWorkService {
         _ = try await client.requestData(method: "DELETE", path: "\(basePath)/threads/\(id)")
         invalidateThread(threadId: id)
         invalidateThreadLists()
+        await WorkDetailVMStore.shared.evictThread(id)
     }
 
     func setPinned(id: String, pinned: Bool) async throws -> MWThread {
@@ -602,11 +603,13 @@ class MatchaWorkService {
     func archiveProject(id: String) async throws {
         _ = try await client.requestData(method: "DELETE", path: "\(basePath)/projects/\(id)")
         invalidateProjectLists()
+        await WorkDetailVMStore.shared.evictProject(id)
     }
 
     func deleteProject(id: String) async throws {
         _ = try await client.requestData(method: "DELETE", path: "\(basePath)/projects/\(id)/permanent")
         invalidateProjectLists()
+        await WorkDetailVMStore.shared.evictProject(id)
     }
 
     func unarchiveProject(id: String) async throws {

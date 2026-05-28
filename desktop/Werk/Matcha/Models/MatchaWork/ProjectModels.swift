@@ -872,6 +872,12 @@ struct MWOpenTask: Codable, Identifiable, Hashable {
     var assignedTo: String?
     var createdBy: String?
     var updatedAt: String?
+    /// True for checklist subtasks (mw_subtasks) merged into the list; nil/false
+    /// for top-level tasks. Optional so older payloads still decode.
+    var isSubtask: Bool?
+    /// Parent task id + title — present only on subtask rows.
+    var parentTaskId: String?
+    var parentTitle: String?
 
     enum CodingKeys: String, CodingKey {
         case id, title, priority, status
@@ -883,6 +889,9 @@ struct MWOpenTask: Codable, Identifiable, Hashable {
         case assignedTo = "assigned_to"
         case createdBy = "created_by"
         case updatedAt = "updated_at"
+        case isSubtask = "is_subtask"
+        case parentTaskId = "parent_task_id"
+        case parentTitle = "parent_title"
     }
 }
 

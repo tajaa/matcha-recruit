@@ -93,6 +93,8 @@
 		D4A29278ECC3366A13089D39 /* ServiceCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ADDBEAEEBA9E4439ECD6181 /* ServiceCache.swift */; };
 		DD00EE11FF22334455660001 /* ChannelModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770001 /* ChannelModels.swift */; };
 		DD00EE11FF22334455660002 /* ChannelsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770002 /* ChannelsService.swift */; };
+		5C0FF11E570E000000000001 /* WorkDetailVMStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C0FF11E570E000000000002 /* WorkDetailVMStore.swift */; };
+		5C0FF11E570E000000000011 /* SkeletonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C0FF11E570E000000000012 /* SkeletonView.swift */; };
 		DD00EE11FF22334455660003 /* ChannelsWebSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */; };
 		DD00EE11FF22334455660004 /* ChannelsSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770004 /* ChannelsSidebarView.swift */; };
 		DD00EE11FF22334455660005 /* ChannelDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770005 /* ChannelDetailView.swift */; };
@@ -215,6 +217,8 @@
 		DCD9DCBDB9CC47BA70B5F0FF /* PreviewPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewPanelView.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770001 /* ChannelModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelModels.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770002 /* ChannelsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsService.swift; sourceTree = "<group>"; };
+		5C0FF11E570E000000000002 /* WorkDetailVMStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkDetailVMStore.swift; sourceTree = "<group>"; };
+		5C0FF11E570E000000000012 /* SkeletonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkeletonView.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsWebSocket.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770004 /* ChannelsSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsSidebarView.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770005 /* ChannelDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelDetailView.swift; sourceTree = "<group>"; };
@@ -287,6 +291,7 @@
 				FAD09F509367E88989F2B765 /* StatusBadge.swift */,
 				B13338371A8BC76142D4A946 /* LoadingDots.swift */,
 				AA11BB22CC33DD44EE6600F5 /* ChannelToastOverlay.swift */,
+				5C0FF11E570E000000000012 /* SkeletonView.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -314,6 +319,7 @@
 				C0C0C0C0C0C0C0C001010002 /* ProjectWebSocket.swift */,
 				FFFF1S1S1S1S1S1S01010002 /* ChannelStarStore.swift */,
 				AA11BB22CC33DD44EE6600F6 /* SidebarSectionOrderStore.swift */,
+				5C0FF11E570E000000000002 /* WorkDetailVMStore.swift */,
 				43B3F0299F983943AFA329D0 /* Support */,
 				C5332D59C2DFE0D0F3DBF734 /* MatchaWork */,
 			);
@@ -711,6 +717,8 @@
 				AA11BB22CC33DD44EE5500E2 /* HomeDashboardView.swift in Sources */,
 				DD00EE11FF22334455660001 /* ChannelModels.swift in Sources */,
 				DD00EE11FF22334455660002 /* ChannelsService.swift in Sources */,
+				5C0FF11E570E000000000001 /* WorkDetailVMStore.swift in Sources */,
+				5C0FF11E570E000000000011 /* SkeletonView.swift in Sources */,
 				DD00EE11FF22334455660003 /* ChannelsWebSocket.swift in Sources */,
 				DD00EE11FF22334455660099 /* ChannelNotificationManager.swift in Sources */,
 				DD00EE11FF22334455660004 /* ChannelsSidebarView.swift in Sources */,

@@ -77,6 +77,13 @@ class EmailService(
         """Check if any email backend (Gmail or MailerSend) is configured."""
         if self.api_key:
             return True
+        return self.is_gmail_configured()
+
+    def is_gmail_configured(self) -> bool:
+        """Whether the Gmail API backend specifically is usable. Callers that
+        need Gmail-only features (e.g. attachments) must gate on this rather
+        than `is_configured()` — the latter is True whenever MailerSend is set,
+        which would let an attachment send through to a failing Gmail path."""
         data = self._load_token()
         return bool(data and data.get("refresh_token") and data.get("client_id") and data.get("client_secret"))
 
@@ -186,13 +193,14 @@ class EmailService(
         subject: str,
         html_content: str,
         text_content: Optional[str] = None,
+        attachments: Optional[list[dict]] = None,
     ) -> bool:
         """Public send wrapper: Gmail first, MailerSend on Gmail failure.
 
-        Use this for transactional emails where reliability matters and
-        the payload doesn't need Gmail-specific features (no `attachments`,
-        no `extra_headers` like List-Unsubscribe — those require Gmail
-        because MailerSend's basic JSON payload doesn't carry them).
+        Use this for transactional emails where reliability matters. Both
+        backends carry `attachments` (Gmail via MIME, MailerSend via its
+        `attachments` array); `extra_headers` like List-Unsubscribe still
+        require Gmail, so use `send_email` directly when you need those.
 
         Same body as the legacy `_send_with_fallback` — kept under both
         names so existing internal callers in `email/auth.py` etc. keep
@@ -204,6 +212,7 @@ class EmailService(
             subject=subject,
             html_content=html_content,
             text_content=text_content,
+            attachments=attachments,
         )
 
     async def _send_with_fallback(
@@ -213,6 +222,7 @@ class EmailService(
         subject: str,
         html_content: str,
         text_content: Optional[str] = None,
+        attachments: Optional[list[dict]] = None,
     ) -> bool:
         """Send via Gmail first, fall back to MailerSend if Gmail fails."""
         # Try Gmail first
@@ -221,6 +231,7 @@ class EmailService(
             sent = await self.send_email(
                 to_email=to_email, to_name=to_name, subject=subject,
                 html_content=html_content, text_content=text_content,
+                attachments=attachments,
             )
             if sent:
                 return True
@@ -238,6 +249,17 @@ class EmailService(
             "html": html_content,
             "text": text_content or "",
         }
+        if attachments:
+            # MailerSend expects {content: <base64>, filename, disposition} —
+            # same shape callers already build for the Gmail MIME path.
+            payload["attachments"] = [
+                {
+                    "content": att["content"],
+                    "filename": att["filename"],
+                    "disposition": att.get("disposition", "attachment"),
+                }
+                for att in attachments
+            ]
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
