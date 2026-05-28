@@ -17,7 +17,7 @@ import {
   Step2Size,
   Step3Locations,
   Step4Scope,
-  Step5Gaps,
+  Step5GapAnalysis,
   Step6Review,
 } from '../../features/admin-onboarding/Steps'
 
@@ -36,8 +36,8 @@ const STEP_LABELS: Record<OnboardingStep, string> = {
   size: 'Headcount',
   locations: 'Locations',
   scope: 'AI Scope',
-  gaps: 'Coverage',
-  review: 'Review',
+  gaps: 'Gap Analysis',
+  review: 'Finalize',
   done: 'Done',
 }
 
@@ -173,7 +173,7 @@ export default function AdminOnboardingWizard() {
           <Step4Scope session={session} onUpdated={onUpdated} onNext={next} />
         )}
         {activeStep === 'gaps' && (
-          <Step5Gaps session={session} onUpdated={onUpdated} onNext={next} />
+          <Step5GapAnalysis session={session} onUpdated={onUpdated} onNext={next} />
         )}
         {activeStep === 'review' && (
           <Step6Review session={session} onUpdated={onUpdated} onNext={next} />

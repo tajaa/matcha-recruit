@@ -568,7 +568,7 @@ function ScopeList({ title, items }: { title: string; items: string[] }) {
   )
 }
 
-// ── Step 5: Gaps (existing vs missing + dispatch) ──────────────────────
+// ── Gap-analysis helpers (shared by Step 5) ────────────────────────────
 
 function missingId(m: ResolvedScopeMissing): string {
   return [
@@ -580,38 +580,112 @@ function missingId(m: ResolvedScopeMissing): string {
   ].join('::')
 }
 
-export function Step5Gaps({ session, onUpdated, onNext }: StepProps) {
+function jurisdictionKey(
+  state?: string | null,
+  county?: string | null,
+  city?: string | null,
+): string {
+  return [state, county, city].filter(Boolean).join(' / ') || 'Federal'
+}
+
+function groupByKey<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
+  const buckets = new Map<string, T[]>()
+  for (const item of items) {
+    const k = key(item)
+    const arr = buckets.get(k)
+    if (arr) arr.push(item)
+    else buckets.set(k, [item])
+  }
+  return buckets
+}
+
+// ── Step 5: Gap Analysis (coverage + missing + AI safety net) ──────────
+
+export function Step5GapAnalysis({ session, onUpdated, onNext }: StepProps) {
+  const persistedGap =
+    (session.resolved_scope as unknown as { gap_check?: GapCheckResult } | null)?.gap_check ?? null
+
   const [approved, setApproved] = useState<Set<string>>(new Set())
-  const [busy, setBusy] = useState(false)
+  const [dispatchBusy, setDispatchBusy] = useState(false)
+  const [advanceBusy, setAdvanceBusy] = useState(false)
   const [dispatchedCount, setDispatchedCount] = useState<number | null>(null)
+  const [gap, setGap] = useState<GapCheckResult | null>(persistedGap)
+  const [gapBusy, setGapBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
   const resolved = session.resolved_scope
   const missing = resolved?.missing || []
   const existing = resolved?.existing || []
 
+  const missingByJurisdiction = useMemo(
+    () => groupByKey(missing, (m) => jurisdictionKey(m.state, m.county, m.city)),
+    [missing],
+  )
+
+  const existingByCategory = useMemo(
+    () => groupByKey(existing, (e) => e.category_slug || 'other'),
+    [existing],
+  )
+
+  const suggestedJurisdictionsByState = useMemo(() => {
+    if (!gap) return new Map<string, typeof gap.suggested_jurisdictions>()
+    return groupByKey(gap.suggested_jurisdictions, (j) => j.state || 'Federal')
+  }, [gap])
+
+  const totalSuggestions = gap
+    ? gap.suggested_compliance_categories.length +
+      gap.suggested_certifications.length +
+      gap.suggested_licenses.length +
+      gap.suggested_jurisdictions.length
+    : 0
+
   function toggle(id: string) {
     setApproved((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id); else next.add(id)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleBucket(ids: string[], allSelected: boolean) {
+    setApproved((prev) => {
+      const next = new Set(prev)
+      if (allSelected) ids.forEach((id) => next.delete(id))
+      else ids.forEach((id) => next.add(id))
       return next
     })
   }
 
   async function dispatchResearch() {
-    setBusy(true)
+    setDispatchBusy(true)
     setError(null)
     try {
       const res = await adminOnboarding.dispatchResearch(session.id, Array.from(approved))
       setDispatchedCount(res.dispatched.length)
+      setApproved(new Set())
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't start research")
     } finally {
-      setBusy(false)
+      setDispatchBusy(false)
+    }
+  }
+
+  async function runGapCheck() {
+    setGapBusy(true)
+    setError(null)
+    try {
+      const res = await adminOnboarding.gapCheck(session.id)
+      setGap(res.gap_check)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Gap check failed')
+    } finally {
+      setGapBusy(false)
     }
   }
 
   async function advance() {
-    setBusy(true)
+    setAdvanceBusy(true)
     setError(null)
     try {
       const updated = await adminOnboarding.patchSession(session.id, { step: 'review' })
@@ -620,100 +694,253 @@ export function Step5Gaps({ session, onUpdated, onNext }: StepProps) {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not advance')
     } finally {
-      setBusy(false)
+      setAdvanceBusy(false)
     }
   }
 
   return (
     <div className="max-w-3xl">
-      <h2 className="text-base font-medium text-zinc-100 mb-1">Coverage check</h2>
-      <p className="text-sm text-zinc-400 mb-6">
-        We already have data for {existing.length} of these requirement{existing.length === 1 ? '' : 's'}. {missing.length} {missing.length === 1 ? 'is' : 'are'} new — check the ones you want our background workers to research now. Anything you leave unchecked is skipped.
+      <h2 className="text-base font-medium text-zinc-100 mb-1">Gap Analysis</h2>
+      <p className="text-sm text-zinc-400 mb-5">
+        {missing.length} to research · {existing.length} already covered
+        {gap ? ` · AI flagged ${totalSuggestions} extra${totalSuggestions === 1 ? '' : 's'}` : ''}
       </p>
       <ErrorBox message={error} />
 
-      {existing.length > 0 && (
-        <div className="mb-6">
-          <div className="text-[11px] uppercase tracking-wider text-emerald-400 mb-1">
-            Already covered · {existing.length}
+      {/* Card A — Needs research (actionable) */}
+      {missing.length > 0 ? (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-4 mb-4">
+          <div className="mb-3">
+            <div className="text-sm font-medium text-amber-100">
+              Needs research · {missing.length}
+            </div>
+            <div className="text-[11px] text-amber-200/70">
+              Tick what to dispatch — background workers research and write to the compliance DB.
+            </div>
           </div>
-          <ul className="text-sm text-zinc-200 space-y-0.5 max-h-48 overflow-auto">
-            {existing.map((e) => (
-              <li key={e.requirement_id}>
-                <span className="text-zinc-400">{e.category_slug}</span> · {e.title || e.canonical_key || e.requirement_id}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
-      {missing.length > 0 && (
-        <div className="mb-6">
-          <div className="text-[11px] uppercase tracking-wider text-amber-400 mb-1">
-            Needs research · {missing.length}
-          </div>
-          <ul className="text-sm text-zinc-200 space-y-1.5 max-h-72 overflow-auto">
-            {missing.map((m) => {
-              const id = missingId(m)
+          <div className="space-y-3 max-h-[28rem] overflow-auto pr-1">
+            {Array.from(missingByJurisdiction.entries()).map(([jKey, items]) => {
+              const ids = items.map(missingId)
+              const allSelected = ids.every((id) => approved.has(id))
               return (
-                <li key={id} className="flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    checked={approved.has(id)}
-                    onChange={() => toggle(id)}
-                    className="mt-0.5"
-                  />
-                  <div>
-                    <div>
-                      <span className="text-zinc-400">{m.category_slug}</span>
-                      {' · '}
-                      <span className="text-zinc-300">{m.scope_level}</span>
-                      {(m.state || m.county || m.city) && (
-                        <span className="text-zinc-500"> · {[m.state, m.county, m.city].filter(Boolean).join(' / ')}</span>
-                      )}
+                <div key={jKey}>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-[11px] uppercase tracking-wider text-zinc-400">
+                      {jKey} · {items.length}
                     </div>
-                    {m.reason && <div className="text-[11px] text-zinc-500">{m.reason}</div>}
+                    <button
+                      onClick={() => toggleBucket(ids, allSelected)}
+                      className="text-[11px] text-amber-300 hover:text-amber-200"
+                    >
+                      {allSelected ? 'Clear' : 'Select all'}
+                    </button>
                   </div>
-                </li>
+                  <ul className="space-y-1.5">
+                    {items.map((m) => {
+                      const id = missingId(m)
+                      return (
+                        <li key={id} className="flex items-start gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={approved.has(id)}
+                            onChange={() => toggle(id)}
+                            className="mt-0.5"
+                          />
+                          <div className="min-w-0">
+                            <div className="text-zinc-100">
+                              {m.category_slug.replace(/_/g, ' ')}
+                              <span className="text-zinc-500"> · {m.scope_level}</span>
+                            </div>
+                            {m.reason && (
+                              <div className="text-[11px] text-zinc-400">{m.reason}</div>
+                            )}
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
               )
             })}
-          </ul>
-          {dispatchedCount !== null && (
-            <div className="mt-2 text-xs text-emerald-300">
-              {dispatchedCount} research job{dispatchedCount === 1 ? '' : 's'} started in the background. They'll write to our compliance database when finished.
-            </div>
-          )}
+          </div>
+
+          <div className="flex items-center gap-3 mt-4 pt-3 border-t border-amber-500/20">
+            <button
+              onClick={() => void dispatchResearch()}
+              disabled={dispatchBusy || approved.size === 0}
+              className="inline-flex items-center gap-2 px-4 h-9 rounded-md bg-amber-500/90 hover:bg-amber-500 text-zinc-950 text-sm font-medium disabled:opacity-50"
+            >
+              {dispatchBusy && <Loader2 className="w-4 h-4 animate-spin" />}
+              Start research ({approved.size})
+            </button>
+            {dispatchedCount !== null && (
+              <div className="text-xs text-emerald-300">
+                {dispatchedCount} job{dispatchedCount === 1 ? '' : 's'} started — results land in the compliance DB.
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-200 mb-4">
+          Nothing new to research — every resolved requirement is already in the compliance DB.
         </div>
       )}
 
-      <div className="flex items-center gap-2">
-        {missing.length > 0 && (
+      {/* Card B — Already covered (informational, collapsed) */}
+      {existing.length > 0 && (
+        <details className="group rounded-md border border-zinc-800 bg-zinc-900/40 p-4 mb-4">
+          <summary className="cursor-pointer list-none flex items-center justify-between [&::-webkit-details-marker]:hidden">
+            <div className="text-[11px] uppercase tracking-wider text-emerald-400">
+              Already covered · {existing.length}
+            </div>
+            <span className="text-[11px] text-zinc-500 group-open:hidden">Show</span>
+            <span className="text-[11px] text-zinc-500 hidden group-open:inline">Hide</span>
+          </summary>
+          <div className="mt-3 space-y-3 max-h-72 overflow-auto pr-1">
+            {Array.from(existingByCategory.entries()).map(([cat, items]) => (
+              <div key={cat}>
+                <div className="text-[11px] uppercase tracking-wider text-zinc-500 mb-1">
+                  {cat.replace(/_/g, ' ')} · {items.length}
+                </div>
+                <ul className="text-sm text-zinc-300 space-y-0.5">
+                  {items.map((e) => (
+                    <li key={e.requirement_id}>
+                      • {e.title || e.canonical_key || e.requirement_id}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+
+      {/* Card C — AI safety net (read-only suggestion) */}
+      <div className="rounded-md border border-zinc-800 bg-zinc-900/30 p-4 mb-6">
+        <div className="flex items-start justify-between gap-3 mb-2">
+          <div>
+            <div className="text-sm font-medium text-zinc-100">AI safety net</div>
+            <div className="text-[11px] text-zinc-500">
+              Gemini re-reads the manifest and flags anything the wizard missed. Read-only — Finalize on the next step.
+            </div>
+          </div>
           <button
-            onClick={() => void dispatchResearch()}
-            disabled={busy || approved.size === 0}
-            className="inline-flex items-center gap-2 px-4 h-10 rounded-md bg-amber-500/90 hover:bg-amber-500 text-zinc-950 text-sm font-medium disabled:opacity-50"
+            onClick={() => void runGapCheck()}
+            disabled={gapBusy}
+            className="inline-flex items-center gap-2 px-3 h-8 rounded-md border border-zinc-700 hover:border-zinc-500 text-xs text-zinc-200 disabled:opacity-50 shrink-0"
           >
-            {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-            Start research ({approved.size})
+            {gapBusy && <Loader2 className="w-3 h-3 animate-spin" />}
+            {gap ? 'Re-run' : 'Run gap check'}
           </button>
+        </div>
+
+        {gap && totalSuggestions === 0 && (
+          <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-200 mt-3">
+            <div className="font-medium">Manifest looks comprehensive.</div>
+            {gap.summary && (
+              <div className="text-xs text-emerald-300/80 mt-0.5">{gap.summary}</div>
+            )}
+          </div>
         )}
-        <PrimaryButton busy={busy} onClick={() => void advance()}>
-          Continue to review
+
+        {gap && totalSuggestions > 0 && (
+          <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 space-y-4 mt-3">
+            {gap.summary && <div className="text-xs text-amber-200">{gap.summary}</div>}
+
+            {gap.suggested_jurisdictions.length > 0 && (
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-amber-300 mb-1">
+                  New jurisdictions to track
+                </div>
+                <div className="space-y-2">
+                  {Array.from(suggestedJurisdictionsByState.entries()).map(([state, items]) => (
+                    <div key={state}>
+                      <div className="text-[11px] text-zinc-400">{state}</div>
+                      <ul className="text-sm text-zinc-100 space-y-0.5 ml-2">
+                        {items.map((j, i) => (
+                          <li key={i}>
+                            • {jurisdictionKey(j.state, j.county, j.city)}
+                            {j.reason && (
+                              <div className="text-[11px] text-zinc-400 ml-3">{j.reason}</div>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {(gap.suggested_compliance_categories.length > 0 ||
+              gap.suggested_certifications.length > 0 ||
+              gap.suggested_licenses.length > 0) && (
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-amber-300 mb-1">
+                  Items to add to manifest
+                </div>
+                <ul className="text-sm text-zinc-100 space-y-1.5">
+                  {gap.suggested_compliance_categories.map((c, i) => (
+                    <li key={`c-${i}`}>
+                      <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
+                        Category
+                      </span>
+                      {c.category_slug.replace(/_/g, ' ')}
+                      <span className="text-zinc-500"> · {c.scope}</span>
+                      {c.reason && (
+                        <div className="text-[11px] text-zinc-400 ml-3">{c.reason}</div>
+                      )}
+                    </li>
+                  ))}
+                  {gap.suggested_certifications.map((c, i) => (
+                    <li key={`cert-${i}`}>
+                      <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
+                        Cert
+                      </span>
+                      {c.name}
+                      {c.reason && (
+                        <div className="text-[11px] text-zinc-400 ml-3">{c.reason}</div>
+                      )}
+                    </li>
+                  ))}
+                  {gap.suggested_licenses.map((l, i) => (
+                    <li key={`lic-${i}`}>
+                      <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">
+                        License
+                      </span>
+                      {l.name}
+                      {l.reason && (
+                        <div className="text-[11px] text-zinc-400 ml-3">{l.reason}</div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3 flex-wrap">
+        <PrimaryButton busy={advanceBusy} onClick={() => void advance()}>
+          Continue to Finalize
         </PrimaryButton>
+        {gap && totalSuggestions > 0 && (
+          <span className="text-[11px] text-amber-300">
+            {totalSuggestions} suggestion{totalSuggestions === 1 ? '' : 's'} flagged — re-run earlier steps to fold them in, or finalize and address from the company compliance page later.
+          </span>
+        )}
       </div>
     </div>
   )
 }
 
-// ── Step 6: Review + Finalize ──────────────────────────────────────────
+// ── Step 6: Finalize ───────────────────────────────────────────────────
 
 export function Step6Review({ session, onUpdated }: StepProps) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [gapBusy, setGapBusy] = useState(false)
-  const [gap, setGap] = useState<GapCheckResult | null>(
-    (session.resolved_scope as unknown as { gap_check?: GapCheckResult } | null)?.gap_check ?? null,
-  )
   const [finalized, setFinalized] = useState<{
     company_id: string
     invite_token?: string | null
@@ -737,32 +964,13 @@ export function Step6Review({ session, onUpdated }: StepProps) {
     }
   }
 
-  async function runGapCheck() {
-    setGapBusy(true)
-    setError(null)
-    try {
-      const res = await adminOnboarding.gapCheck(session.id)
-      setGap(res.gap_check)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Gap check failed')
-    } finally {
-      setGapBusy(false)
-    }
-  }
-
   const basics = session.basics
   const resolved = session.resolved_scope
   const ai = session.ai_scope
 
-  const totalSuggestions =
-    (gap?.suggested_compliance_categories.length ?? 0) +
-    (gap?.suggested_certifications.length ?? 0) +
-    (gap?.suggested_licenses.length ?? 0) +
-    (gap?.suggested_jurisdictions.length ?? 0)
-
   return (
     <div className="max-w-3xl">
-      <h2 className="text-base font-medium text-zinc-100 mb-1">Review + Finalize</h2>
+      <h2 className="text-base font-medium text-zinc-100 mb-1">Finalize</h2>
       <p className="text-sm text-zinc-400 mb-6">
         One last look before we write the scope manifest and issue the owner invite.
       </p>
@@ -775,26 +983,6 @@ export function Step6Review({ session, onUpdated }: StepProps) {
       <SummaryRow label="Already covered" value={`${resolved?.existing.length ?? 0}`} />
       <SummaryRow label="Certifications" value={`${ai?.required_certifications.length ?? 0}`} />
       <SummaryRow label="Licenses" value={`${ai?.required_licenses.length ?? 0}`} />
-
-      <div className="mt-6 mb-6 rounded-md border border-zinc-800 bg-zinc-900/40 p-4">
-        <div className="flex items-center justify-between mb-2">
-          <div>
-            <div className="text-sm text-zinc-100 font-medium">Final gap check</div>
-            <div className="text-xs text-zinc-500">
-              Gemini re-reads everything captured and flags anything the wizard missed. Read-only — Finalize is still up to you.
-            </div>
-          </div>
-          <button
-            onClick={() => void runGapCheck()}
-            disabled={gapBusy}
-            className="inline-flex items-center gap-2 px-3 h-8 rounded-md border border-zinc-700 hover:border-zinc-500 text-xs text-zinc-200 disabled:opacity-50"
-          >
-            {gapBusy && <Loader2 className="w-3 h-3 animate-spin" />}
-            {gap ? 'Re-run gap check' : 'Run gap check'}
-          </button>
-        </div>
-        {gap && <GapPanel gap={gap} totalSuggestions={totalSuggestions} />}
-      </div>
 
       <div className="mt-6">
         {finalized ? (
@@ -820,73 +1008,11 @@ export function Step6Review({ session, onUpdated }: StepProps) {
             </div>
           </div>
         ) : (
-          <>
-            <PrimaryButton busy={busy} onClick={() => void finalize()}>
-              Finalize onboarding
-            </PrimaryButton>
-            {gap && totalSuggestions > 0 && (
-              <p className="mt-2 text-[11px] text-amber-300">
-                Gap check surfaced {totalSuggestions} item{totalSuggestions === 1 ? '' : 's'}. Re-run Step 4 expand to fold them in, or finalize and address from the company compliance page later.
-              </p>
-            )}
-          </>
+          <PrimaryButton busy={busy} onClick={() => void finalize()}>
+            Finalize onboarding
+          </PrimaryButton>
         )}
       </div>
-    </div>
-  )
-}
-
-function GapPanel({ gap, totalSuggestions }: { gap: GapCheckResult; totalSuggestions: number }) {
-  if (totalSuggestions === 0) {
-    return (
-      <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-200">
-        <div className="font-medium">Manifest looks comprehensive.</div>
-        {gap.summary && <div className="text-xs text-emerald-300/80 mt-0.5">{gap.summary}</div>}
-      </div>
-    )
-  }
-  return (
-    <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-100 space-y-3">
-      {gap.summary && <div className="text-xs text-amber-200">{gap.summary}</div>}
-      <SuggestionList title="Compliance categories" items={gap.suggested_compliance_categories.map((c) => ({
-        head: `${c.category_slug} · ${c.scope}`,
-        reason: c.reason || undefined,
-      }))} />
-      <SuggestionList title="Certifications" items={gap.suggested_certifications.map((c) => ({
-        head: c.name,
-        reason: c.reason || undefined,
-      }))} />
-      <SuggestionList title="Licenses" items={gap.suggested_licenses.map((l) => ({
-        head: l.name,
-        reason: l.reason || undefined,
-      }))} />
-      <SuggestionList title="Jurisdictions" items={gap.suggested_jurisdictions.map((j) => ({
-        head: [j.state, j.county, j.city].filter(Boolean).join(' / ') || '(federal)',
-        reason: j.reason || undefined,
-      }))} />
-    </div>
-  )
-}
-
-function SuggestionList({
-  title,
-  items,
-}: {
-  title: string
-  items: { head: string; reason?: string }[]
-}) {
-  if (items.length === 0) return null
-  return (
-    <div>
-      <div className="text-[11px] uppercase tracking-wider text-amber-300 mb-1">{title}</div>
-      <ul className="space-y-1">
-        {items.map((it, i) => (
-          <li key={i}>
-            <div className="text-zinc-100">• {it.head}</div>
-            {it.reason && <div className="text-[11px] text-zinc-400 ml-3">{it.reason}</div>}
-          </li>
-        ))}
-      </ul>
     </div>
   )
 }
