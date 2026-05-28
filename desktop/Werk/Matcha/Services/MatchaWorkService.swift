@@ -628,6 +628,24 @@ class MatchaWorkService {
         try await client.request(method: "DELETE", path: "\(basePath)/projects/\(projectId)/sections/\(sectionId)")
     }
 
+    /// Result of emailing a note: which recipients the server accepted vs. failed.
+    struct EmailNoteResult: Codable {
+        let ok: Bool
+        let sent: [String]
+        let failed: [String]
+    }
+
+    /// Email a single note as a PDF attachment to one or more recipients
+    /// (collaborator emails + free-text). Sends immediately server-side.
+    func emailProjectSection(projectId: String, sectionId: String, recipients: [String], subject: String?, message: String?) async throws -> EmailNoteResult {
+        struct Body: Codable { let recipients: [String]; let subject: String?; let message: String? }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/sections/\(sectionId)/email",
+            body: Body(recipients: recipients, subject: subject, message: message)
+        )
+    }
+
     func reorderProjectSections(projectId: String, sectionIds: [String]) async throws -> MWProject {
         struct Body: Codable { let sectionIds: [String]; enum CodingKeys: String, CodingKey { case sectionIds = "section_ids" } }
         return try await client.request(method: "PUT", path: "\(basePath)/projects/\(projectId)/sections/reorder", body: Body(sectionIds: sectionIds))

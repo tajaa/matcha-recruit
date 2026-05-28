@@ -12,6 +12,7 @@ struct ProjectDetailView: View {
     @State private var chatVM = ThreadDetailViewModel()
     @State private var presenceVM = ProjectPresenceViewModel()
     @State private var editingSectionId: String?
+    @State private var emailingSection: MWProjectSection?
     @State private var newSectionTitle = ""
     @State private var showCollaborators = false
     @State private var showExportMenu = false
@@ -356,11 +357,15 @@ struct ProjectDetailView: View {
         switch collabPanel {
         case .sections:
             Button {
-                Task { await viewModel.addSection(title: "New Section") }
+                Task {
+                    await viewModel.addSection(title: "Untitled note")
+                    // Jump straight into the freshly-added note (appended last).
+                    await MainActor.run { editingSectionId = viewModel.project?.sections?.last?.id }
+                }
             } label: {
-                Image(systemName: "plus.rectangle").font(.system(size: 13))
+                Image(systemName: "square.and.pencil").font(.system(size: 13))
             }
-            .help("Add section")
+            .help("New note")
         case .files:
             Button {
                 NotificationCenter.default.post(name: .mwCollabFilesBrowse, object: nil)
@@ -575,6 +580,8 @@ struct ProjectDetailView: View {
                         onSave: { title, content in
                             Task { await viewModel.updateSection(sectionId: sid, title: title, content: content) }
                         },
+                        onBack: { editingSectionId = nil },
+                        onEmail: { emailingSection = section },
                         onRestore: { restored in
                             // Pass the current title (a null title would blank it
                             // server-side) — restore only rolls back content.
@@ -641,12 +648,20 @@ struct ProjectDetailView: View {
                 }
             } else {
                 Spacer()
-                Text("No sections yet — use the AI chat or click + to add.")
+                Text("No notes yet — use the AI chat or click ✎ to add one.")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                 Spacer()
             }
         }
+        }
+        .sheet(item: $emailingSection) { section in
+            NoteEmailComposer(
+                projectId: viewModel.project?.id ?? "",
+                section: section,
+                collaborators: viewModel.project?.collaborators ?? [],
+                onClose: { emailingSection = nil }
+            )
         }
     }
 

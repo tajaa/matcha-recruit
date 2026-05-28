@@ -10,7 +10,7 @@ enum CollabRightPanel: String, CaseIterable, Identifiable {
         case .files: return "Files"
         case .media: return "Media"
         case .elements: return "Elements"
-        case .sections: return "Sections"
+        case .sections: return "Notes"
         case .threads: return "Threads"
         case .overview: return "Overview"
         }

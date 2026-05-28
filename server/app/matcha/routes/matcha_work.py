@@ -3583,6 +3583,122 @@ async def reject_project_section_revision_endpoint(
     return await proj_svc.reject_section_revision(project_id, section_id)
 
 
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+@router.post("/projects/{project_id}/sections/{section_id}/email")
+async def email_project_section_endpoint(
+    project_id: UUID,
+    section_id: str,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Email a single note as a PDF attachment.
+
+    Body: {recipients: [email,…], subject?: str, message?: str}.
+    Recipients are a mix of project collaborators (picked client-side) and
+    free-text addresses — both arrive here as plain email strings. The note
+    markdown is rendered to PDF via the shared project-PDF path (wrapping the
+    one note as a single-section document) and attached. Sends immediately;
+    scheduling is intentionally out of scope for v1.
+    """
+    import base64 as _b64
+    import html
+
+    project, _role = await _verify_project_access(project_id, current_user)
+
+    section = next((s for s in (project.get("sections") or []) if s.get("id") == section_id), None)
+    if section is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    raw_recipients = body.get("recipients") or []
+    if not isinstance(raw_recipients, list):
+        raise HTTPException(status_code=400, detail="recipients must be a list")
+    # Normalize + validate + dedupe (preserve order).
+    seen: set[str] = set()
+    recipients: list[str] = []
+    for r in raw_recipients:
+        email = str(r or "").strip().lower()
+        if not email:
+            continue
+        if not _EMAIL_RE.match(email):
+            raise HTTPException(status_code=400, detail=f"Invalid email address: {r}")
+        if email not in seen:
+            seen.add(email)
+            recipients.append(email)
+    if not recipients:
+        raise HTTPException(status_code=400, detail="At least one recipient is required")
+
+    note_title = (section.get("title") or "").strip() or "Untitled note"
+    subject = (str(body.get("subject") or "").strip()) or note_title
+    cover_message = str(body.get("message") or "").strip()
+
+    # Render the note as a one-section document so it reuses the project PDF
+    # path (markdown → HTML, inlined images, WeasyPrint). h1 = note title.
+    pdf_doc = {
+        "id": str(project_id),
+        "title": note_title,
+        "sections": [{"content": section.get("content", "") or ""}],
+    }
+    pdf_bytes = await _render_project_pdf(pdf_doc)
+    pdf_b64 = _b64.b64encode(pdf_bytes).decode()
+
+    def _safe_filename(name: str) -> str:
+        cleaned = re.sub(r"[^A-Za-z0-9 _-]+", "", name).strip() or "note"
+        return f"{cleaned[:80]}.pdf"
+
+    filename = _safe_filename(note_title)
+    sender_name = await _resolve_actor_name_safe(current_user.id)
+
+    html_body = f"""
+    <div style="font-family: -apple-system, Segoe UI, sans-serif; max-width: 560px; margin: 0 auto; color: #1a1a1a;">
+        <p style="font-size: 14px;">{html.escape(sender_name)} shared a note with you from Matcha Work:
+        <strong>{html.escape(note_title)}</strong>.</p>
+        {f'<p style="font-size: 14px; white-space: pre-wrap; color: #334155;">{html.escape(cover_message)}</p>' if cover_message else ''}
+        <p style="font-size: 13px; color: #64748b;">The full note is attached as a PDF.</p>
+    </div>
+    """
+    text_body = (
+        f"{sender_name} shared a note with you from Matcha Work: {note_title}.\n\n"
+        + (f"{cover_message}\n\n" if cover_message else "")
+        + "The full note is attached as a PDF."
+    )
+
+    email_svc = get_email_service()
+    if not email_svc.is_configured():
+        raise HTTPException(status_code=503, detail="Email is not configured on the server.")
+
+    attachment = {"filename": filename, "content": pdf_b64, "disposition": "attachment"}
+    sent: list[str] = []
+    failed: list[str] = []
+    for email in recipients:
+        try:
+            ok = await email_svc.send_email(
+                to_email=email,
+                to_name=email.split("@")[0],
+                subject=subject,
+                html_content=html_body,
+                text_content=text_body,
+                attachments=[attachment],
+            )
+        except Exception as exc:
+            logger.warning("Failed to email note %s to %s: %s", section_id, email, exc)
+            ok = False
+        (sent if ok else failed).append(email)
+
+    return {"ok": len(sent) > 0, "sent": sent, "failed": failed}
+
+
+async def _resolve_actor_name_safe(user_id) -> str:
+    """Best-effort display name for the current user; falls back to 'Someone'."""
+    try:
+        from ..services import project_service as proj_svc
+        name = await proj_svc._resolve_actor_name(user_id)
+        return name or "Someone"
+    except Exception:
+        return "Someone"
+
+
 # ── Project file attachment endpoints ──
 
 ALLOWED_PROJECT_FILE_EXTENSIONS = {
