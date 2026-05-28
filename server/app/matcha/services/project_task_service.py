@@ -183,10 +183,18 @@ async def list_project_tasks(project_id: UUID) -> list[dict]:
                    -- visible at board glance, not just in the card history.
                    (SELECT COUNT(*) FROM mw_task_history h2
                       WHERE h2.task_id = t.id AND h2.event_type = 'review_rejected') AS review_cycle_count,
-                   -- Checklist progress for the card face ("done/total").
-                   (SELECT COUNT(*) FROM mw_subtasks s WHERE s.task_id = t.id) AS subtask_total,
+                   -- Checklist progress for the card face ("done/total"),
+                   -- scoped to the ticket's CURRENT round (max round_index) so
+                   -- the card matches the live (current-round) checklist —
+                   -- archived past-round items don't inflate the count.
                    (SELECT COUNT(*) FROM mw_subtasks s
-                      WHERE s.task_id = t.id AND s.is_done) AS subtask_done,
+                      WHERE s.task_id = t.id
+                        AND s.round_index = (SELECT COALESCE(MAX(round_index), 1)
+                                             FROM mw_subtasks s3 WHERE s3.task_id = t.id)) AS subtask_total,
+                   (SELECT COUNT(*) FROM mw_subtasks s
+                      WHERE s.task_id = t.id AND s.is_done
+                        AND s.round_index = (SELECT COALESCE(MAX(round_index), 1)
+                                             FROM mw_subtasks s3 WHERE s3.task_id = t.id)) AS subtask_done,
                    -- Split assignee fields so the client can pick a
                    -- human-readable name and never fall back to showing
                    -- a raw email in cards / tooltips. Older callsites

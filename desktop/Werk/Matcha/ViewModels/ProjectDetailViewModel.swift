@@ -976,8 +976,12 @@ class ProjectDetailViewModel {
     private func syncSubtaskCounts(taskId: String) {
         guard let list = taskSubtasks[taskId],
               let i = tasks.firstIndex(where: { $0.id == taskId }) else { return }
-        tasks[i].subtaskTotal = list.count
-        tasks[i].subtaskDone = list.filter { $0.isDone }.count
+        // Scope to the current round (max round_index) so the card face matches
+        // the live checklist — past-round items are archived, not counted.
+        let current = list.map { $0.roundIndex ?? 1 }.max() ?? 1
+        let scoped = list.filter { ($0.roundIndex ?? 1) == current }
+        tasks[i].subtaskTotal = scoped.count
+        tasks[i].subtaskDone = scoped.filter { $0.isDone }.count
     }
 
     func loadCollaborators() async {

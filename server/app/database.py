@@ -5191,6 +5191,7 @@ async def init_db():
                 title TEXT NOT NULL,
                 is_done BOOLEAN NOT NULL DEFAULT false,
                 position INTEGER NOT NULL DEFAULT 0,
+                round_index INTEGER NOT NULL DEFAULT 1,
                 assigned_to UUID,
                 created_by UUID,
                 completed_at TIMESTAMPTZ,

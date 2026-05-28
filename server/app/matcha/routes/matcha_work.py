@@ -5281,7 +5281,34 @@ async def start_task_round_endpoint(
         if len(found) != len(attachment_ids):
             raise HTTPException(status_code=400, detail="attachment not found on this task")
 
-    # 1. Create the headline subtask (fires its own `subtask_added` history row).
+    # 1. Open the round boundary AND re-scope the checklist, atomically:
+    #    - log the `round_started` row (client groups events between
+    #      consecutive round_started rows into one round),
+    #    - roll every UNCOMPLETED checklist item forward into the new round so
+    #      outstanding work carries over,
+    #    - leave COMPLETED items stamped on their old round so they archive out
+    #      of the live (current-round) checklist and only surface in that
+    #      round's "Fixed in Round N" history rollup.
+    async with get_connection() as conn:
+        async with conn.transaction():
+            await pt_svc._log_task_history(
+                conn,
+                task_id=task_id,
+                project_id=project_id,
+                actor_user_id=current_user.id,
+                event_type="round_started",
+                metadata={"title": title},
+            )
+            # round_started is now logged, so the current round = new round.
+            new_round = await st_svc._current_round(conn, task_id)
+            await conn.execute(
+                "UPDATE mw_subtasks SET round_index = $2, updated_at = NOW() "
+                "WHERE task_id = $1 AND is_done = false",
+                task_id, new_round,
+            )
+
+    # 2. Create the headline subtask (fires its own `subtask_added` history row).
+    #    create_subtask stamps round_index = current round = new_round.
     try:
         subtask = await st_svc.create_subtask(
             project_id, task_id,
@@ -5292,22 +5319,6 @@ async def start_task_round_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
     if subtask is None:
         raise HTTPException(status_code=404, detail="Task not found")
-
-    # 2. Log the round boundary itself. Client groups events between
-    # consecutive round_started rows into one round; the title + headline
-    # subtask_id ride in metadata so the round card can render rich.
-    async with get_connection() as conn:
-        await pt_svc._log_task_history(
-            conn,
-            task_id=task_id,
-            project_id=project_id,
-            actor_user_id=current_user.id,
-            event_type="round_started",
-            metadata={
-                "title": title,
-                "subtask_id": str(subtask["id"]),
-            },
-        )
 
     # 3. Optional kick-off note (text + images) — landed AFTER round_started
     # so it falls inside the new round on the timeline.

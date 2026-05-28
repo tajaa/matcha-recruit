@@ -38,10 +38,21 @@ struct TaskViewerSheet: View {
         viewModel.taskFiles[task.id] ?? []
     }
 
-    /// Checklist items for this task (ordered). Mutated optimistically by the
-    /// view model; the card-face "done/total" stays in sync via syncSubtaskCounts.
-    private var subtasks: [MWSubtask] {
+    /// All checklist items for this task, across every round (ordered).
+    private var allSubtasks: [MWSubtask] {
         viewModel.taskSubtasks[task.id] ?? []
+    }
+    /// The task's current round = highest round_index among its subtasks
+    /// (defaults to 1). Derived from the subtasks themselves so it's available
+    /// the moment they load, without waiting on the history fetch.
+    private var currentRound: Int {
+        allSubtasks.map { $0.roundIndex ?? 1 }.max() ?? 1
+    }
+    /// The LIVE checklist: only the current round's items. Items from earlier
+    /// rounds (necessarily completed — uncompleted ones roll forward) are
+    /// archived out of the checklist and live in the rounds history feed.
+    private var subtasks: [MWSubtask] {
+        allSubtasks.filter { ($0.roundIndex ?? 1) == currentRound }
     }
     private var subtaskDoneCount: Int { subtasks.filter { $0.isDone }.count }
 

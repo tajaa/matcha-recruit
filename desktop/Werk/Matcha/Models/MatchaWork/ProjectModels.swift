@@ -391,6 +391,10 @@ struct MWSubtask: Codable, Identifiable, Hashable {
     var title: String
     var isDone: Bool
     var position: Int
+    /// Review-cycle round this checklist item belongs to (1 = initial work).
+    /// The live checklist shows only the current round; older rounds' items
+    /// archive into the rounds history feed. Optional so legacy payloads decode.
+    var roundIndex: Int?
     var assignedTo: String?
     var createdBy: String?
     var completedAt: String?
@@ -402,6 +406,7 @@ struct MWSubtask: Codable, Identifiable, Hashable {
         case taskId = "task_id"
         case projectId = "project_id"
         case isDone = "is_done"
+        case roundIndex = "round_index"
         case assignedTo = "assigned_to"
         case createdBy = "created_by"
         case completedAt = "completed_at"

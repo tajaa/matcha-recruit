@@ -40,6 +40,19 @@ async def _task_in_project(conn, task_id: UUID, project_id: UUID) -> Optional[di
     )
 
 
+async def _current_round(conn, task_id: UUID) -> int:
+    """The task's current round number. Round 1 is the initial work; each
+    `round_started` row in mw_task_history opens the next round. So the current
+    round = (count of round_started rows) + 1. New checklist items belong to
+    this round."""
+    started = await conn.fetchval(
+        "SELECT COUNT(*) FROM mw_task_history "
+        "WHERE task_id = $1 AND event_type = 'round_started'",
+        task_id,
+    )
+    return int(started or 0) + 1
+
+
 async def list_subtasks(project_id: UUID, task_id: UUID) -> Optional[list[dict]]:
     """Ordered checklist for a task, or None if the task isn't in the project."""
     async with get_connection() as conn:
@@ -48,7 +61,8 @@ async def list_subtasks(project_id: UUID, task_id: UUID) -> Optional[list[dict]]
         rows = await conn.fetch(
             """
             SELECT id, task_id, project_id, company_id, title, is_done, position,
-                   assigned_to, created_by, completed_at, created_at, updated_at
+                   round_index, assigned_to, created_by, completed_at,
+                   created_at, updated_at
             FROM mw_subtasks
             WHERE task_id = $1
             ORDER BY position ASC, created_at ASC
@@ -86,16 +100,22 @@ async def create_subtask(
             "SELECT COALESCE(MAX(position), -1) + 1 FROM mw_subtasks WHERE task_id = $1",
             task_id,
         )
+        # New items belong to the task's current round, so they sit in the live
+        # checklist (which is scoped to the current round) rather than an
+        # already-archived past round.
+        round_index = await _current_round(conn, task_id)
         row = await conn.fetchrow(
             """
             INSERT INTO mw_subtasks
-                (task_id, project_id, company_id, title, position, assigned_to, created_by)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                (task_id, project_id, company_id, title, position, round_index,
+                 assigned_to, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id, task_id, project_id, company_id, title, is_done, position,
-                      assigned_to, created_by, completed_at, created_at, updated_at
+                      round_index, assigned_to, created_by, completed_at,
+                      created_at, updated_at
             """,
             task_id, project_id, parent["company_id"], title, next_pos,
-            assigned_to, created_by,
+            round_index, assigned_to, created_by,
         )
         # Lazy import dodges the routes→services→routes circular at module
         # load. _log_task_history is best-effort: a logging failure must not
@@ -172,7 +192,8 @@ async def update_subtask(
                 updated_at   = NOW()
             WHERE id = $1 AND task_id = $2 AND project_id = $3
             RETURNING id, task_id, project_id, company_id, title, is_done, position,
-                      assigned_to, created_by, completed_at, created_at, updated_at
+                      round_index, assigned_to, created_by, completed_at,
+                      created_at, updated_at
             """,
             subtask_id, task_id, project_id,
             is_done, completed_at_value, title, position,
