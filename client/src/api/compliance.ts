@@ -114,6 +114,35 @@ export function fetchPinnedRequirements() {
   return api.get<PinnedRequirement[]>('/compliance/pinned-requirements')
 }
 
+// ── Certifications & Licenses (per-company, joined to catalog) ──
+
+export interface CompanyCredential {
+  id: string
+  catalog_id: string
+  slug: string
+  name: string
+  issuing_authority: string | null
+  scope_level: string
+  industry_tag: string | null
+  renewal_months: number | null
+  description: string | null
+  source_url: string | null
+  location_id: string | null   // null → company-wide
+  source: string
+  status: string
+  added_at: string | null
+}
+
+export function fetchCompanyCertifications(companyId?: string) {
+  const qs = companyId ? `?company_id=${encodeURIComponent(companyId)}` : ''
+  return api.get<CompanyCredential[]>(`/compliance/certifications${qs}`)
+}
+
+export function fetchCompanyLicenses(companyId?: string) {
+  const qs = companyId ? `?company_id=${encodeURIComponent(companyId)}` : ''
+  return api.get<CompanyCredential[]>(`/compliance/licenses${qs}`)
+}
+
 // ── Alerts ──
 
 export function fetchAlerts(status?: string, severity?: string, locationId?: string) {

@@ -432,3 +432,33 @@ class HierarchicalComplianceResponse(BaseModel):
     categories: List[CategoryComplianceStack]
     total_categories: int
     total_requirements: int
+
+
+class CompanyCredentialResponse(BaseModel):
+    """A per-company certification or license, joined to its catalog row.
+
+    Backs the Certifications & Licenses tab. The gap-analysis wizard's finalize
+    writes company_certifications/company_licenses (→ certifications_catalog /
+    licenses_catalog); these are the readers that surface that output."""
+    id: str                              # company_certifications / company_licenses row id
+    catalog_id: str                      # certification_id / license_id
+    slug: str
+    name: str
+    issuing_authority: Optional[str] = None
+    scope_level: str
+    industry_tag: Optional[str] = None
+    renewal_months: Optional[int] = None
+    description: Optional[str] = None
+    source_url: Optional[str] = None
+    location_id: Optional[str] = None    # null → company-wide
+    source: str
+    status: str
+    added_at: Optional[datetime] = None
+
+
+class CompanyCertificationResponse(CompanyCredentialResponse):
+    """Per-company certification (semantic alias of CompanyCredentialResponse)."""
+
+
+class CompanyLicenseResponse(CompanyCredentialResponse):
+    """Per-company license (semantic alias of CompanyCredentialResponse)."""

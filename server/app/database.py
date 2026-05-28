@@ -2743,6 +2743,24 @@ async def init_db():
             ALTER TABLE compliance_requirements
             ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT false
         """)
+        # Provenance of the row. Known values:
+        #   not_evaluated | precedence_rule | default_local | admin_override
+        #   | onboarding_wizard | employee_sync
+        # (historically only set by migration zp4q5r6s7t8u_05 — mirrored here for fresh DBs)
+        await conn.execute("""
+            ALTER TABLE compliance_requirements
+            ADD COLUMN IF NOT EXISTS governance_source VARCHAR(20) NOT NULL DEFAULT 'not_evaluated'
+        """)
+        # Match jurisdiction_requirements.current_value (widened to VARCHAR(500)
+        # for international reqs). The scan + projector copy jr.current_value into
+        # this column, so a narrower type truncate-errors on long values.
+        await conn.execute("""
+            ALTER TABLE compliance_requirements
+            ALTER COLUMN current_value TYPE VARCHAR(500)
+        """)
+        # NOTE: the jurisdiction_requirement_id FK column (which REFERENCES
+        # jurisdiction_requirements) is added further below, AFTER that table is
+        # created — see "compliance_requirements → catalog link" block.
 
         # Compliance alerts table
         await conn.execute("""
@@ -2989,6 +3007,25 @@ async def init_db():
         await conn.execute("""
             ALTER TABLE jurisdiction_requirements
             ADD COLUMN IF NOT EXISTS applicable_industries TEXT[]
+        """)
+
+        # compliance_requirements → catalog link. Added here (not in the
+        # compliance_requirements block above) because the FK REFERENCES
+        # jurisdiction_requirements, which is only created at this point.
+        # Null for hand-authored rows; the dedup identity for catalog-derived rows.
+        await conn.execute("""
+            ALTER TABLE compliance_requirements
+            ADD COLUMN IF NOT EXISTS jurisdiction_requirement_id UUID
+                REFERENCES jurisdiction_requirements(id) ON DELETE SET NULL
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_compliance_requirements_jr_id
+            ON compliance_requirements(jurisdiction_requirement_id)
+        """)
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_compliance_requirements_loc_jr
+            ON compliance_requirements(location_id, jurisdiction_requirement_id)
+            WHERE jurisdiction_requirement_id IS NOT NULL
         """)
 
         # Compliance embeddings — vectorized jurisdiction_requirements for RAG Q&A

@@ -70,6 +70,7 @@ from app.core.services.onboarding_scope_ai import (
 from app.core.services.compliance_service import (
     ensure_location_for_employee,
     run_compliance_check_stream,
+    admin_add_requirements_to_location_batch,
     _refresh_repository_missing_categories,
     _get_or_create_jurisdiction,
     _lookup_has_local_ordinance,
@@ -186,6 +187,31 @@ def _dossier_from_row(row) -> dict:
     })
 
 
+async def _ensure_company_wide_location(conn, company_id: UUID) -> UUID:
+    """Return the company-wide sentinel location id, creating it if missing.
+
+    Federal-scope requirements attach here. The sentinel is normally created at
+    create-company; older companies (or roster-enriched ones) may predate it, so
+    we create on demand rather than silently dropping federal scope.
+    """
+    sentinel = await conn.fetchrow(
+        "SELECT id FROM business_locations WHERE company_id = $1 AND is_company_wide = TRUE LIMIT 1",
+        company_id,
+    )
+    if sentinel:
+        return sentinel["id"]
+    return await conn.fetchval(
+        """
+        INSERT INTO business_locations (
+            company_id, name, address, city, state, county, zipcode, is_active, is_company_wide
+        )
+        VALUES ($1, 'Company-wide', NULL, NULL, NULL, NULL, NULL, TRUE, TRUE)
+        RETURNING id
+        """,
+        company_id,
+    )
+
+
 async def _write_compliance_scope_rows(
     conn,
     *,
@@ -194,19 +220,36 @@ async def _write_compliance_scope_rows(
     admin_user_id: UUID,
     source: str,
 ) -> int:
-    """Attach resolved 'existing' bank requirements to a company's locations.
+    """Project resolved 'existing' bank requirements into the live per-company
+    store (``compliance_requirements``) — the single source of truth every
+    compliance surface reads (customer /app/compliance, /admin/compliance-mgmt,
+    dashboard, brokers).
 
-    Federal scope → the company-wide sentinel; state/county/city → first
-    matching real location (multi-location attach is Phase 2). Idempotent via
-    the ``(company_id, requirement_id, location_id)`` unique constraint.
-    Shared by ``finalize`` (source='onboarding_wizard') and the employee-sync
-    enrichment (source='employee_sync'). Returns rows attempted-written.
+    Federal scope → the company-wide sentinel; state/county/city → first matching
+    real location (multi-location attach is Phase 2). Idempotent via the
+    ``(location_id, jurisdiction_requirement_id)`` partial unique index — re-runs
+    skip rows already linked. Shared by ``finalize`` (source='onboarding_wizard')
+    and the employee-sync enrichment (source='employee_sync'); ``source`` becomes
+    the row's ``governance_source``. ``admin_user_id`` is accepted for call-site
+    symmetry (compliance_requirements has no reviewer column). Returns rows newly
+    written.
     """
-    sentinel = await conn.fetchrow(
-        "SELECT id FROM business_locations WHERE company_id = $1 AND is_company_wide = TRUE LIMIT 1",
-        company_id,
+    if not existing_items:
+        return 0
+
+    needs_federal = any(
+        (item.get("scope_level") or "federal").lower() == "federal"
+        for item in existing_items
     )
-    sentinel_id = sentinel["id"] if sentinel else None
+    if needs_federal:
+        sentinel_id = await _ensure_company_wide_location(conn, company_id)
+    else:
+        sentinel = await conn.fetchrow(
+            "SELECT id FROM business_locations WHERE company_id = $1 AND is_company_wide = TRUE LIMIT 1",
+            company_id,
+        )
+        sentinel_id = sentinel["id"] if sentinel else None
+
     real_locs = await conn.fetch(
         """
         SELECT id, state, county, city FROM business_locations
@@ -215,8 +258,13 @@ async def _write_compliance_scope_rows(
         company_id,
     )
 
-    written = 0
+    # Resolve each scope item to a target location, grouping catalog requirement
+    # ids so the batch projector runs once per location.
+    by_location: dict = {}
     for item in existing_items:
+        req_id = item.get("requirement_id")
+        if not req_id:
+            continue
         scope_level = (item.get("scope_level") or "federal").lower()
         target_location_id = sentinel_id
         if scope_level != "federal" and real_locs:
@@ -235,23 +283,23 @@ async def _write_compliance_scope_rows(
                 break
             target_location_id = best["id"] if best else (real_locs[0]["id"] if real_locs else sentinel_id)
         if target_location_id is None:
-            continue
-        try:
-            await conn.execute(
-                """
-                INSERT INTO company_compliance_scope (
-                    company_id, requirement_id, location_id, scope_level,
-                    source, status, admin_reviewed_by
-                )
-                VALUES ($1, $2, $3, $4, $5, 'active', $6)
-                ON CONFLICT (company_id, requirement_id, location_id) DO NOTHING
-                """,
-                company_id, item["requirement_id"], target_location_id,
-                scope_level, source, admin_user_id,
+            logger.warning(
+                "no location to attach scope item %s (company %s)", req_id, company_id
             )
-            written += 1
+            continue
+        by_location.setdefault(target_location_id, []).append(req_id)
+
+    written = 0
+    for location_id, jr_ids in by_location.items():
+        try:
+            res = await admin_add_requirements_to_location_batch(
+                conn, location_id, company_id, jr_ids, governance_source=source,
+            )
+            written += res["written"]
         except Exception as exc:
-            logger.warning("scope insert failed for %s: %s", item.get("requirement_id"), exc)
+            logger.warning(
+                "scope projection failed for location %s: %s", location_id, exc
+            )
     return written
 
 
@@ -614,8 +662,9 @@ def _build_enrichment_basics(company) -> dict:
 async def _enrich_scope_and_persist(
     conn, *, company, roles: list[str], admin_user_id: UUID,
 ) -> dict:
-    """Role-aware scope expansion → bank reconciliation → write
-    company_compliance_scope → upsert the per-company enrichment session.
+    """Role-aware scope expansion → bank reconciliation → project resolved
+    'existing' scope into compliance_requirements (the live store) → upsert the
+    per-company enrichment session.
 
     Assumes any new locations have already been filled into business_locations.
     Returns {session_id, resolved (ResolvedScope), ai_scope (AIScope),
@@ -723,9 +772,14 @@ async def _enrich_scope_and_persist(
             basics_blob, locations_blob, ai_blob, resolved_blob,
         )
 
-    # Existing coverage (for display) — what this company already tracks.
+    # Existing coverage (for display) — live per-company requirements this
+    # company already tracks (the single source of truth all surfaces read).
     covered_existing = await conn.fetchval(
-        "SELECT COUNT(*) FROM company_compliance_scope WHERE company_id = $1 AND status = 'active'",
+        """
+        SELECT COUNT(*) FROM compliance_requirements cr
+        JOIN business_locations bl ON cr.location_id = bl.id
+        WHERE bl.company_id = $1
+        """,
         company_id,
     )
 
@@ -1045,26 +1099,9 @@ async def research_gaps_stream(
                         "AND is_active = TRUE ORDER BY is_company_wide ASC LIMIT 1",
                         company_id, jid,
                     )
-                    scope_rows = 0
-                    if loc:
-                        bank_rows = await conn.fetch(
-                            "SELECT id, jurisdiction_level FROM jurisdiction_requirements "
-                            "WHERE jurisdiction_id = $1 AND category = ANY($2::text[])",
-                            jid, cats,
-                        )
-                        for br in bank_rows:
-                            try:
-                                await conn.execute(
-                                    "INSERT INTO company_compliance_scope "
-                                    "(company_id, requirement_id, location_id, scope_level, source, status, admin_reviewed_by) "
-                                    "VALUES ($1, $2, $3, $4, 'employee_sync', 'active', $5) "
-                                    "ON CONFLICT (company_id, requirement_id, location_id) DO NOTHING",
-                                    company_id, br["id"], loc["id"],
-                                    (br["jurisdiction_level"] or "state"), current_user.id,
-                                )
-                                scope_rows += 1
-                            except Exception:
-                                logger.warning("research-gaps: scope insert failed for %s", br["id"])
+                # The re-sync below (run_compliance_check_stream) writes the freshly
+                # researched requirements straight into compliance_requirements — the
+                # live single source of truth. No separate scope-pointer table to keep.
                 filled += 1
                 # Re-sync the location's tracked requirements from the updated repo.
                 if loc:
@@ -1377,9 +1414,11 @@ async def finalize_session(
 ):
     """Write the durable manifest + invite the owner.
 
-    Idempotent — re-running just re-writes the same rows (UNIQUE
-    constraints on company_compliance_scope, company_certifications,
-    company_licenses no-op on duplicate).
+    Projects resolved 'existing' scope into compliance_requirements (the single
+    per-company source of truth) and upserts the cert/license catalogs +
+    company_certifications/company_licenses. Idempotent — re-running re-writes the
+    same rows (the (location_id, jurisdiction_requirement_id) partial unique index
+    and the cert/license UNIQUE constraints no-op on duplicate).
     """
     async with get_connection() as conn:
         row = await _load_session_or_404(conn, session_id)

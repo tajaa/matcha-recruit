@@ -31,6 +31,8 @@ from ..models.compliance import (
     ComplianceSummary,
     PinRequirementRequest,
     HierarchicalComplianceResponse,
+    CompanyCertificationResponse,
+    CompanyLicenseResponse,
 )
 from ..services.compliance_service import (
     create_location,
@@ -1017,6 +1019,76 @@ async def search_requirements_endpoint(
         )
 
     return results
+
+
+async def _fetch_company_credentials(conn, company_id: UUID, *, kind: str) -> List[dict]:
+    """Join a company's certs/licenses to their catalog row. kind ∈ {'certification','license'}.
+
+    These back the Certifications & Licenses tab and surface the gap-analysis
+    wizard's finalize output (company_certifications / company_licenses).
+    """
+    if kind == "certification":
+        rows = await conn.fetch(
+            """
+            SELECT cc.id, cc.certification_id AS catalog_id, cat.slug, cat.name,
+                   cat.issuing_authority, cat.scope_level, cat.industry_tag,
+                   cat.renewal_months, cat.description, cat.source_url,
+                   cc.location_id, cc.source, cc.status, cc.added_at
+            FROM company_certifications cc
+            JOIN certifications_catalog cat ON cat.id = cc.certification_id
+            WHERE cc.company_id = $1
+            ORDER BY cat.name
+            """,
+            company_id,
+        )
+    else:
+        rows = await conn.fetch(
+            """
+            SELECT cl.id, cl.license_id AS catalog_id, cat.slug, cat.name,
+                   cat.issuing_authority, cat.scope_level, cat.industry_tag,
+                   cat.renewal_months, cat.description, cat.source_url,
+                   cl.location_id, cl.source, cl.status, cl.added_at
+            FROM company_licenses cl
+            JOIN licenses_catalog cat ON cat.id = cl.license_id
+            WHERE cl.company_id = $1
+            ORDER BY cat.name
+            """,
+            company_id,
+        )
+    out: List[dict] = []
+    for r in rows:
+        d = dict(r)
+        d["id"] = str(d["id"])
+        d["catalog_id"] = str(d["catalog_id"])
+        d["location_id"] = str(d["location_id"]) if d["location_id"] is not None else None
+        out.append(d)
+    return out
+
+
+@router.get("/certifications", response_model=List[CompanyCertificationResponse])
+async def list_company_certifications(
+    company_id: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Per-company certifications, joined to the catalog (admins may pass ?company_id=)."""
+    cid = await resolve_company_id(current_user, company_id)
+    if cid is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+    async with get_connection() as conn:
+        return await _fetch_company_credentials(conn, cid, kind="certification")
+
+
+@router.get("/licenses", response_model=List[CompanyLicenseResponse])
+async def list_company_licenses(
+    company_id: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Per-company licenses, joined to the catalog (admins may pass ?company_id=)."""
+    cid = await resolve_company_id(current_user, company_id)
+    if cid is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+    async with get_connection() as conn:
+        return await _fetch_company_credentials(conn, cid, kind="license")
 
 
 @lite_router.patch("/locations/{location_id}/facility-attributes")

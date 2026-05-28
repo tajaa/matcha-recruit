@@ -9486,7 +9486,10 @@ async def admin_browse_repository(
               AND NOT EXISTS (
                   SELECT 1 FROM compliance_requirements cr
                   WHERE cr.location_id = $2
-                    AND cr.requirement_key = jr.category || ':' || COALESCE(jr.regulation_key, jr.title)
+                    AND (
+                      cr.jurisdiction_requirement_id = jr.id
+                      OR cr.requirement_key = jr.category || ':' || COALESCE(jr.regulation_key, jr.title)
+                    )
               )
             ORDER BY jr.category, jr.title
             """,

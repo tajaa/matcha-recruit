@@ -12,6 +12,7 @@ import { ComplianceAlertsTab } from '../../components/compliance/ComplianceAlert
 import { ComplianceUpcomingTab } from '../../components/compliance/ComplianceUpcomingTab'
 import { ComplianceHistoryTab } from '../../components/compliance/ComplianceHistoryTab'
 import { CompliancePostersTab } from '../../components/compliance/CompliancePostersTab'
+import { ComplianceCredentialsTab } from '../../components/compliance/ComplianceCredentialsTab'
 import { ComplianceScanProgress } from '../../components/compliance/ComplianceScanProgress'
 import { FacilityProfileBanner } from '../../components/compliance/FacilityProfileBanner'
 import { RegulatoryQuickAsk } from '../../components/compliance/RegulatoryQuickAsk'
@@ -21,11 +22,12 @@ import { PolicyDrafter } from '../../components/compliance/PolicyDrafter'
 import { updateAlertActionPlan } from '../../api/compliance'
 import type { BusinessLocation, LocationCreate, ComplianceActionPlanUpdate } from '../../types/compliance'
 
-type Tab = 'overview' | 'requirements' | 'alerts' | 'upcoming' | 'history' | 'posters' | 'payer-policies' | 'protocol-analysis' | 'policy-drafting'
+type Tab = 'overview' | 'requirements' | 'credentials' | 'alerts' | 'upcoming' | 'history' | 'posters' | 'payer-policies' | 'protocol-analysis' | 'policy-drafting'
 
 const TABS: { value: Tab; label: string }[] = [
   { value: 'overview', label: 'Overview' },
   { value: 'requirements', label: 'Requirements' },
+  { value: 'credentials', label: 'Certifications & Licenses' },
   { value: 'alerts', label: 'Alerts' },
   { value: 'upcoming', label: 'Upcoming' },
   { value: 'history', label: 'History' },
@@ -155,8 +157,13 @@ export default function Compliance() {
         />
       )}
 
+      {/* Certifications & Licenses (company-level, no location context) */}
+      {tab === 'credentials' && (
+        <ComplianceCredentialsTab companyId={searchParams.get('company_id') || undefined} />
+      )}
+
       {/* Location-contextual tabs */}
-      {tab !== 'overview' && (
+      {tab !== 'overview' && tab !== 'credentials' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Left: location list */}
           <div className="col-span-1">

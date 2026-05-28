@@ -1275,7 +1275,11 @@ async def _load_jurisdiction_requirements(conn, jurisdiction_id: UUID) -> List[D
         "SELECT * FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
         jurisdiction_id,
     )
-    return [dict(r) for r in rows]
+    # Carry the catalog row id under an explicit key so the per-location sync can
+    # stamp compliance_requirements.jurisdiction_requirement_id (the SSOT link /
+    # dedup identity). `id` is already present from dict(r); the explicit alias is
+    # unambiguous for the writers below.
+    return [{**dict(r), "jurisdiction_requirement_id": r["id"]} for r in rows]
 
 
 async def _load_jurisdiction_legislation(conn, jurisdiction_id: UUID) -> List[Dict]:
@@ -1290,6 +1294,7 @@ async def _load_jurisdiction_legislation(conn, jurisdiction_id: UUID) -> List[Di
 def _jurisdiction_row_to_dict(jr: dict) -> dict:
     """Convert a jurisdiction_requirements row to a dict compatible with sync functions."""
     return {
+        "jurisdiction_requirement_id": jr.get("id"),
         "category": jr["category"],
         "rate_type": jr.get("rate_type"),
         "jurisdiction_level": jr["jurisdiction_level"],
@@ -3520,13 +3525,40 @@ async def _log_verification_outcome(
 async def _upsert_requirement(
     conn, location_id: UUID, requirement_key: str, req: dict
 ) -> UUID:
-    """Insert a new compliance requirement. Returns the new ID."""
+    """Insert a new compliance requirement. Returns the new ID.
+
+    ON CONFLICT on the (location_id, jurisdiction_requirement_id) partial unique
+    index merges into the existing catalog-linked row instead of erroring. This
+    matters because the scan's requirement_key (_compute_requirement_key) can
+    differ from the projector's simple key for the same catalog requirement, so a
+    key-miss could otherwise try to insert a second row for a jr already projected
+    by the wizard at this location. Null-FK (Gemini-fresh) rows don't match the
+    partial index, so they insert normally (string-key dedup as before).
+    """
     return await conn.fetchval(
         """
         INSERT INTO compliance_requirements
         (location_id, requirement_key, category, rate_type, jurisdiction_level, jurisdiction_name, title, description,
-         current_value, numeric_value, source_url, source_name, effective_date, applicable_industries)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+         current_value, numeric_value, source_url, source_name, effective_date, applicable_industries,
+         jurisdiction_requirement_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        ON CONFLICT (location_id, jurisdiction_requirement_id)
+            WHERE jurisdiction_requirement_id IS NOT NULL
+        DO UPDATE SET
+            requirement_key = EXCLUDED.requirement_key,
+            category = EXCLUDED.category,
+            rate_type = EXCLUDED.rate_type,
+            jurisdiction_level = EXCLUDED.jurisdiction_level,
+            jurisdiction_name = EXCLUDED.jurisdiction_name,
+            title = EXCLUDED.title,
+            description = EXCLUDED.description,
+            current_value = EXCLUDED.current_value,
+            numeric_value = EXCLUDED.numeric_value,
+            source_url = EXCLUDED.source_url,
+            source_name = EXCLUDED.source_name,
+            effective_date = EXCLUDED.effective_date,
+            applicable_industries = EXCLUDED.applicable_industries,
+            updated_at = NOW()
         RETURNING id
         """,
         location_id,
@@ -3543,6 +3575,7 @@ async def _upsert_requirement(
         req.get("source_name"),
         parse_date(req.get("effective_date")),
         req.get("applicable_industries"),
+        req.get("jurisdiction_requirement_id"),  # SSOT link; null for Gemini-fresh rows
     )
 
 
@@ -3554,7 +3587,15 @@ async def _update_requirement(
     previous_value: Optional[str],
     last_changed_at: Optional[datetime],
 ):
-    """Update an existing compliance requirement."""
+    """Update an existing compliance requirement.
+
+    Deliberately does NOT touch jurisdiction_requirement_id: this row was matched
+    by requirement_key, and COALESCE-filling the FK here could collide with a
+    different row at the same location that already holds that FK (e.g. a wizard
+    projection), violating the (location_id, jurisdiction_requirement_id) unique
+    index mid-scan. Go-forward rows get the FK stamped at INSERT time
+    (_upsert_requirement); legacy null-FK rows keep string-key dedup.
+    """
     await conn.execute(
         """
         UPDATE compliance_requirements
@@ -8894,6 +8935,69 @@ async def get_specialization_completeness(
 # ---------------------------------------------------------------------------
 
 
+async def _insert_catalog_requirement(
+    conn,
+    location_id: UUID,
+    jr: dict,
+    governance_source: str,
+    *,
+    on_conflict_nothing: bool,
+) -> Optional[dict]:
+    """Project one ``jurisdiction_requirements`` row (``jr``) into
+    ``compliance_requirements`` for *location_id*, stamping the catalog FK
+    (``jurisdiction_requirement_id``) — the SSOT link / dedup identity — and the
+    given ``governance_source``.
+
+    When *on_conflict_nothing* is True, a row already linked to this
+    (location_id, catalog requirement) is a no-op and returns ``None`` (via the
+    ``uq_compliance_requirements_loc_jr`` partial unique index). The conflict
+    clause is a static fragment — no user input is interpolated.
+    """
+    req_key = f"{jr['category']}:{jr['regulation_key'] or jr['title']}"
+    conflict = (
+        "ON CONFLICT (location_id, jurisdiction_requirement_id) "
+        "WHERE jurisdiction_requirement_id IS NOT NULL DO NOTHING"
+        if on_conflict_nothing
+        else ""
+    )
+    row = await conn.fetchrow(
+        f"""
+        INSERT INTO compliance_requirements (
+            location_id, category, jurisdiction_level, jurisdiction_name,
+            title, description, current_value, numeric_value,
+            source_url, source_name, effective_date,
+            requirement_key, governance_source, jurisdiction_requirement_id
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        {conflict}
+        RETURNING id, category, jurisdiction_level, jurisdiction_name,
+                  title, description, current_value, numeric_value,
+                  source_url, source_name, effective_date,
+                  requirement_key, governance_source, jurisdiction_requirement_id
+        """,
+        location_id,
+        jr["category"],
+        jr["jurisdiction_level"],
+        jr["jurisdiction_name"],
+        jr["title"],
+        jr["description"],
+        jr["current_value"],
+        jr["numeric_value"],
+        jr["source_url"],
+        jr.get("source_name"),
+        jr["effective_date"],
+        req_key,
+        governance_source,
+        jr["id"],
+    )
+    if row is None:
+        return None
+    result = dict(row)
+    result["id"] = str(result["id"])
+    if result.get("jurisdiction_requirement_id") is not None:
+        result["jurisdiction_requirement_id"] = str(result["jurisdiction_requirement_id"])
+    return result
+
+
 async def admin_add_requirement_to_location(
     location_id: UUID, company_id: UUID, jurisdiction_requirement_id: UUID,
 ) -> dict:
@@ -8915,41 +9019,53 @@ async def admin_add_requirement_to_location(
 
         req_key = f"{jr['category']}:{jr['regulation_key'] or jr['title']}"
 
-        # 2. Check for duplicate
+        # 2. Check for duplicate — by catalog FK (exact) OR legacy string key.
         exists = await conn.fetchval(
-            "SELECT 1 FROM compliance_requirements WHERE location_id = $1 AND requirement_key = $2",
-            location_id, req_key,
+            """
+            SELECT 1 FROM compliance_requirements
+            WHERE location_id = $1
+              AND (jurisdiction_requirement_id = $2 OR requirement_key = $3)
+            """,
+            location_id, jurisdiction_requirement_id, req_key,
         )
         if exists:
             raise ValueError("Requirement already exists for this location")
 
-        # 3. Insert
-        row = await conn.fetchrow(
-            """
-            INSERT INTO compliance_requirements (
-                location_id, category, jurisdiction_level, jurisdiction_name,
-                title, description, current_value, numeric_value,
-                source_url, source_name, effective_date,
-                requirement_key, governance_source
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'admin_override')
-            RETURNING id, category, jurisdiction_level, jurisdiction_name,
-                      title, description, current_value, numeric_value,
-                      source_url, source_name, effective_date,
-                      requirement_key, governance_source
-            """,
-            location_id,
-            jr["category"],
-            jr["jurisdiction_level"],
-            jr["jurisdiction_name"],
-            jr["title"],
-            jr["description"],
-            jr["current_value"],
-            jr["numeric_value"],
-            jr["source_url"],
-            jr.get("source_name"),
-            jr["effective_date"],
-            req_key,
+        # 3. Insert (stamps the catalog FK + provenance)
+        return await _insert_catalog_requirement(
+            conn, location_id, jr, "admin_override", on_conflict_nothing=False
         )
-        result = dict(row)
-        result["id"] = str(result["id"])
-        return result
+
+
+async def admin_add_requirements_to_location_batch(
+    conn,
+    location_id: UUID,
+    company_id: UUID,
+    jr_ids: list,
+    governance_source: str = "onboarding_wizard",
+) -> dict:
+    """Project many jurisdiction_requirements rows into compliance_requirements
+    for *location_id* on a shared connection (so callers can run inside their own
+    transaction — e.g. onboarding finalize).
+
+    Idempotent: a row already linked to a given catalog requirement at this
+    location is skipped via the partial unique index. *company_id* is accepted for
+    API symmetry / future tenant assertions; location ownership is the caller's
+    responsibility. Returns ``{written, skipped_existing, missing_jr}``.
+    """
+    written = skipped = missing = 0
+    for jr_id in jr_ids:
+        jr = await conn.fetchrow(
+            "SELECT * FROM jurisdiction_requirements WHERE id = $1", jr_id
+        )
+        if not jr:
+            missing += 1
+            continue
+        row = await _insert_catalog_requirement(
+            conn, location_id, jr, governance_source, on_conflict_nothing=True
+        )
+        if row is None:
+            skipped += 1
+        else:
+            written += 1
+    return {"written": written, "skipped_existing": skipped, "missing_jr": missing}
