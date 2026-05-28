@@ -470,9 +470,26 @@ private struct FileRow: View {
     var body: some View {
         HStack(spacing: 8) {
             if indent { Spacer().frame(width: 18) }
-            Image(systemName: file.isImage ? "photo" : "doc")
-                .font(.system(size: 13))
-                .foregroundColor(.secondary)
+            if file.isImage, let url = URL(string: file.storageUrl) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img):
+                        img.resizable().interpolation(.medium).scaledToFill()
+                    case .failure:
+                        Color.zinc800.overlay(
+                            Image(systemName: "photo").font(.system(size: 11)).foregroundColor(.secondary))
+                    default:
+                        Color.zinc800.overlay(ProgressView().controlSize(.small))
+                    }
+                }
+                .frame(width: 34, height: 34)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            } else {
+                Image(systemName: "doc")
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+                    .frame(width: 34, height: 34)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(file.filename)
                     .font(.system(size: 12))

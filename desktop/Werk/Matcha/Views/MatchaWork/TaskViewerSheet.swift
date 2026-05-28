@@ -1525,11 +1525,6 @@ private struct SubtaskRow: View {
         guard let id = item.assignedTo else { return nil }
         return collaborators.first { $0.userId == id }
     }
-    private var assigneeInitial: String? {
-        guard item.assignedTo != nil else { return nil }
-        if let f = assignee?.name.first { return String(f).uppercased() }
-        return "?"
-    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -1545,6 +1540,13 @@ private struct SubtaskRow: View {
                 .strikethrough(item.isDone)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
+                .textSelection(.enabled)
+                .contextMenu {
+                    Button("Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(item.title, forType: .string)
+                    }
+                }
             Spacer(minLength: 0)
             assigneeMenu
             if isHovered {
@@ -1584,15 +1586,13 @@ private struct SubtaskRow: View {
                 Button("Unassign") { onAssign(nil) }
             }
         } label: {
-            if let initial = assigneeInitial {
-                Circle()
-                    .fill(Color.matcha600)
-                    .frame(width: 18, height: 18)
-                    .overlay(
-                        Text(initial)
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.white)
-                    )
+            if let id = item.assignedTo {
+                ChannelAvatarView(
+                    senderId: id,
+                    payloadURL: assignee?.avatarUrl,
+                    name: assignee?.name ?? "",
+                    size: 18
+                )
             } else {
                 Image(systemName: "person.crop.circle.badge.plus")
                     .font(.system(size: 13))
@@ -1630,9 +1630,26 @@ private struct ViewerAttachmentRow: View {
                     size: 20
                 )
             }
-            Image(systemName: file.isImage ? "photo" : "doc")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
+            if file.isImage, let url = URL(string: file.storageUrl) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img):
+                        img.resizable().interpolation(.medium).aspectRatio(contentMode: .fill)
+                    case .failure:
+                        Color.zinc800.overlay(
+                            Image(systemName: "photo").font(.system(size: 10)).foregroundColor(.secondary))
+                    default:
+                        Color.zinc800.overlay(ProgressView().controlSize(.small))
+                    }
+                }
+                .frame(width: 30, height: 30)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            } else {
+                Image(systemName: "doc")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                    .frame(width: 30, height: 30)
+            }
             Text(file.filename)
                 .font(.system(size: 11))
                 .foregroundColor(.white)
