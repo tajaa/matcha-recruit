@@ -2,7 +2,6 @@ import { Link } from 'react-router-dom'
 import { BookOpen, Briefcase, Calculator, ChevronRight, ClipboardList, FileText } from 'lucide-react'
 
 import PinnedResourcesPanel from '../../components/PinnedResourcesPanel'
-import HeadlinesPanel from '../../components/resources-free/HeadlinesPanel'
 
 type Card = {
   to: string
@@ -62,8 +61,6 @@ export default function AppResources() {
           </p>
         </div>
       </div>
-
-      <HeadlinesPanel compact />
 
       <PinnedResourcesPanel />
 

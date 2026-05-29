@@ -37,7 +37,6 @@ import DisciplineSettings from '../pages/app/DisciplineSettings'
 import Training from '../pages/app/Training'
 import TrainingDetail from '../pages/app/TrainingDetail'
 import AppResources from '../pages/app/AppResources'
-import ResourcesHeadlines from '../pages/app/ResourcesHeadlines'
 import ResourcesTemplates from '../pages/landing/resources/Templates'
 import ResourcesJobDescriptions from '../pages/landing/resources/JobDescriptions'
 import JobDescriptionDetail from '../pages/landing/resources/JobDescriptionDetail'
@@ -101,7 +100,6 @@ export default function AppRoutes() {
         <Route path="resources/handbook-audit/result/:reportId" element={<RequireBusinessAccount><HandbookGapResult embedded /></RequireBusinessAccount>} />
         <Route path="resources/glossary" element={<ResourcesGlossary embedded />} />
         <Route path="resources/glossary/:slug" element={<ResourcesGlossaryTerm embedded />} />
-        <Route path="resources/headlines" element={<ResourcesHeadlines />} />
         <Route path="inbox" element={<Inbox />} />
         <Route path="notifications" element={<Notifications />} />
         <Route path="settings" element={<UserSettings />} />
