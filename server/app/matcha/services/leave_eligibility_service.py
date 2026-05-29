@@ -356,7 +356,7 @@ class LeaveEligibilityService:
                     SELECT DISTINCT '', UPPER(ljr.state), UPPER(ljr.state), 'state'
                     FROM leave_jurisdiction_rules ljr
                     WHERE ljr.state != 'US'
-                    ON CONFLICT (COALESCE(city, ''), state) DO NOTHING
+                    ON CONFLICT DO NOTHING
                 """)
 
                 await conn.execute("""

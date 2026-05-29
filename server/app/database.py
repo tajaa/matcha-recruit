@@ -3208,7 +3208,7 @@ async def init_db():
             SELECT DISTINCT LOWER(city), UPPER(state), county,
                    city || ', ' || UPPER(state), 'city'
             FROM business_locations WHERE is_active = true
-            ON CONFLICT (COALESCE(city, ''), state) DO NOTHING
+            ON CONFLICT DO NOTHING
         """)
 
         # Backfill: link existing locations to jurisdictions

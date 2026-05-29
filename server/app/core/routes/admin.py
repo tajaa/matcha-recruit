@@ -2521,7 +2521,7 @@ async def create_jurisdiction(request: JurisdictionCreateRequest):
             row = await conn.fetchrow("""
                 INSERT INTO jurisdictions (city, state, county, parent_id, display_name)
                 VALUES ($1, $2, $3, $4, $5)
-                ON CONFLICT (COALESCE(city, ''), state) DO UPDATE SET
+                ON CONFLICT (COALESCE(city, ''), COALESCE(state, ''), country_code) DO UPDATE SET
                     parent_id = COALESCE(EXCLUDED.parent_id, jurisdictions.parent_id),
                     county = COALESCE(EXCLUDED.county, jurisdictions.county)
                 RETURNING *
@@ -6327,7 +6327,7 @@ async def _get_or_create_metro_jurisdiction(city: str, state: str) -> UUID:
             """
             INSERT INTO jurisdictions (city, state, county, display_name)
             VALUES ($1, $2, $3, $4)
-            ON CONFLICT (COALESCE(city, ''), state) DO UPDATE SET
+            ON CONFLICT (COALESCE(city, ''), COALESCE(state, ''), country_code) DO UPDATE SET
                 county = COALESCE(jurisdictions.county, EXCLUDED.county)
             RETURNING id
             """,
