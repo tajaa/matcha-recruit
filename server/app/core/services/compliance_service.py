@@ -1104,7 +1104,7 @@ async def _get_or_create_jurisdiction(
         )
         if not state_j:
             await conn.execute(
-                "INSERT INTO jurisdictions (city, state, display_name, level) VALUES ('', $1, $2, 'state') ON CONFLICT (COALESCE(city, ''), state) DO NOTHING",
+                "INSERT INTO jurisdictions (city, state, display_name, level) VALUES ('', $1, $2, 'state') ON CONFLICT DO NOTHING",
                 norm_state,
                 norm_state,
             )
@@ -1124,7 +1124,7 @@ async def _get_or_create_jurisdiction(
         """
         INSERT INTO jurisdictions (city, state, county, display_name, level)
         VALUES ($1, $2, $3, $4, 'city')
-        ON CONFLICT (COALESCE(city, ''), state) DO NOTHING
+        ON CONFLICT DO NOTHING
         """,
         norm_city,
         norm_state,
@@ -1145,7 +1145,7 @@ async def _get_or_create_jurisdiction(
     )
     if not state_j:
         await conn.execute(
-            "INSERT INTO jurisdictions (city, state, display_name, level) VALUES ('', $1, $2, 'state') ON CONFLICT (COALESCE(city, ''), state) DO NOTHING",
+            "INSERT INTO jurisdictions (city, state, display_name, level) VALUES ('', $1, $2, 'state') ON CONFLICT DO NOTHING",
             norm_state,
             norm_state,
         )
@@ -1177,7 +1177,7 @@ async def _get_or_create_jurisdiction(
                 """
                 INSERT INTO jurisdictions (city, state, county, parent_id, display_name, level)
                 VALUES ($1, $2, $3, $4, $5, 'county')
-                ON CONFLICT (COALESCE(city, ''), state) DO NOTHING
+                ON CONFLICT DO NOTHING
                 """,
                 f"_county_{county_norm}",
                 norm_state,
