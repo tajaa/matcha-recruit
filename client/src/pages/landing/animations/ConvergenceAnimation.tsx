@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Share2, AlertTriangle } from 'lucide-react'
+import { Share2 } from 'lucide-react'
 
 // ───────────────────────────────────────────────────────────────────────────
-// Convergence story: one safety incident lands once, then fans out to all
-// three usually-siloed domains — EHS logs it, GRC flags the compliance gap it
-// exposes, ER opens a case off the behavioral pattern. One record, three
-// synchronized workflows, zero manual re-entry. Mirrors the visual vocabulary
-// of AgentReasoningAnimation (scenario → root → fan-out → columns → synthesis).
+// Unified Risk Graph story: every safety / compliance / relations system used to
+// live in its own silo — a logged incident here, a flagged gap there, a case
+// opened somewhere else, none of them talking. Watch the scattered records get
+// pulled into one connected graph: shared context, zero re-entry. A graph mesh,
+// not a decision tree — deliberately distinct from AgentReasoningAnimation.
 // ───────────────────────────────────────────────────────────────────────────
 
 const EMERALD = '#34d399'
@@ -15,83 +15,50 @@ const AMBER = '#d7ba7d'
 const CORAL = '#e0916b'
 const ZINC_LINE = 'rgba(255,255,255,0.08)'
 
-interface Domain {
+interface ElementNode {
   key: string
-  tag: string
-  sub: string
+  label: string
   color: string
-  pill: string
-  cite: string
-  question: string
-  action: string
-  status: string
+  // percentage coords within the body box
+  scatter: { x: number; y: number }
+  web: { x: number; y: number }
 }
 
-const DOMAINS: Domain[] = [
-  {
-    key: 'ehs',
-    tag: 'EHS',
-    sub: 'Safety',
-    color: EMERALD,
-    pill: 'LOGGED',
-    cite: 'OSHA 300 · §1904',
-    question: 'Recordable? Witnesses + photos attached?',
-    action: 'Recordable entry · 5-yr retention',
-    status: 'Routing → EHS · recordkeeping check',
-  },
-  {
-    key: 'grc',
-    tag: 'GRC',
-    sub: 'Compliance',
-    color: AMBER,
-    pill: 'FLAGGED',
-    cite: 'CA SB 553 · §6401.9(e)',
-    question: 'WVP training current across all 8 sites?',
-    action: 'Schedule training · 87 emp · bilingual',
-    status: 'Routing → GRC · SB 553 cadence check',
-  },
-  {
-    key: 'er',
-    tag: 'ER',
-    sub: 'Relations',
-    color: CORAL,
-    pill: 'CASE OPENED',
-    cite: 'Case #C391',
-    question: '3rd escalation at this location in 14 days?',
-    action: 'Open ER case · assign investigator',
-    status: 'Routing → ER · behavioral pattern match',
-  },
+// Web coords = hexagonal ring around the center (50,50). Scatter coords = loose,
+// flung toward the edges so the "before" reads as disconnected systems.
+const ELEMENTS: ElementNode[] = [
+  { key: 'logged', label: 'logged', color: EMERALD, scatter: { x: 14, y: 20 }, web: { x: 50, y: 16 } },
+  { key: 'flagged', label: 'flagged', color: AMBER, scatter: { x: 84, y: 16 }, web: { x: 80, y: 34 } },
+  { key: 'case', label: 'case opened', color: CORAL, scatter: { x: 90, y: 74 }, web: { x: 78, y: 70 } },
+  { key: 'training', label: 'training due', color: AMBER, scatter: { x: 52, y: 88 }, web: { x: 50, y: 84 } },
+  { key: 'gap', label: 'gap found', color: CORAL, scatter: { x: 10, y: 80 }, web: { x: 22, y: 70 } },
+  { key: 'pattern', label: 'pattern matched', color: EMERALD, scatter: { x: 6, y: 48 }, web: { x: 20, y: 34 } },
 ]
 
-const SCENARIO = {
-  id: 'Incident #4827',
-  when: 'Just now · Atlanta · Store 7',
-  facts: 'Customer escalation · raised voice · crew de-escalated, no contact',
-  severity: 'Medium',
-}
+// Mesh adjacency (indices into ELEMENTS): outer ring + two cross-links so it
+// reads as a graph, not a polygon.
+const EDGES: [number, number][] = [
+  [0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 0], // ring
+  [0, 3], [1, 4], // cross-links through the middle
+]
+
+const CENTER = { x: 50, y: 50 }
 
 const SYNTHESIS = {
   stats: [
-    { label: 'Domains updated', value: '3' },
+    { label: 'Systems linked', value: '6' },
     { label: 'Manual re-entry', value: '0' },
     { label: 'Context shared', value: 'Full' },
-    { label: 'Routed in', value: '1.4s' },
+    { label: 'Records', value: '1 graph' },
   ],
 }
 
-type Phase = 'pending' | 'routing' | 'done'
-
-const INITIAL: Phase[] = DOMAINS.map(() => 'pending')
+type Stage = 'idle' | 'scattered' | 'pulling' | 'linked' | 'synthesis' | 'reset'
 
 export function ConvergenceAnimation() {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [scenarioVisible, setScenarioVisible] = useState(false)
-  const [rootVisible, setRootVisible] = useState(false)
-  const [phases, setPhases] = useState<Phase[]>(INITIAL)
-  const [synthesisVisible, setSynthesisVisible] = useState(false)
-  const [stage, setStage] = useState<'idle' | 'routing' | 'synced' | 'reset'>('idle')
+  const [stage, setStage] = useState<Stage>('idle')
   const [hud, setHud] = useState('Listening for new events…')
-  const [routedCount, setRoutedCount] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -117,52 +84,35 @@ export function ConvergenceAnimation() {
         tick()
       })
 
-    const setPhase = (idx: number, p: Phase) =>
-      setPhases((prev) => prev.map((x, i) => (i === idx ? p : x)))
-
     async function loop() {
       while (!cancelled) {
         // RESET
-        setScenarioVisible(false)
-        setRootVisible(false)
-        setPhases(INITIAL)
-        setSynthesisVisible(false)
-        setRoutedCount(0)
         setStage('idle')
         setHud('Listening for new events…')
         await sleep(500)
         if (cancelled) return
 
-        // INCIDENT LANDS
-        setStage('routing')
-        setHud('New incident captured · Atlanta · Store 7')
-        setScenarioVisible(true)
-        await sleep(1100)
+        // SCATTERED — siloed systems, no links
+        setStage('scattered')
+        setHud('Siloed systems · no shared context')
+        await sleep(1300)
         if (cancelled) return
 
-        // ONE RECORD
-        setHud('One record created · routing to 3 domains…')
-        setRootVisible(true)
-        await sleep(900)
+        // PULLING — records drawn toward one graph
+        setStage('pulling')
+        setHud('Pulling records into one graph…')
+        await sleep(1000)
         if (cancelled) return
 
-        // FAN OUT TO EACH DOMAIN
-        for (let i = 0; i < DOMAINS.length; i++) {
-          if (cancelled) return
-          setHud(DOMAINS[i].status)
-          setPhase(i, 'routing')
-          await sleep(620)
-          setPhase(i, 'done')
-          setRoutedCount((c) => c + 1)
-          await sleep(420)
-        }
+        // LINKED — edges snap in
+        setStage('linked')
+        setHud('All records linked · one data model')
+        await sleep(1600)
+        if (cancelled) return
 
         // SYNTHESIS
-        if (cancelled) return
-        setHud('All three workflows synchronized · full context shared')
-        await sleep(600)
-        setSynthesisVisible(true)
-        setStage('synced')
+        setStage('synthesis')
+        setHud('Unified risk graph · full context shared')
         await sleep(6000)
         if (cancelled) return
 
@@ -175,6 +125,10 @@ export function ConvergenceAnimation() {
     loop()
     return () => { cancelled = true; obs?.disconnect() }
   }, [])
+
+  const synthesisVisible = stage === 'synthesis'
+  const pulled = stage === 'pulling' || stage === 'linked' || stage === 'synthesis'
+  const linked = stage === 'linked' || stage === 'synthesis'
 
   return (
     <div
@@ -192,10 +146,10 @@ export function ConvergenceAnimation() {
         <div className="flex items-center gap-2">
           <Share2 className="w-3.5 h-3.5" style={{ color: '#9a8a70' }} />
           <span className="text-[10px] font-medium tracking-wide font-mono uppercase" style={{ color: '#e4ded2' }}>
-            Unified Risk Graph · EHS / GRC / ER
+            Unified Risk Graph
           </span>
           <span className="text-[7.5px] uppercase tracking-wider px-1.5 py-[1px] rounded font-mono" style={{ color: AMBER, border: `1px solid ${AMBER}55` }}>
-            1 data model
+            one data model
           </span>
         </div>
         <div className="flex items-center gap-2 font-mono text-[8.5px]">
@@ -203,7 +157,7 @@ export function ConvergenceAnimation() {
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ backgroundColor: EMERALD }} />
             <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ backgroundColor: EMERALD }} />
           </span>
-          <span style={{ color: '#9a8a70' }}>Live · real-time routing</span>
+          <span style={{ color: '#9a8a70' }}>Live · real-time graph</span>
         </div>
       </div>
 
@@ -223,96 +177,76 @@ export function ConvergenceAnimation() {
         />
         <ParticleField />
 
-        <div className="relative w-full h-full px-4 py-4 flex flex-col">
-          {/* SCENARIO — the incoming incident */}
-          <AnimatePresence>
-            {scenarioVisible && !synthesisVisible && (
-              <motion.div
-                key="scenario"
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.4 }}
-                className="relative mx-auto"
-                style={{ width: 500 }}
-              >
-                <div
-                  className="rounded-lg px-4 py-2.5 flex items-start gap-3"
+        {/* GRAPH STAGE */}
+        {!synthesisVisible && (
+          <div className="relative w-full h-full">
+            {/* before/after caption */}
+            <div className="absolute top-3 left-0 right-0 flex justify-center pointer-events-none">
+              <AnimatePresence mode="wait">
+                <motion.span
+                  key={pulled ? 'after' : 'before'}
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 4 }}
+                  transition={{ duration: 0.35 }}
+                  className="font-mono text-[8.5px] uppercase tracking-[0.2em]"
+                  style={{ color: pulled ? EMERALD : '#6a737d' }}
+                >
+                  {pulled ? 'integrated · one connected graph' : 'siloed today · six systems, none talking'}
+                </motion.span>
+              </AnimatePresence>
+            </div>
+
+            <EdgeSvg linked={linked} />
+
+            {/* Central anchor — the unified graph forms here */}
+            <AnimatePresence>
+              {linked && (
+                <motion.div
+                  key="anchor"
+                  initial={{ opacity: 0, scale: 0.7 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.4, ease: 'easeOut' }}
+                  className="absolute -translate-x-1/2 -translate-y-1/2 rounded-md px-2.5 py-1 flex items-center gap-1.5 z-10"
                   style={{
-                    backgroundColor: 'rgba(224,145,107,0.06)',
-                    border: `1px solid ${CORAL}55`,
-                    boxShadow: `0 0 20px ${CORAL}22, inset 0 0 12px ${CORAL}10`,
+                    left: `${CENTER.x}%`,
+                    top: `${CENTER.y}%`,
+                    backgroundColor: 'rgba(20,20,16,0.95)',
+                    border: `1px solid ${AMBER}66`,
+                    boxShadow: `0 0 16px ${AMBER}33`,
                   }}
                 >
-                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" style={{ color: CORAL }} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline gap-2">
-                      <span className="font-mono text-[12px] font-semibold" style={{ color: CORAL }}>{SCENARIO.id}</span>
-                      <span className="font-mono text-[8.5px] uppercase tracking-wider" style={{ color: '#9a8a70' }}>{SCENARIO.when}</span>
-                    </div>
-                    <div className="font-mono text-[10px] mt-1" style={{ color: '#cbd5e1' }}>{SCENARIO.facts}</div>
-                    <div className="font-mono text-[9px] mt-1.5 flex items-baseline gap-2">
-                      <span style={{ color: '#6a737d' }}>Captured once</span>
-                      <span style={{ color: '#3f3f46' }}>·</span>
-                      <span style={{ color: '#9a8a70' }}>no duplicate entry</span>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-mono text-[8px] uppercase tracking-wider" style={{ color: '#6a737d' }}>Severity</div>
-                    <div className="font-mono text-[14px] font-bold mt-0.5" style={{ color: AMBER }}>{SCENARIO.severity}</div>
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* ROOT + FAN-OUT TREE */}
-          {!synthesisVisible && (
-            <div className="relative flex-1 mt-4">
-              <ConnectorSvg rootVisible={rootVisible} phases={phases} />
-
-              <AnimatePresence>
-                {rootVisible && (
-                  <motion.div
-                    key="root"
-                    initial={{ opacity: 0, scale: 0.92 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.35 }}
-                    className="absolute"
-                    style={{ top: 0, left: '50%', transform: 'translateX(-50%)' }}
-                  >
-                    <RootNode routed={routedCount} />
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              <div className="absolute inset-x-0 grid grid-cols-3 gap-3 px-6" style={{ top: 76 }}>
-                {DOMAINS.map((d, i) => (
-                  <DomainColumn key={d.key} domain={d} phase={phases[i]} index={i} />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* SYNTHESIS */}
-          <div className="absolute inset-0 flex items-center justify-center px-4 pointer-events-none">
-            <AnimatePresence>
-              {synthesisVisible && (
-                <motion.div
-                  key="synthesis"
-                  initial={{ opacity: 0, y: 30, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.5, ease: 'easeOut' }}
-                  className="pointer-events-auto"
-                  style={{ width: 640, maxWidth: '100%' }}
-                >
-                  <SynthesisCard />
+                  <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: AMBER, boxShadow: `0 0 6px ${AMBER}` }} />
+                  <span className="font-mono text-[9px] font-semibold tracking-wide uppercase" style={{ color: '#e4ded2' }}>1 risk graph</span>
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {/* Element nodes */}
+            {ELEMENTS.map((node) => (
+              <ElementChip key={node.key} node={node} pulled={pulled} linked={linked} />
+            ))}
           </div>
+        )}
+
+        {/* SYNTHESIS */}
+        <div className="absolute inset-0 flex items-center justify-center px-4 pointer-events-none">
+          <AnimatePresence>
+            {synthesisVisible && (
+              <motion.div
+                key="synthesis"
+                initial={{ opacity: 0, y: 30, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.5, ease: 'easeOut' }}
+                className="pointer-events-auto"
+                style={{ width: 640, maxWidth: '100%' }}
+              >
+                <SynthesisCard />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 
@@ -323,12 +257,12 @@ export function ConvergenceAnimation() {
       >
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <span style={{ color: '#6a737d' }}>Status</span>
-          <span className="truncate" style={{ color: stage === 'synced' ? EMERALD : AMBER }}>{hud}</span>
+          <span className="truncate" style={{ color: synthesisVisible ? EMERALD : AMBER }}>{hud}</span>
           <span style={{ color: AMBER, animation: 'convergence-cursor 0.9s steps(1) infinite' }}>▎</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span style={{ color: '#6a737d' }}>Domains</span>
-          <span style={{ color: '#9a8a70' }}>EHS · GRC · ER</span>
+          <span style={{ color: '#6a737d' }}>Graph</span>
+          <span style={{ color: '#9a8a70' }}>6 systems → 1 model</span>
         </div>
       </div>
 
@@ -336,10 +270,6 @@ export function ConvergenceAnimation() {
         @keyframes convergence-cursor {
           0%, 50% { opacity: 1; }
           51%, 100% { opacity: 0; }
-        }
-        @keyframes convergence-weigh {
-          0%, 100% { opacity: 0.35; }
-          50% { opacity: 1; }
         }
       `}</style>
     </div>
@@ -350,139 +280,55 @@ export function ConvergenceAnimation() {
 // Sub-components
 // ─────────────────────────────────────────────────────────────────────────────
 
-function RootNode({ routed }: { routed: number }) {
+function ElementChip({ node, pulled, linked }: { node: ElementNode; pulled: boolean; linked: boolean }) {
+  const pos = pulled ? node.web : node.scatter
+  const c = node.color
   return (
-    <div
-      className="rounded-md px-3 py-1.5 flex items-center gap-2"
-      style={{ backgroundColor: 'rgba(20,20,16,0.95)', border: `1px solid ${AMBER}66`, boxShadow: `0 0 16px ${AMBER}30` }}
+    <motion.div
+      className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full flex items-center gap-1.5 px-2.5 py-1 z-20"
+      initial={false}
+      animate={{
+        left: `${pos.x}%`,
+        top: `${pos.y}%`,
+        opacity: pulled ? 1 : 0.4,
+        scale: linked ? 1 : pulled ? 0.96 : 0.9,
+      }}
+      transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+      style={{
+        backgroundColor: 'rgba(20,20,16,0.9)',
+        backdropFilter: 'blur(6px)',
+        border: `1px solid ${pulled ? `${c}88` : 'rgba(255,255,255,0.1)'}`,
+        boxShadow: pulled ? `0 0 14px ${c}44, inset 0 0 8px ${c}20` : 'none',
+      }}
     >
-      <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: AMBER, boxShadow: `0 0 6px ${AMBER}` }} />
-      <span className="font-mono text-[10px] font-semibold tracking-wide uppercase" style={{ color: '#e4ded2' }}>One record</span>
-      <span className="font-mono text-[9px]" style={{ color: '#6a737d' }}>·</span>
-      <span className="font-mono text-[9px]" style={{ color: '#9a8a70' }}>routed to {routed}/3</span>
-    </div>
+      <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: c, boxShadow: pulled ? `0 0 6px ${c}` : 'none' }} />
+      <span className="font-mono text-[9px] tracking-wide whitespace-nowrap" style={{ color: pulled ? '#e4ded2' : '#6a737d' }}>
+        {node.label}
+      </span>
+    </motion.div>
   )
 }
 
-function DomainColumn({ domain, phase, index }: { domain: Domain; phase: Phase; index: number }) {
-  const isPending = phase === 'pending'
-  const isRouting = phase === 'routing'
-  const isDone = phase === 'done'
-  const c = domain.color
-
+function EdgeSvg({ linked }: { linked: boolean }) {
   return (
-    <div className="relative flex flex-col items-center gap-1.5">
-      {/* Routing strip — the citation the domain matches against */}
-      <div className="h-4 flex items-center justify-center w-full">
-        <AnimatePresence>
-          {isRouting && (
-            <motion.div
-              key="routing"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="font-mono text-[8px] tabular-nums"
-              style={{ color: c, animation: 'convergence-weigh 0.6s ease-in-out infinite' }}
-            >
-              {domain.cite}
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* Domain node */}
-      <motion.div
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: isPending ? 0.3 : 1, y: 0, scale: isRouting ? 1.04 : 1 }}
-        transition={{ duration: 0.35, delay: index * 0.05 }}
-        className="rounded-md w-full px-2 py-1.5 text-center"
-        style={{
-          backgroundColor: 'rgba(20,20,16,0.85)',
-          backdropFilter: 'blur(6px)',
-          border: `1px solid ${isDone ? `${c}88` : isRouting ? `${c}88` : 'rgba(255,255,255,0.1)'}`,
-          boxShadow: isRouting || isDone ? `0 0 14px ${c}44, inset 0 0 8px ${c}20` : 'none',
-          transition: 'border-color 220ms, box-shadow 220ms',
-        }}
-      >
-        <div className="font-mono text-[11px] font-bold tracking-wide" style={{ color: c }}>{domain.tag}</div>
-        <div className="font-mono text-[8px] uppercase tracking-wider mt-0.5" style={{ color: '#9a8a70' }}>{domain.sub}</div>
-      </motion.div>
-
-      {/* Status pill */}
-      <AnimatePresence>
-        {isDone && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.7 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 380, damping: 22 }}
-            className="rounded-full px-2 py-[2px] font-mono text-[8.5px] font-bold tracking-wider uppercase flex items-center gap-1"
-            style={{ color: c, backgroundColor: `${c}15`, border: `1px solid ${c}55` }}
-          >
-            <span>✓</span>
-            <span>{domain.pill}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Question / what it checked */}
-      <AnimatePresence>
-        {isDone && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            transition={{ duration: 0.3 }}
-            className="font-mono text-[8px] italic text-center px-1"
-            style={{ color: '#6a737d' }}
-          >
-            "{domain.question}"
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Action sprout */}
-      <AnimatePresence>
-        {isDone && (
-          <motion.div
-            initial={{ opacity: 0, y: -6, scale: 0.92 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.32, ease: 'easeOut' }}
-            className="rounded-md w-full px-2 py-1.5 text-center mt-1"
-            style={{ backgroundColor: `${c}0f`, border: `1px solid ${c}55`, boxShadow: `0 0 10px ${c}25` }}
-          >
-            <div className="font-mono text-[7.5px] uppercase tracking-wider mb-0.5" style={{ color: c }}>Action</div>
-            <div className="font-mono text-[9px] leading-tight" style={{ color: '#cbd5e1' }}>{domain.action}</div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  )
-}
-
-function ConnectorSvg({ rootVisible, phases }: { rootVisible: boolean; phases: Phase[] }) {
-  const cols = 3
-  return (
-    <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ top: 18, height: 72 }} preserveAspectRatio="none">
-      {Array.from({ length: cols }).map((_, i) => {
-        const xPct = ((i + 0.5) / cols) * 100
-        const active = phases[i] !== 'pending'
+    <svg className="absolute inset-0 w-full h-full pointer-events-none z-0" preserveAspectRatio="none">
+      {EDGES.map(([a, b], i) => {
+        const from = ELEMENTS[a].web
+        const to = ELEMENTS[b].web
+        const stroke = ELEMENTS[a].color
         return (
           <motion.line
             key={i}
-            x1="50%"
-            y1="6"
-            x2={`${xPct}%`}
-            y2="62"
-            stroke={active ? DOMAINS[i].color : 'rgba(255,255,255,0.12)'}
-            strokeWidth={active ? 1.3 : 0.8}
+            x1={`${from.x}%`}
+            y1={`${from.y}%`}
+            x2={`${to.x}%`}
+            y2={`${to.y}%`}
+            stroke={stroke}
+            strokeWidth={1.1}
             initial={{ pathLength: 0, opacity: 0 }}
-            animate={{ pathLength: rootVisible ? 1 : 0, opacity: rootVisible ? 1 : 0 }}
-            transition={{ duration: 0.5, delay: i * 0.08 }}
-            style={{
-              filter: active ? `drop-shadow(0 0 4px ${DOMAINS[i].color}aa)` : 'none',
-              transition: 'stroke 240ms, filter 240ms',
-            }}
+            animate={{ pathLength: linked ? 1 : 0, opacity: linked ? 0.7 : 0 }}
+            transition={{ duration: 0.5, delay: linked ? i * 0.07 : 0 }}
+            style={{ filter: linked ? `drop-shadow(0 0 4px ${stroke}aa)` : 'none' }}
           />
         )
       })}
@@ -503,7 +349,7 @@ function SynthesisCard() {
     >
       <div className="flex items-baseline gap-2 mb-3">
         <span className="font-mono text-[11px] font-semibold uppercase tracking-wider" style={{ color: EMERALD }}>
-          One incident → three synchronized workflows
+          Scattered systems → one connected graph
         </span>
       </div>
 
@@ -513,7 +359,7 @@ function SynthesisCard() {
             <div className="font-mono text-[8px] uppercase tracking-wider" style={{ color: '#6a737d' }}>{s.label}</div>
             <div
               className="font-mono font-semibold tabular-nums text-[16px]"
-              style={{ color: i === 1 ? EMERALD : i === 0 ? EMERALD : '#cbd5e1', marginTop: 2 }}
+              style={{ color: i === 0 || i === 1 ? EMERALD : '#cbd5e1', marginTop: 2 }}
             >
               {s.value}
             </div>
@@ -522,7 +368,7 @@ function SynthesisCard() {
       </div>
 
       <div className="mt-3 pt-3 border-t flex items-center gap-3 font-mono text-[9px]" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
-        <span style={{ color: '#6a737d' }}>Siloed tools: <span style={{ color: '#cbd5e1' }}>3 separate entries across 3 systems, context lost</span></span>
+        <span style={{ color: '#6a737d' }}>Siloed tools: <span style={{ color: '#cbd5e1' }}>separate entries across disconnected systems, context lost</span></span>
         <span style={{ color: '#3f3f46' }}>·</span>
         <span>Matcha: <span style={{ color: EMERALD, fontWeight: 600 }}>1 record, shared everywhere</span></span>
       </div>
