@@ -1618,6 +1618,8 @@ async def _upsert_requirements_additive(
         tc_json = json.dumps(tc) if tc else None
         aet_raw = req.get("applicable_entity_types")
         aet = json.dumps(aet_raw) if aet_raw else None
+        steps_raw = req.get("implementation_steps")
+        steps_json = json.dumps(steps_raw) if isinstance(steps_raw, list) and steps_raw else None
         await conn.execute(
             """
             INSERT INTO jurisdiction_requirements
@@ -1625,8 +1627,9 @@ async def _upsert_requirements_additive(
                  title, description, current_value, numeric_value, source_url, source_name,
                  effective_date, expiration_date, last_verified_at, requires_written_policy,
                  applicable_industries, trigger_conditions, applicable_entity_types,
-                 category_id, metadata, source_tier)
+                 implementation_steps, category_id, metadata, source_tier)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18,
+                    $22::jsonb,
                     COALESCE(
                         (SELECT id FROM compliance_categories WHERE slug = $19 LIMIT 1),
                         (SELECT id FROM compliance_categories LIMIT 1)
@@ -1660,6 +1663,7 @@ async def _upsert_requirements_additive(
                 last_changed_at = CASE
                     WHEN jurisdiction_requirements.current_value IS DISTINCT FROM EXCLUDED.current_value
                     THEN NOW() ELSE jurisdiction_requirements.last_changed_at END,
+                implementation_steps = EXCLUDED.implementation_steps,
                 metadata = COALESCE(jurisdiction_requirements.metadata, '{}'::jsonb) || EXCLUDED.metadata,
                 source_tier = CASE
                     WHEN EXCLUDED.source_tier IS NOT NULL
@@ -1691,6 +1695,7 @@ async def _upsert_requirements_additive(
             req.get("category"),  # $19: duplicate for category_id subquery
             meta_fragment,         # $20: research_source metadata
             source_tier,           # $21: source_tier enum value
+            steps_json,            # $22: implementation_steps JSONB
         )
 
 

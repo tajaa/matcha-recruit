@@ -394,6 +394,8 @@ Do NOT return an empty requirements list.
 For each requirement, determine whether the statute explicitly requires the employer to include this policy in a written employee handbook or written notice. Set "requires_written_policy" to true only if written disclosure is legally mandated. If the obligation is satisfied by a workplace poster, verbal notice, or operational compliance alone, set it to false.
 
 For each requirement, include a "penalties" object with enforcement/penalty information from the authoritative source. Include the enforcing agency, civil penalty range (min/max per violation), whether penalties are per-violation or flat, any annual cap, criminal penalties if applicable, and a one-line summary. Use current inflation-adjusted amounts where possible.
+
+For each requirement, include "implementation_steps": a short ordered list (3-6 items) of concrete, actionable steps an employer takes to come into compliance (e.g. register with the agency, adopt/post the required notice, file a form by its deadline, train staff, retain records). One sentence per step, specific to this requirement and jurisdiction.
 {regulation_key_instruction}
 Today's date is {date.today().isoformat()}. Return ONLY rates/values currently in effect.
 
@@ -429,7 +431,8 @@ Respond with JSON:
         "annual_cap": <annual cap USD or null>,
         "criminal": "Brief criminal penalty description or null",
         "summary": "One-line human-readable penalty summary"
-      }}
+      }},
+      "implementation_steps": ["Concrete step an employer takes to comply", "Next step", "..."]
     }}
   ]
 }}

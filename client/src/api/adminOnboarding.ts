@@ -300,6 +300,21 @@ export type GapDashboardResponse = {
   drift: GapDrift | null
 }
 
+// One company row on the gap-analysis landing dashboard (persisted counts +
+// cheap drift). Sorted needs-attention-first server-side.
+export type GapOverviewRow = {
+  company_id: string
+  company_name?: string | null
+  company_status?: string | null
+  session_status: OnboardingStatus
+  covered: number
+  gaps: number
+  ambiguous: number
+  coverage_pct: number
+  last_analyzed_at?: string | null
+  new_locations: number
+}
+
 // Rich detail for a covered requirement (drill-in), resolved from the shared bank.
 export type GapRequirementDetail = {
   id: string
@@ -315,6 +330,7 @@ export type GapRequirementDetail = {
   effective_date?: string | null
   expiration_date?: string | null
   requires_written_policy?: boolean | null
+  implementation_steps?: string[] | null
 }
 
 const BASE = '/admin/onboarding'
@@ -378,6 +394,9 @@ export const adminOnboarding = {
     api.get<GapRequirementDetail>(
       `${BASE}/companies/${companyId}/requirements/${requirementId}`,
     ),
+
+  // Companies overview for the gap-analysis landing dashboard.
+  getGapOverview: () => api.get<GapOverviewRow[]>(`${BASE}/gap-overview`),
 
   expand: (id: string) =>
     api.post<ExpandScopeResponse>(`${BASE}/sessions/${id}/expand`),

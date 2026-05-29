@@ -148,6 +148,14 @@ function CoveredRow({ companyId, item }: { companyId: string; item: CoveredItem 
             <>
               {detail.current_value && <div><span className="text-zinc-500">Value: </span><span className="text-zinc-200 font-mono">{detail.current_value}</span>{detail.rate_type ? ` (${detail.rate_type})` : ''}</div>}
               {detail.description && <div className="leading-relaxed">{detail.description}</div>}
+              {Array.isArray(detail.implementation_steps) && detail.implementation_steps.length > 0 && (
+                <div className="pt-0.5">
+                  <div className="text-zinc-500 mb-1">How to comply:</div>
+                  <ol className="list-decimal pl-4 space-y-1 text-zinc-300 marker:text-vsc-accent">
+                    {detail.implementation_steps.map((s, i) => <li key={i} className="leading-relaxed">{s}</li>)}
+                  </ol>
+                </div>
+              )}
               {detail.effective_date && <div><span className="text-zinc-500">Effective: </span>{detail.effective_date}</div>}
               {detail.requires_written_policy && <div className="text-amber-300">Requires a written policy (handbook).</div>}
               {detail.source_url && (
@@ -251,7 +259,7 @@ export default function GapDashboard() {
   const driftActive = !!drift && (drift.new_locations > 0 || drift.new_jurisdictions > 0)
 
   return (
-    <div className="p-6 max-w-5xl">
+    <div className="p-6 max-w-6xl">
       {/* Header */}
       <div className="flex items-center gap-3 mb-1">
         <Link to="/admin/gap-analysis" className="text-zinc-500 hover:text-zinc-300"><ArrowLeft size={18} /></Link>
@@ -387,7 +395,7 @@ export default function GapDashboard() {
               </div>
             )}
 
-            {(research.running || research.events.length > 0) && (
+            {research.running && (
               <div className="mt-3 border-t border-vsc-border pt-3">
                 <EventFeed events={research.events} running={research.running} label="researching…" />
               </div>

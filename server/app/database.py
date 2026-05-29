@@ -3008,6 +3008,11 @@ async def init_db():
             ALTER TABLE jurisdiction_requirements
             ADD COLUMN IF NOT EXISTS applicable_industries TEXT[]
         """)
+        # Add implementation_steps (JSONB array of "how to comply" steps from research)
+        await conn.execute("""
+            ALTER TABLE jurisdiction_requirements
+            ADD COLUMN IF NOT EXISTS implementation_steps JSONB
+        """)
 
         # compliance_requirements → catalog link. Added here (not in the
         # compliance_requirements block above) because the FK REFERENCES

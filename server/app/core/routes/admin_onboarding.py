@@ -1697,6 +1697,13 @@ async def get_company_gap_dashboard(
             try:
                 fresh = await map_to_bank(ai_scope, conn)
                 resolved = {**fresh, "gap_check": gap_check}
+                # Persist the cheap live refresh back so the companies overview's
+                # counts stay fresh (e.g. a gap filled here drops out of `missing`).
+                # Do NOT bump updated_at — that tracks the last full (Gemini) analysis.
+                await conn.execute(
+                    "UPDATE onboarding_sessions SET resolved_scope = $1::jsonb WHERE id = $2",
+                    json.dumps(resolved), session["id"],
+                )
             except Exception:
                 logger.exception(
                     "gap-dashboard: map_to_bank refresh failed for company %s", company_id,
@@ -1746,6 +1753,68 @@ async def get_company_gap_dashboard(
         }
 
 
+@router.get("/onboarding/gap-overview")
+async def get_gap_overview(
+    current_user: CurrentUser = Depends(require_master_admin),
+):
+    """Companies overview for the gap-analysis landing dashboard.
+
+    One row per analyzed company (its canonical gap session) with persisted
+    counts + a cheap location-drift signal. Counts are as-of the last dashboard
+    view / analysis (the per-company dashboard writes its live refresh back), so
+    this is fast (2 queries total, no per-company Gemini or map_to_bank).
+    """
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT ON (s.company_id)
+                   s.company_id, c.name AS company_name,
+                   COALESCE(c.status, 'approved') AS company_status,
+                   s.status AS session_status, s.updated_at,
+                   s.resolved_scope, s.locations
+            FROM onboarding_sessions s
+            JOIN companies c ON c.id = s.company_id
+            WHERE s.company_id IS NOT NULL AND s.status != 'abandoned'
+            ORDER BY s.company_id,
+                     (s.idempotency_key = 'enrich-' || s.company_id::text) DESC NULLS LAST,
+                     s.updated_at DESC
+            """
+        )
+        loc_rows = await conn.fetch(
+            """
+            SELECT company_id, COUNT(*) AS n FROM business_locations
+            WHERE is_active = TRUE AND is_company_wide = FALSE
+            GROUP BY company_id
+            """
+        )
+    loc_counts = {r["company_id"]: r["n"] for r in loc_rows}
+
+    out = []
+    for r in rows:
+        resolved = _safe_jsonb(r["resolved_scope"], {}) or {}
+        covered = len(resolved.get("existing") or [])
+        gaps = len(resolved.get("missing") or [])
+        ambiguous = len(resolved.get("ambiguous") or [])
+        denom = covered + gaps
+        analyzed_locs = len(_safe_jsonb(r["locations"], []) or [])
+        tracked = loc_counts.get(r["company_id"], 0)
+        out.append({
+            "company_id": str(r["company_id"]),
+            "company_name": r["company_name"],
+            "company_status": r["company_status"],
+            "session_status": r["session_status"],
+            "covered": covered,
+            "gaps": gaps,
+            "ambiguous": ambiguous,
+            "coverage_pct": round(100 * covered / denom) if denom else 100,
+            "last_analyzed_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+            "new_locations": max(0, tracked - analyzed_locs),
+        })
+    # Needs-attention first: open gaps, then drift, then lowest coverage.
+    out.sort(key=lambda x: (-x["gaps"], -x["new_locations"], x["coverage_pct"]))
+    return out
+
+
 @router.get("/onboarding/companies/{company_id}/requirements/{requirement_id}")
 async def get_company_requirement_detail(
     company_id: UUID,
@@ -1763,7 +1832,8 @@ async def get_company_requirement_detail(
             """
             SELECT id, category, jurisdiction_level, jurisdiction_name, title,
                    description, current_value, rate_type, source_url, source_name,
-                   effective_date, expiration_date, requires_written_policy
+                   effective_date, expiration_date, requires_written_policy,
+                   implementation_steps
             FROM jurisdiction_requirements WHERE id = $1
             """,
             requirement_id,
@@ -1784,6 +1854,7 @@ async def get_company_requirement_detail(
             "effective_date": row["effective_date"].isoformat() if row["effective_date"] else None,
             "expiration_date": row["expiration_date"].isoformat() if row["expiration_date"] else None,
             "requires_written_policy": row["requires_written_policy"],
+            "implementation_steps": _safe_jsonb(row["implementation_steps"], None),
         }
 
 

@@ -16,7 +16,7 @@ import MatchaLiteAdmin from '../pages/admin/MatchaLiteAdmin'
 import ComplianceManagement from '../pages/admin/ComplianceManagement'
 import MatchaWork from '../pages/admin/MatchaWork'
 import Customers from '../pages/admin/Customers'
-import AdminOnboarding from '../pages/admin/AdminOnboarding'
+import GapAnalysisHome from '../pages/admin/GapAnalysisHome'
 import AdminOnboardingWizard from '../pages/admin/AdminOnboardingWizard'
 import GapDashboard from '../pages/admin/GapDashboard'
 import GapAnalysisReport from '../features/admin-onboarding/GapAnalysisReport'
@@ -34,7 +34,7 @@ export default function AdminRoutes() {
       <Route element={<AppLayout sidebar={<AdminSidebar />} logoLabel="Matcha Admin" />}>
         <Route index element={<Navigate to="customers" replace />} />
         <Route path="customers" element={<Customers />} />
-        <Route path="gap-analysis" element={<AdminOnboarding />} />
+        <Route path="gap-analysis" element={<GapAnalysisHome />} />
         <Route path="gap-analysis/company/:companyId" element={<GapDashboard />} />
         <Route path="gap-analysis/:sessionId" element={<AdminOnboardingWizard />} />
         <Route path="gap-analysis/:sessionId/report" element={<GapAnalysisReport />} />

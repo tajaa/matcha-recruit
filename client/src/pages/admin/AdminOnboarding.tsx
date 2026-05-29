@@ -24,7 +24,7 @@ const STATUS_FILTERS: { value: OnboardingStatus | 'all'; label: string }[] = [
   { value: 'all', label: 'All' },
 ]
 
-export default function AdminOnboarding() {
+export default function AdminOnboarding({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate()
   const [sessions, setSessions] = useState<OnboardingSessionSummary[]>([])
   const [status, setStatus] = useState<OnboardingStatus | 'all'>('in_progress')
@@ -67,12 +67,19 @@ export default function AdminOnboarding() {
   }
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-5">
-        <div className="flex items-center gap-3">
-          <Sparkles className="w-5 h-5 text-emerald-400" />
-          <h1 className="text-lg font-semibold text-zinc-100">Gap Analysis</h1>
-        </div>
+    <div className={embedded ? '' : 'p-6'}>
+      <div className="flex items-center justify-between mb-3">
+        {embedded ? (
+          <p className="text-xs text-zinc-500 max-w-xl">
+            Take a <span className="text-zinc-300">new company</span> through the onboarding wizard,
+            or resume an in-progress session below.
+          </p>
+        ) : (
+          <div className="flex items-center gap-3">
+            <Sparkles className="w-5 h-5 text-emerald-400" />
+            <h1 className="text-lg font-semibold text-zinc-100">Gap Analysis</h1>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <button
             onClick={() => setPickerOpen(true)}
@@ -91,11 +98,13 @@ export default function AdminOnboarding() {
           </button>
         </div>
       </div>
-      <p className="text-xs text-zinc-500 -mt-3 mb-5">
-        Run a gap analysis on a <span className="text-zinc-300">new company</span> (onboarding wizard)
-        or sync an <span className="text-zinc-300">existing company's</span> employee roster to enrich
-        its compliance &amp; jurisdictional coverage.
-      </p>
+      {!embedded && (
+        <p className="text-xs text-zinc-500 mb-5">
+          Run a gap analysis on a <span className="text-zinc-300">new company</span> (onboarding wizard)
+          or sync an <span className="text-zinc-300">existing company's</span> employee roster to enrich
+          its compliance &amp; jurisdictional coverage.
+        </p>
+      )}
 
       <div className="flex items-center gap-2 mb-4 text-xs">
         {STATUS_FILTERS.map((f) => (
@@ -194,7 +203,7 @@ export default function AdminOnboarding() {
 
 type PickerCompany = { id: string; company_name: string; signup_source?: string | null }
 
-function CompanyPicker({ onClose, onPick }: { onClose: () => void; onPick: (id: string) => void }) {
+export function CompanyPicker({ onClose, onPick }: { onClose: () => void; onPick: (id: string) => void }) {
   const [companies, setCompanies] = useState<PickerCompany[]>([])
   const [loading, setLoading] = useState(true)
   const [q, setQ] = useState('')

@@ -86,9 +86,9 @@ export default function GapCard({ gap, selected, onToggle, onResearch, researchi
               Dispatch research for this requirement. Gemini researches{' '}
               <span className="text-zinc-300">{humanizeCategory(gap.category_slug)}</span> for{' '}
               <span className="text-zinc-300">{jurisdictionLabel(gap)}</span>, writes it to the
-              compliance bank with its rule, current value, and source — after which it moves to
-              <span className="text-emerald-300"> Covered</span> with full detail.
-              {/* <Phase 2> AI-generated step-by-step "how to comply" guidance renders here. */}
+              compliance bank with its rule, current value, source, and step-by-step
+              "how to comply" guidance — after which it moves to
+              <span className="text-emerald-300"> Covered</span>, where the steps show in the detail.
             </div>
           )}
         </div>
