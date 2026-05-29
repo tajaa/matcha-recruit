@@ -1127,10 +1127,19 @@ private struct RoundView: View {
                         .cornerRadius(5)
                     }
 
-                    VStack(alignment: .leading, spacing: 4) {
+                    // A busy round (many moves/notes/subtask events) makes the
+                    // card runaway-tall. Cap it and scroll internally past a
+                    // threshold; short rounds render inline with no scrollbar.
+                    let eventsStack = VStack(alignment: .leading, spacing: 4) {
                         ForEach(round.events) { event in
                             EventRow(event: event, files: files, onPreview: onPreview)
                         }
+                    }
+                    if round.events.count > 8 {
+                        ScrollView { eventsStack }
+                            .frame(height: 340)
+                    } else {
+                        eventsStack
                     }
                 }
                 .padding(.top, 6)
@@ -1531,6 +1540,7 @@ private struct SubtaskRow: View {
     let onDelete: () -> Void
     let onAssign: (String?) -> Void
     @State private var isHovered = false
+    @State private var showingAssign = false
 
     private var assignee: MWProjectCollaborator? {
         guard let id = item.assignedTo else { return nil }
@@ -1578,60 +1588,46 @@ private struct SubtaskRow: View {
         .onHover { isHovered = $0 }
     }
 
+    // A plain Button (NOT a Menu label) — macOS Menu labels rasterize a
+    // resizable image oddly (clipShape ignored → square/garbled avatar). A
+    // Button renders ChannelAvatarView as the same clean 18×18 circle it shows
+    // in the discussion feed. The picker is a confirmationDialog.
     private var assigneeMenu: some View {
-        Menu {
+        Button { showingAssign = true } label: {
+            if let id = item.assignedTo {
+                ChannelAvatarView(
+                    senderId: id,
+                    payloadURL: assignee?.avatarUrl,
+                    name: assignee?.name ?? "",
+                    size: 18
+                )
+            } else {
+                Circle()
+                    .strokeBorder(Color.secondary.opacity(isHovered ? 0.7 : 0.35),
+                                  style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
+                    .frame(width: 18, height: 18)
+                    .overlay(
+                        Image(systemName: "plus")
+                            .symbolRenderingMode(.monochrome)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.secondary.opacity(isHovered ? 0.9 : 0.45))
+                    )
+            }
+        }
+        .buttonStyle(.plain)
+        .help(assignee?.name ?? "Assign")
+        .confirmationDialog("Assign checklist item", isPresented: $showingAssign, titleVisibility: .visible) {
             if let uid = currentUserId, uid != item.assignedTo {
-                Button { onAssign(uid) } label: { Label("Assign to me", systemImage: "person.fill") }
+                Button("Assign to me") { onAssign(uid) }
             }
             ForEach(collaborators) { c in
-                Button { onAssign(c.userId) } label: {
-                    if c.userId == item.assignedTo {
-                        Label(c.name, systemImage: "checkmark")
-                    } else {
-                        Text(c.name)
-                    }
-                }
+                Button(c.userId == item.assignedTo ? "✓ \(c.name)" : c.name) { onAssign(c.userId) }
             }
             if item.assignedTo != nil {
-                Divider()
-                Button("Unassign") { onAssign(nil) }
+                Button("Unassign", role: .destructive) { onAssign(nil) }
             }
-        } label: {
-            // HARD-clamp the label: a macOS Menu label ignores a resizable
-            // image's internal frame, so ChannelAvatarView would otherwise draw
-            // at full intrinsic size (a giant square). The explicit 18×18 frame
-            // + .clipped() in SubtaskRow's own view tree forces a fixed footprint.
-            Group {
-                if let id = item.assignedTo {
-                    ChannelAvatarView(
-                        senderId: id,
-                        payloadURL: assignee?.avatarUrl,
-                        name: assignee?.name ?? "",
-                        size: 18
-                    )
-                } else {
-                    // Muted + monochrome placeholder — never the oversized green
-                    // multicolor badge glyph.
-                    Circle()
-                        .strokeBorder(Color.secondary.opacity(isHovered ? 0.7 : 0.35),
-                                      style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
-                        .overlay(
-                            Image(systemName: "plus")
-                                .symbolRenderingMode(.monochrome)
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundColor(.secondary.opacity(isHovered ? 0.9 : 0.45))
-                        )
-                }
-            }
-            .frame(width: 18, height: 18)
-            .clipShape(Circle())
-            .clipped()
-            .contentShape(Circle())
+            Button("Cancel", role: .cancel) {}
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .frame(width: 18, height: 18)
-        .help(assignee?.name ?? "Assign")
     }
 }
 
