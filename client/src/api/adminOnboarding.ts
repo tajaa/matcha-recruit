@@ -278,7 +278,43 @@ export type GapAnalysisDossier = {
     policies: number
     credentials: number
     suggestions: number
+    coverage_pct?: number
   }
+}
+
+// Drift signals computed cheaply on the persistent dashboard — how much the
+// company has changed since the last (Gemini) analysis ran.
+export type GapDrift = {
+  last_analyzed_at?: string | null
+  new_locations: number
+  new_jurisdictions: number
+}
+
+// Persistent per-company gap dashboard payload. status='never_run' when the
+// company has no analysis yet (UI shows a "Run first analysis" empty state).
+export type GapDashboardResponse = {
+  status: 'ok' | 'never_run'
+  company: { id: string; name?: string | null }
+  session_id?: string | null
+  dossier: GapAnalysisDossier | null
+  drift: GapDrift | null
+}
+
+// Rich detail for a covered requirement (drill-in), resolved from the shared bank.
+export type GapRequirementDetail = {
+  id: string
+  category?: string | null
+  jurisdiction_level?: string | null
+  jurisdiction_name?: string | null
+  title?: string | null
+  description?: string | null
+  current_value?: string | null
+  rate_type?: string | null
+  source_url?: string | null
+  source_name?: string | null
+  effective_date?: string | null
+  expiration_date?: string | null
+  requires_written_policy?: boolean | null
 }
 
 const BASE = '/admin/onboarding'
@@ -332,6 +368,16 @@ export const adminOnboarding = {
   // and returns the per-company enrichment session id.
   enrichFromRoster: (companyId: string) =>
     api.post<EnrichRosterResponse>(`${BASE}/enrich/${companyId}`),
+
+  // Persistent per-company gap dashboard — cheap live read (re-resolves the
+  // persisted scope against the current bank; no Gemini). Re-run = enrich stream.
+  getGapDashboard: (companyId: string) =>
+    api.get<GapDashboardResponse>(`${BASE}/companies/${companyId}/gap-dashboard`),
+
+  getRequirementDetail: (companyId: string, requirementId: string) =>
+    api.get<GapRequirementDetail>(
+      `${BASE}/companies/${companyId}/requirements/${requirementId}`,
+    ),
 
   expand: (id: string) =>
     api.post<ExpandScopeResponse>(`${BASE}/sessions/${id}/expand`),

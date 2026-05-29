@@ -1631,6 +1631,162 @@ async def get_session_report_pdf(
     )
 
 
+# ── Persistent per-company gap dashboard ────────────────────────────────
+
+
+async def _load_company_gap_session(conn, company_id: UUID):
+    """The durable gap-analysis session for a company.
+
+    Prefers the idempotent enrichment session (``enrich-{company_id}``); falls
+    back to the most-recent non-abandoned session for the company (e.g. a
+    wizard-onboarded company that never ran roster enrichment).
+    """
+    row = await conn.fetchrow(
+        "SELECT * FROM onboarding_sessions WHERE idempotency_key = $1",
+        f"enrich-{company_id}",
+    )
+    if row:
+        return row
+    return await conn.fetchrow(
+        """
+        SELECT * FROM onboarding_sessions
+        WHERE company_id = $1 AND status != 'abandoned'
+        ORDER BY updated_at DESC LIMIT 1
+        """,
+        company_id,
+    )
+
+
+@router.get("/onboarding/companies/{company_id}/gap-dashboard")
+async def get_company_gap_dashboard(
+    company_id: UUID,
+    current_user: CurrentUser = Depends(require_master_admin),
+):
+    """Live, persistent gap-analysis dossier for a company.
+
+    Cheap by design: re-resolves the company's persisted ``ai_scope`` against
+    the CURRENT compliance bank via ``map_to_bank`` (pure SQL) so gaps filled
+    since the last run show as covered — without any Gemini call. A full
+    (Gemini) recompute is the separate ``/enrich`` stream; selective fills are
+    ``/research-gaps``. Returns ``status='never_run'`` when no analysis exists.
+    """
+    async with get_connection() as conn:
+        company = await conn.fetchrow(
+            "SELECT id, name FROM companies WHERE id = $1", company_id,
+        )
+        if not company:
+            raise HTTPException(status_code=404, detail="Company not found")
+
+        session = await _load_company_gap_session(conn, company_id)
+        if not session:
+            return {
+                "status": "never_run",
+                "company": {"id": str(company_id), "name": company["name"]},
+                "dossier": None,
+                "drift": None,
+            }
+
+        ai_scope = _safe_jsonb(session["ai_scope"], {}) or {}
+        persisted_resolved = _safe_jsonb(session["resolved_scope"], {}) or {}
+        gap_check = persisted_resolved.get("gap_check") or {}
+
+        # Cheap live refresh: re-resolve persisted scope against the current
+        # bank (SQL only). Preserve the persisted (Gemini) safety-net suggestions.
+        resolved = persisted_resolved
+        if ai_scope:
+            try:
+                fresh = await map_to_bank(ai_scope, conn)
+                resolved = {**fresh, "gap_check": gap_check}
+            except Exception:
+                logger.exception(
+                    "gap-dashboard: map_to_bank refresh failed for company %s", company_id,
+                )
+
+        dossier = build_gap_analysis_dossier({
+            "id": session["id"],
+            "status": session["status"],
+            "basics": _safe_jsonb(session["basics"], {}),
+            "size": _safe_jsonb(session["size"], {}),
+            "locations": _safe_jsonb(session["locations"], []),
+            "ai_scope": ai_scope,
+            "resolved_scope": resolved,
+        })
+        counts = dossier["counts"]
+        denom = counts["covered"] + counts["gaps"]
+        counts["coverage_pct"] = round(100 * counts["covered"] / denom) if denom else 100
+
+        # Drift (cheap): roster jurisdictions not yet tracked + locations added
+        # since the last analysis. Signals when a full Re-run is worthwhile.
+        drift = {
+            "last_analyzed_at": session["updated_at"].isoformat() if session["updated_at"] else None,
+            "new_locations": 0,
+            "new_jurisdictions": 0,
+        }
+        try:
+            _roles, emp_locs, existing_keys = await _collect_roster(conn, company_id)
+            drift["new_jurisdictions"] = sum(1 for k in emp_locs if k not in existing_keys)
+            tracked = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM business_locations
+                WHERE company_id = $1 AND is_active = TRUE AND is_company_wide = FALSE
+                """,
+                company_id,
+            )
+            analyzed = len(_safe_jsonb(session["locations"], []))
+            drift["new_locations"] = max(0, (tracked or 0) - analyzed)
+        except Exception:
+            logger.exception("gap-dashboard: drift calc failed for company %s", company_id)
+
+        return {
+            "status": "ok",
+            "company": {"id": str(company_id), "name": company["name"]},
+            "session_id": str(session["id"]),
+            "dossier": dossier,
+            "drift": drift,
+        }
+
+
+@router.get("/onboarding/companies/{company_id}/requirements/{requirement_id}")
+async def get_company_requirement_detail(
+    company_id: UUID,
+    requirement_id: UUID,
+    current_user: CurrentUser = Depends(require_master_admin),
+):
+    """Rich detail for a covered requirement (drill-in from the dashboard).
+
+    Covered items carry the shared-bank ``requirement_id`` → resolve it to the
+    full ``jurisdiction_requirements`` row. The bank is shared reference data,
+    so this is admin-readable regardless of company.
+    """
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, category, jurisdiction_level, jurisdiction_name, title,
+                   description, current_value, rate_type, source_url, source_name,
+                   effective_date, expiration_date, requires_written_policy
+            FROM jurisdiction_requirements WHERE id = $1
+            """,
+            requirement_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Requirement not found")
+        return {
+            "id": str(row["id"]),
+            "category": row["category"],
+            "jurisdiction_level": row["jurisdiction_level"],
+            "jurisdiction_name": row["jurisdiction_name"],
+            "title": row["title"],
+            "description": row["description"],
+            "current_value": row["current_value"],
+            "rate_type": row["rate_type"],
+            "source_url": row["source_url"],
+            "source_name": row["source_name"],
+            "effective_date": row["effective_date"].isoformat() if row["effective_date"] else None,
+            "expiration_date": row["expiration_date"].isoformat() if row["expiration_date"] else None,
+            "requires_written_policy": row["requires_written_policy"],
+        }
+
+
 # ── Abandon ─────────────────────────────────────────────────────────────
 
 

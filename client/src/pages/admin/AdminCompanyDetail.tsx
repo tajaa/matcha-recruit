@@ -486,13 +486,21 @@ function EmployeeSyncPanel({ companyId }: { companyId: string }) {
             into the compliance engine, and re-scope. New locations are tracked weekly.
           </p>
         </div>
-        <button
-          onClick={run}
-          disabled={busy}
-          className="shrink-0 text-xs px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-500 disabled:opacity-40 transition-colors inline-flex items-center gap-2"
-        >
-          {busy ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Syncing…</> : 'Sync Employees'}
-        </button>
+        <div className="shrink-0 flex items-center gap-2">
+          <button
+            onClick={() => navigate(`/admin/gap-analysis/company/${companyId}`)}
+            className="text-xs px-3 py-2 rounded-lg border border-zinc-700 text-zinc-200 font-medium hover:bg-zinc-800 transition-colors"
+          >
+            Open Gap Dashboard →
+          </button>
+          <button
+            onClick={run}
+            disabled={busy}
+            className="text-xs px-4 py-2 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-500 disabled:opacity-40 transition-colors inline-flex items-center gap-2"
+          >
+            {busy ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Syncing…</> : 'Sync Employees'}
+          </button>
+        </div>
       </div>
 
       {error && <p className="text-xs text-red-400 mt-3">{error}</p>}
@@ -529,10 +537,10 @@ function EmployeeSyncPanel({ companyId }: { companyId: string }) {
           )}
 
           <button
-            onClick={() => navigate(`/admin/gap-analysis/${result.session_id}`)}
+            onClick={() => navigate(`/admin/gap-analysis/company/${companyId}`)}
             className="text-[11px] font-medium text-emerald-400 hover:text-emerald-300"
           >
-            View full gap analysis →
+            Open gap dashboard →
           </button>
         </div>
       )}

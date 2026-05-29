@@ -18,7 +18,7 @@ import MatchaWork from '../pages/admin/MatchaWork'
 import Customers from '../pages/admin/Customers'
 import AdminOnboarding from '../pages/admin/AdminOnboarding'
 import AdminOnboardingWizard from '../pages/admin/AdminOnboardingWizard'
-import AdminGapAnalysisRun from '../pages/admin/AdminGapAnalysisRun'
+import GapDashboard from '../pages/admin/GapDashboard'
 import GapAnalysisReport from '../features/admin-onboarding/GapAnalysisReport'
 import ClientErrors from '../pages/admin/ClientErrors'
 import ServerErrors from '../pages/admin/ServerErrors'
@@ -35,7 +35,7 @@ export default function AdminRoutes() {
         <Route index element={<Navigate to="customers" replace />} />
         <Route path="customers" element={<Customers />} />
         <Route path="gap-analysis" element={<AdminOnboarding />} />
-        <Route path="gap-analysis/company/:companyId" element={<AdminGapAnalysisRun />} />
+        <Route path="gap-analysis/company/:companyId" element={<GapDashboard />} />
         <Route path="gap-analysis/:sessionId" element={<AdminOnboardingWizard />} />
         <Route path="gap-analysis/:sessionId/report" element={<GapAnalysisReport />} />
         {/* legacy /admin/onboarding bookmarks → gap-analysis */}

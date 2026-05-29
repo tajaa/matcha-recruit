@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
+import GapCard from './GapCard'
 
 import {
   adminOnboarding,
@@ -701,10 +702,18 @@ export function Step5GapAnalysis({ session, onUpdated, onNext }: StepProps) {
   return (
     <div className="max-w-3xl">
       <h2 className="text-base font-medium text-zinc-100 mb-1">Gap Analysis</h2>
-      <p className="text-sm text-zinc-400 mb-5">
+      <p className="text-sm text-zinc-400 mb-2">
         {missing.length} to research · {existing.length} already covered
         {gap ? ` · AI flagged ${totalSuggestions} extra${totalSuggestions === 1 ? '' : 's'}` : ''}
       </p>
+      {session.company_id && (
+        <Link
+          to={`/admin/gap-analysis/company/${session.company_id}`}
+          className="inline-flex items-center gap-1 text-xs font-medium text-vsc-accent hover:opacity-80 mb-5"
+        >
+          Open full gap dashboard →
+        </Link>
+      )}
       <ErrorBox message={error} />
 
       {/* Card A — Needs research (actionable) */}
@@ -736,30 +745,20 @@ export function Step5GapAnalysis({ session, onUpdated, onNext }: StepProps) {
                       {allSelected ? 'Clear' : 'Select all'}
                     </button>
                   </div>
-                  <ul className="space-y-1.5">
+                  <div className="space-y-2">
                     {items.map((m) => {
                       const id = missingId(m)
                       return (
-                        <li key={id} className="flex items-start gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={approved.has(id)}
-                            onChange={() => toggle(id)}
-                            className="mt-0.5"
-                          />
-                          <div className="min-w-0">
-                            <div className="text-zinc-100">
-                              {m.category_slug.replace(/_/g, ' ')}
-                              <span className="text-zinc-500"> · {m.scope_level}</span>
-                            </div>
-                            {m.reason && (
-                              <div className="text-[11px] text-zinc-400">{m.reason}</div>
-                            )}
-                          </div>
-                        </li>
+                        <GapCard
+                          key={id}
+                          gap={m}
+                          selected={approved.has(id)}
+                          onToggle={() => toggle(id)}
+                          disabled={dispatchBusy}
+                        />
                       )
                     })}
-                  </ul>
+                  </div>
                 </div>
               )
             })}
