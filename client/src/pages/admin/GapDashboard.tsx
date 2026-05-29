@@ -18,7 +18,6 @@ import {
   CheckCircle2, AlertTriangle, XCircle, Search, MapPin, Scale, Users,
   FileSearch, CalendarCheck, Lightbulb, ChevronRight, ExternalLink,
 } from 'lucide-react'
-import { api } from '../../api/client'
 import { adminOnboarding } from '../../api/adminOnboarding'
 import type {
   GapDashboardResponse, ResolvedScopeMissing, GapRequirementDetail,
