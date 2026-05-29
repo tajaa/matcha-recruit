@@ -16,7 +16,7 @@ const STEPS: Step[] = [
   { label: 'Interviews',    icon: MessageSquare, doc: 'Witness·3' },
   { label: 'Document scan', icon: FileText,      doc: 'Exhibits·47' },
   { label: 'Analysis',      icon: Search,        doc: 'Timeline·MD' },
-  { label: 'Resolution',    icon: Gavel,         doc: 'Memo·PDF' },
+  { label: 'Draft memo',    icon: Gavel,         doc: 'Draft·PDF' },
 ]
 
 const STEP_MS = 1050
@@ -106,10 +106,10 @@ export function InvestigationTimelineAnimation() {
         <div className="flex items-center gap-2">
           <Gavel className="w-3.5 h-3.5" style={{ color: '#9a8a70' }} />
           <span className="text-[11px] font-medium tracking-wide font-mono uppercase" style={{ color: '#e4ded2' }}>
-            ER Copilot Engine
+            ER Copilot
           </span>
           <span className="text-[8.5px] uppercase tracking-wider px-1.5 py-[1px] rounded font-mono" style={{ color: complete ? '#86efac' : '#d7ba7d', border: `1px solid ${complete ? 'rgba(134,239,172,0.4)' : 'rgba(215,186,125,0.4)'}` }}>
-            {complete ? 'Resolved' : 'Active'}
+            {complete ? 'Drafted' : 'Active'}
           </span>
         </div>
         <div className="flex items-center gap-3 font-mono text-[9.5px]">
@@ -217,7 +217,7 @@ export function InvestigationTimelineAnimation() {
           <AlertOctagon className="w-3.5 h-3.5 shrink-0" style={{ color: '#ce9178' }} />
           <div className="flex-1 min-w-0">
             <div className="text-[9px] font-mono uppercase tracking-wider" style={{ color: '#ce9178' }}>
-              Pattern match detected
+              Similar cases surfaced
             </div>
             <div className="text-[9.5px] font-mono truncate" style={{ color: '#e4ded2' }}>
               Similar to ER-0089 (94% sim) · ER-0117 (87% sim)
@@ -239,7 +239,7 @@ export function InvestigationTimelineAnimation() {
           <span style={{ color: '#6a737d' }}>Chain of custody ✓</span>
         </div>
         <span style={{ color: '#9a8a70' }}>
-          {complete ? 'Memo ready' : `Step ${Math.max(0, current + 1)}/${STEPS.length}`}
+          {complete ? 'Draft ready for review' : `Step ${Math.max(0, current + 1)}/${STEPS.length}`}
         </span>
       </div>
     </div>

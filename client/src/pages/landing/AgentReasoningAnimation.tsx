@@ -7,9 +7,9 @@ import { GitBranch, AlertTriangle } from 'lucide-react'
 // Effective Jul 2024 — every CA employer must have a written plan, training,
 // log, hazard assessment, and annual review cadence. Most companies don't.
 // Cal/OSHA penalties stack per-location — risk reads as catastrophic.
-// The agent audits the gap, weighs which sub-rule each decision triggers,
-// commits to a remediation path. The visible "weighing" of multiple §
-// citations per decision is what makes this feel agentic rather than scripted.
+// This is assistive analysis: it screens each requirement against the relevant
+// sub-rules, flags gaps, and DRAFTS a remediation plan for a human to review and
+// act on. It surfaces and suggests — it does not decide or execute on its own.
 // ───────────────────────────────────────────────────────────────────────────
 
 interface Decision {
@@ -197,11 +197,11 @@ export default function AgentReasoningAnimation() {
 
         // SYNTHESIS
         if (cancelled) return
-        setHudStatus('Synthesizing remediation path · sequencing dependencies...')
+        setHudStatus('Drafting remediation plan · sequencing dependencies...')
         await sleep(700)
         setSynthesisVisible(true)
         setPhase('synthesized')
-        setHudStatus('Audit complete · 5/5 gaps resolved · 4-week path published')
+        setHudStatus('Analysis complete · 5/5 gaps found · draft plan ready for review')
         await sleep(6000)
         if (cancelled) return
 
@@ -572,7 +572,7 @@ function DecisionColumn({ decision, state, index }: { decision: Decision; state:
             }}
           >
             <div className="font-mono text-[7.5px] uppercase tracking-wider mb-0.5" style={{ color: EMERALD }}>
-              Remediate
+              Suggested fix
             </div>
             <div className="font-mono text-[9px] leading-tight" style={{ color: '#cbd5e1' }}>
               {decision.remediation}
@@ -635,10 +635,10 @@ function SynthesisCard() {
           className="font-mono text-[11px] font-semibold uppercase tracking-wider"
           style={{ color: EMERALD }}
         >
-          Remediation Path Synthesized
+          Draft remediation plan · for your review
         </span>
         <span className="font-mono text-[8.5px]" style={{ color: '#6a737d' }}>
-          5 dependencies sequenced · 0 unresolved
+          5 steps sequenced · draft
         </span>
       </div>
 

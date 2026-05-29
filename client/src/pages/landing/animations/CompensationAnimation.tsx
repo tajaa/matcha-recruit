@@ -195,7 +195,7 @@ export function CompensationAnimation() {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[8px] uppercase tracking-wider font-mono" style={{ color: '#6a737d' }}>
-                Adjustment
+                Suggested adj.
               </span>
               <span className="text-[11px] tabular-nums font-mono" style={{ color: '#e4ded2' }}>
                 ${Math.round(adjustment / 1000)}k

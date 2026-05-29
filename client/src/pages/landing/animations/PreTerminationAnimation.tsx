@@ -1,37 +1,46 @@
 import { useEffect, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
 
-// Pre-termination risk matrix — 6 dimensions, 3 overlaid case polygons.
-// Dimensions mirror the factors reviewed in a separation risk assessment.
+// Pre-termination risk SCREENING radar — 9 dimensions, 3 overlaid case polygons.
+// Mirrors pre_termination_service.py: 9 risk dimensions, 0-100 score, bands
+// low/moderate/high/critical. Higher value on an axis = MORE risk on that factor.
+// This is decision SUPPORT — it screens and surfaces risk for a human reviewer;
+// high/critical screens require acknowledgment. It does not decide terminations.
 
 type Dimension = { key: string; label: string; short: string }
 
+// The 9 real dimensions from pre_termination_service.py
 const DIMENSIONS: Dimension[] = [
-  { key: 'documentation', label: 'Documentation',   short: 'DOCS' },
-  { key: 'performance',   label: 'Performance',     short: 'PERF' },
-  { key: 'policy',        label: 'Policy',          short: 'POL'  },
-  { key: 'legal',         label: 'Legal exposure',  short: 'LEGAL' },
-  { key: 'warnings',      label: 'Prior notices',   short: 'WARN' },
-  { key: 'consistency',   label: 'Consistency',     short: 'CONS' },
+  { key: 'er_cases',          label: 'ER cases',          short: 'ER'     },
+  { key: 'ir_involvement',    label: 'IR involvement',    short: 'IR'     },
+  { key: 'leave_status',      label: 'Leave status',      short: 'LEAVE'  },
+  { key: 'protected_activity',label: 'Protected activity',short: 'PROT'   },
+  { key: 'documentation',     label: 'Documentation',     short: 'DOCS'   },
+  { key: 'tenure_timing',     label: 'Tenure / timing',   short: 'TENURE' },
+  { key: 'consistency',       label: 'Consistency',       short: 'CONS'   },
+  { key: 'manager_profile',   label: 'Manager profile',   short: 'MGR'    },
+  { key: 'retaliation_risk',  label: 'Retaliation risk',  short: 'RETAL'  },
 ]
+
+type Band = 'low' | 'moderate' | 'high' | 'critical'
 
 type Case = {
   name: string
   color: string
-  values: number[] // 0..1 for each dimension (order must match DIMENSIONS)
-  verdict: 'proceed' | 'defer' | 'escalate'
+  values: number[] // 0..1 risk per dimension (order matches DIMENSIONS); higher = riskier
+  band: Band
 }
 
+// Values are RISK magnitudes (higher = more risk). Critical case spikes on
+// retaliation / protected activity / open ER cases.
 const CASES: Case[] = [
-  { name: 'Case #A247', color: '#86efac', values: [0.88, 0.85, 0.80, 0.30, 0.90, 0.88], verdict: 'proceed'  },
-  { name: 'Case #B183', color: '#d7ba7d', values: [0.55, 0.60, 0.52, 0.65, 0.50, 0.58], verdict: 'defer'    },
-  { name: 'Case #C391', color: '#ce9178', values: [0.28, 0.42, 0.35, 0.88, 0.20, 0.30], verdict: 'escalate' },
+  { name: 'Case #A247', color: '#86efac', values: [0.10, 0.05, 0.00, 0.05, 0.15, 0.20, 0.10, 0.10, 0.08], band: 'low'      },
+  { name: 'Case #B183', color: '#d7ba7d', values: [0.45, 0.30, 0.55, 0.40, 0.60, 0.35, 0.50, 0.45, 0.42], band: 'high'     },
+  { name: 'Case #C391', color: '#ce9178', values: [0.85, 0.70, 0.65, 0.92, 0.55, 0.40, 0.60, 0.50, 0.95], band: 'critical' },
 ]
 
-const VERDICT_LABEL: Record<Case['verdict'], string> = {
-  proceed:  'Proceed',
-  defer:    'Defer',
-  escalate: 'Escalate',
+const BAND_LABEL: Record<Band, string> = {
+  low: 'Low', moderate: 'Moderate', high: 'High', critical: 'Critical',
 }
 
 const SIZE = 200
@@ -118,16 +127,16 @@ export function PreTerminationAnimation() {
         <div className="flex items-center gap-2">
           <ShieldAlert className="w-3.5 h-3.5" style={{ color: '#9a8a70' }} />
           <span className="text-[11px] font-medium tracking-wide font-mono uppercase" style={{ color: '#e4ded2' }}>
-            Pre-Termination Analysis
+            Pre-Termination Screening
           </span>
           <span className="text-[8.5px] uppercase tracking-wider px-1.5 py-[1px] rounded font-mono" style={{ color: '#d7ba7d', border: '1px solid rgba(215,186,125,0.4)' }}>
-            n=3
+            Decision support
           </span>
         </div>
         <div className="flex items-center gap-3 font-mono text-[9.5px]">
-          <span style={{ color: '#6a737d' }}>{N} factors</span>
+          <span style={{ color: '#6a737d' }}>{N} dimensions</span>
           <span style={{ color: '#3f3f46' }}>|</span>
-          <span style={{ color: '#86efac' }}>Risk matrix</span>
+          <span style={{ color: '#86efac' }}>For human review</span>
         </div>
       </div>
 
@@ -293,7 +302,7 @@ export function PreTerminationAnimation() {
                         opacity: isRevealed ? 1 : 0,
                       }}
                     >
-                      {VERDICT_LABEL[c.verdict]}
+                      {BAND_LABEL[c.band]}
                     </span>
                   </div>
                 </div>
@@ -306,14 +315,13 @@ export function PreTerminationAnimation() {
       {/* Footer */}
       <div className="relative px-4 py-2 border-t flex items-center justify-between shrink-0 font-mono text-[8.5px]" style={{ borderColor: 'rgba(255,255,255,0.08)', backgroundColor: 'rgba(255,255,255,0.015)' }}>
         <div className="flex items-center gap-3">
-          <span style={{ color: '#6a737d' }}>Factors</span>
-          <span className="tabular-nums" style={{ color: '#86efac' }}>14 reviewed</span>
+          <span style={{ color: '#6a737d' }}>Dimensions</span>
+          <span className="tabular-nums" style={{ color: '#86efac' }}>{N} screened</span>
           <span style={{ color: '#3f3f46' }}>|</span>
-          <span style={{ color: '#6a737d' }}>Model</span>
-          <span className="tabular-nums" style={{ color: '#d7ba7d' }}>CA-WARN-v2</span>
+          <span style={{ color: '#9a8a70' }}>Screening — not legal advice</span>
           <span style={{ color: '#3f3f46' }}>|</span>
-          <span style={{ color: '#6a737d' }}>Counsel</span>
-          <span className="tabular-nums" style={{ color: '#9a8a70' }}>1 flagged</span>
+          <span style={{ color: '#6a737d' }}>Critical</span>
+          <span className="tabular-nums" style={{ color: '#ce9178' }}>1 → ack required</span>
         </div>
       </div>
     </div>
