@@ -60,6 +60,7 @@ from app.core.services.onboarding_dossier import (
     _dossier_to_html,
     _dossier_to_markdown,
 )
+from app.core.services.compliance_complexity import complexity_from_session
 from app.core.services.onboarding_scope_ai import (
     INDUSTRY_SPECIALTIES,
     build_missing_id,
@@ -1709,18 +1710,26 @@ async def get_company_gap_dashboard(
                     "gap-dashboard: map_to_bank refresh failed for company %s", company_id,
                 )
 
+        basics = _safe_jsonb(session["basics"], {}) or {}
+        size = _safe_jsonb(session["size"], {}) or {}
+        locations = _safe_jsonb(session["locations"], []) or []
         dossier = build_gap_analysis_dossier({
             "id": session["id"],
             "status": session["status"],
-            "basics": _safe_jsonb(session["basics"], {}),
-            "size": _safe_jsonb(session["size"], {}),
-            "locations": _safe_jsonb(session["locations"], []),
+            "basics": basics,
+            "size": size,
+            "locations": locations,
             "ai_scope": ai_scope,
             "resolved_scope": resolved,
         })
         counts = dossier["counts"]
         denom = counts["covered"] + counts["gaps"]
         counts["coverage_pct"] = round(100 * counts["covered"] / denom) if denom else 100
+
+        complexity = complexity_from_session(
+            ai_scope=ai_scope, resolved=resolved, locations=locations, size=size,
+            industry=basics.get("industry"), specialty=basics.get("specialty"),
+        )
 
         # Drift (cheap): roster jurisdictions not yet tracked + locations added
         # since the last analysis. Signals when a full Re-run is worthwhile.
@@ -1750,6 +1759,7 @@ async def get_company_gap_dashboard(
             "session_id": str(session["id"]),
             "dossier": dossier,
             "drift": drift,
+            "complexity": complexity,
         }
 
 
@@ -1768,10 +1778,10 @@ async def get_gap_overview(
         rows = await conn.fetch(
             """
             SELECT DISTINCT ON (s.company_id)
-                   s.company_id, c.name AS company_name,
+                   s.company_id, c.name AS company_name, c.industry,
                    COALESCE(c.status, 'approved') AS company_status,
                    s.status AS session_status, s.updated_at,
-                   s.resolved_scope, s.locations
+                   s.resolved_scope, s.locations, s.ai_scope, s.size
             FROM onboarding_sessions s
             JOIN companies c ON c.id = s.company_id
             WHERE s.company_id IS NOT NULL AND s.status != 'abandoned'
@@ -1792,12 +1802,18 @@ async def get_gap_overview(
     out = []
     for r in rows:
         resolved = _safe_jsonb(r["resolved_scope"], {}) or {}
+        locations = _safe_jsonb(r["locations"], []) or []
+        ai_scope = _safe_jsonb(r["ai_scope"], {}) or {}
+        size = _safe_jsonb(r["size"], {}) or {}
         covered = len(resolved.get("existing") or [])
         gaps = len(resolved.get("missing") or [])
         ambiguous = len(resolved.get("ambiguous") or [])
         denom = covered + gaps
-        analyzed_locs = len(_safe_jsonb(r["locations"], []) or [])
         tracked = loc_counts.get(r["company_id"], 0)
+        cx = complexity_from_session(
+            ai_scope=ai_scope, resolved=resolved, locations=locations,
+            size=size, industry=r["industry"],
+        )
         out.append({
             "company_id": str(r["company_id"]),
             "company_name": r["company_name"],
@@ -1807,8 +1823,10 @@ async def get_gap_overview(
             "gaps": gaps,
             "ambiguous": ambiguous,
             "coverage_pct": round(100 * covered / denom) if denom else 100,
+            "complexity": cx["score"],
+            "complexity_band": cx["band"],
             "last_analyzed_at": r["updated_at"].isoformat() if r["updated_at"] else None,
-            "new_locations": max(0, tracked - analyzed_locs),
+            "new_locations": max(0, tracked - len(locations)),
         })
     # Needs-attention first: open gaps, then drift, then lowest coverage.
     out.sort(key=lambda x: (-x["gaps"], -x["new_locations"], x["coverage_pct"]))

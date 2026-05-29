@@ -13,7 +13,7 @@ import { adminOnboarding } from '../../api/adminOnboarding'
 import type { GapOverviewRow } from '../../api/adminOnboarding'
 import { CompanyPicker } from './AdminOnboarding'
 
-type SortKey = 'attention' | 'name' | 'coverage' | 'gaps'
+type SortKey = 'attention' | 'name' | 'coverage' | 'gaps' | 'complexity'
 
 function relDate(iso?: string | null): string {
   if (!iso) return '—'
@@ -22,6 +22,15 @@ function relDate(iso?: string | null): string {
   if (d === 1) return 'yesterday'
   if (d < 30) return `${d}d ago`
   return new Date(iso).toLocaleDateString()
+}
+
+export function complexityBandClass(band: string): string {
+  switch (band) {
+    case 'Severe': return 'bg-red-500/15 text-red-300 border-red-500/30'
+    case 'High': return 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+    case 'Moderate': return 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+    default: return 'bg-zinc-700/40 text-zinc-300 border-zinc-600/40' // Low
+  }
 }
 
 function StatCard({ label, value, tone }: { label: string; value: number | string; tone?: 'gap' | 'ok' }) {
@@ -51,14 +60,15 @@ export default function GapOverview() {
     if (sort === 'name') return [...v].sort((a, b) => (a.company_name || '').localeCompare(b.company_name || ''))
     if (sort === 'coverage') return [...v].sort((a, b) => a.coverage_pct - b.coverage_pct)
     if (sort === 'gaps') return [...v].sort((a, b) => b.gaps - a.gaps)
+    if (sort === 'complexity') return [...v].sort((a, b) => b.complexity - a.complexity)
     return v // 'attention' — server already sorts needs-attention-first
   }, [rows, q, sort])
 
   const totals = useMemo(() => {
     const openGaps = rows.reduce((s, r) => s + r.gaps, 0)
     const attention = rows.filter((r) => r.gaps > 0 || r.new_locations > 0).length
-    const avgCov = rows.length ? Math.round(rows.reduce((s, r) => s + r.coverage_pct, 0) / rows.length) : 0
-    return { companies: rows.length, openGaps, attention, avgCov }
+    const peakComplexity = rows.reduce((m, r) => Math.max(m, r.complexity), 0)
+    return { companies: rows.length, openGaps, attention, peakComplexity }
   }, [rows])
 
   if (loading) {
@@ -72,7 +82,7 @@ export default function GapOverview() {
         <StatCard label="Companies analyzed" value={totals.companies} />
         <StatCard label="Open gaps (all)" value={totals.openGaps} tone={totals.openGaps > 0 ? 'gap' : 'ok'} />
         <StatCard label="Need attention" value={totals.attention} tone={totals.attention > 0 ? 'gap' : 'ok'} />
-        <StatCard label="Avg coverage" value={`${totals.avgCov}%`} tone="ok" />
+        <StatCard label="Peak complexity" value={totals.peakComplexity} tone={totals.peakComplexity >= 50 ? 'gap' : undefined} />
       </div>
 
       {/* Controls */}
@@ -93,6 +103,7 @@ export default function GapOverview() {
             className="appearance-none rounded-lg border border-vsc-border bg-vsc-bg pl-3 pr-8 py-2 text-sm text-zinc-200 outline-none focus:border-zinc-500"
           >
             <option value="attention">Needs attention</option>
+            <option value="complexity">Highest complexity</option>
             <option value="gaps">Most gaps</option>
             <option value="coverage">Lowest coverage</option>
             <option value="name">Name (A–Z)</option>
@@ -120,6 +131,7 @@ export default function GapOverview() {
             <thead className="bg-vsc-panel text-[11px] uppercase tracking-wider text-zinc-500">
               <tr>
                 <th className="text-left px-4 py-2.5 font-medium">Company</th>
+                <th className="text-left px-4 py-2.5 font-medium">Complexity</th>
                 <th className="text-left px-4 py-2.5 font-medium w-44">Coverage</th>
                 <th className="text-right px-4 py-2.5 font-medium">Covered</th>
                 <th className="text-right px-4 py-2.5 font-medium">Gaps</th>
@@ -141,6 +153,12 @@ export default function GapOverview() {
                         <AlertTriangle size={10} /> {r.new_locations} new location{r.new_locations > 1 ? 's' : ''}
                       </span>
                     )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border ${complexityBandClass(r.complexity_band)}`}>
+                      <span className="text-sm font-semibold tabular-nums">{r.complexity}</span>
+                      <span className="text-[10px] uppercase tracking-wide opacity-80">{r.complexity_band}</span>
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">

@@ -298,10 +298,31 @@ export type GapDashboardResponse = {
   session_id?: string | null
   dossier: GapAnalysisDossier | null
   drift: GapDrift | null
+  complexity?: ComplexityScore | null
+}
+
+// Deterministic compliance-complexity score (0–100) + explainable breakdown.
+export type ComplexityScore = {
+  score: number
+  band: string // Low | Moderate | High | Severe
+  breakdown: {
+    domain: number
+    breadth: number
+    scale: number
+    load: number
+    drivers: {
+      industry?: string | null
+      states: number
+      jurisdictions: number
+      headcount: number
+      category_count: number
+      requirement_count: number
+    }
+  }
 }
 
 // One company row on the gap-analysis landing dashboard (persisted counts +
-// cheap drift). Sorted needs-attention-first server-side.
+// cheap drift + complexity). Sorted needs-attention-first server-side.
 export type GapOverviewRow = {
   company_id: string
   company_name?: string | null
@@ -311,6 +332,8 @@ export type GapOverviewRow = {
   gaps: number
   ambiguous: number
   coverage_pct: number
+  complexity: number
+  complexity_band: string
   last_analyzed_at?: string | null
   new_locations: number
 }

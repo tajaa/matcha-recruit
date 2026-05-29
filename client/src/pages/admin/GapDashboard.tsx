@@ -26,6 +26,7 @@ import type {
 import { useEnrichStream, type EnrichEvent } from '../../hooks/useEnrichStream'
 import { useResearchGaps, type ResearchGapItem } from '../../hooks/useResearchGaps'
 import GapCard, { humanizeCategory, jurisdictionLabel } from '../../features/admin-onboarding/GapCard'
+import { complexityBandClass } from './GapOverview'
 
 type CoveredItem = {
   requirement_id?: string
@@ -179,6 +180,7 @@ export default function GapDashboard() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [activeResearch, setActiveResearch] = useState<string | null>(null) // 'bulk' | missingId
   const [showCovered, setShowCovered] = useState(false)
+  const [showCx, setShowCx] = useState(false)
 
   const enrich = useEnrichStream()
   const research = useResearchGaps()
@@ -233,6 +235,7 @@ export default function GapDashboard() {
   const drift = data?.drift
   const jurisdictionCount = dossier?.scope.applicable_jurisdictions?.length ?? 0
   const coveragePct = counts?.coverage_pct ?? 0
+  const cx = data?.complexity
 
   const suggestionCount =
     (suggestions.suggested_compliance_categories?.length ?? 0) +
@@ -318,7 +321,7 @@ export default function GapDashboard() {
       {dossier && (
         <div className="space-y-5">
           {/* Stat row */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
             <div className="rounded-lg border border-vsc-border bg-vsc-panel p-3 col-span-2 md:col-span-1">
               <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Coverage</div>
               <div className="text-2xl font-semibold text-zinc-100 mt-1">{coveragePct}%</div>
@@ -326,11 +329,56 @@ export default function GapDashboard() {
                 <div className="h-full rounded-full bg-emerald-500" style={{ width: `${coveragePct}%` }} />
               </div>
             </div>
+            {cx && (
+              <button
+                onClick={() => setShowCx((v) => !v)}
+                className="text-left rounded-lg border border-vsc-border bg-vsc-panel p-3 hover:border-zinc-600 transition-colors"
+                title="Compliance complexity — click for breakdown"
+              >
+                <div className="text-[10px] text-zinc-500 uppercase tracking-wider">Complexity</div>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-2xl font-semibold text-zinc-100">{cx.score}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded border uppercase tracking-wide ${complexityBandClass(cx.band)}`}>{cx.band}</span>
+                </div>
+              </button>
+            )}
             <StatCard label="Covered" value={counts?.covered ?? 0} tone="ok" />
             <StatCard label="Gaps" value={counts?.gaps ?? 0} tone="gap" />
             <StatCard label="Ambiguous" value={counts?.ambiguous ?? 0} />
             <StatCard label="Jurisdictions" value={jurisdictionCount} />
           </div>
+
+          {/* Complexity breakdown (expand from the card) */}
+          {cx && showCx && (
+            <div className="rounded-xl border border-vsc-border bg-vsc-panel p-4">
+              <div className="text-sm font-semibold text-zinc-100 mb-3">
+                Complexity breakdown — <span className="text-zinc-400 font-normal">{cx.score}/100 · {cx.band}</span>
+              </div>
+              <div className="space-y-2">
+                {([
+                  ['Domain risk', cx.breakdown.domain, 'what they do'],
+                  ['Jurisdictional breadth', cx.breakdown.breadth, 'states & locales'],
+                  ['Scale', cx.breakdown.scale, 'headcount'],
+                  ['Requirement load', cx.breakdown.load, 'obligations'],
+                ] as [string, number, string][]).map(([label, val, hint]) => (
+                  <div key={label} className="flex items-center gap-3">
+                    <div className="w-44 shrink-0 text-xs text-zinc-300">{label} <span className="text-zinc-600">· {hint}</span></div>
+                    <div className="flex-1 h-2 rounded-full bg-vsc-bg overflow-hidden">
+                      <div className="h-full rounded-full bg-vsc-accent" style={{ width: `${val}%` }} />
+                    </div>
+                    <span className="w-9 text-right text-xs text-zinc-400 tabular-nums">{val}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 pt-3 border-t border-vsc-border text-[11px] text-zinc-500 flex flex-wrap gap-x-4 gap-y-1">
+                {cx.breakdown.drivers.industry && <span>Industry: <span className="text-zinc-300">{cx.breakdown.drivers.industry}</span></span>}
+                <span>{cx.breakdown.drivers.states} states · {cx.breakdown.drivers.jurisdictions} jurisdictions</span>
+                <span>{cx.breakdown.drivers.headcount} employees</span>
+                <span>{cx.breakdown.drivers.category_count} categories</span>
+                <span>{cx.breakdown.drivers.requirement_count} requirements</span>
+              </div>
+            </div>
+          )}
 
           {/* Drift banner */}
           {driftActive && (
