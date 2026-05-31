@@ -397,6 +397,36 @@ class AppState {
                     )
                 }
 
+                // Cross-project kanban/ticket activity → in-app toast when the
+                // user is looking at Werk, so a change in ANOTHER project can
+                // pull their attention over. Skipped when they're already in
+                // that project (the project WS path toasts those live — see
+                // ProjectDetailViewModel — so this would double up).
+                if ["task_progress", "task_assigned", "task_rejected"].contains(type),
+                   NSApplication.shared.isActive {
+                    let pid = metaString("project_id") ?? ""
+                    if !pid.isEmpty, pid != self.selectedProjectId {
+                        let projTitle = metaString("project_title")
+                            ?? (n?["title"] as? String ?? "Project")
+                        let msg = (n?["body"] as? String) ?? (n?["title"] as? String ?? "Updated")
+                        let icon: String
+                        switch type {
+                        case "task_assigned": icon = "person.crop.circle.badge.checkmark"
+                        case "task_rejected": icon = "arrow.uturn.backward"
+                        default: icon = "arrow.left.arrow.right"
+                        }
+                        ChannelNotificationManager.shared.playInAppSound()
+                        WorkToastCenter.shared.push(
+                            WorkToastCenter.Toast(
+                                projectId: pid,
+                                projectTitle: projTitle,
+                                message: msg,
+                                systemImage: icon
+                            )
+                        )
+                    }
+                }
+
                 // OS toast is owned by the starred-channel path in
                 // `onMessageGlobal` for channel_* events — skip those here to
                 // avoid double-toasting on chat. Non-channel events

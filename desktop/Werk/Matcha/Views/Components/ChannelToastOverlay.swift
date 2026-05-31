@@ -237,9 +237,9 @@ struct WorkToastOverlay: View {
             Spacer()
             ForEach(center.toasts) { toast in
                 WorkToastView(toast: toast) {
-                    // Jump to the project; the collab layout defaults to the
-                    // kanban panel so the user lands on the board.
+                    // Jump straight to the project's kanban board.
                     appState.selectedProjectId = toast.projectId
+                    appState.pendingProjectPanel = .kanban
                     appState.showInbox = false
                     appState.selectedThreadId = nil
                     appState.selectedChannelId = nil
