@@ -101,6 +101,7 @@ def decode_interview_ws_token(token: str) -> tuple[Optional[UUID], bool]:
             token,
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm],
+            options={"require_exp": True},
         )
         if payload.get("type") != "interview_ws":
             return None, False
@@ -137,6 +138,7 @@ def decode_email_verify_token(token: str) -> Optional[dict]:
             token,
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm],
+            options={"require_exp": True},
         )
         if payload.get("type") != "email_verify":
             return None
@@ -160,7 +162,8 @@ def decode_token(token: str, expected_type: Optional[str] = None) -> Optional[To
         payload = jwt.decode(
             token,
             settings.jwt_secret_key,
-            algorithms=[settings.jwt_algorithm]
+            algorithms=[settings.jwt_algorithm],
+            options={"require_exp": True},
         )
 
         token_type = payload.get("type")

@@ -152,8 +152,11 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
     if (messages.length === 0 && currentCards.length === 0 && !streaming) {
       void streamRound(null)
     }
+    // streamRound is intentionally omitted (it would re-fire every render);
+    // incidentId IS included so switching incidents cold-starts the new one
+    // instead of closing over the previous incident's streamRound.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading])
+  }, [loading, incidentId])
 
   async function handleSubmitInput() {
     const text = input.trim()

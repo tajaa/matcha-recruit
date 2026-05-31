@@ -96,7 +96,10 @@ final class ProjectWebSocket: NSObject {
             print("[ProjectWS] connect skipped — invalid URL base=\(base)")
             return
         }
-        print("[ProjectWS] connect initiated → \(url.absoluteString.prefix(80))…")
+        // Log the endpoint only — never url.absoluteString, which carries the
+        // JWT in its ?token= query and would leak the bearer credential into
+        // unified logging.
+        print("[ProjectWS] connect initiated → \(wsBase)/ws/projects")
         isConnecting = true
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         self.session = session

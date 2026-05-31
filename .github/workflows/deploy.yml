@@ -1,13 +1,15 @@
 name: Build and Deploy
 
 on:
-  push:
-    branches:
-      - main
+  # Deploy is MANUAL only — merging to main must NOT auto-deploy to prod.
+  # Trigger from the Actions tab (Build and Deploy → Run workflow) or:
+  #   gh workflow run deploy.yml --ref main
+  workflow_dispatch:
+  # PRs still build images for validation; the deploy-to-ec2 job is gated to
+  # workflow_dispatch, so a PR never touches prod.
   pull_request:
     branches:
       - main
-  workflow_dispatch:
 
 env:
   AWS_REGION: us-west-1
@@ -54,7 +56,9 @@ jobs:
     name: Deploy to EC2
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    # Manual deploy only. Prod is never restarted by a push or a PR — only by
+    # an explicit `workflow_dispatch`.
+    if: github.event_name == 'workflow_dispatch'
     permissions:
       id-token: write
       contents: read

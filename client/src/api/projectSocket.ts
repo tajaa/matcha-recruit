@@ -58,6 +58,7 @@ export class ProjectSocket {
   private currentProject: string | null = null
   private currentPageKey: string | null = null
   private _closed = false
+  private _reconnectAttempts = 0
 
   onPresence: PresenceHandler | null = null
   onPresenceUpdate: PresenceUpdateHandler | null = null
@@ -81,6 +82,7 @@ export class ProjectSocket {
     }
 
     this.ws.onopen = () => {
+      this._reconnectAttempts = 0
       this.onConnected?.()
       this._startPing()
       // Rejoin the project we were tracking before the reconnect.
@@ -128,10 +130,18 @@ export class ProjectSocket {
       } catch { /* malformed — ignore */ }
     }
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
       this._stopPing()
       this.onDisconnected?.()
-      if (!this._closed) this._scheduleReconnect()
+      if (this._closed) return
+      // 4001/4003 are the backend's auth-rejection close codes (invalid token /
+      // not authorized). Don't reconnect with the same dead token — try one
+      // refresh and reconnect only if it produced a genuinely new token.
+      if (event.code === 4001 || event.code === 4003) {
+        void this._reconnectAfterAuthFailure()
+      } else {
+        this._scheduleReconnect()
+      }
     }
 
     this.ws.onerror = () => {
@@ -217,8 +227,28 @@ export class ProjectSocket {
 
   private _scheduleReconnect() {
     if (this._closed) return
+    // Capped exponential backoff (3s, 6s, 12s, 24s, … max 30s) so a downed
+    // server isn't hammered every 3s indefinitely. Reset to 0 on a clean open.
+    const delay = Math.min(30000, 3000 * 2 ** this._reconnectAttempts)
+    this._reconnectAttempts++
     this.reconnectTimeout = setTimeout(() => {
       this.connect()
-    }, 3000)
+    }, delay)
+  }
+
+  // After an auth-class close (4001/4003): refresh the token once and reconnect
+  // only if a genuinely new token was obtained. If the token is unchanged the
+  // server would just reject it again; if refresh failed, ensureFreshToken has
+  // already triggered logout — either way, stop the loop.
+  private async _reconnectAfterAuthFailure() {
+    if (this._closed) return
+    const before = localStorage.getItem('matcha_access_token')
+    const { ensureFreshToken } = await import('./client')
+    const after = await ensureFreshToken()
+    if (this._closed) return
+    if (after && after !== before) {
+      this._reconnectAttempts = 0
+      this._scheduleReconnect()
+    }
   }
 }

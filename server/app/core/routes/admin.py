@@ -1703,11 +1703,11 @@ async def get_broker_client_setups_admin(broker_id: UUID):
         locs = r.get("locations")
         if isinstance(locs, str):
             try: locs = _json.loads(locs)
-            except: locs = []
+            except Exception: locs = []
         template = r.get("onboarding_template")
         if isinstance(template, str):
             try: template = _json.loads(template)
-            except: template = {}
+            except Exception: template = {}
         setups.append({
             "id": str(r["id"]),
             "company_name": r["company_name"],

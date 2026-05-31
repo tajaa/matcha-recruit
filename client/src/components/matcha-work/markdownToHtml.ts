@@ -1,5 +1,30 @@
 import type { ProjectSection } from '../../types/matcha-work'
 
+/** Escape a string for safe interpolation into an HTML attribute value. */
+function escapeAttr(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+/**
+ * Allow only http(s)/mailto and relative/anchor links. Returns the escaped
+ * URL safe for an `href`, or null if the scheme is disallowed (`javascript:`,
+ * `data:`, `vbscript:`, …) — content here can originate from AI output or
+ * collaborators, so an unvalidated href is an XSS vector.
+ */
+function sanitizeHref(url: string): string | null {
+  const trimmed = url.trim()
+  // Relative paths and in-page anchors carry no scheme — safe.
+  if (/^(\/|#|\.\/|\.\.\/|\?)/.test(trimmed)) return escapeAttr(trimmed)
+  const scheme = trimmed.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):/)?.[1]?.toLowerCase()
+  if (!scheme) return escapeAttr(trimmed) // no scheme → treat as relative
+  if (scheme === 'http' || scheme === 'https' || scheme === 'mailto') return escapeAttr(trimmed)
+  return null
+}
+
 /** Convert markdown to simple HTML for TipTap initialization */
 export function markdownToHtml(md: string): string {
   let html = md
@@ -11,7 +36,10 @@ export function markdownToHtml(md: string): string {
     .replace(/^#{3}\s+(.+)$/gm, '<h3>$1</h3>')
     .replace(/^#{1}\s+(.+)$/gm, '<h2>$1</h2>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, text: string, url: string) => {
+      const href = sanitizeHref(url)
+      return href ? `<a href="${href}">${text}</a>` : text
+    })
     .replace(/^---+$/gm, '<hr>')
     .replace(/^>\s*(.+)$/gm, '<blockquote>$1</blockquote>')
 

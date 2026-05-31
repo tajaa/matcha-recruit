@@ -32,7 +32,11 @@ function _logout() {
   // Best-effort cleanup of the shared channel WS. Lazy-imported to avoid
   // a circular dependency between api/client.ts and api/channelSocket.ts.
   import('./channelSocket').then((m) => m.disconnectSharedChannelSocket()).catch(() => {})
-  window.location.href = '/login'
+  // Guard against a redirect loop: a failed refresh fired from the login page
+  // itself would otherwise reassign location to /login repeatedly.
+  if (window.location.pathname !== '/login') {
+    window.location.href = '/login'
+  }
 }
 
 /** Proactively refresh token if it expires within 60s. Use before SSE/WebSocket where 401 retry isn't possible. */
@@ -87,6 +91,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         headers: _buildHeaders(init, newToken),
       })
       if (!retry.ok) {
+        // A 401 on the retry means the freshly-refreshed token is also
+        // rejected — the session is truly dead. Clear it and bounce to login
+        // rather than leaving the app in a half-authed state.
+        if (retry.status === 401) {
+          _logout()
+          throw new Error('Session expired')
+        }
         const retryBody = await retry.json().catch(() => null)
         const msg = retryBody?.detail || `${retry.status} ${retry.statusText}`
         // 401/403 are auth conditions (handled by refresh/logout), not bugs —
