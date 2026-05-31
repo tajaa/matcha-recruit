@@ -11,5 +11,8 @@
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "security-guidance@claude-code-plugins": true
   }
 }
