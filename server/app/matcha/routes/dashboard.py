@@ -548,7 +548,7 @@ For each flag, provide:
 Rules:
 - Only surface items that require ACTION — skip informational items
 - Connect related patterns (e.g., same department appearing in incidents AND ER cases)
-- For black-and-white violations (wage below minimum), state the exact numbers
+- Do NOT create wage / minimum-wage / exempt-salary flags — those are computed deterministically with exact counts and added automatically. You may reference wage exposure when connecting related patterns, but never emit it as its own flag.
 - For trend-based findings, cite the specific timeframe and counts
 - Maximum 15 flags — prioritize ruthlessly
 - Be specific: name locations, departments, and roles (but not individual employee names in descriptions — use role titles like "Exempt Employee at [Location]")
@@ -705,6 +705,28 @@ async def _detect_risk_patterns(company_id: UUID) -> dict:
                         })
             if violations:
                 patterns["wage_violations"] = violations
+                # Summary stats (deduped by employee, matching the Risk
+                # Assessment module) so the AI sees an explicit total and the
+                # deterministic rollup flag can report the true count.
+                unique_ids = {v.get("employee_id") for v in violations if v.get("employee_id")}
+                hourly_ids = {
+                    v.get("employee_id") for v in violations
+                    if (v.get("rate_type") == "general" or v.get("pay_classification") == "hourly")
+                    and v.get("employee_id")
+                }
+                salary_ids = {
+                    v.get("employee_id") for v in violations
+                    if (v.get("rate_type") == "exempt_salary" or v.get("pay_classification") == "exempt")
+                    and v.get("employee_id")
+                }
+                patterns["wage_violations_summary"] = {
+                    "total_employees": len(unique_ids) or len(violations),
+                    "hourly_count": len(hourly_ids),
+                    "salary_count": len(salary_ids),
+                    "locations_affected": len(
+                        {v.get("location") for v in violations if v.get("location")}
+                    ),
+                }
         except Exception:
             logger.exception("Failed to compute wage violations for dashboard flags")
 
@@ -871,6 +893,69 @@ def _deterministic_flags_from_patterns(patterns: dict) -> list[dict]:
     return flags
 
 
+def _wage_rollup_flag(patterns: dict) -> dict | None:
+    """Single wage-violation flag carrying the TRUE total.
+
+    The AI summarizer collapses many wage violations into a vague "two
+    employees" mention, undercounting vs the Risk Assessment module (which
+    counts every underpaid employee). This builds one deterministic flag from
+    the full violation list so the Command Center count always matches Risk
+    Assessment.
+    """
+    violations = patterns.get("wage_violations") or []
+    if not violations:
+        return None
+
+    summary = patterns.get("wage_violations_summary") or {}
+    unique_ids = {v.get("employee_id") for v in violations if v.get("employee_id")}
+    total = summary.get("total_employees") or len(unique_ids) or len(violations)
+    hourly_n = summary.get("hourly_count") or 0
+    salary_n = summary.get("salary_count") or 0
+    locs = summary.get("locations_affected") or len(
+        {v.get("location") for v in violations if v.get("location")}
+    )
+
+    parts: list[str] = []
+    if salary_n:
+        parts.append(f"{salary_n} exempt below the salary threshold")
+    if hourly_n:
+        parts.append(f"{hourly_n} hourly below minimum wage")
+    breakdown = "; ".join(parts) if parts else "below the applicable minimum"
+    loc_label = f"{locs} location{'s' if locs != 1 else ''}"
+
+    return {
+        "category": "Compliance",
+        "location_subject": "Company Wide",
+        "description": (
+            f"{total} employee{'s' if total != 1 else ''} across {loc_label} "
+            f"are paid below the applicable minimum ({breakdown}). This is "
+            f"documented wage-and-hour exposure under the FLSA and state wage orders."
+        ),
+        "recommendation": (
+            "Open the wage-compliance review on the Employees page, raise each "
+            "underpaid employee to the applicable minimum (or reclassify exempt "
+            "staff as non-exempt), and record the remediation date for each."
+        ),
+        "severity": "critical",
+        "source_type": "wage",
+        "link": "/app/employees",
+    }
+
+
+def _apply_wage_rollup(raw_flags: list[dict], patterns: dict) -> list[dict]:
+    """Drop any wage flags and prepend one deterministic rollup.
+
+    Used on every write path (AI + deterministic + auto-rebuild) so the
+    Command Center wage count always matches the Risk Assessment total
+    instead of whatever subset the AI happened to mention.
+    """
+    flags = [f for f in raw_flags if f.get("source_type") != "wage"]
+    wage_flag = _wage_rollup_flag(patterns)
+    if wage_flag:
+        flags.insert(0, wage_flag)
+    return flags
+
+
 import re as _loc_re_mod
 _LOC_PATTERN = _loc_re_mod.compile(r',\s*[A-Z]{2}')
 
@@ -925,7 +1010,7 @@ async def rebuild_flags_deterministic(company_id: UUID) -> int:
     or when the flags table is empty for a company.
     """
     patterns = await _detect_risk_patterns(company_id)
-    raw_flags = _deterministic_flags_from_patterns(patterns)
+    raw_flags = _apply_wage_rollup(_deterministic_flags_from_patterns(patterns), patterns)
     dept_names = {d["department"] for d in patterns.get("departments_with_multiple_incidents", [])}
     return await _write_flags_to_db(company_id, raw_flags, is_ai=False, dept_names=dept_names)
 
@@ -1142,17 +1227,15 @@ async def analyze_risk_flags(
     patterns = await _detect_risk_patterns(company_id)
     dept_names = {d["department"] for d in patterns.get("departments_with_multiple_incidents", [])}
 
-    # Try AI synthesis, fall back to deterministic
+    # Try AI synthesis, fall back to deterministic.
     ai_flags = await _analyze_with_ai(patterns)
-    if ai_flags is not None:
-        count = await _write_flags_to_db(company_id, ai_flags, is_ai=True, dept_names=dept_names)
-        return {"analyzed": count, "is_ai": True}
-    else:
-        count = await _write_flags_to_db(
-            company_id, _deterministic_flags_from_patterns(patterns),
-            is_ai=False, dept_names=dept_names,
-        )
-        return {"analyzed": count, "is_ai": False}
+    is_ai = ai_flags is not None
+    raw_flags = ai_flags if is_ai else _deterministic_flags_from_patterns(patterns)
+    # AI collapses/undercounts wage violations — always inject the deterministic
+    # rollup so the count matches the Risk Assessment total.
+    raw_flags = _apply_wage_rollup(raw_flags, patterns)
+    count = await _write_flags_to_db(company_id, raw_flags, is_ai=is_ai, dept_names=dept_names)
+    return {"analyzed": count, "is_ai": is_ai}
 
 
 def _format_action(action: str, details: dict | None) -> str:
