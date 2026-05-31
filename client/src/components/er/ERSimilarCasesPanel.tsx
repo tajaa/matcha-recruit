@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { api } from '../../api/client'
+import { api, authStreamHeaders } from '../../api/client'
 import { Badge, Button } from '../ui'
 import type { SimilarCasesAnalysis, SimilarCaseMatch } from '../../types/er'
 import { categoryLabel, outcomeLabel, statusLabel } from '../../types/er'
@@ -23,17 +23,15 @@ export function ERSimilarCasesPanel({ caseId }: Props) {
     const ctrl = new AbortController()
     abortRef.current = ctrl
 
-    const token = localStorage.getItem('matcha_access_token')
     const url = `${BASE}/er/cases/${caseId}/analysis/similar-cases${refresh ? '?refresh=true' : ''}`
 
-    fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      signal: ctrl.signal,
-    })
+    authStreamHeaders({ 'Content-Type': 'application/json' }).then((headers) =>
+      fetch(url, {
+        method: 'POST',
+        headers,
+        signal: ctrl.signal,
+      }),
+    )
       .then(async (res) => {
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
         const reader = res.body?.getReader()

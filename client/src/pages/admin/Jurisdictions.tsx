@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import type { FormEvent } from 'react'
-import { api } from '../../api/client'
+import { api, authStreamHeaders } from '../../api/client'
 import { Button, Input, Modal } from '../../components/ui'
 import JurisdictionDetailPanel from '../../components/admin/JurisdictionDetailPanel'
 
@@ -212,11 +212,10 @@ export default function Jurisdictions() {
 
   function startResearch(item: ResearchItem) {
     setResearchingId(item.jurisdiction_id); setResearchMessages([])
-    const token = localStorage.getItem('matcha_access_token')
     const base = import.meta.env.VITE_API_URL || '/api'
-    fetch(`${base}/admin/research-queue/${item.jurisdiction_id}/research`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}` },
-    }).then(async (res) => {
+    authStreamHeaders().then((headers) => fetch(`${base}/admin/research-queue/${item.jurisdiction_id}/research`, {
+      method: 'POST', headers,
+    })).then(async (res) => {
       const reader = res.body?.getReader()
       const decoder = new TextDecoder()
       if (!reader) return
@@ -241,11 +240,10 @@ export default function Jurisdictions() {
 
   function handleRunTopMetros() {
     setTopMetroRunning(true); setTopMetroMessages([])
-    const token = localStorage.getItem('matcha_access_token')
     const base = import.meta.env.VITE_API_URL || '/api'
-    fetch(`${base}/admin/jurisdictions/top-metros/check`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}` },
-    }).then(async (res) => {
+    authStreamHeaders().then((headers) => fetch(`${base}/admin/jurisdictions/top-metros/check`, {
+      method: 'POST', headers,
+    })).then(async (res) => {
       const reader = res.body?.getReader()
       const decoder = new TextDecoder()
       if (!reader) return

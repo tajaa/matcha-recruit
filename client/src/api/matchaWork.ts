@@ -704,7 +704,7 @@ export async function runResearchStream(
   signal?: AbortSignal,
   captureScreenshot?: boolean,
 ) {
-  const token = localStorage.getItem('matcha_access_token')
+  const token = await ensureFreshToken()
   const qs = captureScreenshot ? '?capture_screenshot=true' : ''
   const res = await fetch(`${BASE}/matcha-work/projects/${projectId}/research-tasks/${taskId}/run${qs}`, {
     method: 'POST',
@@ -736,7 +736,7 @@ export async function retryResearchStream(
   inputId: string,
   onEvent: (event: { type: string; input_id?: string; message?: string }) => void,
 ) {
-  const token = localStorage.getItem('matcha_access_token')
+  const token = await ensureFreshToken()
   const res = await fetch(`${BASE}/matcha-work/projects/${projectId}/research-tasks/${taskId}/inputs/${inputId}/retry`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -769,7 +769,7 @@ export async function followUpResearchStream(
   signal?: AbortSignal,
   captureScreenshot?: boolean,
 ) {
-  const token = localStorage.getItem('matcha_access_token')
+  const token = await ensureFreshToken()
   const qs = captureScreenshot ? '?capture_screenshot=true' : ''
   const res = await fetch(`${BASE}/matcha-work/projects/${projectId}/research-tasks/${taskId}/inputs/${inputId}/follow-up${qs}`, {
     method: 'POST',

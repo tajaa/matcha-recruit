@@ -243,6 +243,45 @@ export const policies = {
   delete: (id: string) => request<void>(`/policies/${id}`, { method: 'DELETE' }),
 }
 
+/** Headers for SSE/streaming fetches that can't use request()'s 401 retry
+ *  (a half-consumed stream can't be replayed): proactively refresh the token
+ *  if it's near expiry, then attach it. ensureFreshToken logs out on failure. */
+export async function authStreamHeaders(
+  extra?: Record<string, string>,
+): Promise<Record<string, string>> {
+  const token = await ensureFreshToken()
+  return { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(extra ?? {}) }
+}
+
+/** Fetch returning the raw Response (for blobs/streams), with the same
+ *  proactive-refresh + single 401 refresh-and-retry that request() applies. */
+async function _fetchWithRefresh(url: string, init: RequestInit = {}): Promise<Response> {
+  const token = await ensureFreshToken()
+  const withAuth = (t: string | null): RequestInit => ({
+    ...init,
+    headers: { ...(t ? { Authorization: `Bearer ${t}` } : {}), ...init.headers },
+  })
+  const res = await fetch(url, withAuth(token))
+  if (res.status !== 401 || !token) return res
+  if (!_refreshing) {
+    _refreshing = _tryRefresh().finally(() => { _refreshing = null })
+  }
+  const ok = await _refreshing
+  if (!ok) { _logout(); return res }
+  return fetch(url, withAuth(localStorage.getItem('matcha_access_token')))
+}
+
+/** Trigger a browser download from a binary Response. */
+async function _saveBlobResponse(res: Response, path: string, filename?: string): Promise<void> {
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename ?? path.split('/').pop() ?? 'download'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
@@ -255,38 +294,19 @@ export const api = {
   upload: <T>(path: string, formData: FormData) =>
     request<T>(path, { method: 'POST', body: formData }),
   download: async (path: string, filename?: string) => {
-    const token = localStorage.getItem('matcha_access_token')
-    const res = await fetch(`${BASE}${path}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
+    const res = await _fetchWithRefresh(`${BASE}${path}`)
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-    const blob = await res.blob()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename ?? path.split('/').pop() ?? 'download'
-    a.click()
-    URL.revokeObjectURL(url)
+    await _saveBlobResponse(res, path, filename)
   },
   // POST a JSON body and download the binary response as a file.
   downloadPost: async (path: string, body: unknown, filename?: string) => {
-    const token = localStorage.getItem('matcha_access_token')
-    const res = await fetch(`${BASE}${path}`, {
+    const res = await _fetchWithRefresh(`${BASE}${path}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
-    const blob = await res.blob()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename ?? path.split('/').pop() ?? 'download'
-    a.click()
-    URL.revokeObjectURL(url)
+    await _saveBlobResponse(res, path, filename)
   },
 }
 

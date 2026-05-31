@@ -24,7 +24,7 @@ import {
   type TimelineAnalysisResponse,
   type ShareLink,
 } from '../../types/er'
-import { api } from '../../api/client'
+import { api, ensureFreshToken } from '../../api/client'
 
 const statusVariant: Record<string, BadgeVariant> = {
   open: 'warning',
@@ -102,7 +102,7 @@ export default function ERCaseDetail() {
     setExporting(true)
     try {
       const BASE = import.meta.env.VITE_API_URL ?? '/api'
-      const token = localStorage.getItem('matcha_access_token')
+      const token = await ensureFreshToken()
       const res = await fetch(`${BASE}/er/cases/${caseId}/export`, {
         method: 'POST',
         headers: {

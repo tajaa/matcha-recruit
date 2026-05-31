@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState, useCallback, useMemo } from 'react'
-import { api } from '../../api/client'
+import { api, authStreamHeaders } from '../../api/client'
 import { Button } from '../../components/ui'
 import {
   CATEGORY_LABELS,
@@ -135,11 +135,10 @@ export default function JurisdictionData() {
 
   function startMetroCheck() {
     setMetroScanning(true); setMetroMessages([])
-    const token = localStorage.getItem('matcha_access_token')
     const base = import.meta.env.VITE_API_URL || '/api'
-    fetch(`${base}/admin/jurisdictions/top-metros/check`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}` },
-    }).then(async (res) => {
+    authStreamHeaders().then((headers) => fetch(`${base}/admin/jurisdictions/top-metros/check`, {
+      method: 'POST', headers,
+    })).then(async (res) => {
       const reader = res.body?.getReader()
       const decoder = new TextDecoder()
       if (!reader) return

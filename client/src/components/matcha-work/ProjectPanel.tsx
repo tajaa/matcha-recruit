@@ -5,6 +5,7 @@ import { updateProjectSection, deleteProjectSection, addProjectSection, exportPr
 import type { ProjectFile } from '../../api/matchaWork'
 import SectionEditor from './SectionEditor'
 import { sectionToHtml } from './markdownToHtml'
+import { ensureFreshToken } from '../../api/client'
 import ResearchPanel from './ResearchPanel'
 import type { PresenceMember } from '../../api/projectSocket'
 import type { RemoteCaret } from '../../hooks/useProjectPresence'
@@ -272,7 +273,7 @@ export default function ProjectPanel(props: ProjectPanelProps) {
       if (isNewMode) {
         if (fmt === 'md') {
           const BASE = import.meta.env.VITE_API_URL ?? '/api'
-          const token = localStorage.getItem('matcha_access_token')
+          const token = await ensureFreshToken()
           const res = await fetch(`${BASE}/matcha-work/projects/${projectId}/export/md`, {
             headers: token ? { Authorization: `Bearer ${token}` } : {},
           })
@@ -289,7 +290,7 @@ export default function ProjectPanel(props: ProjectPanelProps) {
       } else {
         if (fmt === 'md') {
           const BASE = import.meta.env.VITE_API_URL ?? '/api'
-          const token = localStorage.getItem('matcha_access_token')
+          const token = await ensureFreshToken()
           const res = await fetch(`${BASE}/matcha-work/threads/${threadId}/project/export/md`, {
             headers: token ? { Authorization: `Bearer ${token}` } : {},
           })

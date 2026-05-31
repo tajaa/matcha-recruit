@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from 'react'
 import { getResearchGapsUrl } from '../api/adminOnboarding'
+import { ensureFreshToken } from '../api/client'
 import type { EnrichEvent } from './useEnrichStream'
 
 /**
@@ -33,7 +34,7 @@ export function useResearchGaps() {
     setDone(null)
     setError(null)
 
-    const token = localStorage.getItem('matcha_access_token')
+    const token = await ensureFreshToken()
 
     try {
       const res = await fetch(getResearchGapsUrl(companyId), {

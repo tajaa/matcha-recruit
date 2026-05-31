@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Download, FileSpreadsheet, FileText } from 'lucide-react'
-import { api } from '../../api/client'
+import { api, ensureFreshToken } from '../../api/client'
 import { Button, Input, Modal, Select } from '../ui'
 import { INCIDENT_TYPE_OPTIONS } from '../../types/ir'
 
@@ -102,7 +102,7 @@ export function IRExportModal({ open, onClose }: Props) {
       if (locationId) params.set('location_id', locationId)
 
       const base = (import.meta.env.VITE_API_URL ?? '/api').replace(/\/$/, '')
-      const token = localStorage.getItem('matcha_access_token')
+      const token = await ensureFreshToken()
       const res = await fetch(`${base}/ir/incidents/export?${params.toString()}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })

@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { api } from '../../api/client'
+import { api, authStreamHeaders } from '../../api/client'
 import { Badge, Button, type BadgeVariant } from '../ui'
 import type { OutcomeAnalysisResponse, OutcomeOption, ERCaseOutcome } from '../../types/er'
 
@@ -40,16 +40,13 @@ export function EROutcomePanel({ caseId, onApplyOutcome }: Props) {
     const ctrl = new AbortController()
     abortRef.current = ctrl
 
-    const token = localStorage.getItem('matcha_access_token')
-
-    fetch(`${BASE}/er/cases/${caseId}/guidance/outcomes/stream`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      signal: ctrl.signal,
-    })
+    authStreamHeaders({ 'Content-Type': 'application/json' }).then((headers) =>
+      fetch(`${BASE}/er/cases/${caseId}/guidance/outcomes/stream`, {
+        method: 'POST',
+        headers,
+        signal: ctrl.signal,
+      }),
+    )
       .then(async (res) => {
         if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
         const reader = res.body?.getReader()
