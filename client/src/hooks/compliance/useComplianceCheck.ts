@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from 'react'
 import { getComplianceCheckUrl } from '../../api/compliance'
+import { ensureFreshToken } from '../../api/client'
 
 export interface ComplianceCheckMessage {
   type: string
@@ -25,7 +26,7 @@ export function useComplianceCheck(onComplete: () => void) {
     setScanning(true)
     setMessages([])
 
-    const token = localStorage.getItem('matcha_access_token')
+    const token = await ensureFreshToken()
     const url = getComplianceCheckUrl(locationId)
 
     try {

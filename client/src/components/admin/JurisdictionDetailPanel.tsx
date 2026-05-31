@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { api } from '../../api/client'
+import { api, authStreamHeaders } from '../../api/client'
 import { Button, Input, Textarea } from '../ui'
 import {
   CATEGORY_LABELS,
@@ -150,11 +150,10 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
 
   function startCheck() {
     setScanning(true); setScanMessages([])
-    const token = localStorage.getItem('matcha_access_token')
     const base = import.meta.env.VITE_API_URL || '/api'
-    fetch(`${base}/admin/jurisdictions/${id}/check`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}` },
-    }).then((res) => readSSEStream(
+    authStreamHeaders().then((headers) => fetch(`${base}/admin/jurisdictions/${id}/check`, {
+      method: 'POST', headers,
+    })).then((res) => readSSEStream(
       res,
       (ev) => {
         if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); return }
@@ -166,11 +165,10 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
 
   function startSpecialtyCheck() {
     setSpecialtyRunning(true); setScanMessages([])
-    const token = localStorage.getItem('matcha_access_token')
     const base = import.meta.env.VITE_API_URL || '/api'
-    fetch(`${base}/admin/jurisdictions/${id}/check-specialty`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}` },
-    }).then((res) => readSSEStream(
+    authStreamHeaders().then((headers) => fetch(`${base}/admin/jurisdictions/${id}/check-specialty`, {
+      method: 'POST', headers,
+    })).then((res) => readSSEStream(
       res,
       (ev) => {
         if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); return }
@@ -182,11 +180,10 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
 
   function startMedicalCheck() {
     setMedicalRunning(true); setScanMessages([])
-    const token = localStorage.getItem('matcha_access_token')
     const base = import.meta.env.VITE_API_URL || '/api'
-    fetch(`${base}/admin/jurisdictions/${id}/check-medical-compliance`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}` },
-    }).then((res) => readSSEStream(
+    authStreamHeaders().then((headers) => fetch(`${base}/admin/jurisdictions/${id}/check-medical-compliance`, {
+      method: 'POST', headers,
+    })).then((res) => readSSEStream(
       res,
       (ev) => {
         if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); return }
@@ -198,11 +195,10 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
 
   function startLifeSciCheck() {
     setLifeSciRunning(true); setScanMessages([])
-    const token = localStorage.getItem('matcha_access_token')
     const base = import.meta.env.VITE_API_URL || '/api'
-    fetch(`${base}/admin/jurisdictions/${id}/check-life-sciences`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}` },
-    }).then((res) => readSSEStream(
+    authStreamHeaders().then((headers) => fetch(`${base}/admin/jurisdictions/${id}/check-life-sciences`, {
+      method: 'POST', headers,
+    })).then((res) => readSSEStream(
       res,
       (ev) => {
         if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); return }
@@ -214,11 +210,10 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
 
   function startFedSourcesCheck() {
     setFedSourcesRunning(true); setScanMessages([]); setFedPreview(null)
-    const token = localStorage.getItem('matcha_access_token')
     const base = import.meta.env.VITE_API_URL || '/api'
-    fetch(`${base}/admin/jurisdictions/${id}/check-federal-sources`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}` },
-    }).then((res) => readSSEStream(
+    authStreamHeaders().then((headers) => fetch(`${base}/admin/jurisdictions/${id}/check-federal-sources`, {
+      method: 'POST', headers,
+    })).then((res) => readSSEStream(
       res,
       (ev) => {
         if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); return }

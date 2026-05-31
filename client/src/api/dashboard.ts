@@ -1,4 +1,4 @@
-import { api } from './client'
+import { api, ensureFreshToken } from './client'
 import type {
   DashboardStats,
   CredentialExpirationsResponse,
@@ -79,7 +79,7 @@ export function snapshotFlightRisk() {
 export async function downloadWageGapCsv() {
   // Auth is Bearer-token, not cookie, so a plain <a href> won't send creds.
   // Fetch as blob, build an object URL, click a synthetic <a download>.
-  const token = localStorage.getItem('matcha_access_token')
+  const token = await ensureFreshToken()
   const base = import.meta.env.VITE_API_URL ?? '/api'
   const res = await fetch(`${base}/dashboard/wage-gap/export.csv`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},

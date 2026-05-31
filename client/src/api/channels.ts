@@ -1,4 +1,4 @@
-import { api } from './client'
+import { api, ensureFreshToken } from './client'
 
 export interface ChannelSummary {
   id: string
@@ -203,7 +203,7 @@ export const updateChannel = (id: string, updates: { name?: string; description?
 
 export async function uploadChannelFiles(channelId: string, files: File[]): Promise<ChannelAttachment[]> {
   const BASE = import.meta.env.VITE_API_URL ?? '/api'
-  const token = localStorage.getItem('matcha_access_token')
+  const token = await ensureFreshToken()
   const form = new FormData()
   files.forEach((f) => form.append('files', f))
   const res = await fetch(`${BASE}/channels/${channelId}/upload`, {

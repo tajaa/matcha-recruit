@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from 'react'
 import { getEnrichStreamUrl } from '../api/adminOnboarding'
+import { ensureFreshToken } from '../api/client'
 
 /**
  * Consumes the master-admin gap-analysis enrichment SSE stream
@@ -56,7 +57,7 @@ export function useEnrichStream() {
     setDone(null)
     setError(null)
 
-    const token = localStorage.getItem('matcha_access_token')
+    const token = await ensureFreshToken()
 
     try {
       const res = await fetch(getEnrichStreamUrl(companyId), {

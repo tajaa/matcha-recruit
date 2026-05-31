@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Microscope, Loader2, Check, ChevronRight, ChevronDown, ArrowLeft } from 'lucide-react'
 import { HEALTHCARE_SPECIALTIES } from '../../data/industryConstants'
+import { ensureFreshToken, authStreamHeaders } from '../../api/client'
 
 const MODEL_LABELS: Record<string, { label: string; model: string; color: string }> = {
   lite:  { label: 'Lite',  model: 'Gemini 3.1 Flash Lite', color: 'bg-zinc-700 text-zinc-300' },
@@ -61,10 +62,9 @@ export default function SpecializationResearch() {
   const [modelMode, setModelMode] = useState<string>('light')
 
   useEffect(() => {
-    const token = localStorage.getItem('matcha_access_token')
-    fetch(`${BASE}/admin/platform-settings`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
+    authStreamHeaders().then((headers) => fetch(`${BASE}/admin/platform-settings`, {
+      headers,
+    }))
       .then((r) => r.json())
       .then((data) => setModelMode(data.jurisdiction_research_model_mode || 'light'))
       .catch(() => {})
@@ -102,7 +102,7 @@ export default function SpecializationResearch() {
     if (!specialization.trim()) return
     setDiscovering(true)
     setDiscoverError('')
-    const token = localStorage.getItem('matcha_access_token')
+    const token = await ensureFreshToken()
     try {
       const res = await fetch(`${BASE}/admin/specialization-research/discover`, {
         method: 'POST',
@@ -166,7 +166,7 @@ export default function SpecializationResearch() {
     setResearching(true)
     setStep(3)
 
-    const token = localStorage.getItem('matcha_access_token')
+    const token = await ensureFreshToken()
     const ctrl = new AbortController()
     abortRef.current = ctrl
 

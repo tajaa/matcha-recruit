@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react'
+import { authStreamHeaders } from '../../api/client'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -30,18 +31,16 @@ export function useIRAnalysisStream(incidentId: string) {
 
       setState({ streaming: true, messages: [], result: null, error: '', analysisType: type })
 
-      const token = localStorage.getItem('matcha_access_token')
       const endpoint = type === 'similar' ? 'similar' : type
       const url = `${BASE}/ir/incidents/${incidentId}/analyze/${endpoint}`
 
-      fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        signal: ctrl.signal,
-      })
+      authStreamHeaders({ 'Content-Type': 'application/json' }).then((headers) =>
+        fetch(url, {
+          method: 'POST',
+          headers,
+          signal: ctrl.signal,
+        }),
+      )
         .then(async (res) => {
           if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
           const reader = res.body?.getReader()

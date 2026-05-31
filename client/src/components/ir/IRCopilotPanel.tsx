@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Send, Sparkles } from 'lucide-react'
 import { Button } from '../ui'
 import IRCopilotCard, { type CopilotCard, type AcceptPayload } from './IRCopilotCard'
-import { api } from '../../api/client'
+import { api, ensureFreshToken } from '../../api/client'
 import { reportApiError } from '../../api/errorReporter'
 
 const BASE = (import.meta.env.VITE_API_URL ?? '/api').replace(/\/$/, '')
@@ -71,7 +71,7 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
     setStreaming(true)
     setError(null)
     try {
-      const token = localStorage.getItem('matcha_access_token')
+      const token = await ensureFreshToken()
       const res = await fetch(`${BASE}/ir/incidents/${incidentId}/copilot/stream`, {
         method: 'POST',
         headers: {
@@ -170,7 +170,7 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
     setBusyStage('Starting…')
     setError(null)
     try {
-      const token = localStorage.getItem('matcha_access_token')
+      const token = await ensureFreshToken()
       const body: Record<string, unknown> = { message_id: messageId, card_id: cardId }
       if (payload?.selected_value !== undefined) body.selected_value = payload.selected_value
       if (payload?.numeric_value !== undefined) body.numeric_value = payload.numeric_value

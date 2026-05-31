@@ -5,6 +5,7 @@ import { Loader2, ShieldAlert, FileSearch, MapPin, UploadCloud, Lock } from 'luc
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
 import { useMe } from '../../hooks/useMe'
+import { ensureFreshToken } from '../../api/client'
 
 const INK = 'var(--color-ivory-ink)'
 const BG = 'var(--color-ivory-bg)'
@@ -256,7 +257,7 @@ function UploaderForm({ embedded = false }: { embedded?: boolean }) {
       fd.append('pdf', pdfFile)
       fd.append('states', selectedState)
       fd.append('industry', industry)
-      const token = localStorage.getItem('matcha_access_token')
+      const token = await ensureFreshToken()
       const res = await fetch(`${BASE}/resources/handbook-gap-analyzer/analyze`, {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
