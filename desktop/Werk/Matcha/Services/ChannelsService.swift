@@ -28,7 +28,9 @@ class ChannelsService {
     /// Used by the cross-workspace discovery surface so personal-account users
     /// can find each other's paid channels.
     func discoverChannels(query: String? = nil, paidOnly: Bool = false, category: String? = nil) async throws -> [ChannelSummary] {
-        var components = URLComponents(string: "\(basePath)/discover")!
+        guard var components = URLComponents(string: "\(basePath)/discover") else {
+            throw APIError.invalidURL
+        }
         var items: [URLQueryItem] = []
         if let query, !query.isEmpty {
             items.append(URLQueryItem(name: "q", value: query))
@@ -42,7 +44,8 @@ class ChannelsService {
         if !items.isEmpty {
             components.queryItems = items
         }
-        return try await client.request(method: "GET", path: components.url!.absoluteString)
+        guard let url = components.url else { throw APIError.invalidURL }
+        return try await client.request(method: "GET", path: url.absoluteString)
     }
 
     func getChannel(id: String) async throws -> ChannelDetail {

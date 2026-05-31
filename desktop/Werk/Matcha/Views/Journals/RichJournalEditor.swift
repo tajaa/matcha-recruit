@@ -161,7 +161,7 @@ struct RichJournalEditor: NSViewRepresentable {
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
 
-        let tv = scroll.documentView as! NSTextView
+        guard let tv = scroll.documentView as? NSTextView else { return scroll }
         tv.delegate = context.coordinator
         tv.isRichText = false
         tv.allowsUndo = true

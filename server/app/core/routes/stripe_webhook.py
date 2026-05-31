@@ -26,7 +26,8 @@ async def _claim_event(event_id: str, event_type: str) -> bool:
     response). Without dedupe, a retried event would re-execute every
     side effect (feature flips, emails, subscription upserts). The unique
     primary key on event_id makes the INSERT idempotent — a duplicate
-    raises and we return False without throwing.
+    inserts no row, so we return False. A genuine DB error is re-raised so the
+    webhook fails closed and Stripe retries.
     """
     try:
         async with get_connection() as conn:
@@ -41,12 +42,18 @@ async def _claim_event(event_id: str, event_type: str) -> bool:
                 event_type,
             )
         return inserted is not None
-    except Exception as exc:
-        # If the dedupe table itself is broken (e.g. migration not yet
-        # applied), don't 500 the webhook — log and process anyway.
-        # Worst case: a retry processes twice, same as today.
-        logger.warning("stripe_webhook_events insert failed: %s", exc)
-        return True
+    except Exception:
+        # Fail CLOSED: a broken dedupe table (e.g. migration not yet applied)
+        # must NOT let side effects run without a durable idempotency record,
+        # or a Stripe retry double-processes the money path (double token
+        # grants, duplicate feature flips). Surface the error so the webhook
+        # returns 500 and Stripe retries — a delayed retry beats a double-spend.
+        logger.exception(
+            "stripe_webhook_events insert failed for %s (%s) — failing closed",
+            event_id,
+            event_type,
+        )
+        raise
 
 
 from ..services.stripe_service import extract_current_period_end as _extract_current_period_end  # noqa: E402,F401
