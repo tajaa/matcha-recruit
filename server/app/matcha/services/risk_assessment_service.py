@@ -1108,13 +1108,15 @@ Rules:
 
 Return ONLY a valid JSON object (no markdown fences) with two fields:
 
-1. "report": A 2-3 paragraph executive summary written as a senior HR consultant addressing the company's leadership. Requirements:
-   - State the overall score and band upfront, and what it means in plain terms for the company's legal exposure today
-   - Name specific risks tied to the actual dimension scores — include real dollar amounts for fines, settlements, and penalties relevant to each active risk area (e.g. OSHA per-violation amounts, EEOC average settlements, DOL back-wage recovery figures, state-specific penalty structures)
-   - Address trajectory: at a moderate score of 34, the company is one bad quarter away from high-risk territory — cite what has historically happened to companies that allowed similar profiles to deteriorate (named enforcement actions, class actions, DOL audits)
-   - If doing well in some areas, acknowledge it specifically — but make clear that moderate risk is not safe, it is deferred liability
-   - Tone: authoritative, grounded, zero filler — the kind of memo a CHRO would forward to the board
-   - Do NOT use bullet points or lists — write in flowing narrative paragraphs
+1. "report": A tight executive analysis — 2 paragraphs preferred, a 3rd only if the data genuinely demands it — written as a senior HR consultant addressing the company's leadership. Optimize for insight density, NOT length: say more in fewer words. A shorter, sharper memo beats a longer, padded one. Requirements:
+   - Open with the overall score and band and what it means for the company's legal exposure right now — state the consequence, not a textbook definition of the band.
+   - Every sentence must carry a distinct, non-obvious point: a causal link, a quantified stake, a named enforcement precedent, or a decision leadership must make. No sentence may merely restate the dashboard or repeat another sentence.
+   - Tie named risks to the actual dimension scores with real dollar amounts (OSHA per-violation amounts, EEOC average settlements, DOL back-wage recovery figures, state-specific penalty structures).
+   - Go beyond a per-dimension recap: surface how risks COMPOUND. An open ER case across a multi-state workforce is multi-jurisdiction class exposure; a stale compliance audit during a legislative-change window is documented willful non-compliance. The second-order interaction between dimensions is where the real exposure lives — name it explicitly.
+   - Address trajectory: at the current band, what does one bad quarter cost? Cite what has happened to companies that let a similar profile deteriorate (named enforcement actions, class actions, DOL audits).
+   - If the company is strong somewhere, say so in a single clause — then make clear that low risk is deferred liability, not safety.
+   - Cut all filler: no throat-clearing, no hedging, no transitional padding ("it is important to note", "as you can see", "moving forward", "in conclusion"). Authoritative and grounded — the kind of memo a CHRO forwards to the board untouched.
+   - Do NOT use bullet points or lists — write in flowing narrative paragraphs.
 
 2. "recommendations": A JSON array of 5-10 objects, each with:
    - "dimension": string

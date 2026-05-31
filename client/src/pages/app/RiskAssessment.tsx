@@ -136,7 +136,6 @@ export default function RiskAssessment() {
           <RiskScoreCard
             score={a.overall_score}
             band={a.overall_band}
-            report={a.report}
             dimensions={a.dimensions}
             weights={a.weights}
           />

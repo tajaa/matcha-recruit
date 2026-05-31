@@ -39,12 +39,11 @@ function BandBadge({ band }: { band: Band }) {
 type Props = {
   score: number
   band: string
-  report?: string
   dimensions: Record<string, DimensionResult>
   weights?: Record<string, number>
 }
 
-export function RiskScoreCard({ score, band, report, dimensions, weights }: Props) {
+export function RiskScoreCard({ score, band, dimensions, weights }: Props) {
   const b = band as Band
 
   return (
@@ -91,11 +90,6 @@ export function RiskScoreCard({ score, band, report, dimensions, weights }: Prop
           )
         })}
       </div>
-
-      {/* Timestamp removed — shown in parent header */}
-      {report && (
-        <p className="text-sm text-zinc-400 leading-relaxed mt-4">{report}</p>
-      )}
     </div>
   )
 }
