@@ -110,6 +110,12 @@ struct ContentView: View {
             // it doesn't push the layout around.
             ChannelToastOverlay()
         }
+        .overlay(alignment: .bottomTrailing) {
+            // In-app toast for collaborator kanban/ticket changes. Bottom-right
+            // so it doesn't collide with channel toasts (top-right). Tap to
+            // jump to the project board.
+            WorkToastOverlay()
+        }
         .toolbar {
             ToolbarItem(placement: .status) {
                 if let user = appState.currentUser {

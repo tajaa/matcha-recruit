@@ -740,22 +740,78 @@ class ProjectDetailViewModel {
                 return
             }
             if let task = Self.decodeTask(dict) {
-                Task { @MainActor in self.applyTaskCreated(task) }
+                Task { @MainActor in
+                    self.applyTaskCreated(task)
+                    self.pushTaskToast(actorId: actorId, action: "added", title: task.title,
+                                       systemImage: "plus.rectangle.on.rectangle")
+                }
             }
         }
         ws.onTaskUpdated = { [weak self] dict in
             print("[ProjectVM] onTaskUpdated task=\(dict["id"] ?? "?") actor=\(dict["actor_id"] ?? "?") column=\(dict["board_column"] ?? "?")")
             guard let self else { return }
+            let actorId = dict["actor_id"] as? String
             if let task = Self.decodeTask(dict) {
-                Task { @MainActor in self.applyTaskUpdated(task) }
+                Task { @MainActor in
+                    // Capture the prior column before applying so we can tell a
+                    // lane move from an in-place edit for the toast copy.
+                    let prevColumn = self.tasks.first(where: { $0.id == task.id })?.boardColumn
+                    self.applyTaskUpdated(task)
+                    if actorId != self.currentUserId {
+                        if let prevColumn, prevColumn != task.boardColumn {
+                            let label = kanbanColumns.first(where: { $0.key == task.boardColumn })?.label ?? task.boardColumn
+                            self.pushTaskToast(actorId: actorId, action: "moved", title: task.title,
+                                               suffix: "to \(label)", systemImage: "arrow.left.arrow.right")
+                        } else {
+                            self.pushTaskToast(actorId: actorId, action: "updated", title: task.title,
+                                               systemImage: "pencil")
+                        }
+                    }
+                }
             }
         }
         ws.onTaskDeleted = { [weak self] taskId, actorId in
             print("[ProjectVM] onTaskDeleted task=\(taskId) actor=\(actorId ?? "?")")
             guard let self else { return }
             if let actorId, actorId == self.currentUserId { return }
-            Task { @MainActor in self.applyTaskDeleted(taskId) }
+            Task { @MainActor in
+                let title = self.tasks.first(where: { $0.id == taskId })?.title
+                self.applyTaskDeleted(taskId)
+                self.pushTaskToast(actorId: actorId, action: "removed", title: title,
+                                   systemImage: "trash")
+            }
         }
+    }
+
+    /// Resolve a collaborator's display name from the loaded project roster.
+    private func collaboratorName(_ id: String?) -> String {
+        guard let id else { return "A collaborator" }
+        return project?.collaborators?.first(where: { $0.userId == id })?.name ?? "A collaborator"
+    }
+
+    /// Push an in-app toast for a collaborator's ticket change so the user gets
+    /// a real-time nudge even when they're not looking at the board. Tapping it
+    /// jumps to the project. No-op if the project isn't loaded.
+    @MainActor
+    private func pushTaskToast(actorId: String?, action: String, title: String?,
+                               suffix: String? = nil, systemImage: String) {
+        guard let proj = project else { return }
+        let who = collaboratorName(actorId)
+        var msg: String
+        if let title, !title.isEmpty {
+            msg = "\(who) \(action) \u{201C}\(title)\u{201D}"
+        } else {
+            msg = "\(who) \(action) a ticket"
+        }
+        if let suffix, !suffix.isEmpty { msg += " \(suffix)" }
+        WorkToastCenter.shared.push(
+            WorkToastCenter.Toast(
+                projectId: proj.id,
+                projectTitle: proj.title,
+                message: msg,
+                systemImage: systemImage
+            )
+        )
     }
 
     private static func decodeTask(_ dict: [String: Any]) -> MWProjectTask? {
