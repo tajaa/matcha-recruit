@@ -9,8 +9,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from pydantic import BaseModel, EmailStr
 
 from ...database import get_connection
 from ..dependencies import get_current_user
@@ -2908,6 +2908,339 @@ async def join_by_invite(
         )
 
     return {"ok": True, "channel_id": str(channel_id)}
+
+
+# ---------------------------------------------------------------------------
+# Email invites — invite people who don't have an account yet. The creator
+# (owner/moderator) sends a free-signup link bound to the recipient's email;
+# on signup we create a free personal workspace and auto-join the channel.
+# ---------------------------------------------------------------------------
+
+class EmailInviteRequest(BaseModel):
+    emails: list[EmailStr]
+
+
+class EmailInviteResult(BaseModel):
+    invited: list[str]            # emails a fresh invite was emailed to
+    already_members: list[str]    # emails whose user is already in the channel
+    failed: list[str]             # emails we couldn't process (send failure, etc.)
+
+
+def _channel_invite_join_url(code: str, base_url: str) -> str:
+    return f"{base_url}/join-channel/{code}"
+
+
+@router.post("/{channel_id}/email-invites", response_model=EmailInviteResult)
+async def create_email_invites(
+    channel_id: UUID,
+    body: EmailInviteRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Invite non-users to a channel by email (owner/moderator only).
+
+    For each address: if an account already exists and is a member, skip; if it
+    exists but isn't a member, still email them the link (the join page signs
+    them in / joins). Otherwise mint a single-use, email-bound invite code and
+    email a free-signup link. Free (non-paid) channels only in v1.
+    """
+    from ...config import get_settings
+    from ..services.email import get_email_service
+
+    if not body.emails:
+        raise HTTPException(status_code=400, detail="At least one email is required")
+    if len(body.emails) > 20:
+        raise HTTPException(status_code=400, detail="You can invite at most 20 people at once")
+
+    company_id = await _get_company_id(current_user)
+
+    async with get_connection() as conn:
+        ch = await conn.fetchrow(
+            "SELECT id, name, company_id, COALESCE(is_paid, false) AS is_paid, is_archived "
+            "FROM channels WHERE id = $1",
+            channel_id,
+        )
+        if not ch or ch["is_archived"] or ch["company_id"] != company_id:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        if ch["is_paid"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Email invites aren't available for paid channels yet. Share a paid invite link instead.",
+            )
+
+        my_role = await conn.fetchval(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        if my_role not in ("owner", "moderator") and current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only owners and moderators can invite people")
+
+        inviter_name = await conn.fetchval(
+            f"SELECT {_USER_NAME_EXPR} FROM users u "
+            "LEFT JOIN clients c ON c.user_id = u.id "
+            "LEFT JOIN employees e ON e.user_id = u.id "
+            "LEFT JOIN admins a ON a.user_id = u.id WHERE u.id = $1",
+            current_user.id,
+        ) or "Someone"
+
+        # Normalize + dedupe addresses (case-insensitive).
+        seen: set[str] = set()
+        emails: list[str] = []
+        for raw in body.emails:
+            e = str(raw).strip().lower()
+            if e and e not in seen:
+                seen.add(e)
+                emails.append(e)
+
+        settings = get_settings()
+        email_service = get_email_service()
+        invited: list[str] = []
+        already_members: list[str] = []
+        failed: list[str] = []
+
+        for email in emails:
+            # Already a member? Skip (don't leak, don't re-invite).
+            existing_member = await conn.fetchval(
+                """
+                SELECT EXISTS(
+                    SELECT 1 FROM channel_members cm
+                    JOIN users u ON u.id = cm.user_id
+                    WHERE cm.channel_id = $1 AND lower(u.email) = $2
+                )
+                """,
+                channel_id, email,
+            )
+            if existing_member:
+                already_members.append(email)
+                continue
+
+            # Reuse an active, unconsumed email invite for this (channel, email)
+            # if one exists, so re-inviting doesn't pile up dead codes.
+            code = await conn.fetchval(
+                """
+                SELECT code FROM channel_invites
+                WHERE channel_id = $1 AND lower(email) = $2 AND is_active = true
+                  AND (expires_at IS NULL OR expires_at > NOW())
+                  AND (max_uses IS NULL OR use_count < max_uses)
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                channel_id, email,
+            )
+            if not code:
+                expires_at = datetime.now(timezone.utc) + timedelta(days=14)
+                for _ in range(3):
+                    candidate = secrets.token_urlsafe(12)
+                    try:
+                        code = await conn.fetchval(
+                            """
+                            INSERT INTO channel_invites
+                                (channel_id, code, created_by, email, max_uses, expires_at, note)
+                            VALUES ($1, $2, $3, $4, 1, $5, $6)
+                            RETURNING code
+                            """,
+                            channel_id, candidate, current_user.id, email, expires_at,
+                            f"Email invite to {email}",
+                        )
+                        break
+                    except Exception as exc:  # unique collision on code → retry
+                        if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
+                            continue
+                        raise
+            if not code:
+                failed.append(email)
+                continue
+
+            try:
+                sent = await email_service.send_channel_invite_email(
+                    to_email=email,
+                    channel_name=ch["name"],
+                    inviter_name=inviter_name,
+                    join_url=_channel_invite_join_url(code, settings.app_base_url),
+                )
+            except Exception:
+                logger.warning("Failed to send channel invite email to %s", email, exc_info=True)
+                sent = False
+            (invited if sent else failed).append(email)
+
+    return EmailInviteResult(invited=invited, already_members=already_members, failed=failed)
+
+
+class ChannelInviteInfo(BaseModel):
+    channel_name: str
+    inviter_name: Optional[str] = None
+    email: Optional[str] = None      # bound recipient (locked at signup) if any
+    is_paid: bool = False
+    valid: bool = True
+
+
+@router.get("/invite-info/{code}", response_model=ChannelInviteInfo)
+async def get_invite_info(code: str):
+    """Public: minimal channel/invite context for the join landing page.
+
+    Returns valid=False (not 404) for unknown/expired codes so the page can
+    render a friendly message without leaking whether a code ever existed.
+    """
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT ci.email, ci.is_active, ci.expires_at, ci.max_uses, ci.use_count,
+                   ch.name AS channel_name, COALESCE(ch.is_paid, false) AS is_paid,
+                   ch.is_archived, ch.created_by
+            FROM channel_invites ci
+            JOIN channels ch ON ch.id = ci.channel_id
+            WHERE ci.code = $1
+            """,
+            code,
+        )
+        if not row:
+            return ChannelInviteInfo(channel_name="", valid=False)
+        expired = row["expires_at"] is not None and row["expires_at"] < datetime.now(timezone.utc)
+        used_up = row["max_uses"] is not None and row["use_count"] >= row["max_uses"]
+        if not row["is_active"] or expired or used_up or row["is_archived"]:
+            return ChannelInviteInfo(channel_name=row["channel_name"], is_paid=row["is_paid"], valid=False)
+
+        inviter_name = await conn.fetchval(
+            f"SELECT {_USER_NAME_EXPR} FROM users u "
+            "LEFT JOIN clients c ON c.user_id = u.id "
+            "LEFT JOIN employees e ON e.user_id = u.id "
+            "LEFT JOIN admins a ON a.user_id = u.id WHERE u.id = $1",
+            row["created_by"],
+        )
+        return ChannelInviteInfo(
+            channel_name=row["channel_name"],
+            inviter_name=inviter_name,
+            email=row["email"],
+            is_paid=row["is_paid"],
+            valid=True,
+        )
+
+
+class AcceptInviteRequest(BaseModel):
+    name: str
+    password: str
+    email: Optional[EmailStr] = None   # required only for unbound (link) invites
+
+
+@router.post("/invite/{code}/accept")
+async def accept_invite_signup(code: str, body: AcceptInviteRequest, http_request: Request):
+    """Public: create a free personal account and join the channel in one step.
+
+    Mirrors /auth/register/individual (role='individual', personal workspace,
+    matcha_work enabled), then inserts the channel membership — bypassing the
+    same-company restriction because this is an explicit, owner-issued invite.
+    Returns auth tokens + channel_id so the client can sign in and route in.
+    """
+    from ...config import get_settings
+    from ..feature_flags import DEFAULT_COMPANY_FEATURES
+    from ..services.auth import hash_password, create_access_token, create_refresh_token
+    from ..services.redis_cache import check_rate_limit, client_ip
+    from ...matcha.services.token_budget_service import FREE_TOKEN_GRANT
+
+    ip = client_ip(http_request)
+    await check_rate_limit(ip, "channel_invite_accept", 10, 3600)
+
+    if not body.name.strip():
+        raise HTTPException(status_code=400, detail="Name is required")
+    if len(body.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            invite = await conn.fetchrow(
+                """
+                SELECT ci.id, ci.channel_id, ci.email, ci.is_active, ci.expires_at,
+                       ci.max_uses, ci.use_count, ch.name AS channel_name,
+                       ch.company_id, COALESCE(ch.is_paid, false) AS is_paid, ch.is_archived
+                FROM channel_invites ci
+                JOIN channels ch ON ch.id = ci.channel_id
+                WHERE ci.code = $1
+                FOR UPDATE OF ci
+                """,
+                code,
+            )
+            if not invite:
+                raise HTTPException(status_code=404, detail="Invalid invite link")
+            if not invite["is_active"] or invite["is_archived"]:
+                raise HTTPException(status_code=410, detail="This invite link is no longer active")
+            if invite["expires_at"] and invite["expires_at"] < datetime.now(timezone.utc):
+                raise HTTPException(status_code=410, detail="This invite link has expired")
+            if invite["max_uses"] is not None and invite["use_count"] >= invite["max_uses"]:
+                raise HTTPException(status_code=410, detail="This invite link has already been used")
+            if invite["is_paid"]:
+                raise HTTPException(status_code=400, detail="Email invites aren't available for paid channels yet")
+
+            # Resolve the signup email. Email-bound invites lock it; link
+            # invites take it from the form.
+            email = (invite["email"] or (str(body.email) if body.email else "")).strip().lower()
+            if not email:
+                raise HTTPException(status_code=400, detail="Email is required")
+
+            existing = await conn.fetchval("SELECT id FROM users WHERE lower(email) = $1", email)
+            if existing:
+                # Account already exists → don't create a duplicate. Tell the
+                # client to sign in; the authed join-by-invite path takes over.
+                raise HTTPException(
+                    status_code=409,
+                    detail="An account with this email already exists. Please sign in to join.",
+                )
+
+            # Create personal workspace + individual user (mirror register_individual).
+            personal_features = {**DEFAULT_COMPANY_FEATURES, "matcha_work": True}
+            company_id = await conn.fetchval(
+                """INSERT INTO companies (name, status, approved_at, is_personal, enabled_features)
+                   VALUES ($1, 'approved', NOW(), true, $2::jsonb) RETURNING id""",
+                f"{body.name.strip()}'s Workspace", json.dumps(personal_features),
+            )
+            await conn.execute(
+                """INSERT INTO mw_token_budgets (company_id, free_tokens_used, free_token_limit)
+                   VALUES ($1, 0, $2) ON CONFLICT (company_id) DO NOTHING""",
+                company_id, FREE_TOKEN_GRANT,
+            )
+            user = await conn.fetchrow(
+                """INSERT INTO users (email, password_hash, role)
+                   VALUES ($1, $2, 'individual') RETURNING id, email, role""",
+                email, hash_password(body.password),
+            )
+            await conn.execute(
+                "INSERT INTO clients (user_id, company_id, name) VALUES ($1, $2, $3)",
+                user["id"], company_id, body.name.strip(),
+            )
+            await conn.execute("UPDATE companies SET owner_id = $1 WHERE id = $2", user["id"], company_id)
+
+            # Atomically claim the invite use, then join the channel.
+            claimed = await conn.fetchval(
+                """
+                UPDATE channel_invites SET use_count = use_count + 1
+                WHERE id = $1 AND is_active = true
+                  AND (expires_at IS NULL OR expires_at > NOW())
+                  AND (max_uses IS NULL OR use_count < max_uses)
+                RETURNING id
+                """,
+                invite["id"],
+            )
+            if not claimed:
+                raise HTTPException(status_code=410, detail="This invite link has expired or already been used")
+
+            await conn.execute(
+                """
+                INSERT INTO channel_members (channel_id, user_id, role, last_contributed_at)
+                VALUES ($1, $2, 'member', NOW())
+                ON CONFLICT (channel_id, user_id) DO NOTHING
+                """,
+                invite["channel_id"], user["id"],
+            )
+            channel_id = invite["channel_id"]
+
+    settings = get_settings()
+    access_token = create_access_token(user["id"], user["email"], user["role"])
+    refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in": settings.jwt_access_token_expire_minutes * 60,
+        "user": {"id": str(user["id"]), "email": user["email"], "role": user["role"]},
+        "channel_id": str(channel_id),
+    }
 
 
 # ---------------------------------------------------------------------------

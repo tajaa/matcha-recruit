@@ -332,6 +332,64 @@ export const joinByInvite = (code: string) =>
   api.post<{ ok?: boolean; requires_payment?: boolean; channel_id?: string; checkout_url?: string }>(`/channels/join-by-invite/${code}`)
 
 // ---------------------------------------------------------------------------
+// Email invites — invite people who don't have an account yet.
+// ---------------------------------------------------------------------------
+
+export interface EmailInviteResult {
+  invited: string[]
+  already_members: string[]
+  failed: string[]
+}
+
+/** Owner/moderator: email free-signup links to people without an account. */
+export const sendChannelEmailInvites = (channelId: string, emails: string[]) =>
+  api.post<EmailInviteResult>(`/channels/${channelId}/email-invites`, { emails })
+
+export interface ChannelInviteInfo {
+  channel_name: string
+  inviter_name?: string | null
+  email?: string | null
+  is_paid: boolean
+  valid: boolean
+}
+
+export interface AcceptInviteResponse {
+  access_token: string
+  refresh_token: string
+  channel_id: string
+}
+
+const PUBLIC_BASE = import.meta.env.VITE_API_URL ?? '/api'
+
+/** Public (no auth): channel context for the join landing page. */
+export const getChannelInviteInfo = async (code: string): Promise<ChannelInviteInfo> => {
+  const res = await fetch(`${PUBLIC_BASE}/channels/invite-info/${code}`)
+  if (!res.ok) throw new Error('Could not load invite')
+  return res.json()
+}
+
+/** Public (no auth): create a free account + join the channel in one step.
+ *  `email` is required only for unbound (shareable-link) invites; email-bound
+ *  invites ignore it and use the locked address. */
+export const acceptChannelInvite = async (
+  code: string,
+  body: { name: string; password: string; email?: string },
+): Promise<AcceptInviteResponse> => {
+  const res = await fetch(`${PUBLIC_BASE}/channels/invite/${code}/accept`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const err = new Error(data?.detail ?? 'Could not join channel') as Error & { status?: number }
+    err.status = res.status
+    throw err
+  }
+  return data
+}
+
+// ---------------------------------------------------------------------------
 // Connections
 // ---------------------------------------------------------------------------
 

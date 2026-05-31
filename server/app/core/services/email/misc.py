@@ -192,3 +192,71 @@ Sent from Matcha Recruit contact form
             html_content=html_content,
             text_content=text_content,
         )
+
+    async def send_channel_invite_email(
+        self,
+        to_email: str,
+        channel_name: str,
+        inviter_name: str,
+        join_url: str,
+    ) -> bool:
+        """Invite a non-user to a channel via a free-signup link.
+
+        Sent when a channel owner/moderator invites someone by email who does
+        not have an account yet. `join_url` lands on the public join page,
+        which creates a free personal workspace and drops them into the
+        channel. Returns True if sent, False otherwise (incl. reserved-domain
+        guard skips).
+        """
+        if not self.is_configured():
+            logger.warning("Gmail not configured, skipping channel invite email")
+            return False
+
+        channel_safe = html.escape(channel_name)
+        inviter_safe = html.escape(inviter_name)
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .logo {{ color: #22c55e; font-size: 22px; font-weight: bold; letter-spacing: 2px; }}
+        .card {{ background: #f8fafc; border-left: 4px solid #22c55e; border-radius: 8px; padding: 16px; margin: 16px 0; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 12px 22px; text-decoration: none; border-radius: 6px; font-weight: 600; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; margin-top: 24px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">MATCHA</div>
+        <h2 style="font-size:18px;color:#111;">You're invited to a channel</h2>
+        <div class="card">
+            <p style="margin:0;"><strong>{inviter_safe}</strong> invited you to join the channel
+            <strong>#{channel_safe}</strong>.</p>
+        </div>
+        <p>Create a free account and you'll be dropped straight into the conversation.</p>
+        <p style="text-align:center;">
+            <a href="{join_url}" class="btn">Join #{channel_safe}</a>
+        </p>
+        <p style="font-size:12px;color:#6b7280;">Or paste this link into your browser:<br>{join_url}</p>
+        <div class="footer">If you weren't expecting this invitation, you can ignore this email.</div>
+    </div>
+</body>
+</html>
+"""
+        text_content = (
+            f"{inviter_name} invited you to join the channel #{channel_name}.\n\n"
+            f"Create a free account and you'll be dropped straight into the conversation:\n"
+            f"{join_url}\n\n"
+            f"If you weren't expecting this invitation, you can ignore this email.\n"
+        )
+
+        return await self.send_email(
+            to_email=to_email,
+            to_name=None,
+            subject=f"{inviter_name} invited you to #{channel_name}",
+            html_content=html_content,
+            text_content=text_content,
+        )

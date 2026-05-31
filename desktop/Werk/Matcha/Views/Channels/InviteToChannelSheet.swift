@@ -13,6 +13,27 @@ struct InviteToChannelSheet: View {
     @State private var inviting = false
     @State private var error: String?
     @State private var searchTask: Task<Void, Never>?
+    @State private var emailInviting = false
+    @State private var emailInviteSent: String?
+
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Loose email check — good enough to decide whether to offer an email
+    /// invite; the server validates for real.
+    private var queryIsEmail: Bool {
+        let q = trimmedQuery
+        guard let at = q.firstIndex(of: "@"), at != q.startIndex else { return false }
+        let domain = q[q.index(after: at)...]
+        return domain.contains(".") && !domain.hasSuffix(".") && !q.contains(" ")
+    }
+
+    /// Offer "invite by email" when the query is an email that doesn't already
+    /// match an existing user (those go through the normal add-member path).
+    private var showEmailInvite: Bool {
+        queryIsEmail && !users.contains { $0.email.lowercased() == trimmedQuery.lowercased() }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -49,20 +70,15 @@ struct InviteToChannelSheet: View {
 
             Divider().opacity(0.3)
 
-            if users.isEmpty && !loading {
-                VStack(spacing: 8) {
-                    Image(systemName: "person.crop.circle.badge.questionmark")
-                        .font(.system(size: 24))
-                        .foregroundColor(.secondary)
-                    Text(query.isEmpty ? "Type to search" : "No matching users")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(24)
-            } else {
+            if showEmailInvite || !users.isEmpty {
                 ScrollView {
                     LazyVStack(spacing: 0) {
+                        // When the query is an email with no existing user, offer
+                        // to send a free-signup link — the invitee joins on signup.
+                        if showEmailInvite {
+                            emailInviteRow
+                            Divider().opacity(0.15)
+                        }
                         ForEach(users) { user in
                             UserRow(
                                 user: user,
@@ -74,6 +90,17 @@ struct InviteToChannelSheet: View {
                         }
                     }
                 }
+            } else if !loading {
+                VStack(spacing: 8) {
+                    Image(systemName: "person.crop.circle.badge.questionmark")
+                        .font(.system(size: 24))
+                        .foregroundColor(.secondary)
+                    Text(query.isEmpty ? "Type to search by name or email" : "No matching users")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(24)
             }
 
             Divider().opacity(0.3)
@@ -83,6 +110,11 @@ struct InviteToChannelSheet: View {
                     Text(err)
                         .font(.system(size: 11))
                         .foregroundColor(.red)
+                } else if let sent = emailInviteSent {
+                    Label("Invite sent to \(sent)", systemImage: "checkmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(Color.matcha500)
+                        .lineLimit(1)
                 }
                 Spacer()
                 Text("\(selectedIds.count) selected")
@@ -164,6 +196,68 @@ struct InviteToChannelSheet: View {
             let addedCount = res.added?.count ?? selectedIds.count
             onInvited(addedCount)
             dismiss()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private var emailInviteRow: some View {
+        Button {
+            Task { await inviteByEmail() }
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(Color.matcha500.opacity(0.18))
+                        .frame(width: 28, height: 28)
+                    Image(systemName: "envelope.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(Color.matcha500)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Invite \(trimmedQuery)")
+                        .font(.system(size: 12))
+                        .foregroundColor(.white)
+                    Text("Send a free signup link — they join on sign up")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                if emailInviting {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text("Send")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(Color.matcha500)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(emailInviting)
+    }
+
+    private func inviteByEmail() async {
+        let target = trimmedQuery
+        guard queryIsEmail else { return }
+        emailInviting = true
+        error = nil
+        emailInviteSent = nil
+        defer { emailInviting = false }
+        do {
+            let res = try await ChannelsService.shared.sendEmailInvites(channelId: channelId, emails: [target])
+            if res.invited.contains(where: { $0.lowercased() == target.lowercased() }) {
+                emailInviteSent = target
+                query = ""
+                users = []
+            } else if res.alreadyMembers.contains(where: { $0.lowercased() == target.lowercased() }) {
+                error = "\(target) is already a member"
+            } else {
+                error = "Couldn't send invite to \(target)"
+            }
         } catch {
             self.error = error.localizedDescription
         }

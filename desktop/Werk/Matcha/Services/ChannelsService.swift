@@ -179,6 +179,31 @@ class ChannelsService {
         return try await client.request(method: "POST", path: "\(basePath)/\(channelId)/members", body: body)
     }
 
+    // MARK: - Email invites (invite people without an account)
+
+    struct EmailInviteRequest: Encodable {
+        let emails: [String]
+    }
+
+    struct EmailInviteResult: Decodable {
+        let invited: [String]
+        let alreadyMembers: [String]
+        let failed: [String]
+        enum CodingKeys: String, CodingKey {
+            case invited
+            case alreadyMembers = "already_members"
+            case failed
+        }
+    }
+
+    /// Email free-signup links to people who don't have an account yet. They
+    /// sign up and are dropped straight into the channel. Owner/moderator only;
+    /// free (non-paid) channels only.
+    func sendEmailInvites(channelId: String, emails: [String]) async throws -> EmailInviteResult {
+        let body = EmailInviteRequest(emails: emails)
+        return try await client.request(method: "POST", path: "\(basePath)/\(channelId)/email-invites", body: body)
+    }
+
     // MARK: - Connections
 
     func listConnections() async throws -> [UserConnection] {

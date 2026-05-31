@@ -44,6 +44,7 @@ const ResourcesSignup = lazy(() => import('./pages/auth/ResourcesSignup'))
 const VerifyEmail = lazy(() => import('./pages/auth/VerifyEmail'))
 const SSOCallback = lazy(() => import('./pages/SSOCallback'))
 const BetaRegister = lazy(() => import('./pages/BetaRegister'))
+const ChannelInviteLanding = lazy(() => import('./pages/work/ChannelInviteLanding'))
 const ResetPassword = lazy(() => import('./pages/ResetPassword'))
 const ERExportDownload = lazy(() => import('./pages/shared/ERExportDownload'))
 const CandidateInterview = lazy(() => import('./pages/shared/CandidateInterview'))
@@ -97,6 +98,7 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/sso/callback" element={<SSOCallback />} />
         <Route path="/register/beta" element={<BetaRegister />} />
+        <Route path="/join-channel/:code" element={<ChannelInviteLanding />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/s/:token" element={<ERExportDownload />} />
         <Route path="/candidate-interview/:token" element={<CandidateInterview />} />
