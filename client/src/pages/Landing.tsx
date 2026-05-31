@@ -16,6 +16,7 @@ const ConvergenceAnimation = lazy(() =>
 // )
 import { ANIMATION_BY_SIZZLE_ID } from './landing/animations'
 import { EnforcementTotalsTicker } from '../components/landing/EnforcementTotalsTicker'
+import { IrAnalysisPanel } from '../components/landing/IrAnalysisPanel'
 import { PricingContactModal } from '../components/PricingContactModal'
 import { useLandingMedia } from '../hooks/useLandingMedia'
 import type { LandingMedia, LandingSizzleVideo, LandingCustomerLogo, LandingTestimonial } from '../api/client'
@@ -78,6 +79,8 @@ export default function Landing() {
 
       <main>
         <ConvergenceSection />
+
+        <IncidentIntakeSection />
 
         {sizzles.map((s, i) => (
           <ProductSizzle key={s.id} sizzle={s} reverse={i % 2 === 1} />
@@ -423,7 +426,7 @@ const CONVERGENCE_DOMAINS: { tag: string; title: string; blurb: string }[] = [
   {
     tag: 'EHS',
     title: 'Environmental, Health & Safety',
-    blurb: 'Incident intake, OSHA logs, workplace-violence prevention, and hazard tracking.',
+    blurb: 'Intelligent incident intake, theme analysis with pattern detection, OSHA logs, and hazard tracking for proactive safety.',
   },
   {
     tag: 'GRC',
@@ -481,6 +484,65 @@ function ConvergenceSection() {
               <p className="mt-2 text-sm" style={{ color: MUTED, lineHeight: 1.55 }}>{d.blurb}</p>
             </div>
           ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Intelligent Incident Intake — categorization, severity, pattern detection
+// ---------------------------------------------------------------------------
+
+const INTAKE_BULLETS: { label: string; desc: string }[] = [
+  {
+    label: 'Categorization',
+    desc: 'Behavioral, safety, property, or harassment — flagged for manager review the moment an incident is submitted.',
+  },
+  {
+    label: 'Severity scoring',
+    desc: 'Low / Medium / High with mandatory justification attached to every incident, reviewed and confirmed by your team.',
+  },
+  {
+    label: 'Pattern detection',
+    desc: 'Cross-incident analysis surfaces recurring patterns across locations, shifts, and case types before they compound.',
+  },
+]
+
+function IncidentIntakeSection() {
+  return (
+    <section className="py-20 sm:py-28 border-t" style={{ borderColor: LINE }}>
+      <div className="max-w-[1440px] mx-auto px-5 sm:px-10">
+        <div className="grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+          <div className="max-w-xl">
+            <div className="text-[11px] uppercase tracking-wider font-medium mb-3" style={{ color: MUTED }}>
+              Intelligent Incident Intake
+            </div>
+            <h2
+              className="tracking-tight"
+              style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(1.875rem, 4vw, 3rem)', lineHeight: 1.05 }}
+            >
+              Every incident categorized, scored, and connected.
+            </h2>
+            <p className="mt-5 text-lg" style={{ color: MUTED, lineHeight: 1.6 }}>
+              Intake flags suggested categorization and severity on submission, then cross-incident pattern
+              detection surfaces what no single manager would catch — repeat locations, shift clusters, and
+              escalating severity trends.
+            </p>
+            <ul className="mt-7 space-y-5">
+              {INTAKE_BULLETS.map((item) => (
+                <li key={item.label} className="flex gap-3">
+                  <div className="w-1.5 h-1.5 rounded-full mt-[7px] shrink-0" style={{ backgroundColor: INK }} />
+                  <div>
+                    <span className="text-sm font-medium" style={{ color: INK }}>{item.label}</span>
+                    <p className="text-sm mt-0.5" style={{ color: MUTED, lineHeight: 1.55 }}>{item.desc}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          <IrAnalysisPanel />
         </div>
       </div>
     </section>
