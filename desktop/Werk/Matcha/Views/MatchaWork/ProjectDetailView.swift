@@ -594,6 +594,35 @@ struct ProjectDetailView: View {
         // between users on the Sections sub-tab.
         ProjectPresenceOverlay(presenceVM: presenceVM, members: presenceVM.members) {
         VStack(spacing: 0) {
+            // Inline panel header with a discoverable "New note" button. The
+            // toolbar ✎ is easy to miss in the crowded window toolbar, so the
+            // list view carries its own affordance. Hidden while editing a
+            // section (the editor has its own back/save chrome).
+            if editingSectionId == nil {
+                HStack {
+                    Text("Notes")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Button {
+                        Task {
+                            await viewModel.addSection(title: "Untitled note")
+                            await MainActor.run { editingSectionId = viewModel.project?.sections?.last?.id }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus")
+                            Text("New note")
+                        }
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.matcha500)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                Divider().opacity(0.2)
+            }
             if let sections = viewModel.project?.sections, !sections.isEmpty {
                 if let sid = editingSectionId,
                    let section = sections.first(where: { $0.id == sid }) {
@@ -671,7 +700,7 @@ struct ProjectDetailView: View {
                 }
             } else {
                 Spacer()
-                Text("No notes yet — use the AI chat or click ✎ to add one.")
+                Text("No notes yet — click \"New note\" above or use the AI chat.")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                 Spacer()
