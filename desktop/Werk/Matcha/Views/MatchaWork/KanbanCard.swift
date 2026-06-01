@@ -150,30 +150,6 @@ struct KanbanCardView: View {
                         }
                     }
 
-                    if let tpl = KanbanTemplate.from(category: task.category) {
-                        HStack(spacing: 2) {
-                            Image(systemName: tpl.icon).font(.system(size: 7))
-                            Text(tpl.displayName).font(.system(size: 8, weight: .semibold))
-                        }
-                        .foregroundColor(tpl.color)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(tpl.color.opacity(0.15))
-                        .cornerRadius(3)
-                    }
-
-                    if let elName = elementName ?? task.elementName {
-                        HStack(spacing: 2) {
-                            Image(systemName: "square.stack.3d.up.fill").font(.system(size: 7))
-                            Text(elName).font(.system(size: 8, weight: .medium))
-                        }
-                        .foregroundColor(appState.themeAccent)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(appState.themeAccent.opacity(0.12))
-                        .cornerRadius(3)
-                    }
-
                     Menu {
                         ForEach(columnsFor(pipeline: pipelineMode), id: \.key) { c in
                             Button {
@@ -223,6 +199,41 @@ struct KanbanCardView: View {
                         Text(due.prefix(10))
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
+                    }
+                }
+
+                // Template + element tags on their own row so a crowded status
+                // row never squeezes them into a vertical one-letter-per-line
+                // strip (and never pushes the assignee off the card edge).
+                if KanbanTemplate.from(category: task.category) != nil
+                    || (elementName ?? task.elementName) != nil {
+                    HStack(spacing: 5) {
+                        if let tpl = KanbanTemplate.from(category: task.category) {
+                            HStack(spacing: 2) {
+                                Image(systemName: tpl.icon).font(.system(size: 7))
+                                Text(tpl.displayName).font(.system(size: 8, weight: .semibold))
+                                    .lineLimit(1)
+                            }
+                            .fixedSize(horizontal: true, vertical: false)
+                            .foregroundColor(tpl.color)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(tpl.color.opacity(0.15))
+                            .cornerRadius(3)
+                        }
+                        if let elName = elementName ?? task.elementName {
+                            HStack(spacing: 2) {
+                                Image(systemName: "square.stack.3d.up.fill").font(.system(size: 7))
+                                Text(elName).font(.system(size: 8, weight: .medium))
+                                    .lineLimit(1)
+                            }
+                            .fixedSize(horizontal: true, vertical: false)
+                            .foregroundColor(appState.themeAccent)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(appState.themeAccent.opacity(0.12))
+                            .cornerRadius(3)
+                        }
                     }
                 }
 
