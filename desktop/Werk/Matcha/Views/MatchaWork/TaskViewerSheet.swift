@@ -18,12 +18,16 @@ struct TaskViewerSheet: View {
 
     @State private var previewFile: MWProjectFile?
     @State private var history: [MWTaskHistoryEntry] = []
-    /// Discussion/history is lazy: not fetched or rendered until the user
-    /// expands it. Opening a ticket no longer pays for history nobody asked to
-    /// see. `historyLoaded` guards the one-time fetch on first expand.
-    @State private var showDiscussion = false
+    /// Discussion (the in-ticket Q&A thread) is always visible and renders the
+    /// activity notes, so history is fetched once on open. `historyLoaded`
+    /// guards that one-time fetch; the rounds/audit feed stays collapsed behind
+    /// `showHistory` so the audit trail is opt-in, not in the way.
+    @State private var showHistory = false
     @State private var historyLoaded = false
     @State private var loadingHistory = false
+    /// Earlier-round attachments tuck behind a disclosure so the foreground
+    /// ATTACHMENTS list shows only the current round's files.
+    @State private var showEarlierAttachments = false
     @State private var didCopy = false
     @State private var isCopying = false
     @State private var newNote = ""
@@ -42,6 +46,18 @@ struct TaskViewerSheet: View {
 
     private var attachments: [MWProjectFile] {
         viewModel.taskFiles[task.id] ?? []
+    }
+
+    /// Foreground attachments — only the current round's files. Files with no
+    /// round_index (optimistic uploads, older lists) default to the current
+    /// round so they stay visible rather than vanishing.
+    private var currentRoundAttachments: [MWProjectFile] {
+        attachments.filter { ($0.roundIndex ?? currentRound) == currentRound }
+    }
+    /// Background attachments — files uploaded in earlier rounds, tucked behind
+    /// a disclosure so a sent-back ticket doesn't show stale round-1 files up top.
+    private var earlierRoundAttachments: [MWProjectFile] {
+        attachments.filter { ($0.roundIndex ?? currentRound) < currentRound }
     }
 
     /// All checklist items for this task, across every round (ordered).
@@ -127,6 +143,7 @@ struct TaskViewerSheet: View {
     }
 
     var body: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 Text(task.title)
@@ -199,7 +216,8 @@ struct TaskViewerSheet: View {
 
             if let note = task.reviewNote?.trimmingCharacters(in: .whitespacesAndNewlines),
                !note.isEmpty,
-               task.boardColumn == "changes_requested" || task.boardColumn == "in_progress" {
+               task.boardColumn == "changes_requested" || task.boardColumn == "in_progress"
+                || task.boardColumn == "todo" {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 5) {
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -263,14 +281,22 @@ struct TaskViewerSheet: View {
             // task-level file dump.
             checklistSection
 
-            if showDiscussion {
-                discussionSection
-            } else {
-                discussionToggle
-            }
+            // Discussion: the always-on in-ticket Q&A thread (composer + notes).
+            // Available in every column — clarifying questions shouldn't sit
+            // behind a toggle.
+            discussionSection
 
             if !attachments.isEmpty {
                 attachmentsSection
+            }
+
+            // History: rounds + audit trail — the background (prior rounds, who
+            // moved what, what got fixed). Collapsed by default so the active
+            // work (checklist + feedback + discussion) leads.
+            if showHistory {
+                historySection
+            } else {
+                historyToggle
             }
 
             if isRejecting {
@@ -298,14 +324,18 @@ struct TaskViewerSheet: View {
             }
         }
         .padding(16)
+        }
         .frame(width: 600)
+        .frame(maxHeight: 760)
         .background(Color.appBackground)
         .task {
             if viewModel.taskFiles[task.id] == nil {
                 await viewModel.loadTaskFiles(taskId: task.id)
             }
             await viewModel.loadSubtasks(taskId: task.id)
-            // History/discussion is loaded lazily on expand — see discussionSection.
+            // Discussion is always shown, so load history once on open to
+            // populate the notes thread (and the collapsed rounds feed).
+            if !historyLoaded { await loadHistory() }
         }
         .sheet(item: $previewFile) { file in
             AttachmentPreviewSheet(file: file)
@@ -380,24 +410,33 @@ struct TaskViewerSheet: View {
         historyLoaded = true
     }
 
-    /// Collapsed stand-in for the discussion feed. Tapping it reveals the feed
-    /// and triggers the one-time history fetch — so a ticket opens without
-    /// paying for activity data the user didn't ask to see.
-    private var discussionToggle: some View {
+    /// Collapsed stand-in for the rounds + audit History feed (the background).
+    /// History is already loaded on open for the Discussion thread, so tapping
+    /// just reveals it; the lazy fetch stays as a safety net.
+    private var historyToggle: some View {
         Button {
-            showDiscussion = true
+            showHistory = true
             if !historyLoaded {
                 Task { await loadHistory() }
             }
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: "bubble.left.and.bubble.right")
+                Image(systemName: "clock.arrow.circlepath")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
-                Text("DISCUSSION & HISTORY")
+                Text("HISTORY")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(.secondary)
                     .tracking(0.5)
+                if rounds.count > 1 {
+                    Text("\(rounds.count) rounds")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.zinc800)
+                        .cornerRadius(4)
+                }
                 Spacer()
                 Text("Show")
                     .font(.system(size: 10, weight: .semibold))
@@ -426,6 +465,13 @@ struct TaskViewerSheet: View {
     }
 
     private var currentPhase: StatePhase {
+        // A ticket sent back from review now lands in `todo` (the active flow)
+        // carrying a reviewNote — frame it as rework ("address the feedback"),
+        // not a cold never-started task.
+        let hasFeedback = (task.reviewNote?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+        if task.boardColumn == "todo" && hasFeedback {
+            return StatePhase(label: "Changes Requested", owner: "Assignee to address feedback", color: .orange, icon: "arrow.uturn.backward.circle.fill")
+        }
         switch task.boardColumn {
         case "todo":
             return StatePhase(label: "Not Started", owner: "Assignee to begin", color: .secondary, icon: "circle.dashed")
@@ -492,25 +538,70 @@ struct TaskViewerSheet: View {
         .cornerRadius(6)
     }
 
-    // MARK: - Discussion (rounds-grouped feed)
+    // MARK: - History (rounds-grouped audit) + Discussion (notes thread)
 
-    /// All history events grouped into review-cycle rounds. Round 1 starts at
-    /// task creation; a new round opens every time the card leaves `review`
-    /// for a non-done column (changes_requested / in_progress / todo). The
-    /// "leaving review" event itself lands at the top of the new round so it
-    /// reads "Reviewer sent back · …" + the assignee's reply notes.
+    /// Structural history grouped into review-cycle rounds for the History feed.
+    /// A new round opens on each `round_started` event (logged when a reviewer
+    /// sends a card back, or someone starts a manual round). Activity notes are
+    /// stripped here — they live in the separate Discussion thread, so the
+    /// rounds feed is purely the structural audit trail (moves, subtask flips,
+    /// the send-back event).
     private var rounds: [TaskRound] {
-        TaskRound.build(from: history)
+        TaskRound.build(from: history.filter { $0.eventType != "activity" })
     }
 
+    /// The in-ticket Q&A thread: a note composer plus the activity notes,
+    /// newest-first. Always visible in every column so clarifying questions
+    /// are one click away. Posting a note bells the other participants.
     @ViewBuilder
     private var discussionSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "bubble.left.and.bubble.right")
                     .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.matcha500)
                 Text("DISCUSSION")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .tracking(0.5)
+                Text("Ask & answer clarifications")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary.opacity(0.7))
+                if loadingHistory {
+                    ProgressView().controlSize(.small)
+                }
+                Spacer()
+            }
+
+            noteComposer
+
+            // Activity notes only, newest-first so the latest sits right under
+            // the composer. Structural events (moves, subtask flips, round
+            // starts) are intentionally NOT here — they live in History.
+            if !notes.isEmpty {
+                ForEach(Array(notes.reversed())) { note in
+                    NoteRow(entry: note, files: attachments, onPreview: { previewFile = $0 })
+                }
+            } else if !loadingHistory {
+                Text("No comments yet — ask a question to start the thread.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .padding(.vertical, 4)
+            }
+        }
+    }
+
+    /// The background: structural rounds + audit trail. Collapsed by default
+    /// (toggled via `historyToggle`). Prior rounds carry their fixed items and
+    /// older attachments out of the foreground. Hosts "Start Next Round".
+    @ViewBuilder
+    private var historySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Text("HISTORY")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(.secondary)
                     .tracking(0.5)
@@ -527,6 +618,13 @@ struct TaskViewerSheet: View {
                     ProgressView().controlSize(.small)
                 }
                 Spacer()
+                Button { showHistory = false } label: {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Collapse history")
                 Button {
                     showingNewRoundSheet = true
                 } label: {
@@ -546,11 +644,8 @@ struct TaskViewerSheet: View {
                 .help("Open a new round with a suggested-fix subtask. Any collaborator can start one.")
             }
 
-            noteComposer
-
-            // Rounds rendered newest-first so the active round sits right
-            // under the composer. Within each round events stay chronological
-            // (oldest → newest) so the round reads as a coherent story.
+            // Rounds rendered newest-first so the active round sits on top.
+            // Within each round events stay chronological (oldest → newest).
             // `previousFixed` threads the prior round's completed subtask
             // titles forward so round N+1 shows "Fixed in Round N · …".
             let reversed = Array(rounds.reversed())
@@ -713,18 +808,56 @@ struct TaskViewerSheet: View {
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(.secondary)
                     .tracking(0.5)
-                Text("\(attachments.count)")
+                Text("\(currentRoundAttachments.count)")
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
                     .background(Color.zinc800)
                     .cornerRadius(4)
+                if currentRound > 1 {
+                    Text("Round \(currentRound)")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
             }
+            // Foreground: only this round's files.
             VStack(spacing: 3) {
-                ForEach(attachments) { f in
+                ForEach(currentRoundAttachments) { f in
                     ViewerAttachmentRow(file: f) {
                         previewFile = f
+                    }
+                }
+            }
+            if currentRoundAttachments.isEmpty {
+                Text("No files this round.")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+
+            // Background: earlier rounds' files behind a disclosure so they
+            // stay reachable without cluttering the active round.
+            if !earlierRoundAttachments.isEmpty {
+                Button {
+                    withAnimation { showEarlierAttachments.toggle() }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: showEarlierAttachments ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 8, weight: .semibold))
+                        Text("\(earlierRoundAttachments.count) from earlier round\(earlierRoundAttachments.count == 1 ? "" : "s")")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                if showEarlierAttachments {
+                    VStack(spacing: 3) {
+                        ForEach(earlierRoundAttachments) { f in
+                            ViewerAttachmentRow(file: f) {
+                                previewFile = f
+                            }
+                            .opacity(0.7)
+                        }
                     }
                 }
             }

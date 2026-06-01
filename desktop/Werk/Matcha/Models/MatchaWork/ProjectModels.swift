@@ -111,6 +111,11 @@ struct MWProjectFile: Codable, Identifiable, Hashable {
     var folderId: String?
     /// nil = project root Files/Media; otherwise bucketed under an element repo.
     var elementId: String?
+    /// Review round this file was uploaded in (1-based). Only populated by the
+    /// per-task files endpoint (derived server-side from upload time vs the
+    /// task's round boundaries); nil on other file lists. Lets the ticket
+    /// viewer keep the current round's attachments in the foreground.
+    var roundIndex: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, filename
@@ -125,6 +130,7 @@ struct MWProjectFile: Codable, Identifiable, Hashable {
         case createdAt = "created_at"
         case folderId = "folder_id"
         case elementId = "element_id"
+        case roundIndex = "round_index"
     }
 
     var isImage: Bool {

@@ -402,7 +402,7 @@ class AppState {
                 // pull their attention over. Skipped when they're already in
                 // that project (the project WS path toasts those live — see
                 // ProjectDetailViewModel — so this would double up).
-                if ["task_progress", "task_assigned", "task_rejected"].contains(type),
+                if ["task_progress", "task_assigned", "task_rejected", "task_comment"].contains(type),
                    NSApplication.shared.isActive {
                     let pid = metaString("project_id") ?? ""
                     if !pid.isEmpty, pid != self.selectedProjectId {
@@ -413,6 +413,7 @@ class AppState {
                         switch type {
                         case "task_assigned": icon = "person.crop.circle.badge.checkmark"
                         case "task_rejected": icon = "arrow.uturn.backward"
+                        case "task_comment": icon = "bubble.left.fill"
                         default: icon = "arrow.left.arrow.right"
                         }
                         ChannelNotificationManager.shared.playInAppSound()
