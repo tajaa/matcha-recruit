@@ -34,6 +34,7 @@ IR_VALID_ANALYSIS_TYPES = {
     "recommendations",
     "similar",
     "policy_mapping",
+    "followup_questions",
 }
 
 # AI commonly emits abbreviated / alternate names. Map them to canonical IDs
@@ -56,6 +57,11 @@ ANALYSIS_TYPE_ALIASES = {
     "recommendation": "recommendations",
     "recommended_actions": "recommendations",
     "severity_assessment": "severity",
+    "followup": "followup_questions",
+    "follow_up": "followup_questions",
+    "follow_up_questions": "followup_questions",
+    "investigation": "followup_questions",
+    "questions": "followup_questions",
 }
 
 

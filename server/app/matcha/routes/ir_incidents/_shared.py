@@ -886,6 +886,42 @@ def build_request_documents_card() -> dict:
     }
 
 
+def build_investigation_notes_card(questions: list[str] | None = None) -> dict:
+    """Capture investigation findings as free text, with AI-generated
+    incident-specific questions shown inline.
+
+    ``questions`` come from the cached ``followup_questions`` analysis. They
+    render under the card (interview_questions) so the user has concrete
+    prompts to answer instead of a blank box. Handled by the
+    ``investigation_notes`` branch of ``_handle_text_input``, which writes
+    category_data.investigation_notes + sets investigation_documented.
+    """
+    qs = [q for q in (questions or []) if isinstance(q, str) and q.strip()][:6]
+    return {
+        "id": "investigation_notes",
+        "title": "Document the investigation",
+        "recommendation": (
+            "Answer what you can below — who was involved, what happened, what's "
+            "been done so far, and anything still unknown."
+        ),
+        "rationale": (
+            "Thorough notes now make the OSHA record, insurance claim, and any "
+            "legal review defensible later. This goes on the incident file."
+        ),
+        "priority": "high",
+        "blockers": [],
+        "interview_questions": qs or None,
+        "action": {
+            "type": "text_input",
+            "label": "Save findings",
+            "target_field": "investigation_notes",
+            "prompt_text": "Investigation findings",
+            "input_label": "Findings",
+            "input_rows": 5,
+        },
+    }
+
+
 async def _persist_osha_emergency_alert(conn, incident_id: str, current_user) -> None:
     """Flip severity to critical, mark the alert active in category_data,
     and persist the emergency card to the Copilot transcript.

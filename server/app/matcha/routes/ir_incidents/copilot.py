@@ -322,7 +322,10 @@ async def skip_copilot_card(
         # user already opted into by clicking Yes on log_root_cause_query.
         # Skipping mid-chain leaves the JSONB partially populated; route
         # users back to answering or starting over.
-        if stored_action.get("type") == "text_input":
+        if (
+            stored_action.get("type") == "text_input"
+            and stored_action.get("target_field") in ROOT_CAUSE_INTERVIEW_STEPS
+        ):
             raise HTTPException(
                 status_code=400,
                 detail="Finish the root cause interview or type 'no' on a fresh prompt instead.",
@@ -1069,6 +1072,44 @@ async def _handle_text_input(
     and the AI Analysis tab see a populated value.
     """
     step = (action.get("target_field") or "").strip()
+
+    # Investigation findings — free-text documentation capture (not part of the
+    # root-cause interview chain). Writes category_data.investigation_notes and
+    # stamps investigation_documented so the deterministic flow advances.
+    if step == "investigation_notes":
+        raw = (body.text_value or "").strip()
+        if not raw:
+            return {"error": "Add your findings before saving (or Skip if there's nothing to add)."}
+        notes = raw[:4000]
+        await conn.execute(
+            """
+            UPDATE ir_incidents
+            SET category_data = jsonb_set(
+                jsonb_set(
+                    COALESCE(category_data, '{}'::jsonb),
+                    '{investigation_notes}',
+                    to_jsonb($1::text),
+                    true
+                ),
+                '{investigation_documented}',
+                'true'::jsonb,
+                true
+            ),
+            updated_at = NOW()
+            WHERE id = $2
+            """,
+            notes, incident_id,
+        )
+        return {
+            "event_summary": "Investigation findings documented",
+            "event_extra": {
+                "field": "investigation_notes",
+                "field_label": "Investigation notes",
+                "previous_value": None,
+                "new_value": notes,
+            },
+        }
+
     if step not in ROOT_CAUSE_INTERVIEW_STEPS:
         return {"error": f"Invalid text_input target_field: {step}"}
 
@@ -1356,6 +1397,29 @@ async def accept_copilot_card(
                         except Exception as exc:
                             logger.exception("root_cause analysis failed for incident %s", incident_id)
                             event_summary = f"Root cause analysis failed: {exc}"
+                    elif analysis_type == "followup_questions":
+                        yield _sse({
+                            "type": "status",
+                            "stage": "running_analysis",
+                            "analysis_type": "followup_questions",
+                            "label": "Working out what still needs to be investigated…",
+                        })
+                        try:
+                            from .ai_analysis import run_followup_questions_inline
+                            await run_followup_questions_inline(
+                                incident_id,
+                                current_user,
+                                ip_address=request.client.host if request.client else None,
+                            )
+                            yield _sse({
+                                "type": "status",
+                                "stage": "analysis_complete",
+                                "analysis_type": "followup_questions",
+                            })
+                            event_summary = "Investigation questions ready."
+                        except Exception as exc:
+                            logger.exception("followup_questions failed for incident %s", incident_id)
+                            event_summary = f"Couldn't generate investigation questions: {exc}"
                     elif analysis_type == "recommendations":
                         yield _sse({
                             "type": "status",

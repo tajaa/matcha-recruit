@@ -325,6 +325,84 @@ async def run_root_cause_inline(
     )
 
 
+async def run_followup_questions_inline(
+    incident_id: UUID,
+    current_user,
+    *,
+    ip_address: Optional[str] = None,
+    use_cache: bool = True,
+) -> dict:
+    """Generate incident-specific follow-up investigation questions inline.
+
+    Drives the IR Copilot investigation phase: the deterministic flow asks
+    for these questions before closing so the record is more than the OSHA
+    checkboxes. Persists to ``ir_incident_analysis`` under
+    ``followup_questions`` and audit-logs like the other inline runners.
+
+    Returns the analysis dict (``questions`` + ``reasoning``). Raises
+    ``IRAnalysisError`` if the LLM fails AND no cached row exists.
+    """
+    from app.matcha.services.ir_analysis import get_ir_analyzer, IRAnalysisError
+
+    async with get_connection() as conn:
+        row = await _get_incident_with_company_check(conn, incident_id, current_user)
+        row = dict(row)
+
+        cached = None
+        if use_cache:
+            cached = await conn.fetchrow(
+                """
+                SELECT analysis_data FROM ir_incident_analysis
+                WHERE incident_id = $1 AND analysis_type = 'followup_questions'
+                ORDER BY generated_at DESC LIMIT 1
+                """,
+                str(incident_id),
+            )
+
+    if cached:
+        return _safe_json_loads(cached["analysis_data"])
+
+    category_data = json.loads(row["category_data"]) if isinstance(row.get("category_data"), str) else row.get("category_data")
+    witnesses = parse_witnesses(row.get("witnesses"))
+
+    try:
+        analyzer = get_ir_analyzer()
+        result = await analyzer.generate_followup_questions(
+            title=row["title"],
+            description=row["description"],
+            incident_type=row["incident_type"],
+            severity=row["severity"],
+            location=row["location"],
+            category_data=category_data,
+            witnesses=[w.model_dump() for w in witnesses],
+        )
+    except IRAnalysisError:
+        logger.exception("Follow-up questions failed for incident %s", incident_id)
+        raise
+
+    async with get_connection() as conn2:
+        await conn2.execute(
+            """
+            INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
+            VALUES ($1, 'followup_questions', $2)
+            """,
+            str(incident_id),
+            json.dumps(result),
+        )
+        await log_audit(
+            conn2,
+            str(incident_id),
+            str(current_user.id),
+            "analysis_run",
+            "analysis",
+            None,
+            {"type": "followup_questions"},
+            ip_address,
+        )
+
+    return result
+
+
 @router.post("/{incident_id}/analyze/root-cause")
 async def analyze_root_cause(
     incident_id: UUID,

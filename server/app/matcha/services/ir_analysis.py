@@ -84,6 +84,17 @@ def _validate_root_cause(result: dict) -> Optional[str]:
     return None
 
 
+def _validate_followup(result: dict) -> Optional[str]:
+    """Validate follow-up investigation questions. Returns error or None."""
+    questions = result.get("questions")
+    if not isinstance(questions, list):
+        return "Invalid questions: must be a list"
+    cleaned = [q for q in questions if isinstance(q, str) and q.strip()]
+    if len(cleaned) < 2:
+        return "questions must contain at least 2 non-empty strings"
+    return None
+
+
 def _validate_recommendations(result: dict) -> Optional[str]:
     """Validate recommendations response. Returns error message or None."""
     if not isinstance(result.get("recommendations"), list):
@@ -321,6 +332,46 @@ Return ONLY a JSON object with this structure:
         "Add safety equipment to regular inventory checks"
     ],
     "reasoning": "This incident could have been prevented with proper warning signage. The root cause traces back to a process gap in safety equipment management."
+}}"""
+
+
+FOLLOWUP_QUESTIONS_PROMPT = """You are a seasoned workplace-incident investigator. The OSHA recordability \
+checkboxes for this incident are already handled. Your job is to surface the \
+SPECIFIC, non-obvious questions a thorough investigator still needs answered \
+before this record is complete and defensible.
+
+INCIDENT REPORT:
+Title: {title}
+Description: {description}
+Type: {incident_type}
+Severity: {severity}
+Location: {location}
+Category-Specific Data: {category_data}
+Witnesses: {witnesses}
+
+Generate 3-5 follow-up questions. Rules:
+- Each question MUST be answerable by someone who was there — concrete, not \
+generic. Tie it to details in THIS report (people, equipment, timeline, place).
+- Target the gaps that matter for a defensible record: sequence of events, \
+who witnessed/responded, prior occurrences or known hazards, what immediate \
+action was taken, contributing conditions, and any conflicting accounts.
+- Do NOT re-ask anything already answered in the report or category data.
+- Do NOT ask OSHA-form questions (recordable? days away?) — those are done.
+- No yes/no fluff. Each question should pull out narrative or evidence.
+
+Example for a "slip on wet floor" incident:
+- "Who mopped the floor, and was wet-floor signage placed before the fall?"
+- "Has this corridor had slip incidents before, and was it ever flagged?"
+- "Who responded first, and what first aid or medical care was given on-site?"
+
+Return ONLY a JSON object with this structure:
+{{
+    "questions": [
+        "Specific question 1 tied to this incident",
+        "Specific question 2 tied to this incident",
+        "Specific question 3 tied to this incident"
+    ],
+    "reasoning": "One sentence on what these questions are meant to establish."
 }}"""
 
 
@@ -739,6 +790,47 @@ class IRAnalyzer:
             return prompt
 
         result = await self._call_with_retry(build_prompt, _validate_root_cause, label="root_cause")
+        result["generated_at"] = datetime.now(timezone.utc).isoformat()
+        return result
+
+    async def generate_followup_questions(
+        self,
+        title: str,
+        description: str,
+        incident_type: str,
+        severity: str,
+        location: Optional[str] = None,
+        category_data: Optional[dict] = None,
+        witnesses: Optional[list] = None,
+    ) -> dict[str, Any]:
+        """Generate incident-specific follow-up investigation questions.
+
+        Surfaces the concrete questions an investigator still needs answered
+        beyond the OSHA checkboxes, so the Copilot can build a defensible
+        record instead of closing on the OSHA workflow alone.
+
+        Returns a dict with ``questions`` (list[str]) and ``reasoning``.
+        """
+        def build_prompt(feedback: Optional[str] = None) -> str:
+            prompt = FOLLOWUP_QUESTIONS_PROMPT.format(
+                title=title,
+                description=description or "No description provided",
+                incident_type=incident_type,
+                severity=severity,
+                location=location or "Not specified",
+                category_data=json.dumps(category_data) if category_data else "None",
+                witnesses=json.dumps(witnesses) if witnesses else "No witness statements",
+            )
+            if feedback:
+                prompt += f"\n\n{feedback}"
+            return prompt
+
+        result = await self._call_with_retry(build_prompt, _validate_followup, label="followup_questions")
+        # Normalize: keep only non-empty strings, cap at 6.
+        result["questions"] = [
+            q.strip() for q in result.get("questions", [])
+            if isinstance(q, str) and q.strip()
+        ][:6]
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
 

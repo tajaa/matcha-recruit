@@ -21,14 +21,18 @@ Flow phases (in order — first unsatisfied gate wins):
   4. Injury assessment — safety/injury incident, treatment_beyond_first_aid unset
   5. OSHA recordable   — treatment beyond first aid + osha_recordable unset
   6. Root cause        — safety/near_miss or high/critical, not yet logged/declined
+  6.5 Investigation    — surface AI follow-up questions + capture findings before
+                         close (substantive incidents); the "ask meaningful
+                         questions / build documentation" step
   7. Documents         — safety/recordable incident with nothing attached
   8. Corrective action — corrective_actions empty (suggest via recommendations)
   9. Action required   — actions captured, status not yet action_required
  10. Close             — everything captured
 
-Every card shape here matches what the accept-handlers already dispatch, so no
-handler changes are needed for the reused steps. Only the treatment_query
-quick-reply and the request_documents action are new.
+Every card shape here matches what the accept-handlers already dispatch. New
+pieces vs the original OSHA-only flow: the treatment_query quick-reply, the
+request_documents action, and the investigation step (followup_questions
+analysis + investigation_notes text_input).
 """
 
 from __future__ import annotations
@@ -72,6 +76,8 @@ _GATE_BY_CARD_ID = {
     "osha_days_type_query": "osha",
     "osha_injury_type_query": "osha",
     "log_root_cause_query": "root_cause",
+    "flow_followup_run": "investigation",
+    "investigation_notes": "investigation",
     "request_documents": "documents",
     "flow_recommendations_run": "actions",
     "flow_corrective_actions": "actions",
@@ -319,6 +325,46 @@ def resolve_next_step(
         return _payload(
             "Let's document the root cause.",
             [build_log_root_cause_query_card()],
+        )
+
+    # ── 6.5 Investigation & documentation ────────────────────────────────
+    # Before rushing to close, build out the record: surface incident-specific
+    # follow-up questions and capture the investigator's findings. This is the
+    # "ask meaningful questions / build good documentation" step the OSHA-only
+    # flow was missing.
+    investigation_done = (
+        bool(category_data.get("investigation_documented"))
+        or "investigation" in flow_skipped
+    )
+    investigation_relevant = (
+        incident_type in {"safety", "behavioral", "near_miss"}
+        or severity in {"high", "critical"}
+    )
+    if investigation_relevant and not investigation_done:
+        followup = by_type.get("followup_questions") or {}
+        raw_questions = followup.get("questions")
+        questions = [
+            q for q in raw_questions if isinstance(q, str) and q.strip()
+        ] if isinstance(raw_questions, list) else []
+        if not questions:
+            # No questions cached yet — generate them (inline via accept handler).
+            return _payload(
+                "Before we wrap up, let's make sure this is properly investigated.",
+                [_run_analysis_card(
+                    card_id="flow_followup_run",
+                    title="Investigate further",
+                    analysis_type="followup_questions",
+                    recommendation="Generate the follow-up questions an investigator should still answer.",
+                    rationale="A complete record needs more than the OSHA checkboxes — let's surface what's missing.",
+                    label="Generate questions",
+                )],
+            )
+        # Questions ready — surface them and capture the investigator's findings.
+        from app.matcha.routes.ir_incidents._shared import build_investigation_notes_card
+        return _payload(
+            "A few questions to make sure this incident is fully documented:",
+            [build_investigation_notes_card(questions)],
+            open_questions=questions[:3],
         )
 
     # ── 7. Documents ─────────────────────────────────────────────────────
