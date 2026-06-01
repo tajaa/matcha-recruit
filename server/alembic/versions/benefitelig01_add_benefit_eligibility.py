@@ -1,7 +1,7 @@
 """benefit eligibility + renewal risk: roster store, exceptions, risk radar
 
 Revision ID: benefitelig01
-Revises: chinvemail01
+Revises: irlink0002
 Create Date: 2026-06-01
 
 Backs the employee-benefits broker feature (Scopes 1 & 2):
@@ -25,7 +25,7 @@ from alembic import op
 
 
 revision = "benefitelig01"
-down_revision = "chinvemail01"
+down_revision = "irlink0002"
 branch_labels = None
 depends_on = None
 
