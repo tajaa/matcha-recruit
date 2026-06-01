@@ -152,6 +152,15 @@ struct KanbanBoardView: View {
         }
     }
 
+    /// Open a ticket's viewer when chat asked us to (a ticket chip click /
+    /// "Go to ticket"). Waits until the task is loaded, then clears the request.
+    private func openPendingTaskIfPossible() {
+        guard let tid = appState.pendingOpenTaskId,
+              let task = viewModel.tasks.first(where: { $0.id == tid }) else { return }
+        viewingTask = task
+        appState.pendingOpenTaskId = nil
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if let err = viewModel.errorMessage {
@@ -223,6 +232,7 @@ struct KanbanBoardView: View {
         .onAppear {
             if viewModel.project?.pipelineMode == true { viewMode = .pipeline }
             maybeReplay()
+            openPendingTaskIfPossible()
         }
         .task {
             if viewModel.tasks.isEmpty {
@@ -230,9 +240,13 @@ struct KanbanBoardView: View {
             }
         }
         // Tasks usually arrive after the board mounts — run the replay the
-        // moment they do (maybeReplay is idempotent, guarded by didReplay).
+        // moment they do (maybeReplay is idempotent, guarded by didReplay), and
+        // honor any pending "open this ticket" request from chat.
         .onChange(of: viewModel.tasks.isEmpty) { _, empty in
-            if !empty { maybeReplay() }
+            if !empty { maybeReplay(); openPendingTaskIfPossible() }
+        }
+        .onChange(of: appState.pendingOpenTaskId) { _, _ in
+            openPendingTaskIfPossible()
         }
         // Re-render once a minute so aging tints advance while the board sits
         // open. Cards carry closures (non-equatable), so the parent re-render

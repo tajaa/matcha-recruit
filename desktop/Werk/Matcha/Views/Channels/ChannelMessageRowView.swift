@@ -76,8 +76,15 @@ struct ChannelMessageRowView: View {
                             .foregroundColor(appState.themeTextSecondary)
                             .italic()
                     } else {
-                        if !msg.content.isEmpty {
-                            Text(mentionAttributedContent(msg))
+                        // A "Chat about this ticket" message carries a marker we
+                        // render as a clickable chip; the rest is the user's text.
+                        let ticket = parseTicketRef(msg.content)
+                        let displayBody = ticket?.body ?? msg.content
+                        if let t = ticket {
+                            TicketRefChip(id: t.id, title: t.title, column: t.column)
+                        }
+                        if !displayBody.isEmpty {
+                            Text(mentionAttributedContent(displayBody, mentionedUserIds: msg.mentionedUserIds))
                                 .font(.system(size: 13))
                                 .foregroundColor(isMine ? appState.themeOnAccent : appState.themeText)
                                 .textSelection(.enabled)
@@ -425,9 +432,9 @@ struct ChannelMessageRowView: View {
         return display.string(from: date)
     }
 
-    private func mentionAttributedContent(_ msg: ChannelMessage) -> AttributedString {
-        var attributed = AttributedString(msg.content)
-        let resolved: Set<String> = msg.mentionedUserIds.map(Set.init) ?? Set()
+    private func mentionAttributedContent(_ text: String, mentionedUserIds: [String]?) -> AttributedString {
+        var attributed = AttributedString(text)
+        let resolved: Set<String> = mentionedUserIds.map(Set.init) ?? Set()
         // Build handle -> member map (handle = email local-part lowercased).
         let memberByHandle: [String: ChannelMember] = Dictionary(
             uniqueKeysWithValues: members.compactMap { m -> (String, ChannelMember)? in
@@ -438,8 +445,8 @@ struct ChannelMessageRowView: View {
         )
         let pattern = #"(?<=^|\s)@([A-Za-z0-9._-]{2,32})\b"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return attributed }
-        let nsContent = msg.content as NSString
-        let matches = regex.matches(in: msg.content, range: NSRange(location: 0, length: nsContent.length))
+        let nsContent = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsContent.length))
         for m in matches.reversed() {
             // Use group 1 (handle) for lookup; style the full match (with @).
             let handleRange = m.range(at: 1)
@@ -452,7 +459,7 @@ struct ChannelMessageRowView: View {
             let chipNSRange = NSRange(location: handleRange.location - 1, length: handleRange.length + 1)
             guard chipNSRange.location >= 0,
                   chipNSRange.location + chipNSRange.length <= nsContent.length,
-                  let stringRange = Range(chipNSRange, in: msg.content),
+                  let stringRange = Range(chipNSRange, in: text),
                   let attrRange = Range(stringRange, in: attributed)
             else { continue }
             let isMe = member.userId == currentUserId
@@ -460,6 +467,74 @@ struct ChannelMessageRowView: View {
             attributed[attrRange].font = .system(size: 13, weight: .semibold)
         }
         return attributed
+    }
+
+    /// Parses a leading `⟦ticket:ID|TITLE|COLUMN⟧` marker (emitted by "Chat
+    /// about this ticket") into a ref plus the message body with the marker
+    /// stripped. Returns nil for ordinary messages.
+    func parseTicketRef(_ content: String) -> (id: String, title: String, column: String, body: String)? {
+        let opener = "⟦ticket:"
+        guard content.hasPrefix(opener), let close = content.range(of: "⟧") else { return nil }
+        let inner = content[content.index(content.startIndex, offsetBy: opener.count)..<close.lowerBound]
+        let parts = inner.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+        guard let id = parts.first, !id.isEmpty else { return nil }
+        let title = parts.count > 1 && !parts[1].isEmpty ? parts[1] : "ticket"
+        let column = parts.count > 2 ? parts[2] : ""
+        var body = String(content[close.upperBound...])
+        if body.hasPrefix("\n") { body.removeFirst() }
+        return (id, title, column, body.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+}
+
+/// Clickable ticket reference shown inside a chat message (from "Chat about
+/// this ticket"). Tap or right-click → "Go to ticket" opens the ticket's
+/// read-only viewer on the kanban board. Read-only by design — collaborators
+/// view it, they don't edit from chat.
+private struct TicketRefChip: View {
+    @Environment(AppState.self) private var appState
+    let id: String
+    let title: String
+    let column: String
+
+    private func openTicket() {
+        appState.pendingOpenTaskId = id
+        appState.pendingProjectPanel = .kanban
+    }
+
+    var body: some View {
+        Button(action: openTicket) {
+            HStack(spacing: 6) {
+                Image(systemName: "checklist").font(.system(size: 10))
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                if !column.isEmpty {
+                    Text(column)
+                        .font(.system(size: 8, weight: .semibold))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(appState.themeText.opacity(0.12))
+                        .cornerRadius(3)
+                }
+                Image(systemName: "arrow.up.right").font(.system(size: 8, weight: .bold)).opacity(0.6)
+            }
+            .foregroundColor(appState.themeAccent)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(appState.themeAccent.opacity(0.12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(appState.themeAccent.opacity(0.35), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .help("Open ticket (read-only)")
+        .contextMenu {
+            Button { openTicket() } label: { Label("Go to ticket", systemImage: "arrow.up.right.square") }
+        }
     }
 }
 

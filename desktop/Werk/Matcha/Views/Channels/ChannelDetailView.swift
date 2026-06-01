@@ -675,8 +675,15 @@ struct ChannelDetailView: View {
         var content = trimmed
         if let ref = appState.pendingTicketRef {
             let colLabel = ref.column.replacingOccurrences(of: "_", with: " ").capitalized
-            let prefix = "Re: ticket “\(ref.title)” (\(colLabel))"
-            content = trimmed.isEmpty ? prefix : "\(prefix)\n\n\(trimmed)"
+            // Machine-readable marker the message row renders as a clickable
+            // ticket chip. Sanitize the title of the delimiter chars so it
+            // round-trips; clients that don't parse it just see the raw text.
+            let safeTitle = ref.title
+                .replacingOccurrences(of: "⟦", with: "")
+                .replacingOccurrences(of: "⟧", with: "")
+                .replacingOccurrences(of: "|", with: "/")
+            let token = "⟦ticket:\(ref.id)|\(safeTitle)|\(colLabel)⟧"
+            content = trimmed.isEmpty ? token : "\(token)\n\(trimmed)"
             appState.pendingTicketRef = nil
         }
         let attachmentsToSend = pendingAttachments

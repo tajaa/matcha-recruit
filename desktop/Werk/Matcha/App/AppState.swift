@@ -53,6 +53,11 @@ class AppState {
     /// the ticket into the next message it sends. Cleared after send or dismiss.
     var pendingTicketRef: TicketChatRef? = nil
 
+    /// Set when a ticket chip in chat is clicked / "Go to ticket". The kanban
+    /// board opens this task's (read-only) viewer once it's loaded, then clears
+    /// it. Paired with `pendingProjectPanel = .kanban` to switch to the board.
+    var pendingOpenTaskId: String? = nil
+
     // MARK: - Workspace tabs
     static let maxPinnedTabs = 4
     private static let tabsKey = "mw-open-tabs-v1"
