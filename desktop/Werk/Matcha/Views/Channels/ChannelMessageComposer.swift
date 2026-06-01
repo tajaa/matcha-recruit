@@ -45,6 +45,37 @@ struct ChannelMessageComposer: View {
                 .padding(.horizontal, 4)
             }
 
+            // Ticket reference banner — set by "Chat about this ticket" on a
+            // kanban card. Mirrors the reply banner; the send path weaves the
+            // reference into the message and × clears it.
+            if let ref = appState.pendingTicketRef {
+                HStack(spacing: 8) {
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(appState.themeAccent)
+                        .frame(width: 3, height: 24)
+                    Image(systemName: "checklist")
+                        .font(.system(size: 10))
+                        .foregroundColor(appState.themeAccent)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Chatting about ticket")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(appState.themeAccent)
+                        Text(ref.title)
+                            .font(.system(size: 10))
+                            .foregroundColor(appState.themeText.opacity(0.6))
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button { appState.pendingTicketRef = nil } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(appState.themeText.opacity(0.4))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 4)
+            }
+
             // Reply banner
             if let reply = replyingTo {
                 HStack(spacing: 8) {

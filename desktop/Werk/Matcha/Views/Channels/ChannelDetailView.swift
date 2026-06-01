@@ -658,8 +658,18 @@ struct ChannelDetailView: View {
             Task { await vm.editMessage(editing, newContent: trimmed) }
             return
         }
+        // Weave in a referenced kanban ticket (from "Chat about this ticket")
+        // as a reply-style prefix so the channel message carries the ticket
+        // context. Captured + cleared on send.
+        var content = trimmed
+        if let ref = appState.pendingTicketRef {
+            let colLabel = ref.column.replacingOccurrences(of: "_", with: " ").capitalized
+            let prefix = "Re: ticket “\(ref.title)” (\(colLabel))"
+            content = trimmed.isEmpty ? prefix : "\(prefix)\n\n\(trimmed)"
+            appState.pendingTicketRef = nil
+        }
         let attachmentsToSend = pendingAttachments
-        guard !trimmed.isEmpty || !attachmentsToSend.isEmpty else { return }
+        guard !content.isEmpty || !attachmentsToSend.isEmpty else { return }
         guard !isUploading else { return }
 
         let replyId = replyingTo?.id
@@ -674,19 +684,18 @@ struct ChannelDetailView: View {
             let cmid = UUID().uuidString
             appendOptimisticMessage(
                 clientMessageId: cmid,
-                content: trimmed,
+                content: content,
                 attachments: [],
                 replyToId: replyId,
                 replyPreview: replyPreviewForOptimistic,
             )
-            ws.sendMessage(channelId: channelId, content: trimmed, replyToId: replyId, clientMessageId: cmid)
+            ws.sendMessage(channelId: channelId, content: content, replyToId: replyId, clientMessageId: cmid)
             inputText = ""
             replyingTo = nil
             return
         }
 
         isUploading = true
-        let content = trimmed
         Task {
             do {
                 let files = attachmentsToSend.map { (data: $0.data, filename: $0.filename, mimeType: $0.mimeType) }
