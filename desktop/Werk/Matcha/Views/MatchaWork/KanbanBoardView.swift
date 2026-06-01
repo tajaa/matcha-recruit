@@ -80,8 +80,9 @@ struct KanbanBoardView: View {
     /// Empty in steady state — grouping then falls straight through to the
     /// memoized `groupedColumns`, so there's zero per-frame cost when idle.
     @State private var replayOverrides: [String: String] = [:]
-    /// taskIds added since the last view — highlighted briefly as "new".
-    @State private var replayNewIds: Set<String> = []
+    /// taskIds moved or added since this user last looked — outlined in yellow
+    /// until the user clicks the card to view its updated state (then removed).
+    @State private var changedIds: Set<String> = []
     /// One replay per board mount; set once tasks first load.
     @State private var didReplay = false
     /// Drives matchedGeometryEffect so a card glides from its old column to its
@@ -138,16 +139,14 @@ struct KanbanBoardView: View {
         guard !overrides.isEmpty || !newIds.isEmpty else { return }            // unchanged
 
         replayOverrides = overrides
-        replayNewIds = newIds
+        // Outline everything that moved or is new in yellow; the ring persists
+        // until the user clicks each card to acknowledge its updated state.
+        changedIds = Set(overrides.keys).union(newIds)
         Task { @MainActor in
             // Hold the old layout a beat so the eye registers it, then glide.
             try? await Task.sleep(for: .seconds(0.55))
             withAnimation(.spring(response: 0.6, dampingFraction: 0.78)) {
                 replayOverrides = [:]
-            }
-            try? await Task.sleep(for: .seconds(1.4))
-            withAnimation(.easeOut(duration: 0.4)) {
-                replayNewIds = []
             }
         }
     }
@@ -157,6 +156,9 @@ struct KanbanBoardView: View {
     private func openPendingTaskIfPossible() {
         guard let tid = appState.pendingOpenTaskId,
               let task = viewModel.tasks.first(where: { $0.id == tid }) else { return }
+        if changedIds.contains(tid) {
+            withAnimation(.easeOut(duration: 0.25)) { _ = changedIds.remove(tid) }
+        }
         viewingTask = task
         appState.pendingOpenTaskId = nil
     }
@@ -630,7 +632,13 @@ struct KanbanBoardView: View {
                     pipelineMode: isPipeline,
                     elementName: task.elementName
                         ?? viewModel.elements.first(where: { $0.id == task.elementId })?.name,
-                    onTap: { viewingTask = task },
+                    onTap: {
+                        // Acknowledge the change → drop the yellow outline.
+                        if changedIds.contains(task.id) {
+                            withAnimation(.easeOut(duration: 0.25)) { _ = changedIds.remove(task.id) }
+                        }
+                        viewingTask = task
+                    },
                     onToggle: { Task { await viewModel.toggleTaskComplete(id: task.id) } },
                     onMoveColumn: { col in
                         Task {
@@ -644,11 +652,12 @@ struct KanbanBoardView: View {
                 )
                 // Glide across columns when the replay clears its overrides.
                 .matchedGeometryEffect(id: task.id, in: cardNS)
-                // Fading accent ring marks tickets added since the last view.
+                // Yellow ring marks tickets moved/added since the last view;
+                // persists until the user clicks the card to acknowledge it.
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(appState.themeAccent,
-                                lineWidth: replayNewIds.contains(task.id) ? 2 : 0)
+                        .stroke(Color.yellow,
+                                lineWidth: changedIds.contains(task.id) ? 2 : 0)
                 )
                 .draggable(task.id)
                 .contextMenu {
