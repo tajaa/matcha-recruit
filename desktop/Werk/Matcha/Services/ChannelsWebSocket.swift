@@ -1,5 +1,26 @@
 import Foundation
 
+/// One channel view's set of inbound-event handlers. Registered with
+/// `ChannelsWebSocket.subscribe(_:)`; the socket dispatches every inbound event
+/// to every registered subscriber, and each handler self-filters by channelId.
+///
+/// This replaces the old single-callback model: a main-window channel tab and
+/// an embedded collab-project chat are alive at the same time and both need the
+/// echoes for their own channel. With one callback slot, whichever view wired
+/// up last stole delivery, so the loser's optimistic sends never reconciled and
+/// flipped to "failed" after the 8s timeout.
+struct ChannelSubscriber {
+    var onMessage: ((ChannelMessage) -> Void)?
+    var onMessageDeleted: ((_ messageId: String, _ deletedBy: String) -> Void)?
+    var onMessageEdited: ((_ messageId: String, _ content: String, _ editedAt: String?) -> Void)?
+    var onReactionUpdate: ((_ messageId: String, _ reactions: [ChannelReaction]) -> Void)?
+    var onOnlineUsers: (([ChannelOnlineUser]) -> Void)?
+    var onUserJoined: ((ChannelOnlineUser) -> Void)?
+    var onUserLeft: ((ChannelOnlineUser) -> Void)?
+    var onTyping: ((_ userId: String, _ name: String) -> Void)?
+    var onError: ((String) -> Void)?
+}
+
 @MainActor
 final class ChannelsWebSocket: NSObject {
     static let shared = ChannelsWebSocket()
@@ -26,25 +47,59 @@ final class ChannelsWebSocket: NSObject {
     /// un-napped while awake but still lets the Mac sleep when idle.
     private var napAssertion: NSObjectProtocol?
 
-    var onMessage: ((ChannelMessage) -> Void)?
-    /// Fires for every inbound message regardless of which view owns `onMessage`.
-    /// Set once by AppState for background notifications; never cleared by channel views.
+    // ── Per-view event subscribers ──────────────────────────────────────────
+    // Each live channel view registers a ChannelSubscriber; inbound events fan
+    // out to all of them (handlers self-filter by channelId). See the doc on
+    // ChannelSubscriber for why this is a registry and not a single callback.
+    private var subscribers: [UUID: ChannelSubscriber] = [:]
+
+    func subscribe(_ sub: ChannelSubscriber) -> UUID {
+        let token = UUID()
+        subscribers[token] = sub
+        return token
+    }
+
+    func unsubscribe(_ token: UUID) {
+        subscribers.removeValue(forKey: token)
+    }
+
+    private func dispatch(_ body: (ChannelSubscriber) -> Void) {
+        for sub in subscribers.values { body(sub) }
+    }
+
+    /// Fires for every inbound message regardless of which view is focused.
+    /// Set once by AppState for background notifications; never per-view.
     var onMessageGlobal: ((ChannelMessage) -> Void)?
     var currentRoomName: String?
-    var onOnlineUsers: (([ChannelOnlineUser]) -> Void)?
-    var onUserJoined: ((ChannelOnlineUser) -> Void)?
-    var onUserLeft: ((ChannelOnlineUser) -> Void)?
-    var onTyping: ((_ userId: String, _ name: String) -> Void)?
-    var onMessageDeleted: ((_ messageId: String, _ deletedBy: String) -> Void)?
-    var onMessageEdited: ((_ messageId: String, _ content: String, _ editedAt: String?) -> Void)?
-    var onError: ((String) -> Void)?
+    // Broadcast (live-audio) events are global app state, owned by AppState.
     var onBroadcastStarted: ((WSBroadcastStarted) -> Void)?
     var onBroadcastEnded: ((WSBroadcastEnded) -> Void)?
     var onBroadcastPublisherChanged: ((WSBroadcastPublisherChanged) -> Void)?
     var onBroadcastTokenGrant: ((WSBroadcastTokenGrant) -> Void)?
 
+    // ── Outbox (durable send queue) ──────────────────────────────────────────
+    // Every outbound message is queued here keyed by client_message_id and only
+    // removed once the server echoes it back (the echo carries the same cmid).
+    // If the socket is down at send time, or drops mid-send, the queue survives
+    // — it's persisted to UserDefaults and flushed on every (re)connect — so a
+    // message the user "sent" while offline still goes out when we reconnect,
+    // even across an app restart. Server-side INSERT is idempotent on
+    // (sender_id, client_message_id), so re-sending the same cmid never dupes.
+    private struct OutboxItem: Codable {
+        let cmid: String
+        let channelId: String
+        let content: String
+        let attachments: [ChannelAttachment]
+        let replyToId: String?
+        var attempts: Int
+    }
+    private var outbox: [OutboxItem] = []
+    private let outboxKey = "channels_outbox_v1"
+    private static let maxSendAttempts = 8
+
     override private init() {
         super.init()
+        loadOutbox()
     }
 
     private func beginNoNap() {
@@ -96,6 +151,11 @@ final class ChannelsWebSocket: NSObject {
         currentRoom = nil
         subscribedRooms = []
         roomNames = [:]
+        // Full teardown (logout). Drop subscribers + the outbox so we never
+        // resend a previous user's queued messages after a new login.
+        subscribers = [:]
+        outbox = []
+        persistOutbox()
     }
 
     func joinRoom(channelId: String, channelName: String? = nil) {
@@ -139,26 +199,6 @@ final class ChannelsWebSocket: NSObject {
         currentRoomName = name
     }
 
-    func clearCallbacks() {
-        onMessage = nil
-        onOnlineUsers = nil
-        onUserJoined = nil
-        onUserLeft = nil
-        onTyping = nil
-        onReactionUpdate = nil
-        onError = nil
-        // Broadcast handlers are owned by AppState (global). Don't clear here
-        // — view teardown shouldn't kill the singleton's broadcast routing.
-    }
-
-    /// Clear callbacks only if no other view has joined a different room since
-    /// the caller wired them up. Avoids the SwiftUI teardown race where a
-    /// disappearing channel view wipes the callbacks just set by the next one.
-    func clearCallbacksIfRoomMatches(_ channelId: String) {
-        guard currentRoom == nil || currentRoom == channelId else { return }
-        clearCallbacks()
-    }
-
     func leaveRoom(channelId: String) {
         if currentRoom == channelId { currentRoom = nil }
         subscribedRooms.remove(channelId)
@@ -167,18 +207,55 @@ final class ChannelsWebSocket: NSObject {
         }
     }
 
-    var onReactionUpdate: ((_ messageId: String, _ reactions: [ChannelReaction]) -> Void)?
-
     func sendMessage(channelId: String, content: String, attachments: [ChannelAttachment] = [], replyToId: String? = nil, clientMessageId: String? = nil) {
+        // Always carry a client_message_id: it's both the optimistic-UI
+        // correlation key and the server-side idempotency key for safe resends.
+        let cmid = clientMessageId ?? UUID().uuidString
+        let item = OutboxItem(
+            cmid: cmid, channelId: channelId, content: content,
+            attachments: attachments, replyToId: replyToId, attempts: 0,
+        )
+        enqueueOutbox(item)
+        attemptSend(cmid: cmid)
+    }
+
+    // ── Outbox plumbing ──────────────────────────────────────────────────────
+
+    private func enqueueOutbox(_ item: OutboxItem) {
+        if let idx = outbox.firstIndex(where: { $0.cmid == item.cmid }) {
+            outbox[idx] = item
+        } else {
+            outbox.append(item)
+        }
+        persistOutbox()
+    }
+
+    /// Transmit a single queued message. No-op (leaves it queued) if the socket
+    /// isn't up — connect() will flush on open. Drops the item after too many
+    /// attempts so a permanently-rejected message can't loop forever.
+    private func attemptSend(cmid: String) {
+        guard let idx = outbox.firstIndex(where: { $0.cmid == cmid }) else { return }
+        guard isConnected, let task else {
+            connect()   // didOpenWithProtocol flushes the whole outbox
+            return
+        }
+        if outbox[idx].attempts >= Self.maxSendAttempts {
+            outbox.remove(at: idx)
+            persistOutbox()
+            return
+        }
+        outbox[idx].attempts += 1
+        persistOutbox()
+        let item = outbox[idx]
         var payload: [String: Any] = [
             "type": "message",
-            "channel_id": channelId,
-            "content": content,
+            "channel_id": item.channelId,
+            "content": item.content,
+            "client_message_id": item.cmid,
         ]
-        if let replyToId { payload["reply_to_id"] = replyToId }
-        if let clientMessageId { payload["client_message_id"] = clientMessageId }
-        if !attachments.isEmpty {
-            payload["attachments"] = attachments.map { att in
+        if let replyToId = item.replyToId { payload["reply_to_id"] = replyToId }
+        if !item.attachments.isEmpty {
+            payload["attachments"] = item.attachments.map { att in
                 [
                     "url": att.url,
                     "filename": att.filename,
@@ -187,7 +264,48 @@ final class ChannelsWebSocket: NSObject {
                 ]
             }
         }
-        send(payload)
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let str = String(data: data, encoding: .utf8) else { return }
+        task.send(.string(str)) { [weak self] error in
+            if error != nil {
+                // Stays in the outbox; reconnect's flush retries it.
+                Task { @MainActor in self?.scheduleReconnect() }
+            }
+        }
+    }
+
+    /// Re-send everything queued. Called on every (re)connect once the handshake
+    /// is up. Ensures each queued channel is joined first so the server echoes
+    /// our message back to us — the echo is what reconciles the optimistic row.
+    private func flushOutbox() {
+        guard isConnected, !outbox.isEmpty else { return }
+        for channelId in Set(outbox.map { $0.channelId }) {
+            subscribedRooms.insert(channelId)
+            send(["type": "join_room", "channel_id": channelId])
+        }
+        for item in outbox { attemptSend(cmid: item.cmid) }
+    }
+
+    /// Remove a message from the outbox once the server confirms it (the echo
+    /// carries the original client_message_id).
+    private func confirmSent(cmid: String?) {
+        guard let cmid, !cmid.isEmpty else { return }
+        if let idx = outbox.firstIndex(where: { $0.cmid == cmid }) {
+            outbox.remove(at: idx)
+            persistOutbox()
+        }
+    }
+
+    private func persistOutbox() {
+        if let data = try? JSONEncoder().encode(outbox) {
+            UserDefaults.standard.set(data, forKey: outboxKey)
+        }
+    }
+
+    private func loadOutbox() {
+        guard let data = UserDefaults.standard.data(forKey: outboxKey),
+              let items = try? JSONDecoder().decode([OutboxItem].self, from: data) else { return }
+        outbox = items
     }
 
     func sendTyping(channelId: String) {
@@ -245,7 +363,9 @@ final class ChannelsWebSocket: NSObject {
             if let msgDict = obj["message"] as? [String: Any],
                let msgData = try? JSONSerialization.data(withJSONObject: msgDict),
                let msg = try? JSONDecoder().decode(ChannelMessage.self, from: msgData) {
-                onMessage?(msg)
+                // Server confirmed delivery — drop it from the resend queue.
+                confirmSent(cmid: msg.clientMessageId)
+                dispatch { $0.onMessage?(msg) }
                 onMessageGlobal?(msg)
             }
         case "online_users":
@@ -254,39 +374,42 @@ final class ChannelsWebSocket: NSObject {
                     guard let id = dict["id"] as? String, let name = dict["name"] as? String else { return nil }
                     return ChannelOnlineUser(id: id, name: name, avatarUrl: dict["avatar_url"] as? String)
                 }
-                onOnlineUsers?(parsed)
+                dispatch { $0.onOnlineUsers?(parsed) }
             }
         case "user_joined":
             if let user = obj["user"] as? [String: Any],
                let id = user["id"] as? String, let name = user["name"] as? String {
-                onUserJoined?(ChannelOnlineUser(id: id, name: name, avatarUrl: user["avatar_url"] as? String))
+                let u = ChannelOnlineUser(id: id, name: name, avatarUrl: user["avatar_url"] as? String)
+                dispatch { $0.onUserJoined?(u) }
             }
         case "user_left":
             if let user = obj["user"] as? [String: Any],
                let id = user["id"] as? String, let name = user["name"] as? String {
-                onUserLeft?(ChannelOnlineUser(id: id, name: name, avatarUrl: user["avatar_url"] as? String))
+                let u = ChannelOnlineUser(id: id, name: name, avatarUrl: user["avatar_url"] as? String)
+                dispatch { $0.onUserLeft?(u) }
             }
         case "typing":
             if let user = obj["user"] as? [String: Any],
                let id = user["id"] as? String, let name = user["name"] as? String {
-                onTyping?(id, name)
+                dispatch { $0.onTyping?(id, name) }
             }
         case "message_deleted":
             if let messageId = obj["message_id"] as? String,
                let deletedBy = obj["deleted_by"] as? String {
-                onMessageDeleted?(messageId, deletedBy)
+                dispatch { $0.onMessageDeleted?(messageId, deletedBy) }
             }
         case "message_edited":
             if let messageId = obj["message_id"] as? String,
                let content = obj["content"] as? String {
-                onMessageEdited?(messageId, content, obj["edited_at"] as? String)
+                let editedAt = obj["edited_at"] as? String
+                dispatch { $0.onMessageEdited?(messageId, content, editedAt) }
             }
         case "reaction_update":
             if let messageId = obj["message_id"] as? String,
                let reactionsArr = obj["reactions"] as? [[String: Any]],
                let reactionsData = try? JSONSerialization.data(withJSONObject: reactionsArr),
                let reactions = try? JSONDecoder().decode([ChannelReaction].self, from: reactionsData) {
-                onReactionUpdate?(messageId, reactions)
+                dispatch { $0.onReactionUpdate?(messageId, reactions) }
             }
         case "broadcast.started":
             if let channelId = obj["channel_id"] as? String,
@@ -334,7 +457,7 @@ final class ChannelsWebSocket: NSObject {
                 )
             }
         case "error":
-            if let msg = obj["message"] as? String { onError?(msg) }
+            if let msg = obj["message"] as? String { dispatch { $0.onError?(msg) } }
         default:
             break
         }
@@ -406,6 +529,10 @@ extension ChannelsWebSocket: URLSessionWebSocketDelegate {
             for roomId in self.subscribedRooms {
                 self.send(["type": "join_room", "channel_id": roomId])
             }
+            // Re-send anything queued while we were down (incl. messages
+            // persisted to the outbox across an app restart). Joins above run
+            // first so the server echoes each resent message back to us.
+            self.flushOutbox()
         }
     }
 

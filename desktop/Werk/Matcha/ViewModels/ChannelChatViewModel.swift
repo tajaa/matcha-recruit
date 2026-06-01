@@ -22,6 +22,17 @@ final class ChannelChatViewModel {
     private static let pendingFailureSeconds: UInt64 = 8
     private let ws = ChannelsWebSocket.shared
     private let service = ChannelsService.shared
+    /// This VM's registration token on the shared socket. Each channel view owns
+    /// its own subscription, so a second view wiring up can no longer steal this
+    /// one's message echoes (the bug that flipped collab-chat sends to "failed").
+    private var wsToken: UUID?
+
+    private func unsubscribeFromWS() {
+        if let token = wsToken {
+            ws.unsubscribe(token)
+            wsToken = nil
+        }
+    }
 
     /// Called by ChannelDetailView right after an optimistic-pending entry is
     /// appended to `messages`. Starts an 8s timer; if the WS echo doesn't
@@ -48,12 +59,10 @@ final class ChannelChatViewModel {
     }
 
     func start(channelId: String) async {
-        // Wipe any stale closure from a prior channel BEFORE the await on
-        // loadChannel. Otherwise the previous channel's `onMessage` (whose
-        // captured `channelId` guard still passes for that prior channel) can
-        // fire during this view's REST fetch and append a stale-channel
-        // message into the just-replaced `messages` array.
-        ws.clearCallbacks()
+        // Drop any prior subscription BEFORE the await on loadChannel, so a
+        // stale closure from a previous channel can't fire during this view's
+        // REST fetch and append into the just-replaced `messages` array.
+        unsubscribeFromWS()
         cancelAllPendingTimeouts()
         self.channelId = channelId
         await loadChannel(channelId: channelId)
@@ -71,7 +80,7 @@ final class ChannelChatViewModel {
             await start(channelId: channelId)
             return
         }
-        ws.clearCallbacks()
+        unsubscribeFromWS()
         cancelAllPendingTimeouts()
         wireCallbacks(channelId: channelId)
         ws.connect()
@@ -80,7 +89,7 @@ final class ChannelChatViewModel {
     }
 
     func stop(channelId: String) {
-        ws.clearCallbacksIfRoomMatches(channelId)
+        unsubscribeFromWS()
         cancelAllPendingTimeouts()
     }
 
@@ -135,15 +144,20 @@ final class ChannelChatViewModel {
     }
 
     private func wireCallbacks(channelId: String) {
-        // Closures capture `self` (a class) by reference — mutations propagate
-        // to the live SwiftUI view via @Observable tracking.
-        ws.onMessage = { [weak self] msg in
+        // Replace any existing subscription, then register a fresh one. Closures
+        // capture `self` (a class) by reference — mutations propagate to the
+        // live SwiftUI view via @Observable tracking. Every handler self-filters
+        // by `channelId` since the socket fans out to all subscribers.
+        unsubscribeFromWS()
+        var sub = ChannelSubscriber()
+        sub.onMessage = { [weak self] msg in
             guard let self, msg.channelId == channelId else { return }
             // Reconcile optimistic-pending entries first. The sender's own echo
             // carries the client_message_id we generated on send; replace the
             // pending struct (whose `id` was the client UUID) with the
             // server-confirmed one so the row keeps its position but flips
-            // pending=false and gets the real server id + timestamp.
+            // pending=false and gets the real server id + timestamp. Matching
+            // `failed` rows too means a resent message auto-heals a red row.
             if let cmid = msg.clientMessageId, !cmid.isEmpty,
                let idx = self.messages.firstIndex(where: { $0.clientMessageId == cmid && ($0.pending || $0.failed) }) {
                 self.cancelPendingTimeout(clientMessageId: cmid)
@@ -156,39 +170,39 @@ final class ChannelChatViewModel {
                 self.messages.append(msg)
             }
         }
-        ws.onMessageDeleted = { [weak self] messageId, deletedBy in
+        sub.onMessageDeleted = { [weak self] messageId, deletedBy in
             guard let self else { return }
             if let idx = self.messages.firstIndex(where: { $0.id == messageId }) {
                 self.messages[idx].deletedAt = ISO8601DateFormatter().string(from: Date())
                 self.messages[idx].deletedBy = deletedBy
             }
         }
-        ws.onMessageEdited = { [weak self] messageId, content, editedAt in
+        sub.onMessageEdited = { [weak self] messageId, content, editedAt in
             guard let self else { return }
             if let idx = self.messages.firstIndex(where: { $0.id == messageId }) {
                 self.messages[idx].content = content
                 self.messages[idx].editedAt = editedAt ?? ISO8601DateFormatter().string(from: Date())
             }
         }
-        ws.onReactionUpdate = { [weak self] messageId, reactions in
+        sub.onReactionUpdate = { [weak self] messageId, reactions in
             guard let self else { return }
             if let idx = self.messages.firstIndex(where: { $0.id == messageId }) {
                 self.messages[idx].reactions = reactions
             }
         }
-        ws.onOnlineUsers = { [weak self] users in
+        sub.onOnlineUsers = { [weak self] users in
             self?.onlineUsers = users
         }
-        ws.onUserJoined = { [weak self] user in
+        sub.onUserJoined = { [weak self] user in
             guard let self else { return }
             if !self.onlineUsers.contains(where: { $0.id == user.id }) {
                 self.onlineUsers.append(user)
             }
         }
-        ws.onUserLeft = { [weak self] user in
+        sub.onUserLeft = { [weak self] user in
             self?.onlineUsers.removeAll { $0.id == user.id }
         }
-        ws.onTyping = { [weak self] userId, name in
+        sub.onTyping = { [weak self] userId, name in
             guard let self else { return }
             self.typingUsers[userId] = name.lowercased().replacingOccurrences(of: " ", with: "_")
             self.typingClearTask?.cancel()
@@ -197,8 +211,9 @@ final class ChannelChatViewModel {
                 self?.typingUsers.removeValue(forKey: userId)
             }
         }
-        ws.onError = { [weak self] msg in
+        sub.onError = { [weak self] msg in
             self?.errorMessage = msg
         }
+        wsToken = ws.subscribe(sub)
     }
 }
