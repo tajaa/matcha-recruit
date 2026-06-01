@@ -669,6 +669,10 @@ class ProjectDetailViewModel {
                 var seeded: [String: [MWProjectFile]] = [:]
                 for t in list {
                     if let atts = t.attachments { seeded[t.id] = atts }
+                    // Seed the unviewed-updates baseline so a ticket's existing
+                    // history isn't flagged as new on first sight (we have
+                    // recentEventIds here, at the board level).
+                    TicketUpdatesStore.shared.baselineIfNeeded(t)
                 }
                 taskFiles = seeded
                 isLoadingTasks = false
@@ -852,6 +856,8 @@ class ProjectDetailViewModel {
         if merged.reviewCycleCount == nil { merged.reviewCycleCount = tasks[i].reviewCycleCount }
         if merged.subtaskTotal == nil { merged.subtaskTotal = tasks[i].subtaskTotal }
         if merged.subtaskDone == nil { merged.subtaskDone = tasks[i].subtaskDone }
+        if merged.updateCount == nil { merged.updateCount = tasks[i].updateCount }
+        if merged.recentEventIds == nil { merged.recentEventIds = tasks[i].recentEventIds }
         tasks[i] = merged
     }
 

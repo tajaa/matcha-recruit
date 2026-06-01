@@ -123,6 +123,7 @@
 		FC22CC98585FB00D59E39358 /* PreviewPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCD9DCBDB9CC47BA70B5F0FF /* PreviewPanelView.swift */; };
 		FF11223344556677AA000001 /* PeopleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF11223344556677BB000001 /* PeopleView.swift */; };
 		FFFF1S1S1S1S1S1S01010001 /* ChannelStarStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFFF1S1S1S1S1S1S01010002 /* ChannelStarStore.swift */; };
+		FFFF1U1U1U1U1U1U01010001 /* TicketUpdatesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFFF1U1U1U1U1U1U01010002 /* TicketUpdatesStore.swift */; };
 		AA11BB22CC33DD44EE5500F6 /* SidebarSectionOrderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE6600F6 /* SidebarSectionOrderStore.swift */; };
 		G1G2G3000000000000000001 /* RichJournalEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000002 /* RichJournalEditor.swift */; };
 		G1G2G3000000000000000003 /* JournalEditorToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000004 /* JournalEditorToolbar.swift */; };
@@ -247,6 +248,7 @@
 		FF11223344556677BB000001 /* PeopleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleView.swift; sourceTree = "<group>"; };
 		FF4C96E6C5F0062D21DAB318 /* ChannelMessageComposer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChannelMessageComposer.swift; sourceTree = "<group>"; };
 		FFFF1S1S1S1S1S1S01010002 /* ChannelStarStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelStarStore.swift; sourceTree = "<group>"; };
+		FFFF1U1U1U1U1U1U01010002 /* TicketUpdatesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TicketUpdatesStore.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE6600F6 /* SidebarSectionOrderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarSectionOrderStore.swift; sourceTree = "<group>"; };
 		G1G2G3000000000000000002 /* RichJournalEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RichJournalEditor.swift; sourceTree = "<group>"; };
 		G1G2G3000000000000000004 /* JournalEditorToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalEditorToolbar.swift; sourceTree = "<group>"; };
@@ -318,6 +320,7 @@
 				BC01DD22EE33FF445566BB02 /* BroadcastService.swift */,
 				C0C0C0C0C0C0C0C001010002 /* ProjectWebSocket.swift */,
 				FFFF1S1S1S1S1S1S01010002 /* ChannelStarStore.swift */,
+				FFFF1U1U1U1U1U1U01010002 /* TicketUpdatesStore.swift */,
 				AA11BB22CC33DD44EE6600F6 /* SidebarSectionOrderStore.swift */,
 				5C0FF11E570E000000000002 /* WorkDetailVMStore.swift */,
 				43B3F0299F983943AFA329D0 /* Support */,
@@ -751,6 +754,7 @@
 				EEEE0J0J0J0J0J0J01010007 /* NewJournalSheet.swift in Sources */,
 				EEEE0J0J0J0J0J0J01010009 /* InviteToJournalSheet.swift in Sources */,
 				FFFF1S1S1S1S1S1S01010001 /* ChannelStarStore.swift in Sources */,
+				FFFF1U1U1U1U1U1U01010001 /* TicketUpdatesStore.swift in Sources */,
 				AA11BB22CC33DD44EE5500F6 /* SidebarSectionOrderStore.swift in Sources */,
 				G1G2G3000000000000000001 /* RichJournalEditor.swift in Sources */,
 				G1G2G3000000000000000003 /* JournalEditorToolbar.swift in Sources */,

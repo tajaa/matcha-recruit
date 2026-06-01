@@ -91,6 +91,29 @@ struct TaskViewerSheet: View {
         history.filter { $0.eventType == "activity" }
     }
 
+    /// Viewable update events for the UPDATES checkoff list — the same set the
+    /// card badge counts (`TicketUpdatesStore.countedEventTypes`). Unviewed
+    /// sorted above viewed, each group newest-first.
+    private var updateEvents: [MWTaskHistoryEntry] {
+        let store = TicketUpdatesStore.shared
+        return history
+            .filter { TicketUpdatesStore.countedEventTypes.contains($0.eventType) }
+            .sorted { a, b in
+                let av = store.isViewed(taskId: task.id, eventId: a.id)
+                let bv = store.isViewed(taskId: task.id, eventId: b.id)
+                if av != bv { return !av }          // unviewed first
+                return a.createdAt > b.createdAt    // then newest first
+            }
+    }
+
+    private var unviewedUpdateCount: Int {
+        let store = TicketUpdatesStore.shared
+        return history.reduce(into: 0) { acc, e in
+            if TicketUpdatesStore.countedEventTypes.contains(e.eventType),
+               !store.isViewed(taskId: task.id, eventId: e.id) { acc += 1 }
+        }
+    }
+
     private var assigneeName: String? {
         // Prefer the server-provided assignee (clean name with email-derived
         // fallback in MWProjectTask.displayAssignee). Fall back to a local
@@ -256,6 +279,10 @@ struct TaskViewerSheet: View {
             // record). Hidden on single-round tickets.
             currentRoundCard
 
+            // Unviewed updates — what changed on this ticket since the user last
+            // checked it off. Separate from the checklist (which is work-done).
+            updatesSection
+
             if let description = task.description, !description.isEmpty {
                 ScrollView {
                     Text(description)
@@ -343,6 +370,11 @@ struct TaskViewerSheet: View {
         .frame(maxHeight: 760)
         .background(Color.appBackground)
         .task {
+            // Ensure the per-user updates store is bound to this ticket's
+            // project (idempotent if the board already configured it; corrects
+            // it if the viewer was opened from a non-board surface).
+            TicketUpdatesStore.shared.configure(
+                userId: appState.currentUser?.id, projectId: viewModel.project?.id)
             if viewModel.taskFiles[task.id] == nil {
                 await viewModel.loadTaskFiles(taskId: task.id)
             }
@@ -429,6 +461,15 @@ struct TaskViewerSheet: View {
             projectId: pid, taskId: task.id
         ) {
             history = rows
+            // Your own actions aren't "updates to view" for you — auto-mark
+            // counted events you triggered as viewed so your own comment/move
+            // never lands as an unviewed badge on your own board.
+            if let me = appState.currentUser?.id {
+                for e in rows where e.actorUserId == me
+                    && TicketUpdatesStore.countedEventTypes.contains(e.eventType) {
+                    TicketUpdatesStore.shared.markViewed(taskId: task.id, eventId: e.id)
+                }
+            }
         }
         historyLoaded = true
     }
@@ -721,6 +762,63 @@ struct TaskViewerSheet: View {
                     onPreview: { previewFile = $0 }
                 )
             }
+        }
+    }
+
+    /// UPDATES — per-update "viewed" checkoff. Lists every viewable history
+    /// event (comments / round changes / subtasks added / moves+send-backs)
+    /// with a viewed toggle that's deliberately distinct from the checklist's
+    /// completion checks. Unviewed rows sit on top.
+    @ViewBuilder
+    private var updatesSection: some View {
+        let events = updateEvents
+        if !events.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: "bell.badge")
+                        .font(.system(size: 10))
+                        .foregroundColor(.blue)
+                    Text("UPDATES")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .tracking(0.5)
+                    if unviewedUpdateCount > 0 {
+                        Text("\(unviewedUpdateCount) unviewed")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.blue.opacity(0.15))
+                            .cornerRadius(4)
+                    }
+                    Spacer()
+                    if unviewedUpdateCount > 0 {
+                        Button {
+                            TicketUpdatesStore.shared.markAllViewed(
+                                taskId: task.id, eventIds: events.map(\.id))
+                        } label: {
+                            Text("Mark all viewed")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(.matcha500)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                ForEach(events) { e in
+                    UpdateCheckoffRow(
+                        entry: e,
+                        isViewed: TicketUpdatesStore.shared.isViewed(taskId: task.id, eventId: e.id),
+                        onToggle: { viewed in
+                            TicketUpdatesStore.shared.setViewed(
+                                taskId: task.id, eventId: e.id, isViewed: viewed)
+                        }
+                    )
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.zinc800.opacity(0.35))
+            .cornerRadius(6)
         }
     }
 
@@ -1529,7 +1627,7 @@ private struct EventRow: View {
         }
     }
 
-    private static func icon(for event: String) -> String {
+    fileprivate static func icon(for event: String) -> String {
         switch event {
         case "created": return "plus.circle.fill"
         case "column_change": return "arrow.right.circle"
@@ -1565,7 +1663,7 @@ private struct EventRow: View {
         }
     }
 
-    private static func describe(_ e: MWTaskHistoryEntry) -> String {
+    fileprivate static func describe(_ e: MWTaskHistoryEntry) -> String {
         let who = (e.actorName?.isEmpty == false ? e.actorName! : "Someone")
         switch e.eventType {
         case "created":
@@ -1620,6 +1718,61 @@ private struct EventRow: View {
 
     private static func columnLabel(_ raw: String) -> String {
         raw.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+}
+
+/// One row in the UPDATES checkoff list: a compact label for a history event
+/// plus a "viewed" toggle. The toggle is a circle/checkmark-circle, distinct
+/// from the checklist's square completion boxes, so "I've read this" never
+/// reads as "this work is done." Viewed rows dim.
+private struct UpdateCheckoffRow: View {
+    let entry: MWTaskHistoryEntry
+    let isViewed: Bool
+    let onToggle: (Bool) -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button { onToggle(!isViewed) } label: {
+                Image(systemName: isViewed ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14))
+                    .foregroundColor(isViewed ? .matcha500 : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help(isViewed ? "Mark as not viewed" : "Mark as viewed")
+            Image(systemName: Self.icon(entry))
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+                .frame(width: 16, alignment: .center)
+            Text(Self.label(entry))
+                .font(.system(size: 11))
+                .foregroundColor(.white.opacity(isViewed ? 0.45 : 0.9))
+                .lineLimit(2)
+                .strikethrough(isViewed, color: .secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private static func icon(_ e: MWTaskHistoryEntry) -> String {
+        e.eventType == "activity" ? "bubble.left" : EventRow.icon(for: e.eventType)
+    }
+
+    /// Compact one-liner. Reuses EventRow.describe for structural events;
+    /// activity (comments) get bespoke wording incl. an image-only fallback.
+    private static func label(_ e: MWTaskHistoryEntry) -> String {
+        guard e.eventType == "activity" else { return EventRow.describe(e) }
+        let who = e.actorName?.isEmpty == false ? e.actorName! : "Someone"
+        let body = (e.metadata?["body"] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
+        if !body.isEmpty {
+            let excerpt = body.count > 80 ? String(body.prefix(80)) + "\u{2026}" : body
+            return "\(who) commented: \u{201C}\(excerpt)\u{201D}"
+        }
+        if let ids = e.attachmentIds, !ids.isEmpty {
+            return ids.count == 1 ? "\(who) added an image" : "\(who) added \(ids.count) images"
+        }
+        return "\(who) commented"
     }
 }
 

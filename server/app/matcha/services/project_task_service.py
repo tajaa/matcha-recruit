@@ -77,6 +77,17 @@ _ALLOWED_OUTCOMES = {"open", "won", "lost"}
 # Sales follow-up activity kinds, logged onto the task history timeline.
 _ALLOWED_ACTIVITY_KINDS = {"call", "email", "note", "meeting"}
 
+# History event types that count as a "viewable update" on a ticket — drives
+# the kanban card's unviewed-updates badge + the viewer's UPDATES checkoff list.
+# Keep in lock-step with the client's COUNTED_UPDATE_EVENTS (TicketUpdatesStore):
+# comments, round changes, subtasks added, column moves + review send-backs.
+# (Images count only when attached to a comment — they have no standalone
+# history row.) Intentionally excludes assignee/description/progress-note edits,
+# subtask completion/reopen/delete, created, and deleted.
+COUNTED_UPDATE_EVENTS = (
+    'activity', 'round_started', 'subtask_added', 'column_change', 'review_rejected',
+)
+
 # Email + bell templates for forward-only column transitions. Destinations
 # other than these (e.g. moving back to 'todo') intentionally fire nothing.
 _TRANSITION_TEMPLATES: dict[str, dict[str, str]] = {
@@ -210,9 +221,12 @@ async def log_task_activity(
 
 
 async def list_project_tasks(project_id: UUID) -> list[dict]:
+    # Inline the counted-event literals (code constants, not user input) so the
+    # badge subqueries stay in lock-step with COUNTED_UPDATE_EVENTS.
+    _counted = ", ".join(f"'{e}'" for e in COUNTED_UPDATE_EVENTS)
     async with get_connection() as conn:
         rows = await conn.fetch(
-            """
+            f"""
             SELECT t.id, t.project_id, t.company_id, t.created_by, t.title, t.description,
                    t.due_date, t.priority, t.status, t.board_column, t.assigned_to,
                    t.completed_at, t.created_at, t.updated_at, t.progress_note, t.category,
@@ -246,6 +260,20 @@ async def list_project_tasks(project_id: UUID) -> list[dict]:
                       WHERE s.task_id = t.id AND s.is_done
                         AND s.round_index = (SELECT COALESCE(MAX(round_index), 1)
                                              FROM mw_subtasks s3 WHERE s3.task_id = t.id)) AS subtask_done,
+                   -- Unviewed-updates badge on the card. update_count = total
+                   -- "viewable" history events (comments / rounds / subtasks
+                   -- added / moves+send-backs); recent_event_ids = the newest
+                   -- such event ids so the client can diff against its per-user
+                   -- viewed set (TicketUpdatesStore) without fetching full
+                   -- history per card. Capped at 100 (overflow is cosmetic).
+                   (SELECT COUNT(*) FROM mw_task_history h3
+                      WHERE h3.task_id = t.id
+                        AND h3.event_type IN ({_counted})) AS update_count,
+                   ARRAY(SELECT h4.id::text FROM mw_task_history h4
+                      WHERE h4.task_id = t.id
+                        AND h4.event_type IN ({_counted})
+                      ORDER BY h4.created_at DESC
+                      LIMIT 100) AS recent_event_ids,
                    -- Split assignee fields so the client can pick a
                    -- human-readable name and never fall back to showing
                    -- a raw email in cards / tooltips. Older callsites

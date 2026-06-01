@@ -259,6 +259,8 @@ struct KanbanBoardView: View {
         .background(ThemeRadialBackground())
         .onAppear {
             if viewModel.project?.pipelineMode == true { viewMode = .pipeline }
+            TicketUpdatesStore.shared.configure(
+                userId: appState.currentUser?.id, projectId: viewModel.project?.id)
             maybeReplay()
             openPendingTaskIfPossible()
         }

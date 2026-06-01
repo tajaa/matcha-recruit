@@ -133,6 +133,25 @@ struct KanbanCardView: View {
                         .help("Sent back from review \(cycles) time\(cycles == 1 ? "" : "s")")
                     }
 
+                    // Unviewed updates — comments / round changes / subtasks
+                    // added / moves since this user last marked them viewed.
+                    // Distinct blue bell so it doesn't read as the orange churn
+                    // chip. Reading the store here tracks it: ticking updates
+                    // off in the viewer decrements this live.
+                    let unviewedUpdates = TicketUpdatesStore.shared.unviewedCount(task)
+                    if unviewedUpdates > 0 {
+                        HStack(spacing: 1) {
+                            Image(systemName: "bell.badge.fill").font(.system(size: 7))
+                            Text("\(unviewedUpdates)").font(.system(size: 8, weight: .bold))
+                        }
+                        .foregroundColor(.blue)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.blue.opacity(0.15))
+                        .cornerRadius(3)
+                        .help("\(unviewedUpdates) unviewed update\(unviewedUpdates == 1 ? "" : "s")")
+                    }
+
                     if pipelineMode {
                         if let dv = task.dealValue, dv > 0 {
                             Text(formatDealValue(dv))

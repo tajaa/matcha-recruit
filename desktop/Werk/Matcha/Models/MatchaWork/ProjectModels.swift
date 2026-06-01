@@ -404,6 +404,13 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
     /// Card face shows "done/total" with a thin bar. Treat nil as 0.
     var subtaskTotal: Int? = nil
     var subtaskDone: Int? = nil
+    /// Unviewed-updates badge inputs, present only on the list query (nil on
+    /// create/update/WS payloads — preserved across those in the VM). `update_count`
+    /// is the total count of viewable history events; `recentEventIds` are the
+    /// newest such event ids, diffed against the per-user viewed set in
+    /// TicketUpdatesStore to compute the unviewed count. Treat nil as "unknown".
+    var updateCount: Int? = nil
+    var recentEventIds: [String]? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, title, description, priority, status, attachments, category
@@ -412,6 +419,8 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
         case reviewCycleCount = "review_cycle_count"
         case subtaskTotal = "subtask_total"
         case subtaskDone = "subtask_done"
+        case updateCount = "update_count"
+        case recentEventIds = "recent_event_ids"
         case projectId = "project_id"
         case boardColumn = "board_column"
         case pipelineColumn = "pipeline_column"
