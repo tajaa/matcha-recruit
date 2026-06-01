@@ -42,6 +42,7 @@ from app.matcha.models.ir_incident import (
 from ._shared import (
     _company_filter,
     _gather_incident_people,
+    _hydrate_involved_employees,
     _resolve_employee_refs,
     _safe_json_loads,
     _sync_incident_people,
@@ -794,11 +795,17 @@ async def get_incident(
             str(incident_id),
         )
 
+        # Hydrate roster employees (names for involved_employee_ids).
+        involved_employees = await _hydrate_involved_employees(
+            conn, company_id, row["involved_employee_ids"]
+        )
+
     response_row = dict(row)
     response_row["involved_people"] = [
         {"id": pr["id"], "display_name": pr["display_name"], "role": pr["role"]}
         for pr in people_rows
     ]
+    response_row["involved_employees"] = involved_employees
     return row_to_response(response_row, row["document_count"])
 
 
@@ -1066,6 +1073,12 @@ async def update_incident(
         response_row["location_name"] = location_name
         response_row["location_city"] = location_city
         response_row["location_state"] = location_state
+        # Hydrate roster employees so the PUT response carries names back and
+        # the detail page re-renders the involved-employee list immediately.
+        response_row["involved_employees"] = await _hydrate_involved_employees(
+            conn, str(row.get("company_id") or company_id) if (row.get("company_id") or company_id) else None,
+            row.get("involved_employee_ids"),
+        )
 
         if status_changed:
             effective_company_id = row.get("company_id") or company_id

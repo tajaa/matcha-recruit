@@ -166,6 +166,48 @@ async def _resolve_employee_refs(
     return out or None
 
 
+async def _hydrate_involved_employees(
+    conn, company_id: Optional[str], ids,
+) -> list[dict]:
+    """Resolve involved_employee_ids (UUIDs) → roster employee detail.
+
+    Returns [{id, first_name, last_name, job_title, department,
+    employment_status}] ordered by name, scoped to the company's roster.
+    Best-effort: an empty/unreachable roster yields []. Mirrors the
+    name-resolution pattern in analytics.risk_insights.
+    """
+    if not company_id or not ids:
+        return []
+    uuids = [str(x) for x in ids if x]
+    if not uuids:
+        return []
+    try:
+        rows = await conn.fetch(
+            """
+            SELECT id, first_name, last_name, job_title, department, employment_status
+            FROM employees
+            WHERE org_id = $1 AND id = ANY($2::uuid[])
+            ORDER BY last_name, first_name
+            """,
+            company_id, uuids,
+        )
+    except Exception as e:
+        # Roster may be empty/unavailable for the tenant — don't fail the read.
+        logger.info("[IR] involved-employee hydration skipped: %s", e)
+        return []
+    return [
+        {
+            "id": r["id"],
+            "first_name": r["first_name"],
+            "last_name": r["last_name"],
+            "job_title": r["job_title"],
+            "department": r["department"],
+            "employment_status": r["employment_status"],
+        }
+        for r in rows
+    ]
+
+
 # ===========================================
 # IR People — lightweight per-person identity (matcha-lite, no roster)
 # ===========================================
@@ -1224,6 +1266,7 @@ def row_to_response(row, document_count: int = 0) -> IRIncidentResponse:
         corrective_actions=row["corrective_actions"],
         involved_employee_ids=row.get("involved_employee_ids") or [],
         involved_people=row.get("involved_people") or [],
+        involved_employees=row.get("involved_employees") or [],
         er_case_id=row.get("er_case_id"),
         document_count=document_count,
         company_id=row.get("company_id"),

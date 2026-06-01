@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 import { api } from '../../api/client'
 import { Button, Input, Modal, Select, Textarea } from '../ui'
 import { IRPersonMultiSelect } from './IRPersonMultiSelect'
+import { EmployeeMultiSelect } from '../employees/EmployeeMultiSelect'
+import { useMe } from '../../hooks/useMe'
 import type { IRIncident } from '../../types/ir'
 
 type LocationRow = {
@@ -19,6 +21,7 @@ const EMPTY_FORM = {
   location_id: '',
   description: '',
   involved: [] as string[],
+  involved_employee_ids: [] as string[],
   next_steps: '',
 }
 
@@ -36,6 +39,8 @@ type Props = {
 }
 
 export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
+  const { hasFeature } = useMe()
+  const hasRoster = hasFeature('employees')
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [locations, setLocations] = useState<LocationRow[] | null>(null)
@@ -87,6 +92,7 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
         location: selectedLocation ? locationLabel(selectedLocation) : null,
         reported_by_name: form.reported_by_name.trim() || 'Unknown',
         witnesses,
+        involved_employee_ids: form.involved_employee_ids,
         corrective_actions: form.next_steps.trim() || null,
       })
       setForm(EMPTY_FORM)
@@ -151,6 +157,18 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
           onChange={(e) => setForm({ ...form, description: e.target.value })}
           placeholder="What happened? Include relevant details — Intelligent Theme Analysis will categorize from this."
         />
+
+        {/* Roster link — only for tenants with an employee roster (CSV/HRIS).
+            Sends employee UUIDs in involved_employee_ids; resolved server-side.
+            Separate from the free-text witnesses field below. */}
+        {hasRoster && (
+          <EmployeeMultiSelect
+            label="Involved employees (roster)"
+            value={form.involved_employee_ids}
+            onChange={(involved_employee_ids) => setForm({ ...form, involved_employee_ids })}
+            placeholder="Search employees…"
+          />
+        )}
 
         {/* These names persist to the witnesses column (role=witness in the
             per-person index). Label says "witnesses / others involved" so the

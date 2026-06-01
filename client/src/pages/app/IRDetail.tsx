@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Download } from 'lucide-react'
 import { Badge, Button, Card, Select } from '../../components/ui'
+import { EmployeeMultiSelect } from '../../components/employees/EmployeeMultiSelect'
 import { api } from '../../api/client'
 import { useIRIncident } from '../../hooks/ir/useIRIncident'
 import { IRCategorizationPanel } from '../../components/ir/IRCategorizationPanel'
@@ -42,6 +43,7 @@ const LITE_TABS = ['copilot', 'overview', 'documents'] as const
 export default function IRDetail() {
   const { incidentId } = useParams<{ incidentId: string }>()
   const { me, hasFeature } = useMe()
+  const hasRoster = hasFeature('employees')
   const showPolicyMapping = hasFeature('policies')
   const showERFeatures = hasFeature('er_copilot')
   const showUpsell = !showPolicyMapping || !showERFeatures
@@ -53,7 +55,9 @@ export default function IRDetail() {
 
   const [rootCause, setRootCause] = useState('')
   const [correctiveActions, setCorrectiveActions] = useState('')
+  const [involvedEmpIds, setInvolvedEmpIds] = useState<string[]>([])
   const [savingFields, setSavingFields] = useState(false)
+  const [savingEmployees, setSavingEmployees] = useState(false)
   const [initialized, setInitialized] = useState(false)
 
   // Persist AI analysis results across tab switches
@@ -70,7 +74,21 @@ export default function IRDetail() {
   if (incident && !initialized) {
     setRootCause(incident.root_cause || '')
     setCorrectiveActions(incident.corrective_actions || '')
+    setInvolvedEmpIds(incident.involved_employee_ids || [])
     setInitialized(true)
+  }
+
+  // UUID → display name for already-linked employees, so the picker's pills
+  // render names immediately (seeded from the hydrated involved_employees).
+  const employeeLabels: Record<string, string> = {}
+  for (const e of incident?.involved_employees || []) {
+    employeeLabels[e.id] = [e.first_name, e.last_name].filter(Boolean).join(' ').trim() || `${e.id.slice(0, 8)}…`
+  }
+
+  async function saveInvolvedEmployees() {
+    setSavingEmployees(true)
+    try { await updateIncident({ involved_employee_ids: involvedEmpIds } as never) }
+    finally { setSavingEmployees(false) }
   }
 
   async function updateField(field: string, value: string) {
@@ -202,18 +220,37 @@ export default function IRDetail() {
                   </div>
                 )}
 
-                {/* Full-platform roster path (employees table). Still shows raw
-                    ids — needs name hydration like involved_people above. */}
-                {incident.involved_employee_ids && incident.involved_employee_ids.length > 0 && (
+                {/* Roster path (employees table). Editable picker for tenants
+                    with a roster; read-only hydrated names otherwise. */}
+                {hasRoster ? (
+                  <div>
+                    <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">Involved Employees</h3>
+                    <EmployeeMultiSelect
+                      label=""
+                      value={involvedEmpIds}
+                      onChange={setInvolvedEmpIds}
+                      initialLabels={employeeLabels}
+                      placeholder="Search employees…"
+                    />
+                    {[...involvedEmpIds].sort().join(',') !== [...(incident.involved_employee_ids || [])].sort().join(',') && (
+                      <Button size="sm" className="mt-1" disabled={savingEmployees} onClick={saveInvolvedEmployees}>
+                        {savingEmployees ? 'Saving...' : 'Save'}
+                      </Button>
+                    )}
+                  </div>
+                ) : (incident.involved_employees && incident.involved_employees.length > 0) ? (
                   <div>
                     <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">Involved Employees</h3>
                     <div className="flex flex-wrap gap-1.5">
-                      {incident.involved_employee_ids.map((id) => (
-                        <span key={id} className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 font-mono">{id.slice(0, 8)}...</span>
+                      {incident.involved_employees.map((e) => (
+                        <span key={e.id} className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-200">
+                          {[e.first_name, e.last_name].filter(Boolean).join(' ') || `${e.id.slice(0, 8)}…`}
+                          {e.job_title && <span className="ml-1 text-zinc-500">· {e.job_title}</span>}
+                        </span>
                       ))}
                     </div>
                   </div>
-                )}
+                ) : null}
 
                 <div>
                   <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">Root Cause</h3>

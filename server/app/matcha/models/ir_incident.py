@@ -129,6 +129,21 @@ class InvolvedPerson(BaseModel):
     role: Literal["reporter", "involved", "witness", "interviewee"]
 
 
+class InvolvedEmployee(BaseModel):
+    """A roster employee linked to an incident via involved_employee_ids.
+
+    Hydrated (name + role context) version of the raw UUIDs, so the detail
+    view can show "Jane Doe · Nurse" instead of a truncated id. Distinct
+    from InvolvedPerson, which is the name-only no-roster identity.
+    """
+    id: UUID
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    job_title: Optional[str] = None
+    department: Optional[str] = None
+    employment_status: Optional[str] = None
+
+
 class IRIncidentResponse(BaseModel):
     """Response model for an incident report."""
     id: UUID
@@ -152,6 +167,10 @@ class IRIncidentResponse(BaseModel):
     # Lightweight no-roster people linked to this incident (ir_people).
     # Populated by the single-incident GET; empty on list/create responses.
     involved_people: list[InvolvedPerson] = []
+    # Hydrated roster employees (names for involved_employee_ids). Same
+    # lifecycle as involved_people: populated on single GET + update, empty
+    # on list/create.
+    involved_employees: list[InvolvedEmployee] = []
     er_case_id: Optional[UUID] = None
     document_count: int = 0
     company_id: Optional[UUID] = None

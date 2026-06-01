@@ -38,6 +38,9 @@ export type IRIncident = {
   // No-roster people linked to this incident (matcha-lite). Populated by the
   // single-incident GET; empty on list responses.
   involved_people?: IRInvolvedPerson[]
+  // Hydrated roster employees (names for involved_employee_ids). Same
+  // lifecycle as involved_people: populated on single GET + update.
+  involved_employees?: IRInvolvedEmployee[]
   er_case_id: string | null
   document_count: number
   company_id: string | null
@@ -64,6 +67,9 @@ export type IRIncidentCreate = {
   witnesses?: IRWitness[]
   category_data?: Record<string, unknown> | null
   corrective_actions?: string | null
+  // Roster employee UUIDs to link as involved. Resolved server-side
+  // (accepts UUIDs or HR badge external_uids).
+  involved_employee_ids?: string[]
 }
 
 export type IRDocument = {
@@ -299,6 +305,17 @@ export type IRInvolvedPerson = {
   id: string
   display_name: string
   role: IRPersonRole
+}
+
+// Roster employee linked to an incident, hydrated with name/role context.
+// Distinct from IRInvolvedPerson (name-only, no-roster).
+export type IRInvolvedEmployee = {
+  id: string
+  first_name?: string | null
+  last_name?: string | null
+  job_title?: string | null
+  department?: string | null
+  employment_status?: string | null
 }
 
 export type IRPersonSummary = {
