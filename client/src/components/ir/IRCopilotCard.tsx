@@ -12,6 +12,7 @@ export type CopilotCardActionType =
   | 'numeric_input'
   | 'text_input'
   | 'osha_emergency_alert'
+  | 'request_documents'
 
 export type CopilotCardChoice = {
   label: string
@@ -79,9 +80,10 @@ interface Props {
   busy: boolean
   onAccept: (messageId: string, cardId: string, payload?: AcceptPayload) => void
   onSkip: (messageId: string) => void
+  onOpenDocuments?: () => void
 }
 
-export default function IRCopilotCard({ messageId, card, accepted, busy, onAccept, onSkip }: Props) {
+export default function IRCopilotCard({ messageId, card, accepted, busy, onAccept, onSkip, onOpenDocuments }: Props) {
   // OSHA emergency alert renders as a distinct red blocking card with a
   // phone link and a required-notes textarea before the user can clear it.
   if (card.action.type === 'osha_emergency_alert') {
@@ -93,6 +95,55 @@ export default function IRCopilotCard({ messageId, card, accepted, busy, onAccep
         busy={busy}
         onAccept={onAccept}
       />
+    )
+  }
+
+  // Document-capture step: open the Documents tab to upload, then mark done.
+  if (card.action.type === 'request_documents') {
+    return (
+      <div
+        className={`rounded-lg border p-4 ${
+          accepted ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-zinc-700 bg-zinc-900'
+        }`}
+      >
+        <div className="flex items-start gap-3">
+          <Badge variant="warning">DOCS</Badge>
+          <div className="flex-1 min-w-0">
+            <h4 className="text-sm font-medium text-zinc-100">{card.title}</h4>
+            <p className="text-sm text-zinc-300 mt-1">{card.recommendation}</p>
+            <p className="text-xs text-zinc-500 mt-1.5">{card.rationale}</p>
+            {accepted ? (
+              <div className="mt-3 flex items-center gap-1.5 text-xs text-emerald-400">
+                <Check className="w-3.5 h-3.5" />
+                Documents reviewed
+              </div>
+            ) : (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {onOpenDocuments && (
+                  <Button size="sm" onClick={() => onOpenDocuments()} disabled={busy}>
+                    Open Documents tab
+                  </Button>
+                )}
+                <button
+                  onClick={() => onAccept(messageId, card.id)}
+                  disabled={busy}
+                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-zinc-800 text-zinc-100 hover:bg-zinc-700 border border-zinc-700 disabled:opacity-50 inline-flex items-center gap-1"
+                >
+                  {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                  I&apos;m done
+                </button>
+                <button
+                  onClick={() => onSkip(messageId)}
+                  disabled={busy}
+                  className="text-xs text-zinc-500 hover:text-zinc-300 disabled:opacity-50"
+                >
+                  Skip
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     )
   }
 

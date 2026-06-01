@@ -85,6 +85,7 @@ IR_ACTION_TYPES = {
     "numeric_input",
     "text_input",
     "osha_emergency_alert",
+    "request_documents",
 }
 
 # Mirrors copilot.py:_handle_quick_reply allowed_by_kind. Filter uses
@@ -92,6 +93,7 @@ IR_ACTION_TYPES = {
 # dispatcher doesn't route — surfacing them would just trigger the
 # "Unknown quick_reply kind:" banner when the user clicks an option.
 IR_VALID_QUICK_REPLY_KINDS = {
+    "treatment_query",
     "osha_recordable_query",
     "osha_days_type_query",
     "osha_injury_type_query",
@@ -444,7 +446,13 @@ async def load_incident_state(
         "FROM ir_incident_ai_messages WHERE incident_id = $1 ORDER BY created_at",
         incident_id,
     )
-    return dict(incident), [dict(a) for a in analyses], [dict(m) for m in messages]
+    incident_dict = dict(incident)
+    # Document count powers the deterministic flow's document-capture gate.
+    incident_dict["documents_count"] = await conn.fetchval(
+        "SELECT COUNT(*) FROM ir_incident_documents WHERE incident_id = $1",
+        incident_id,
+    ) or 0
+    return incident_dict, [dict(a) for a in analyses], [dict(m) for m in messages]
 
 
 def _coerce_metadata(value) -> Optional[dict]:
@@ -482,6 +490,19 @@ async def generate_guidance(
         and incident_status not in {"closed", "resolved"}
     ):
         return _close_intent_payload()
+
+    # Deterministic flow engine drives the guided sequence (categorize →
+    # severity → injury/OSHA → root cause → documents → actions → close).
+    # Returns the canonical next-step card for any unsatisfied gate; only
+    # falls through to the LLM for free-form rounds (closed/resolved incidents).
+    from .ir_flow import resolve_next_step
+    flow_payload = resolve_next_step(
+        incident,
+        analyses,
+        documents_count=int((incident or {}).get("documents_count") or 0),
+    )
+    if flow_payload is not None:
+        return flow_payload
 
     rate_limiter = get_rate_limiter()
     await rate_limiter.check_limit("ir_analysis", "ir_copilot")

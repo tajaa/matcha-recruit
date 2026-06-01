@@ -336,6 +336,27 @@ async def skip_copilot_card(
             json.dumps(meta), body.message_id,
         )
 
+        # Honor the skip in the deterministic flow: record the gate so
+        # resolve_next_step stops re-emitting the same card on later rounds.
+        from app.matcha.services.ir_flow import gate_key_for_card
+        gate = gate_key_for_card(stored_card.get("id") if isinstance(stored_card, dict) else None)
+        if gate:
+            await conn.execute(
+                """
+                UPDATE ir_incidents
+                SET category_data = jsonb_set(
+                    COALESCE(category_data, '{}'::jsonb),
+                    '{flow_skipped}',
+                    COALESCE(category_data->'flow_skipped', '[]'::jsonb) || to_jsonb($1::text),
+                    true
+                ),
+                updated_at = NOW()
+                WHERE id = $2
+                  AND NOT (COALESCE(category_data->'flow_skipped', '[]'::jsonb) @> to_jsonb($1::text))
+                """,
+                gate, incident_id,
+            )
+
         await log_audit(
             conn,
             incident_id=str(incident_id),
@@ -749,6 +770,7 @@ async def _handle_quick_reply(
         return {"error": "Pick an option to continue."}
 
     allowed_by_kind = {
+        "treatment_query": {"yes", "no"},
         "osha_recordable_query": {"yes", "no"},
         "osha_days_type_query": {"days_away", "restricted_duty", "neither"},
         "osha_injury_type_query": OSHA_INJURY_TYPES,
@@ -758,6 +780,48 @@ async def _handle_quick_reply(
         return {"error": f"Unknown quick_reply kind: {kind}"}
     if selected not in allowed_by_kind[kind]:
         return {"error": f"Invalid selection '{selected}' for {kind}"}
+
+    if kind == "treatment_query":
+        # Injury-assessment gate. Writes category_data.treatment_beyond_first_aid
+        # (same JSONB key the set_field path uses). "Yes" → injury is generally
+        # OSHA recordable, so chain straight into the recordable query.
+        bool_value = selected == "yes"
+        await conn.execute(
+            """
+            UPDATE ir_incidents
+            SET category_data = jsonb_set(
+                COALESCE(category_data, '{}'::jsonb),
+                '{treatment_beyond_first_aid}',
+                $1::jsonb,
+                true
+            ),
+            updated_at = NOW()
+            WHERE id = $2
+            """,
+            "true" if bool_value else "false",
+            incident_id,
+        )
+        event_extra = {
+            "field": "treatment_beyond_first_aid",
+            "field_label": "Treatment beyond first aid",
+            "previous_value": None,
+            "new_value": bool_value,
+        }
+        if bool_value:
+            next_card = build_osha_recordable_query_card()
+            inserted = await _emit_chain_card(
+                conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
+            )
+            return {
+                "event_summary": "Recorded: treatment beyond on-site first aid",
+                "event_extra": event_extra,
+                "next_card": next_card,
+                "next_message_id": str(inserted["id"]),
+            }
+        return {
+            "event_summary": "Recorded: on-site first aid only",
+            "event_extra": event_extra,
+        }
 
     if kind == "log_root_cause_query":
         # Skip-if-answered: a non-empty existing root_cause means the user
@@ -1292,6 +1356,29 @@ async def accept_copilot_card(
                         except Exception as exc:
                             logger.exception("root_cause analysis failed for incident %s", incident_id)
                             event_summary = f"Root cause analysis failed: {exc}"
+                    elif analysis_type == "recommendations":
+                        yield _sse({
+                            "type": "status",
+                            "stage": "running_analysis",
+                            "analysis_type": "recommendations",
+                            "label": "Generating recommended corrective actions…",
+                        })
+                        try:
+                            from .ai_analysis import run_recommendations_inline
+                            await run_recommendations_inline(
+                                incident_id,
+                                current_user,
+                                ip_address=request.client.host if request.client else None,
+                            )
+                            yield _sse({
+                                "type": "status",
+                                "stage": "analysis_complete",
+                                "analysis_type": "recommendations",
+                            })
+                            event_summary = "Recommendations ready — review the suggested corrective actions."
+                        except Exception as exc:
+                            logger.exception("recommendations analysis failed for incident %s", incident_id)
+                            event_summary = f"Recommendations failed: {exc}"
                     else:
                         event_summary = (
                             f"Open the AI Analysis tab and click Run on '{analysis_type.replace('_', ' ').title()}'."
@@ -1471,6 +1558,41 @@ async def accept_copilot_card(
                         )
                         next_card = chain_card
                         next_message_id = chain_message_id
+
+                elif action_type == "request_documents":
+                    # Document-capture step. The actual upload happens in the
+                    # Documents tab; accepting this card marks the prompt
+                    # satisfied (so the deterministic flow advances) and reports
+                    # how many docs are now attached.
+                    doc_count = await conn.fetchval(
+                        "SELECT COUNT(*) FROM ir_incident_documents WHERE incident_id = $1",
+                        incident_id,
+                    ) or 0
+                    await conn.execute(
+                        """
+                        UPDATE ir_incidents
+                        SET category_data = jsonb_set(
+                            COALESCE(category_data, '{}'::jsonb),
+                            '{documents_prompted}',
+                            'true'::jsonb,
+                            true
+                        ),
+                        updated_at = NOW()
+                        WHERE id = $1
+                        """,
+                        incident_id,
+                    )
+                    event_summary = (
+                        f"{doc_count} document{'s' if doc_count != 1 else ''} attached"
+                        if doc_count
+                        else "No documents attached — marked reviewed"
+                    )
+                    event_extra = {
+                        "field": "documents",
+                        "field_label": "Documents",
+                        "previous_value": None,
+                        "new_value": int(doc_count),
+                    }
 
                 else:
                     yield _sse({"type": "error", "detail": f"Unknown action type: {action_type}"})

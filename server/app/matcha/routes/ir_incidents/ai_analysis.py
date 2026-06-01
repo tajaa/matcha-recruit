@@ -391,6 +391,116 @@ async def analyze_root_cause(
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+async def run_recommendations_inline(
+    incident_id: UUID,
+    current_user,
+    *,
+    ip_address: Optional[str] = None,
+    use_cache: bool = True,
+) -> RecommendationsAnalysis:
+    """Generate corrective-action recommendations without SSE wrapping.
+
+    Callable from the IR Copilot accept handler so the deterministic flow's
+    "Suggest actions" step runs inline (and caches to ir_incident_analysis)
+    instead of bouncing the user to the AI Analysis tab. Mirrors
+    ``analyze_recommendations``' data-gathering + caching; raises
+    ``IRAnalysisError`` if the LLM fails AND no cached row exists.
+    """
+    from app.matcha.services.ir_analysis import get_ir_analyzer, IRAnalysisError
+    from app.matcha.models.ir_incident import RecommendationItem
+
+    async with get_connection() as conn:
+        row = await _get_incident_with_company_check(conn, incident_id, current_user)
+        row = dict(row)
+
+        company_name = industry = company_size = ir_guidance_blurb = None
+        if row.get("company_id"):
+            company = await conn.fetchrow(
+                "SELECT name, industry, size, ir_guidance_blurb FROM companies WHERE id = $1",
+                row["company_id"],
+            )
+            if company:
+                company_name = company["name"]
+                industry = company["industry"]
+                company_size = company["size"]
+                ir_guidance_blurb = company["ir_guidance_blurb"]
+
+        city = state = None
+        if row.get("location_id"):
+            location = await conn.fetchrow(
+                "SELECT city, state FROM business_locations WHERE id = $1",
+                row["location_id"],
+            )
+            if location:
+                city = location["city"]
+                state = location["state"]
+
+        cached = None
+        if use_cache:
+            cached = await conn.fetchrow(
+                """
+                SELECT analysis_data FROM ir_incident_analysis
+                WHERE incident_id = $1 AND analysis_type = 'recommendations'
+                ORDER BY generated_at DESC LIMIT 1
+                """,
+                str(incident_id),
+            )
+
+    if cached:
+        result = _safe_json_loads(cached["analysis_data"])
+        return RecommendationsAnalysis(
+            recommendations=[RecommendationItem(**r) for r in result["recommendations"]],
+            summary=result["summary"],
+            generated_at=result["generated_at"],
+            from_cache=True,
+        )
+
+    try:
+        analyzer = get_ir_analyzer()
+        result = await analyzer.generate_recommendations(
+            title=row["title"],
+            description=row["description"],
+            incident_type=row["incident_type"],
+            severity=row["severity"],
+            root_cause=row["root_cause"],
+            company_name=company_name,
+            industry=industry,
+            company_size=company_size,
+            city=city,
+            state=state,
+            ir_guidance_blurb=ir_guidance_blurb,
+        )
+    except IRAnalysisError:
+        logger.exception("Recommendations analysis failed for incident %s", incident_id)
+        raise
+
+    async with get_connection() as conn2:
+        await conn2.execute(
+            """
+            INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
+            VALUES ($1, 'recommendations', $2)
+            """,
+            str(incident_id),
+            json.dumps(result),
+        )
+        await log_audit(
+            conn2,
+            str(incident_id),
+            str(current_user.id),
+            "analysis_run",
+            "analysis",
+            None,
+            {"type": "recommendations"},
+            ip_address,
+        )
+
+    return RecommendationsAnalysis(
+        recommendations=[RecommendationItem(**r) for r in result["recommendations"]],
+        summary=result["summary"],
+        generated_at=result["generated_at"],
+    )
+
+
 @router.post("/{incident_id}/analyze/recommendations")
 async def analyze_recommendations(
     incident_id: UUID,

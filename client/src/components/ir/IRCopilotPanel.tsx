@@ -29,9 +29,10 @@ interface Props {
   incidentId: string
   incidentStatus?: string
   onIncidentChanged?: () => void
+  onOpenDocuments?: () => void
 }
 
-export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentChanged }: Props) {
+export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentChanged, onOpenDocuments }: Props) {
   const [messages, setMessages] = useState<CopilotMessage[]>([])
   const [currentCards, setCurrentCards] = useState<CopilotCard[]>([])
   const [openQuestions, setOpenQuestions] = useState<string[]>([])
@@ -452,6 +453,7 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
                   busy={busyCardMessageId === mid}
                   onAccept={handleAccept}
                   onSkip={(id) => void handleSkip(id, c.id)}
+                  onOpenDocuments={onOpenDocuments}
                 />
               )
             })}

@@ -822,6 +822,70 @@ def build_osha_close_confirmation_card() -> dict:
     }
 
 
+# ===========================================
+# Injury assessment + document capture (deterministic flow engine)
+# ===========================================
+
+def build_treatment_query_card() -> dict:
+    """Yes/No: was treatment provided beyond basic on-site first aid?
+
+    The injury-assessment gate. A "yes" makes the injury OSHA-recordable
+    (29 CFR 1904.7) and kicks off the recordable chain. Handled by
+    ``_handle_quick_reply`` under quick_reply_kind 'treatment_query', which
+    writes category_data.treatment_beyond_first_aid.
+    """
+    return {
+        "id": "treatment_query",
+        "title": "Injury Assessment",
+        "recommendation": "Was any treatment provided beyond basic on-site first aid?",
+        "rationale": (
+            "Treatment beyond first aid — stitches, prescription medication, "
+            "work restrictions, or similar — generally makes an injury OSHA "
+            "recordable (29 CFR 1904.7)."
+        ),
+        "priority": "high",
+        "blockers": [],
+        "action": {
+            "type": "quick_reply",
+            "label": "Choose one",
+            "quick_reply_kind": "treatment_query",
+            "choices": [
+                {"label": "Yes — beyond first aid", "value": "yes"},
+                {"label": "No — first aid only", "value": "no"},
+            ],
+        },
+    }
+
+
+def build_request_documents_card() -> dict:
+    """Prompt the user to attach supporting documents to the incident.
+
+    Handled by the ``request_documents`` action in accept_copilot_card, which
+    re-checks the ir_incident_documents count and marks
+    category_data.documents_prompted so the flow advances whether the user
+    uploads or explicitly skips. The frontend opens the Documents upload zone.
+    """
+    return {
+        "id": "request_documents",
+        "title": "Attach supporting documents",
+        "recommendation": (
+            "Upload any photos, witness statements, medical or first-aid "
+            "records, or incident forms related to this report."
+        ),
+        "rationale": (
+            "Documentation strengthens the record for OSHA, insurance, and "
+            "legal defense. Attach what you have — or skip if there's nothing "
+            "to add."
+        ),
+        "priority": "medium",
+        "blockers": [],
+        "action": {
+            "type": "request_documents",
+            "label": "Open upload",
+        },
+    }
+
+
 async def _persist_osha_emergency_alert(conn, incident_id: str, current_user) -> None:
     """Flip severity to critical, mark the alert active in category_data,
     and persist the emergency card to the Copilot transcript.

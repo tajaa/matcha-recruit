@@ -125,6 +125,7 @@ export default function IRDetail() {
                 incidentId={incidentId!}
                 incidentStatus={incident.status}
                 onIncidentChanged={refetch}
+                onOpenDocuments={() => setTab('documents')}
               />
             )}
 
