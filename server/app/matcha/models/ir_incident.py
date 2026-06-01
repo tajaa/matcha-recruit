@@ -619,6 +619,7 @@ IRCopilotMessageType = Literal["text", "card", "event"]
 IRCopilotActionType = Literal[
     "run_analysis", "set_field", "request_info", "escalate", "close_incident",
     "quick_reply", "numeric_input", "text_input", "osha_emergency_alert",
+    "request_documents",
 ]
 
 

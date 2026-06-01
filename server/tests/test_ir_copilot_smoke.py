@@ -124,6 +124,10 @@ def test_action_type_set_complete():
         # types accepted by the dispatch handler and surfaced through the
         # transcript filter.
         "quick_reply", "numeric_input", "text_input", "osha_emergency_alert",
+        # request_documents: document-capture action — still dispatch-handled
+        # and frontend-rendered, kept a valid type even though the flow
+        # resolver no longer emits it after the conversational-flow restore.
+        "request_documents",
     }
     assert IR_ACTION_TYPES == expected
 
@@ -376,9 +380,16 @@ def test_generate_guidance_drops_treatment_set_field_when_already_set(monkeypatc
             return None
     monkeypatch.setattr(ir_ai_orchestrator, "get_rate_limiter", lambda: FakeRateLimiter())
 
+    # incident_type + severity + osha_recordable are all set so the
+    # deterministic resolver's compliance gates are satisfied and it returns
+    # None, handing the round to the LLM — the path this dedup rewrite guards.
+    # treatment_beyond_first_aid is already recorded in category_data.
     incident = {
         "id": "00000000-0000-0000-0000-000000000000",
         "title": "Worker injured",
+        "incident_type": "safety",
+        "severity": "high",
+        "osha_recordable": True,
         "category_data": {"treatment_beyond_first_aid": "true"},
     }
     result = asyncio.run(

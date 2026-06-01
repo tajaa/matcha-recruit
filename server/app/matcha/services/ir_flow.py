@@ -1,38 +1,33 @@
-"""Deterministic IR Copilot flow engine.
+"""IR Copilot compliance-gate resolver.
 
-The Copilot used to depend on the LLM (``generate_guidance``) to emit the
-correct next-step card every round, with a large net of post-hoc rewrites to
-correct the model. In practice that stalled — the model would omit the next
-step, emit a dead card, or return nothing, so the guided flow never reliably
-advanced ("conceptual / doesn't work").
+History: the Copilot first relied entirely on the LLM (``generate_guidance``)
+to emit the right next-step card each round. That stalled. The fix over-
+corrected into a fully **deterministic** 10-phase march (categorize → severity
+→ injury/OSHA → root cause → documents → corrective actions → close) that ran
+*ahead* of the LLM every round — it opened on robotic cards, surfaced empty
+"corrective actions" set_field cards with nothing to set, and dead-ended on a
+close button before root cause was even captured. That replaced the
+conversational, fact-gathering copilot users actually wanted.
 
-This module makes the flow **deterministic**. ``resolve_next_step`` inspects
-the incident's current state and returns the single canonical next card,
-reusing the existing card builders and accept-handlers in
-``routes/ir_incidents``. The LLM is now only a fallback for free-form Q&A
-(when this resolver returns ``None``).
+This module now does **only** the part determinism is good for: guaranteeing
+the hard OSHA-compliance gates that must never be skipped or stalled.
+``resolve_next_step`` returns a canonical card for exactly three states and
+``None`` for everything else, handing the conversation back to the LLM:
 
-Flow phases (in order — first unsatisfied gate wins):
+  • OSHA emergency  — reportable event flagged at intake (fatality / in-patient
+                      hospitalization / amputation / loss of eye). Freeze on the
+                      reporting disclaimer immediately.
+  • Injury gate     — once incident_type + severity are set, ask the
+                      treatment-beyond-first-aid question (OSHA recordability).
+  • OSHA recordable — treatment beyond first aid → kick off the 300/301 chain
+                      (the accept handlers self-chain the follow-ups, then hand
+                      back to the conversation).
 
-  1. Categorize        — incident_type unset
-  2. Severity          — severity unset
-  3. OSHA emergency    — category_data.osha_emergency_alert_active (mandatory
-                         reporting, requires confirmation notes)
-  4. Injury assessment — safety/injury incident, treatment_beyond_first_aid unset
-  5. OSHA recordable   — treatment beyond first aid + osha_recordable unset
-  6. Root cause        — safety/near_miss or high/critical, not yet logged/declined
-  6.5 Investigation    — surface AI follow-up questions + capture findings before
-                         close (substantive incidents); the "ask meaningful
-                         questions / build documentation" step
-  7. Documents         — safety/recordable incident with nothing attached
-  8. Corrective action — corrective_actions empty (suggest via recommendations)
-  9. Action required   — actions captured, status not yet action_required
- 10. Close             — everything captured
-
-Every card shape here matches what the accept-handlers already dispatch. New
-pieces vs the original OSHA-only flow: the treatment_query quick-reply, the
-request_documents action, and the investigation step (followup_questions
-analysis + investigation_notes text_input).
+Categorize, severity, clarifying questions, root cause, corrective actions, and
+closure are conversational again (``generate_guidance`` / ``PROMPT_TEMPLATE``).
+Root-cause-before-close and OSHA-recordable-before-close remain *enforced*
+regardless of the conversation by the close-intercepts in
+``_close_incident_via_copilot``.
 """
 
 from __future__ import annotations
@@ -202,11 +197,16 @@ def resolve_next_step(
     incident: dict[str, Any],
     analyses: list[dict[str, Any]] | None,
     documents_count: int = 0,
+    is_cold_start: bool = False,
 ) -> Optional[dict]:
-    """Return the canonical next-step guidance payload, or None for free-form.
+    """Return a card payload for a hard OSHA-compliance gate, or None.
 
-    ``documents_count`` is the number of rows in ir_incident_documents for the
-    incident (the caller supplies it; defaults to incident['documents_count']).
+    Returns a canonical card for exactly three states (OSHA emergency freeze,
+    the injury/treatment recordability question, and the OSHA-recordable chain
+    kickoff). For every other state it returns None, handing the round to the
+    conversational LLM (``generate_guidance``). ``analyses`` and
+    ``documents_count`` are accepted for call-site compatibility but no longer
+    influence the result.
     """
     if not incident:
         return None
@@ -215,81 +215,22 @@ def resolve_next_step(
     if status in {"closed", "resolved"}:
         return None  # terminal — let the LLM field any follow-up questions
 
-    if documents_count == 0:
-        try:
-            documents_count = int(incident.get("documents_count") or 0)
-        except (TypeError, ValueError):
-            documents_count = 0
-
     incident_type = (incident.get("incident_type") or "").lower()
     severity = (incident.get("severity") or "").lower()
     category_data = _safe_json(incident.get("category_data"), {}) or {}
-    by_type = _analyses_by_type(analyses)
     # Gates the user explicitly skipped — don't re-emit them.
     raw_skipped = category_data.get("flow_skipped")
     flow_skipped = set(raw_skipped) if isinstance(raw_skipped, list) else set()
 
-    # ── 1. Categorize ────────────────────────────────────────────────────
-    if incident_type not in VALID_INCIDENT_TYPES and "categorize" not in flow_skipped:
-        cat = by_type.get("categorization") or {}
-        suggested = str(cat.get("suggested_type") or "").lower()
-        if suggested in VALID_INCIDENT_TYPES:
-            conf = cat.get("confidence")
-            conf_str = f" ({round(float(conf) * 100)}% confidence)" if isinstance(conf, (int, float)) else ""
-            reason = str(cat.get("reasoning") or "").strip()
-            return _payload(
-                "First, let's confirm what kind of incident this is.",
-                [_set_field_card(
-                    card_id="flow_categorize",
-                    title="Incident type",
-                    field_name="incident_type",
-                    field_value=suggested,
-                    recommendation=f"Classify this as a {suggested.replace('_', ' ')} incident{conf_str}.",
-                    rationale=reason or "Categorizing routes the right compliance checks and analysis.",
-                )],
-            )
-        return _payload(
-            "First, let's categorize this incident.",
-            [_run_analysis_card(
-                card_id="flow_categorize_run",
-                title="Categorize incident",
-                analysis_type="categorization",
-                recommendation="Run AI categorization to suggest the incident type.",
-                rationale="Categorizing routes the right compliance checks and analysis.",
-                label="Categorize",
-            )],
-        )
+    # This resolver intentionally no longer drives categorize / severity /
+    # clarifying questions / root cause / corrective actions / closure — those
+    # are conversational again via generate_guidance. It returns a card ONLY for
+    # the three hard OSHA-compliance gates below, and None otherwise.
 
-    # ── 2. Severity ──────────────────────────────────────────────────────
-    if severity not in VALID_SEVERITIES and "severity" not in flow_skipped:
-        sev = by_type.get("severity") or {}
-        suggested = str(sev.get("suggested_severity") or "").lower()
-        if suggested in VALID_SEVERITIES:
-            reason = str(sev.get("reasoning") or "").strip()
-            return _payload(
-                "Now let's set the severity.",
-                [_set_field_card(
-                    card_id="flow_severity",
-                    title="Severity",
-                    field_name="severity",
-                    field_value=suggested,
-                    recommendation=f"Set severity to {suggested}.",
-                    rationale=reason or "Severity drives escalation, OSHA, and reporting thresholds.",
-                )],
-            )
-        return _payload(
-            "Now let's assess the severity.",
-            [_run_analysis_card(
-                card_id="flow_severity_run",
-                title="Assess severity",
-                analysis_type="severity",
-                recommendation="Run AI severity assessment to suggest a level.",
-                rationale="Severity drives escalation, OSHA, and reporting thresholds.",
-                label="Assess severity",
-            )],
-        )
-
-    # ── 3. OSHA emergency (mandatory reporting) ──────────────────────────
+    # ── OSHA emergency (mandatory reporting freeze) ──────────────────────
+    # Fatality / in-patient hospitalization / amputation / loss of eye flagged
+    # at intake. Freeze immediately — a legal 8/24-hour reporting duty trumps
+    # any conversational triage.
     if category_data.get("osha_emergency_alert_active"):
         from app.matcha.routes.ir_incidents._shared import build_osha_emergency_alert_card
         return _payload(
@@ -297,16 +238,31 @@ def resolve_next_step(
             [build_osha_emergency_alert_card()],
         )
 
-    # ── 4. Injury assessment (treatment beyond first aid) ────────────────
+    # ── Injury assessment (OSHA recordability gate) ──────────────────────
+    # The treatment-beyond-first-aid question is the entry to the recordable
+    # chain. Don't open the copilot with it: skip the cold-start round so the
+    # LLM gets the first word (greet, categorize, gather facts / severity), and
+    # only fire once incident_type + severity are set. New incidents default to
+    # incident_type='other' / severity='medium', so the cold-start guard — not
+    # the type/severity check — is what prevents the old "asks treatment the
+    # instant an injury word appears" behavior. (Emergency reporting above is
+    # NOT cold-start-gated — a reportable event must freeze immediately.)
     treatment = category_data.get("treatment_beyond_first_aid")
-    if _has_injury_signal(incident, incident_type) and treatment is None and "treatment" not in flow_skipped:
+    if (
+        not is_cold_start
+        and incident_type in VALID_INCIDENT_TYPES
+        and severity in VALID_SEVERITIES
+        and _has_injury_signal(incident, incident_type)
+        and treatment is None
+        and "treatment" not in flow_skipped
+    ):
         from app.matcha.routes.ir_incidents._shared import build_treatment_query_card
         return _payload(
             "Let's assess the injury for OSHA recordability.",
             [build_treatment_query_card()],
         )
 
-    # ── 5. OSHA recordable chain ─────────────────────────────────────────
+    # ── OSHA recordable chain ────────────────────────────────────────────
     treatment_true = str(treatment).strip().lower() == "true"
     if treatment_true and incident.get("osha_recordable") is None and "osha" not in flow_skipped:
         from app.matcha.routes.ir_incidents._shared import build_osha_recordable_query_card
@@ -315,128 +271,10 @@ def resolve_next_step(
             [build_osha_recordable_query_card()],
         )
 
-    # ── 6. Root cause ────────────────────────────────────────────────────
-    root_cause = (incident.get("root_cause") or "").strip()
-    rc_declined = bool(category_data.get("root_cause_declined"))
-    rc_started = bool(category_data.get("root_cause_interview"))
-    rc_required = incident_type in {"safety", "near_miss"} or severity in {"high", "critical"}
-    if rc_required and not root_cause and not rc_declined and not rc_started and "root_cause" not in flow_skipped:
-        from app.matcha.routes.ir_incidents._shared import build_log_root_cause_query_card
-        return _payload(
-            "Let's document the root cause.",
-            [build_log_root_cause_query_card()],
-        )
-
-    # ── 6.5 Investigation & documentation ────────────────────────────────
-    # Before rushing to close, build out the record: surface incident-specific
-    # follow-up questions and capture the investigator's findings. This is the
-    # "ask meaningful questions / build good documentation" step the OSHA-only
-    # flow was missing.
-    investigation_done = (
-        bool(category_data.get("investigation_documented"))
-        or "investigation" in flow_skipped
-    )
-    investigation_relevant = (
-        incident_type in {"safety", "behavioral", "near_miss"}
-        or severity in {"high", "critical"}
-    )
-    if investigation_relevant and not investigation_done:
-        followup = by_type.get("followup_questions") or {}
-        raw_questions = followup.get("questions")
-        questions = [
-            q for q in raw_questions if isinstance(q, str) and q.strip()
-        ] if isinstance(raw_questions, list) else []
-        if not questions:
-            # No questions cached yet — generate them (inline via accept handler).
-            return _payload(
-                "Before we wrap up, let's make sure this is properly investigated.",
-                [_run_analysis_card(
-                    card_id="flow_followup_run",
-                    title="Investigate further",
-                    analysis_type="followup_questions",
-                    recommendation="Generate the follow-up questions an investigator should still answer.",
-                    rationale="A complete record needs more than the OSHA checkboxes — let's surface what's missing.",
-                    label="Generate questions",
-                )],
-            )
-        # Questions ready — surface them and capture the investigator's findings.
-        from app.matcha.routes.ir_incidents._shared import build_investigation_notes_card
-        return _payload(
-            "A few questions to make sure this incident is fully documented:",
-            [build_investigation_notes_card(questions)],
-            open_questions=questions[:3],
-        )
-
-    # ── 7. Documents ─────────────────────────────────────────────────────
-    docs_handled = (
-        bool(category_data.get("documents_prompted"))
-        or documents_count > 0
-        or "documents" in flow_skipped
-    )
-    docs_relevant = incident_type == "safety" or bool(incident.get("osha_recordable"))
-    if docs_relevant and not docs_handled:
-        from app.matcha.routes.ir_incidents._shared import build_request_documents_card
-        return _payload(
-            "Attach any supporting documentation for the record.",
-            [build_request_documents_card()],
-        )
-
-    # ── 8. Corrective actions ────────────────────────────────────────────
-    actions = (incident.get("corrective_actions") or "").strip()
-    if not actions and "actions" not in flow_skipped:
-        recs = by_type.get("recommendations") or {}
-        rec_items = recs.get("recommendations") if isinstance(recs.get("recommendations"), list) else None
-        if rec_items:
-            summary_text = str(recs.get("summary") or "").strip()
-            if not summary_text:
-                summary_text = "; ".join(
-                    str(r.get("action")) for r in rec_items[:3] if isinstance(r, dict) and r.get("action")
-                )
-            summary_text = summary_text[:1500] or "Document and act on the recommended steps."
-            return _payload(
-                "Here are suggested corrective actions.",
-                [_set_field_card(
-                    card_id="flow_corrective_actions",
-                    title="Corrective actions",
-                    field_name="corrective_actions",
-                    field_value=summary_text,
-                    recommendation="Apply these recommended corrective actions.",
-                    rationale="Captured on the incident and surfaced in reports.",
-                    priority="medium",
-                )],
-            )
-        return _payload(
-            "Let's generate recommended corrective actions.",
-            [_run_analysis_card(
-                card_id="flow_recommendations_run",
-                title="Suggest actions",
-                analysis_type="recommendations",
-                recommendation="Run AI recommendations to propose corrective actions.",
-                rationale="Gives you concrete next steps tied to this incident.",
-                label="Suggest actions",
-                priority="medium",
-            )],
-        )
-
-    # ── 9. Mark action required ──────────────────────────────────────────
-    if status not in {"action_required", "resolved", "closed"} and "status" not in flow_skipped:
-        return _payload(
-            "Corrective actions are set — mark this as action required.",
-            [_set_field_card(
-                card_id="flow_status_action_required",
-                title="Status",
-                field_name="status",
-                field_value="action_required",
-                recommendation="Move the incident to Action Required.",
-                rationale="Signals the incident is in remediation before closure.",
-                priority="medium",
-            )],
-        )
-
-    # ── 10. Close ────────────────────────────────────────────────────────
-    if "close" in flow_skipped:
-        return None
-    return _payload(
-        "Everything's captured. You can close this incident.",
-        [_close_card()],
-    )
+    # Nothing compliance-critical is pending — hand the conversation back to the
+    # LLM (generate_guidance). It drives root cause (log_root_cause_query),
+    # clarifying follow-ups, corrective actions, and the eventual close
+    # recommendation. Root-cause-before-close stays enforced by the
+    # close-intercept in _close_incident_via_copilot even though we don't emit a
+    # proactive root-cause card here.
+    return None

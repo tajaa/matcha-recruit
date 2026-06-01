@@ -255,9 +255,9 @@ instead. Backend rejects unknown values and the user sees an error.
 - status: "reported" | "investigating" | "action_required" | "resolved" | "closed"
 - root_cause: free text (1-3 sentences)
 - corrective_actions: free text (1-3 sentences)
-- treatment_beyond_first_aid: "true" | "false" — OSHA recordability gate.
-  Set ONLY after the user has answered the on-site first aid question (see
-  OSHA INJURY GATE below). Persists to category_data->>'treatment_beyond_first_aid'.
+- treatment_beyond_first_aid: BACKEND-OWNED — never set this yourself. The
+  deterministic OSHA gate writes it once incident_type and severity are set
+  (see OSHA INJURY GATE below).
 
 ACTION RULES:
 - run_analysis: pick analysis_type from IR's valid set. Don't recommend an
@@ -273,7 +273,9 @@ ACTION RULES:
   when the incident's root_cause field is already non-empty OR
   category_data.root_cause_declined is true (user said No earlier) OR
   category_data.root_cause_interview has any keys (interview already
-  in progress — never re-prompt mid-interview).
+  in progress — never re-prompt mid-interview) OR
+  category_data.flow_skipped includes "root_cause" (user skipped the card —
+  don't re-offer it; the close step still enforces root cause when required).
 - set_field: when you can confidently propose a value (e.g. incident_type
   from description), pre-fill field_name + field_value. The user clicks
   accept and the system writes it. field_value MUST be from SET_FIELD
@@ -290,24 +292,18 @@ ACTION RULES:
   action plan exists. HOLD if OSHA INJURY GATE applies (see below) — the
   backend will intercept and emit the OSHA recordable chain instead.
 
-OSHA INJURY GATE — When the description mentions a physical injury
-(cut, fall, slip, trip, sprain, strain, burn, struck, hit, fell, twisted,
-laceration, bruise, fracture, scratched, pinched, caught in, crushed) AND
-the value of category_data.treatment_beyond_first_aid is missing or null,
-ask in your summary text: "Was any treatment provided beyond basic on-site
-first aid?" Keep the question conversational — do NOT emit a card for this
-question. When the user answers (yes / no / details), the NEXT round emits
-ONE set_field card with field_name="treatment_beyond_first_aid" and
-field_value of "true" or "false". After that gate is set, proceed with
-normal guidance. Skip the gate entirely when the value of
-category_data.treatment_beyond_first_aid is already set (true or false)
-OR when the user already supplied the answer in their initial description
-(e.g. "she went to the ER", "first aid only, no doctor"). Never re-ask
-the question — conversationally or as a card — once
-category_data.treatment_beyond_first_aid has any value. When
-treatment_beyond_first_aid is true and osha_recordable is null, the
-backend will intercept any close_incident card with the OSHA recordable
-chain — you do not need to handle that chain yourself.
+OSHA INJURY GATE — Injury incidents carry a mandatory OSHA recordability
+determination (treatment beyond first aid → recordable 300/301 chain). The
+BACKEND owns this gate end to end: once incident_type and severity are set it
+deterministically surfaces the "Was any treatment provided beyond basic
+on-site first aid?" question and every recordable follow-up, and it intercepts
+any close_incident card while that chain is unfinished. So do NOT ask the
+first-aid/treatment question, do NOT emit a card for it, and do NOT set
+treatment_beyond_first_aid or osha_recordable yourself. Spend your rounds
+instead on establishing the incident type, setting severity, and gathering the
+clarifying facts an investigator needs (what happened, who/what was involved,
+witnesses, evidence to collect) — the OSHA chain fires on its own once the
+basics are in place, and root cause / corrective actions / closure follow it.
 
 INVESTIGATION-VS-ACTION DECISION:
 When the incident facts are clear and the policy violation is unambiguous
@@ -497,15 +493,22 @@ async def generate_guidance(
     ):
         return _close_intent_payload()
 
-    # Deterministic flow engine drives the guided sequence (categorize →
-    # severity → injury/OSHA → root cause → documents → actions → close).
-    # Returns the canonical next-step card for any unsatisfied gate; only
-    # falls through to the LLM for free-form rounds (closed/resolved incidents).
+    # Hard OSHA-compliance gates run deterministically (emergency-reporting
+    # freeze, injury/treatment recordability, the 300/301 recordable chain);
+    # everything else — categorize, severity, clarifying questions, root cause,
+    # corrective actions, closure — is conversational and handled by the LLM
+    # below. is_cold_start = no assistant turn yet, so the LLM gets the opening
+    # round to greet / categorize / gather facts before the injury gate fires
+    # (the emergency freeze still fires immediately, even cold).
+    is_cold_start = not any(
+        (m or {}).get("role") == "assistant" for m in (messages or [])
+    )
     from .ir_flow import resolve_next_step
     flow_payload = resolve_next_step(
         incident,
         analyses,
         documents_count=int((incident or {}).get("documents_count") or 0),
+        is_cold_start=is_cold_start,
     )
     if flow_payload is not None:
         return flow_payload

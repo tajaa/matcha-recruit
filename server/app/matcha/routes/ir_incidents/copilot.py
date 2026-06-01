@@ -40,7 +40,6 @@ from ._shared import (
     _sse,
     _utc_now_naive,
     build_log_root_cause_query_card,
-    build_osha_close_confirmation_card,
     build_osha_days_count_card,
     build_osha_days_type_query_card,
     build_osha_injury_type_query_card,
@@ -895,17 +894,22 @@ async def _handle_quick_reply(
         }
         if bool_value:
             next_card = build_osha_days_type_query_card()
-        else:
-            # Not recordable — surface the close confirmation card.
-            next_card = build_osha_close_confirmation_card()
-        inserted = await _emit_chain_card(
-            conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
-        )
+            inserted = await _emit_chain_card(
+                conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
+            )
+            return {
+                "event_summary": event_summary,
+                "event_extra": event_extra,
+                "next_card": next_card,
+                "next_message_id": str(inserted["id"]),
+            }
+        # Not recordable — OSHA capture is done. Hand back to the conversational
+        # guidance round (root cause / clarifying questions / closure) instead of
+        # jumping straight to a close button. Omitting next_card makes the accept
+        # dispatcher run a normal generate_guidance round.
         return {
             "event_summary": event_summary,
             "event_extra": event_extra,
-            "next_card": next_card,
-            "next_message_id": str(inserted["id"]),
         }
 
     if kind == "osha_days_type_query":
@@ -984,10 +988,10 @@ async def _handle_quick_reply(
         """,
         selected, incident_id,
     )
-    next_card = build_osha_close_confirmation_card()
-    inserted = await _emit_chain_card(
-        conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
-    )
+    # OSHA recordable capture complete. Hand back to the conversational guidance
+    # round so the copilot moves on to root cause / clarifying questions /
+    # closure rather than dead-ending on a close button before those are done.
+    # Omitting next_card makes the accept dispatcher run generate_guidance.
     return {
         "event_summary": f"Captured injury type: {OSHA_INJURY_TYPE_LABELS[selected]}",
         "event_extra": {
@@ -996,8 +1000,6 @@ async def _handle_quick_reply(
             "previous_value": None,
             "new_value": selected,
         },
-        "next_card": next_card,
-        "next_message_id": str(inserted["id"]),
     }
 
 
