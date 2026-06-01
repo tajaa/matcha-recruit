@@ -25,10 +25,15 @@ struct ContentView: View {
     // Search state
     @State private var searchText = ""
 
+    /// Force the sidebar visible on every launch (lands on Home with the
+    /// sidebar open). @State re-inits to .all each cold start, so a mid-session
+    /// collapse never persists into the next launch.
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+
     var body: some View {
         @Bindable var appState = appState
 
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebarColumn
         } detail: {
             VStack(spacing: 0) {

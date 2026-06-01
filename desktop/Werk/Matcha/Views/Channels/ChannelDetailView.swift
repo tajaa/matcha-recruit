@@ -47,6 +47,10 @@ struct ChannelDetailView: View {
     @State private var ticketDraftError: String?
     /// True while the bottom sentinel is on screen — gates message auto-scroll.
     @State private var isAtBottom = true
+    /// Bumped whenever WE send a message, to force the viewport to the newest
+    /// message regardless of scroll position — sending a reply should always
+    /// reveal your own message without a manual scroll.
+    @State private var selfSendScroll = 0
     // Chat → ticket always drafts with Flash Lite (cheap/fast for this
     // lightweight action), regardless of the header model selector.
     private var ticketDraftModel: String? {
@@ -489,6 +493,13 @@ struct ChannelDetailView: View {
                 guard isAtBottom, let last = vm.messages.last else { return }
                 withAnimation { proxy.scrollTo(last.stableKey, anchor: .bottom) }
             }
+            // Our own send — always jump to the newest message regardless of
+            // scroll position, so a reply reveals itself without a manual scroll.
+            .onChange(of: selfSendScroll) {
+                guard let last = vm.messages.last else { return }
+                isAtBottom = true
+                withAnimation { proxy.scrollTo(last.stableKey, anchor: .bottom) }
+            }
             // Initial render scroll-to-bottom. .onChange above fires when
             // the REST load flips messages.count 0→N, but proxy.scrollTo
             // runs in the same SwiftUI commit as the LazyVStack's cell
@@ -692,6 +703,7 @@ struct ChannelDetailView: View {
             ws.sendMessage(channelId: channelId, content: content, replyToId: replyId, clientMessageId: cmid)
             inputText = ""
             replyingTo = nil
+            selfSendScroll += 1
             return
         }
 
@@ -716,6 +728,7 @@ struct ChannelDetailView: View {
                     replyingTo = nil
                     pendingAttachments.removeAll()
                     isUploading = false
+                    selfSendScroll += 1
                 }
             } catch {
                 await MainActor.run {
