@@ -1063,17 +1063,18 @@ class MatchaWorkService {
     /// `attachmentIds` (optional) links the note to existing mw_project_files
     /// rows for the task — upload via `uploadTaskFile` first, then pass the
     /// returned ids here so the note renders inline thumbnails.
-    func logTaskActivity(projectId: String, taskId: String, kind: String, body: String?, attachmentIds: [String]? = nil) async throws {
+    func logTaskActivity(projectId: String, taskId: String, kind: String, body: String?, attachmentIds: [String]? = nil, replyTo: String? = nil) async throws {
         struct Req: Encodable {
             let kind: String
             let body: String?
             let attachment_ids: [String]?
+            let reply_to: String?
         }
         struct Res: Decodable { let ok: Bool? }
         let _: Res = try await client.request(
             method: "POST",
             path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/activity",
-            body: Req(kind: kind, body: body, attachment_ids: (attachmentIds?.isEmpty ?? true) ? nil : attachmentIds)
+            body: Req(kind: kind, body: body, attachment_ids: (attachmentIds?.isEmpty ?? true) ? nil : attachmentIds, reply_to: replyTo)
         )
     }
 

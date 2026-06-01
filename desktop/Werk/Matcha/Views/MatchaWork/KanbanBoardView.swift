@@ -94,7 +94,13 @@ struct KanbanBoardView: View {
 
     // MARK: - Replay helpers
 
-    private func lastSeenKey(_ pid: String) -> String { "kanban-lastseen-\(pid)" }
+    // Per-USER, per-project so each collaborator's unread state is isolated even
+    // if two accounts share one app install. Changing this key from the old
+    // project-only form harmlessly re-baselines once (no false unread flags).
+    private func lastSeenKey(_ pid: String) -> String {
+        let uid = appState.currentUser?.id ?? "anon"
+        return "kanban-lastseen-\(uid)-\(pid)"
+    }
 
     private func loadLastSeen(_ pid: String) -> [String: String] {
         UserDefaults.standard.dictionary(forKey: lastSeenKey(pid)) as? [String: String] ?? [:]
@@ -127,9 +133,16 @@ struct KanbanBoardView: View {
         let current = Dictionary(viewModel.tasks.map { ($0.id, $0.boardColumn) },
                                  uniquingKeysWith: { a, _ in a })
         let lastSeen = loadLastSeen(pid)
-        // Persist the current board as the new baseline either way.
-        saveLastSeen(pid, current)
-        guard !lastSeen.isEmpty else { return }   // first ever open — nothing to replay
+        // First time this user ever opens the board: establish the baseline
+        // silently so nothing is spuriously flagged unread. After that we NEVER
+        // re-baseline the whole board — a card only leaves its baseline column
+        // when this user actually opens it (see `acknowledge`). That's what makes
+        // the yellow ring persist across reloads/relaunches and survive board
+        // state changes elsewhere, until the specific collaborator opens the card.
+        guard !lastSeen.isEmpty else {
+            saveLastSeen(pid, current)
+            return
+        }
 
         var overrides: [String: String] = [:]
         for (tid, col) in current {
@@ -151,14 +164,27 @@ struct KanbanBoardView: View {
         }
     }
 
+    /// Mark a card as seen by THIS user: drop its yellow ring and advance its
+    /// persisted baseline to the current column. This is the ONLY thing that
+    /// clears unread — so an untouched card stays highlighted no matter what
+    /// state changes happen elsewhere, until this collaborator opens it.
+    private func acknowledge(_ taskId: String) {
+        if changedIds.contains(taskId) {
+            withAnimation(.easeOut(duration: 0.25)) { _ = changedIds.remove(taskId) }
+        }
+        guard let pid = viewModel.project?.id,
+              let task = viewModel.tasks.first(where: { $0.id == taskId }) else { return }
+        var baseline = loadLastSeen(pid)
+        baseline[taskId] = task.boardColumn
+        saveLastSeen(pid, baseline)
+    }
+
     /// Open a ticket's viewer when chat asked us to (a ticket chip click /
     /// "Go to ticket"). Waits until the task is loaded, then clears the request.
     private func openPendingTaskIfPossible() {
         guard let tid = appState.pendingOpenTaskId,
               let task = viewModel.tasks.first(where: { $0.id == tid }) else { return }
-        if changedIds.contains(tid) {
-            withAnimation(.easeOut(duration: 0.25)) { _ = changedIds.remove(tid) }
-        }
+        acknowledge(tid)
         viewingTask = task
         appState.pendingOpenTaskId = nil
     }
@@ -633,10 +659,9 @@ struct KanbanBoardView: View {
                     elementName: task.elementName
                         ?? viewModel.elements.first(where: { $0.id == task.elementId })?.name,
                     onTap: {
-                        // Acknowledge the change → drop the yellow outline.
-                        if changedIds.contains(task.id) {
-                            withAnimation(.easeOut(duration: 0.25)) { _ = changedIds.remove(task.id) }
-                        }
+                        // Acknowledge the change → drop the yellow outline and
+                        // advance this user's persisted baseline for the card.
+                        acknowledge(task.id)
                         viewingTask = task
                     },
                     onToggle: { Task { await viewModel.toggleTaskComplete(id: task.id) } },
@@ -662,6 +687,7 @@ struct KanbanBoardView: View {
                 .draggable(task.id)
                 .contextMenu {
                     Button {
+                        acknowledge(task.id)
                         viewingTask = task
                     } label: { Label("Open", systemImage: "arrow.up.right.square") }
                     Button {

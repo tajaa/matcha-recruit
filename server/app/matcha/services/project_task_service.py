@@ -128,6 +128,7 @@ async def log_task_activity(
     kind: str,
     body: Optional[str] = None,
     attachment_ids: Optional[list[UUID]] = None,
+    reply_to: Optional[UUID] = None,
 ) -> Optional[dict]:
     """Log a sales follow-up activity (call/email/note/meeting) onto a task's
     history timeline. Reuses mw_task_history (event_type='activity') so it
@@ -137,6 +138,12 @@ async def log_task_activity(
     `attachment_ids` (optional) links this note to N existing mw_project_files
     rows for the task. Caller is responsible for validating ownership before
     invoking. Stored inside metadata JSONB so no schema change is needed.
+
+    `reply_to` (optional) is the mw_task_history id of an existing comment this
+    note replies to. We resolve the parent's author + a short body excerpt
+    server-side and stash them in metadata (reply_to / reply_to_name /
+    reply_to_excerpt) so the client can render the quoted parent without a
+    second round-trip. A reply to a non-note row is ignored.
     """
     kind = (kind or "note").strip().lower()
     if kind not in _ALLOWED_ACTIVITY_KINDS:
@@ -151,6 +158,36 @@ async def log_task_activity(
         metadata: dict = {"kind": kind, "body": (body or "").strip()}
         if attachment_ids:
             metadata["attachment_ids"] = [str(a) for a in attachment_ids]
+        if reply_to:
+            parent = await conn.fetchrow(
+                """
+                SELECT h.metadata,
+                       COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name),
+                                a.name, u.email) AS actor_name
+                FROM mw_task_history h
+                LEFT JOIN users u     ON u.id      = h.actor_user_id
+                LEFT JOIN clients c   ON c.user_id = h.actor_user_id
+                LEFT JOIN employees e ON e.user_id = h.actor_user_id
+                LEFT JOIN admins a    ON a.user_id = h.actor_user_id
+                WHERE h.id = $1 AND h.task_id = $2 AND h.event_type = 'activity'
+                """,
+                reply_to, task_id,
+            )
+            if parent:
+                metadata["reply_to"] = str(reply_to)
+                if parent["actor_name"]:
+                    metadata["reply_to_name"] = parent["actor_name"]
+                pmeta = parent["metadata"]
+                if isinstance(pmeta, str):
+                    import json as _json
+                    try:
+                        pmeta = _json.loads(pmeta)
+                    except Exception:
+                        pmeta = {}
+                parent_body = (pmeta or {}).get("body") if isinstance(pmeta, dict) else None
+                if parent_body:
+                    excerpt = parent_body.strip().replace("\n", " ")
+                    metadata["reply_to_excerpt"] = excerpt[:140]
         await _log_task_history(
             conn,
             task_id=task_id,

@@ -32,6 +32,10 @@ struct TaskViewerSheet: View {
     @State private var isCopying = false
     @State private var newNote = ""
     @State private var addingNote = false
+    @FocusState private var isNoteFieldFocused: Bool
+    /// The discussion comment the composer is currently replying to, if any.
+    /// Drives the "Replying to …" banner and threads `reply_to` through submit.
+    @State private var replyingToNote: MWTaskHistoryEntry?
     @State private var isRejecting = false
     @State private var rejectNote = ""
     @State private var submitting = false
@@ -48,11 +52,15 @@ struct TaskViewerSheet: View {
         viewModel.taskFiles[task.id] ?? []
     }
 
-    /// Foreground attachments — only the current round's files. Files with no
+    /// Foreground attachments — the current round's files. Files with no
     /// round_index (optimistic uploads, older lists) default to the current
-    /// round so they stay visible rather than vanishing.
+    /// round so they stay visible rather than vanishing. We match `>=`
+    /// currentRound (not just `==`) so a file whose derived round_index runs
+    /// ahead of the highest subtask round — e.g. a kickoff screenshot tagged to
+    /// the just-opened round — is shown rather than silently dropped into the
+    /// gap between the two buckets.
     private var currentRoundAttachments: [MWProjectFile] {
-        attachments.filter { ($0.roundIndex ?? currentRound) == currentRound }
+        attachments.filter { ($0.roundIndex ?? currentRound) >= currentRound }
     }
     /// Background attachments — files uploaded in earlier rounds, tucked behind
     /// a disclosure so a sent-back ticket doesn't show stale round-1 files up top.
@@ -616,7 +624,15 @@ struct TaskViewerSheet: View {
             // starts) are intentionally NOT here — they live in History.
             if !notes.isEmpty {
                 ForEach(Array(notes.reversed())) { note in
-                    NoteRow(entry: note, files: attachments, onPreview: { previewFile = $0 })
+                    NoteRow(
+                        entry: note,
+                        files: attachments,
+                        onPreview: { previewFile = $0 },
+                        onReply: {
+                            replyingToNote = note
+                            isNoteFieldFocused = true
+                        }
+                    )
                 }
             } else if !loadingHistory {
                 Text("No comments yet — ask a question to start the thread.")
@@ -711,14 +727,18 @@ struct TaskViewerSheet: View {
     @ViewBuilder
     private var noteComposer: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if let replying = replyingToNote {
+                replyingToBanner(replying)
+            }
             HStack(spacing: 6) {
-                TextField("Add a note…", text: $newNote)
+                TextField(replyingToNote == nil ? "Add a note…" : "Write a reply…", text: $newNote)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .foregroundColor(.white)
                     .padding(7)
                     .background(Color.zinc800.opacity(0.6))
                     .cornerRadius(5)
+                    .focused($isNoteFieldFocused)
                     .onSubmit { Task { await submitNote() } }
                 Button {
                     attachFileFromDisk()
@@ -764,6 +784,47 @@ struct TaskViewerSheet: View {
                 }
             }
         }
+    }
+
+    /// "Replying to {name}: {excerpt}" chip shown above the composer while a
+    /// reply is in flight. Tapping the × clears the reply target.
+    @ViewBuilder
+    private func replyingToBanner(_ note: MWTaskHistoryEntry) -> some View {
+        let name = note.actorName?.isEmpty == false ? note.actorName! : "comment"
+        let excerpt = (note.metadata?["body"] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
+        HStack(spacing: 6) {
+            Rectangle()
+                .fill(Color.matcha500)
+                .frame(width: 2)
+                .cornerRadius(1)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Replying to \(name)")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.matcha500)
+                if !excerpt.isEmpty {
+                    Text(excerpt)
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+            Button {
+                replyingToNote = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Cancel reply")
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .background(Color.zinc800.opacity(0.4))
+        .cornerRadius(5)
     }
 
     private var canSubmitNote: Bool {
@@ -1083,10 +1144,12 @@ struct TaskViewerSheet: View {
         do {
             try await MatchaWorkService.shared.logTaskActivity(
                 projectId: pid, taskId: task.id, kind: "note", body: text,
-                attachmentIds: uploadedIds.isEmpty ? nil : uploadedIds
+                attachmentIds: uploadedIds.isEmpty ? nil : uploadedIds,
+                replyTo: replyingToNote?.id
             )
             newNote = ""
             pendingAttachments = []
+            replyingToNote = nil
             await loadHistory()
         } catch {
             // Best-effort; leave the text in place so the user can retry.
@@ -1621,6 +1684,8 @@ private struct NoteRow: View {
     let entry: MWTaskHistoryEntry
     let files: [MWProjectFile]
     let onPreview: (MWProjectFile) -> Void
+    var onReply: (() -> Void)? = nil
+    @State private var isHovered = false
 
     private var body_: String {
         (entry.metadata?["body"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1630,6 +1695,14 @@ private struct NoteRow: View {
         guard let ids = entry.attachmentIds, !ids.isEmpty else { return [] }
         let idSet = Set(ids)
         return files.filter { idSet.contains($0.id) }
+    }
+
+    /// Set on notes that reply to an earlier comment — resolved server-side and
+    /// stashed in metadata so we can render the quoted parent inline.
+    private var replyParentName: String? { entry.metadata?["reply_to_name"] }
+    private var replyParentExcerpt: String? {
+        let e = (entry.metadata?["reply_to_excerpt"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return e.isEmpty ? nil : e
     }
 
     var body: some View {
@@ -1661,6 +1734,27 @@ private struct NoteRow: View {
                         )
                 }
                 VStack(alignment: .leading, spacing: 4) {
+                    // Quoted parent — shows what this note is replying to.
+                    if let excerpt = replyParentExcerpt {
+                        HStack(spacing: 5) {
+                            Rectangle()
+                                .fill(Color.matcha500.opacity(0.7))
+                                .frame(width: 2)
+                                .cornerRadius(1)
+                            VStack(alignment: .leading, spacing: 0) {
+                                if let name = replyParentName {
+                                    Text(name)
+                                        .font(.system(size: 8, weight: .semibold))
+                                        .foregroundColor(.matcha500)
+                                }
+                                Text(excerpt)
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(2)
+                            }
+                        }
+                        .padding(.leading, 1)
+                    }
                     if !bodyText.isEmpty {
                         Text(bodyText)
                             .font(.system(size: 12))
@@ -1676,9 +1770,23 @@ private struct NoteRow: View {
                             }
                         }
                     }
-                    Text("\((entry.actorName?.isEmpty == false ? entry.actorName! : "Someone")) · \(PacificDateFormatter.absolute(entry.createdAt) ?? "")")
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
+                    HStack(spacing: 8) {
+                        Text("\((entry.actorName?.isEmpty == false ? entry.actorName! : "Someone")) · \(PacificDateFormatter.absolute(entry.createdAt) ?? "")")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                        if let onReply, isHovered {
+                            Button(action: onReply) {
+                                HStack(spacing: 2) {
+                                    Image(systemName: "arrowshape.turn.up.left")
+                                        .font(.system(size: 8))
+                                    Text("Reply")
+                                        .font(.system(size: 9, weight: .semibold))
+                                }
+                                .foregroundColor(.matcha500)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -1686,6 +1794,7 @@ private struct NoteRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.zinc800.opacity(0.5))
             .cornerRadius(5)
+            .onHover { isHovered = $0 }
         }
     }
 }

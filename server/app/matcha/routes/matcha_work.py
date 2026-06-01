@@ -5306,6 +5306,22 @@ async def start_task_round_endpoint(
                 "WHERE task_id = $1 AND is_done = false",
                 task_id, new_round,
             )
+            # The kickoff attachments were uploaded by the client BEFORE this
+            # call, so their created_at predates the round_started row we just
+            # logged. A file's round is derived at read time as
+            # 1 + COUNT(round_started rows with created_at <= file.created_at)
+            # (see project_file_service.list_task_files — there's no round_index
+            # column), so without this they'd be attributed to the PREVIOUS
+            # round and never show up under the new round's ATTACHMENTS. Stamp
+            # them just past the boundary (clock_timestamp() advances within the
+            # txn, so it's strictly after the round_started insert) to pull them
+            # into the round they actually belong to.
+            if attachment_ids:
+                await conn.execute(
+                    "UPDATE mw_project_files SET created_at = clock_timestamp() "
+                    "WHERE task_id = $1 AND id = ANY($2::uuid[])",
+                    task_id, attachment_ids,
+                )
 
     # 2. Create the headline subtask (fires its own `subtask_added` history row).
     #    create_subtask stamps round_index = current round = new_round.
@@ -5377,6 +5393,14 @@ async def log_task_activity_endpoint(
         if len(found) != len(attachment_ids):
             raise HTTPException(status_code=400, detail="attachment not found on this task")
 
+    reply_to: Optional[UUID] = None
+    raw_reply = body.get("reply_to")
+    if raw_reply:
+        try:
+            reply_to = UUID(str(raw_reply))
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="reply_to must be a valid UUID")
+
     try:
         result = await pt_svc.log_task_activity(
             project_id=project_id,
@@ -5385,6 +5409,7 @@ async def log_task_activity_endpoint(
             kind=body.get("kind", "note"),
             body=body.get("body"),
             attachment_ids=attachment_ids or None,
+            reply_to=reply_to,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
