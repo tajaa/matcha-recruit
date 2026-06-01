@@ -69,17 +69,17 @@ def _t_roster(q: BookQuote) -> str:
 
 
 def _book_econ(q: BookQuote) -> str:
-    # Monthly is the headline (what the book pays each month); yearly + savings stay visible below.
-    monthly = round(q.book_annual / 12)
-    save = (f'<span style="font-weight:600">&nbsp;&middot;&nbsp; Saves {_m(q.book_savings)}/yr vs list</span>'
-            if q.book_savings > 0 else "")
+    # No book-wide aggregate dollar total — per-company monthly/yearly live in the roster, and a
+    # large book total reads as "scary" to a broker. Lead with the pooled per-employee rate (what
+    # the committed volume unlocks) and frame the win as a % below list, not a big dollar figure.
+    off = (f'<span style="font-weight:600">&nbsp;&middot;&nbsp; {q.discount_pct}% below the {_p(q.list_pepm)} list rate</span>'
+           if q.discount_pct else "")
     return (
         '<div class="highlight-box">'
-        f'<div style="font-size:22pt;font-weight:700;line-height:1.15">{_m(monthly)}'
-        f'<span style="font-size:11pt;font-weight:600;opacity:0.85"> / mo</span></div>'
+        f'<div style="font-size:22pt;font-weight:700;line-height:1.15">{_p(q.net_pepm)}'
+        f'<span style="font-size:11pt;font-weight:600;opacity:0.85"> PEPM</span></div>'
         f'<div style="margin-top:6px;font-size:10pt;font-weight:500;opacity:0.9">'
-        f'{q.total_seats:,} committed seats &times; {_p(q.net_pepm)} PEPM &nbsp;&middot;&nbsp; '
-        f'{_m(q.book_annual)} / yr{save}</div>'
+        f'Pooled rate across {q.total_seats:,} committed seats{off}</div>'
         '</div>')
 
 

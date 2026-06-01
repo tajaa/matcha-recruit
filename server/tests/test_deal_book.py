@@ -91,17 +91,26 @@ def test_defaults_when_none():
 def test_template_renders():
     from app.core.services.deal_book_template import render_book_proposal_html
 
-    inp = BookInputs(broker_name="Alliant", clients=[BookClient(name="Acme", seats=640)])
+    # Two clients so the book-wide aggregate differs from every per-company figure.
+    inp = BookInputs(
+        broker_name="Alliant",
+        clients=[BookClient(name="Acme", seats=200), BookClient(name="Beacon", seats=450)],
+    )
     q = compute_book_quote(inp)
     html = render_book_proposal_html(inp, q)
     assert "Book Pricing" in html
     assert "Acme" in html
     assert "your book" in html  # active schedule row marker
-    # Book economics shows monthly (headline) alongside the yearly rate.
-    assert "/ mo" in html
-    assert "/ yr" in html
-    assert f"${round(q.book_annual / 12):,}" in html  # monthly = book annual / 12
-    # Roster has a per-company Monthly column (between Seats and Annual) and no book total row.
+
+    # Roster: per-company Monthly + Annual columns, no book-wide total row.
     assert "<th>Monthly</th>" in html
-    assert f"${round(q.lines[0].annual / 12):,}" in html  # Acme's per-company monthly
+    assert "<th>Annual</th>" in html
     assert "Book total" not in html
+    acme = next(ln for ln in q.lines if ln.name == "Acme")
+    assert f"${round(acme.annual / 12):,}" in html  # Acme's per-company monthly
+    assert f"${acme.annual:,}" in html              # Acme's per-company annual
+
+    # Book Economics: pooled PEPM rate, NO scary book-wide aggregate dollar totals.
+    assert "PEPM" in html
+    assert f"${round(q.book_annual / 12):,}" not in html  # aggregate monthly gone
+    assert f"${q.book_annual:,}" not in html              # aggregate yearly gone
