@@ -49,6 +49,15 @@ async def list_task_files(project_id: UUID, task_id: UUID) -> list[dict[str, Any
             """SELECT f.id, f.project_id, f.task_id, f.uploaded_by, f.filename,
                       f.storage_url, f.content_type, f.file_size, f.folder_id,
                       f.created_at,
+                      -- Round this file was uploaded in: 1 + the number of
+                      -- round_started boundaries that precede its upload time.
+                      -- Lets the viewer keep the current round's files in the
+                      -- foreground and archive earlier rounds' files. Derived
+                      -- at read time — no round_index column on the table.
+                      (1 + (SELECT COUNT(*) FROM mw_task_history h
+                            WHERE h.task_id = f.task_id
+                              AND h.event_type = 'round_started'
+                              AND h.created_at <= f.created_at)) AS round_index,
                       COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name),
                                a.name, u.email)            AS uploader_name,
                       u.avatar_url                          AS uploader_avatar_url
