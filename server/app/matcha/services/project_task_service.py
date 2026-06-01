@@ -8,9 +8,13 @@ company-wide dashboard tasks surfaced via /tasks). Board state is tracked in
 - moving out of 'done' → status='pending',  completed_at=null
 - toggling status complete ↔ moves column to 'done' / 'todo' accordingly
 
-`changes_requested` is the rework lane: reject_project_task bounces a card here
-from review (not back to todo) so kicked-back work is visually separate from
-never-started work. The review_note + churn count surface why / how often.
+Review send-back (`reject_project_task`) drops a card from review back to `todo`
+and auto-opens the next round: unfixed checklist items roll forward into the new
+round (the live, foreground checklist) while items the reviewer accepted stay
+archived on the prior round (background). review_note + the round_started title
+carry the feedback; the churn count tracks how many times it bounced. The
+`changes_requested` column remains valid for manual drag but is no longer
+auto-populated by send-back.
 """
 
 import json
@@ -154,6 +158,16 @@ async def log_task_activity(
             actor_user_id=actor_user_id,
             event_type="activity",
             metadata=metadata,
+        )
+    # Notify the other participants of a new in-ticket comment (the discussion
+    # channel). Only plain notes — sales touchpoints (call/email/meeting) don't
+    # ping collaborators. Best-effort; never blocks the log.
+    if kind == "note":
+        await _notify_task_comment(
+            project_id=project_id,
+            task_id=task_id,
+            actor_user_id=actor_user_id,
+            body=body or "",
         )
     return {"ok": True, "kind": kind}
 
@@ -545,6 +559,101 @@ async def _notify_task_rejected(
         logger.warning("Failed to notify task rejection %s -> %s: %s", task_id, assigned_to, e)
 
 
+async def _notify_task_comment(
+    *,
+    project_id: UUID,
+    task_id: UUID,
+    actor_user_id: Optional[UUID],
+    body: str,
+) -> None:
+    """Bell + in-app toast the OTHER participants when someone posts a comment
+    on a ticket — the in-ticket clarification channel. Recipients = the
+    assignee + the creator + anyone who previously commented, minus the author.
+    No email (comments are high-frequency; the bell + live toast are enough).
+    Best-effort — never raises into the caller.
+    """
+    from . import notification_service as notif_svc
+    try:
+        async with get_connection() as conn:
+            task = await conn.fetchrow(
+                """SELECT t.company_id, t.assigned_to, t.created_by, t.title,
+                          p.name AS project_title
+                   FROM mw_tasks t
+                   LEFT JOIN mw_projects p ON p.id = t.project_id
+                   WHERE t.id = $1 AND t.project_id = $2""",
+                task_id, project_id,
+            )
+            if not task:
+                return
+            prior = await conn.fetch(
+                """SELECT DISTINCT actor_user_id FROM mw_task_history
+                   WHERE task_id = $1 AND event_type = 'activity'
+                     AND actor_user_id IS NOT NULL""",
+                task_id,
+            )
+            actor_name = "Someone"
+            if actor_user_id is not None:
+                arow = await conn.fetchrow(
+                    """
+                    SELECT COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
+                    FROM users u
+                    LEFT JOIN clients c ON c.user_id = u.id
+                    LEFT JOIN employees e ON e.user_id = u.id
+                    LEFT JOIN admins a ON a.user_id = u.id
+                    WHERE u.id = $1
+                    """, actor_user_id
+                )
+                if arow and arow["name"]:
+                    actor_name = arow["name"]
+
+        recipients: set = set()
+        for uid in (task["assigned_to"], task["created_by"]):
+            if uid is not None:
+                recipients.add(uid)
+        for r in prior:
+            recipients.add(r["actor_user_id"])
+        if actor_user_id is not None:
+            recipients.discard(actor_user_id)
+        if not recipients:
+            return
+
+        project_title = task["project_title"]
+        task_title = task["title"]
+        snippet = (body or "").strip()
+        if len(snippet) > 140:
+            snippet = snippet[:140] + "…"
+        where = f" in {project_title}" if project_title else ""
+        nbody = f"{actor_name} commented on “{task_title}”{where}:\n\n“{snippet}”"
+        link = f"/work?project={project_id}&task={task_id}"
+        for uid in recipients:
+            try:
+                await notif_svc.create_notification(
+                    user_id=uid,
+                    company_id=task["company_id"],
+                    type="task_comment",
+                    title=f"New comment: {task_title}",
+                    body=nbody,
+                    link=link,
+                    metadata={
+                        "project_id": str(project_id),
+                        "task_id": str(task_id),
+                        "actor_id": str(actor_user_id) if actor_user_id else None,
+                        "project_title": project_title,
+                        "task_title": task_title,
+                        "actor_name": actor_name,
+                        "snippet": snippet,
+                    },
+                    send_email=False,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed task-comment notify task=%s recipient=%s: %s",
+                    task_id, uid, e,
+                )
+    except Exception as e:
+        logger.warning("task-comment notify failed task=%s: %s", task_id, e)
+
+
 async def reject_project_task(
     project_id: UUID,
     task_id: UUID,
@@ -553,10 +662,11 @@ async def reject_project_task(
     actor_user_id: Optional[UUID] = None,
     project_title: Optional[str] = None,
 ) -> Optional[dict]:
-    """Reviewer sends a task back: bounce review → changes_requested, store the
-    reason in review_note, log a `review_rejected` history event, and email the
-    assignee. Only valid from the `review` column. Returns the updated task
-    row (same shape as `update_project_task`) or None if not found.
+    """Reviewer sends a task back: bounce review → todo, store the reason in
+    review_note, auto-open the next round (roll unfixed checklist items forward,
+    archive accepted ones), log a `review_rejected` history event, and email the
+    assignee. Only valid from the `review` column. Returns the updated task row
+    (same shape as `update_project_task`) or None if not found.
     """
     note = (note or "").strip()
     async with get_connection() as conn:
@@ -575,7 +685,7 @@ async def reject_project_task(
         row = await conn.fetchrow(
             """
             UPDATE mw_tasks SET
-                board_column = 'changes_requested',
+                board_column = 'todo',
                 status = 'pending',
                 completed_at = NULL,
                 review_note = $3::text,
@@ -594,6 +704,32 @@ async def reject_project_task(
         )
         cycle_count = 0
         if row:
+            # Auto-open the next round so the rework cycle reads as
+            # foreground/background: log the round boundary FIRST, roll every
+            # UNFIXED (uncompleted) checklist item into the new round (the live
+            # foreground checklist), and leave items the reviewer accepted
+            # stamped on the prior round so they archive into the background.
+            # The reviewer's "re-open these items" taps already flipped the
+            # rejected pieces to not-done, so they roll forward here as the new
+            # round's work.
+            from . import project_subtask_service as st_svc
+            round_title = note[:80] if note else "Reviewer requested changes"
+            await _log_task_history(
+                conn,
+                task_id=task_id,
+                project_id=project_id,
+                actor_user_id=actor_user_id,
+                event_type="round_started",
+                metadata={"title": round_title, "from_review": True},
+            )
+            new_round = await st_svc._current_round(conn, task_id)
+            await conn.execute(
+                "UPDATE mw_subtasks SET round_index = $2, updated_at = NOW() "
+                "WHERE task_id = $1 AND is_done = false",
+                task_id, new_round,
+            )
+            # The bounce event lands AFTER round_started so it falls inside the
+            # new round on the history feed ("Round N · sent back · <note>").
             await _log_task_history(
                 conn,
                 task_id=task_id,
@@ -601,7 +737,7 @@ async def reject_project_task(
                 actor_user_id=actor_user_id,
                 event_type="review_rejected",
                 from_value="review",
-                to_value="changes_requested",
+                to_value="todo",
                 metadata={"note": note[:500]},
             )
             # Count includes the bounce we just logged, so the card's churn chip
