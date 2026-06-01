@@ -288,6 +288,120 @@ class FinchHRISService:
             )
         return resp.json()
 
+    async def list_enrolled(self, config: dict, secrets: dict, benefit_id: str) -> list[str]:
+        """Return the individual_ids enrolled in a given company benefit."""
+        token = await self.authenticate(config, secrets)
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            resp = await self._request_with_retry(
+                client, "GET", f"{FINCH_BASE_URL}/employer/benefits/{benefit_id}/enrolled",
+                headers=self._headers(token),
+            )
+        if resp.status_code != 200:
+            raise HRISProvisioningError(
+                "benefits_read_failed", f"Finch enrolled read failed: {resp.status_code}",
+            )
+        body = resp.json()
+        rows = body if isinstance(body, list) else (body.get("individual_ids") or body.get("enrolled") or [])
+        out: list[str] = []
+        for r in rows:
+            if isinstance(r, str):
+                out.append(r)
+            elif isinstance(r, dict) and r.get("individual_id"):
+                out.append(r["individual_id"])
+        return out
+
+    async def get_benefit_individuals(self, config: dict, secrets: dict, benefit_id: str) -> dict[str, dict]:
+        """Per-individual enrollment detail for a benefit: contribution amounts.
+
+        Returns ``{individual_id: {employee_deduction, company_contribution}}``.
+        Amounts follow Finch's structured ``{amount, type}`` shape (amount in
+        minor units / cents for ``type='fixed'``).
+        """
+        token = await self.authenticate(config, secrets)
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            resp = await self._request_with_retry(
+                client, "GET", f"{FINCH_BASE_URL}/employer/benefits/{benefit_id}/individuals",
+                headers=self._headers(token),
+            )
+        if resp.status_code != 200:
+            raise HRISProvisioningError(
+                "benefits_read_failed", f"Finch benefit individuals read failed: {resp.status_code}",
+            )
+        body = resp.json()
+        rows = body if isinstance(body, list) else (body.get("responses") or body.get("individuals") or [])
+        out: dict[str, dict] = {}
+        for entry in rows:
+            iid = entry.get("individual_id")
+            data = entry.get("body") or entry
+            if iid:
+                out[iid] = data
+        return out
+
+    async def fetch_benefit_facts(
+        self, config: dict, secrets: dict, individual_ids: list[str]
+    ) -> dict[str, dict]:
+        """Per-employee benefit facts used by the eligibility-exception engine.
+
+        Output: ``{individual_id: {has_benefits_enrollment, employer_health_premium_monthly}}``.
+
+        Source is the Finch *Benefits* product (company benefit → enrolled
+        individuals → per-individual company contribution). Health/medical
+        benefits drive the employer-premium estimate that powers the
+        termination "premium leak" detection.
+
+        ⚠️ UNVERIFIED against a live Finch sandbox (no credentials at scaffold
+        time). Real connections without the Benefits product, or providers that
+        don't expose ``/benefits/{id}/individuals``, degrade to "no facts" — the
+        caller treats unknown enrollment as ``None`` rather than a false signal.
+        """
+        if config.get("mode") == "mock":
+            # Demo facts: first mock employee enrolled w/ employer premium, the
+            # rest unenrolled — exercises both the leak and the gap path.
+            facts: dict[str, dict] = {}
+            for i, iid in enumerate(individual_ids):
+                enrolled = (i % 2 == 0)
+                facts[iid] = {
+                    "has_benefits_enrollment": enrolled,
+                    "employer_health_premium_monthly": 650.0 if enrolled else 0.0,
+                }
+            return facts
+
+        facts: dict[str, dict] = {}
+        try:
+            benefits = await self.list_benefits(config, secrets)
+        except HRISProvisioningError:
+            return facts  # Benefits product not available — caller handles unknown.
+
+        health_types = ("medical", "health", "section_125_medical", "hsa", "fsa_medical")
+        for benefit in benefits:
+            btype = (benefit.get("type") or "").lower()
+            if not any(h in btype for h in health_types):
+                continue
+            bid = benefit.get("id") or benefit.get("benefit_id")
+            if not bid:
+                continue
+            try:
+                enrolled_ids = await self.list_enrolled(config, secrets, bid)
+                contributions = await self.get_benefit_individuals(config, secrets, bid)
+            except HRISProvisioningError:
+                continue
+            for iid in enrolled_ids:
+                fact = facts.setdefault(
+                    iid, {"has_benefits_enrollment": True, "employer_health_premium_monthly": 0.0}
+                )
+                fact["has_benefits_enrollment"] = True
+                detail = contributions.get(iid) or {}
+                comp = detail.get("company_contribution") or {}
+                amount = comp.get("amount") if isinstance(comp, dict) else None
+                if amount not in (None, ""):
+                    try:
+                        # Finch fixed amounts are in minor units (cents).
+                        monthly = float(Decimal(str(amount)) / Decimal(100))
+                        fact["employer_health_premium_monthly"] = round(monthly, 2)
+                    except (InvalidOperation, ValueError):
+                        pass
+        return facts
+
     @staticmethod
     def normalize_worker(finch_record: dict) -> dict:
         """Convert a merged Finch record to flat Matcha employee format.

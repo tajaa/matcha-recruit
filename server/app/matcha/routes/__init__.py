@@ -30,6 +30,7 @@ from .inbound_email import router as anonymous_report_router
 from .training import router as training_router
 from .i9 import router as i9_router
 from .cobra import router as cobra_router
+from .benefits import router as benefits_router
 from .separation import router as separation_router
 from .fake_hris import router as fake_hris_router
 from .twilio_webhook import router as twilio_webhook_router
@@ -157,6 +158,12 @@ matcha_router.include_router(
     prefix="/cobra",
     tags=["cobra"],
     dependencies=[Depends(require_feature("cobra"))],
+)
+matcha_router.include_router(
+    benefits_router,
+    prefix="/benefits",
+    tags=["benefits"],
+    dependencies=[Depends(require_feature("benefits_admin"))],
 )
 matcha_router.include_router(
     separation_router,

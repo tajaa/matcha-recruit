@@ -26,6 +26,12 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "paid_channel_creator": False,
     "channel_job_postings": False,
     "discipline": True,
+    # Employee-benefits broker tooling. When on, exposes the benefits roster
+    # ingestion (Finch + CSV), eligibility-exception detection (new-hire
+    # enrollment gaps + terminated-but-still-deducted "premium leaks"), and the
+    # renewal-risk radar. Gates the company-facing /benefits/* router; the
+    # broker-portal rollups live under /broker/benefits/* (broker-role gated).
+    "benefits_admin": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,
