@@ -560,6 +560,9 @@ class Osha300ASummary(BaseModel):
     establishment_id: Optional[str] = None
     ein: Optional[str] = None
     naics: Optional[str] = None
+    # Human-readable industry title derived from the NAICS code (subsector
+    # level) — fills the 300A "Industry description" field + ITA CSV column.
+    industry_description: Optional[str] = None
     address: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None

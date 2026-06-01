@@ -28,6 +28,7 @@ from app.matcha.models.ir_incident import (
 )
 from ._shared import log_audit
 from app.core.services.osha_redaction import redact_osha_text, company_is_healthcare
+from app.matcha.services.naics_titles import naics_industry_description
 
 logger = logging.getLogger(__name__)
 
@@ -431,6 +432,7 @@ async def get_osha_300a_summary(
             establishment_id=str(est["id"]),
             ein=est["ein"],
             naics=est["naics"],
+            industry_description=naics_industry_description(est["naics"]),
             address=est["address"],
             city=est["city"],
             state=est["state"],
@@ -749,7 +751,7 @@ async def export_ita_csv(
             "state": est["state"] or "",
             "zip_code": est["zip_code"] or "",
             "naics_code": est["naics"] or "",
-            "industry_description": "",  # optional; derivable from NAICS, left blank
+            "industry_description": naics_industry_description(est["naics"]) or "",
             "size": _ita_size_category(est["annual_average_employees"]),
             "establishment_type": 1,  # 1 = private (not a government establishment)
             "year_filing_for": year,

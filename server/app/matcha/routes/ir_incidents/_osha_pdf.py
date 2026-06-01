@@ -223,7 +223,7 @@ def _build_300a_html(s: dict) -> str:
         <div class="field"><span class="lbl">City</span><span class="val">{_esc(s.get('city'))}</span></div>
         <div class="field"><span class="lbl">State</span><span class="val">{_esc(s.get('state'))}</span></div>
         <div class="field"><span class="lbl">ZIP</span><span class="val">{_esc(s.get('zipcode'))}</span></div>
-        <div class="field"><span class="lbl">Industry description (e.g. Manufacture of motor trailers)</span><span class="val">&nbsp;</span></div>
+        <div class="field"><span class="lbl">Industry description (e.g. Manufacture of motor trailers)</span><span class="val">{_esc(s.get('industry_description')) or '&nbsp;'}</span></div>
         <div class="field"><span class="lbl">NAICS code (e.g. 336212), if known</span><span class="val">{_esc(s.get('naics'))}</span></div>
       </div>
 
