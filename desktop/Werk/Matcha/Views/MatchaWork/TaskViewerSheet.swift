@@ -23,9 +23,6 @@ struct TaskViewerSheet: View {
     /// guards that one-time fetch; the rounds/audit feed stays collapsed behind
     /// `showHistory` so the audit trail is opt-in, not in the way.
     @State private var showHistory = false
-    /// UPDATES log is collapsed by default — it's a read-only audit trail (like
-    /// a commit history) for spotting discrepancies, never auto-expanded on open.
-    @State private var showUpdates = false
     @State private var historyLoaded = false
     @State private var loadingHistory = false
     /// Earlier-round attachments tuck behind a disclosure so the foreground
@@ -94,13 +91,15 @@ struct TaskViewerSheet: View {
         history.filter { $0.eventType == "activity" }
     }
 
-    /// The ticket's update log — the same event set the card badge counts
-    /// (`TicketUpdatesStore.countedEventTypes`), newest first. Read-only audit
-    /// trail; not a checklist.
-    private var updateEvents: [MWTaskHistoryEntry] {
-        history
-            .filter { TicketUpdatesStore.countedEventTypes.contains($0.eventType) }
-            .sorted { $0.createdAt > $1.createdAt }
+    /// `round_started` timestamps, ascending. Anything created at/after the
+    /// k-th boundary belongs to round k+1 — same derivation the backend uses for
+    /// file round_index and `_current_round`, so a comment's round lines up with
+    /// `currentRound` (from subtasks) and the attachment rounds.
+    private var roundBoundaryTimes: [String] {
+        history.filter { $0.eventType == "round_started" }.map(\.createdAt).sorted()
+    }
+    private func roundIndex(forCreatedAt createdAt: String) -> Int {
+        1 + roundBoundaryTimes.reduce(into: 0) { acc, t in if t <= createdAt { acc += 1 } }
     }
 
     private var assigneeName: String? {
@@ -267,10 +266,6 @@ struct TaskViewerSheet: View {
             // note is cleared server-side on re-submit; History is the durable
             // record). Hidden on single-round tickets.
             currentRoundCard
-
-            // Unviewed updates — what changed on this ticket since the user last
-            // checked it off. Separate from the checklist (which is work-done).
-            updatesSection
 
             if let description = task.description, !description.isEmpty {
                 ScrollView {
@@ -450,6 +445,12 @@ struct TaskViewerSheet: View {
             projectId: pid, taskId: task.id
         ) {
             history = rows
+            // Opening the ticket = the user has seen what's new (this round's
+            // content is inline). Clear the card's unviewed-updates badge.
+            let counted = rows
+                .filter { TicketUpdatesStore.countedEventTypes.contains($0.eventType) }
+                .map(\.id)
+            TicketUpdatesStore.shared.markAllViewed(taskId: task.id, eventIds: counted)
         }
         historyLoaded = true
     }
@@ -615,6 +616,18 @@ struct TaskViewerSheet: View {
         }
     }
 
+    /// Small "Round N" chip marking a foreground section as scoped to the live
+    /// round, so it's explicit the body is showing the current round's work.
+    private var roundScopePill: some View {
+        Text("Round \(currentRound)")
+            .font(.system(size: 8, weight: .semibold))
+            .foregroundColor(.matcha500)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(Color.matcha500.opacity(0.15))
+            .cornerRadius(4)
+    }
+
     /// The in-ticket Q&A thread: a note composer plus the activity notes,
     /// newest-first. Always visible in every column so clarifying questions
     /// are one click away. Posting a note bells the other participants.
@@ -636,18 +649,23 @@ struct TaskViewerSheet: View {
                     ProgressView().controlSize(.small)
                 }
                 Spacer()
+                if currentRound > 1 {
+                    roundScopePill
+                }
             }
 
             noteComposer
 
-            // Activity notes only, newest-first so the latest sits right under
-            // the composer. Structural events (moves, subtask flips, round
-            // starts) are intentionally NOT here — they live in History.
+            // One combined thread, newest-first (current-round comments land on
+            // top). Each row carries a Round-N chip and prior-round comments are
+            // dimmed, so it's never ambiguous which round a comment is from.
             if !notes.isEmpty {
                 ForEach(Array(notes.reversed())) { note in
                     NoteRow(
                         entry: note,
                         files: attachments,
+                        noteRound: roundIndex(forCreatedAt: note.createdAt),
+                        currentRound: currentRound,
                         onPreview: { previewFile = $0 },
                         onReply: {
                             replyingToNote = note
@@ -742,58 +760,6 @@ struct TaskViewerSheet: View {
                     onPreview: { previewFile = $0 }
                 )
             }
-        }
-    }
-
-    /// UPDATES — a read-only audit log of what changed on this ticket (comments
-    /// / round changes / subtasks added / moves+send-backs), newest first. Like
-    /// a commit history: it's there to reconcile discrepancies, not to tick off.
-    /// Collapsed by default (never auto-opens with the ticket). Expanding it
-    /// acknowledges the log → clears the card's unviewed-updates badge.
-    @ViewBuilder
-    private var updatesSection: some View {
-        let events = updateEvents
-        if !events.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Button {
-                    let opening = !showUpdates
-                    withAnimation { showUpdates.toggle() }
-                    if opening {
-                        TicketUpdatesStore.shared.markAllViewed(
-                            taskId: task.id, eventIds: events.map(\.id))
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "clock.arrow.2.circlepath")
-                            .font(.system(size: 10))
-                            .foregroundColor(.blue)
-                        Text("UPDATES")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.secondary)
-                            .tracking(0.5)
-                        Text("\(events.count)")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Color.zinc800)
-                            .cornerRadius(4)
-                        Spacer()
-                        Image(systemName: showUpdates ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.secondary)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                if showUpdates {
-                    ForEach(events) { e in UpdateLogRow(entry: e) }
-                }
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.zinc800.opacity(0.35))
-            .cornerRadius(6)
         }
     }
 
@@ -1058,6 +1024,10 @@ struct TaskViewerSheet: View {
                         .padding(.vertical, 1)
                         .background(Color.zinc800)
                         .cornerRadius(4)
+                }
+                Spacer()
+                if currentRound > 1 {
+                    roundScopePill
                 }
             }
 
@@ -1696,54 +1666,6 @@ private struct EventRow: View {
     }
 }
 
-/// One row in the read-only UPDATES audit log: an event icon, a compact label,
-/// and the timestamp. No interaction — it's a reference trail, not a checklist.
-private struct UpdateLogRow: View {
-    let entry: MWTaskHistoryEntry
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: Self.icon(entry))
-                .font(.system(size: 10))
-                .foregroundColor(.secondary)
-                .frame(width: 16, alignment: .center)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(Self.label(entry))
-                    .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.85))
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(PacificDateFormatter.absolute(entry.createdAt) ?? entry.createdAt)
-                    .font(.system(size: 9))
-                    .foregroundColor(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 2)
-    }
-
-    private static func icon(_ e: MWTaskHistoryEntry) -> String {
-        e.eventType == "activity" ? "bubble.left" : EventRow.icon(for: e.eventType)
-    }
-
-    /// Compact one-liner. Reuses EventRow.describe for structural events;
-    /// activity (comments) get bespoke wording incl. an image-only fallback.
-    private static func label(_ e: MWTaskHistoryEntry) -> String {
-        guard e.eventType == "activity" else { return EventRow.describe(e) }
-        let who = e.actorName?.isEmpty == false ? e.actorName! : "Someone"
-        let body = (e.metadata?["body"] ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "\n", with: " ")
-        if !body.isEmpty {
-            let excerpt = body.count > 80 ? String(body.prefix(80)) + "\u{2026}" : body
-            return "\(who) commented: \u{201C}\(excerpt)\u{201D}"
-        }
-        if let ids = e.attachmentIds, !ids.isEmpty {
-            return ids.count == 1 ? "\(who) added an image" : "\(who) added \(ids.count) images"
-        }
-        return "\(who) commented"
-    }
-}
-
 /// One pending image/file queued in the note composer before the note
 /// is submitted. Held in memory only — uploaded to mw_project_files on
 /// submit and linked to the activity row via metadata.attachment_ids.
@@ -1804,9 +1726,17 @@ private struct PendingAttachmentChip: View {
 private struct NoteRow: View {
     let entry: MWTaskHistoryEntry
     let files: [MWProjectFile]
+    /// The round this comment was posted in, and the ticket's live round.
+    /// When they differ the row is chipped + dimmed so a prior-round comment
+    /// never reads as part of the current round. Default 1/1 (e.g. EventRow's
+    /// inline use) renders no chip.
+    var noteRound: Int = 1
+    var currentRound: Int = 1
     let onPreview: (MWProjectFile) -> Void
     var onReply: (() -> Void)? = nil
     @State private var isHovered = false
+
+    private var isPriorRound: Bool { noteRound < currentRound }
 
     private var body_: String {
         (entry.metadata?["body"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1895,6 +1825,18 @@ private struct NoteRow: View {
                         Text("\((entry.actorName?.isEmpty == false ? entry.actorName! : "Someone")) · \(PacificDateFormatter.absolute(entry.createdAt) ?? "")")
                             .font(.system(size: 9))
                             .foregroundColor(.secondary)
+                        // Which round this comment is from. Only shown on
+                        // multi-round tickets; greyed for prior rounds, matcha
+                        // for the current one.
+                        if currentRound > 1 {
+                            Text("Round \(noteRound)")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundColor(isPriorRound ? .secondary : .matcha500)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background((isPriorRound ? Color.secondary : Color.matcha500).opacity(0.15))
+                                .cornerRadius(3)
+                        }
                         if let onReply, isHovered {
                             Button(action: onReply) {
                                 HStack(spacing: 2) {
@@ -1915,6 +1857,7 @@ private struct NoteRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.zinc800.opacity(0.5))
             .cornerRadius(5)
+            .opacity(isPriorRound ? 0.6 : 1)   // prior-round comments recede
             .onHover { isHovered = $0 }
         }
     }
