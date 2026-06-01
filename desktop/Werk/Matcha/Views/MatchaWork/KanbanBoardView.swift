@@ -71,8 +71,86 @@ struct KanbanBoardView: View {
     /// Board/Pipeline tab — initialized from project.pipelineMode on appear.
     @State private var viewMode: ViewMode = .board
 
+    // MARK: - "Replay changes" on open
+    // When the board opens, briefly show each ticket where it was the LAST time
+    // this user looked, then animate it to where collaborators have since moved
+    // it — so the diff plays out like pieces sliding across a board. Newly-added
+    // tickets get a fading highlight. Board mode only.
+    /// taskId → the column to DISPLAY during the replay (its last-seen column).
+    /// Empty in steady state — grouping then falls straight through to the
+    /// memoized `groupedColumns`, so there's zero per-frame cost when idle.
+    @State private var replayOverrides: [String: String] = [:]
+    /// taskIds added since the last view — highlighted briefly as "new".
+    @State private var replayNewIds: Set<String> = []
+    /// One replay per board mount; set once tasks first load.
+    @State private var didReplay = false
+    /// Drives matchedGeometryEffect so a card glides from its old column to its
+    /// new one when `replayOverrides` clears.
+    @Namespace private var cardNS
+
     private var isPipeline: Bool { viewMode == .pipeline }
     private var pipelineSummary: PipelineSummary { PipelineSummary(tasks: viewModel.tasks) }
+
+    // MARK: - Replay helpers
+
+    private func lastSeenKey(_ pid: String) -> String { "kanban-lastseen-\(pid)" }
+
+    private func loadLastSeen(_ pid: String) -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: lastSeenKey(pid)) as? [String: String] ?? [:]
+    }
+    private func saveLastSeen(_ pid: String, _ map: [String: String]) {
+        UserDefaults.standard.set(map, forKey: lastSeenKey(pid))
+    }
+
+    /// Tasks to render in `key`, accounting for an active replay. Steady state
+    /// (no overrides) returns the memoized column list unchanged — no extra work
+    /// on the resize-driven body re-evals the perf fix guards against.
+    private func displayTasks(forColumn key: String) -> [MWProjectTask] {
+        let grouped = viewModel.groupedColumns(pipeline: isPipeline, search: searchText)
+        guard !replayOverrides.isEmpty else { return grouped[key] ?? [] }
+        // Re-bucket by display column = override (old column) ?? real column.
+        var result = (grouped[key] ?? []).filter { replayOverrides[$0.id] == nil }
+        for (col, tasks) in grouped where col != key {
+            result += tasks.filter { replayOverrides[$0.id] == key }
+        }
+        return result
+    }
+
+    /// Run once after tasks first load: diff the board against what this user
+    /// last saw, stage the old positions, then spring them to current.
+    private func maybeReplay() {
+        guard !didReplay, !isPipeline, !viewModel.tasks.isEmpty,
+              let pid = viewModel.project?.id else { return }
+        didReplay = true
+
+        let current = Dictionary(viewModel.tasks.map { ($0.id, $0.boardColumn) },
+                                 uniquingKeysWith: { a, _ in a })
+        let lastSeen = loadLastSeen(pid)
+        // Persist the current board as the new baseline either way.
+        saveLastSeen(pid, current)
+        guard !lastSeen.isEmpty else { return }   // first ever open — nothing to replay
+
+        var overrides: [String: String] = [:]
+        for (tid, col) in current {
+            if let old = lastSeen[tid], old != col { overrides[tid] = old }   // moved
+        }
+        let newIds = Set(current.keys.filter { lastSeen[$0] == nil })          // added
+        guard !overrides.isEmpty || !newIds.isEmpty else { return }            // unchanged
+
+        replayOverrides = overrides
+        replayNewIds = newIds
+        Task { @MainActor in
+            // Hold the old layout a beat so the eye registers it, then glide.
+            try? await Task.sleep(for: .seconds(0.55))
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.78)) {
+                replayOverrides = [:]
+            }
+            try? await Task.sleep(for: .seconds(1.4))
+            withAnimation(.easeOut(duration: 0.4)) {
+                replayNewIds = []
+            }
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -144,11 +222,17 @@ struct KanbanBoardView: View {
         .background(ThemeRadialBackground())
         .onAppear {
             if viewModel.project?.pipelineMode == true { viewMode = .pipeline }
+            maybeReplay()
         }
         .task {
             if viewModel.tasks.isEmpty {
                 await viewModel.loadTasks()
             }
+        }
+        // Tasks usually arrive after the board mounts — run the replay the
+        // moment they do (maybeReplay is idempotent, guarded by didReplay).
+        .onChange(of: viewModel.tasks.isEmpty) { _, empty in
+            if !empty { maybeReplay() }
         }
         // Re-render once a minute so aging tints advance while the board sits
         // open. Cards carry closures (non-equatable), so the parent re-render
@@ -384,7 +468,7 @@ struct KanbanBoardView: View {
         // memoized — a window resize re-evaluates this body every frame, so the
         // filter/sort/date-parse must NOT run here. `orderedTasks` is already in
         // final display order (done column pre-sorted most-recently-completed).
-        let orderedTasks = viewModel.groupedColumns(pipeline: isPipeline, search: searchText)[key] ?? []
+        let orderedTasks = displayTasks(forColumn: key)
         // Done column collapses to the 5 most-recently-completed with a "show
         // more" expander — completed work piles up otherwise.
         let isDoneColumn = !isPipeline && key == "done"
@@ -543,6 +627,14 @@ struct KanbanBoardView: View {
                             }
                         }
                     }
+                )
+                // Glide across columns when the replay clears its overrides.
+                .matchedGeometryEffect(id: task.id, in: cardNS)
+                // Fading accent ring marks tickets added since the last view.
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(appState.themeAccent,
+                                lineWidth: replayNewIds.contains(task.id) ? 2 : 0)
                 )
                 .draggable(task.id)
                 .contextMenu {
