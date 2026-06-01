@@ -147,7 +147,7 @@ struct TaskViewerSheet: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isCopying)
-                .help("Copy ticket (markdown + screenshots)")
+                .help("Copy ticket as text + screenshot paths (for Claude Code)")
                 Button(action: onClose) {
                     Image(systemName: "xmark")
                         .font(.system(size: 11))
@@ -937,67 +937,50 @@ struct TaskViewerSheet: View {
         }
     }
 
-    /// Copies the ticket as markdown PLUS the real screenshot bytes, so pasting
-    /// into Claude/ChatGPT web drops the actual images instead of dead
-    /// presigned/CloudFront URLs. The markdown (which still lists every image as
-    /// a `![](url)` line) doubles as the fallback for images that fail to
-    /// download or for paste targets that ignore image flavors.
+    /// Copies the ticket as a single TEXT blob tuned for Claude Code: title,
+    /// status, description, checklist (subtasks), and the screenshots written
+    /// out as LOCAL file paths Claude Code can open with its Read tool.
     ///
-    /// The primary pasteboard item carries BOTH the markdown string and the
-    /// first image's bytes, so a single paste can surface either flavor. Extra
-    /// images ride on follow-up items (best-effort — browsers typically pull
-    /// only one image per paste).
+    /// Deliberately text-only — no image bytes on the clipboard. Claude Code
+    /// (and most CLIs) grab image data whenever it's present and drop the text,
+    /// which loses the ticket context. Local paths sidestep that: one paste
+    /// carries the full ticket AND loadable screenshots. (These are real local
+    /// files, unlike the dead CloudFront URLs the export used to emit.)
     @MainActor
     private func copyTicketToClipboard() async {
         isCopying = true
+
+        // Download up to 6 image attachments and write them to a per-task temp
+        // dir so their paths are real + readable. Only successfully-written
+        // files contribute a path (never list an unreadable one).
+        let images = Array(attachments.filter { $0.isImage }.prefix(6))
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("werk-ticket-\(task.id)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+
+        var screenshotPaths: [String] = []
+        for (idx, img) in images.enumerated() {
+            guard let url = URL(string: img.storageUrl),
+                  let (data, _) = try? await URLSession.shared.data(from: url) else { continue }
+            let safeName = img.filename.isEmpty ? "image-\(idx).png" : img.filename
+            let fileURL = tmpDir.appendingPathComponent("\(idx)-\(safeName)")
+            if (try? data.write(to: fileURL)) != nil {
+                screenshotPaths.append(fileURL.path)
+            }
+        }
+
         let markdown = TaskClipboardExporter.markdown(
             for: task,
             assigneeName: assigneeName,
             columnLabel: columnLabel,
             attachments: attachments,
             subtasks: subtasks,
+            screenshotPaths: screenshotPaths,
         )
-
-        // Download up to 6 image attachments' bytes.
-        let images = Array(attachments.filter { $0.isImage }.prefix(6))
-        var downloaded: [(file: MWProjectFile, data: Data)] = []
-        for img in images {
-            guard let url = URL(string: img.storageUrl) else { continue }
-            if let (data, _) = try? await URLSession.shared.data(from: url) {
-                downloaded.append((img, data))
-            }
-        }
-
-        // Write each image to a temp file and put its file URL on the clipboard
-        // (alongside the raw bytes) so pasting into Claude Code drops the real
-        // PNG/screenshot — like dragging the file in — instead of a URL string.
-        // The markdown (now including the checklist) rides on a trailing text
-        // item so plain-text targets still get the full ticket.
-        let tmpDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("werk-ticket-\(task.id)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-
-        var items: [NSPasteboardItem] = []
-        for (idx, entry) in downloaded.enumerated() {
-            let item = NSPasteboardItem()
-            item.setData(entry.data, forType: pasteboardType(for: entry.file))
-            let safeName = entry.file.filename.isEmpty ? "image-\(idx).png" : entry.file.filename
-            let fileURL = tmpDir.appendingPathComponent("\(idx)-\(safeName)")
-            if (try? entry.data.write(to: fileURL)) != nil {
-                item.setString(fileURL.absoluteString, forType: .fileURL)
-            }
-            items.append(item)
-        }
-
-        // Markdown last: image/file-aware readers (Claude Code, browsers) match
-        // the leading image items first; plain-text targets fall through to this.
-        let textItem = NSPasteboardItem()
-        textItem.setString(markdown, forType: .string)
-        items.append(textItem)
 
         let board = NSPasteboard.general
         board.clearContents()
-        board.writeObjects(items)
+        board.setString(markdown, forType: .string)
 
         isCopying = false
         didCopy = true
@@ -1005,21 +988,6 @@ struct TaskViewerSheet: View {
             try? await Task.sleep(for: .milliseconds(1500))
             await MainActor.run { didCopy = false }
         }
-    }
-
-    /// Concrete image pasteboard type so the receiver knows the format.
-    private func pasteboardType(for file: MWProjectFile) -> NSPasteboard.PasteboardType {
-        let ct = (file.contentType ?? "").lowercased()
-        let ext = (file.filename as NSString).pathExtension.lowercased()
-        if ct.contains("png") || ext == "png" { return .png }
-        if ct.contains("tiff") || ext == "tiff" || ext == "tif" { return .tiff }
-        if ct.contains("jpeg") || ct.contains("jpg") || ext == "jpg" || ext == "jpeg" {
-            return NSPasteboard.PasteboardType(UTType.jpeg.identifier)
-        }
-        if let ut = UTType(filenameExtension: ext), ut.conforms(to: .image) {
-            return NSPasteboard.PasteboardType(ut.identifier)
-        }
-        return .png
     }
 
     private func metaPill(label: String, color: Color) -> some View {
@@ -1768,11 +1736,10 @@ private struct ViewerAttachmentRow: View {
 
 /// Builds a clipboard-friendly markdown blob describing a task. Used by
 /// TaskViewerSheet's Copy button so the user can drop the full ticket
-/// (title, status, assignee, description, progress note, attachments,
-/// history) into Claude Code / Codex / ChatGPT / any chat that accepts
-/// markdown. Image attachments are inlined as `![]()` so paste-targets
-/// that fetch URLs render the screenshots; terminal paste-targets see
-/// the URL as text.
+/// (title, status, assignee, description, checklist) into Claude Code /
+/// Codex / any chat that accepts markdown. Screenshots are referenced by
+/// LOCAL file path (`screenshotPaths`) so Claude Code can open them with its
+/// Read tool — not by CloudFront URL, which CLIs can't fetch.
 enum TaskClipboardExporter {
     static func markdown(
         for task: MWProjectTask,
@@ -1780,6 +1747,7 @@ enum TaskClipboardExporter {
         columnLabel: String,
         attachments: [MWProjectFile],
         subtasks: [MWSubtask] = [],
+        screenshotPaths: [String] = [],
     ) -> String {
         var lines: [String] = []
         lines.append("# \(task.title)")
@@ -1815,16 +1783,23 @@ enum TaskClipboardExporter {
             lines.append("")
         }
 
-        if !attachments.isEmpty {
-            lines.append("## Attachments (\(attachments.count))")
-            for f in attachments {
-                let sizeStr = formatSize(f.fileSize)
-                lines.append("- [\(f.filename)](\(f.storageUrl)) — \(sizeStr)")
+        // Non-image attachments by name only — the CloudFront URLs are dead
+        // weight to a CLI, and listing them was the "directories" noise.
+        let nonImages = attachments.filter { !$0.isImage }
+        if !nonImages.isEmpty {
+            lines.append("## Attachments (\(nonImages.count))")
+            for f in nonImages {
+                lines.append("- \(f.filename) — \(formatSize(f.fileSize))")
             }
-            // Inline-render images so paste-targets that fetch URLs show them.
-            for f in attachments where f.isImage {
-                lines.append("")
-                lines.append("![\(f.filename)](\(f.storageUrl))")
+            lines.append("")
+        }
+
+        // Screenshots as LOCAL paths Claude Code can open directly.
+        if !screenshotPaths.isEmpty {
+            lines.append("## Screenshots")
+            lines.append("_Local files — open these to view:_")
+            for p in screenshotPaths {
+                lines.append(p)
             }
             lines.append("")
         }
