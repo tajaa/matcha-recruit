@@ -2615,7 +2615,15 @@ async def init_db():
                 company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
                 location_id UUID NOT NULL REFERENCES business_locations(id) ON DELETE CASCADE,
                 token VARCHAR(32) UNIQUE NOT NULL,
+                -- Reusable (not single-use): used_at is the LAST-used timestamp,
+                -- never blocks. is_active=false is a soft revoke. use_count drives
+                -- the optional max_uses cap. See migration irlink0002.
                 used_at TIMESTAMPTZ,
+                is_active BOOLEAN NOT NULL DEFAULT true,
+                revoked_at TIMESTAMPTZ,
+                use_count INT NOT NULL DEFAULT 0,
+                max_uses INT,
+                expires_at TIMESTAMPTZ,
                 created_by UUID,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 UNIQUE (company_id, location_id)
@@ -2626,6 +2634,29 @@ async def init_db():
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_ir_report_links_token ON ir_report_links(token)
+        """)
+        # Rotation history: every regenerate/revoke retires the old token here so
+        # a compromised token stays correlatable to the reports filed through it.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ir_report_link_history (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                link_id UUID NOT NULL REFERENCES ir_report_links(id) ON DELETE CASCADE,
+                company_id UUID NOT NULL,
+                location_id UUID NOT NULL,
+                token VARCHAR(32) NOT NULL,
+                went_live_at TIMESTAMPTZ,
+                retired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                retired_reason TEXT NOT NULL CHECK (retired_reason IN ('rotated', 'revoked')),
+                use_count INT NOT NULL DEFAULT 0,
+                created_by UUID,
+                retired_by UUID
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ir_report_link_history_link ON ir_report_link_history(link_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ir_report_link_history_company ON ir_report_link_history(company_id)
         """)
 
         # Backfill legacy IR incidents with missing company_id so tenant-scoped

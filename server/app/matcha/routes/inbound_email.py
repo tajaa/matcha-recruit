@@ -250,13 +250,37 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
 # Single-use: the token is burned on first submit.
 # ---------------------------------------------------------------------------
 
+def _check_link_usable(row) -> None:
+    """Raise 410 if a per-location link is revoked, expired, or over its
+    max-use cap. Reusable links pass; the only blockers are these three.
+    ``row`` must expose is_active, expires_at, max_uses, use_count."""
+    if not row["is_active"]:
+        raise HTTPException(
+            status_code=410,
+            detail="This reporting link has been revoked. Contact your HR team for a new link.",
+        )
+    expires_at = row["expires_at"]
+    if expires_at is not None and expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=410,
+            detail="This reporting link has expired. Contact your HR team for a new link.",
+        )
+    max_uses = row["max_uses"]
+    if max_uses is not None and (row["use_count"] or 0) >= max_uses:
+        raise HTTPException(
+            status_code=410,
+            detail="This reporting link has reached its usage limit. Contact your HR team for a new link.",
+        )
+
+
 @router.get("/intake/{token}")
 async def validate_location_intake_token(token: str):
     """Validate a per-location magic link so the form can show its locked location."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            SELECT rl.used_at, rl.location_id, rl.company_id,
+            SELECT rl.location_id, rl.company_id,
+                   rl.is_active, rl.expires_at, rl.max_uses, rl.use_count,
                    c.name AS company_name, c.enabled_features
             FROM ir_report_links rl
             JOIN companies c ON c.id = rl.company_id
@@ -271,8 +295,7 @@ async def validate_location_intake_token(token: str):
         features = json.loads(features)
     if not (features or {}).get("incidents", False):
         raise HTTPException(status_code=404, detail="Invalid reporting link")
-    if row["used_at"] is not None:
-        raise HTTPException(status_code=410, detail="This reporting link has already been used")
+    _check_link_usable(row)
 
     # Read the location under the tenant so business_locations RLS is satisfied
     # even once the app stops connecting as a superuser (rl + companies are
@@ -333,7 +356,7 @@ async def submit_location_report(
     async with get_connection() as conn:
         link = await conn.fetchrow(
             """
-            SELECT rl.location_id, rl.used_at,
+            SELECT rl.location_id,
                    c.id AS company_id, c.enabled_features
             FROM ir_report_links rl
             JOIN companies c ON c.id = rl.company_id
@@ -359,18 +382,21 @@ async def submit_location_report(
     ][:50]
 
     # 2. Tenant-scoped atomic write — ir_incidents has RLS, so the tenant must
-    #    be set on the connection. Re-check used_at under FOR UPDATE so a
-    #    double-submit can't mint two incidents off one single-use link.
+    #    be set on the connection. Re-check usability under FOR UPDATE so a
+    #    burst of concurrent submits can't overshoot a max_uses cap (the link is
+    #    reusable, so the lock guards the ceiling, not single-use).
     async with get_connection(tenant_id=company_id) as conn:
         async with conn.transaction():
             link_row = await conn.fetchrow(
-                "SELECT used_at FROM ir_report_links WHERE token = $1 FOR UPDATE",
+                """
+                SELECT is_active, expires_at, max_uses, use_count
+                FROM ir_report_links WHERE token = $1 FOR UPDATE
+                """,
                 token.lower(),
             )
             if not link_row:
                 raise HTTPException(status_code=404, detail="Invalid reporting link")
-            if link_row["used_at"] is not None:
-                raise HTTPException(status_code=410, detail="This reporting link has already been used")
+            _check_link_usable(link_row)
 
             # Location label + active-state, read under the tenant (RLS-safe).
             # A link for a since-deactivated location is rejected (parity with
@@ -409,8 +435,9 @@ async def submit_location_report(
                 current_user=None,
             )
 
+            # Reusable: bump the counter + last-used stamp instead of burning it.
             await conn.execute(
-                "UPDATE ir_report_links SET used_at = NOW() WHERE token = $1",
+                "UPDATE ir_report_links SET use_count = use_count + 1, used_at = NOW() WHERE token = $1",
                 token.lower(),
             )
 

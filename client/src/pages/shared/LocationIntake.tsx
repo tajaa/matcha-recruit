@@ -47,8 +47,11 @@ export default function LocationIntake() {
           setStage('form')
           return
         }
-        if (res.status === 410) setStage('used')
-        else setStage('invalid')
+        if (res.status === 410) {
+          const data = (await res.json().catch(() => null)) as { detail?: string } | null
+          setError(data?.detail ?? null)
+          setStage('used')
+        } else setStage('invalid')
       })
       .catch(() => setStage('invalid'))
   }, [token])
@@ -106,8 +109,8 @@ export default function LocationIntake() {
     return (
       <Shell>
         <AlertTriangle className="w-10 h-10 text-amber-400 mx-auto mb-3" />
-        <h1 className="text-lg font-semibold text-zinc-100 mb-2">Link already used</h1>
-        <p className="text-sm text-zinc-400">This reporting link has already been submitted. Contact your HR team for a new one.</p>
+        <h1 className="text-lg font-semibold text-zinc-100 mb-2">Link unavailable</h1>
+        <p className="text-sm text-zinc-400">{error ?? 'This reporting link is no longer active. Contact your HR team for a new one.'}</p>
       </Shell>
     )
   }
