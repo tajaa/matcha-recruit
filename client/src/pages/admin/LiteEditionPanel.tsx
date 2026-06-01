@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Download, FileText, PencilLine } from 'lucide-react'
 import { Button } from '../../components/ui'
 import { api } from '../../api/client'
+import { getTemplate, saveTemplate } from '../../api/dealTemplates'
+import SaveTemplateButton from './SaveTemplateButton'
 
 type Block = { id: string; kind: string; text: string; items: string[]; new_page: boolean; column: string }
 
@@ -25,8 +27,11 @@ export default function LiteEditionPanel({
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    api.get<{ blocks: Block[] }>('/admin/deal-flow/lite-defaults')
-      .then((r) => setBlocks(r.blocks))
+    Promise.all([
+      api.get<{ blocks: Block[] }>('/admin/deal-flow/lite-defaults'),
+      getTemplate<{ blocks: Block[] }>('lite'),
+    ])
+      .then(([def, saved]) => setBlocks(saved.payload?.blocks ?? def.blocks))
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load template'))
   }, [])
 
@@ -59,6 +64,11 @@ export default function LiteEditionPanel({
     setBlocks((prev) => prev && prev.map((b) => (b.id === id ? { ...b, ...patch } : b)))
   }
 
+  async function saveTpl() {
+    // Lite Edition's template is its editable copy; pricing comes from the one-pager inputs.
+    await saveTemplate<{ blocks: Block[] }>('lite', { blocks: blocks ?? [] })
+  }
+
   async function download() {
     if (!validHeadcount) return
     setDownloading(true)
@@ -80,10 +90,13 @@ export default function LiteEditionPanel({
           <ToggleBtn active={view === 'edit'} onClick={() => setView('edit')} icon={<PencilLine className="h-4 w-4" />}>Edit</ToggleBtn>
           <ToggleBtn active={view === 'preview'} onClick={() => setView('preview')} icon={<FileText className="h-4 w-4" />}>Preview</ToggleBtn>
         </div>
-        <Button onClick={download} disabled={!validHeadcount || downloading}>
-          {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-          Download Lite PDF
-        </Button>
+        <div className="flex items-center gap-2">
+          <SaveTemplateButton onSave={saveTpl} />
+          <Button onClick={download} disabled={!validHeadcount || downloading}>
+            {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            Download Lite PDF
+          </Button>
+        </div>
       </div>
 
       {error && <p className="mt-3 text-sm text-red-400">{error}</p>}

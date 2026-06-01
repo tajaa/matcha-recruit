@@ -68,9 +68,18 @@ def _t_roster(q: BookQuote) -> str:
 
 
 def _book_econ(q: BookQuote) -> str:
-    save = f" &nbsp;&middot;&nbsp; Saves {_m(q.book_savings)}/yr vs list" if q.book_savings > 0 else ""
-    return (f'<div class="highlight-box">{q.total_seats:,} committed seats &times; {_p(q.net_pepm)} PEPM &times; 12 '
-            f'= {_m(q.book_annual)} / yr{save}</div>')
+    # Monthly is the headline (what the book pays each month); yearly + savings stay visible below.
+    monthly = round(q.book_annual / 12)
+    save = (f'<span style="font-weight:600">&nbsp;&middot;&nbsp; Saves {_m(q.book_savings)}/yr vs list</span>'
+            if q.book_savings > 0 else "")
+    return (
+        '<div class="highlight-box">'
+        f'<div style="font-size:22pt;font-weight:700;line-height:1.15">{_m(monthly)}'
+        f'<span style="font-size:11pt;font-weight:600;opacity:0.85"> / mo</span></div>'
+        f'<div style="margin-top:6px;font-size:10pt;font-weight:500;opacity:0.9">'
+        f'{q.total_seats:,} committed seats &times; {_p(q.net_pepm)} PEPM &nbsp;&middot;&nbsp; '
+        f'{_m(q.book_annual)} / yr{save}</div>'
+        '</div>')
 
 
 def _sign(inp: BookInputs) -> str:

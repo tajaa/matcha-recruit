@@ -10258,3 +10258,66 @@ async def deal_flow_full_proposal(inp: FullDealInputs):
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{safe_name}_Matcha_Full_Proposal.pdf"'},
     )
+
+
+# ── Deal Flow — saved editor templates (DB-backed; admin-global, one row per tab) ──
+# The deal builder is otherwise stateless. These two endpoints let a master-admin
+# persist an editor tab's template — its prose blocks plus that tab's structured
+# config (book volume tiers, broker margin tiers, one-pager per-tier pricing). The
+# payload is opaque JSONB whose shape the frontend tab owns; on load each tab layers
+# the saved payload over the hardcoded `*-defaults` (GET returns null when unsaved,
+# so the tab falls back to defaults and behaves exactly as before).
+_DEAL_TEMPLATE_KEYS = {"book", "full", "broker", "one_pager", "lite"}
+
+
+def _deal_template_row(key: str, row) -> dict:
+    """Shape a deal_flow_templates row (or absence) into the API response."""
+    if not row:
+        return {"key": key, "payload": None, "updated_at": None, "updated_by": None}
+    payload = row["payload"]
+    if isinstance(payload, str):  # asyncpg returns jsonb as text unless a codec is set
+        payload = json.loads(payload)
+    return {
+        "key": key,
+        "payload": payload,
+        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+        "updated_by": row["updated_by"],
+    }
+
+
+@router.get("/deal-flow/templates/{key}", dependencies=[Depends(require_admin)])
+async def deal_flow_get_template(key: str):
+    """Return the saved template payload for a Deal Flow tab, or null if unset."""
+    if key not in _DEAL_TEMPLATE_KEYS:
+        raise HTTPException(status_code=404, detail="Unknown template key")
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT payload, updated_at, updated_by FROM deal_flow_templates WHERE template_key = $1",
+            key,
+        )
+    return _deal_template_row(key, row)
+
+
+@router.put("/deal-flow/templates/{key}")
+async def deal_flow_save_template(
+    key: str,
+    payload: dict = Body(..., embed=True),
+    admin=Depends(require_admin),
+):
+    """Upsert the saved template payload for a Deal Flow tab (admin-global, shared)."""
+    if key not in _DEAL_TEMPLATE_KEYS:
+        raise HTTPException(status_code=404, detail="Unknown template key")
+    updated_by = getattr(admin, "email", None) or getattr(admin, "id", None)
+    updated_by = str(updated_by) if updated_by is not None else None
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO deal_flow_templates (template_key, payload, updated_at, updated_by)
+            VALUES ($1, $2::jsonb, now(), $3)
+            ON CONFLICT (template_key) DO UPDATE
+              SET payload = EXCLUDED.payload, updated_at = now(), updated_by = EXCLUDED.updated_by
+            RETURNING payload, updated_at, updated_by
+            """,
+            key, json.dumps(payload), updated_by,
+        )
+    return _deal_template_row(key, row)

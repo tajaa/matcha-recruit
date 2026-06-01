@@ -2,12 +2,15 @@ import { useEffect, useMemo, useState } from 'react'
 import { Loader2, Download, FileText } from 'lucide-react'
 import { Button, Input, Toggle } from '../../components/ui'
 import { api } from '../../api/client'
+import { getTemplate, saveTemplate } from '../../api/dealTemplates'
+import SaveTemplateButton from './SaveTemplateButton'
 import FullDealTab from './FullDealTab'
 import LiteEditionPanel from './LiteEditionPanel'
 import BrokerTab from './BrokerTab'
 import BookPricingTab from './BookPricingTab'
 
 type Tier = 'lite' | 'mid' | 'max'
+type OnePagerTemplate = { config: Record<Tier, { pepm: number; onboarding: number }> }
 
 const TIERS: Tier[] = ['lite', 'mid', 'max']
 const TIER_LABEL: Record<Tier, string> = { lite: 'Lite', mid: 'Mid', max: 'Max' }
@@ -163,6 +166,23 @@ export default function DealFlow() {
     setConfig((prev) => (prev.lite.pepm === auto ? prev : { ...prev, lite: { ...prev.lite, pepm: auto } }))
   }, [headcountNum, validHeadcount, liteManual])
 
+  // Load any saved one-pager pricing template (admin-global). Marks Lite as manual
+  // so the volume auto-fill above doesn't clobber a saved Lite PEPM.
+  useEffect(() => {
+    getTemplate<OnePagerTemplate>('one_pager')
+      .then((saved) => {
+        const c = saved.payload?.config
+        if (!c) return
+        setConfig({
+          lite: { pepm: String(c.lite.pepm), onboarding: String(c.lite.onboarding) },
+          mid: { pepm: String(c.mid.pepm), onboarding: String(c.mid.onboarding) },
+          max: { pepm: String(c.max.pepm), onboarding: String(c.max.onboarding) },
+        })
+        setLiteManual(true)
+      })
+      .catch(() => { /* no saved template → keep defaults */ })
+  }, [])
+
   const inputs = useMemo(() => {
     const overrides: Record<string, { pepm: number; onboarding: number }> = {}
     for (const t of TIERS) {
@@ -220,6 +240,19 @@ export default function DealFlow() {
     return () => clearTimeout(t)
   }, [showPreview, inputs, validHeadcount])
 
+  async function saveTpl() {
+    const c = {} as Record<Tier, { pepm: number; onboarding: number }>
+    for (const t of TIERS) {
+      const pepm = parseInt(config[t].pepm, 10)
+      const onboarding = parseInt(config[t].onboarding, 10)
+      c[t] = {
+        pepm: Number.isFinite(pepm) && pepm >= 0 ? pepm : TIER_DEFAULTS[t].pepm,
+        onboarding: Number.isFinite(onboarding) && onboarding >= 0 ? onboarding : TIER_DEFAULTS[t].onboarding,
+      }
+    }
+    await saveTemplate<OnePagerTemplate>('one_pager', { config: c })
+  }
+
   async function downloadProposal() {
     if (!validHeadcount) return
     setDownloading(true)
@@ -237,7 +270,7 @@ export default function DealFlow() {
   return (
     <div>
       <h1 className="text-2xl font-semibold text-zinc-100">Deal Flow</h1>
-      <p className="mt-2 text-sm text-zinc-500">Generate Matcha proposals. Nothing is saved.</p>
+      <p className="mt-2 text-sm text-zinc-500">Generate Matcha proposals. Per-deal inputs are transient; Save persists the editable template for each tab.</p>
 
       <div className="mt-5 flex gap-2 border-b border-zinc-800">
         {([
@@ -273,18 +306,21 @@ export default function DealFlow() {
             <p className="text-sm text-zinc-500">
               Configure off the Lite / Mid / Max structure and generate a proposal PDF.
             </p>
-            {template === 'standard' && (
-              <div className="flex items-center gap-2">
-                <Button variant="secondary" onClick={() => setShowPreview((v) => !v)} disabled={!validHeadcount}>
-                  <FileText className="mr-2 h-4 w-4" />
-                  {showPreview ? 'Hide preview' : 'Preview'}
-                </Button>
-                <Button onClick={downloadProposal} disabled={!validHeadcount || downloading}>
-                  {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-                  Download Proposal PDF
-                </Button>
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              <SaveTemplateButton onSave={saveTpl} label="Save pricing" />
+              {template === 'standard' && (
+                <>
+                  <Button variant="secondary" onClick={() => setShowPreview((v) => !v)} disabled={!validHeadcount}>
+                    <FileText className="mr-2 h-4 w-4" />
+                    {showPreview ? 'Hide preview' : 'Preview'}
+                  </Button>
+                  <Button onClick={downloadProposal} disabled={!validHeadcount || downloading}>
+                    {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                    Download Proposal PDF
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
 
           {error && <p className="mt-4 text-sm text-red-400">{error}</p>}

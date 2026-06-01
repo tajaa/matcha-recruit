@@ -2,10 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Download, FileText, PencilLine, Plus, X } from 'lucide-react'
 import { Button, Input } from '../../components/ui'
 import { api } from '../../api/client'
+import { getTemplate, saveTemplate } from '../../api/dealTemplates'
+import SaveTemplateButton from './SaveTemplateButton'
 
 type Block = { id: string; kind: string; text: string; items: string[]; new_page: boolean; column: string }
 type DiscountTier = { min_seats: number; discount_pct: number }
 type ClientRow = { name: string; seats: string }
+type BookTemplate = { blocks: Block[]; discount_tiers: DiscountTier[]; list_pepm: number }
 
 const COMPUTED_LABEL: Record<string, string> = {
   cover: 'Cover (auto)',
@@ -48,8 +51,16 @@ export default function BookPricingTab() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    api.get<{ blocks: Block[]; discount_tiers: DiscountTier[] }>('/admin/deal-flow/book-defaults')
-      .then((r) => { setBlocks(r.blocks); setTiers(r.discount_tiers) })
+    Promise.all([
+      api.get<{ blocks: Block[]; discount_tiers: DiscountTier[] }>('/admin/deal-flow/book-defaults'),
+      getTemplate<BookTemplate>('book'),
+    ])
+      .then(([def, saved]) => {
+        const t = saved.payload
+        setBlocks(t?.blocks ?? def.blocks)
+        setTiers(t?.discount_tiers ?? def.discount_tiers)
+        if (t?.list_pepm != null) setListPepm(String(t.list_pepm))
+      })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load template'))
   }, [])
 
@@ -110,6 +121,12 @@ export default function BookPricingTab() {
     setClients((prev) => prev.filter((_, idx) => idx !== i))
   }
 
+  async function saveTpl() {
+    // Persist the reusable template (prose + volume tiers + list rate); the broker
+    // name and client roster are per-deal inputs and stay out of the saved template.
+    await saveTemplate<BookTemplate>('book', { blocks: blocks ?? [], discount_tiers: tiers, list_pepm: list })
+  }
+
   async function download() {
     setDownloading(true)
     setError(null)
@@ -130,10 +147,13 @@ export default function BookPricingTab() {
           <ToggleBtn active={view === 'edit'} onClick={() => setView('edit')} icon={<PencilLine className="h-4 w-4" />}>Edit</ToggleBtn>
           <ToggleBtn active={view === 'preview'} onClick={() => setView('preview')} icon={<FileText className="h-4 w-4" />}>Preview</ToggleBtn>
         </div>
-        <Button onClick={download} disabled={downloading}>
-          {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-          Download Book Pricing PDF
-        </Button>
+        <div className="flex items-center gap-2">
+          <SaveTemplateButton onSave={saveTpl} />
+          <Button onClick={download} disabled={downloading}>
+            {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            Download Book Pricing PDF
+          </Button>
+        </div>
       </div>
 
       {error && <p className="mt-4 text-sm text-red-400">{error}</p>}

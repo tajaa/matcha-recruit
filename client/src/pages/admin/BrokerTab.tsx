@@ -2,9 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Download, FileText, PencilLine } from 'lucide-react'
 import { Button, Input } from '../../components/ui'
 import { api } from '../../api/client'
+import { getTemplate, saveTemplate } from '../../api/dealTemplates'
+import SaveTemplateButton from './SaveTemplateButton'
 
 type Block = { id: string; kind: string; text: string; items: string[]; new_page: boolean; column: string }
 type MarginTier = { label: string; min_employees: number; max_employees: number; margin_pct: number }
+type BrokerTemplate = { blocks: Block[]; margin_tiers: MarginTier[] }
 type PlatformTier = 'lite' | 'mid' | 'max'
 
 const COMPUTED_LABEL: Record<string, string> = {
@@ -42,8 +45,15 @@ export default function BrokerTab() {
   const valid = bookNum >= 0 && brokerName.trim().length >= 0
 
   useEffect(() => {
-    api.get<{ blocks: Block[]; margin_tiers: MarginTier[] }>('/admin/deal-flow/broker-defaults')
-      .then((r) => { setBlocks(r.blocks); setMarginTiers(r.margin_tiers) })
+    Promise.all([
+      api.get<{ blocks: Block[]; margin_tiers: MarginTier[] }>('/admin/deal-flow/broker-defaults'),
+      getTemplate<BrokerTemplate>('broker'),
+    ])
+      .then(([def, saved]) => {
+        const t = saved.payload
+        setBlocks(t?.blocks ?? def.blocks)
+        setMarginTiers(t?.margin_tiers ?? def.margin_tiers)
+      })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load template'))
   }, [])
 
@@ -86,6 +96,11 @@ export default function BrokerTab() {
     setMarginTiers((prev) => prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)))
   }
 
+  async function saveTpl() {
+    // Reusable template = program copy + margin-tier schedule; broker/sample-client are per-deal.
+    await saveTemplate<BrokerTemplate>('broker', { blocks: blocks ?? [], margin_tiers: marginTiers })
+  }
+
   async function download() {
     setDownloading(true)
     setError(null)
@@ -106,10 +121,13 @@ export default function BrokerTab() {
           <ToggleBtn active={view === 'edit'} onClick={() => setView('edit')} icon={<PencilLine className="h-4 w-4" />}>Edit</ToggleBtn>
           <ToggleBtn active={view === 'preview'} onClick={() => setView('preview')} icon={<FileText className="h-4 w-4" />}>Preview</ToggleBtn>
         </div>
-        <Button onClick={download} disabled={downloading || !valid}>
-          {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-          Download Partner Program PDF
-        </Button>
+        <div className="flex items-center gap-2">
+          <SaveTemplateButton onSave={saveTpl} />
+          <Button onClick={download} disabled={downloading || !valid}>
+            {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            Download Partner Program PDF
+          </Button>
+        </div>
       </div>
 
       {error && <p className="mt-4 text-sm text-red-400">{error}</p>}

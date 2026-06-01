@@ -92,7 +92,12 @@ def test_template_renders():
     from app.core.services.deal_book_template import render_book_proposal_html
 
     inp = BookInputs(broker_name="Alliant", clients=[BookClient(name="Acme", seats=640)])
-    html = render_book_proposal_html(inp, compute_book_quote(inp))
+    q = compute_book_quote(inp)
+    html = render_book_proposal_html(inp, q)
     assert "Book Pricing" in html
     assert "Acme" in html
     assert "your book" in html  # active schedule row marker
+    # Book economics shows monthly (headline) alongside the yearly rate.
+    assert "/ mo" in html
+    assert "/ yr" in html
+    assert f"${round(q.book_annual / 12):,}" in html  # monthly = book annual / 12

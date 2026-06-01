@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, Download, FileText, PencilLine } from 'lucide-react'
 import { Button, Input, Toggle } from '../../components/ui'
 import { api } from '../../api/client'
+import { getTemplate, saveTemplate } from '../../api/dealTemplates'
+import SaveTemplateButton from './SaveTemplateButton'
 
 type BlockKind =
   | 'h2' | 'h3' | 'h4' | 'p' | 'note' | 'callout' | 'highlight' | 'bullets'
@@ -55,10 +57,13 @@ export default function FullDealTab() {
   const headcountNum = int(headcount, 0)
   const validHeadcount = headcountNum > 0
 
-  // Load the default document once.
+  // Load the default document, layering any saved template over it.
   useEffect(() => {
-    api.get<{ blocks: Block[] }>('/admin/deal-flow/full-defaults')
-      .then((r) => setBlocks(r.blocks))
+    Promise.all([
+      api.get<{ blocks: Block[] }>('/admin/deal-flow/full-defaults'),
+      getTemplate<{ blocks: Block[] }>('full'),
+    ])
+      .then(([def, saved]) => setBlocks(saved.payload?.blocks ?? def.blocks))
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load template'))
   }, [])
 
@@ -114,6 +119,11 @@ export default function FullDealTab() {
     setBlocks((prev) => prev && prev.map((b) => (b.id === id ? { ...b, ...patch } : b)))
   }
 
+  async function saveTpl() {
+    // The full proposal's template is its editable document; pricing/ROI inputs are per-deal.
+    await saveTemplate<{ blocks: Block[] }>('full', { blocks: blocks ?? [] })
+  }
+
   async function downloadFull() {
     if (!validHeadcount) return
     setDownloading(true)
@@ -135,10 +145,13 @@ export default function FullDealTab() {
           <ToggleBtn active={view === 'edit'} onClick={() => setView('edit')} icon={<PencilLine className="h-4 w-4" />}>Edit</ToggleBtn>
           <ToggleBtn active={view === 'preview'} onClick={() => setView('preview')} icon={<FileText className="h-4 w-4" />}>Preview</ToggleBtn>
         </div>
-        <Button onClick={downloadFull} disabled={!validHeadcount || downloading}>
-          {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-          Download Full Proposal PDF
-        </Button>
+        <div className="flex items-center gap-2">
+          <SaveTemplateButton onSave={saveTpl} />
+          <Button onClick={downloadFull} disabled={!validHeadcount || downloading}>
+            {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+            Download Full Proposal PDF
+          </Button>
+        </div>
       </div>
 
       {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
