@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Loader2, CheckCircle2, XCircle, AlertTriangle, MapPin } from 'lucide-react'
 import { IRPersonMultiSelect } from '../../components/ir/IRPersonMultiSelect'
+import { SubmissionDisclaimer } from '../../components/ir/SubmissionDisclaimer'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -201,6 +202,8 @@ export default function LocationIntake() {
           className="hidden"
           aria-hidden="true"
         />
+
+        <SubmissionDisclaimer />
 
         {error && <p className="text-sm text-red-400">{error}</p>}
 
