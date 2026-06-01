@@ -101,3 +101,7 @@ def test_template_renders():
     assert "/ mo" in html
     assert "/ yr" in html
     assert f"${round(q.book_annual / 12):,}" in html  # monthly = book annual / 12
+    # Roster has a per-company Monthly column (between Seats and Annual) and no book total row.
+    assert "<th>Monthly</th>" in html
+    assert f"${round(q.lines[0].annual / 12):,}" in html  # Acme's per-company monthly
+    assert "Book total" not in html

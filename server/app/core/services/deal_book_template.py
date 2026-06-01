@@ -54,17 +54,18 @@ def _t_discount(inp: BookInputs, q: BookQuote) -> str:
 
 
 def _t_roster(q: BookQuote) -> str:
+    # Per-company breakdown: monthly + annual for each client. No book total row —
+    # the book-wide monthly/yearly aggregate lives in the Book Economics section.
     rows = []
     for ln in q.lines:
+        monthly = round(ln.annual / 12)
         rows.append(f'<tr><td style="text-align:left">{escape(ln.name)}</td>'
-                    f'<td>{ln.seats:,}</td><td>{_m(ln.annual)}</td></tr>')
-    total = (f'<tr class="row-total"><td style="text-align:left">Book total</td>'
-             f'<td>{q.total_seats:,}</td><td>{_m(q.book_annual)}</td></tr>')
+                    f'<td>{ln.seats:,}</td><td>{_m(monthly)}</td><td>{_m(ln.annual)}</td></tr>')
     off = f" &mdash; {q.discount_pct}% off the {_p(q.list_pepm)} list rate" if q.discount_pct else ""
     note = (f'<p class="note">All clients are priced at the pooled rate of <strong>{_p(q.net_pepm)} PEPM</strong>'
             f'{off}, unlocked by {q.total_seats:,} committed seats.</p>')
     return ('<table><thead><tr><th style="text-align:left">Client</th><th>Seats</th>'
-            f'<th>Annual</th></tr></thead><tbody>{"".join(rows)}{total}</tbody></table>{note}')
+            f'<th>Monthly</th><th>Annual</th></tr></thead><tbody>{"".join(rows)}</tbody></table>{note}')
 
 
 def _book_econ(q: BookQuote) -> str:
