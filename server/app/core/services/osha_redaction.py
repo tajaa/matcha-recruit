@@ -53,13 +53,27 @@ _PHI_PATTERNS: dict[str, tuple[str, str]] = {
         r"(?i:\bNPI)\s*[:#]?\s*\d{10}\b",
         "[NPI-REDACTED]",
     ),
-    # "patient John Doe", "Patient John", "pt. Jane Smith", "the patient, Mary Q. Public",
-    # "patient named John Doe", "resident: Jane Doe". Keyword + optional
-    # named/name:/punctuation + 1-3 capitalized name tokens (single name OK).
+    # Two orders, one token (key stays "patient_name" → [PATIENT_NAME-N]):
+    #   branch 1 keyword-first:  "patient John Doe", "Patient John", "pt. Jane Smith",
+    #     "the patient, Mary Q. Public", "patient named John Doe", "resident: Jane Doe".
+    #   branch 2 name-first appositive: "Jazmine, the patient", "Mary Smith, a resident".
+    #     Comma is REQUIRED so "Helped the patient" / "Moved the resident" (verb + the
+    #     patient — common in injury narratives) don't false-positive. A stoplist
+    #     negative-lookahead drops sentence-leading temporal/transition words that
+    #     legitimately precede ", the patient" (e.g. "Yesterday, the patient fell").
     "patient_name": (
+        r"(?:"
         r"(?i:\b(?:patient|pt\.?|resident|client))"
         r"\s*[:,]?\s*(?:(?i:named|name)\s*:?\s*)?"
-        r"[A-Z][a-z]+(?:\s+(?:[A-Z][a-z]+|[A-Z]\.)){0,2}",
+        r"[A-Z][a-z]+(?:\s+(?:[A-Z][a-z]+|[A-Z]\.)){0,2}"
+        r"|"
+        r"\b(?!(?:The|An?|Yesterday|Today|Tonight|Earlier|Later|Then|When|While|During|"
+        r"After|Before|Suddenly|Meanwhile|However|Although|Unfortunately|Initially|"
+        r"Eventually|Finally|Now|Once|Soon|Subsequently|Apparently|Reportedly)\b)"
+        r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}"
+        r"\s*,\s+(?i:the|an?)\s+"
+        r"(?i:patient|resident|client)\b"
+        r")",
         "[PATIENT-REDACTED]",
     ),
     # Titled third-party names that show up in descriptions: "Dr. Smith",

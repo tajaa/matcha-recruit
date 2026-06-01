@@ -96,8 +96,8 @@ def _build_300a_html(s: dict) -> str:
   /* Establishment / Employment Info — labeled fields with underline values */
   .field {{ display: flex; padding: 5px 8px; border-top: 1px solid #ddd; align-items: baseline; gap: 6px; }}
   .info-block .field:first-of-type {{ border-top: none; }}
-  .field .lbl {{ font-size: 6.5pt; color: #555; text-transform: uppercase; letter-spacing: 0.03em; min-width: 38%; }}
-  .field .val {{ font-size: 9pt; font-weight: 500; flex: 1; border-bottom: 1px solid #aaa; min-height: 14px; padding-bottom: 1px; }}
+  .field .lbl {{ font-size: 6.5pt; color: #555; text-transform: uppercase; letter-spacing: 0.03em; flex: 0 0 38%; line-height: 1.25; }}
+  .field .val {{ font-size: 9pt; font-weight: 500; flex: 1; min-width: 0; border-bottom: 1px solid #aaa; min-height: 14px; padding-bottom: 1px; overflow-wrap: break-word; }}
 
   /* Cert block */
   .cert {{ margin-top: 14px; border-top: 1.5px solid #111; padding-top: 8px; font-size: 8.5pt; }}

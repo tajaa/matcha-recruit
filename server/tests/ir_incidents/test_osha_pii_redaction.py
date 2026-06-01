@@ -84,6 +84,53 @@ def test_resident_client_keywords_redacted():
     assert "Bob Jones" not in redact_osha_text("Altercation with client Bob Jones.")
 
 
+# ── name-before-keyword appositive (Round-3 fix) ─────────────────────────────
+# The keyword-first pattern missed names that precede the keyword as an
+# appositive ("Jazmine, the patient ..."). Branch 2 catches "<Name>, the/a
+# patient|resident|client". Comma required so verb phrases don't false-positive.
+
+def test_appositive_name_before_patient_redacted():
+    # The exact leak from the screenshot.
+    text = ("I just left the senior care center and went to urgent care because "
+            "Jazmine, the patient in room 204 stabbed my arm.")
+    out = redact_osha_text(text)
+    assert "Jazmine" not in out
+    assert "stabbed my arm" in out      # injury context preserved
+    assert "room 204" in out            # location context preserved
+
+
+def test_appositive_multiword_name_before_resident_redacted():
+    out = redact_osha_text("Mary Smith, a resident, became combative and bit staff.")
+    assert "Mary Smith" not in out
+    assert "bit staff" in out
+
+
+def test_appositive_requires_comma_no_overredaction():
+    # "verb + the patient" must NOT redact — no comma, no name.
+    for text in (
+        "Helped the patient to the bed and strained my back.",
+        "Moved the resident and twisted my knee.",
+        "Assisted a client into the chair.",
+    ):
+        assert redact_osha_text(text) == text
+
+
+def test_appositive_stoplist_temporal_lead_preserved():
+    # Sentence-leading temporal/transition words before ", the patient" are not names.
+    text = "Yesterday, the patient fell and I caught them, hurting my shoulder."
+    out = redact_osha_text(text)
+    assert "Yesterday" in out
+    assert out == text
+
+
+def test_appositive_idempotent():
+    text = "Because Jazmine, the patient in 204 lashed out, I went to the ER."
+    once = redact_osha_text(text)
+    twice = redact_osha_text(once)
+    assert once == twice
+    assert "Jazmine" not in once
+
+
 def test_titled_third_party_name_redacted():
     assert "Smith" not in redact_osha_text("Struck while assisting Dr. Smith with restraint.")
     assert "Jane Public" not in redact_osha_text("Per Ms. Jane Public, the floor was wet.")
