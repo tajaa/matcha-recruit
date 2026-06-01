@@ -1208,6 +1208,54 @@ async def _handle_text_input(
     }
 
 
+def _build_recommendations_corrective_card(recs) -> Optional[dict]:
+    """Turn a RecommendationsAnalysis into a pre-filled corrective_actions card.
+
+    The run_analysis:recommendations path generates corrective actions and
+    caches them to ir_incident_analysis, but the content otherwise never
+    reaches the copilot conversation — the user just saw a "review them" note
+    with nothing to review. This surfaces the actual recommendations in the
+    card's *visible* recommendation text (the frontend renders
+    ``recommendation``/``rationale``, not ``field_value``) and pre-fills
+    field_value so accepting writes them to ir_incidents.corrective_actions.
+    Returns None when there's nothing to recommend.
+    """
+    items = getattr(recs, "recommendations", None) or []
+    actions: list[str] = []
+    for it in items:
+        action = (getattr(it, "action", None) or "").strip()
+        if action:
+            prio = (getattr(it, "priority", None) or "").strip()
+            actions.append(f"{action} ({prio} priority)" if prio else action)
+    summary = (getattr(recs, "summary", None) or "").strip()
+    if not actions and not summary:
+        return None
+
+    # Visible card text: the card body renders `recommendation` as a single
+    # paragraph, so number the actions inline rather than as line breaks.
+    numbered = "  ".join(f"({i}) {a}" for i, a in enumerate(actions, 1))
+    shown = " ".join(p for p in (summary, numbered) if p).strip()[:900]
+
+    # Saved value: newline-separated for clean storage / report rendering.
+    saved_lines = ([summary] if summary else []) + [f"• {a}" for a in actions]
+    field_value = "\n".join(saved_lines).strip()[:1800] or shown
+
+    return {
+        "id": "recommendations_corrective_actions",
+        "title": "Recommended corrective actions",
+        "recommendation": shown or "Apply the recommended corrective actions.",
+        "rationale": "Accept to save these to the incident record, or skip to refine.",
+        "priority": "medium",
+        "blockers": [],
+        "action": {
+            "type": "set_field",
+            "label": "Save corrective actions",
+            "field_name": "corrective_actions",
+            "field_value": field_value,
+        },
+    }
+
+
 @router.post("/{incident_id}/copilot/accept")
 async def accept_copilot_card(
     incident_id: UUID,
@@ -1431,7 +1479,7 @@ async def accept_copilot_card(
                         })
                         try:
                             from .ai_analysis import run_recommendations_inline
-                            await run_recommendations_inline(
+                            recs = await run_recommendations_inline(
                                 incident_id,
                                 current_user,
                                 ip_address=request.client.host if request.client else None,
@@ -1441,7 +1489,21 @@ async def accept_copilot_card(
                                 "stage": "analysis_complete",
                                 "analysis_type": "recommendations",
                             })
-                            event_summary = "Recommendations ready — review the suggested corrective actions."
+                            # Surface the generated recommendations IN the
+                            # conversation as a pre-filled corrective_actions
+                            # card. Without this they only land in the DB and the
+                            # user sees an empty "review them" note (the bug).
+                            rec_card = _build_recommendations_corrective_card(recs)
+                            if rec_card is not None:
+                                inserted = await _emit_chain_card(
+                                    conn, incident_id=incident_id, card=rec_card,
+                                    created_by=current_user.id,
+                                )
+                                next_card = rec_card
+                                next_message_id = str(inserted["id"])
+                                event_summary = "Generated recommended corrective actions."
+                            else:
+                                event_summary = "No corrective actions to recommend for this incident."
                         except Exception as exc:
                             logger.exception("recommendations analysis failed for incident %s", incident_id)
                             event_summary = f"Recommendations failed: {exc}"
