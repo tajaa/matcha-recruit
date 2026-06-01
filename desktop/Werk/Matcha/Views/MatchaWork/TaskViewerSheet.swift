@@ -242,6 +242,12 @@ struct TaskViewerSheet: View {
                 .cornerRadius(6)
             }
 
+            // The latest round, surfaced up top so the current changes-requested
+            // + what got fixed is obvious without expanding History (the review
+            // note is cleared server-side on re-submit; History is the durable
+            // record). Hidden on single-round tickets.
+            currentRoundCard
+
             if let description = task.description, !description.isEmpty {
                 ScrollView {
                     Text(description)
@@ -343,12 +349,14 @@ struct TaskViewerSheet: View {
         .sheet(isPresented: $showingNewRoundSheet) {
             NewRoundSheet(
                 nextRoundIndex: rounds.count + 1,
+                openSubtasks: subtasks.filter { !$0.isDone },
                 onCancel: { showingNewRoundSheet = false },
-                onSubmit: { suggestedFix, body, pending in
+                onSubmit: { suggestedFix, body, pending, completedIds in
                     await submitNewRound(
                         suggestedFix: suggestedFix,
                         body: body,
-                        pending: pending
+                        pending: pending,
+                        completedSubtaskIds: completedIds
                     )
                 }
             )
@@ -363,9 +371,16 @@ struct TaskViewerSheet: View {
     private func submitNewRound(
         suggestedFix: String,
         body: String,
-        pending: [PendingAttachment]
+        pending: [PendingAttachment],
+        completedSubtaskIds: [String]
     ) async -> Bool {
         guard let pid = viewModel.project?.id else { return false }
+        // Persist the completions the user just acknowledged BEFORE opening the
+        // round, so the backend archives those items on the current round and
+        // only rolls the still-unfinished ones forward into the new round.
+        for sid in completedSubtaskIds {
+            await viewModel.toggleSubtask(taskId: task.id, subtaskId: sid, isDone: true)
+        }
         var uploadedIds: [String] = []
         for att in pending {
             guard let id = await viewModel.uploadTaskFile(
@@ -550,6 +565,27 @@ struct TaskViewerSheet: View {
         TaskRound.build(from: history.filter { $0.eventType != "activity" })
     }
 
+    /// The latest round rendered inline in the foreground — surfaces the current
+    /// changes-requested + "fixed in round N-1" so the user doesn't have to
+    /// expand History to see what changed. Multi-round tickets only.
+    @ViewBuilder
+    private var currentRoundCard: some View {
+        if rounds.count > 1, let current = rounds.last {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("LATEST UPDATE · ROUND \(current.index)")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.matcha500)
+                    .tracking(0.5)
+                RoundView(
+                    round: current,
+                    previousFixed: rounds[rounds.count - 2].fixedSubtaskTitles,
+                    files: attachments,
+                    onPreview: { previewFile = $0 }
+                )
+            }
+        }
+    }
+
     /// The in-ticket Q&A thread: a note composer plus the activity notes,
     /// newest-first. Always visible in every column so clarifying questions
     /// are one click away. Posting a note bells the other participants.
@@ -648,7 +684,10 @@ struct TaskViewerSheet: View {
             // Within each round events stay chronological (oldest → newest).
             // `previousFixed` threads the prior round's completed subtask
             // titles forward so round N+1 shows "Fixed in Round N · …".
-            let reversed = Array(rounds.reversed())
+            // The current round is surfaced inline (currentRoundCard), so History
+            // keeps the prior rounds only — no duplication.
+            let historyRounds = rounds.count > 1 ? Array(rounds.dropLast()) : rounds
+            let reversed = Array(historyRounds.reversed())
             ForEach(Array(reversed.enumerated()), id: \.element.id) { idx, round in
                 // `reversed` is newest-first; the round AFTER this one in
                 // chronological time is the previous element in `reversed`
@@ -1958,13 +1997,18 @@ enum TaskClipboardExporter {
 /// new round's headline subtask AND the round's display title.
 private struct NewRoundSheet: View {
     let nextRoundIndex: Int
+    /// The current round's still-open checklist items. The person starting a
+    /// round must say which (if any) they actually finished before it rolls
+    /// the rest forward.
+    let openSubtasks: [MWSubtask]
     let onCancel: () -> Void
     /// Returns true if submit succeeded and the sheet should dismiss.
-    let onSubmit: (_ suggestedFix: String, _ body: String, _ pending: [PendingAttachment]) async -> Bool
+    let onSubmit: (_ suggestedFix: String, _ body: String, _ pending: [PendingAttachment], _ completedSubtaskIds: [String]) async -> Bool
 
     @State private var suggestedFix = ""
     @State private var noteBody = ""
     @State private var pending: [PendingAttachment] = []
+    @State private var completedIds: Set<String> = []
     @State private var submitting = false
     @State private var error: String?
 
@@ -1991,6 +2035,46 @@ private struct NewRoundSheet: View {
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
+            }
+
+            // Force the round-opener to account for the current checklist: tick
+            // what's actually done (archives onto this round) — the rest rolls
+            // forward. Only shown when there are open items to resolve.
+            if !openSubtasks.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("DID YOU COMPLETE ANY OF THESE?")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.matcha500)
+                        .tracking(0.5)
+                    Text("Check off what's done — it archives into this round; unchecked items carry into Round \(nextRoundIndex).")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                    ForEach(openSubtasks) { item in
+                        Button {
+                            if completedIds.contains(item.id) { completedIds.remove(item.id) }
+                            else { completedIds.insert(item.id) }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: completedIds.contains(item.id) ? "checkmark.circle.fill" : "circle")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(completedIds.contains(item.id) ? .matcha500 : .secondary)
+                                Text(item.title)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.white.opacity(0.9))
+                                    .strikethrough(completedIds.contains(item.id))
+                                    .lineLimit(2)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.vertical, 3)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.matcha500.opacity(0.08))
+                .cornerRadius(6)
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -2099,7 +2183,7 @@ private struct NewRoundSheet: View {
         guard !title.isEmpty, !submitting else { return }
         submitting = true
         error = nil
-        let ok = await onSubmit(title, noteBody, pending)
+        let ok = await onSubmit(title, noteBody, pending, Array(completedIds))
         if !ok {
             error = "Couldn't open the round. Try again."
         }

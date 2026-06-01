@@ -489,15 +489,19 @@ struct ChannelDetailView: View {
                 .padding(.horizontal, 16)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            // Always follow new messages to the bottom. The previous isAtBottom
+            // gate was unreliable (the lazy bottom sentinel's appear/disappear
+            // mis-fires), so inbound messages often didn't reposition the view
+            // and the newest message sat off-screen. Chat-standard behavior:
+            // a new message always reveals itself.
             .onChange(of: vm.messages.count) {
-                guard isAtBottom, let last = vm.messages.last else { return }
+                guard let last = vm.messages.last else { return }
                 withAnimation { proxy.scrollTo(last.stableKey, anchor: .bottom) }
             }
-            // Our own send — always jump to the newest message regardless of
-            // scroll position, so a reply reveals itself without a manual scroll.
+            // Belt-and-suspenders for our own send (the count may not change at
+            // the exact commit the optimistic row lands).
             .onChange(of: selfSendScroll) {
                 guard let last = vm.messages.last else { return }
-                isAtBottom = true
                 withAnimation { proxy.scrollTo(last.stableKey, anchor: .bottom) }
             }
             // Initial render scroll-to-bottom. .onChange above fires when
