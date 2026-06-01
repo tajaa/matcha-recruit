@@ -1,5 +1,15 @@
 import SwiftUI
 
+/// A kanban ticket referenced into the project chat via "Chat about this
+/// ticket". Carries just enough to render the reply-style banner and to weave
+/// a compact reference into the outgoing message (so the AI + collaborators
+/// have context). Identifiable so SwiftUI can animate the banner in/out.
+struct TicketChatRef: Identifiable, Equatable {
+    let id: String        // task id
+    let title: String
+    let column: String    // board_column, for the chip label
+}
+
 enum CollabRightPanel: String, CaseIterable, Identifiable {
     case chat, kanban, files, media, elements, sections, threads, overview
     var id: String { rawValue }

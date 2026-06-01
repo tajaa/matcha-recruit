@@ -549,6 +549,13 @@ struct KanbanBoardView: View {
                     Button {
                         viewingTask = task
                     } label: { Label("Open", systemImage: "arrow.up.right.square") }
+                    Button {
+                        // Reference this ticket into the project chat (reply-style)
+                        // and jump to the chat panel so the user can ask about it.
+                        appState.pendingTicketRef = TicketChatRef(
+                            id: task.id, title: task.title, column: task.boardColumn)
+                        appState.pendingProjectPanel = .chat
+                    } label: { Label("Chat about this ticket", systemImage: "bubble.left.and.text.bubble.right") }
                     Button(role: .destructive) {
                         taskToDelete = task
                     } label: { Label("Delete", systemImage: "trash") }

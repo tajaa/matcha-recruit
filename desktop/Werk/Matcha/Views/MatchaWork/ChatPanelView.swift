@@ -54,11 +54,20 @@ struct ChatPanelView: View {
     private var isOverLimit: Bool { trimmedInputCount > Self.messageCharLimit }
 
     private func send() {
-        let content = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        var content = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let files = pendingFiles
         // Allow sending with files but no text — server replies asking what the
         // user wants rather than auto-analyzing.
         guard (!content.isEmpty || !files.isEmpty), !viewModel.isStreaming, !isOverLimit else { return }
+        // Weave in a referenced ticket (from "Chat about this ticket") as a
+        // compact reply-style prefix so the sent message reads like a reply and
+        // the AI gets the ticket as context. Captured + cleared on send.
+        if let ref = appState.pendingTicketRef {
+            let colLabel = ref.column.replacingOccurrences(of: "_", with: " ").capitalized
+            let prefix = "Re: ticket “\(ref.title)” (\(colLabel))"
+            content = content.isEmpty ? prefix : "\(prefix)\n\n\(content)"
+            appState.pendingTicketRef = nil
+        }
         inputText = ""
         pendingFiles = []
         Task {
@@ -254,6 +263,7 @@ struct ChatPanelView: View {
                     .background(appState.themeAccent.opacity(0.06))
                 }
                 pendingFilesStrip
+                ticketRefBar
                 inputBar
             }
         }
@@ -411,6 +421,50 @@ struct ChatPanelView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
             .background(appState.themeCard.opacity(0.5))
+        }
+    }
+
+    /// Reply-style banner shown above the composer when a kanban ticket was
+    /// sent here via "Chat about this ticket". Mirrors the slide/jurisdiction
+    /// context bars; × clears the reference without sending.
+    @ViewBuilder private var ticketRefBar: some View {
+        if let ref = appState.pendingTicketRef {
+            HStack(spacing: 6) {
+                Image(systemName: "arrowshape.turn.up.left.fill")
+                    .font(.system(size: 10))
+                    .foregroundColor(appState.themeAccent)
+                Text("Chatting about")
+                    .font(.system(size: 10))
+                    .foregroundColor(appState.themeTextSecondary)
+                Text(ref.title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(appState.themeAccent)
+                    .lineLimit(1)
+                Text(ref.column.replacingOccurrences(of: "_", with: " ").capitalized)
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(appState.themeTextSecondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(appState.themeCard)
+                    .cornerRadius(4)
+                Spacer()
+                Button { appState.pendingTicketRef = nil } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(appState.themeTextSecondary)
+                }
+                .buttonStyle(.plain)
+                .help("Stop referencing this ticket")
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .background(appState.themeAccent.opacity(0.08))
+            .overlay(
+                Rectangle()
+                    .frame(height: 1)
+                    .foregroundColor(appState.themeAccent.opacity(0.2)),
+                alignment: .top
+            )
         }
     }
 
@@ -704,6 +758,8 @@ extension ChatPanelView {
                         .padding(.vertical, 4)
                     }
                     
+                    ticketRefBar
+
                     HStack(alignment: .bottom, spacing: 10) {
                         Button { pickImages() } label: {
                             Image(systemName: "photo.badge.plus")

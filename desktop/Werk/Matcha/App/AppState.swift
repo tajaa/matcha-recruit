@@ -48,6 +48,11 @@ class AppState {
     /// notification taps so a task notification opens the kanban board.
     var pendingProjectPanel: CollabRightPanel? = nil
 
+    /// Set by "Chat about this ticket" on a kanban card. The project chat
+    /// composer picks it up, shows a reply-style reference banner, and weaves
+    /// the ticket into the next message it sends. Cleared after send or dismiss.
+    var pendingTicketRef: TicketChatRef? = nil
+
     // MARK: - Workspace tabs
     static let maxPinnedTabs = 4
     private static let tabsKey = "mw-open-tabs-v1"
