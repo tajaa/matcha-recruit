@@ -23,6 +23,9 @@ struct TaskViewerSheet: View {
     /// guards that one-time fetch; the rounds/audit feed stays collapsed behind
     /// `showHistory` so the audit trail is opt-in, not in the way.
     @State private var showHistory = false
+    /// UPDATES log is collapsed by default — it's a read-only audit trail (like
+    /// a commit history) for spotting discrepancies, never auto-expanded on open.
+    @State private var showUpdates = false
     @State private var historyLoaded = false
     @State private var loadingHistory = false
     /// Earlier-round attachments tuck behind a disclosure so the foreground
@@ -91,27 +94,13 @@ struct TaskViewerSheet: View {
         history.filter { $0.eventType == "activity" }
     }
 
-    /// Viewable update events for the UPDATES checkoff list — the same set the
-    /// card badge counts (`TicketUpdatesStore.countedEventTypes`). Unviewed
-    /// sorted above viewed, each group newest-first.
+    /// The ticket's update log — the same event set the card badge counts
+    /// (`TicketUpdatesStore.countedEventTypes`), newest first. Read-only audit
+    /// trail; not a checklist.
     private var updateEvents: [MWTaskHistoryEntry] {
-        let store = TicketUpdatesStore.shared
-        return history
+        history
             .filter { TicketUpdatesStore.countedEventTypes.contains($0.eventType) }
-            .sorted { a, b in
-                let av = store.isViewed(taskId: task.id, eventId: a.id)
-                let bv = store.isViewed(taskId: task.id, eventId: b.id)
-                if av != bv { return !av }          // unviewed first
-                return a.createdAt > b.createdAt    // then newest first
-            }
-    }
-
-    private var unviewedUpdateCount: Int {
-        let store = TicketUpdatesStore.shared
-        return history.reduce(into: 0) { acc, e in
-            if TicketUpdatesStore.countedEventTypes.contains(e.eventType),
-               !store.isViewed(taskId: task.id, eventId: e.id) { acc += 1 }
-        }
+            .sorted { $0.createdAt > $1.createdAt }
     }
 
     private var assigneeName: String? {
@@ -461,15 +450,6 @@ struct TaskViewerSheet: View {
             projectId: pid, taskId: task.id
         ) {
             history = rows
-            // Your own actions aren't "updates to view" for you — auto-mark
-            // counted events you triggered as viewed so your own comment/move
-            // never lands as an unviewed badge on your own board.
-            if let me = appState.currentUser?.id {
-                for e in rows where e.actorUserId == me
-                    && TicketUpdatesStore.countedEventTypes.contains(e.eventType) {
-                    TicketUpdatesStore.shared.markViewed(taskId: task.id, eventId: e.id)
-                }
-            }
         }
         historyLoaded = true
     }
@@ -765,54 +745,49 @@ struct TaskViewerSheet: View {
         }
     }
 
-    /// UPDATES — per-update "viewed" checkoff. Lists every viewable history
-    /// event (comments / round changes / subtasks added / moves+send-backs)
-    /// with a viewed toggle that's deliberately distinct from the checklist's
-    /// completion checks. Unviewed rows sit on top.
+    /// UPDATES — a read-only audit log of what changed on this ticket (comments
+    /// / round changes / subtasks added / moves+send-backs), newest first. Like
+    /// a commit history: it's there to reconcile discrepancies, not to tick off.
+    /// Collapsed by default (never auto-opens with the ticket). Expanding it
+    /// acknowledges the log → clears the card's unviewed-updates badge.
     @ViewBuilder
     private var updatesSection: some View {
         let events = updateEvents
         if !events.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Image(systemName: "bell.badge")
-                        .font(.system(size: 10))
-                        .foregroundColor(.blue)
-                    Text("UPDATES")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.secondary)
-                        .tracking(0.5)
-                    if unviewedUpdateCount > 0 {
-                        Text("\(unviewedUpdateCount) unviewed")
-                            .font(.system(size: 9, weight: .semibold))
+                Button {
+                    let opening = !showUpdates
+                    withAnimation { showUpdates.toggle() }
+                    if opening {
+                        TicketUpdatesStore.shared.markAllViewed(
+                            taskId: task.id, eventIds: events.map(\.id))
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "clock.arrow.2.circlepath")
+                            .font(.system(size: 10))
                             .foregroundColor(.blue)
+                        Text("UPDATES")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .tracking(0.5)
+                        Text("\(events.count)")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.secondary)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Color.blue.opacity(0.15))
+                            .background(Color.zinc800)
                             .cornerRadius(4)
+                        Spacer()
+                        Image(systemName: showUpdates ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.secondary)
                     }
-                    Spacer()
-                    if unviewedUpdateCount > 0 {
-                        Button {
-                            TicketUpdatesStore.shared.markAllViewed(
-                                taskId: task.id, eventIds: events.map(\.id))
-                        } label: {
-                            Text("Mark all viewed")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundColor(.matcha500)
-                        }
-                        .buttonStyle(.plain)
-                    }
+                    .contentShape(Rectangle())
                 }
-                ForEach(events) { e in
-                    UpdateCheckoffRow(
-                        entry: e,
-                        isViewed: TicketUpdatesStore.shared.isViewed(taskId: task.id, eventId: e.id),
-                        onToggle: { viewed in
-                            TicketUpdatesStore.shared.setViewed(
-                                taskId: task.id, eventId: e.id, isViewed: viewed)
-                        }
-                    )
+                .buttonStyle(.plain)
+                if showUpdates {
+                    ForEach(events) { e in UpdateLogRow(entry: e) }
                 }
             }
             .padding(10)
@@ -1721,33 +1696,26 @@ private struct EventRow: View {
     }
 }
 
-/// One row in the UPDATES checkoff list: a compact label for a history event
-/// plus a "viewed" toggle. The toggle is a circle/checkmark-circle, distinct
-/// from the checklist's square completion boxes, so "I've read this" never
-/// reads as "this work is done." Viewed rows dim.
-private struct UpdateCheckoffRow: View {
+/// One row in the read-only UPDATES audit log: an event icon, a compact label,
+/// and the timestamp. No interaction — it's a reference trail, not a checklist.
+private struct UpdateLogRow: View {
     let entry: MWTaskHistoryEntry
-    let isViewed: Bool
-    let onToggle: (Bool) -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            Button { onToggle(!isViewed) } label: {
-                Image(systemName: isViewed ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 14))
-                    .foregroundColor(isViewed ? .matcha500 : .secondary)
-            }
-            .buttonStyle(.plain)
-            .help(isViewed ? "Mark as not viewed" : "Mark as viewed")
+        HStack(alignment: .top, spacing: 8) {
             Image(systemName: Self.icon(entry))
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
                 .frame(width: 16, alignment: .center)
-            Text(Self.label(entry))
-                .font(.system(size: 11))
-                .foregroundColor(.white.opacity(isViewed ? 0.45 : 0.9))
-                .lineLimit(2)
-                .strikethrough(isViewed, color: .secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(Self.label(entry))
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.85))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(PacificDateFormatter.absolute(entry.createdAt) ?? entry.createdAt)
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+            }
             Spacer(minLength: 0)
         }
         .padding(.vertical, 2)
