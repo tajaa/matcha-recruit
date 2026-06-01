@@ -18,6 +18,12 @@ struct TaskViewerSheet: View {
 
     @State private var previewFile: MWProjectFile?
     @State private var history: [MWTaskHistoryEntry] = []
+    /// Discussion/history is lazy: not fetched or rendered until the user
+    /// expands it. Opening a ticket no longer pays for history nobody asked to
+    /// see. `historyLoaded` guards the one-time fetch on first expand.
+    @State private var showDiscussion = false
+    @State private var historyLoaded = false
+    @State private var loadingHistory = false
     @State private var didCopy = false
     @State private var isCopying = false
     @State private var newNote = ""
@@ -257,7 +263,11 @@ struct TaskViewerSheet: View {
             // task-level file dump.
             checklistSection
 
-            discussionSection
+            if showDiscussion {
+                discussionSection
+            } else {
+                discussionToggle
+            }
 
             if !attachments.isEmpty {
                 attachmentsSection
@@ -295,7 +305,7 @@ struct TaskViewerSheet: View {
                 await viewModel.loadTaskFiles(taskId: task.id)
             }
             await viewModel.loadSubtasks(taskId: task.id)
-            await loadHistory()
+            // History/discussion is loaded lazily on expand — see discussionSection.
         }
         .sheet(item: $previewFile) { file in
             AttachmentPreviewSheet(file: file)
@@ -360,11 +370,50 @@ struct TaskViewerSheet: View {
 
     private func loadHistory() async {
         guard let pid = viewModel.project?.id else { return }
+        loadingHistory = true
+        defer { loadingHistory = false }
         if let rows = try? await MatchaWorkService.shared.fetchTaskHistory(
             projectId: pid, taskId: task.id
         ) {
             history = rows
         }
+        historyLoaded = true
+    }
+
+    /// Collapsed stand-in for the discussion feed. Tapping it reveals the feed
+    /// and triggers the one-time history fetch — so a ticket opens without
+    /// paying for activity data the user didn't ask to see.
+    private var discussionToggle: some View {
+        Button {
+            showDiscussion = true
+            if !historyLoaded {
+                Task { await loadHistory() }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "bubble.left.and.bubble.right")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Text("DISCUSSION & HISTORY")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .tracking(0.5)
+                Spacer()
+                Text("Show")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.matcha500)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.matcha500)
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity)
+            .background(Color.zinc800.opacity(0.4))
+            .cornerRadius(6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - "You are here" state banner
@@ -420,8 +469,11 @@ struct TaskViewerSheet: View {
                 }
             }
             Spacer()
-            if rounds.count > 0 {
-                Text("Round \(rounds.count)")
+            // Round number comes from the subtasks (currentRound), not the
+            // history feed — so it shows the moment the ticket opens, without
+            // forcing the now-lazy history fetch.
+            if currentRound > 0 {
+                Text("Round \(currentRound)")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(p.color)
                     .padding(.horizontal, 6)
@@ -470,6 +522,9 @@ struct TaskViewerSheet: View {
                         .padding(.vertical, 1)
                         .background(Color.zinc800)
                         .cornerRadius(4)
+                }
+                if loadingHistory {
+                    ProgressView().controlSize(.small)
                 }
                 Spacer()
                 Button {
@@ -900,6 +955,7 @@ struct TaskViewerSheet: View {
             assigneeName: assigneeName,
             columnLabel: columnLabel,
             attachments: attachments,
+            subtasks: subtasks,
         )
 
         // Download up to 6 image attachments' bytes.
@@ -912,17 +968,32 @@ struct TaskViewerSheet: View {
             }
         }
 
-        let primary = NSPasteboardItem()
-        primary.setString(markdown, forType: .string)
-        if let first = downloaded.first {
-            primary.setData(first.data, forType: pasteboardType(for: first.file))
-        }
-        var items = [primary]
-        for entry in downloaded.dropFirst() {
+        // Write each image to a temp file and put its file URL on the clipboard
+        // (alongside the raw bytes) so pasting into Claude Code drops the real
+        // PNG/screenshot — like dragging the file in — instead of a URL string.
+        // The markdown (now including the checklist) rides on a trailing text
+        // item so plain-text targets still get the full ticket.
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("werk-ticket-\(task.id)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+
+        var items: [NSPasteboardItem] = []
+        for (idx, entry) in downloaded.enumerated() {
             let item = NSPasteboardItem()
             item.setData(entry.data, forType: pasteboardType(for: entry.file))
+            let safeName = entry.file.filename.isEmpty ? "image-\(idx).png" : entry.file.filename
+            let fileURL = tmpDir.appendingPathComponent("\(idx)-\(safeName)")
+            if (try? entry.data.write(to: fileURL)) != nil {
+                item.setString(fileURL.absoluteString, forType: .fileURL)
+            }
             items.append(item)
         }
+
+        // Markdown last: image/file-aware readers (Claude Code, browsers) match
+        // the leading image items first; plain-text targets fall through to this.
+        let textItem = NSPasteboardItem()
+        textItem.setString(markdown, forType: .string)
+        items.append(textItem)
 
         let board = NSPasteboard.general
         board.clearContents()
@@ -1708,6 +1779,7 @@ enum TaskClipboardExporter {
         assigneeName: String?,
         columnLabel: String,
         attachments: [MWProjectFile],
+        subtasks: [MWSubtask] = [],
     ) -> String {
         var lines: [String] = []
         lines.append("# \(task.title)")
@@ -1733,6 +1805,15 @@ enum TaskClipboardExporter {
         let progress = (task.progressNote ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         lines.append(progress.isEmpty ? "_(no progress note)_" : progress)
         lines.append("")
+
+        if !subtasks.isEmpty {
+            let done = subtasks.filter { $0.isDone }.count
+            lines.append("## Checklist (\(done)/\(subtasks.count))")
+            for s in subtasks.sorted(by: { $0.position < $1.position }) {
+                lines.append("- [\(s.isDone ? "x" : " ")] \(s.title)")
+            }
+            lines.append("")
+        }
 
         if !attachments.isEmpty {
             lines.append("## Attachments (\(attachments.count))")
