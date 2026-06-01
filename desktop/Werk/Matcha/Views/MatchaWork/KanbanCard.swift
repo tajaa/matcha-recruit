@@ -70,10 +70,11 @@ struct KanbanCardView: View {
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(8)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             .background(headerTint)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 6) {
                 if let note = task.progressNote, !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     HStack(spacing: 4) {
                         Image(systemName: "location.north.line")
@@ -283,9 +284,9 @@ struct KanbanCardView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 8)
-            .padding(.bottom, 8)
-            .padding(.top, 4)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
+            .padding(.top, 6)
         }
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .elevatedCard(cornerRadius: 8)
