@@ -27,6 +27,7 @@ from app.matcha.models.ir_incident import (
     OshaRecordabilityUpdate,
 )
 from ._shared import log_audit
+from app.core.services.osha_redaction import redact_osha_text, company_is_healthcare
 
 logger = logging.getLogger(__name__)
 
@@ -229,6 +230,9 @@ async def get_osha_300_log(
             company_id,
             year,
         )
+        # Redact patient PHI (healthcare) / structured PII (all) from the
+        # free-text fields before they land in the exported log.
+        healthcare = await company_is_healthcare(conn, company_id)
 
     entries = []
     for row in rows:
@@ -244,8 +248,8 @@ async def get_osha_300_log(
             employee_name=emp_name,
             job_title=row["emp_job_title"],
             date_of_injury=row["occurred_at"].strftime("%Y-%m-%d") if row["occurred_at"] else "",
-            location=row["location"],
-            description=row["description"],
+            location=redact_osha_text(row["location"], healthcare=healthcare),
+            description=redact_osha_text(row["description"], healthcare=healthcare),
             classification=row["osha_classification"],
             days_away=row["days_away_from_work"],
             days_restricted=row["days_restricted_duty"],
@@ -344,6 +348,12 @@ async def get_osha_301_form(
     if row["emp_first_name"]:
         emp_name = f"{row['emp_first_name']} {row['emp_last_name'] or ''}".strip()
 
+    # Redact patient PHI (healthcare) / structured PII (all) from free-text
+    # fields. Injury structure (injury_type, body_parts, classification) is
+    # passed through unredacted so the 301 still describes the injury.
+    async with get_connection() as conn:
+        healthcare = await company_is_healthcare(conn, company_id)
+
     return {
         "incident_id": str(row["id"]),
         "case_number": row["osha_case_number"] or str(row["id"])[:8],
@@ -358,12 +368,12 @@ async def get_osha_301_form(
         "establishment_state": row.get("location_state"),
         "date_of_injury": row["occurred_at"].strftime("%Y-%m-%d") if row["occurred_at"] else None,
         "time_of_event": row["occurred_at"].strftime("%H:%M") if row["occurred_at"] else None,
-        "location_of_event": row.get("location"),
-        "description_of_injury": row.get("description"),
+        "location_of_event": redact_osha_text(row.get("location"), healthcare=healthcare),
+        "description_of_injury": redact_osha_text(row.get("description"), healthcare=healthcare),
         "object_or_substance": category_data.get("equipment_involved"),
         "injury_type": category_data.get("injury_type"),
         "body_parts_affected": category_data.get("body_parts", []),
-        "treatment": category_data.get("treatment"),
+        "treatment": redact_osha_text(category_data.get("treatment"), healthcare=healthcare),
         "osha_classification": row.get("osha_classification"),
         "days_away_from_work": row.get("days_away_from_work") or 0,
         "days_restricted_duty": row.get("days_restricted_duty") or 0,
