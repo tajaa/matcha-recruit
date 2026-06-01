@@ -10,6 +10,18 @@ const METRIC_LABEL: Record<BrokerRiskMetricKey, string> = {
   lost_days: 'Lost workdays',
   claim_free_broken: 'Claim-free streak',
   premium_increase: 'Premium impact',
+  behavioral_friction: 'Behavioral Friction & Retention Risk',
+}
+
+// Risk categories — P&C safety metrics vs the workforce-retention signal.
+// Shown as a subtle tag so EB brokers can spot the new category at a glance.
+const CATEGORY: Record<BrokerRiskMetricKey, string> = {
+  trir: 'Property & Casualty',
+  dart: 'Property & Casualty',
+  lost_days: 'Property & Casualty',
+  claim_free_broken: 'Property & Casualty',
+  premium_increase: 'Property & Casualty',
+  behavioral_friction: 'Workforce Retention',
 }
 
 const SEVERITY_TONE: Record<string, { bg: string; text: string; label: string }> = {
@@ -83,7 +95,8 @@ export default function BrokerRiskAlerts() {
             )}
           </h1>
           <p className="text-sm text-zinc-500 mt-1">
-            Clients whose safety / Workers&nbsp;Comp metrics trended negative over the trailing 12 months.
+            Clients whose safety / Workers&nbsp;Comp metrics trended negative, or whose workforce shows a
+            sudden spike in behavioral friction &amp; retention risk.
           </p>
         </div>
         <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer select-none">
@@ -137,6 +150,11 @@ export default function BrokerRiskAlerts() {
                           <span className="text-xs font-medium text-zinc-300">
                             {METRIC_LABEL[a.metric_key] ?? a.metric_key}
                           </span>
+                          {CATEGORY[a.metric_key] && (
+                            <span className="px-1.5 py-0.5 rounded bg-white/5 text-[9px] uppercase tracking-wider text-zinc-500">
+                              {CATEGORY[a.metric_key]}
+                            </span>
+                          )}
                           {!a.is_read && !a.resolved_at && (
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                           )}

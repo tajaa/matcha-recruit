@@ -448,6 +448,93 @@ async def compute_wc_metrics(conn, company_id: UUID, period_days: int = 365) -> 
     }
 
 
+async def compute_behavioral_friction(conn, company_id: UUID, window_days: int = 90) -> dict:
+    """Per-company behavioral-incident spike metrics for the broker
+    "Behavioral Friction & Retention Risk" alert.
+
+    A short recent window (default 90d) vs the equal-length window before it,
+    so a *sudden* surge in behavioral incidents (incl. insubordination /
+    attendance) trips the alert — distinct from the trailing-12mo WC trend in
+    ``compute_wc_metrics``. Count-based: no headcount / hours estimate needed.
+
+    The attendance / insubordination sub-counts come from
+    ``category_data->>'policy_violated'`` (with a title fallback) — the
+    taxonomy has no distinct types for them; they live under ``behavioral``.
+
+    Returns the current/prior counts, % delta, subtype sub-counts (current
+    window), and the single location with the most behavioral incidents this
+    window so the alert message can name where the friction is concentrated.
+    """
+    window_start = _utc_now_naive() - timedelta(days=window_days)
+    prior_start = window_start - timedelta(days=window_days)
+
+    rows = await conn.fetch(
+        """
+        SELECT
+            CASE WHEN occurred_at >= $2 THEN 'current' ELSE 'prior' END AS bucket,
+            COUNT(*) AS behavioral_count,
+            COALESCE(SUM(CASE
+                WHEN category_data->>'policy_violated' ILIKE '%attendance%'
+                  OR title ILIKE '%attendance%'
+                THEN 1 ELSE 0 END), 0) AS attendance_count,
+            COALESCE(SUM(CASE
+                WHEN category_data->>'policy_violated' ILIKE '%insubordinat%'
+                  OR title ILIKE '%insubordinat%'
+                THEN 1 ELSE 0 END), 0) AS insubordination_count
+        FROM ir_incidents
+        WHERE company_id = $1
+          AND incident_type = 'behavioral'
+          AND occurred_at >= $3
+        GROUP BY bucket
+        """,
+        company_id, window_start, prior_start,
+    )
+
+    current_count = prior_count = 0
+    attendance_count = insubordination_count = 0
+    for r in rows:
+        if r["bucket"] == "current":
+            current_count = int(r["behavioral_count"])
+            attendance_count = int(r["attendance_count"])
+            insubordination_count = int(r["insubordination_count"])
+        else:
+            prior_count = int(r["behavioral_count"])
+
+    hot = await conn.fetchrow(
+        """
+        SELECT COALESCE(bl.name, NULLIF(i.location, ''), 'Unspecified location') AS loc_name,
+               COUNT(*) AS cnt
+        FROM ir_incidents i
+        LEFT JOIN business_locations bl ON bl.id = i.location_id
+        WHERE i.company_id = $1
+          AND i.incident_type = 'behavioral'
+          AND i.occurred_at >= $2
+        GROUP BY loc_name
+        ORDER BY cnt DESC
+        LIMIT 1
+        """,
+        company_id, window_start,
+    )
+
+    def _delta_pct(curr, prior):
+        if prior is None or prior == 0:
+            return None
+        return round(((curr - prior) / prior) * 100, 1)
+
+    return {
+        "window_days": window_days,
+        "current_count": current_count,
+        "prior_count": prior_count,
+        "delta_pct": _delta_pct(current_count, prior_count),
+        "attendance_count": attendance_count,
+        "insubordination_count": insubordination_count,
+        "hot_location": (
+            {"name": hot["loc_name"], "count": int(hot["cnt"])} if hot and hot["cnt"] else None
+        ),
+        "generated_at": _utc_now_naive().isoformat(),
+    }
+
+
 @router.get("/analytics/wc-metrics")
 async def get_wc_metrics(
     period_days: int = Query(365, ge=30, le=1095),

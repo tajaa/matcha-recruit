@@ -6,6 +6,7 @@ export type BrokerRiskMetricKey =
   | 'lost_days'
   | 'claim_free_broken'
   | 'premium_increase'
+  | 'behavioral_friction'
 
 export interface BrokerRiskAlert {
   id: string
