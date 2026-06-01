@@ -7,6 +7,10 @@ import type {
   BrokerLiteReferralToken,
   BrokerLiteReferralTokenListResponse,
   BrokerRiskAlertsResponse,
+  BrokerReferredClientsResponse,
+  EligibilityExceptionsResponse,
+  RenewalRadarResponse,
+  RenewalRadarDetail,
 } from '../types/broker'
 
 export function fetchBrokerPortfolio() {
@@ -49,4 +53,58 @@ export function fetchBrokerRiskAlerts(includeResolved = false) {
 
 export function markBrokerRiskAlertRead(alertId: string) {
   return api.post<{ status: string }>(`/brokers/risk-alerts/${alertId}/read`, {})
+}
+
+// --- Referred clients (company picker) ---
+
+export function fetchBrokerClientsLite() {
+  return api.get<BrokerReferredClientsResponse>('/brokers/referred-clients')
+}
+
+// --- Employee Benefits: eligibility exceptions ---
+
+export function fetchBenefitEligibilityExceptions() {
+  return api.get<EligibilityExceptionsResponse>('/broker/benefits/eligibility-exceptions')
+}
+
+export function nudgeEligibilityException(id: string) {
+  return api.post<{ status: string }>(`/broker/benefits/eligibility-exceptions/${id}/nudge`, {})
+}
+
+export function resolveEligibilityException(id: string, note?: string) {
+  return api.post<{ status: string }>(`/broker/benefits/eligibility-exceptions/${id}/resolve`, { note })
+}
+
+export function dismissEligibilityException(id: string, note?: string) {
+  return api.post<{ status: string }>(`/broker/benefits/eligibility-exceptions/${id}/dismiss`, { note })
+}
+
+export function downloadBenefitRosterTemplate() {
+  return api.download('/broker/benefits/roster/template', 'benefit_roster_template.csv')
+}
+
+export function uploadBenefitRoster(companyId: string, file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return api.upload<{ status: string; created?: number; updated?: number }>(
+    `/broker/benefits/roster/upload?company_id=${companyId}`,
+    formData,
+  )
+}
+
+// --- Employee Benefits: renewal risk radar ---
+
+export function fetchRenewalRadar() {
+  return api.get<RenewalRadarResponse>('/broker/benefits/renewal-radar')
+}
+
+export function fetchRenewalRadarDetail(companyId: string) {
+  return api.get<RenewalRadarDetail>(`/broker/benefits/renewal-radar/${companyId}`)
+}
+
+export function downloadStabilizationKit(companyId: string) {
+  return api.download(
+    `/broker/benefits/renewal-radar/${companyId}/stabilization-kit.pdf`,
+    'stabilization-kit.pdf',
+  )
 }

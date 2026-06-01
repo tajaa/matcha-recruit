@@ -211,6 +211,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 | `hris_deductions` | ❌ | Deductions/benefits **write**-back via Finch — requests the `benefits` product at connect; gates `/provisioning/hris/benefits` (provider must support it) |
 | `paid_channel_creator` | ❌ | Stripe-gated paid channels |
 | `channel_job_postings` | ❌ | Stripe-gated job postings in channels |
+| `benefits_admin` | ❌ | Employee-benefits broker tooling — source-agnostic roster ingest (Finch + CSV), eligibility-exception detection (new-hire gaps + termination premium leaks), renewal-risk radar. Gates company-facing `/benefits/*`; broker rollups live under `/broker/benefits/*` (broker-role gated). Daily Celery `benefit_eligibility_sync` (scheduler row, default off). |
 
 `incidents` and `employees` are not in the defaults — they're flipped on by tier-specific flows (Matcha-lite Stripe webhook, IR-only signup) or admin toggle.
 

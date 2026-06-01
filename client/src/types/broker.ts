@@ -1,3 +1,92 @@
+// --- Employee Benefits: eligibility exceptions ---
+
+export type BenefitExceptionType = 'new_hire_enrollment_gap' | 'termination_premium_leak'
+
+export interface EligibilityException {
+  id: string
+  company_id: string
+  company_name: string
+  employee_name: string
+  exception_type: BenefitExceptionType
+  reference_date: string
+  days_elapsed: number
+  days_remaining: number | null
+  estimated_monthly_leak: number | null
+  status: 'open' | 'resolved' | 'dismissed'
+  source: 'finch' | 'csv' | 'mock'
+  last_nudge_sent_at: string | null
+  detected_at: string
+}
+
+export interface EligibilityExceptionsSummary {
+  new_hire_count: number
+  termination_leak_count: number
+  total_open: number
+  estimated_monthly_leak: number
+}
+
+export interface EligibilityExceptionsResponse {
+  summary: EligibilityExceptionsSummary
+  exceptions: EligibilityException[]
+}
+
+// --- Employee Benefits: renewal risk radar ---
+
+export type RenewalRiskBand = 'stable' | 'elevated' | 'critical'
+
+export interface RenewalRadarSummary {
+  client_count: number
+  stable: number
+  elevated: number
+  critical: number
+}
+
+export interface RenewalRadarCompany {
+  company_id: string
+  company_name: string
+  industry: string | null
+  risk_band: RenewalRiskBand
+  policy_month: number | null
+  turnover_pct: number
+  turnover_delta_pct: number
+  lost_workdays: number
+  near_misses: number
+  behavioral_incidents: number
+  headcount: number
+  top_trigger: string | null
+  computed_at: string
+}
+
+export interface RenewalRadarResponse {
+  summary: RenewalRadarSummary
+  companies: RenewalRadarCompany[]
+}
+
+export interface RenewalRiskDimension {
+  dimension_type: 'company' | 'department' | 'location'
+  dimension_value: string
+  risk_band: RenewalRiskBand
+  turnover_pct: number
+  turnover_baseline_pct: number
+  turnover_delta_pct: number
+  lost_workdays: number
+  lost_workdays_delta_pct: number
+  near_misses: number
+  behavioral_incidents: number
+  headcount: number
+  gross_payroll: number | null
+  triggers: string[]
+}
+
+export interface RenewalRadarDetail {
+  company_id: string
+  company_name: string
+  risk_band: RenewalRiskBand
+  policy_month: number | null
+  recommendation: string
+  dimensions: RenewalRiskDimension[]
+}
+
 // --- Risk-trend alerts ---
 
 export type BrokerRiskMetricKey =

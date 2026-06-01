@@ -8,6 +8,8 @@ import BrokerWcPortfolio from '../pages/broker/BrokerWcPortfolio'
 import BrokerClientDetail from '../pages/broker/BrokerClientDetail'
 import BrokerReferralLinks from '../pages/broker/BrokerReferralLinks'
 import BrokerRiskAlerts from '../pages/broker/BrokerRiskAlerts'
+import BrokerEligibilityExceptions from '../pages/broker/BrokerEligibilityExceptions'
+import BrokerRenewalRiskRadar from '../pages/broker/BrokerRenewalRiskRadar'
 
 export default function BrokerRoutes() {
   return (
@@ -17,6 +19,8 @@ export default function BrokerRoutes() {
         <Route path="clients" element={<BrokerClients />} />
         <Route path="wc-portfolio" element={<BrokerWcPortfolio />} />
         <Route path="risk-alerts" element={<BrokerRiskAlerts />} />
+        <Route path="benefits/eligibility-exceptions" element={<BrokerEligibilityExceptions />} />
+        <Route path="benefits/renewal-risk-radar" element={<BrokerRenewalRiskRadar />} />
         <Route path="referrals" element={<BrokerReferralLinks />} />
         <Route path="settings" element={<BrokerSettings />} />
         <Route path="clients/:companyId" element={<BrokerClientDetail />} />
