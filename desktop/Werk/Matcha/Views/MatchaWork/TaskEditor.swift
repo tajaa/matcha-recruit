@@ -76,8 +76,10 @@ struct TaskEditorSheet: View {
 
     private var collaborators: [MWProjectCollaborator] { viewModel.collaborators }
     private var attachments: [MWProjectFile] { viewModel.taskFiles[task.id] ?? [] }
-    /// Show pipeline/deal fields for all collab projects — both views are available.
-    private var isPipeline: Bool { viewModel.project?.projectType == "collab" }
+    /// Deal/Stage/Outcome/Follow-up fields are sales-pipeline only. Gate on the
+    /// project's pipelineMode — NOT projectType, since regular kanban projects
+    /// are also projectType="collab" and were wrongly showing the sales form.
+    private var isPipeline: Bool { viewModel.project?.pipelineMode == true }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
