@@ -263,6 +263,59 @@ struct MWTaskHistoryEntry: Codable, Identifiable, Hashable {
         case attachmentIds = "attachment_ids"
         case createdAt = "created_at"
     }
+
+    // Custom decode so `metadata` tolerates non-string JSON values. The server
+    // stores metadata as JSONB and MOSTLY uses string values, but a stray bool
+    // or number (e.g. an event flag) would otherwise fail the WHOLE
+    // [MWTaskHistoryEntry] decode — silently emptying a ticket's notes + rounds.
+    // Coerce scalars to strings; drop nested objects/arrays/null.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        taskId = try c.decodeIfPresent(String.self, forKey: .taskId)
+        actorUserId = try c.decodeIfPresent(String.self, forKey: .actorUserId)
+        actorName = try c.decodeIfPresent(String.self, forKey: .actorName)
+        actorAvatarUrl = try c.decodeIfPresent(String.self, forKey: .actorAvatarUrl)
+        eventType = try c.decode(String.self, forKey: .eventType)
+        fromValue = try c.decodeIfPresent(String.self, forKey: .fromValue)
+        toValue = try c.decodeIfPresent(String.self, forKey: .toValue)
+        metadata = (try? c.decode(LenientStringMap.self, forKey: .metadata))?.values
+        attachmentIds = try c.decodeIfPresent([String].self, forKey: .attachmentIds)
+        createdAt = try c.decode(String.self, forKey: .createdAt)
+    }
+}
+
+/// Decodes a JSON object whose values may be strings, bools, or numbers into a
+/// `[String: String]`, coercing scalars to their string form and dropping
+/// nested containers / null. Keeps one stray non-string value from failing the
+/// surrounding decode (see `MWTaskHistoryEntry.init(from:)`).
+private struct LenientStringMap: Decodable {
+    let values: [String: String]
+
+    private struct DynamicKey: CodingKey {
+        var stringValue: String
+        var intValue: Int?
+        init?(stringValue: String) { self.stringValue = stringValue; self.intValue = nil }
+        init?(intValue: Int) { self.stringValue = String(intValue); self.intValue = intValue }
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: DynamicKey.self)
+        var out: [String: String] = [:]
+        for key in c.allKeys {
+            if let s = try? c.decode(String.self, forKey: key) {
+                out[key.stringValue] = s
+            } else if let b = try? c.decode(Bool.self, forKey: key) {
+                out[key.stringValue] = b ? "true" : "false"
+            } else if let i = try? c.decode(Int.self, forKey: key) {
+                out[key.stringValue] = String(i)
+            } else if let d = try? c.decode(Double.self, forKey: key) {
+                out[key.stringValue] = String(d)
+            }
+            // null / nested object / array → skipped
+        }
+        values = out
+    }
 }
 
 /// One row from the project-scoped activity feed

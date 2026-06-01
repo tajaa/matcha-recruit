@@ -720,7 +720,11 @@ async def reject_project_task(
                 project_id=project_id,
                 actor_user_id=actor_user_id,
                 event_type="round_started",
-                metadata={"title": round_title, "from_review": True},
+                # Keep metadata string-only — the desktop client decodes
+                # mw_task_history.metadata as [String: String], so a non-string
+                # value (e.g. a bool) fails the whole history decode and the
+                # ticket's notes + rounds silently vanish.
+                metadata={"title": round_title},
             )
             new_round = await st_svc._current_round(conn, task_id)
             await conn.execute(
