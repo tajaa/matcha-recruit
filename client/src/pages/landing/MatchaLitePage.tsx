@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { motion, useInView } from 'framer-motion'
-import { ShieldAlert, FileText, MapPin, Calculator, Bell, Loader2, Brain, ClipboardList } from 'lucide-react'
+import { ShieldAlert, FileText, MapPin, Calculator, Bell, Brain, ClipboardList } from 'lucide-react'
 
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
@@ -9,7 +9,6 @@ import { ComplianceTicker } from '../../components/landing/ComplianceTicker'
 import { MatchaLiteMockup } from '../../components/landing/MatchaLiteMockup'
 import { IrAnalysisPanel } from '../../components/landing/IrAnalysisPanel'
 import { PricingContactModal } from '../../components/PricingContactModal'
-import { api } from '../../api/client'
 
 const INK = 'var(--color-ivory-ink)'
 const BG = 'var(--color-ivory-bg)'
@@ -78,11 +77,6 @@ const FEATURES: { id: string; icon: typeof ShieldAlert; title: string; caption: 
 
 export default function MatchaLitePage() {
   const [isPricingOpen, setIsPricingOpen] = useState(false)
-  const waitlistRef = useRef<HTMLDivElement>(null)
-
-  function scrollToWaitlist() {
-    waitlistRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }
 
   return (
     <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen">
@@ -90,13 +84,12 @@ export default function MatchaLitePage() {
       <ComplianceTicker />
       <MarketingNav onDemoClick={() => setIsPricingOpen(true)} />
 
-      <Hero onWaitlistClick={scrollToWaitlist} />
+      <Hero onContactClick={() => setIsPricingOpen(true)} />
 
       <main>
         <FeatureGrid />
         <IrAnalysisSection />
         <OshaSection />
-        <WaitlistSection waitlistRef={waitlistRef} />
       </main>
 
       <MarketingFooter />
@@ -108,7 +101,7 @@ export default function MatchaLitePage() {
 // Hero
 // ---------------------------------------------------------------------------
 
-function Hero({ onWaitlistClick }: { onWaitlistClick: () => void }) {
+function Hero({ onContactClick }: { onContactClick: () => void }) {
   return (
     <section className="relative w-full overflow-hidden" style={{ backgroundColor: BG }}>
       <div
@@ -127,13 +120,7 @@ function Hero({ onWaitlistClick }: { onWaitlistClick: () => void }) {
           >
             <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#86efac' }} />
             <span className="text-[10px] sm:text-[11px] uppercase tracking-wider font-medium">
-              Self-serve HR risk + compliance
-            </span>
-            <span
-              className="text-[9px] uppercase tracking-wider font-medium px-1.5 py-[1px] rounded ml-1"
-              style={{ color: '#d7ba7d', border: '1px solid rgba(215,186,125,0.4)' }}
-            >
-              Coming Soon
+              HR risk + compliance, bundled
             </span>
           </div>
           <h1
@@ -158,11 +145,11 @@ function Hero({ onWaitlistClick }: { onWaitlistClick: () => void }) {
           </p>
           <div className="mt-8 sm:mt-10 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <button
-              onClick={onWaitlistClick}
+              onClick={onContactClick}
               className="inline-flex items-center justify-center w-full sm:w-auto px-7 h-12 rounded-full text-[15px] font-medium transition-opacity hover:opacity-90 cursor-pointer"
               style={{ backgroundColor: INK, color: BG }}
             >
-              Join the waitlist
+              Talk to sales
             </button>
             <Link
               to="/resources"
@@ -263,115 +250,6 @@ function FeatureGrid() {
               </motion.div>
             )
           })}
-        </div>
-      </div>
-    </section>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Waitlist
-// ---------------------------------------------------------------------------
-
-function WaitlistSection({ waitlistRef }: { waitlistRef: React.RefObject<HTMLDivElement | null> }) {
-  const [email, setEmail] = useState('')
-  const [name, setName] = useState('')
-  const [companyName, setCompanyName] = useState('')
-  const [headcount, setHeadcount] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [submitted, setSubmitted] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [honeypot, setHoneypot] = useState('')
-
-  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!valid || submitting) return
-    setSubmitting(true)
-    setError(null)
-    try {
-      const hc = parseInt(headcount, 10)
-      await api.post('/resources/waitlist/lite', {
-        email: email.trim(),
-        name: name.trim() || undefined,
-        company_name: companyName.trim() || undefined,
-        headcount: !isNaN(hc) && hc > 0 ? hc : undefined,
-        website: honeypot,
-      })
-      setSubmitted(true)
-    } catch (err: any) {
-      setError(err?.message ?? 'Something went wrong. Try again.')
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  return (
-    <section ref={waitlistRef} className="py-20 sm:py-28 border-t" style={{ borderColor: LINE }}>
-      <div className="max-w-[1100px] mx-auto px-5 sm:px-10">
-        <div className="grid md:grid-cols-2 gap-10 md:gap-16 items-start">
-          <div>
-            <h2
-              className="tracking-tight"
-              style={{
-                fontFamily: DISPLAY,
-                fontWeight: 400,
-                color: INK,
-                fontSize: 'clamp(1.75rem, 4vw, 2.75rem)',
-                lineHeight: 1.1,
-              }}
-            >
-              Join the Matcha Lite waitlist.
-            </h2>
-            <p className="mt-4 text-base" style={{ color: MUTED, lineHeight: 1.6 }}>
-              Lite is rolling out to broker partners first. Drop your details
-              and we'll reach out as soon as a slot opens.
-            </p>
-          </div>
-
-          {submitted ? (
-            <div
-              className="p-8 rounded-2xl"
-              style={{ border: `1px solid ${LINE}`, backgroundColor: 'rgba(31,29,26,0.03)' }}
-            >
-              <h3 className="text-xl mb-2" style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}>
-                You're on the list.
-              </h3>
-              <p className="text-sm" style={{ color: MUTED }}>
-                We'll email you the moment Lite opens up. Thanks for the interest.
-              </p>
-            </div>
-          ) : (
-            <form
-              onSubmit={handleSubmit}
-              className="p-6 sm:p-8 rounded-2xl flex flex-col gap-4"
-              style={{ border: `1px solid ${LINE}`, backgroundColor: 'rgba(31,29,26,0.03)' }}
-            >
-              <input type="text" name="website" tabIndex={-1} autoComplete="off"
-                aria-hidden="true" value={honeypot} onChange={e => setHoneypot(e.target.value)}
-                style={{position:'absolute',left:'-9999px',width:1,height:1,opacity:0}} />
-              <Field label="Work email *" type="email" value={email} onChange={setEmail} required />
-              <Field label="Your name" value={name} onChange={setName} />
-              <Field label="Company name" value={companyName} onChange={setCompanyName} />
-              <Field label="Headcount" type="number" value={headcount} onChange={setHeadcount} />
-
-              {error && <p className="text-sm" style={{ color: '#c1543a' }}>{error}</p>}
-
-              <button
-                type="submit"
-                disabled={!valid || submitting}
-                className="inline-flex items-center justify-center gap-2 px-5 h-11 rounded-full text-sm font-medium transition-opacity hover:opacity-90 disabled:opacity-50"
-                style={{ backgroundColor: INK, color: BG }}
-              >
-                {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                {submitting ? 'Submitting…' : 'Notify me'}
-              </button>
-              <p className="text-xs" style={{ color: MUTED }}>
-                We won't share your email. One announcement when Lite opens, that's it.
-              </p>
-            </form>
-          )}
         </div>
       </div>
     </section>
@@ -534,28 +412,6 @@ function OshaLogPanel() {
       </div>
     </div>
     </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-
-function Field({
-  label, value, onChange, type = 'text', required,
-}: {
-  label: string; value: string; onChange: (v: string) => void; type?: string; required?: boolean
-}) {
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-xs uppercase tracking-wider" style={{ color: MUTED }}>{label}</span>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        required={required}
-        className="px-3 h-10 rounded-lg text-sm outline-none"
-        style={{ backgroundColor: 'transparent', border: `1px solid ${LINE}`, color: INK }}
-      />
-    </label>
   )
 }
 
