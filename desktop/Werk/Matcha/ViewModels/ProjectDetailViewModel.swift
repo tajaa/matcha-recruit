@@ -1287,14 +1287,13 @@ class ProjectDetailViewModel {
         }
     }
 
-    /// Scan recent GitHub commits → subtask-completion suggestions (no local git).
-    /// `branch` overrides the connected branch so you can scan a feature branch
-    /// without merging. The chips appear on tickets (TaskViewer loads them on open).
-    func scanCommitsFromGitHub(branch: String? = nil) async {
+    /// Manual "Scan commits": force a re-scan of recent commits (so a just-added
+    /// ticket can match already-merged work). Chips appear on tickets.
+    func scanCommitsFromGitHub() async {
         guard let pid = project?.id, !isScanningCommits else { return }
         await MainActor.run { isScanningCommits = true }
         do {
-            let r = try await service.scanCommitsFromGitHub(projectId: pid, branch: branch)
+            let r = try await service.scanCommitsFromGitHub(projectId: pid, force: true)
             lastGitHubScanAt[pid] = Date()
             await MainActor.run {
                 isScanningCommits = false
@@ -1316,7 +1315,8 @@ class ProjectDetailViewModel {
         lastGitHubScanAt[pid] = Date()  // stamp before the await so a re-fire skips
         await MainActor.run { isScanningCommits = true }
         do {
-            let r = try await service.scanCommitsFromGitHub(projectId: pid, branch: nil)
+            // Watermark scan: only NEW commits since the last scan (cheap).
+            let r = try await service.scanCommitsFromGitHub(projectId: pid, force: false)
             await MainActor.run {
                 isScanningCommits = false
                 regroupSuggestions(r.suggestions)

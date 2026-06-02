@@ -5312,8 +5312,11 @@ async def github_scan_commits_endpoint(
     body: dict = Body(default={}),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Pull recent commits from GitHub (no local git) and run them through the
-    same commit→subtask matcher → suggestions on tickets. Idempotent re-scan."""
+    """Pull NEW commits from GitHub (since the last scan) and run them through the
+    commit→subtask matcher → suggestions on tickets. A watermark
+    (mw_projects.github_last_scanned_sha) means an auto-scan with nothing new makes
+    zero Gemini calls. `force` (the manual button) re-scans recent commits so a
+    newly-added ticket can match already-merged work."""
     project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
         raise HTTPException(status_code=403, detail="You don't have edit access to this project")
@@ -5325,14 +5328,23 @@ async def github_scan_commits_endpoint(
     repo, ref = _resolve_github_repo(project, body)
     if not repo:
         raise HTTPException(status_code=400, detail="No GitHub repo connected to this project.")
+    force = bool((body or {}).get("force"))
+    since = None if force else project.get("github_last_scanned_sha")
     try:
-        commits = await gh_svc.fetch_recent_commits(
+        commits, newest_sha = await gh_svc.fetch_recent_commits(
             repo=repo, ref=ref,
             limit=int((body or {}).get("limit") or gh_svc.DEFAULT_COMMIT_LIMIT),
+            since_sha=since,
         )
     except gh_svc.GitHubError as e:
         raise HTTPException(status_code=400, detail=str(e))
     suggestions = await cs_svc.scan_commits(project_id, company_id, commits)
+    if newest_sha:
+        async with get_connection() as conn:
+            await conn.execute(
+                "UPDATE mw_projects SET github_last_scanned_sha = $1 WHERE id = $2",
+                newest_sha, str(project_id),
+            )
     return {"scanned": len(commits), "suggestions": suggestions}
 
 

@@ -25,7 +25,7 @@ GITHUB_API = "https://api.github.com"
 MAX_FILE_BYTES = 40_000
 MAX_FILES_PER_ELEMENT = 600
 MAX_DIFF_CHARS = 60_000          # per-commit diff cap fed to the matcher
-DEFAULT_COMMIT_LIMIT = 20        # how many recent commits a scan looks back over
+DEFAULT_COMMIT_LIMIT = 15        # how far back a *forced* (full) scan looks; watermark scans only do new commits
 _BLOB_CONCURRENCY = 10
 
 EXCLUDED_DIRS = {
@@ -166,12 +166,16 @@ async def sync_element(
 
 
 async def fetch_recent_commits(
-    repo: Optional[str] = None, ref: Optional[str] = None, limit: int = DEFAULT_COMMIT_LIMIT,
-) -> list[dict]:
-    """Recent non-merge commits on `ref` (default branch if None), shaped for
-    `commit_scan_service.scan_commits`: [{sha, short_sha, message, branch,
-    changed_files[], diff}]. Oldest-first. Fetches each commit's detail (the list
-    endpoint omits files/patch)."""
+    repo: Optional[str] = None, ref: Optional[str] = None,
+    limit: int = DEFAULT_COMMIT_LIMIT, since_sha: Optional[str] = None,
+) -> tuple[list[dict], Optional[str]]:
+    """Non-merge commits on `ref`, shaped for `commit_scan_service.scan_commits`,
+    oldest-first. If `since_sha` is given, returns only commits NEWER than it
+    (stops when the list reaches it) — the watermark optimization so we don't
+    re-evaluate commits every scan. Returns `(commits, newest_sha)` where
+    newest_sha = branch HEAD (persist as the new watermark, even when nothing is
+    new and `commits` is empty). Fetches per-commit detail (list omits files/patch)
+    only for the commits actually returned."""
     if not _token():
         raise GitHubError("GITHUB_TOKEN is not set on the server.")
     repo = repo or default_repo()
@@ -188,7 +192,13 @@ async def fetch_recent_commits(
         if r.status_code == 401:
             raise GitHubError("GitHub token invalid or missing (GITHUB_TOKEN).")
         r.raise_for_status()
-        shas = [c["sha"] for c in r.json()]
+        all_shas = [c["sha"] for c in r.json()]
+        newest_sha = all_shas[0] if all_shas else None
+        # Only the commits newer than the watermark (those above it in the list).
+        if since_sha and since_sha in all_shas:
+            shas = all_shas[:all_shas.index(since_sha)]
+        else:
+            shas = all_shas
 
         sem = asyncio.Semaphore(_BLOB_CONCURRENCY)
 
@@ -225,4 +235,4 @@ async def fetch_recent_commits(
             "diff": "".join(parts),
         })
     out.reverse()  # GitHub returns newest-first; scan oldest-first
-    return out
+    return out, newest_sha
