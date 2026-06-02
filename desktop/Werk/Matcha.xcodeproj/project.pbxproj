@@ -129,6 +129,19 @@
 		G1G2G3000000000000000003 /* JournalEditorToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000004 /* JournalEditorToolbar.swift */; };
 		G1G2G3000000000000000005 /* JournalContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000006 /* JournalContentView.swift */; };
 		G1G2G3000000000000000007 /* JournalStylePopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000008 /* JournalStylePopover.swift */; };
+		7A5C0000000000000000B001 /* TaskRound.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F001 /* TaskRound.swift */; };
+		7A5C0000000000000000B002 /* RoundView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F002 /* RoundView.swift */; };
+		7A5C0000000000000000B003 /* EventRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F003 /* EventRow.swift */; };
+		7A5C0000000000000000B004 /* TaskViewerGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F004 /* TaskViewerGraph.swift */; };
+		7A5C0000000000000000B005 /* PendingAttachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F005 /* PendingAttachment.swift */; };
+		7A5C0000000000000000B006 /* NoteRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F006 /* NoteRow.swift */; };
+		7A5C0000000000000000B007 /* SubtaskRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F007 /* SubtaskRow.swift */; };
+		7A5C0000000000000000B008 /* ViewerAttachmentRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F008 /* ViewerAttachmentRow.swift */; };
+		7A5C0000000000000000B009 /* TaskClipboardExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F009 /* TaskClipboardExporter.swift */; };
+		7A5C0000000000000000B010 /* NewRoundSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F010 /* NewRoundSheet.swift */; };
+		7A5C0000000000000000B011 /* TaskViewerSheet+Graph.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F011 /* TaskViewerSheet+Graph.swift */; };
+		7A5C0000000000000000B012 /* TaskViewerSheet+Sections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F012 /* TaskViewerSheet+Sections.swift */; };
+		7A5C0000000000000000B013 /* TaskViewerSheet+Actions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F013 /* TaskViewerSheet+Actions.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -254,6 +267,19 @@
 		G1G2G3000000000000000004 /* JournalEditorToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalEditorToolbar.swift; sourceTree = "<group>"; };
 		G1G2G3000000000000000006 /* JournalContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalContentView.swift; sourceTree = "<group>"; };
 		G1G2G3000000000000000008 /* JournalStylePopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalStylePopover.swift; sourceTree = "<group>"; };
+		7A5C0000000000000000F001 /* TaskRound.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskRound.swift; sourceTree = "<group>"; };
+		7A5C0000000000000000F002 /* RoundView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoundView.swift; sourceTree = "<group>"; };
+		7A5C0000000000000000F003 /* EventRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventRow.swift; sourceTree = "<group>"; };
+		7A5C0000000000000000F004 /* TaskViewerGraph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskViewerGraph.swift; sourceTree = "<group>"; };
+		7A5C0000000000000000F005 /* PendingAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingAttachment.swift; sourceTree = "<group>"; };
+		7A5C0000000000000000F006 /* NoteRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteRow.swift; sourceTree = "<group>"; };
+		7A5C0000000000000000F007 /* SubtaskRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtaskRow.swift; sourceTree = "<group>"; };
+		7A5C0000000000000000F008 /* ViewerAttachmentRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerAttachmentRow.swift; sourceTree = "<group>"; };
+		7A5C0000000000000000F009 /* TaskClipboardExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskClipboardExporter.swift; sourceTree = "<group>"; };
+		7A5C0000000000000000F010 /* NewRoundSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewRoundSheet.swift; sourceTree = "<group>"; };
+		7A5C0000000000000000F011 /* TaskViewerSheet+Graph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Graph.swift"; sourceTree = "<group>"; };
+		7A5C0000000000000000F012 /* TaskViewerSheet+Sections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Sections.swift"; sourceTree = "<group>"; };
+		7A5C0000000000000000F013 /* TaskViewerSheet+Actions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Actions.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -376,6 +402,7 @@
 				C0C0C0C0C0C0C0C001010008 /* PresencePillContent.swift */,
 				C17C03E9AEF2444962BCA6E4 /* Previews */,
 				8646470B8A128EECBD15D889 /* ProjectDetail */,
+				7A5C0000000000000000A001 /* TaskViewer */,
 			);
 			path = MatchaWork;
 			sourceTree = "<group>";
@@ -406,6 +433,27 @@
 			);
 			name = ProjectDetail;
 			path = ProjectDetail;
+			sourceTree = "<group>";
+		};
+		7A5C0000000000000000A001 /* TaskViewer */ = {
+			isa = PBXGroup;
+			children = (
+				7A5C0000000000000000F001 /* TaskRound.swift */,
+				7A5C0000000000000000F002 /* RoundView.swift */,
+				7A5C0000000000000000F003 /* EventRow.swift */,
+				7A5C0000000000000000F004 /* TaskViewerGraph.swift */,
+				7A5C0000000000000000F005 /* PendingAttachment.swift */,
+				7A5C0000000000000000F006 /* NoteRow.swift */,
+				7A5C0000000000000000F007 /* SubtaskRow.swift */,
+				7A5C0000000000000000F008 /* ViewerAttachmentRow.swift */,
+				7A5C0000000000000000F009 /* TaskClipboardExporter.swift */,
+				7A5C0000000000000000F010 /* NewRoundSheet.swift */,
+				7A5C0000000000000000F011 /* TaskViewerSheet+Graph.swift */,
+				7A5C0000000000000000F012 /* TaskViewerSheet+Sections.swift */,
+				7A5C0000000000000000F013 /* TaskViewerSheet+Actions.swift */,
+			);
+			name = TaskViewer;
+			path = TaskViewer;
 			sourceTree = "<group>";
 		};
 		A1B2C3D4E5F60708CC000001 /* Profile */ = {
@@ -662,6 +710,19 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7A5C0000000000000000B001 /* TaskRound.swift in Sources */,
+				7A5C0000000000000000B002 /* RoundView.swift in Sources */,
+				7A5C0000000000000000B003 /* EventRow.swift in Sources */,
+				7A5C0000000000000000B004 /* TaskViewerGraph.swift in Sources */,
+				7A5C0000000000000000B005 /* PendingAttachment.swift in Sources */,
+				7A5C0000000000000000B006 /* NoteRow.swift in Sources */,
+				7A5C0000000000000000B007 /* SubtaskRow.swift in Sources */,
+				7A5C0000000000000000B008 /* ViewerAttachmentRow.swift in Sources */,
+				7A5C0000000000000000B009 /* TaskClipboardExporter.swift in Sources */,
+				7A5C0000000000000000B010 /* NewRoundSheet.swift in Sources */,
+				7A5C0000000000000000B011 /* TaskViewerSheet+Graph.swift in Sources */,
+				7A5C0000000000000000B012 /* TaskViewerSheet+Sections.swift in Sources */,
+				7A5C0000000000000000B013 /* TaskViewerSheet+Actions.swift in Sources */,
 				B2C7DB8AE33E886529C5BF99 /* MatchaApp.swift in Sources */,
 				A8B0E4F8719EE4B839FFBCBC /* AppState.swift in Sources */,
 				27D89F55D2042BB60126C2E5 /* ContentView.swift in Sources */,
