@@ -11,12 +11,13 @@ struct TicketChatRef: Identifiable, Equatable {
 }
 
 enum CollabRightPanel: String, CaseIterable, Identifiable {
-    case chat, kanban, files, media, elements, sections, threads, overview
+    case chat, kanban, props, files, media, elements, sections, threads, overview
     var id: String { rawValue }
     var label: String {
         switch self {
         case .chat: return "Chat"
         case .kanban: return "Kanban"
+        case .props: return "Props"
         case .files: return "Files"
         case .media: return "Media"
         case .elements: return "Elements"
@@ -29,6 +30,7 @@ enum CollabRightPanel: String, CaseIterable, Identifiable {
         switch self {
         case .chat: return "bubble.left.and.bubble.right"
         case .kanban: return "rectangle.split.3x1"
+        case .props: return "lightbulb"
         case .files: return "doc.on.doc"
         case .media: return "photo.stack"
         case .elements: return "square.stack.3d.up"
@@ -42,12 +44,13 @@ enum CollabRightPanel: String, CaseIterable, Identifiable {
         switch self {
         case .chat: return "1"
         case .kanban: return "2"
-        case .files: return "3"
-        case .media: return "4"
-        case .elements: return "5"
-        case .sections: return "6"
-        case .overview: return "7"
-        case .threads: return "8"
+        case .props: return "3"
+        case .files: return "4"
+        case .media: return "5"
+        case .elements: return "6"
+        case .sections: return "7"
+        case .overview: return "8"
+        case .threads: return "9"
         }
     }
 }

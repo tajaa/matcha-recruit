@@ -400,6 +400,9 @@ struct TaskViewerSheet: View {
                 await viewModel.loadTaskFiles(taskId: task.id)
             }
             await viewModel.loadSubtasks(taskId: task.id)
+            // Refresh commit-driven suggestions so chips appear even when the
+            // ticket is opened straight from the board (no-op if no repo bound).
+            await viewModel.loadCommitSuggestions()
             // Discussion is always shown, so load history once on open to
             // populate the notes thread (and the collapsed rounds feed).
             if !historyLoaded { await loadHistory() }

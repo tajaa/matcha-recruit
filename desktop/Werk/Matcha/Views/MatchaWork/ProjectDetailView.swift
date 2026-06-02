@@ -468,6 +468,8 @@ struct ProjectDetailView: View {
                 collabChatView
             case .kanban:
                 KanbanBoardView(viewModel: viewModel)
+            case .props:
+                PropsView(viewModel: viewModel)
             case .files:
                 ProjectFilesView(viewModel: viewModel)
             case .media:

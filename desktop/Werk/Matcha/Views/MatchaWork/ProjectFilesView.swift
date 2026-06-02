@@ -2,6 +2,74 @@ import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
 
+/// Sheet to connect / change a project's GitHub repo (owner/name + optional
+/// branch). Validation happens server-side on connect (the read-only token must
+/// be able to read it).
+struct GitHubConnectSheet: View {
+    let currentRepo: String?
+    let currentBranch: String?
+    let onConnect: (_ repo: String, _ branch: String?) async -> Void
+    let onClose: () -> Void
+
+    @State private var repo: String
+    @State private var branch: String
+    @State private var connecting = false
+
+    init(currentRepo: String?, currentBranch: String?,
+         onConnect: @escaping (_ repo: String, _ branch: String?) async -> Void,
+         onClose: @escaping () -> Void) {
+        self.currentRepo = currentRepo
+        self.currentBranch = currentBranch
+        self.onConnect = onConnect
+        self.onClose = onClose
+        _repo = State(initialValue: currentRepo ?? "")
+        _branch = State(initialValue: currentBranch ?? "")
+    }
+
+    private var trimmedRepo: String { repo.trimmingCharacters(in: .whitespaces) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Connect GitHub repo").font(.system(size: 15, weight: .semibold)).foregroundColor(.white)
+            Text("The server reads this repo with its read-only token — for commit→subtask check-off and Prop code chat. No local clone.")
+                .font(.system(size: 11)).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("REPOSITORY").font(.system(size: 9, weight: .semibold)).foregroundColor(.secondary).tracking(0.5)
+                TextField("owner/name (e.g. tajaa/matcha-recruit)", text: $repo)
+                    .textFieldStyle(.plain).font(.system(size: 12, design: .monospaced)).foregroundColor(.white)
+                    .padding(8).background(Color.zinc800.opacity(0.6)).cornerRadius(6)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("BRANCH (optional)").font(.system(size: 9, weight: .semibold)).foregroundColor(.secondary).tracking(0.5)
+                TextField("default branch if blank (e.g. main)", text: $branch)
+                    .textFieldStyle(.plain).font(.system(size: 12, design: .monospaced)).foregroundColor(.white)
+                    .padding(8).background(Color.zinc800.opacity(0.6)).cornerRadius(6)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { onClose() }.buttonStyle(.plain).foregroundColor(.secondary)
+                Button {
+                    connecting = true
+                    let b = branch.trimmingCharacters(in: .whitespaces)
+                    Task {
+                        await onConnect(trimmedRepo, b.isEmpty ? nil : b)
+                        connecting = false
+                        onClose()
+                    }
+                } label: {
+                    if connecting { ProgressView().controlSize(.small) }
+                    else { Text("Connect").font(.system(size: 12, weight: .semibold)).foregroundColor(.white) }
+                }
+                .buttonStyle(.plain).padding(.horizontal, 12).padding(.vertical, 5)
+                .background(Color.matcha500).cornerRadius(5)
+                .disabled(connecting || trimmedRepo.isEmpty)
+            }
+        }
+        .padding(18).frame(width: 420)
+        .background(Color.appBackground)
+    }
+}
+
 // MARK: - Files View
 
 struct ProjectFilesView: View {
@@ -889,6 +957,7 @@ struct ElementsView: View {
     @State private var isCreating = false
     @State private var newName = ""
     @State private var showWizard = false
+    @State private var showConnectSheet = false
     @AppStorage("mw-elements-wizard-shown-v1") private var hasSeenWizard = false
     @FocusState private var nameFocused: Bool
 
@@ -902,14 +971,26 @@ struct ElementsView: View {
                 )
             } else {
                 listHeader
+                githubBar
                 Divider().opacity(0.2)
                 listContent
             }
         }
         .background(Color.appBackground)
+        .sheet(isPresented: $showConnectSheet) {
+            GitHubConnectSheet(
+                currentRepo: viewModel.connectedGitHubRepo,
+                currentBranch: viewModel.connectedGitHubBranch,
+                onConnect: { repo, branch in
+                    await viewModel.connectGitHubRepo(repo: repo, branch: branch)
+                },
+                onClose: { showConnectSheet = false }
+            )
+        }
         .task {
             if viewModel.elements.isEmpty { await viewModel.loadElements() }
             if viewModel.tasks.isEmpty { Task.detached { await viewModel.loadTasks() } }
+            await viewModel.loadCommitSuggestions()
             // First-run nudge: introduce elements once, only when there's
             // nothing here yet. Re-openable later via the "?" button.
             if !hasSeenWizard && viewModel.elements.isEmpty && selected == nil {
@@ -963,6 +1044,65 @@ struct ElementsView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+
+    /// GitHub connection bar — connect/change the repo, then Scan commits
+    /// (subtask check-off) + Sync code (Prop grounding). All server-side via the
+    /// read-only token; no local clone.
+    private var githubBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                .font(.system(size: 10, weight: .semibold)).foregroundColor(.matcha500)
+            if let repo = viewModel.connectedGitHubRepo, !repo.isEmpty {
+                Text(repo).font(.system(size: 10, weight: .medium)).foregroundColor(.white).lineLimit(1)
+                if let b = viewModel.connectedGitHubBranch, !b.isEmpty {
+                    Text("@\(b)").font(.system(size: 9)).foregroundColor(.secondary)
+                }
+                if let s = viewModel.lastScanSummary ?? viewModel.lastSyncSummary {
+                    Text("· \(s)").font(.system(size: 9)).foregroundColor(.secondary).lineLimit(1)
+                }
+            } else {
+                Text("No GitHub repo connected").font(.system(size: 10)).foregroundColor(.secondary)
+            }
+            Spacer(minLength: 6)
+            if viewModel.isGitHubConnected {
+                Button { Task { await viewModel.scanCommitsFromGitHub() } } label: {
+                    HStack(spacing: 3) {
+                        if viewModel.isScanningCommits { ProgressView().controlSize(.small) }
+                        else { Image(systemName: "arrow.triangle.2.circlepath") }
+                        Text("Scan commits")
+                    }
+                    .font(.system(size: 10)).foregroundColor(.matcha500)
+                }
+                .buttonStyle(.plain).disabled(viewModel.isScanningCommits)
+                .help("Pull recent commits from GitHub → check off subtasks")
+                Button { Task { await viewModel.syncFromGitHub() } } label: {
+                    HStack(spacing: 3) {
+                        if viewModel.isSyncingRepo { ProgressView().controlSize(.small) }
+                        else { Image(systemName: "arrow.down.circle") }
+                        Text("Sync code")
+                    }
+                    .font(.system(size: 10)).foregroundColor(.matcha500)
+                }
+                .buttonStyle(.plain).disabled(viewModel.isSyncingRepo)
+                .help("Pull each bound element's code from GitHub (for Prop chats)")
+                Menu {
+                    Button("Change repo…") { showConnectSheet = true }
+                    Button("Disconnect", role: .destructive) { Task { await viewModel.disconnectGitHubRepo() } }
+                } label: {
+                    Image(systemName: "ellipsis").font(.system(size: 11)).foregroundColor(.secondary)
+                }
+                .menuStyle(.borderlessButton).frame(width: 16)
+            } else {
+                Button { showConnectSheet = true } label: {
+                    HStack(spacing: 3) { Image(systemName: "link"); Text("Connect GitHub repo") }
+                        .font(.system(size: 10)).foregroundColor(.matcha500)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 5)
+        .background(Color.zinc900.opacity(0.4))
     }
 
     private var listContent: some View {
@@ -1061,6 +1201,9 @@ struct ElementDetailView: View {
     @State private var newLink = ""
     @State private var loading = false
     @State private var isDragOver = false
+    @State private var repoPathsText = ""
+    @State private var repoBranch = ""
+    @State private var savingBinding = false
     @FocusState private var folderFocused: Bool
 
     private var projectId: String? { viewModel.project?.id }
@@ -1078,6 +1221,7 @@ struct ElementDetailView: View {
                     if let fid = openFolderId {
                         folderContents(fid)
                     } else {
+                        repoBindingSection
                         repoSection
                         notesSection
                         ticketsSection
@@ -1088,8 +1232,72 @@ struct ElementDetailView: View {
         }
         .background(Color.appBackground)
         .task { await reload() }
+        .onAppear { initBinding() }
         .sheet(item: $previewFile) { f in AttachmentPreviewSheet(file: f) }
         .onChange(of: isCreatingFolder) { _, v in if v { folderFocused = true } }
+    }
+
+    // MARK: repository binding (git element)
+
+    /// Glob patterns + optional branch that map local commits to this element.
+    /// Editing here drives the commit-scan matcher; empty = element isn't a git
+    /// binding (still usable as a plain context bucket).
+    @ViewBuilder
+    private var repoBindingSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: "chevron.left.forwardslash.chevron.right")
+                    .font(.system(size: 10, weight: .semibold)).foregroundColor(.secondary)
+                Text("REPOSITORY").font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary).tracking(0.5)
+                Spacer()
+                if element.hasRepoBinding {
+                    let n = element.repoPaths?.count ?? 0
+                    Text("\(n) path\(n == 1 ? "" : "s")")
+                        .font(.system(size: 9)).foregroundColor(.matcha500)
+                }
+            }
+            Text("Glob patterns mapping commits to this element — one per line (e.g. server/**).")
+                .font(.system(size: 10)).foregroundColor(.secondary)
+            TextEditor(text: $repoPathsText)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(.white.opacity(0.9))
+                .scrollContentBackground(.hidden)
+                .frame(height: 58)
+                .padding(5)
+                .background(Color.zinc800.opacity(0.6)).cornerRadius(5)
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch").font(.system(size: 10)).foregroundColor(.secondary)
+                TextField("Branch (optional, e.g. main)", text: $repoBranch)
+                    .textFieldStyle(.plain).font(.system(size: 11)).foregroundColor(.white)
+                    .padding(6).background(Color.zinc800.opacity(0.6)).cornerRadius(5)
+                Button { saveBinding() } label: {
+                    if savingBinding { ProgressView().controlSize(.small) }
+                    else { Text("Save").font(.system(size: 11, weight: .semibold)).foregroundColor(.matcha500) }
+                }
+                .buttonStyle(.plain).disabled(savingBinding)
+            }
+        }
+        .padding(10)
+        .background(Color.zinc900.opacity(0.4)).cornerRadius(6)
+    }
+
+    private func initBinding() {
+        repoPathsText = (element.repoPaths ?? []).joined(separator: "\n")
+        repoBranch = element.repoBranch ?? ""
+    }
+
+    private func saveBinding() {
+        let paths = repoPathsText
+            .split(whereSeparator: { $0 == "\n" || $0 == "," })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let branch = repoBranch.trimmingCharacters(in: .whitespaces)
+        savingBinding = true
+        Task {
+            await viewModel.updateElementRepoBinding(element, repoPaths: paths, repoBranch: branch.isEmpty ? nil : branch)
+            await MainActor.run { savingBinding = false }
+        }
     }
 
     // MARK: header

@@ -509,20 +509,34 @@ extension TaskViewerSheet {
             }
 
             ForEach(subtasks) { item in
-                SubtaskRow(
-                    item: item,
-                    collaborators: viewModel.collaborators,
-                    currentUserId: appState.currentUser?.id,
-                    onToggle: {
-                        Task { await viewModel.toggleSubtask(taskId: task.id, subtaskId: item.id, isDone: !item.isDone) }
-                    },
-                    onDelete: {
-                        Task { await viewModel.deleteSubtask(taskId: task.id, subtaskId: item.id) }
-                    },
-                    onAssign: { newAssignee in
-                        Task { await viewModel.assignSubtask(taskId: task.id, subtaskId: item.id, assignedTo: newAssignee) }
+                VStack(alignment: .leading, spacing: 3) {
+                    SubtaskRow(
+                        item: item,
+                        collaborators: viewModel.collaborators,
+                        currentUserId: appState.currentUser?.id,
+                        onToggle: {
+                            Task { await viewModel.toggleSubtask(taskId: task.id, subtaskId: item.id, isDone: !item.isDone) }
+                        },
+                        onDelete: {
+                            Task { await viewModel.deleteSubtask(taskId: task.id, subtaskId: item.id) }
+                        },
+                        onAssign: { newAssignee in
+                            Task { await viewModel.assignSubtask(taskId: task.id, subtaskId: item.id, assignedTo: newAssignee) }
+                        }
+                    )
+                    // Commit-driven completion suggestions — only for items not
+                    // yet checked (a done item needs no suggestion).
+                    if !item.isDone {
+                        ForEach(viewModel.suggestions(taskId: task.id, subtaskId: item.id)) { sug in
+                            CommitSuggestionChip(
+                                suggestion: sug,
+                                onAccept: { Task { await viewModel.acceptSuggestion(sug) } },
+                                onDismiss: { Task { await viewModel.dismissSuggestion(sug) } }
+                            )
+                            .padding(.leading, 22)
+                        }
                     }
-                )
+                }
             }
 
             HStack(spacing: 6) {

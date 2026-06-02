@@ -70,7 +70,7 @@ _ALLOWED_PIPELINE_COLUMNS = {"lead", "qualified", "proposal", "negotiation", "cl
 _ALLOWED_PRIORITIES = {"critical", "high", "medium", "low"}
 # Ticket-template kinds stored in mw_tasks.category. "manual" = no template
 # (blank task / legacy rows) and renders without a badge on the client.
-_ALLOWED_CATEGORIES = {"manual", "engineering", "sales", "product", "bug", "general"}
+_ALLOWED_CATEGORIES = {"manual", "engineering", "sales", "product", "bug", "general", "feat", "fix"}
 # Sales-pipeline deal outcome. "open" = still in the funnel; won/lost are
 # terminal and independent of board_column (a deal can be lost from any stage).
 _ALLOWED_OUTCOMES = {"open", "won", "lost"}

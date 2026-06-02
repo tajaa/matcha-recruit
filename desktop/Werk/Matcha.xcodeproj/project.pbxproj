@@ -12,6 +12,9 @@
 		0F5C621C255ED1D1ED92354A /* CommonModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F0C8E2B8D1614829B174F9A /* CommonModels.swift */; };
 		13EAEBAAAC7381CA06D71B4A /* HandbookPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72F0FDE017AA63842A64DD61 /* HandbookPreview.swift */; };
 		1544DF6ADC7DC9778A60BEA8 /* MatchaWorkService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDEE91D105D2B702A920ED3 /* MatchaWorkService.swift */; };
+		7A5C0000000000000000B0C2 /* GitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F0C2 /* GitService.swift */; };
+		7A5C0000000000000000B0D1 /* PropsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F0D1 /* PropsView.swift */; };
+		7A5C0000000000000000B0D2 /* RepoSnapshotService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F0D2 /* RepoSnapshotService.swift */; };
 		15E1BD123DCD5C4F06029703 /* ProjectLayoutEnums.swift in Sources */ = {isa = PBXBuildFile; fileRef = E21DF105CC19746BC2BF16B1 /* ProjectLayoutEnums.swift */; };
 		1896C192062FDFA5D66338DF /* AuthViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B03E99B58F986725B43CD7A /* AuthViewModel.swift */; };
 		1BFFF9E1D881752A67CF8777 /* VersionHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C4DFA44755333D647B43C2 /* VersionHistoryView.swift */; };
@@ -136,6 +139,7 @@
 		7A5C0000000000000000B005 /* PendingAttachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F005 /* PendingAttachment.swift */; };
 		7A5C0000000000000000B006 /* NoteRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F006 /* NoteRow.swift */; };
 		7A5C0000000000000000B007 /* SubtaskRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F007 /* SubtaskRow.swift */; };
+		7A5C0000000000000000B0C1 /* CommitSuggestionChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F0C1 /* CommitSuggestionChip.swift */; };
 		7A5C0000000000000000B008 /* ViewerAttachmentRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F008 /* ViewerAttachmentRow.swift */; };
 		7A5C0000000000000000B009 /* TaskClipboardExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F009 /* TaskClipboardExporter.swift */; };
 		7A5C0000000000000000B010 /* NewRoundSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F010 /* NewRoundSheet.swift */; };
@@ -157,6 +161,9 @@
 		3AE423DAF2E806EE77E7FB4D /* MessageBubbleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubbleView.swift; sourceTree = "<group>"; };
 		49C4DFA44755333D647B43C2 /* VersionHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersionHistoryView.swift; sourceTree = "<group>"; };
 		4CDEE91D105D2B702A920ED3 /* MatchaWorkService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchaWorkService.swift; sourceTree = "<group>"; };
+		7A5C0000000000000000F0C2 /* GitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitService.swift; sourceTree = "<group>"; };
+		7A5C0000000000000000F0D2 /* RepoSnapshotService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoSnapshotService.swift; sourceTree = "<group>"; };
+		7A5C0000000000000000F0D1 /* PropsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Props/PropsView.swift; sourceTree = "<group>"; };
 		564E3C3CDF69E05F3D1338CB /* Matcha.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Matcha.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5ADDBEAEEBA9E4439ECD6181 /* ServiceCache.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ServiceCache.swift; sourceTree = "<group>"; };
 		696FF167B14C8BBD12958A10 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
@@ -274,6 +281,7 @@
 		7A5C0000000000000000F005 /* PendingAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingAttachment.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F006 /* NoteRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteRow.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F007 /* SubtaskRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtaskRow.swift; sourceTree = "<group>"; };
+		7A5C0000000000000000F0C1 /* CommitSuggestionChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitSuggestionChip.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F008 /* ViewerAttachmentRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewerAttachmentRow.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F009 /* TaskClipboardExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskClipboardExporter.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F010 /* NewRoundSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewRoundSheet.swift; sourceTree = "<group>"; };
@@ -339,6 +347,8 @@
 				15F1E6446AC5C08F85073A51 /* APIClient.swift */,
 				696FF167B14C8BBD12958A10 /* AuthService.swift */,
 				4CDEE91D105D2B702A920ED3 /* MatchaWorkService.swift */,
+				7A5C0000000000000000F0C2 /* GitService.swift */,
+				7A5C0000000000000000F0D2 /* RepoSnapshotService.swift */,
 				AA11BB22CC33DD44EE660008 /* InboxService.swift */,
 				DD00EE11FF22334455770002 /* ChannelsService.swift */,
 				DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */,
@@ -392,6 +402,7 @@
 				DEADBEEF000000000000F007 /* KanbanCard.swift */,
 				DEADBEEF000000000000F008 /* KanbanSearch.swift */,
 				AA11BB22CC33DD44EE66000C /* ProjectFilesView.swift */,
+				7A5C0000000000000000F0D1 /* PropsView.swift */,
 				AA11BB22CC33DD44EE6600F1 /* AttachmentPreviewSheet.swift */,
 				AA11BB22CC33DD44EE6600F2 /* TaskViewerSheet.swift */,
 				AA11BB22CC33DD44EE6600F3 /* TaskHistoryTimeline.swift */,
@@ -445,6 +456,7 @@
 				7A5C0000000000000000F005 /* PendingAttachment.swift */,
 				7A5C0000000000000000F006 /* NoteRow.swift */,
 				7A5C0000000000000000F007 /* SubtaskRow.swift */,
+				7A5C0000000000000000F0C1 /* CommitSuggestionChip.swift */,
 				7A5C0000000000000000F008 /* ViewerAttachmentRow.swift */,
 				7A5C0000000000000000F009 /* TaskClipboardExporter.swift */,
 				7A5C0000000000000000F010 /* NewRoundSheet.swift */,
@@ -717,6 +729,7 @@
 				7A5C0000000000000000B005 /* PendingAttachment.swift in Sources */,
 				7A5C0000000000000000B006 /* NoteRow.swift in Sources */,
 				7A5C0000000000000000B007 /* SubtaskRow.swift in Sources */,
+				7A5C0000000000000000B0C1 /* CommitSuggestionChip.swift in Sources */,
 				7A5C0000000000000000B008 /* ViewerAttachmentRow.swift in Sources */,
 				7A5C0000000000000000B009 /* TaskClipboardExporter.swift in Sources */,
 				7A5C0000000000000000B010 /* NewRoundSheet.swift in Sources */,
@@ -733,6 +746,9 @@
 				E5454454BDC033D4A00E1FFC /* APIClient.swift in Sources */,
 				0CBD0CD62319C7801E72CE1A /* AuthService.swift in Sources */,
 				1544DF6ADC7DC9778A60BEA8 /* MatchaWorkService.swift in Sources */,
+				7A5C0000000000000000B0C2 /* GitService.swift in Sources */,
+				7A5C0000000000000000B0D1 /* PropsView.swift in Sources */,
+				7A5C0000000000000000B0D2 /* RepoSnapshotService.swift in Sources */,
 				1896C192062FDFA5D66338DF /* AuthViewModel.swift in Sources */,
 				FADFA74F8E449B203A55B306 /* ThreadListViewModel.swift in Sources */,
 				EC4ABAA381C7E136838EDD09 /* ThreadDetailViewModel.swift in Sources */,

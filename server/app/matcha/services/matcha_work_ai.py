@@ -1690,7 +1690,7 @@ def get_ai_provider() -> GeminiProvider:
 
 
 _TASK_DRAFT_PRIORITIES = {"critical", "high", "medium", "low"}
-_TASK_DRAFT_CATEGORIES = {"engineering", "bug", "product", "sales", "general", "manual"}
+_TASK_DRAFT_CATEGORIES = {"engineering", "bug", "product", "sales", "general", "manual", "feat", "fix"}
 _TASK_DRAFT_COLUMNS = {"todo", "in_progress", "review", "done"}
 
 

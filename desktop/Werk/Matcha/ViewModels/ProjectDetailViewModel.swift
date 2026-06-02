@@ -32,6 +32,22 @@ class ProjectDetailViewModel {
     /// viewer opens; mutated optimistically. `syncSubtaskCounts` mirrors the
     /// counts onto the matching `tasks` entry so the card face updates live.
     var taskSubtasks: [String: [MWSubtask]] = [:]
+    /// Pending commit→subtask suggestions for the current project, keyed by
+    /// task id. Filled by `scanCommits()` / `loadCommitSuggestions()`; the
+    /// TaskViewer checklist renders a chip per matching subtask.
+    var commitSuggestions: [String: [MWCommitSuggestion]] = [:]
+    var isScanningCommits = false
+    /// One-line result of the last scan ("3 commits · 2 suggestions"), shown
+    /// transiently in the Elements header.
+    var lastScanSummary: String?
+    /// Repo-snapshot sync (uploads element code text for Prop grounding).
+    var isSyncingRepo = false
+    var lastSyncSummary: String?
+    /// Per-project last auto-sync time → cooldown so opening the Props tab
+    /// repeatedly never spams GitHub. In-memory on the (cached) VM, so it
+    /// survives tab switches. Manual Sync bypasses it.
+    private var lastGitHubSyncAt: [String: Date] = [:]
+    private let githubSyncCooldown: TimeInterval = 600  // 10 min
     /// Per-session activity log surfaced in the collab Overview panel. Capped
     /// at 20 entries; FIFO eviction. In-memory only — survives panel switches
     /// but not project switches or app relaunches. Backend feed is a follow-up.
@@ -1124,6 +1140,165 @@ class ProjectDetailViewModel {
         } catch {
             await loadElements()
             await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    /// Save an element's git repo binding (path globs + optional branch pin).
+    func updateElementRepoBinding(_ element: MWProjectElement, repoPaths: [String], repoBranch: String?) async {
+        guard let pid = project?.id else { return }
+        do {
+            let updated = try await service.updateProjectElement(
+                projectId: pid, elementId: element.id,
+                repoPaths: repoPaths, repoBranch: repoBranch ?? ""
+            )
+            await MainActor.run {
+                if let i = elements.firstIndex(where: { $0.id == element.id }) { elements[i] = updated }
+            }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    // MARK: - GitHub connection + commit scanning
+
+    var isGitHubConnected: Bool { !(project?.githubRepo ?? "").isEmpty }
+    var connectedGitHubRepo: String? { project?.githubRepo }
+    var connectedGitHubBranch: String? { project?.githubBranch }
+
+    /// Connect / change the project's GitHub repo (validated server-side).
+    /// `repo` is owner/name; empty disconnects.
+    func connectGitHubRepo(repo: String, branch: String?) async {
+        guard let pid = project?.id else { return }
+        do {
+            let conn = try await service.setGitHubConnection(projectId: pid, repo: repo, branch: branch)
+            await MainActor.run {
+                project?.githubRepo = conn.repo
+                project?.githubBranch = conn.branch
+            }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func disconnectGitHubRepo() async {
+        guard let pid = project?.id else { return }
+        do {
+            _ = try await service.setGitHubConnection(projectId: pid, repo: "", branch: nil)
+            await MainActor.run {
+                project?.githubRepo = nil
+                project?.githubBranch = nil
+                lastScanSummary = nil
+                lastSyncSummary = nil
+            }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    /// Refresh pending suggestions from the server (e.g. on project open).
+    func loadCommitSuggestions() async {
+        guard let pid = project?.id else { return }
+        do {
+            let list = try await service.listCommitSuggestions(projectId: pid)
+            await MainActor.run { regroupSuggestions(list) }
+        } catch { /* non-fatal — suggestions are advisory */ }
+    }
+
+    /// Replace the keyed suggestion map from a flat list (server is source of truth).
+    private func regroupSuggestions(_ list: [MWCommitSuggestion]) {
+        commitSuggestions = Dictionary(grouping: list, by: { $0.taskId })
+    }
+
+    /// Pending suggestions for one subtask (used by the checklist chip).
+    func suggestions(taskId: String, subtaskId: String) -> [MWCommitSuggestion] {
+        (commitSuggestions[taskId] ?? []).filter { $0.subtaskId == subtaskId && $0.status == "pending" }
+    }
+
+    func acceptSuggestion(_ s: MWCommitSuggestion) async {
+        guard let pid = project?.id else { return }
+        // Optimistic: drop the chip and tick the box locally.
+        await MainActor.run {
+            commitSuggestions[s.taskId]?.removeAll { $0.id == s.id }
+            if var list = taskSubtasks[s.taskId], let i = list.firstIndex(where: { $0.id == s.subtaskId }) {
+                list[i].isDone = true
+                taskSubtasks[s.taskId] = list
+                syncSubtaskCounts(taskId: s.taskId)
+            }
+        }
+        do {
+            try await service.acceptCommitSuggestion(projectId: pid, suggestionId: s.id)
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+            await loadSubtasks(taskId: s.taskId)
+            await loadCommitSuggestions()
+        }
+    }
+
+    func dismissSuggestion(_ s: MWCommitSuggestion) async {
+        guard let pid = project?.id else { return }
+        await MainActor.run { commitSuggestions[s.taskId]?.removeAll { $0.id == s.id } }
+        do {
+            try await service.dismissCommitSuggestion(projectId: pid, suggestionId: s.id)
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+            await loadCommitSuggestions()
+        }
+    }
+
+    /// Pull element code from GitHub (server-side, read-only token) — no local
+    /// clone or bookmark needed, works for any collaborator.
+    func syncFromGitHub() async {
+        guard let pid = project?.id else { return }
+        if elements.isEmpty { await loadElements() }
+        await MainActor.run { isSyncingRepo = true }
+        do {
+            let res = try await service.syncFromGitHub(projectId: pid)
+            lastGitHubSyncAt[pid] = Date()
+            await MainActor.run {
+                isSyncingRepo = false
+                lastSyncSummary = "GitHub: \(res.totalStored) files" + (res.repo.map { " · \($0)" } ?? "")
+            }
+        } catch {
+            await MainActor.run { isSyncingRepo = false; errorMessage = error.localizedDescription }
+        }
+    }
+
+    /// Auto-sync on Props-tab open, gated so it can't spam GitHub:
+    ///  1. skip if a sync is already running (no concurrent calls)
+    ///  2. skip if synced within the cooldown window (per project)
+    ///  3. skip if no element has globs bound (nothing to fetch)
+    /// Silent on failure (no error banner) — the manual button surfaces errors
+    /// and bypasses the cooldown.
+    func autoSyncFromGitHubIfStale() async {
+        guard let pid = project?.id, !isSyncingRepo, isGitHubConnected else { return }
+        if let last = lastGitHubSyncAt[pid], Date().timeIntervalSince(last) < githubSyncCooldown { return }
+        if elements.isEmpty { await loadElements() }
+        guard elements.contains(where: { !($0.repoPaths ?? []).isEmpty }) else { return }
+        // Stamp BEFORE the await so a rapid second .task firing can't double-fire.
+        lastGitHubSyncAt[pid] = Date()
+        await MainActor.run { isSyncingRepo = true }
+        do {
+            let res = try await service.syncFromGitHub(projectId: pid)
+            await MainActor.run { isSyncingRepo = false; lastSyncSummary = "GitHub: \(res.totalStored) files" }
+        } catch {
+            await MainActor.run { isSyncingRepo = false }  // silent on auto; keep the stamp so a failure doesn't retry-spam
+        }
+    }
+
+    /// Scan recent GitHub commits → subtask-completion suggestions (no local git).
+    /// The chips appear on tickets (TaskViewer loads them on open).
+    func scanCommitsFromGitHub() async {
+        guard let pid = project?.id, !isScanningCommits else { return }
+        await MainActor.run { isScanningCommits = true }
+        do {
+            let r = try await service.scanCommitsFromGitHub(projectId: pid)
+            await MainActor.run {
+                isScanningCommits = false
+                regroupSuggestions(r.suggestions)
+                lastScanSummary = "\(r.scanned) commit\(r.scanned == 1 ? "" : "s") · \(r.suggestions.count) suggestion\(r.suggestions.count == 1 ? "" : "s")"
+            }
+        } catch {
+            await MainActor.run { isScanningCommits = false; errorMessage = error.localizedDescription }
         }
     }
 
