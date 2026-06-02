@@ -119,6 +119,17 @@ final class ProjectPresenceViewModel {
         ProjectWebSocket.shared.sendSectionEditEnd(projectId: projectId, pageKey: pageKey, sectionId: sectionId)
     }
 
+    /// Wrest the section lock from the current holder (watcher → editor). Clears
+    /// our own watcher lock optimistically so the editor opens instantly; the
+    /// server reassigns the lock and broadcasts the new holder, which demotes
+    /// the previous editor to watcher.
+    func takeOver(sectionId: String) {
+        guard let projectId else { return }
+        lockedSections.removeValue(forKey: sectionId)
+        liveSections.removeValue(forKey: sectionId)
+        ProjectWebSocket.shared.sendSectionEditTakeover(projectId: projectId, pageKey: pageKey, sectionId: sectionId)
+    }
+
     func setPage(_ pageKey: String) {
         guard let projectId, self.pageKey != pageKey else { return }
         self.pageKey = pageKey

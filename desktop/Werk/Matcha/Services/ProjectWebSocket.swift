@@ -187,6 +187,13 @@ final class ProjectWebSocket: NSObject {
         send(["type": "section_edit_end", "project_id": projectId, "page_key": pageKey, "section_id": sectionId])
     }
 
+    /// Force-claim a section lock held by someone else (take-over handoff). The
+    /// server reassigns the lock and broadcasts the new holder, demoting the
+    /// previous editor to watcher.
+    func sendSectionEditTakeover(projectId: String, pageKey: String, sectionId: String) {
+        send(["type": "section_edit_takeover", "project_id": projectId, "page_key": pageKey, "section_id": sectionId])
+    }
+
     func leaveProject(projectId: String) {
         send(["type": "leave_project", "project_id": projectId])
         if currentProjectId == projectId {

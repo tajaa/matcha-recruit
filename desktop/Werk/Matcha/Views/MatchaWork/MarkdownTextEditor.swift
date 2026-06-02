@@ -7,6 +7,21 @@ import AppKit
 ///
 /// Use the `controller` binding to drive edits from outside the view. The
 /// controller is the only supported cross-view handle to NSTextView.
+/// A remote collaborator's caret/selection inside the document, rendered as a
+/// colored bar (+ name label) at their text position. UTF-16 offsets to match
+/// NSTextView's `selectedRange`.
+struct RemoteCaretMark: Identifiable, Equatable {
+    let id: String          // userId
+    let color: Color
+    let name: String
+    let anchor: Int
+    let head: Int
+    var range: NSRange {
+        let lo = min(anchor, head), hi = max(anchor, head)
+        return NSRange(location: max(0, lo), length: max(0, hi - lo))
+    }
+}
+
 struct MarkdownTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var controller: MarkdownEditorController
@@ -15,6 +30,12 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// NSTextView's selectedRange). Used by collab presence to broadcast
     /// remote-caret position; nil for editors that don't broadcast.
     var onSelectionChange: ((Int, Int) -> Void)? = nil
+    /// When false the text view is read-only (watcher mode) — still selectable
+    /// so the reader can copy, but not editable.
+    var isEditable: Bool = true
+    /// Remote collaborators' carets to draw in-text (e.g. the lock holder's
+    /// caret, shown to watchers). Empty for the active editor.
+    var remoteCarets: [RemoteCaretMark] = []
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -24,7 +45,7 @@ struct MarkdownTextEditor: NSViewRepresentable {
             return scrollView
         }
         textView.isRichText = false
-        textView.isEditable = true
+        textView.isEditable = isEditable
         textView.isSelectable = true
         textView.allowsUndo = true
         textView.font = NSFont.systemFont(ofSize: 14)
@@ -40,6 +61,15 @@ struct MarkdownTextEditor: NSViewRepresentable {
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.string = text
 
+        // Transparent overlay (child of the text view, so it scrolls + resizes
+        // with the content) that draws remote collaborators' carets in-text.
+        let overlay = RemoteCaretOverlay(frame: textView.bounds)
+        overlay.textView = textView
+        overlay.autoresizingMask = [.width, .height]
+        overlay.marks = remoteCarets
+        textView.addSubview(overlay)
+        context.coordinator.overlay = overlay
+
         scrollView.drawsBackground = false
         scrollView.backgroundColor = .clear
 
@@ -49,17 +79,23 @@ struct MarkdownTextEditor: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? NSTextView else { return }
+        if textView.isEditable != isEditable { textView.isEditable = isEditable }
         if textView.string != text {
             let sel = textView.selectedRange()
             textView.string = text
             let clamped = NSRange(location: min(sel.location, text.utf16.count), length: 0)
             textView.setSelectedRange(clamped)
         }
+        if let overlay = context.coordinator.overlay {
+            overlay.frame = textView.bounds
+            overlay.marks = remoteCarets
+        }
         controller.textView = textView
     }
 
     class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MarkdownTextEditor
+        weak var overlay: RemoteCaretOverlay?
         init(_ parent: MarkdownTextEditor) { self.parent = parent }
 
         func textDidChange(_ notification: Notification) {
@@ -136,5 +172,81 @@ final class MarkdownEditorController {
         }
         let block = (needsLeadingNewline ? "\n" : "") + text + "\n"
         tv.insertText(block, replacementRange: sel)
+    }
+}
+
+/// Transparent overlay drawn on top of an `NSTextView` that renders remote
+/// collaborators' carets/selections at their text position. Lives as a child
+/// of the text view so it shares the (flipped) text coordinate space and
+/// scrolls/resizes with the content. Hit-transparent so it never steals
+/// clicks from the editor underneath.
+final class RemoteCaretOverlay: NSView {
+    weak var textView: NSTextView?
+    var marks: [RemoteCaretMark] = [] { didSet { needsDisplay = true } }
+
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard !marks.isEmpty,
+              let tv = textView,
+              let lm = tv.layoutManager,
+              let tc = tv.textContainer else { return }
+        let origin = tv.textContainerOrigin
+        let nsLen = (tv.string as NSString).length
+
+        for mark in marks {
+            let r = mark.range
+            // Clamp to current text length — the caret stream can briefly lead
+            // the content stream, so offsets may overshoot.
+            let loc = min(r.location, nsLen)
+            let len = min(r.length, max(0, nsLen - loc))
+            let charRange = NSRange(location: loc, length: len)
+            let glyphRange = lm.glyphRange(forCharacterRange: charRange, actualCharacterRange: nil)
+
+            var rect = lm.boundingRect(forGlyphRange: glyphRange, in: tc)
+            if rect.height <= 0 {
+                // End-of-text / empty line: fall back to the extra line fragment.
+                let extra = lm.extraLineFragmentRect
+                rect = extra.height > 0 ? extra : rect
+            }
+            rect = rect.offsetBy(dx: origin.x, dy: origin.y)
+            let color = NSColor(mark.color)
+
+            if len == 0 {
+                // Caret: a thin vertical bar.
+                let bar = NSRect(x: rect.minX, y: rect.minY, width: 2, height: max(rect.height, 14))
+                color.setFill()
+                bar.fill()
+                drawLabel(mark.name, color: color, atTopOf: bar)
+            } else {
+                // Selection: translucent highlight + label at its start.
+                color.withAlphaComponent(0.22).setFill()
+                rect.fill()
+                let caret = NSRect(x: rect.minX, y: rect.minY, width: 2, height: max(rect.height, 14))
+                drawLabel(mark.name, color: color, atTopOf: caret)
+            }
+        }
+    }
+
+    private func drawLabel(_ name: String, color: NSColor, atTopOf bar: NSRect) {
+        guard !name.isEmpty else { return }
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 9, weight: .medium),
+            .foregroundColor: NSColor.white,
+        ]
+        let label = name as NSString
+        let size = label.size(withAttributes: attrs)
+        let pad: CGFloat = 3
+        let bg = NSRect(
+            x: bar.minX,
+            y: max(0, bar.minY - size.height - 3),
+            width: size.width + pad * 2,
+            height: size.height + 2
+        )
+        color.setFill()
+        NSBezierPath(roundedRect: bg, xRadius: 3, yRadius: 3).fill()
+        label.draw(at: NSPoint(x: bg.minX + pad, y: bg.minY + 1), withAttributes: attrs)
     }
 }

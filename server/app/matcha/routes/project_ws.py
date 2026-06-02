@@ -320,25 +320,66 @@ class ProjectConnectionManager:
             return True
         return False
 
-    async def release_section_lock(self, project_id: UUID, section_id: str, user_id: UUID) -> None:
-        """Release the lock iff this user holds it. Safe to call redundantly."""
+    async def takeover_section_lock(self, project_id: UUID, section_id: str, user: "ProjectUser") -> Optional[dict]:
+        """Force-claim the lock for `user`, evicting the current holder. Returns
+        the previous holder dict (or None if it was free / already ours). Used
+        for the watcher → editor take-over handoff; the caller then broadcasts
+        the new holder so the evicted editor drops to watcher mode."""
+        holder = {"user_id": str(user.id), "name": user.name}
+
+        def _untrack_prev(prev: Optional[dict]) -> None:
+            if prev and prev.get("user_id") and prev["user_id"] != str(user.id):
+                try:
+                    self._untrack_held(UUID(prev["user_id"]), project_id, section_id)
+                except (ValueError, TypeError):
+                    pass
+
+        redis = get_redis_cache()
+        if redis is None:
+            prev = self._local_section_locks.get((project_id, section_id))
+            _untrack_prev(prev)
+            self._local_section_locks[(project_id, section_id)] = holder
+            self._track_held(user.id, project_id, section_id)
+            return prev if prev and prev.get("user_id") != str(user.id) else None
+        key = f"{_SECTION_LOCK_PREFIX}{project_id}:{section_id}"
+        cur = await redis.get(key)
+        prev = None
+        if cur:
+            try:
+                prev = json.loads(cur)
+            except (ValueError, TypeError):
+                prev = None
+        await redis.set(key, json.dumps(holder), ex=_SECTION_LOCK_TTL)
+        _untrack_prev(prev)
+        self._track_held(user.id, project_id, section_id)
+        return prev if prev and prev.get("user_id") != str(user.id) else None
+
+    async def release_section_lock(self, project_id: UUID, section_id: str, user_id: UUID) -> bool:
+        """Release the lock iff this user holds it. Returns True when it actually
+        released (so the caller knows whether to broadcast `section_unlocked`).
+        Critically False when the user was already evicted by a take-over — else
+        their later edit_end would falsely tell watchers the section is free.
+        Safe to call redundantly."""
         self._untrack_held(user_id, project_id, section_id)
         redis = get_redis_cache()
         if redis is None:
             h = self._local_section_locks.get((project_id, section_id))
             if h and h["user_id"] == str(user_id):
                 self._local_section_locks.pop((project_id, section_id), None)
-            return
+                return True
+            return False
         key = f"{_SECTION_LOCK_PREFIX}{project_id}:{section_id}"
         cur = await redis.get(key)
         if not cur:
-            return
+            return False
         try:
             h = json.loads(cur)
         except (ValueError, TypeError):
             h = None
         if h and h.get("user_id") == str(user_id):
             await redis.delete(key)
+            return True
+        return False
 
     async def broadcast_section_lock(self, project_id: UUID, page_key: str, section_id: str, user: "ProjectUser", *, locked: bool) -> None:
         await self._broadcast_to_page(project_id, page_key, {
@@ -363,8 +404,8 @@ class ProjectConnectionManager:
         """On disconnect: free every lock this user held + tell watchers."""
         held = self.held_section_locks.pop(user_id, set())
         for (project_id, section_id) in held:
-            await self.release_section_lock(project_id, section_id, user_id)
-            if user is not None:
+            released = await self.release_section_lock(project_id, section_id, user_id)
+            if released and user is not None:
                 # Section editing lives on the "sections" sub-tab.
                 await self.broadcast_section_lock(project_id, "sections", section_id, user, locked=False)
 
@@ -863,9 +904,26 @@ async def project_websocket(
                 if section_id is None or not (0 < len(str(section_id)) <= _MAX_SECTION_ID_LEN):
                     continue
                 section_id_str = str(section_id)
-                await project_manager.release_section_lock(project_id, section_id_str, user.id)
+                released = await project_manager.release_section_lock(project_id, section_id_str, user.id)
+                # Only announce the unlock if we actually held it — a user evicted
+                # by a take-over must not tell watchers the section is now free.
+                if released:
+                    await project_manager.broadcast_section_lock(
+                        project_id, page_key, section_id_str, user, locked=False
+                    )
+
+            elif msg_type == "section_edit_takeover":
+                # Wrest the lock from the current holder. Broadcasting the new
+                # holder (excludes the taker) lands on the previous editor, whose
+                # client flips them to watcher mode.
+                page_key = data.get("page_key") or "sections"
+                section_id = data.get("section_id")
+                if section_id is None or not (0 < len(str(section_id)) <= _MAX_SECTION_ID_LEN):
+                    continue
+                section_id_str = str(section_id)
+                await project_manager.takeover_section_lock(project_id, section_id_str, user)
                 await project_manager.broadcast_section_lock(
-                    project_id, page_key, section_id_str, user, locked=False
+                    project_id, page_key, section_id_str, user, locked=True
                 )
 
             elif msg_type == "leave_project":

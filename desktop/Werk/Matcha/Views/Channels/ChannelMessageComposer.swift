@@ -10,15 +10,26 @@ struct ChannelMessageComposer: View {
     let currentUserId: String
     let maxAttachments: Int
     let typingPing: () -> Void
-    let onSend: () -> Void
+    /// Send the current draft. Text is passed up because the composer now owns
+    /// it locally (see `text`) — keeping it off the parent's @State is what
+    /// stops every keystroke from re-rendering the whole message list.
+    let onSend: (String) -> Void
     let onOpenFilePicker: () -> Void
     let onPasteImage: () -> Void
-    @Binding var inputText: String
+    /// External draft seed: when `seedNonce` changes, the composer copies `seed`
+    /// into its local `text`. Used by the parent to prefill (edit a message) or
+    /// clear (after send) without binding the field to parent state per keystroke.
+    let seed: String
+    let seedNonce: Int
     @Binding var pendingAttachments: [PendingChannelAttachment]
     @Binding var replyingTo: ChannelMessage?
     @Binding var editingMessage: ChannelMessage?
     @Binding var isUploading: Bool
     @Binding var lastTypingSentAt: Date
+
+    /// The live draft. Local @State so typing only re-renders the composer, not
+    /// `ChannelDetailView.body` / the message list.
+    @State private var text: String = ""
 
     var body: some View {
         VStack(spacing: 8) {
@@ -34,7 +45,7 @@ struct ChannelMessageComposer: View {
                     Spacer()
                     Button {
                         editingMessage = nil
-                        inputText = ""
+                        text = ""
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 9, weight: .bold))
@@ -186,7 +197,7 @@ struct ChannelMessageComposer: View {
 
                 TextField(
                     "",
-                    text: $inputText,
+                    text: $text,
                     prompt: Text("type a message (⌘↵ to send)").foregroundColor(appState.themeText.opacity(0.2)),
                     axis: .vertical
                 )
@@ -194,19 +205,20 @@ struct ChannelMessageComposer: View {
                 .font(.system(size: 13))
                 .foregroundColor(appState.themeText.opacity(0.9))
                 .lineLimit(1...8)
-                .onChange(of: inputText) {
-                    guard !inputText.isEmpty else { return }
+                .onChange(of: text) {
+                    guard !text.isEmpty else { return }
                     let now = Date()
                     if now.timeIntervalSince(lastTypingSentAt) >= 2.5 {
                         lastTypingSentAt = now
                         typingPing()
                     }
                 }
+                .onChange(of: seedNonce) { text = seed }
                 // No .onSubmit — Enter inserts a newline (vertical-axis field).
                 // Send via the ↵ button / ⌘↵ shortcut below.
 
-                let canSend = (!inputText.trimmingCharacters(in: .whitespaces).isEmpty || !pendingAttachments.isEmpty) && !isUploading
-                Button(action: onSend) {
+                let canSend = (!text.trimmingCharacters(in: .whitespaces).isEmpty || !pendingAttachments.isEmpty) && !isUploading
+                Button { onSend(text) } label: {
                     if isUploading {
                         ProgressView().controlSize(.small)
                     } else {
@@ -274,14 +286,15 @@ struct ChannelMessageComposer: View {
     /// at the end (the dominant case); editing mid-text won't trigger
     /// autocomplete reliably but also won't misfire.
     private var activeMentionQuery: (query: String, tokenStart: String.Index)? {
-        guard let atIdx = inputText.lastIndex(of: "@") else { return nil }
+        // Cheap early-out: skip the scans entirely until there's an @ to match.
+        guard text.contains("@"), let atIdx = text.lastIndex(of: "@") else { return nil }
         // Token must be at start-of-string or preceded by whitespace.
-        if atIdx > inputText.startIndex {
-            let prev = inputText[inputText.index(before: atIdx)]
+        if atIdx > text.startIndex {
+            let prev = text[text.index(before: atIdx)]
             if !prev.isWhitespace { return nil }
         }
-        let after = inputText.index(after: atIdx)
-        let q = String(inputText[after...])
+        let after = text.index(after: atIdx)
+        let q = String(text[after...])
         // Reject if any whitespace inside (token closed) or invalid char.
         guard !q.contains(where: { $0.isWhitespace }) else { return nil }
         guard q.count <= 32, q.allSatisfy({ $0.isLetter || $0.isNumber || "._-".contains($0) }) else { return nil }
@@ -304,8 +317,8 @@ struct ChannelMessageComposer: View {
         guard let active = activeMentionQuery else { return }
         let handle = member.email.split(separator: "@").first.map(String.init) ?? ""
         guard !handle.isEmpty else { return }
-        let head = String(inputText[..<active.tokenStart])
-        let tail = String(inputText[inputText.index(active.tokenStart, offsetBy: active.query.count)...])
-        inputText = head + handle + " " + tail
+        let head = String(text[..<active.tokenStart])
+        let tail = String(text[text.index(active.tokenStart, offsetBy: active.query.count)...])
+        text = head + handle + " " + tail
     }
 }

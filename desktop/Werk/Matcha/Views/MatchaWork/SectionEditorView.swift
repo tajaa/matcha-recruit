@@ -29,9 +29,14 @@ struct SectionEditorView: View {
     var lockedByName: String? = nil
     /// Live content streamed by the active editor, shown in watcher mode.
     var liveContent: SectionLiveContent? = nil
+    /// The lock holder's caret, drawn in-text in watcher mode so you can see
+    /// where they're working in the document (not a floating app pointer).
+    var remoteCaret: RemoteCaretMark? = nil
     /// Claim / release the live-edit soft lock as the editor opens / closes.
     var onEditStart: (() -> Void)? = nil
     var onEditEnd: (() -> Void)? = nil
+    /// Wrest the edit lock from the current holder (watcher → editor handoff).
+    var onTakeOver: (() -> Void)? = nil
     /// Broadcast in-progress text to watchers (caller throttles).
     var onContentChange: ((_ title: String?, _ content: String) -> Void)? = nil
 
@@ -42,8 +47,16 @@ struct SectionEditorView: View {
     @State private var hasUnsavedChanges = false
     @State private var showPendingPreview = true
     @State private var controller = MarkdownEditorController()
+    /// Separate controller for the read-only watcher editor.
+    @State private var watcherController = MarkdownEditorController()
     @State private var uploadStatus: String? = nil
     @State private var uploadError: String? = nil
+    /// Auto-release: the lock is dropped after a spell of inactivity so a
+    /// watcher isn't blocked when the holder walks away. Re-acquired on the
+    /// next edit. `releasedIdle` tracks that we let go while still on screen.
+    @State private var idleTimer: Timer?
+    @State private var releasedIdle = false
+    private let idleReleaseSeconds: TimeInterval = 60
 
     var body: some View {
         VStack(spacing: 0) {
@@ -105,6 +118,7 @@ struct SectionEditorView: View {
                 .padding(.bottom, 8)
                 .disabled(lockedByName != nil)
                 .onChange(of: title) {
+                    noteActivity()
                     scheduleSave()
                     onContentChange?(title.isEmpty ? nil : title, content)
                 }
@@ -113,17 +127,17 @@ struct SectionEditorView: View {
 
             if let holder = lockedByName {
                 // Watcher mode: another collaborator holds the lock. Show their
-                // live edits read-only — no toolbar, no editor binding, no save.
+                // live edits in a read-only editor so their caret renders in-text
+                // — no toolbar, no save.
                 lockedWatcherBanner(holder)
-                ScrollView {
-                    Text(liveContent?.content ?? content)
-                        .font(.system(size: 13))
-                        .foregroundColor(.white.opacity(0.85))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 8)
-                }
+                MarkdownTextEditor(
+                    text: .constant(liveContent?.content ?? content),
+                    controller: $watcherController,
+                    isEditable: false,
+                    remoteCarets: remoteCaret.map { [$0] } ?? []
+                )
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
             } else {
                 if section.hasPendingRevision {
                     pendingRevisionBanner
@@ -142,6 +156,7 @@ struct SectionEditorView: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .onChange(of: content) {
+                        noteActivity()
                         scheduleSave()
                         onContentChange?(title.isEmpty ? nil : title, content)
                     }
@@ -188,6 +203,7 @@ struct SectionEditorView: View {
             // Claim the soft lock. If denied, the parent flips `lockedByName`
             // and this view re-renders into watcher mode.
             onEditStart?()
+            if lockedByName == nil { resetIdleTimer() }
         }
         .onChange(of: section.id) {
             // Different section — flush any pending save for the prior one.
@@ -197,10 +213,54 @@ struct SectionEditorView: View {
             isSaved = false
             hasUnsavedChanges = false
             showPendingPreview = true
+            releasedIdle = false
+            resetIdleTimer()
+        }
+        .onChange(of: lockedByName) { _, newVal in
+            if newVal != nil {
+                // Someone took the lock from us → we drop to watcher. Preserve
+                // our last edits. Don't release (we no longer hold it; release
+                // is holder-guarded server-side anyway).
+                flushSaveIfDirty()
+                idleTimer?.invalidate()
+            } else {
+                // We just took over (watcher → editor): continue from the latest
+                // streamed text, not the stale `section` prop.
+                if let live = liveContent {
+                    content = live.content
+                    if let t = live.title { title = t }
+                }
+                releasedIdle = false
+                resetIdleTimer()
+            }
         }
         .onDisappear {
+            idleTimer?.invalidate()
             flushSaveIfDirty()
             onEditEnd?()
+        }
+    }
+
+    /// Mark editor activity: re-acquire the lock if we'd released it for idle,
+    /// then restart the idle countdown. No-op in watcher mode.
+    private func noteActivity() {
+        guard lockedByName == nil else { return }
+        if releasedIdle {
+            onEditStart?()
+            releasedIdle = false
+        }
+        resetIdleTimer()
+    }
+
+    private func resetIdleTimer() {
+        idleTimer?.invalidate()
+        guard lockedByName == nil else { return }
+        idleTimer = Timer.scheduledTimer(withTimeInterval: idleReleaseSeconds, repeats: false) { _ in
+            Task { @MainActor in
+                guard lockedByName == nil, !releasedIdle else { return }
+                onEditEnd?()
+                releasedIdle = true
+            }
         }
     }
 
@@ -213,6 +273,21 @@ struct SectionEditorView: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.orange)
             Spacer()
+            if let onTakeOver {
+                Button(action: onTakeOver) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "hand.raised.fill").font(.system(size: 9))
+                        Text("Take over").font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 3)
+                    .background(Color.orange)
+                    .cornerRadius(5)
+                }
+                .buttonStyle(.plain)
+                .help("Take over editing — \(holder) drops to read-only")
+            }
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 8)

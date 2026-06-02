@@ -11,7 +11,11 @@ struct ChannelDetailView: View {
 
     @Environment(AppState.self) private var appState
     @State private var vm = ChannelChatViewModel()
-    @State private var inputText = ""
+    /// Composer draft seed. The composer owns the live text locally (so typing
+    /// doesn't re-render this view + the message list); we push values in by
+    /// bumping the nonce — to prefill on "edit message" or clear after send.
+    @State private var composerSeed = ""
+    @State private var composerSeedNonce = 0
 
     @MainActor
     init(channelId: String, isEmbedded: Bool = false) {
@@ -135,10 +139,11 @@ struct ChannelDetailView: View {
                     currentUserId: appState.currentUser?.id ?? "",
                     maxAttachments: maxAttachments,
                     typingPing: { ws.sendTyping(channelId: channelId) },
-                    onSend: send,
+                    onSend: { send($0) },
                     onOpenFilePicker: openFilePicker,
                     onPasteImage: pasteImageFromClipboard,
-                    inputText: $inputText,
+                    seed: composerSeed,
+                    seedNonce: composerSeedNonce,
                     pendingAttachments: $pendingAttachments,
                     replyingTo: $replyingTo,
                     editingMessage: $editingMessage,
@@ -458,7 +463,7 @@ struct ChannelDetailView: View {
                             onReply: { replyingTo = $0 },
                             onToggleReaction: toggleReaction,
                             onRequestDelete: { pendingMessageDelete = $0 },
-                            onRequestEdit: { editingMessage = $0; inputText = $0.content; replyingTo = nil },
+                            onRequestEdit: { editingMessage = $0; seedComposer($0.content); replyingTo = nil },
                             onOpenAttachment: { previewFile = previewModel($0) },
                             onCreateTicket: vm.channel?.projectId != nil ? { startTicketDraft(from: $0) } : nil
                         )
@@ -663,12 +668,19 @@ struct ChannelDetailView: View {
 
     // MARK: - Actions
 
-    private func send() {
-        let trimmed = inputText.trimmingCharacters(in: .whitespaces)
+    /// Push a value into the composer's local draft (prefill on edit, clear
+    /// after send) by bumping the seed nonce the composer watches.
+    private func seedComposer(_ s: String) {
+        composerSeed = s
+        composerSeedNonce += 1
+    }
+
+    private func send(_ draft: String) {
+        let trimmed = draft.trimmingCharacters(in: .whitespaces)
         // Edit mode: commit the edit instead of sending a new message.
         if let editing = editingMessage {
             editingMessage = nil
-            inputText = ""
+            seedComposer("")
             guard !trimmed.isEmpty else { return }
             Task { await vm.editMessage(editing, newContent: trimmed) }
             return
@@ -712,7 +724,7 @@ struct ChannelDetailView: View {
                 replyPreview: replyPreviewForOptimistic,
             )
             ws.sendMessage(channelId: channelId, content: content, replyToId: replyId, clientMessageId: cmid)
-            inputText = ""
+            seedComposer("")
             replyingTo = nil
             selfSendScroll += 1
             return
@@ -735,7 +747,7 @@ struct ChannelDetailView: View {
                         replyPreview: replyPreviewForOptimistic,
                     )
                     ws.sendMessage(channelId: channelId, content: content, attachments: uploaded, replyToId: replyId, clientMessageId: cmid)
-                    inputText = ""
+                    seedComposer("")
                     replyingTo = nil
                     pendingAttachments.removeAll()
                     isUploading = false

@@ -644,8 +644,10 @@ struct ProjectDetailView: View {
                         },
                         lockedByName: presenceVM.lockedSections[sid]?.name,
                         liveContent: presenceVM.liveSections[sid],
+                        remoteCaret: watcherCaret(for: sid),
                         onEditStart: { presenceVM.startEditing(sectionId: sid) },
                         onEditEnd: { presenceVM.endEditing(sectionId: sid) },
+                        onTakeOver: { presenceVM.takeOver(sectionId: sid) },
                         onContentChange: { title, content in
                             presenceVM.sendSectionContent(sectionId: sid, title: title, content: content)
                         }
@@ -732,6 +734,22 @@ struct ProjectDetailView: View {
             return nil
         }
         return presenceVM.members.first { $0.id == entry.key }
+    }
+
+    /// The lock holder's caret in this section, for in-text rendering in the
+    /// watcher's read-only editor. Only the holder broadcasts a caret, so this
+    /// is the single mark a watcher sees.
+    private func watcherCaret(for sectionId: String) -> RemoteCaretMark? {
+        guard let holder = presenceVM.lockedSections[sectionId],
+              let c = presenceVM.remoteCarets[holder.userId],
+              c.sectionId == sectionId else { return nil }
+        return RemoteCaretMark(
+            id: holder.userId,
+            color: UserColor.forUserId(holder.userId),
+            name: holder.name,
+            anchor: c.anchor,
+            head: c.head
+        )
     }
 
     private var collabOverview: some View {
