@@ -382,6 +382,42 @@ def _parse_occurred_at(value) -> datetime:
     return _utc_now_naive()
 
 
+def _privacy_signal_overlay(signals: Optional[dict]) -> dict:
+    """Build the category_data overlay of POSITIVE OSHA privacy signals from the
+    AI extraction.
+
+    Only includes keys worth setting — true flags, a real infectious agent, a
+    non-empty injury_type / body_parts. It deliberately omits false/"none"
+    defaults so the merge never writes a value that would block a later human
+    override (and never falsely masks a case the AI didn't actually flag).
+    """
+    s = signals or {}
+    overlay: dict = {}
+
+    it = s.get("injury_type")
+    if isinstance(it, str) and it.strip():
+        overlay["injury_type"] = it.strip().lower()
+
+    bps = s.get("body_parts")
+    if isinstance(bps, list):
+        cleaned = [str(b).strip().lower() for b in bps if str(b).strip()]
+        if cleaned:
+            overlay["body_parts"] = cleaned
+
+    if s.get("intimate_injury") is True:
+        overlay["intimate_injury"] = True
+    if s.get("from_sexual_assault") is True:
+        overlay["from_sexual_assault"] = True
+    if s.get("contaminated_sharps") is True:
+        overlay["contaminated_sharps"] = True
+
+    agent = s.get("infectious_agent")
+    if isinstance(agent, str) and agent.strip().lower() in ("hiv", "hepatitis", "tuberculosis", "other"):
+        overlay["infectious_agent"] = agent.strip().lower()
+
+    return overlay
+
+
 async def _auto_classify_incident_task(
     incident_id: str,
     *,
@@ -471,6 +507,36 @@ async def _auto_classify_incident_task(
                     )
         except IRAnalysisError as e:
             logger.warning(f"[IR] auto-severity failed for {incident_id}: {e}")
+
+        # OSHA Privacy Case "data organization" — extract the structured signals
+        # (intimate injury, sexual assault, infectious pathogen, contaminated
+        # sharps + clinical injury_type / body_parts) so the deterministic
+        # privacy-case rule can mask names with no one hand-typing them. Merged
+        # into category_data WITHOUT clobbering existing keys (jsonb `||` with
+        # existing on the right wins), so a human/Copilot entry always beats the
+        # AI and only positive signals are written.
+        try:
+            signals = await analyzer.extract_privacy_signals(
+                title=row["title"] or "",
+                description=row["description"] or "",
+            )
+            overlay = _privacy_signal_overlay(signals)
+            if overlay:
+                async with get_connection() as conn:
+                    await conn.execute(
+                        """
+                        UPDATE ir_incidents
+                        SET category_data = $2::jsonb || COALESCE(category_data, '{}'::jsonb),
+                            updated_at = NOW()
+                        WHERE id = $1
+                        """,
+                        incident_id,
+                        json.dumps(overlay),
+                    )
+        except IRAnalysisError as e:
+            logger.warning(f"[IR] privacy-signal extraction failed for {incident_id}: {e}")
+        except Exception:
+            logger.exception(f"[IR] privacy-signal extraction crashed for {incident_id}")
 
     except Exception:
         logger.exception(f"[IR] auto-classify task crashed for {incident_id}")

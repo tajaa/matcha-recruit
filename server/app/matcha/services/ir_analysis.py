@@ -196,6 +196,49 @@ def _validate_risk_themes(result: dict) -> Optional[str]:
 # Prompts
 # ===========================================
 
+def _validate_privacy_signals(result: dict) -> Optional[str]:
+    """Validate the OSHA privacy-signal extraction response."""
+    if not isinstance(result, dict):
+        return "Response must be a JSON object."
+    agent = result.get("infectious_agent")
+    if agent is not None and str(agent).strip().lower() not in (
+        "hiv", "hepatitis", "tuberculosis", "other", "none",
+    ):
+        return f"Invalid infectious_agent: {agent}. Use hiv|hepatitis|tuberculosis|other|none."
+    bp = result.get("body_parts")
+    if bp is not None and not isinstance(bp, list):
+        return "body_parts must be a JSON list."
+    return None
+
+
+# Extracts ONLY the structured OSHA Privacy Case signals (booleans/enums +
+# canonical body parts) from the free-text narrative — never names. Feeds the
+# deterministic privacy-case rule in app.core.services.osha_privacy.
+PRIVACY_SIGNALS_PROMPT = """You extract STRUCTURED OSHA injury fields from a workplace incident report. Output ONLY the structured fields below. NEVER output any person's name or any free-text narrative.
+
+Incident title: {title}
+Incident description: {description}
+
+Return ONLY this JSON object (no markdown, no commentary):
+{{
+    "injury_type": "short clinical nature of the injury, lowercase (e.g. laceration, contusion, fracture, burn, needlestick, strain); null if not stated",
+    "body_parts": ["affected body parts as lowercase keys"],
+    "intimate_injury": false,
+    "from_sexual_assault": false,
+    "infectious_agent": "none",
+    "contaminated_sharps": false
+}}
+
+Field rules:
+- intimate_injury: true ONLY if the injury is to an intimate or reproductive body part (genitals, reproductive system, groin, breast, buttocks, perineum, anus).
+- from_sexual_assault: true ONLY if the injury resulted from a sexual assault.
+- infectious_agent: exactly one of "hiv", "hepatitis", "tuberculosis", "other", or "none", based on any infectious exposure described.
+- contaminated_sharps: true ONLY for a needlestick or cut from a sharp contaminated with blood or other potentially infectious material.
+- In body_parts, for intimate parts use exactly these keys: genitals, reproductive_system, groin, breast, buttocks, perineum, anus.
+- Base every field ONLY on the text. When unsure, use false / "none" / null. Booleans must be true or false.
+- Do NOT include any person's name anywhere in the output."""
+
+
 CATEGORIZATION_PROMPT = """You are an HR incident analysis assistant. Analyze this incident report and determine the most appropriate category.
 
 INCIDENT REPORT:
@@ -712,6 +755,32 @@ class IRAnalyzer:
         result = await self._call_with_retry(build_prompt, _validate_categorization, label="categorize")
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
+
+    async def extract_privacy_signals(
+        self,
+        title: str,
+        description: str,
+    ) -> dict[str, Any]:
+        """Extract structured OSHA Privacy Case signals from the narrative.
+
+        The "data organization" layer: reads the free-text incident and emits
+        ONLY structured booleans/enums + canonical body parts (never names) for
+        the deterministic privacy-case rule to consume. Auto-populates the
+        signals that otherwise have no capture path (intimate injury, sexual
+        assault, infectious pathogen, contaminated sharps).
+        """
+        def build_prompt(feedback: Optional[str] = None) -> str:
+            prompt = PRIVACY_SIGNALS_PROMPT.format(
+                title=title or "",
+                description=description or "No description provided",
+            )
+            if feedback:
+                prompt += f"\n\n{feedback}"
+            return prompt
+
+        return await self._call_with_retry(
+            build_prompt, _validate_privacy_signals, label="privacy_signals"
+        )
 
     async def assess_severity(
         self,

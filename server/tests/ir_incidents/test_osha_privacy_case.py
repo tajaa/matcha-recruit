@@ -9,6 +9,7 @@ from app.core.services.osha_privacy import (
     determine_privacy_case,
     compose_clinical_description,
 )
+from app.matcha.routes.ir_incidents._shared import _privacy_signal_overlay
 
 
 # ── the 6 trigger conditions ────────────────────────────────────────────────
@@ -16,6 +17,13 @@ from app.core.services.osha_privacy import (
 def test_intimate_body_part_triggers():
     is_priv, reason = determine_privacy_case({"body_parts": ["groin"]}, "injury", False)
     assert is_priv and reason == "intimate_injury"
+
+
+def test_intimate_injury_flag_triggers():
+    # Explicit flag (manual checkbox / AI extraction), independent of body_parts.
+    assert determine_privacy_case({"intimate_injury": True}, "injury", False) == (True, "intimate_injury")
+    assert determine_privacy_case({"intimate_injury": "true"}, "injury", False) == (True, "intimate_injury")
+    assert determine_privacy_case({"intimate_injury": False}, "injury", False) == (False, None)
 
 
 def test_sexual_assault_triggers():
@@ -99,6 +107,31 @@ def test_clinical_description_body_only_and_nature_only():
 def test_clinical_description_empty_returns_none():
     assert compose_clinical_description({}) is None
     assert compose_clinical_description(None) is None
+
+
+def test_privacy_signal_overlay_positive_only():
+    # AI extraction → only meaningful/positive keys are written (no false/none
+    # defaults that would block a later human override or falsely mask).
+    out = _privacy_signal_overlay({
+        "injury_type": "Laceration",
+        "body_parts": ["Groin"],
+        "intimate_injury": True,
+        "from_sexual_assault": False,
+        "infectious_agent": "hiv",
+        "contaminated_sharps": False,
+    })
+    assert out == {
+        "injury_type": "laceration",
+        "body_parts": ["groin"],
+        "intimate_injury": True,
+        "infectious_agent": "hiv",
+    }
+
+
+def test_privacy_signal_overlay_empty_when_nothing_positive():
+    assert _privacy_signal_overlay({"intimate_injury": False, "infectious_agent": "none"}) == {}
+    assert _privacy_signal_overlay({}) == {}
+    assert _privacy_signal_overlay(None) == {}
 
 
 def test_clinical_description_ignores_narrative_names():
