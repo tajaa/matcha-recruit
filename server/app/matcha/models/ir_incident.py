@@ -43,6 +43,7 @@ class SafetyData(BaseModel):
     # fields drive the deterministic name-masking on the 300/301 log — see
     # app.core.services.osha_privacy.determine_privacy_case. Populated by the IR
     # Copilot / Gemini "data organization" pass (and editable by a reviewer).
+    intimate_injury: bool = False               # injury to an intimate/reproductive body part
     from_sexual_assault: bool = False           # injury resulted from a sexual assault
     infectious_agent: Optional[str] = None      # none | hiv | hepatitis | tuberculosis | other
     contaminated_sharps: bool = False           # needlestick/cut from a contaminated sharp

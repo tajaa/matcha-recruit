@@ -96,9 +96,12 @@ def determine_privacy_case(
     """
     cd = category_data or {}
 
-    # 1. Intimate / reproductive body part.
+    # 1. Intimate / reproductive body part — explicit flag (manual checkbox or
+    #    AI extraction) OR an intimate body-part value in the list.
     body_parts = cd.get("body_parts") or []
-    if any(str(bp).strip().lower() in INTIMATE_BODY_PARTS for bp in body_parts):
+    if _truthy(cd.get("intimate_injury")) or any(
+        str(bp).strip().lower() in INTIMATE_BODY_PARTS for bp in body_parts
+    ):
         return True, "intimate_injury"
 
     # 2. Sexual assault.

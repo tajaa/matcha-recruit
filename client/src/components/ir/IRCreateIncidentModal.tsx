@@ -24,6 +24,10 @@ const EMPTY_FORM = {
   involved_employee_ids: [] as string[],
   next_steps: '',
   withhold_name: false,
+  intimate_injury: false,
+  from_sexual_assault: false,
+  contaminated_sharps: false,
+  infectious_agent: 'none',
 }
 
 function locationLabel(loc: LocationRow): string {
@@ -82,6 +86,15 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
     try {
       const selectedLocation = (locations || []).find((l) => l.id === form.location_id)
       const witnesses = form.involved.map((name) => ({ name, contact: null }))
+      // OSHA Privacy Case signals → category_data; the backend's deterministic
+      // rule masks the employee name on the 300/301 log. (AI also auto-detects
+      // these from the description after submit; merge keeps these manual values.)
+      const categoryData: Record<string, unknown> = {}
+      if (form.intimate_injury) categoryData.intimate_injury = true
+      if (form.from_sexual_assault) categoryData.from_sexual_assault = true
+      if (form.contaminated_sharps) categoryData.contaminated_sharps = true
+      if (form.infectious_agent !== 'none') categoryData.infectious_agent = form.infectious_agent
+      if (form.withhold_name) categoryData.employee_privacy_requested = true
       const created = await api.post<IRIncident>('/ir/incidents', {
         description: form.description.trim(),
         // Free-text date — backend parses with dateutil and falls back to NOW().
@@ -95,10 +108,8 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
         witnesses,
         involved_employee_ids: form.involved_employee_ids,
         corrective_actions: form.next_steps.trim() || null,
-        // OSHA Privacy Case opt-out (29 CFR 1904.29(b)(10)) — rides in
-        // category_data; the backend masks the employee name on the 300/301
-        // log only when the case is also recorded as an illness.
-        category_data: form.withhold_name ? { employee_privacy_requested: true } : undefined,
+        // OSHA Privacy Case signals (assembled above) ride in category_data.
+        category_data: Object.keys(categoryData).length ? categoryData : undefined,
       })
       setForm(EMPTY_FORM)
       onCreated(created)
@@ -192,22 +203,65 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
           placeholder="Anything you'd like the team to do?"
         />
 
-        {/* OSHA Privacy Case opt-out — for work-related ILLNESS cases the
-            employee may request their name be withheld from the posted OSHA 300
-            log (29 CFR 1904.29(b)(10)). Other privacy categories (intimate
-            injury, sexual assault, mental illness, HIV/Hep/TB, contaminated
-            sharps) mask automatically from the structured injury data. */}
-        <label className="flex items-start gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={form.withhold_name}
-            onChange={(e) => setForm({ ...form, withhold_name: e.target.checked })}
-            className="mt-0.5 accent-emerald-600"
-          />
-          <span className="text-xs text-zinc-400">
-            Employee requests their name be withheld from the OSHA log (privacy case — illnesses only)
+        {/* OSHA Privacy Case signals (29 CFR 1904.29). Any of these masks the
+            employee name on the posted 300/301 log. Optional — AI also
+            auto-detects them from the description after submit; these manual
+            values win over the AI. */}
+        <div className="border border-white/10 rounded-lg p-3 space-y-2.5">
+          <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
+            Sensitive case (optional)
           </span>
-        </label>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.intimate_injury}
+              onChange={(e) => setForm({ ...form, intimate_injury: e.target.checked })}
+              className="mt-0.5 accent-emerald-600"
+            />
+            <span className="text-xs text-zinc-400">Injury to an intimate or reproductive body part</span>
+          </label>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.from_sexual_assault}
+              onChange={(e) => setForm({ ...form, from_sexual_assault: e.target.checked })}
+              className="mt-0.5 accent-emerald-600"
+            />
+            <span className="text-xs text-zinc-400">Resulted from a sexual assault</span>
+          </label>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.contaminated_sharps}
+              onChange={(e) => setForm({ ...form, contaminated_sharps: e.target.checked })}
+              className="mt-0.5 accent-emerald-600"
+            />
+            <span className="text-xs text-zinc-400">Needlestick / cut from a contaminated sharp</span>
+          </label>
+          <Select
+            label="Infectious exposure"
+            options={[
+              { value: 'none', label: 'None' },
+              { value: 'hiv', label: 'HIV' },
+              { value: 'hepatitis', label: 'Hepatitis' },
+              { value: 'tuberculosis', label: 'Tuberculosis' },
+              { value: 'other', label: 'Other' },
+            ]}
+            value={form.infectious_agent}
+            onChange={(e) => setForm({ ...form, infectious_agent: e.target.value })}
+          />
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.withhold_name}
+              onChange={(e) => setForm({ ...form, withhold_name: e.target.checked })}
+              className="mt-0.5 accent-emerald-600"
+            />
+            <span className="text-xs text-zinc-400">
+              Employee requests their name be withheld (illness opt-out)
+            </span>
+          </label>
+        </div>
 
         {submitError && <p className="text-sm text-red-400">{submitError}</p>}
         <div className="flex justify-end gap-2 pt-2">
