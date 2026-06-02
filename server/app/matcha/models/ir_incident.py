@@ -39,6 +39,16 @@ class SafetyData(BaseModel):
     lost_days: Optional[int] = None
     equipment_involved: Optional[str] = None
     osha_recordable: Optional[bool] = None
+    # OSHA Privacy Case signals (29 CFR 1904.29(b)(6)-(b)(10)). These structured
+    # fields drive the deterministic name-masking on the 300/301 log — see
+    # app.core.services.osha_privacy.determine_privacy_case. Populated by the IR
+    # Copilot / Gemini "data organization" pass (and editable by a reviewer).
+    from_sexual_assault: bool = False           # injury resulted from a sexual assault
+    infectious_agent: Optional[str] = None      # none | hiv | hepatitis | tuberculosis | other
+    contaminated_sharps: bool = False           # needlestick/cut from a contaminated sharp
+    # Employee's explicit opt-out ("withhold my name"); only takes effect for
+    # an ILLNESS case. Human-entered (Gemini cannot infer a privacy choice).
+    employee_privacy_requested: bool = False
 
 
 class BehavioralData(BaseModel):
@@ -556,7 +566,13 @@ class OshaRecordabilityUpdate(BaseModel):
 
 
 class Osha300LogEntry(BaseModel):
-    """A single entry in the OSHA 300 log."""
+    """A single entry in the OSHA 300 log.
+
+    ``employee_name`` is the literal string "Privacy Case" when the incident is
+    an OSHA privacy case (real name resolvable only via the confidential
+    endpoint). ``description`` is the structured clinical phrase (never the raw
+    reporter narrative), so no patient/third-party name reaches the export.
+    """
     case_number: str
     employee_name: str
     job_title: Optional[str]
@@ -567,6 +583,23 @@ class Osha300LogEntry(BaseModel):
     days_away: int
     days_restricted: int
     injury_type: Optional[str]
+    incident_id: str
+    is_privacy_case: bool = False
+    privacy_case_reason: Optional[str] = None
+
+
+class OshaPrivacyCaseEntry(BaseModel):
+    """One row of the confidential privacy-case reference list.
+
+    Maps the public log's anonymous case number back to the real employee name
+    (29 CFR 1904.29(b)(9)). Served only by the privileged, company-scoped,
+    audit-logged ``/osha/privacy-cases`` endpoint — never the public 300 log.
+    """
+    case_number: str
+    real_employee_name: str
+    privacy_case_reason: Optional[str] = None
+    classification: Optional[str] = None
+    date_of_injury: str
     incident_id: str
 
 

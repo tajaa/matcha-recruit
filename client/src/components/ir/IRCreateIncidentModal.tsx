@@ -23,6 +23,7 @@ const EMPTY_FORM = {
   involved: [] as string[],
   involved_employee_ids: [] as string[],
   next_steps: '',
+  withhold_name: false,
 }
 
 function locationLabel(loc: LocationRow): string {
@@ -94,6 +95,10 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
         witnesses,
         involved_employee_ids: form.involved_employee_ids,
         corrective_actions: form.next_steps.trim() || null,
+        // OSHA Privacy Case opt-out (29 CFR 1904.29(b)(10)) — rides in
+        // category_data; the backend masks the employee name on the 300/301
+        // log only when the case is also recorded as an illness.
+        category_data: form.withhold_name ? { employee_privacy_requested: true } : undefined,
       })
       setForm(EMPTY_FORM)
       onCreated(created)
@@ -186,6 +191,23 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
           onChange={(e) => setForm({ ...form, next_steps: e.target.value })}
           placeholder="Anything you'd like the team to do?"
         />
+
+        {/* OSHA Privacy Case opt-out — for work-related ILLNESS cases the
+            employee may request their name be withheld from the posted OSHA 300
+            log (29 CFR 1904.29(b)(10)). Other privacy categories (intimate
+            injury, sexual assault, mental illness, HIV/Hep/TB, contaminated
+            sharps) mask automatically from the structured injury data. */}
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={form.withhold_name}
+            onChange={(e) => setForm({ ...form, withhold_name: e.target.checked })}
+            className="mt-0.5 accent-emerald-600"
+          />
+          <span className="text-xs text-zinc-400">
+            Employee requests their name be withheld from the OSHA log (privacy case — illnesses only)
+          </span>
+        </label>
 
         {submitError && <p className="text-sm text-red-400">{submitError}</p>}
         <div className="flex justify-end gap-2 pt-2">
