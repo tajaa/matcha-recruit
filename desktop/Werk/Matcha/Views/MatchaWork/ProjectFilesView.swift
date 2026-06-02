@@ -1075,7 +1075,7 @@ struct ElementsView: View {
                     .font(.system(size: 10)).foregroundColor(.matcha500)
                 }
                 .buttonStyle(.plain).disabled(viewModel.isScanningCommits)
-                .help("Pull recent commits from GitHub → check off subtasks")
+                .help("Scan the connected branch's recent commits → check off subtasks (auto-runs when you open the Kanban)")
                 Button { Task { await viewModel.syncFromGitHub() } } label: {
                     HStack(spacing: 3) {
                         if viewModel.isSyncingRepo { ProgressView().controlSize(.small) }

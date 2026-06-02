@@ -47,6 +47,8 @@ class ProjectDetailViewModel {
     /// repeatedly never spams GitHub. In-memory on the (cached) VM, so it
     /// survives tab switches. Manual Sync bypasses it.
     private var lastGitHubSyncAt: [String: Date] = [:]
+    /// Per-project last commit-scan time → cooldown for auto-scan on Kanban open.
+    private var lastGitHubScanAt: [String: Date] = [:]
     private let githubSyncCooldown: TimeInterval = 600  // 10 min
     /// Per-session activity log surfaced in the collab Overview panel. Capped
     /// at 20 entries; FIFO eviction. In-memory only — survives panel switches
@@ -1286,12 +1288,14 @@ class ProjectDetailViewModel {
     }
 
     /// Scan recent GitHub commits → subtask-completion suggestions (no local git).
-    /// The chips appear on tickets (TaskViewer loads them on open).
-    func scanCommitsFromGitHub() async {
+    /// `branch` overrides the connected branch so you can scan a feature branch
+    /// without merging. The chips appear on tickets (TaskViewer loads them on open).
+    func scanCommitsFromGitHub(branch: String? = nil) async {
         guard let pid = project?.id, !isScanningCommits else { return }
         await MainActor.run { isScanningCommits = true }
         do {
-            let r = try await service.scanCommitsFromGitHub(projectId: pid)
+            let r = try await service.scanCommitsFromGitHub(projectId: pid, branch: branch)
+            lastGitHubScanAt[pid] = Date()
             await MainActor.run {
                 isScanningCommits = false
                 regroupSuggestions(r.suggestions)
@@ -1299,6 +1303,29 @@ class ProjectDetailViewModel {
             }
         } catch {
             await MainActor.run { isScanningCommits = false; errorMessage = error.localizedDescription }
+        }
+    }
+
+    /// Auto-scan the connected branch on Kanban open — gated so it "just happens"
+    /// after you merge without spamming GitHub. Gates: not already scanning,
+    /// 10-min per-project cooldown, repo connected. Silent on failure (the manual
+    /// Scan button surfaces errors and bypasses the cooldown).
+    func autoScanCommitsIfStale() async {
+        guard let pid = project?.id, !isScanningCommits, isGitHubConnected else { return }
+        if let last = lastGitHubScanAt[pid], Date().timeIntervalSince(last) < githubSyncCooldown { return }
+        lastGitHubScanAt[pid] = Date()  // stamp before the await so a re-fire skips
+        await MainActor.run { isScanningCommits = true }
+        do {
+            let r = try await service.scanCommitsFromGitHub(projectId: pid, branch: nil)
+            await MainActor.run {
+                isScanningCommits = false
+                regroupSuggestions(r.suggestions)
+                if !r.suggestions.isEmpty {
+                    lastScanSummary = "\(r.scanned) commit\(r.scanned == 1 ? "" : "s") · \(r.suggestions.count) suggestion\(r.suggestions.count == 1 ? "" : "s")"
+                }
+            }
+        } catch {
+            await MainActor.run { isScanningCommits = false }  // silent on auto
         }
     }
 

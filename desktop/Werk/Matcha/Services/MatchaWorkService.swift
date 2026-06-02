@@ -1009,14 +1009,16 @@ class MatchaWorkService {
     }
 
     /// Pull recent commits from GitHub (no local git) → commit→subtask matcher →
-    /// suggestions on tickets. Returns (commits scanned, current pending list).
-    func scanCommitsFromGitHub(projectId: String) async throws -> (scanned: Int, suggestions: [MWCommitSuggestion]) {
-        struct EmptyBody: Encodable {}
+    /// suggestions on tickets. `branch` overrides the connected branch (so you can
+    /// scan a feature branch without merging). Returns (scanned, pending list).
+    func scanCommitsFromGitHub(projectId: String, branch: String? = nil) async throws -> (scanned: Int, suggestions: [MWCommitSuggestion]) {
+        struct Body: Encodable { let ref: String? }
         struct Resp: Decodable { let scanned: Int; let suggestions: [MWCommitSuggestion] }
+        let trimmed = branch?.trimmingCharacters(in: .whitespaces)
         let r: Resp = try await client.request(
             method: "POST",
             path: "\(basePath)/projects/\(projectId)/github/scan-commits",
-            body: EmptyBody()
+            body: Body(ref: (trimmed?.isEmpty == false) ? trimmed : nil)
         )
         return (r.scanned, r.suggestions)
     }

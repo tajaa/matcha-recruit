@@ -268,6 +268,9 @@ struct KanbanBoardView: View {
             if viewModel.tasks.isEmpty {
                 await viewModel.loadTasks()
             }
+            // Auto-pick up merged commits → subtask check-offs (gated 10-min
+            // cooldown; no-op if no repo connected). "Done = merged."
+            await viewModel.autoScanCommitsIfStale()
         }
         // Tasks usually arrive after the board mounts — run the replay the
         // moment they do (maybeReplay is idempotent, guarded by didReplay), and
