@@ -4,7 +4,8 @@ import { api } from '../../api/client'
 import { fetchLocations } from '../../api/compliance'
 import type { BusinessLocation } from '../../types/compliance'
 import { Badge, Button } from '../ui'
-import { Download, Loader2, FileSpreadsheet, FileText, Save, AlertTriangle } from 'lucide-react'
+import { useMe } from '../../hooks/useMe'
+import { Download, Loader2, FileSpreadsheet, FileText, Save, AlertTriangle, Lock, Eye, EyeOff } from 'lucide-react'
 
 type LogEntry = {
   case_number: string
@@ -18,6 +19,27 @@ type LogEntry = {
   days_restricted: number
   injury_type: string | null
   incident_id: string
+  is_privacy_case: boolean
+  privacy_case_reason: string | null
+}
+
+// Confidential privacy-case reference list row (admin/client-only endpoint).
+type PrivacyCaseRow = {
+  case_number: string
+  real_employee_name: string
+  privacy_case_reason: string | null
+  classification: string | null
+  date_of_injury: string
+  incident_id: string
+}
+
+const privacyReasonLabel: Record<string, string> = {
+  intimate_injury: 'Intimate injury',
+  sexual_assault: 'Sexual assault',
+  mental_illness: 'Mental illness',
+  infectious_pathogen: 'HIV / Hepatitis / TB',
+  contaminated_sharps: 'Contaminated sharps',
+  voluntary_opt_out: 'Employee opt-out',
 }
 
 type Summary300A = {
@@ -83,6 +105,8 @@ const missingLabel: Record<string, string> = {
 
 export function OshaLogsPanel() {
   const navigate = useNavigate()
+  const { hasRole } = useMe()
+  const canRevealNames = hasRole('admin') || hasRole('client')
   const currentYear = new Date().getFullYear()
   const [year, setYear] = useState(currentYear)
   const [locations, setLocations] = useState<BusinessLocation[]>([])
@@ -90,6 +114,9 @@ export function OshaLogsPanel() {
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [summary, setSummary] = useState<Summary300A | null>(null)
   const [loading, setLoading] = useState(true)
+  // Confidential privacy-case names (revealed on demand; audit-logged server-side).
+  const [privacyNames, setPrivacyNames] = useState<PrivacyCaseRow[] | null>(null)
+  const [revealing, setRevealing] = useState(false)
 
   // 300A manual / certification form state
   const [hours, setHours] = useState('')
@@ -123,6 +150,7 @@ export function OshaLogsPanel() {
     }
     setLoading(true)
     setItaProblems(null)
+    setPrivacyNames(null)
     Promise.allSettled([
       api.get<LogEntry[]>(`/ir/incidents/osha/300-log?year=${year}`).then(setEntries),
       api
@@ -199,6 +227,18 @@ export function OshaLogsPanel() {
       setItaProblems([])
     } finally {
       setItaBusy(false)
+    }
+  }
+
+  async function revealConfidentialNames() {
+    setRevealing(true)
+    try {
+      const rows = await api.get<PrivacyCaseRow[]>(`/ir/incidents/osha/privacy-cases?year=${year}`)
+      setPrivacyNames(rows)
+    } catch {
+      setPrivacyNames([])
+    } finally {
+      setRevealing(false)
     }
   }
 
@@ -413,6 +453,58 @@ export function OshaLogsPanel() {
         </div>
       )}
 
+      {/* Confidential privacy-case reference list (admin/client only). OSHA
+          masks the name on the public log; this resolves case # → real name
+          (29 CFR 1904.29(b)(9)). Every reveal is audit-logged server-side. */}
+      {canRevealNames && entries.some((e) => e.is_privacy_case) && (
+        <div className="bg-zinc-900 border border-amber-500/20 rounded-2xl p-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Lock size={14} className="text-amber-400" />
+              <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
+                Confidential Privacy-Case Names
+              </span>
+            </div>
+            {privacyNames === null ? (
+              <Button size="sm" variant="ghost" onClick={revealConfidentialNames} disabled={revealing}>
+                {revealing ? <Loader2 size={12} className="mr-1.5 animate-spin" /> : <Eye size={12} className="mr-1.5" />}
+                Reveal names
+              </Button>
+            ) : (
+              <Button size="sm" variant="ghost" onClick={() => setPrivacyNames(null)}>
+                <EyeOff size={12} className="mr-1.5" />
+                Hide
+              </Button>
+            )}
+          </div>
+          {privacyNames !== null &&
+            (privacyNames.length === 0 ? (
+              <p className="text-[12px] text-zinc-500 mt-3">No privacy-case names to show.</p>
+            ) : (
+              <table className="w-full text-sm text-left mt-3">
+                <thead className="text-zinc-500">
+                  <tr>
+                    <th className="py-1.5 text-[10px] uppercase tracking-widest font-bold">Case #</th>
+                    <th className="py-1.5 text-[10px] uppercase tracking-widest font-bold">Employee</th>
+                    <th className="py-1.5 text-[10px] uppercase tracking-widest font-bold">Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {privacyNames.map((p) => (
+                    <tr key={p.incident_id} className="border-t border-white/5 text-zinc-300">
+                      <td className="py-2 font-mono text-[11px] text-zinc-500">{p.case_number}</td>
+                      <td className="py-2 text-[13px] text-zinc-100">{p.real_employee_name}</td>
+                      <td className="py-2 text-[12px] text-zinc-400">
+                        {p.privacy_case_reason ? privacyReasonLabel[p.privacy_case_reason] ?? p.privacy_case_reason : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ))}
+        </div>
+      )}
+
       {/* 300 Log Table */}
       <div className="bg-zinc-900 border border-white/10 rounded-2xl overflow-hidden">
         {entries.length === 0 ? (
@@ -444,7 +536,21 @@ export function OshaLogsPanel() {
                     onClick={() => navigate(`/app/ir/${e.incident_id}`)}
                   >
                     <td className="px-4 py-3 font-mono text-[11px] text-zinc-500">{e.case_number}</td>
-                    <td className="px-4 py-3 text-[13px] text-zinc-100 font-medium">{e.employee_name}</td>
+                    <td className="px-4 py-3 text-[13px] text-zinc-100 font-medium">
+                      {e.is_privacy_case ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Lock size={11} className="text-amber-400 shrink-0" />
+                          <span>Privacy Case</span>
+                          {e.privacy_case_reason && (
+                            <Badge variant="neutral">
+                              {privacyReasonLabel[e.privacy_case_reason] ?? e.privacy_case_reason}
+                            </Badge>
+                          )}
+                        </span>
+                      ) : (
+                        e.employee_name
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-[12px] text-zinc-500">{e.job_title || '—'}</td>
                     <td className="px-4 py-3 text-[11px] text-zinc-400 font-mono">{e.date_of_injury}</td>
                     <td className="px-4 py-3 text-[12px] text-zinc-400">{e.location || '—'}</td>

@@ -35,7 +35,7 @@ ANALYSIS_TYPES = Literal[
 # can group on them without an Alembic migration.
 OSHA_INJURY_TYPES = {
     "injury", "skin_disorder", "respiratory",
-    "poisoning", "hearing_loss", "other_illness",
+    "poisoning", "hearing_loss", "mental_illness", "other_illness",
 }
 
 OSHA_INJURY_TYPE_LABELS = {
@@ -44,6 +44,10 @@ OSHA_INJURY_TYPE_LABELS = {
     "respiratory": "Respiratory Condition",
     "poisoning": "Poisoning",
     "hearing_loss": "Hearing Loss",
+    # mental_illness is also an OSHA Privacy Case trigger (29 CFR 1904.29) — its
+    # presence masks the employee name on the 300/301 log. Aggregates under the
+    # 300A "All Other Illnesses" M-column (see _aggregate_300a fallback).
+    "mental_illness": "Mental Illness",
     "other_illness": "All Other",
 }
 
@@ -734,7 +738,7 @@ def build_osha_injury_type_query_card() -> dict:
             "quick_reply_kind": "osha_injury_type_query",
             "choices": [
                 {"label": OSHA_INJURY_TYPE_LABELS[k], "value": k}
-                for k in ("injury", "skin_disorder", "respiratory", "poisoning", "hearing_loss", "other_illness")
+                for k in ("injury", "skin_disorder", "respiratory", "poisoning", "hearing_loss", "mental_illness", "other_illness")
             ],
         },
     }

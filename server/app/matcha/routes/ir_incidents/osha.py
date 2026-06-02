@@ -24,10 +24,17 @@ from app.matcha.models.ir_incident import (
     Osha300LogEntry,
     Osha300ASummary,
     Osha300ASaveRequest,
+    OshaPrivacyCaseEntry,
     OshaRecordabilityUpdate,
 )
 from ._shared import log_audit
 from app.core.services.osha_redaction import redact_osha_text
+from app.core.services.osha_privacy import (
+    determine_privacy_case,
+    compose_clinical_description,
+    PRIVACY_NAME,
+    PRIVACY_DESCRIPTION_PLACEHOLDER,
+)
 from app.matcha.services.naics_titles import naics_industry_description
 
 logger = logging.getLogger(__name__)
@@ -96,6 +103,36 @@ def _safe_json_loads(val, default=None):
         return default
 
 
+# Non-privacy incidents with no structured injury data still must NOT show the
+# raw reporter narrative (it can name patients / third parties). Show a neutral
+# pointer instead — the full narrative lives only on the internal incident record.
+_NO_STRUCTURED_DESCRIPTION = "See incident record for details"
+
+
+def _resolve_osha_privacy(category_data: dict, osha_form_301_data: dict, emp_name: str):
+    """Compute OSHA privacy-case masking + clinical description for one row.
+
+    Returns ``(is_privacy_case, reason, display_name, description)``:
+    - ``display_name`` is "Privacy Case" when masked, else ``emp_name``.
+    - ``description`` is the structured clinical phrase (never the raw
+      narrative); a name-free placeholder when there's no structured injury data.
+
+    Single source of the masking logic shared by the 300 log, the 301 form, and
+    the confidential privacy-case endpoint, so the three can never drift.
+    """
+    cd = category_data or {}
+    is_priv, reason = determine_privacy_case(
+        cd,
+        (osha_form_301_data or {}).get("injury_type"),
+        bool(cd.get("employee_privacy_requested")),
+    )
+    display_name = PRIVACY_NAME if is_priv else emp_name
+    description = compose_clinical_description(cd) or (
+        PRIVACY_DESCRIPTION_PLACEHOLDER if is_priv else _NO_STRUCTURED_DESCRIPTION
+    )
+    return is_priv, reason, display_name, description
+
+
 async def _aggregate_300a(conn, company_id, location_id, year) -> dict:
     """Aggregate recordable-incident totals for one establishment in one year.
 
@@ -119,7 +156,7 @@ async def _aggregate_300a(conn, company_id, location_id, year) -> dict:
             COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'respiratory' THEN 1 ELSE 0 END), 0) AS total_respiratory,
             COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'poisoning' THEN 1 ELSE 0 END), 0) AS total_poisonings,
             COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'hearing_loss' THEN 1 ELSE 0 END), 0) AS total_hearing_loss,
-            COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'other_illness' THEN 1 ELSE 0 END), 0) AS total_other_illnesses
+            COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' IN ('other_illness', 'mental_illness') THEN 1 ELSE 0 END), 0) AS total_other_illnesses
         FROM ir_incidents
         WHERE company_id = $1
           AND location_id = $2
@@ -215,6 +252,7 @@ async def get_osha_300_log(
                 COALESCE(i.days_away_from_work, 0) AS days_away_from_work,
                 COALESCE(i.days_restricted_duty, 0) AS days_restricted_duty,
                 i.category_data,
+                i.osha_form_301_data,
                 i.reported_by_name,
                 e.first_name AS emp_first_name,
                 e.last_name AS emp_last_name,
@@ -240,19 +278,25 @@ async def get_osha_300_log(
 
         category_data = _safe_json_loads(row.get("category_data"), {})
         injury_type = category_data.get("injury_type")
+        form_301 = _safe_json_loads(row.get("osha_form_301_data"), {})
+        is_priv, reason, display_name, description = _resolve_osha_privacy(
+            category_data, form_301, emp_name,
+        )
 
         entries.append(Osha300LogEntry(
             case_number=row["osha_case_number"] or str(row["id"])[:8],
-            employee_name=emp_name,
+            employee_name=display_name,
             job_title=row["emp_job_title"],
             date_of_injury=row["occurred_at"].strftime("%Y-%m-%d") if row["occurred_at"] else "",
             location=redact_osha_text(row["location"]),
-            description=redact_osha_text(row["description"]),
+            description=description,
             classification=row["osha_classification"],
             days_away=row["days_away_from_work"],
             days_restricted=row["days_restricted_duty"],
             injury_type=injury_type,
             incident_id=str(row["id"]),
+            is_privacy_case=is_priv,
+            privacy_case_reason=reason,
         ))
     return entries
 
@@ -295,6 +339,76 @@ async def get_osha_300_log_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+@router.get("/osha/privacy-cases", response_model=list[OshaPrivacyCaseEntry])
+async def get_osha_privacy_cases(
+    year: int = Query(..., description="Calendar year for the privacy-case reference list"),
+    current_user=Depends(require_admin_or_client),
+):
+    """Confidential OSHA Privacy Case reference list (29 CFR 1904.29(b)(9)).
+
+    Resolves each masked 300-log row's case number back to the REAL employee
+    name. Company-scoped, admin/client-gated, and every access is written to the
+    IR audit log. Never exposed on the public 300 log / CSV / 301 form.
+    """
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with user")
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                i.id,
+                i.osha_case_number,
+                i.occurred_at,
+                i.osha_classification,
+                i.category_data,
+                i.osha_form_301_data,
+                i.reported_by_name,
+                e.first_name AS emp_first_name,
+                e.last_name AS emp_last_name
+            FROM ir_incidents i
+            LEFT JOIN employees e
+                ON e.email = i.reported_by_email
+                AND e.org_id = i.company_id
+            WHERE i.company_id = $1
+              AND i.osha_recordable = true
+              AND EXTRACT(YEAR FROM i.occurred_at) = $2
+            ORDER BY i.occurred_at
+            """,
+            company_id,
+            year,
+        )
+
+        entries: list[OshaPrivacyCaseEntry] = []
+        for row in rows:
+            emp_name = row["reported_by_name"]
+            if row["emp_first_name"]:
+                emp_name = f"{row['emp_first_name']} {row['emp_last_name'] or ''}".strip()
+            category_data = _safe_json_loads(row.get("category_data"), {})
+            form_301 = _safe_json_loads(row.get("osha_form_301_data"), {})
+            is_priv, reason, _display, _desc = _resolve_osha_privacy(category_data, form_301, emp_name)
+            if not is_priv:
+                continue
+            entries.append(OshaPrivacyCaseEntry(
+                case_number=row["osha_case_number"] or str(row["id"])[:8],
+                real_employee_name=emp_name or "Unknown",
+                privacy_case_reason=reason,
+                classification=row["osha_classification"],
+                date_of_injury=row["occurred_at"].strftime("%Y-%m-%d") if row["occurred_at"] else "",
+                incident_id=str(row["id"]),
+            ))
+
+        # Confidential access is audited (list view → no single-incident scope).
+        await log_audit(
+            conn, None, str(current_user.id), "privacy_case_names_viewed",
+            entity_type="osha_privacy_case",
+            details={"year": year, "count": len(entries)},
+        )
+
+    return entries
 
 
 @router.get("/osha/301/{incident_id}")
@@ -346,13 +460,20 @@ async def get_osha_301_form(
     if row["emp_first_name"]:
         emp_name = f"{row['emp_first_name']} {row['emp_last_name'] or ''}".strip()
 
-    # Redact PII / patient PHI from free-text fields. Injury structure
-    # (injury_type, body_parts, classification) is passed through unredacted
-    # so the 301 still describes the injury.
+    # OSHA Privacy Case (29 CFR 1904.29): mask the employee name + render the
+    # Description from structured injury fields (never the raw narrative) so no
+    # patient/third-party name reaches the form. Injury structure (injury_type,
+    # body_parts, classification) is still passed through so the 301 describes
+    # the injury. The real name stays resolvable via /osha/privacy-cases.
+    is_priv, reason, display_name, clinical_description = _resolve_osha_privacy(
+        category_data, form_301_data, emp_name,
+    )
     return {
         "incident_id": str(row["id"]),
         "case_number": row["osha_case_number"] or str(row["id"])[:8],
-        "employee_name": emp_name,
+        "employee_name": display_name,
+        "is_privacy_case": is_priv,
+        "privacy_case_reason": reason,
         "employee_email": row.get("emp_email"),
         "employee_job_title": row.get("emp_job_title"),
         "employee_start_date": row["emp_start_date"].isoformat() if row.get("emp_start_date") else None,
@@ -364,7 +485,7 @@ async def get_osha_301_form(
         "date_of_injury": row["occurred_at"].strftime("%Y-%m-%d") if row["occurred_at"] else None,
         "time_of_event": row["occurred_at"].strftime("%H:%M") if row["occurred_at"] else None,
         "location_of_event": redact_osha_text(row.get("location")),
-        "description_of_injury": redact_osha_text(row.get("description")),
+        "description_of_injury": clinical_description,
         "object_or_substance": category_data.get("equipment_involved"),
         "injury_type": category_data.get("injury_type"),
         "body_parts_affected": category_data.get("body_parts", []),
