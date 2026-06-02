@@ -22,6 +22,18 @@ struct RemoteCaretMark: Identifiable, Equatable {
     }
 }
 
+/// A commented text range, drawn as a yellow highlight and clickable to open
+/// its thread.
+struct CommentHighlightMark: Identifiable, Equatable {
+    let id: String          // commentId (the thread root)
+    let anchor: Int
+    let head: Int
+    var range: NSRange {
+        let lo = min(anchor, head), hi = max(anchor, head)
+        return NSRange(location: max(0, lo), length: max(0, hi - lo))
+    }
+}
+
 struct MarkdownTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var controller: MarkdownEditorController
@@ -36,6 +48,15 @@ struct MarkdownTextEditor: NSViewRepresentable {
     /// Remote collaborators' carets to draw in-text (e.g. the lock holder's
     /// caret, shown to watchers). Empty for the active editor.
     var remoteCarets: [RemoteCaretMark] = []
+    /// Commented text ranges to highlight (yellow), clickable to open the
+    /// thread. Resolved comments are filtered out by the caller.
+    var commentHighlights: [CommentHighlightMark] = []
+    /// A commented highlight was clicked — (commentId, rect in editor-local
+    /// coordinates) so the caller can anchor a thread popover.
+    var onCommentTap: ((String, CGRect) -> Void)? = nil
+    /// The selection changed: rect (editor-local, nil when empty) + char range.
+    /// Drives the "add comment" affordance on a fresh selection.
+    var onSelectionRectChange: ((CGRect?, Int, Int) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -60,6 +81,16 @@ struct MarkdownTextEditor: NSViewRepresentable {
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.string = text
+
+        // Comment-highlight overlay FIRST (lower in z-order) so it can catch
+        // clicks on highlights; the caret overlay above it is click-through.
+        let commentOverlay = CommentHighlightOverlay(frame: textView.bounds)
+        commentOverlay.textView = textView
+        commentOverlay.autoresizingMask = [.width, .height]
+        commentOverlay.marks = commentHighlights
+        commentOverlay.onTap = onCommentTap
+        textView.addSubview(commentOverlay)
+        context.coordinator.commentOverlay = commentOverlay
 
         // Transparent overlay (child of the text view, so it scrolls + resizes
         // with the content) that draws remote collaborators' carets in-text.
@@ -90,12 +121,18 @@ struct MarkdownTextEditor: NSViewRepresentable {
             overlay.frame = textView.bounds
             overlay.marks = remoteCarets
         }
+        if let commentOverlay = context.coordinator.commentOverlay {
+            commentOverlay.frame = textView.bounds
+            commentOverlay.marks = commentHighlights
+            commentOverlay.onTap = onCommentTap
+        }
         controller.textView = textView
     }
 
     class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MarkdownTextEditor
         weak var overlay: RemoteCaretOverlay?
+        weak var commentOverlay: CommentHighlightOverlay?
         init(_ parent: MarkdownTextEditor) { self.parent = parent }
 
         func textDidChange(_ notification: Notification) {
@@ -111,6 +148,22 @@ struct MarkdownTextEditor: NSViewRepresentable {
             // doesn't expose direction; we treat anchor as start and head as
             // start+length — close enough for rendering, matches web behavior.
             parent.onSelectionChange?(sel.location, sel.location + sel.length)
+
+            // Report the selection rect (for the "add comment" affordance) in
+            // the enclosing scroll view's coords, so a SwiftUI overlay can pin
+            // a bubble to it.
+            guard let report = parent.onSelectionRectChange else { return }
+            if sel.length > 0, let lm = tv.layoutManager, let tc = tv.textContainer {
+                let gr = lm.glyphRange(forCharacterRange: sel, actualCharacterRange: nil)
+                var rect = lm.boundingRect(forGlyphRange: gr, in: tc)
+                    .offsetBy(dx: tv.textContainerOrigin.x, dy: tv.textContainerOrigin.y)
+                if let sv = tv.enclosingScrollView {
+                    rect = tv.convert(rect, to: sv)
+                }
+                report(rect, sel.location, sel.location + sel.length)
+            } else {
+                report(nil, sel.location, sel.location)
+            }
         }
     }
 }
@@ -248,5 +301,73 @@ final class RemoteCaretOverlay: NSView {
         color.setFill()
         NSBezierPath(roundedRect: bg, xRadius: 3, yRadius: 3).fill()
         label.draw(at: NSPoint(x: bg.minX + pad, y: bg.minY + 1), withAttributes: attrs)
+    }
+}
+
+/// Draws yellow highlights under commented ranges and makes them clickable to
+/// open the comment thread. Click-through everywhere EXCEPT on a highlight, so
+/// it never steals selection/editing from the text view underneath.
+final class CommentHighlightOverlay: NSView {
+    weak var textView: NSTextView?
+    var onTap: ((String, CGRect) -> Void)?
+    var marks: [CommentHighlightMark] = [] { didSet { needsDisplay = true } }
+
+    /// Per-line hit rects (overlay coords) mapped to their comment id, rebuilt
+    /// each draw so hit-testing matches what's painted.
+    private var hitRects: [(rect: NSRect, id: String)] = []
+
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let local = convert(point, from: superview)
+        return hitRects.contains(where: { $0.rect.contains(local) }) ? self : nil
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        if let hit = hitRects.first(where: { $0.rect.contains(p) }) {
+            onTap?(hit.id, hit.rect)
+        }
+    }
+
+    private func enclosingRects(for range: NSRange, lm: NSLayoutManager, tc: NSTextContainer, origin: NSPoint, nsLen: Int) -> [NSRect] {
+        let loc = min(range.location, nsLen)
+        let len = min(range.length, max(0, nsLen - loc))
+        guard len > 0 else { return [] }
+        let glyphRange = lm.glyphRange(forCharacterRange: NSRange(location: loc, length: len), actualCharacterRange: nil)
+        var rects: [NSRect] = []
+        lm.enumerateEnclosingRects(
+            forGlyphRange: glyphRange,
+            withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+            in: tc
+        ) { rect, _ in
+            rects.append(rect.offsetBy(dx: origin.x, dy: origin.y))
+        }
+        return rects
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        hitRects = []
+        guard !marks.isEmpty,
+              let tv = textView,
+              let lm = tv.layoutManager,
+              let tc = tv.textContainer else { return }
+        let origin = tv.textContainerOrigin
+        let nsLen = (tv.string as NSString).length
+        let fill = NSColor.systemYellow.withAlphaComponent(0.28)
+        let underline = NSColor.systemYellow.withAlphaComponent(0.9)
+
+        for mark in marks {
+            for r in enclosingRects(for: mark.range, lm: lm, tc: tc, origin: origin, nsLen: nsLen) {
+                fill.setFill()
+                NSBezierPath(roundedRect: r.insetBy(dx: -1, dy: 0), xRadius: 2, yRadius: 2).fill()
+                // Bottom rule so a highlight reads as "commented" even on a
+                // pale background.
+                underline.setFill()
+                NSRect(x: r.minX, y: r.maxY - 1.5, width: r.width, height: 1.5).fill()
+                hitRects.append((r, mark.id))
+            }
+        }
     }
 }

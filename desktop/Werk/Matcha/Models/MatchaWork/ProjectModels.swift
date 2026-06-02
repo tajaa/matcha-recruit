@@ -774,15 +774,29 @@ struct MWSectionComment: Codable, Identifiable, Hashable {
     var avatarUrl: String?
     var content: String
     var replyToCommentId: String?
+    /// Highlight anchor: UTF-16 char range into the note text. Both nil for a
+    /// general (whole-note) comment. `quotedText` is the snippet at creation
+    /// time, used to re-find the range if the text shifted.
+    var anchorStart: Int?
+    var anchorEnd: Int?
+    var quotedText: String?
+    var resolved: Bool?
     var createdAt: String?
 
+    /// True when this comment is pinned to a text range (vs a general comment).
+    var isAnchored: Bool { anchorStart != nil && anchorEnd != nil }
+    var isResolved: Bool { resolved ?? false }
+
     enum CodingKeys: String, CodingKey {
-        case id, content
+        case id, content, resolved
         case sectionId = "section_id"
         case userId = "user_id"
         case authorName = "author_name"
         case avatarUrl = "avatar_url"
         case replyToCommentId = "reply_to_comment_id"
+        case anchorStart = "anchor_start"
+        case anchorEnd = "anchor_end"
+        case quotedText = "quoted_text"
         case createdAt = "created_at"
     }
 }

@@ -3724,7 +3724,9 @@ async def create_section_comment_endpoint(
     body: dict,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Add a comment to a note. Body: {content, reply_to_comment_id?}."""
+    """Add a comment to a note. Body: {content, reply_to_comment_id?,
+    anchor_start?, anchor_end?, quoted_text?}. The anchor fields attach the
+    comment to a highlighted text range (omit them for a whole-note comment)."""
     project, _role = await _verify_project_access(project_id, current_user)
 
     content = str(body.get("content") or "").strip()
@@ -3739,6 +3741,24 @@ async def create_section_comment_endpoint(
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="Invalid reply_to_comment_id")
 
+    # Optional anchor (highlight range). Both ends must be present, ordered,
+    # and non-negative to count — otherwise treated as a general comment.
+    anchor_start = anchor_end = None
+    quoted_text = None
+    try:
+        a_raw = body.get("anchor_start")
+        b_raw = body.get("anchor_end")
+        if a_raw is not None and b_raw is not None:
+            a, b = int(a_raw), int(b_raw)
+            if a >= 0 and b > a:
+                anchor_start, anchor_end = a, b
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid anchor offsets")
+    if anchor_start is not None:
+        qt = body.get("quoted_text")
+        if isinstance(qt, str) and qt:
+            quoted_text = qt[:500]
+
     company_id = await get_client_company_id(current_user)
 
     from ..services import project_comment_service as cmt_svc
@@ -3749,6 +3769,9 @@ async def create_section_comment_endpoint(
         user_id=current_user.id,
         content=content,
         reply_to_comment_id=reply_to,
+        anchor_start=anchor_start,
+        anchor_end=anchor_end,
+        quoted_text=quoted_text,
     )
 
     # Notify the note's last editor and, on a reply, the parent comment's
@@ -3800,6 +3823,25 @@ async def delete_section_comment_endpoint(
     if not ok:
         raise HTTPException(status_code=404, detail="Comment not found")
     return {"ok": True}
+
+
+@router.patch("/projects/{project_id}/sections/{section_id}/comments/{comment_id}/resolve")
+async def resolve_section_comment_endpoint(
+    project_id: UUID,
+    section_id: str,
+    comment_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Resolve / unresolve a comment. Body: {resolved: bool}. Any collaborator
+    with project access may resolve (mirrors doc-comment conventions)."""
+    await _verify_project_access(project_id, current_user)
+    resolved = bool(body.get("resolved", True))
+    from ..services import project_comment_service as cmt_svc
+    comment = await cmt_svc.set_section_comment_resolved(comment_id, project_id, resolved)
+    if comment is None:
+        raise HTTPException(status_code=404, detail="Comment not found")
+    return comment
 
 
 # ── Project file attachment endpoints ──

@@ -31,12 +31,14 @@ def _row_to_comment(row: dict) -> dict:
 
 
 async def list_section_comments(project_id: UUID, section_id: str) -> list[dict]:
-    """All comments on a note, oldest first, with resolved author name + avatar."""
+    """All comments on a note, oldest first, with resolved author name + avatar.
+    Includes anchor range + quote + resolved so the client can draw highlights."""
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
             SELECT c.id, c.project_id, c.section_id, c.user_id, c.content,
-                   c.reply_to_comment_id, c.created_at, c.updated_at,
+                   c.reply_to_comment_id, c.anchor_start, c.anchor_end,
+                   c.quoted_text, c.resolved, c.created_at, c.updated_at,
                    COALESCE(a.name, u.email) AS author_name,
                    u.avatar_url
             FROM mw_section_comments c
@@ -58,18 +60,25 @@ async def create_section_comment(
     user_id: UUID,
     content: str,
     reply_to_comment_id: Optional[UUID] = None,
+    anchor_start: Optional[int] = None,
+    anchor_end: Optional[int] = None,
+    quoted_text: Optional[str] = None,
 ) -> dict:
-    """Insert a comment and return it with the author's name + avatar resolved."""
+    """Insert a comment and return it with the author's name + avatar resolved.
+    anchor_start/anchor_end/quoted_text are nil for a general (whole-note) comment."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO mw_section_comments
-                (project_id, section_id, company_id, user_id, content, reply_to_comment_id)
-            VALUES ($1, $2, $3, $4, $5, $6)
+                (project_id, section_id, company_id, user_id, content,
+                 reply_to_comment_id, anchor_start, anchor_end, quoted_text)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING id, project_id, section_id, user_id, content,
-                      reply_to_comment_id, created_at, updated_at
+                      reply_to_comment_id, anchor_start, anchor_end, quoted_text,
+                      resolved, created_at, updated_at
             """,
-            project_id, section_id, company_id, user_id, content, reply_to_comment_id,
+            project_id, section_id, company_id, user_id, content,
+            reply_to_comment_id, anchor_start, anchor_end, quoted_text,
         )
         author = await conn.fetchrow(
             """
@@ -79,6 +88,40 @@ async def create_section_comment(
             WHERE u.id = $1
             """,
             user_id,
+        )
+    out = _row_to_comment(row)
+    out["author_name"] = author["author_name"] if author else None
+    out["avatar_url"] = author["avatar_url"] if author else None
+    return out
+
+
+async def set_section_comment_resolved(
+    comment_id: UUID, project_id: UUID, resolved: bool
+) -> Optional[dict]:
+    """Toggle a comment's resolved flag (any collaborator with project access may
+    resolve). Returns the updated comment with author, or None if not found."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE mw_section_comments
+            SET resolved = $3, updated_at = NOW()
+            WHERE id = $1 AND project_id = $2
+            RETURNING id, project_id, section_id, user_id, content,
+                      reply_to_comment_id, anchor_start, anchor_end, quoted_text,
+                      resolved, created_at, updated_at
+            """,
+            comment_id, project_id, resolved,
+        )
+        if row is None:
+            return None
+        author = await conn.fetchrow(
+            """
+            SELECT COALESCE(a.name, u.email) AS author_name, u.avatar_url
+            FROM users u
+            LEFT JOIN admins a ON a.user_id = u.id
+            WHERE u.id = $1
+            """,
+            row["user_id"],
         )
     out = _row_to_comment(row)
     out["author_name"] = author["author_name"] if author else None

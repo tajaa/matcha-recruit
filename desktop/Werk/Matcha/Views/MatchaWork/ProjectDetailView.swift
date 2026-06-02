@@ -13,7 +13,6 @@ struct ProjectDetailView: View {
     @State private var presenceVM = ProjectPresenceViewModel()
     @State private var editingSectionId: String?
     @State private var emailingSection: MWProjectSection?
-    @State private var commentingSection: MWProjectSection?
     @State private var newSectionTitle = ""
     @State private var showCollaborators = false
     @State private var showExportMenu = false
@@ -633,12 +632,13 @@ struct ProjectDetailView: View {
                         },
                         onBack: { editingSectionId = nil },
                         onEmail: { emailingSection = section },
-                        onComments: { commentingSection = section },
+                        currentUserId: appState.currentUser?.id,
                         onRestore: { restored in
                             // Pass the current title (a null title would blank it
                             // server-side) — restore only rolls back content.
                             Task { await viewModel.updateSection(sectionId: sid, title: section.title, content: restored) }
                         },
+                        projectId: viewModel.project?.id,
                         onCaretMove: { anchor, head in
                             presenceVM.reportCaret(sectionId: sid, anchor: anchor, head: head)
                         },
@@ -715,14 +715,6 @@ struct ProjectDetailView: View {
                 section: section,
                 collaborators: viewModel.project?.collaborators ?? [],
                 onClose: { emailingSection = nil }
-            )
-        }
-        .sheet(item: $commentingSection) { section in
-            NoteCommentsView(
-                projectId: viewModel.project?.id ?? "",
-                section: section,
-                currentUserId: appState.currentUser?.id,
-                onClose: { commentingSection = nil }
             )
         }
     }

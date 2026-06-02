@@ -5241,6 +5241,9 @@ async def init_db():
         # mw_projects.sections JSONB with short hex string ids (not UUIDs), so
         # section_id is TEXT. reply_to_comment_id is reserved for threading
         # (v1 UI renders a flat list). Migration mwseccmt01.
+        # anchor_start/anchor_end/quoted_text attach a comment to a highlighted
+        # text range (nil = a general, whole-note comment); resolved hides the
+        # highlight + tucks the thread away. Migration seccmtanchor01.
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS mw_section_comments (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -5250,6 +5253,10 @@ async def init_db():
                 user_id UUID NOT NULL,
                 content TEXT NOT NULL,
                 reply_to_comment_id UUID,
+                anchor_start INTEGER,
+                anchor_end INTEGER,
+                quoted_text TEXT,
+                resolved BOOLEAN NOT NULL DEFAULT FALSE,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )

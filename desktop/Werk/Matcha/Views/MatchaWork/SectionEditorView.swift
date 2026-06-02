@@ -11,9 +11,8 @@ struct SectionEditorView: View {
     /// Opens the email-this-note composer. When non-nil an envelope button
     /// renders next to back.
     var onEmail: (() -> Void)? = nil
-    /// Opens the note comments panel. When non-nil a comment button renders in
-    /// the title row.
-    var onComments: (() -> Void)? = nil
+    /// Current user id — for comment author attribution + delete-own gating.
+    var currentUserId: String? = nil
     var onAcceptRevision: (() -> Void)? = nil
     var onRejectRevision: (() -> Void)? = nil
     var onRestore: ((String) -> Void)? = nil
@@ -58,6 +57,263 @@ struct SectionEditorView: View {
     @State private var releasedIdle = false
     private let idleReleaseSeconds: TimeInterval = 60
 
+    // MARK: Comments (anchored highlight-to-comment + general)
+    @State private var comments: [MWSectionComment] = []
+    /// Live selection rect (editor-local) + char range, for the "add comment"
+    /// affordance. Set from MarkdownTextEditor.onSelectionRectChange.
+    @State private var selRect: CGRect? = nil
+    @State private var selRange: (Int, Int)? = nil
+    @State private var composing = false
+    @State private var composeText = ""
+    /// An opened thread (clicked highlight) + the rect to anchor its popover.
+    @State private var openThreadId: String? = nil
+    @State private var threadRect: CGRect? = nil
+    @State private var showAllComments = false
+
+    /// Unresolved, anchored comments → in-text yellow highlights.
+    private var commentHighlights: [CommentHighlightMark] {
+        comments.compactMap { c in
+            guard !c.isResolved, let a = c.anchorStart, let b = c.anchorEnd, b > a else { return nil }
+            return CommentHighlightMark(id: c.id, anchor: a, head: b)
+        }
+    }
+
+    /// A thread = the root comment + its replies, oldest first.
+    private func thread(for rootId: String) -> [MWSectionComment] {
+        guard let root = comments.first(where: { $0.id == rootId }) else { return [] }
+        let replies: [MWSectionComment] = comments.filter { $0.replyToCommentId == rootId }
+        let sortedReplies = replies.sorted { ($0.createdAt ?? "") < ($1.createdAt ?? "") }
+        var result: [MWSectionComment] = [root]
+        result.append(contentsOf: sortedReplies)
+        return result
+    }
+
+    private func quote(_ a: Int, _ b: Int) -> String {
+        let ns = content as NSString
+        let lo = max(0, min(a, ns.length))
+        let hi = max(lo, min(b, ns.length))
+        return ns.substring(with: NSRange(location: lo, length: hi - lo))
+    }
+
+    private func loadComments() async {
+        guard let pid = projectId else { return }
+        if let list = try? await MatchaWorkService.shared.listSectionComments(projectId: pid, sectionId: section.id) {
+            await MainActor.run { comments = list }
+        }
+    }
+
+    private func postAnchoredComment() {
+        guard let pid = projectId, let (a, b) = selRange else { return }
+        let body = composeText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return }
+        let q = quote(a, b)
+        Task {
+            if let c = try? await MatchaWorkService.shared.addSectionComment(
+                projectId: pid, sectionId: section.id, content: body,
+                anchorStart: a, anchorEnd: b, quotedText: q
+            ) {
+                await MainActor.run {
+                    comments.append(c)
+                    composeText = ""; composing = false; selRect = nil; selRange = nil
+                }
+            }
+        }
+    }
+
+    private func postReply(to rootId: String, _ body: String) {
+        guard let pid = projectId else { return }
+        let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        Task {
+            if let c = try? await MatchaWorkService.shared.addSectionComment(
+                projectId: pid, sectionId: section.id, content: text, replyToCommentId: rootId
+            ) {
+                await MainActor.run { comments.append(c) }
+            }
+        }
+    }
+
+    private func postGeneralComment(_ body: String) {
+        guard let pid = projectId else { return }
+        let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        Task {
+            if let c = try? await MatchaWorkService.shared.addSectionComment(
+                projectId: pid, sectionId: section.id, content: text
+            ) {
+                await MainActor.run { comments.append(c) }
+            }
+        }
+    }
+
+    private func setResolved(_ c: MWSectionComment, _ val: Bool) {
+        guard let pid = projectId else { return }
+        Task {
+            if let u = try? await MatchaWorkService.shared.resolveSectionComment(
+                projectId: pid, sectionId: section.id, commentId: c.id, resolved: val
+            ) {
+                await MainActor.run {
+                    if let i = comments.firstIndex(where: { $0.id == u.id }) { comments[i] = u }
+                    if val, openThreadId == c.id { openThreadId = nil }
+                }
+            }
+        }
+    }
+
+    private func deleteComment(_ c: MWSectionComment) {
+        guard let pid = projectId else { return }
+        Task {
+            try? await MatchaWorkService.shared.deleteSectionComment(
+                projectId: pid, sectionId: section.id, commentId: c.id
+            )
+            await MainActor.run {
+                comments.removeAll { $0.id == c.id || $0.replyToCommentId == c.id }
+                if openThreadId == c.id { openThreadId = nil }
+            }
+        }
+    }
+
+    private func selectionChanged(_ rect: CGRect?, _ a: Int, _ b: Int) {
+        if let rect, b > a {
+            selRect = rect; selRange = (a, b)
+            composing = false; openThreadId = nil
+        } else if !composing {
+            selRect = nil; selRange = nil
+        }
+    }
+
+    private var unresolvedCount: Int { comments.filter { !$0.isResolved }.count }
+
+    /// Select + scroll to a comment's anchored range in whichever editor is live.
+    private func jumpTo(_ c: MWSectionComment) {
+        showAllComments = false
+        guard let a = c.anchorStart, let b = c.anchorEnd, b > a else { return }
+        guard let tv = (lockedByName == nil ? controller : watcherController).textView else { return }
+        let len = (tv.string as NSString).length
+        let lo = max(0, min(a, len)); let hi = max(lo, min(b, len))
+        let r = NSRange(location: lo, length: hi - lo)
+        tv.setSelectedRange(r)
+        tv.scrollRangeToVisible(r)
+        tv.window?.makeFirstResponder(tv)
+    }
+
+    private func clampX(_ x: CGFloat, width: CGFloat, card: CGFloat) -> CGFloat {
+        max(0, min(x, max(0, width - card)))
+    }
+
+    /// Floating comment UI layered over the editor: an "add comment" bubble on a
+    /// fresh selection, the inline compose card, and the clicked-highlight thread.
+    @ViewBuilder
+    private func commentAffordances(width: CGFloat) -> some View {
+        if !composing, let rect = selRect, selRange != nil {
+            addCommentBubble
+                .offset(x: clampX(rect.minX, width: width, card: 120), y: rect.maxY + 4)
+        }
+        if composing, let rect = selRect {
+            composeCard
+                .offset(x: clampX(rect.minX, width: width, card: 260), y: rect.maxY + 4)
+        }
+        if let id = openThreadId, let rect = threadRect {
+            threadCard(id)
+                .offset(x: clampX(rect.minX, width: width, card: 280), y: rect.maxY + 4)
+        }
+    }
+
+    private var addCommentBubble: some View {
+        Button {
+            composeText = ""
+            composing = true
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "text.bubble.fill").font(.system(size: 10))
+                Text("Comment").font(.system(size: 11, weight: .semibold))
+            }
+            .padding(.horizontal, 9).padding(.vertical, 5)
+            .foregroundColor(.white)
+            .background(Color.matcha600)
+            .cornerRadius(6)
+            .shadow(radius: 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var composeCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let (a, b) = selRange {
+                Text("\u{201C}\(String(quote(a, b).prefix(80)))\u{201D}")
+                    .font(.system(size: 10)).italic()
+                    .foregroundColor(.secondary).lineLimit(2)
+            }
+            TextField("Add a comment…", text: $composeText, axis: .vertical)
+                .textFieldStyle(.plain).font(.system(size: 12)).foregroundColor(.white)
+                .lineLimit(1...4)
+                .padding(8).background(Color.zinc800).cornerRadius(6)
+            HStack {
+                Spacer()
+                Button("Cancel") { composing = false; selRect = nil; selRange = nil }
+                    .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(.secondary)
+                let empty = composeText.trimmingCharacters(in: .whitespaces).isEmpty
+                Button("Comment") { postAnchoredComment() }
+                    .buttonStyle(.plain).font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white).padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(empty ? Color.zinc800 : Color.matcha600)
+                    .cornerRadius(5)
+                    .disabled(empty)
+            }
+        }
+        .padding(10).frame(width: 260)
+        .background(Color(white: 0.14)).cornerRadius(8)
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.1), lineWidth: 1))
+        .shadow(radius: 8)
+    }
+
+    @ViewBuilder
+    private func threadCard(_ id: String) -> some View {
+        let items = thread(for: id)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Comment").font(.system(size: 11, weight: .semibold)).foregroundColor(.matcha500)
+                Spacer()
+                if let root = items.first {
+                    Button { setResolved(root, true) } label: {
+                        Label("Resolve", systemImage: "checkmark").font(.system(size: 10))
+                    }
+                    .buttonStyle(.plain).foregroundColor(.secondary)
+                    .help("Resolve — hides the highlight")
+                }
+                Button { openThreadId = nil } label: {
+                    Image(systemName: "xmark").font(.system(size: 10))
+                }
+                .buttonStyle(.plain).foregroundColor(.secondary)
+            }
+            if let root = items.first, root.isAnchored, let q = root.quotedText, !q.isEmpty {
+                Text("\u{201C}\(String(q.prefix(80)))\u{201D}")
+                    .font(.system(size: 10)).italic().foregroundColor(.secondary).lineLimit(2)
+            }
+            ForEach(items) { c in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(c.authorName ?? "Someone").font(.system(size: 11, weight: .semibold)).foregroundColor(.white)
+                        Spacer()
+                        if c.userId == currentUserId {
+                            Button { deleteComment(c) } label: {
+                                Image(systemName: "trash").font(.system(size: 9)).foregroundColor(.red.opacity(0.7))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    Text(c.content).font(.system(size: 12)).foregroundColor(.white.opacity(0.9))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            ThreadReplyField { postReply(to: id, $0) }
+        }
+        .padding(10).frame(width: 280)
+        .background(Color(white: 0.14)).cornerRadius(8)
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.1), lineWidth: 1))
+        .shadow(radius: 8)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Back bar + title
@@ -78,18 +334,28 @@ struct SectionEditorView: View {
                     .help("Back to notes (⌘[)")
                 }
                 Spacer()
-                if let onComments {
-                    Button {
-                        onComments()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 11))
-                            Text("Comments").font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundColor(.white.opacity(0.85))
+                Button {
+                    showAllComments.toggle()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 11))
+                        Text(unresolvedCount > 0 ? "Comments (\(unresolvedCount))" : "Comments")
+                            .font(.system(size: 12, weight: .medium))
                     }
-                    .buttonStyle(.plain)
-                    .help("Comments on this note")
+                    .foregroundColor(unresolvedCount > 0 ? .matcha500 : .white.opacity(0.85))
+                }
+                .buttonStyle(.plain)
+                .help("All comments on this note")
+                .popover(isPresented: $showAllComments, arrowEdge: .bottom) {
+                    NoteCommentsView(
+                        comments: comments,
+                        currentUserId: currentUserId,
+                        onAdd: { postGeneralComment($0) },
+                        onResolve: { setResolved($0, $1) },
+                        onDelete: { deleteComment($0) },
+                        onJump: { jumpTo($0) },
+                        onClose: { showAllComments = false }
+                    )
                 }
                 if let onEmail {
                     Button {
@@ -130,12 +396,22 @@ struct SectionEditorView: View {
                 // live edits in a read-only editor so their caret renders in-text
                 // — no toolbar, no save.
                 lockedWatcherBanner(holder)
-                MarkdownTextEditor(
-                    text: .constant(liveContent?.content ?? content),
-                    controller: $watcherController,
-                    isEditable: false,
-                    remoteCarets: remoteCaret.map { [$0] } ?? []
-                )
+                // Read-only, but still selectable — a watcher can highlight +
+                // comment even while someone else holds the edit lock.
+                GeometryReader { geo in
+                    ZStack(alignment: .topLeading) {
+                        MarkdownTextEditor(
+                            text: .constant(liveContent?.content ?? content),
+                            controller: $watcherController,
+                            isEditable: false,
+                            remoteCarets: remoteCaret.map { [$0] } ?? [],
+                            commentHighlights: commentHighlights,
+                            onCommentTap: { id, rect in openThreadId = id; threadRect = rect; selRect = nil; composing = false },
+                            onSelectionRectChange: { rect, a, b in selectionChanged(rect, a, b) }
+                        )
+                        commentAffordances(width: geo.size.width)
+                    }
+                }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
             } else {
@@ -146,20 +422,28 @@ struct SectionEditorView: View {
                 formattingToolbar
 
                 // Content editor
-                MarkdownTextEditor(
-                    text: $content,
-                    controller: $controller,
-                    onSelectionChange: { anchor, head in
-                        onCaretMove?(anchor, head)
+                GeometryReader { geo in
+                    ZStack(alignment: .topLeading) {
+                        MarkdownTextEditor(
+                            text: $content,
+                            controller: $controller,
+                            onSelectionChange: { anchor, head in
+                                onCaretMove?(anchor, head)
+                            },
+                            commentHighlights: commentHighlights,
+                            onCommentTap: { id, rect in openThreadId = id; threadRect = rect; selRect = nil; composing = false },
+                            onSelectionRectChange: { rect, a, b in selectionChanged(rect, a, b) }
+                        )
+                        .onChange(of: content) {
+                            noteActivity()
+                            scheduleSave()
+                            onContentChange?(title.isEmpty ? nil : title, content)
+                        }
+                        commentAffordances(width: geo.size.width)
                     }
-                )
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .onChange(of: content) {
-                        noteActivity()
-                        scheduleSave()
-                        onContentChange?(title.isEmpty ? nil : title, content)
-                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
             }
 
             // Footer
@@ -205,6 +489,7 @@ struct SectionEditorView: View {
             onEditStart?()
             if lockedByName == nil { resetIdleTimer() }
         }
+        .task(id: section.id) { await loadComments() }
         .onChange(of: section.id) {
             // Different section — flush any pending save for the prior one.
             flushSaveIfDirty()
@@ -215,6 +500,9 @@ struct SectionEditorView: View {
             showPendingPreview = true
             releasedIdle = false
             resetIdleTimer()
+            // Reset comment UI for the new note.
+            selRect = nil; selRange = nil; composing = false
+            openThreadId = nil; threadRect = nil; showAllComments = false
         }
         .onChange(of: lockedByName) { _, newVal in
             if newVal != nil {
@@ -839,121 +1127,138 @@ private struct FlowChips: View {
     }
 }
 
-// MARK: - Note comments
+// MARK: - Note comments panel
 
-/// In-app comments on a note. Collaborators can read the thread and post a
-/// reply; you can delete your own comments. Flat list (newest at the bottom);
-/// the backend keeps a reply_to column for future threading.
+/// Driven (no self-load) browse-all-comments panel, shown as a popover from the
+/// note's "Comments" button. Lists top-level comments (anchored + general),
+/// shows each anchored comment's quote (tap to jump to it in the text), and
+/// supports resolve / reopen / delete + a general (whole-note) composer. The
+/// per-highlight reply thread lives inline in the editor, not here.
 struct NoteCommentsView: View {
-    let projectId: String
-    let section: MWProjectSection
+    let comments: [MWSectionComment]
     let currentUserId: String?
+    var onAdd: (String) -> Void
+    var onResolve: (MWSectionComment, Bool) -> Void
+    var onDelete: (MWSectionComment) -> Void
+    var onJump: (MWSectionComment) -> Void
     var onClose: () -> Void
 
-    @State private var comments: [MWSectionComment] = []
-    @State private var draft: String = ""
-    @State private var loading = true
-    @State private var sending = false
-    @State private var errorText: String? = nil
+    @State private var draft = ""
+    @State private var showResolved = false
+
+    private var roots: [MWSectionComment] {
+        comments.filter { $0.replyToCommentId == nil }
+    }
+    private var visible: [MWSectionComment] {
+        showResolved ? roots : roots.filter { !$0.isResolved }
+    }
+    private var resolvedCount: Int { roots.filter { $0.isResolved }.count }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Comments").font(.system(size: 15, weight: .semibold)).foregroundColor(.white)
-                    Text(section.title.isEmpty ? "Untitled note" : section.title)
-                        .font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
-                }
+                Text("Comments").font(.system(size: 14, weight: .semibold)).foregroundColor(.white)
                 Spacer()
+                if resolvedCount > 0 {
+                    Button { showResolved.toggle() } label: {
+                        Text(showResolved ? "Hide resolved" : "Show resolved (\(resolvedCount))")
+                            .font(.system(size: 10)).foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
                 Button { onClose() } label: {
-                    Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
+                    Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 20).padding(.vertical, 14)
+            .padding(.horizontal, 14).padding(.vertical, 10)
 
             Divider().opacity(0.2)
 
             ScrollView {
-                if loading {
-                    ProgressView().controlSize(.small).padding(.vertical, 40)
-                } else if comments.isEmpty {
-                    Text("No comments yet. Start the discussion.")
-                        .font(.system(size: 12)).foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity).padding(.vertical, 40)
+                if visible.isEmpty {
+                    Text("No comments yet.\nHighlight text in the note to comment on it.")
+                        .font(.system(size: 11)).foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity).padding(.vertical, 36).padding(.horizontal, 16)
                 } else {
-                    VStack(alignment: .leading, spacing: 14) {
-                        ForEach(comments) { c in commentRow(c) }
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(visible) { c in commentRow(c) }
                     }
-                    .padding(16)
+                    .padding(14)
                 }
-            }
-
-            if let errorText {
-                Text(errorText)
-                    .font(.system(size: 10)).foregroundColor(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16).padding(.bottom, 4)
             }
 
             Divider().opacity(0.2)
 
             HStack(alignment: .bottom, spacing: 8) {
-                TextField("Write a comment…", text: $draft, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundColor(.white)
-                    .lineLimit(1...5)
+                TextField("Comment on the whole note…", text: $draft, axis: .vertical)
+                    .textFieldStyle(.plain).font(.system(size: 12)).foregroundColor(.white)
+                    .lineLimit(1...4)
                     .padding(.horizontal, 10).padding(.vertical, 8)
                     .background(Color.zinc800).cornerRadius(8)
+                let empty = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 Button {
-                    Task { await send() }
+                    onAdd(draft); draft = ""
                 } label: {
-                    if sending {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "paperplane.fill").font(.system(size: 13))
-                            .foregroundColor(canSend ? .matcha500 : .secondary)
-                    }
+                    Image(systemName: "paperplane.fill").font(.system(size: 13))
+                        .foregroundColor(empty ? .secondary : .matcha500)
                 }
-                .buttonStyle(.plain)
-                .disabled(!canSend || sending)
+                .buttonStyle(.plain).disabled(empty)
             }
-            .padding(.horizontal, 16).padding(.vertical, 12)
+            .padding(.horizontal, 12).padding(.vertical, 10)
         }
-        .frame(width: 440, height: 560)
+        .frame(width: 360, height: 460)
         .background(Color(white: 0.11))
-        .task { await load() }
-    }
-
-    private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     @ViewBuilder
     private func commentRow(_ c: MWSectionComment) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            ChannelAvatarView(senderId: c.userId, payloadURL: c.avatarUrl, name: c.authorName ?? "?", size: 28)
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(c.authorName ?? "Someone")
-                        .font(.system(size: 12, weight: .semibold)).foregroundColor(.white)
-                    if let ts = c.createdAt, let d = parseMWDate(ts) {
-                        Text(relativeShort(d)).font(.system(size: 9)).foregroundColor(.secondary)
-                    }
-                    Spacer()
-                    if c.userId == currentUserId {
-                        Button { Task { await delete(c) } } label: {
-                            Image(systemName: "trash").font(.system(size: 9)).foregroundColor(.red.opacity(0.7))
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .top, spacing: 8) {
+                ChannelAvatarView(senderId: c.userId, payloadURL: c.avatarUrl, name: c.authorName ?? "?", size: 22)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(c.authorName ?? "Someone")
+                            .font(.system(size: 11, weight: .semibold)).foregroundColor(.white)
+                        if let ts = c.createdAt, let d = parseMWDate(ts) {
+                            Text(relativeShort(d)).font(.system(size: 9)).foregroundColor(.secondary)
                         }
-                        .buttonStyle(.plain)
-                        .help("Delete comment")
+                        if c.isResolved {
+                            Text("RESOLVED").font(.system(size: 7, weight: .bold)).tracking(0.4)
+                                .foregroundColor(.matcha500)
+                                .padding(.horizontal, 4).padding(.vertical, 1)
+                                .background(Color.matcha500.opacity(0.15)).cornerRadius(3)
+                        }
+                        Spacer()
                     }
+                    if c.isAnchored, let q = c.quotedText, !q.isEmpty {
+                        Button { onJump(c) } label: {
+                            Text("“\(String(q.prefix(80)))”")
+                                .font(.system(size: 10)).italic()
+                                .foregroundColor(.matcha500).lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                        }
+                        .buttonStyle(.plain).help("Jump to this highlight")
+                    }
+                    Text(c.content)
+                        .font(.system(size: 12)).foregroundColor(.white.opacity(0.9))
+                        .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 }
-                Text(c.content)
-                    .font(.system(size: 12)).foregroundColor(.white.opacity(0.9))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+            }
+            HStack(spacing: 12) {
+                Spacer()
+                Button { onResolve(c, !c.isResolved) } label: {
+                    Text(c.isResolved ? "Reopen" : "Resolve")
+                        .font(.system(size: 10, weight: .medium)).foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                if c.userId == currentUserId {
+                    Button { onDelete(c) } label: {
+                        Image(systemName: "trash").font(.system(size: 9)).foregroundColor(.red.opacity(0.7))
+                    }
+                    .buttonStyle(.plain).help("Delete comment")
+                }
             }
         }
     }
@@ -965,41 +1270,26 @@ struct NoteCommentsView: View {
         if secs < 86400 { return "\(secs/3600)h" }
         return "\(secs/86400)d"
     }
+}
 
-    private func load() async {
-        await MainActor.run { loading = true; errorText = nil }
-        do {
-            let list = try await MatchaWorkService.shared.listSectionComments(projectId: projectId, sectionId: section.id)
-            await MainActor.run { comments = list; loading = false }
-        } catch {
-            await MainActor.run { errorText = error.localizedDescription; loading = false }
-        }
-    }
+/// Small reply field for the inline thread popover (own state so typing doesn't
+/// disturb the editor).
+private struct ThreadReplyField: View {
+    var onSend: (String) -> Void
+    @State private var text = ""
 
-    private func send() async {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        await MainActor.run { sending = true; errorText = nil }
-        do {
-            let created = try await MatchaWorkService.shared.addSectionComment(
-                projectId: projectId, sectionId: section.id, content: text
-            )
-            await MainActor.run {
-                comments.append(created)
-                draft = ""
-                sending = false
+    var body: some View {
+        HStack(spacing: 6) {
+            TextField("Reply…", text: $text, axis: .vertical)
+                .textFieldStyle(.plain).font(.system(size: 11)).foregroundColor(.white)
+                .lineLimit(1...3)
+                .padding(6).background(Color.zinc800).cornerRadius(5)
+            let empty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            Button { onSend(text); text = "" } label: {
+                Image(systemName: "paperplane.fill").font(.system(size: 11))
+                    .foregroundColor(empty ? .secondary : .matcha500)
             }
-        } catch {
-            await MainActor.run { errorText = error.localizedDescription; sending = false }
-        }
-    }
-
-    private func delete(_ c: MWSectionComment) async {
-        do {
-            try await MatchaWorkService.shared.deleteSectionComment(projectId: projectId, sectionId: section.id, commentId: c.id)
-            await MainActor.run { comments.removeAll { $0.id == c.id } }
-        } catch {
-            await MainActor.run { errorText = error.localizedDescription }
+            .buttonStyle(.plain).disabled(empty)
         }
     }
 }

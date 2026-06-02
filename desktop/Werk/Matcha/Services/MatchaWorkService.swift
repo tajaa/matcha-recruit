@@ -1468,12 +1468,41 @@ class MatchaWorkService {
         )
     }
 
-    func addSectionComment(projectId: String, sectionId: String, content: String, replyToCommentId: String? = nil) async throws -> MWSectionComment {
-        struct Body: Encodable { let content: String; let reply_to_comment_id: String? }
+    func addSectionComment(
+        projectId: String,
+        sectionId: String,
+        content: String,
+        replyToCommentId: String? = nil,
+        anchorStart: Int? = nil,
+        anchorEnd: Int? = nil,
+        quotedText: String? = nil
+    ) async throws -> MWSectionComment {
+        struct Body: Encodable {
+            let content: String
+            let reply_to_comment_id: String?
+            let anchor_start: Int?
+            let anchor_end: Int?
+            let quoted_text: String?
+        }
         return try await client.request(
             method: "POST",
             path: "\(basePath)/projects/\(projectId)/sections/\(sectionId)/comments",
-            body: Body(content: content, reply_to_comment_id: replyToCommentId)
+            body: Body(
+                content: content,
+                reply_to_comment_id: replyToCommentId,
+                anchor_start: anchorStart,
+                anchor_end: anchorEnd,
+                quoted_text: quotedText
+            )
+        )
+    }
+
+    func resolveSectionComment(projectId: String, sectionId: String, commentId: String, resolved: Bool) async throws -> MWSectionComment {
+        struct Body: Encodable { let resolved: Bool }
+        return try await client.request(
+            method: "PATCH",
+            path: "\(basePath)/projects/\(projectId)/sections/\(sectionId)/comments/\(commentId)/resolve",
+            body: Body(resolved: resolved)
         )
     }
 
