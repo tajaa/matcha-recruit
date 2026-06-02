@@ -9,12 +9,16 @@ enum ViewerMode { case list, graph }
 /// Fixed geometry for the graph gutter. All constants — no GeometryReader, so
 /// `laneX` is safe to call from a `Shape.path(in:)`.
 enum GraphGeom {
-    static let rowH: CGFloat = 44
-    static let avatar: CGFloat = 22
-    static let laneSpacing: CGFloat = 28
-    static let laneInset: CGFloat = 18
+    static let rowH: CGFloat = 52
+    static let avatar: CGFloat = 30
+    static let laneSpacing: CGFloat = 40
+    static let laneInset: CGFloat = 24
 
     /// The history event types that earn a node — "key actions only".
+    /// `column_change` IS a node (a reviewer's whole contribution can be moves —
+    /// dropping them erased that person from the graph), but `graphModel`
+    /// coalesces consecutive same-actor moves into one net transition and drops
+    /// no-op churn, so the board shuffling doesn't drown out everything else.
     static let nodeEvents: Set<String> = [
         "created", "activity", "column_change", "assignee_change",
         "round_started", "subtask_added", "subtask_completed", "review_rejected",
@@ -23,9 +27,9 @@ enum GraphGeom {
     static func laneX(_ i: Int) -> CGFloat { laneInset + CGFloat(i) * laneSpacing }
 
     /// Gutter width grows with lane count but is capped so the action card keeps
-    /// ≥ ~330pt on the sheet's fixed 600pt width.
+    /// a comfortable width on the graph sheet's wider layout.
     static func gutterW(laneCount: Int) -> CGFloat {
-        min(220, laneInset + laneSpacing * CGFloat(max(1, laneCount - 1)) + avatar / 2 + 8)
+        min(280, laneInset + laneSpacing * CGFloat(max(1, laneCount - 1)) + avatar / 2 + 10)
     }
 }
 
@@ -46,6 +50,11 @@ struct GraphNode: Identifiable {
     let laneKey: String
     let event: MWTaskHistoryEntry
     let isSystem: Bool
+    /// Where the ticket sat on the board at this node's time. `moved == true`
+    /// when the column differs from the previous node's, so the badge can read
+    /// as a transition ("Todo → In Progress") instead of a static location.
+    let columnLabel: String?
+    let columnFromLabel: String?
 }
 
 /// The curved "handoff" into this node: from the previous node's lane at the
@@ -98,6 +107,8 @@ struct GraphRow: View {
     let gutterW: CGFloat
     let roundLabel: Int?
     let showExit: Bool
+    /// The most recent real action — "you are here" on the timeline.
+    var isCurrent: Bool = false
 
     private var laneX: CGFloat { GraphGeom.laneX(node.laneIndex) }
     private var isComment: Bool { node.event.eventType == "activity" }
@@ -108,13 +119,22 @@ struct GraphRow: View {
     private var cardTint: Color {
         isComment ? .blue : EventRow.tint(for: node.event.eventType)
     }
+    private var who: String {
+        node.event.actorName?.isEmpty == false ? node.event.actorName! : "Someone"
+    }
     private var cardLabel: String {
-        guard isComment else { return EventRow.describe(node.event) }
-        let body = (node.event.metadata?["body"] ?? "")
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let who = node.event.actorName?.isEmpty == false ? node.event.actorName! : "Someone"
-        return body.isEmpty ? "\(who) commented" : "\(who): \(body)"
+        if isComment {
+            let body = (node.event.metadata?["body"] ?? "")
+                .replacingOccurrences(of: "\n", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return body.isEmpty ? "\(who) commented" : "\(who): \(body)"
+        }
+        // Moves use the COALESCED net transition, not the raw last hop.
+        if node.event.eventType == "column_change", let to = node.columnLabel {
+            if let from = node.columnFromLabel { return "\(who) moved \(from) → \(to)" }
+            return "\(who) moved to \(to)"
+        }
+        return EventRow.describe(node.event)
     }
 
     var body: some View {
@@ -167,7 +187,7 @@ struct GraphRow: View {
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
                 )
-                .overlay(Circle().stroke(Color.appBackground, lineWidth: 1.5))
+                .overlay(Circle().stroke(ringColor, lineWidth: ringWidth))
         } else {
             ChannelAvatarView(
                 senderId: node.laneKey,
@@ -175,9 +195,14 @@ struct GraphRow: View {
                 name: node.event.actorName ?? "",
                 size: GraphGeom.avatar
             )
-            .overlay(Circle().stroke(node.color.opacity(0.9), lineWidth: 1.5))
+            .overlay(Circle().stroke(ringColor, lineWidth: ringWidth))
         }
     }
+
+    private var ringColor: Color {
+        isCurrent ? .matcha500 : (node.isSystem ? .appBackground : node.color.opacity(0.9))
+    }
+    private var ringWidth: CGFloat { isCurrent ? 2.5 : 1.5 }
 
     private var card: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -192,6 +217,16 @@ struct GraphRow: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 0)
+                if isCurrent {
+                    Text("NOW")
+                        .font(.system(size: 8, weight: .bold))
+                        .tracking(0.5)
+                        .foregroundColor(.matcha500)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.matcha500.opacity(0.18))
+                        .cornerRadius(3)
+                }
                 if let roundLabel {
                     Text("R\(roundLabel)")
                         .font(.system(size: 8, weight: .semibold))
@@ -202,15 +237,136 @@ struct GraphRow: View {
                         .cornerRadius(3)
                 }
             }
-            Text(PacificDateFormatter.absolute(node.event.createdAt) ?? node.event.createdAt)
-                .font(.system(size: 9))
-                .foregroundColor(.secondary)
+            HStack(spacing: 6) {
+                Text(PacificDateFormatter.absolute(node.event.createdAt) ?? node.event.createdAt)
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                columnBadge
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.zinc800.opacity(0.45))
         .cornerRadius(6)
+        .padding(.vertical, 3)
+    }
+
+    /// Where the ticket sat on the board at this node's time. A plain muted pill
+    /// for "still here", or an accented "From → To" transition pill the moment
+    /// it moved — so kanban moves stay visible without each being its own node.
+    @ViewBuilder
+    private var columnBadge: some View {
+        // Move nodes already say "moved X → Y" in the label — don't double up.
+        if node.event.eventType != "column_change", let to = node.columnLabel {
+            if let from = node.columnFromLabel {
+                HStack(spacing: 3) {
+                    Text(from)
+                    Image(systemName: "arrow.right").font(.system(size: 7, weight: .bold))
+                    Text(to).fontWeight(.semibold)
+                }
+                .font(.system(size: 8, weight: .medium))
+                .foregroundColor(.matcha500)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(Color.matcha500.opacity(0.15))
+                .cornerRadius(3)
+            } else {
+                Text(to)
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Color.secondary.opacity(0.12))
+                    .cornerRadius(3)
+            }
+        }
+    }
+}
+
+/// A still-open checklist item, drawn as a hollow "future" node in the
+/// assignee's lane — the graph showing remaining work, not just history. The
+/// dashed ring + dashed lead-in read as "to do" against the solid, done past,
+/// so the spine literally continues into what hasn't happened yet.
+struct GhostRow: View {
+    let title: String
+    let assignee: String?
+    let laneIndex: Int
+    let color: Color
+    let laneCount: Int
+    let gutterW: CGFloat
+    /// Lane of the row above (last real node for the first ghost, then the
+    /// ghost lane itself) so the dashed lead-in meets the spine above.
+    let connectFromLane: Int?
+
+    private var laneX: CGFloat { GraphGeom.laneX(laneIndex) }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            gutter
+            card
+        }
+        .frame(minHeight: GraphGeom.rowH, alignment: .top)
+    }
+
+    private var gutter: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(0..<laneCount, id: \.self) { i in
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.10))
+                    .frame(width: 1.5, height: GraphGeom.rowH)
+                    .offset(x: GraphGeom.laneX(i) - 0.75, y: 0)
+            }
+            if let connectFromLane {
+                IncomingEdge(fromX: GraphGeom.laneX(connectFromLane), toX: laneX)
+                    .stroke(color.opacity(0.5),
+                            style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [3, 3]))
+                    .frame(width: gutterW, height: GraphGeom.rowH)
+            }
+            Circle()
+                .fill(Color.appBackground)
+                .overlay(
+                    Circle().strokeBorder(
+                        color.opacity(0.7),
+                        style: StrokeStyle(lineWidth: 1.5, dash: [2.5, 2.5]))
+                )
+                .frame(width: GraphGeom.avatar, height: GraphGeom.avatar)
+                .offset(x: laneX - GraphGeom.avatar / 2,
+                        y: GraphGeom.rowH / 2 - GraphGeom.avatar / 2)
+        }
+        .frame(width: gutterW, height: GraphGeom.rowH, alignment: .topLeading)
+    }
+
+    private var card: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "square.dashed")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .frame(width: 14)
+            Text(title)
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+            if let assignee {
+                Text(assignee)
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Color.secondary.opacity(0.12))
+                    .cornerRadius(3)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(Color.secondary.opacity(0.18),
+                              style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+        )
         .padding(.vertical, 3)
     }
 }

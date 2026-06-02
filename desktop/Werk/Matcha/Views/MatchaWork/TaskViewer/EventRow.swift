@@ -141,7 +141,7 @@ struct EventRow: View {
         }
     }
 
-    private static func columnLabel(_ raw: String) -> String {
+    static func columnLabel(_ raw: String) -> String {
         raw.replacingOccurrences(of: "_", with: " ").capitalized
     }
 }

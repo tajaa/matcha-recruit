@@ -387,7 +387,7 @@ struct TaskViewerSheet: View {
         }
         .padding(16)
         }
-        .frame(width: 600)
+        .frame(width: viewMode == .graph ? 820 : 600)
         .frame(maxHeight: 760)
         .background(Color.appBackground)
         .task {
