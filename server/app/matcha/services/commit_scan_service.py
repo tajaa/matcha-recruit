@@ -249,30 +249,25 @@ async def match_commit_to_subtasks(commit: dict, candidates: list[dict]) -> list
 # Orchestration + persistence
 # ---------------------------------------------------------------------------
 
-async def _load_elements(conn, project_id: UUID) -> list[dict]:
-    rows = await conn.fetch(
-        "SELECT id, repo_paths, repo_branch FROM mw_project_elements WHERE project_id = $1",
-        str(project_id),
-    )
-    return [dict(r) for r in rows]
+async def _load_open_candidates(conn, project_id: UUID, limit: int = 60) -> list[dict]:
+    """ALL open tickets in the project + their current-round open subtasks — the
+    set Gemini matches a commit against. NO element/glob filtering: completion is
+    "read the commit, find the relevant ticket, mark it." (Globs are only for the
+    Elements/Prop *creation* flow, not for completion.)
 
-
-async def _load_candidates(conn, project_id: UUID, element_ids: list[str]) -> list[dict]:
-    """Open tickets on the touched elements + their current-round open subtasks.
-
-    Current round = MAX(round_index) among the task's subtasks (matches the
-    'live' checklist the UI shows). Done subtasks are excluded so an already
-    checked item never resurfaces."""
+    Current round = MAX(round_index) per task (the 'live' checklist). Done subtasks
+    excluded so a checked item never resurfaces. Capped at `limit` newest tickets."""
     task_rows = await conn.fetch(
-        f"""
+        """
         SELECT id, element_id, title
         FROM mw_tasks
         WHERE project_id = $1
-          AND element_id = ANY($2::text[])
           AND status = 'pending'
-          AND board_column = ANY($3::text[])
+          AND board_column = ANY($2::text[])
+        ORDER BY updated_at DESC
+        LIMIT $3
         """,
-        str(project_id), element_ids, list(OPEN_BOARD_COLUMNS),
+        str(project_id), list(OPEN_BOARD_COLUMNS), limit,
     )
     candidates = []
     for t in task_rows:
@@ -299,35 +294,23 @@ async def _load_candidates(conn, project_id: UUID, element_ids: list[str]) -> li
 
 
 async def scan_commits(project_id: UUID, company_id: UUID, commits: list[dict]) -> list[dict]:
-    """Match commits → elements → tickets → subtasks via Gemini, persist pending
-    suggestions idempotently, and return the project's current pending list.
+    """For each recent commit, ask Gemini which of the project's OPEN ticket
+    subtasks it completes — by commit↔ticket relevance (message + diff), not globs.
+    Persists pending suggestions idempotently; returns the project's pending list.
 
     `commits`: [{sha, short_sha, message, branch, changed_files: [str], diff: str}].
-    Tenant `company_id` is supplied by the caller (derived from the project),
-    never trusted from the client."""
+    Tenant `company_id` is supplied by the caller (derived from the project)."""
     commits = (commits or [])[:MAX_COMMITS_PER_SCAN]
 
     async with get_connection() as conn:
-        elements = await _load_elements(conn, project_id)
-        if not elements:
+        # Project-wide candidate set, loaded once (same for every commit this scan).
+        candidates = await _load_open_candidates(conn, project_id)
+        if not candidates:
             return await _list_pending(conn, project_id)
 
-        # Map subtask_id → (task_id, element_id) so we can persist with full FKs.
-        for commit in commits:
-            branch = commit.get("branch")
-            changed = commit.get("changed_files") or []
-            touched = match_changed_files_to_elements(changed, elements, branch)
-            if not touched:
-                continue
-            candidates = await _load_candidates(conn, project_id, list(touched))
-            if not candidates:
-                continue
+        sub_index = {s["subtask_id"]: c for c in candidates for s in c["subtasks"]}
 
-            sub_index = {
-                s["subtask_id"]: c
-                for c in candidates
-                for s in c["subtasks"]
-            }
+        for commit in commits:
             matches = await match_commit_to_subtasks(commit, candidates)
             for m in matches:
                 cand = sub_index.get(m["subtask_id"])
