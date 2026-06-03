@@ -65,6 +65,11 @@ struct SectionEditorView: View {
     @State private var selRange: (Int, Int)? = nil
     @State private var composing = false
     @State private var composeText = ""
+    /// The compose card overlays the NSTextView editor; without explicitly
+    /// driving first responder, the TextField never grabs the keyboard and
+    /// typed text never lands (button stays disabled). Focus it when the card
+    /// opens.
+    @FocusState private var composeFocused: Bool
     /// An opened thread (clicked highlight) + the rect to anchor its popover.
     @State private var openThreadId: String? = nil
     @State private var threadRect: CGRect? = nil
@@ -114,7 +119,8 @@ struct SectionEditorView: View {
             ) {
                 await MainActor.run {
                     comments.append(c)
-                    composeText = ""; composing = false; selRect = nil; selRange = nil
+                    composeText = ""; composing = false; composeFocused = false
+                    selRect = nil; selRange = nil
                 }
             }
         }
@@ -174,10 +180,15 @@ struct SectionEditorView: View {
     }
 
     private func selectionChanged(_ rect: CGRect?, _ a: Int, _ b: Int) {
+        // While the compose card is open, freeze the captured selection — the
+        // editor resigning first responder to the comment field can emit a stray
+        // selection event that would otherwise clear selRange (nothing to anchor)
+        // or flip `composing` off and dismiss the card mid-type.
+        if composing { return }
         if let rect, b > a {
             selRect = rect; selRange = (a, b)
-            composing = false; openThreadId = nil
-        } else if !composing {
+            openThreadId = nil
+        } else {
             selRect = nil; selRange = nil
         }
     }
@@ -245,12 +256,17 @@ struct SectionEditorView: View {
                     .foregroundColor(.secondary).lineLimit(2)
             }
             TextField("Add a comment…", text: $composeText, axis: .vertical)
-                .textFieldStyle(.plain).font(.system(size: 12)).foregroundColor(.white)
+                .textFieldStyle(.plain).font(.system(size: 12))
+                // Tinted distinct from the (white) document text so the comment
+                // reads as a comment, not part of the note.
+                .foregroundColor(.matcha500)
+                .tint(.matcha500)
+                .focused($composeFocused)
                 .lineLimit(1...4)
                 .padding(8).background(Color.zinc800).cornerRadius(6)
             HStack {
                 Spacer()
-                Button("Cancel") { composing = false; selRect = nil; selRange = nil }
+                Button("Cancel") { composing = false; composeFocused = false; selRect = nil; selRange = nil }
                     .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(.secondary)
                 let empty = composeText.trimmingCharacters(in: .whitespaces).isEmpty
                 Button("Comment") { postAnchoredComment() }
@@ -265,6 +281,9 @@ struct SectionEditorView: View {
         .background(Color(white: 0.14)).cornerRadius(8)
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.1), lineWidth: 1))
         .shadow(radius: 8)
+        // Grab the keyboard the moment the card mounts (next runloop tick so the
+        // field is in the hierarchy and AppKit hands over first responder).
+        .onAppear { DispatchQueue.main.async { composeFocused = true } }
     }
 
     @ViewBuilder
