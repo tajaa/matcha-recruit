@@ -115,8 +115,25 @@ struct GraphRow: View {
     var currentStatusLabel: String? = nil
     var currentStatusTint: Color = .matcha500
 
+    @Environment(AppState.self) private var appState
+    /// Tap a node → read its full (untruncated) note/text in a popover, so the
+    /// graph stays usable for people who live in the node view.
+    @State private var showFull = false
+
     private var laneX: CGFloat { GraphGeom.laneX(node.laneIndex) }
     private var isComment: Bool { node.event.eventType == "activity" }
+
+    /// Full, untruncated text for the tap-to-read popover.
+    private var fullBody: String {
+        if isComment {
+            return (node.event.metadata?["body"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return EventRow.describe(node.event)
+    }
+    /// Nodes whose label routinely truncates — worth a "click to read" cue.
+    private var hasReadableBody: Bool {
+        isComment || ["review_rejected", "round_started", "subtask_rejected"].contains(node.event.eventType)
+    }
 
     /// Actor name surfaced on the card so each row says WHO acted, not only the
     /// (sometimes terse) action label. Nil for system events.
@@ -248,10 +265,15 @@ struct GraphRow: View {
                     .frame(width: 14)
                 Text(cardLabel)
                     .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.9))
+                    .foregroundColor(appState.themeText.opacity(0.9))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 0)
+                if hasReadableBody {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
                 if let roundLabel {
                     Text("R\(roundLabel)")
                         .font(.system(size: 8, weight: .semibold))
@@ -266,7 +288,7 @@ struct GraphRow: View {
                 if let who = actorCaption {
                     Text(who)
                         .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.7))
+                        .foregroundColor(appState.themeText.opacity(0.7))
                         .lineLimit(1)
                     Text("·").font(.system(size: 9)).foregroundColor(.secondary)
                 }
@@ -279,13 +301,37 @@ struct GraphRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isCurrent ? currentStatusTint.opacity(0.12) : Color.zinc800.opacity(0.45))
+        .background(isCurrent ? currentStatusTint.opacity(0.12) : appState.themeText.opacity(0.06))
         .overlay(
             isCurrent
                 ? RoundedRectangle(cornerRadius: 6).strokeBorder(currentStatusTint.opacity(0.35), lineWidth: 1)
                 : nil
         )
         .cornerRadius(6)
+        .contentShape(Rectangle())
+        .onTapGesture { showFull = true }
+        .help(hasReadableBody ? "Click to read the full note" : "")
+        .popover(isPresented: $showFull, arrowEdge: .leading) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Text(who).font(.system(size: 11, weight: .semibold)).foregroundColor(appState.themeText)
+                    Text(PacificDateFormatter.absolute(node.event.createdAt) ?? node.event.createdAt)
+                        .font(.system(size: 9)).foregroundColor(.secondary)
+                    Spacer(minLength: 0)
+                }
+                ScrollView {
+                    Text(fullBody.isEmpty ? cardLabel : fullBody)
+                        .font(.system(size: 12))
+                        .foregroundColor(appState.themeText.opacity(0.9))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxHeight: 320)
+            }
+            .padding(12).frame(width: 320)
+            .background(appState.themeCard)
+        }
         .padding(.vertical, 3)
     }
 

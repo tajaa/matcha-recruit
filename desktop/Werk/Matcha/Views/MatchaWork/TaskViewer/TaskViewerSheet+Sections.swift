@@ -420,6 +420,21 @@ extension TaskViewerSheet {
     }
 
     @ViewBuilder
+    /// Heuristic: does this note text read like an actionable to-do? Only nudges
+    /// ("add as subtask?") — never blocks adding a normal note. Imperative verb
+    /// at the start, or "need to / should / todo / checkbox" phrasing.
+    func looksLikeSubtask(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard t.count >= 4 else { return false }
+        if t.contains("need to") || t.contains("should ") || t.hasPrefix("todo")
+            || t.contains("to-do") || t.hasPrefix("- ") || t.hasPrefix("[ ]") { return true }
+        let verbs = ["add ", "implement ", "fix ", "create ", "build ", "write ",
+                     "test ", "update ", "remove ", "refactor ", "verify ", "ensure ",
+                     "make ", "set up ", "handle ", "validate ", "document ",
+                     "investigate ", "check ", "wire ", "hook up ", "review "]
+        return verbs.contains(where: { t.hasPrefix($0) })
+    }
+
     var noteComposer: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let replying = replyingToNote {
@@ -465,6 +480,24 @@ extension TaskViewerSheet {
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSubmitNote || addingNote)
+            }
+
+            // Self-check: people often type an actionable to-do as a note. When
+            // the text reads like a task, offer to capture it as a subtask instead.
+            if looksLikeSubtask(newNote) {
+                HStack(spacing: 6) {
+                    Image(systemName: "checklist").font(.system(size: 9)).foregroundColor(.matcha500)
+                    Text("Looks like a to-do — add it as a subtask instead?")
+                        .font(.system(size: 10)).foregroundColor(appState.themeTextSecondary)
+                    Button("Add as subtask") {
+                        let t = newNote.trimmingCharacters(in: .whitespacesAndNewlines)
+                        Task { await viewModel.addSubtask(taskId: task.id, title: t) }
+                        newNote = ""
+                    }
+                    .buttonStyle(.plain).font(.system(size: 10, weight: .semibold)).foregroundColor(.matcha500)
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 2)
             }
 
             if !pendingAttachments.isEmpty {
