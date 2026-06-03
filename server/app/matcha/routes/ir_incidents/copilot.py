@@ -471,14 +471,19 @@ async def _emit_osha_description_review(conn, incident_id, current_user):
         return None
 
     # Prefill order: prior draft → any existing cleansed value (legacy incidents
-    # cleansed pre-approval) → AI cleanse → structured clinical phrase → blank.
+    # cleansed pre-approval) → AI cleanse → structured clinical phrase. All of
+    # these are name-free, so cleansed=True. If every one comes up empty (AI off
+    # and nothing structured yet), fall back to seeding the editor with the RAW
+    # narrative (cleansed=False) so the box is never blank — the human strips the
+    # names. The raw fallback is display-only; only cleansed drafts are persisted.
     draft = (cd.get("osha_clean_description_draft") or cd.get("osha_clean_description") or "").strip()
+    cleansed = True
     if not draft:
+        row = await conn.fetchrow(
+            "SELECT title, description FROM ir_incidents WHERE id = $1", incident_id
+        )
         try:
             from app.matcha.services.ir_analysis import get_ir_analyzer
-            row = await conn.fetchrow(
-                "SELECT title, description FROM ir_incidents WHERE id = $1", incident_id
-            )
             clean = await get_ir_analyzer().cleanse_description(
                 title=(row["title"] if row else "") or "",
                 description=(row["description"] if row else "") or "",
@@ -490,6 +495,7 @@ async def _emit_osha_description_review(conn, incident_id, current_user):
         if not draft:
             draft = (compose_clinical_description(cd) or "").strip()
         if draft:
+            # genuine name-free draft → persist for re-display and reuse
             await conn.execute(
                 """
                 UPDATE ir_incidents
@@ -504,8 +510,13 @@ async def _emit_osha_description_review(conn, incident_id, current_user):
                 """,
                 incident_id, draft,
             )
+        else:
+            # last resort: seed the raw narrative for the human to rewrite.
+            # NOT persisted (may contain names; never printed until approved).
+            draft = ((row["description"] if row else "") or "").strip()[:2000]
+            cleansed = False
 
-    card = build_osha_clean_description_card(draft)
+    card = build_osha_clean_description_card(draft, cleansed=cleansed)
     inserted = await _emit_chain_card(
         conn, incident_id=incident_id, card=card,
         created_by=current_user.id if current_user else None,

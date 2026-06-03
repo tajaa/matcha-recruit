@@ -1227,24 +1227,41 @@ def build_investigation_notes_card(questions: list[str] | None = None) -> dict:
     }
 
 
-def build_osha_clean_description_card(prefilled: str = "") -> dict:
+def build_osha_clean_description_card(prefilled: str = "", *, cleansed: bool = True) -> dict:
     """Approve-or-edit the name-free OSHA 300 Description (Column F).
 
-    Reuses the text_input card type, prefilled with the AI-cleansed draft (or
-    the structured clinical phrase when AI is unavailable, or blank). The user
-    approves as written or edits first; the submitted text becomes the printed
-    Column F. ``target_field='osha_clean_description'`` routes the answer to the
-    dedicated branch of ``_handle_text_input``. Emitted once per incident, after
+    Reuses the text_input card type, prefilled with the draft. Two modes:
+
+    - ``cleansed=True`` (default): the prefill is an AI name-stripped draft (or
+      the structured clinical phrase) — copy tells the human to approve/edit.
+    - ``cleansed=False``: AI was unavailable, so the prefill is the RAW incident
+      narrative (may contain names) seeded for the human to rewrite — copy tells
+      them to strip names before approving. The raw text is display-only and is
+      NOT persisted as a draft; only the approved submission ever prints.
+
+    The submitted text becomes the printed Column F.
+    ``target_field='osha_clean_description'`` routes the answer to the dedicated
+    branch of ``_handle_text_input``. Emitted once per incident, after
     recordable=yes, before the per-case capture loop.
     """
-    return {
-        "id": "osha_clean_description_review",
-        "title": "Review the OSHA 300 description",
-        "recommendation": (
+    if cleansed:
+        recommendation = (
             "Confirm the injury/illness description for the OSHA 300 log. We "
             "removed every person's name — the 300 log is a posted record. "
             "Approve it as written, or edit the wording first."
-        ),
+        )
+    else:
+        recommendation = (
+            "Rewrite this description for the OSHA 300 log so it names no one "
+            "(e.g. \"John slipped\" → \"An employee slipped\"). We couldn't "
+            "auto-draft a name-free version, so the original text is shown "
+            "below — strip every person's name, then approve. The 300 log is a "
+            "posted record."
+        )
+    return {
+        "id": "osha_clean_description_review",
+        "title": "Review the OSHA 300 description",
+        "recommendation": recommendation,
         "rationale": (
             "Column F is public, so it must name no one (employee, coworker, "
             "patient, or visitor). Real names stay on the confidential incident "

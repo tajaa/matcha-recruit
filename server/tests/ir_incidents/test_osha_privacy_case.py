@@ -341,6 +341,19 @@ def test_build_osha_clean_description_card_shape():
     assert a["prefilled"] == "An employee slipped and fell in the warehouse."
 
 
+def test_build_osha_clean_description_card_raw_fallback_copy():
+    # cleansed=False (AI unavailable) seeds the raw narrative and tells the
+    # human to strip names — distinct copy from the approve-as-written default.
+    from app.matcha.routes.ir_incidents._shared import build_osha_clean_description_card
+    clean = build_osha_clean_description_card("An employee slipped.", cleansed=True)
+    raw = build_osha_clean_description_card("John slipped and fell.", cleansed=False)
+    assert raw["action"]["prefilled"] == "John slipped and fell."
+    # default copy claims names already removed; fallback asks the human to do it
+    assert "removed every person's name" in clean["recommendation"]
+    assert "removed every person's name" not in raw["recommendation"]
+    assert "names no one" in raw["recommendation"] or "strip" in raw["recommendation"].lower()
+
+
 def test_osha_description_approval_writes_and_advances(monkeypatch):
     # Approving the review card writes the canonical osha_clean_description +
     # the osha_description_approved gate, then resumes the per-case loop.
