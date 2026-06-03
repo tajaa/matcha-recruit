@@ -174,6 +174,10 @@ struct KanbanBoardView: View {
         }
         guard let pid = viewModel.project?.id,
               let task = viewModel.tasks.first(where: { $0.id == taskId }) else { return }
+        // Opening = seen everything on the card → also clear the unviewed-updates
+        // ring eagerly (the viewer's loadHistory marks these viewed too, but this
+        // drops the ring the instant the card is opened, not after the fetch).
+        TicketUpdatesStore.shared.markAllViewed(taskId: taskId, eventIds: task.recentEventIds ?? [])
         var baseline = loadLastSeen(pid)
         baseline[taskId] = task.boardColumn
         saveLastSeen(pid, baseline)
@@ -688,12 +692,18 @@ struct KanbanBoardView: View {
                 )
                 // Glide across columns when the replay clears its overrides.
                 .matchedGeometryEffect(id: task.id, in: cardNS)
-                // Yellow ring marks tickets moved/added since the last view;
-                // persists until the user clicks the card to acknowledge it.
+                // Yellow ring marks tickets moved/added OR carrying unviewed
+                // updates (a changes-requested send-back, new round, comment)
+                // since this user last opened them. The column-move diff alone
+                // misses a send-back that round-trips to an already-seen column
+                // or lands live after the board mounted, so also key off the
+                // per-user unviewed-updates count. Persists until the card is
+                // opened (acknowledge + the viewer mark everything viewed).
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .stroke(Color.yellow,
-                                lineWidth: changedIds.contains(task.id) ? 2 : 0)
+                                lineWidth: (changedIds.contains(task.id)
+                                    || TicketUpdatesStore.shared.unviewedCount(task) > 0) ? 2 : 0)
                 )
                 .draggable(task.id)
                 .contextMenu {
