@@ -85,6 +85,36 @@ async def get_snapshot_stats(element_id: str) -> dict:
     }
 
 
+# Contributor/convention docs worth feeding the ticket-draft model so subtasks
+# land on real files and respect the repo's migration/test workflow.
+CONVENTION_BASENAMES = ("CLAUDE.md", "AGENTS.md", "CONTRIBUTING.md")
+
+
+async def fetch_convention_docs(project_id: UUID, char_budget: int = 20_000) -> str:
+    """Concatenated text of the project's synced convention docs (CLAUDE.md etc.),
+    root-first and budget-capped — extra knowledge for `generate_task_draft` so it
+    breaks work down the way THIS codebase is organized. Returns "" when none are
+    synced (graceful no-op). Basename-filtered in SQL so we never pull the whole
+    5MB snapshot just to find a few docs."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT path, content FROM mw_element_repo_files
+            WHERE project_id = $1
+              AND regexp_replace(path, '^.*/', '') = ANY($2::text[])
+            """,
+            str(project_id), list(CONVENTION_BASENAMES),
+        )
+    if not rows:
+        return ""
+    # Root-first: a shallower CLAUDE.md (repo root) sets the cross-cutting rules;
+    # nearer/subtree ones add specifics. Order by depth, then path.
+    docs = sorted(((r["path"], r["content"]) for r in rows),
+                  key=lambda pc: (pc[0].count("/"), pc[0]))
+    text, _ = assemble_context(docs, char_budget)
+    return text
+
+
 async def build_grounding_context(
     element_id: Optional[str],
     project_id: Optional[UUID] = None,

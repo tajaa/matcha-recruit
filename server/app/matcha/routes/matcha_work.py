@@ -4727,6 +4727,15 @@ async def ai_draft_task_endpoint(
     ]
     recent_done = [r["title"] for r in done_rows if r["title"]]
 
+    # Repo conventions (CLAUDE.md etc.) from the synced element snapshot — grounds
+    # the model in this codebase so subtasks reference real files/migrations/tests.
+    # "" when nothing is synced (graceful).
+    from ..services import element_repo_service as repo_svc
+    try:
+        conventions = await repo_svc.fetch_convention_docs(project_id)
+    except Exception:  # noqa: BLE001 — advisory context, never block a draft
+        conventions = ""
+
     try:
         draft = await matcha_work_ai.generate_task_draft(
             prompt=prompt,
@@ -4736,6 +4745,7 @@ async def ai_draft_task_endpoint(
             recent_done=recent_done,
             model_override=(body.get("model") or None),
             company_id=str(project.get("company_id")) if project.get("company_id") else None,
+            conventions=conventions or None,
         )
     except Exception as e:
         logger.warning("AI task draft failed project=%s: %s", project_id, e)
