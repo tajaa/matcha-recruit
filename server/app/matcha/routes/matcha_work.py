@@ -4920,13 +4920,15 @@ async def update_task_subtask_endpoint(
         patch["assigned_to"] = UUID(v) if v else None
 
     # A reviewer denying a completed item (is_done=false + reason) logs a
-    # `subtask_rejected` audit event instead of a plain uncheck.
+    # `subtask_rejected` audit event instead of a plain uncheck. `severity`
+    # (blocker|nit) rides in the same event metadata.
     reason = body.get("reason") if isinstance(body.get("reason"), str) else None
+    severity = body.get("severity") if body.get("severity") in ("blocker", "nit") else None
 
     try:
         row = await st_svc.update_subtask(
             project_id, task_id, subtask_id, patch,
-            actor_user_id=current_user.id, reason=reason,
+            actor_user_id=current_user.id, reason=reason, severity=severity,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

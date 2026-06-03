@@ -11,13 +11,17 @@ struct SubtaskRow: View {
     let onDelete: () -> Void
     let onAssign: (String?) -> Void
     /// When the ticket is in review, a reviewer can DENY a completed item —
-    /// reopen it with a reason (audited as `subtask_rejected`).
+    /// reopen it with a reason + severity (audited as `subtask_rejected`).
     var canReview: Bool = false
-    var onDeny: ((String) -> Void)? = nil
+    var onDeny: ((String, String?) -> Void)? = nil
+    /// Set when this item was added by someone other than the assignee (new
+    /// scope, usually the reviewer) — shows an "added by <name>" chip.
+    var addedByName: String? = nil
     @State private var isHovered = false
     @State private var showingAssign = false
     @State private var showDeny = false
     @State private var denyReason = ""
+    @State private var denySeverity = "blocker"
     @FocusState private var denyFocused: Bool
 
     private var assignee: MWProjectCollaborator? {
@@ -46,6 +50,16 @@ struct SubtaskRow: View {
                         NSPasteboard.general.setString(item.title, forType: .string)
                     }
                 }
+            if let by = addedByName {
+                HStack(spacing: 2) {
+                    Image(systemName: "person.badge.plus").font(.system(size: 7))
+                    Text("added by \(by)").font(.system(size: 8, weight: .medium))
+                }
+                .foregroundColor(.blue)
+                .padding(.horizontal, 4).padding(.vertical, 1)
+                .background(Color.blue.opacity(0.15)).cornerRadius(3)
+                .help("Added during review by \(by) — new scope, not part of your original checklist")
+            }
             Spacer(minLength: 0)
             if canReview && item.isDone, onDeny != nil {
                 denyButton
@@ -84,6 +98,12 @@ struct SubtaskRow: View {
                     .font(.system(size: 11, weight: .semibold)).foregroundColor(.white)
                 Text("\u{201C}\(item.title)\u{201D}")
                     .font(.system(size: 10)).italic().foregroundColor(.secondary).lineLimit(2)
+                Picker("", selection: $denySeverity) {
+                    Text("Blocker").tag("blocker")
+                    Text("Nit").tag("nit")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
                 TextField("Why isn't this actually done?", text: $denyReason, axis: .vertical)
                     .textFieldStyle(.plain).font(.system(size: 12)).foregroundColor(.white)
                     .lineLimit(1...4).padding(8).background(Color.zinc800).cornerRadius(6)
@@ -94,7 +114,7 @@ struct SubtaskRow: View {
                         .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(.secondary)
                     let empty = denyReason.trimmingCharacters(in: .whitespaces).isEmpty
                     Button("Deny") {
-                        onDeny?(denyReason.trimmingCharacters(in: .whitespacesAndNewlines))
+                        onDeny?(denyReason.trimmingCharacters(in: .whitespacesAndNewlines), denySeverity)
                         showDeny = false; denyReason = ""
                     }
                     .buttonStyle(.plain).font(.system(size: 11, weight: .semibold))

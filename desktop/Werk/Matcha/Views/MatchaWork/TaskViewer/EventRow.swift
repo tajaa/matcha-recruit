@@ -136,7 +136,9 @@ struct EventRow: View {
         case "subtask_rejected":
             let title = (e.metadata?["title"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let reason = (e.metadata?["reason"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let head = title.isEmpty ? "\(who) denied a checklist item" : "\(who) denied: \u{201C}\(title)\u{201D}"
+            let sev = (e.metadata?["severity"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let tag = sev.isEmpty ? "" : " (\(sev))"
+            let head = title.isEmpty ? "\(who) denied a checklist item\(tag)" : "\(who) denied\(tag): \u{201C}\(title)\u{201D}"
             return reason.isEmpty ? head : "\(head) — \(reason)"
         case "subtask_uncompleted":
             let title = (e.metadata?["title"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)

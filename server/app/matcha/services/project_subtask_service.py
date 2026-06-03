@@ -140,6 +140,7 @@ async def update_subtask(
     *,
     actor_user_id: Optional[UUID] = None,
     reason: Optional[str] = None,
+    severity: Optional[str] = None,
 ) -> Optional[dict]:
     """Partial update of one checklist item: is_done (stamps/clears completed_at),
     title, position, assigned_to. Returns the updated row or None if the subtask
@@ -224,6 +225,8 @@ async def update_subtask(
                     "subtask_id": str(row["id"]),
                     "reason": clean_reason[:500],
                 }
+                if severity in ("blocker", "nit"):
+                    meta["severity"] = severity
             else:
                 event_type = "subtask_completed" if is_done else "subtask_uncompleted"
                 meta = {"title": row["title"], "subtask_id": str(row["id"])}

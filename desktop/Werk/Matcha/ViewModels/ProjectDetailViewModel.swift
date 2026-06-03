@@ -1014,7 +1014,7 @@ class ProjectDetailViewModel {
 
     /// Reviewer denies a completed checklist item with a reason: reopen it +
     /// log a `subtask_rejected` audit event. Optimistic uncheck.
-    func denySubtask(taskId: String, subtaskId: String, reason: String) async {
+    func denySubtask(taskId: String, subtaskId: String, reason: String, severity: String?) async {
         guard let pid = project?.id else { return }
         await MainActor.run {
             if var list = taskSubtasks[taskId],
@@ -1028,7 +1028,7 @@ class ProjectDetailViewModel {
         }
         do {
             let updated = try await service.denySubtask(
-                projectId: pid, taskId: taskId, subtaskId: subtaskId, reason: reason
+                projectId: pid, taskId: taskId, subtaskId: subtaskId, reason: reason, severity: severity
             )
             await MainActor.run {
                 if var list = taskSubtasks[taskId],

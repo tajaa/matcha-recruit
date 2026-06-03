@@ -51,10 +51,10 @@ extension TaskViewerSheet {
     // MARK: - In-review audit
 
     /// Items the reviewer denied this cycle and that are still open: the latest
-    /// `subtask_rejected` reason per not-done subtask. Drives the audit list in
-    /// the changes-requested (NEEDS WORK) section. `createdAt` is ISO8601, so a
-    /// lexical compare is chronological.
-    var reviewDenials: [(title: String, reason: String)] {
+    /// `subtask_rejected` reason + severity per not-done subtask. Drives the audit
+    /// list in the changes-requested (NEEDS WORK) section. `createdAt` is ISO8601,
+    /// so a lexical compare is chronological.
+    var reviewDenials: [(title: String, reason: String, severity: String)] {
         let openIds = Set(subtasks.filter { !$0.isDone }.map { $0.id })
         var latest: [String: MWTaskHistoryEntry] = [:]
         for e in history where e.eventType == "subtask_rejected" {
@@ -64,7 +64,99 @@ extension TaskViewerSheet {
         }
         return latest.values
             .sorted { $0.createdAt < $1.createdAt }
-            .map { (title: $0.metadata?["title"] ?? "Item", reason: $0.metadata?["reason"] ?? "") }
+            .map { (title: $0.metadata?["title"] ?? "Item",
+                    reason: $0.metadata?["reason"] ?? "",
+                    severity: $0.metadata?["severity"] ?? "") }
+    }
+
+    /// "N blocker(s) · M nit(s)" for the denial header, or nil when no severities.
+    var denialSeverityCounts: String? {
+        let b = reviewDenials.filter { $0.severity == "blocker" }.count
+        let n = reviewDenials.filter { $0.severity == "nit" }.count
+        guard b > 0 || n > 0 else { return nil }
+        var parts: [String] = []
+        if b > 0 { parts.append("\(b) blocker\(b == 1 ? "" : "s")") }
+        if n > 0 { parts.append("\(n) nit\(n == 1 ? "" : "s")") }
+        return parts.joined(separator: " · ")
+    }
+
+    // MARK: - Reviewer-added scope (#7)
+
+    /// Name to tag a checklist item with when someone OTHER than the assignee
+    /// added it in the current round (new scope, usually the reviewer). Nil when
+    /// the item is the assignee's own / from an earlier round / no assignee.
+    func addedByReviewerName(_ item: MWSubtask) -> String? {
+        guard let assignee = task.assignedTo,
+              let by = item.createdBy, by != assignee,
+              item.roundIndex == currentRound else { return nil }
+        return viewModel.collaborators.first(where: { $0.userId == by })?.name
+    }
+
+    // MARK: - Review delta (#5)
+
+    /// What changed in the current round — only meaningful on a re-review
+    /// (currentRound > 1). All derived from already-loaded state.
+    var reviewDelta: (completed: [String], comments: Int, commits: [String]) {
+        let completed = history
+            .filter { $0.eventType == "subtask_completed"
+                && roundIndex(forCreatedAt: $0.createdAt) == currentRound }
+            .compactMap { $0.metadata?["title"] }
+        let comments = history.filter {
+            $0.eventType == "activity"
+            && roundIndex(forCreatedAt: $0.createdAt) == currentRound
+        }.count
+        let commits = viewModel.commitCompletions.values
+            .filter { roundIndex(forCreatedAt: $0.createdAt) == currentRound }
+            .compactMap { $0.commitShortSha }
+        return (completed, comments, Array(Set(commits)).sorted())
+    }
+
+    /// "Since last review" — surfaces the round's deltas at the top so a reviewer
+    /// re-reviews only what changed. Shown in review when currentRound > 1.
+    @ViewBuilder
+    var reviewDeltaSection: some View {
+        let d = reviewDelta
+        if task.boardColumn == "review", currentRound > 1,
+           !d.completed.isEmpty || d.comments > 0 || !d.commits.isEmpty {
+            HStack(alignment: .top, spacing: 8) {
+                RoundedRectangle(cornerRadius: 1).fill(Color.matcha500.opacity(0.7)).frame(width: 2)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("SINCE LAST REVIEW")
+                        .font(.system(size: 9, weight: .semibold)).tracking(0.5)
+                        .foregroundColor(.matcha500)
+                    ForEach(d.completed.prefix(6), id: \.self) { t in
+                        HStack(spacing: 5) {
+                            Image(systemName: "checkmark.circle.fill").font(.system(size: 8)).foregroundColor(.matcha500)
+                            Text(t).font(.system(size: 11)).foregroundColor(.white.opacity(0.8)).lineLimit(1)
+                        }
+                    }
+                    HStack(spacing: 10) {
+                        if d.comments > 0 {
+                            Label("\(d.comments) new comment\(d.comments == 1 ? "" : "s")", systemImage: "bubble.left")
+                                .font(.system(size: 10)).foregroundColor(.secondary)
+                        }
+                        if !d.commits.isEmpty {
+                            Label(d.commits.joined(separator: ", "), systemImage: "arrow.triangle.branch")
+                                .font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // MARK: - Time in review (#9b)
+
+    /// Whole days the ticket has sat in review (from its last move). Nil when not
+    /// in review or the timestamp doesn't parse.
+    var daysInReview: Int? {
+        guard task.boardColumn == "review", let moved = task.lastMovedAt else { return nil }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let d = iso.date(from: moved) ?? ISO8601DateFormatter().date(from: moved) else { return nil }
+        return Calendar.current.dateComponents([.day], from: d, to: Date()).day
     }
 
     // MARK: - "You are here" state banner
@@ -127,6 +219,15 @@ extension TaskViewerSheet {
                 }
             }
             Spacer()
+            // Time-in-review nudge — orange once it's been sitting ~3+ days.
+            if let days = daysInReview {
+                HStack(spacing: 2) {
+                    Image(systemName: "clock").font(.system(size: 8))
+                    Text(days <= 0 ? "In review today" : "In review \(days)d")
+                        .font(.system(size: 9, weight: .medium))
+                }
+                .foregroundColor(days >= 3 ? .orange : .secondary)
+            }
             // Round number comes from the subtasks (currentRound), not the
             // history feed — so it shows the moment the ticket opens, without
             // forcing the now-lazy history fetch.
@@ -540,9 +641,10 @@ extension TaskViewerSheet {
                         },
                         // In review, the reviewer can deny a completed item.
                         canReview: task.boardColumn == "review",
-                        onDeny: { reason in
-                            Task { await viewModel.denySubtask(taskId: task.id, subtaskId: item.id, reason: reason) }
-                        }
+                        onDeny: { reason, severity in
+                            Task { await viewModel.denySubtask(taskId: task.id, subtaskId: item.id, reason: reason, severity: severity) }
+                        },
+                        addedByName: addedByReviewerName(item)
                     )
                     // Commit-driven completion suggestions — only for items not
                     // yet checked (a done item needs no suggestion).

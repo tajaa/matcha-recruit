@@ -1665,13 +1665,13 @@ class MatchaWorkService {
     /// Reviewer denies a completed checklist item: reopen it (is_done=false) with
     /// a reason → server logs a `subtask_rejected` audit event and rolls the item
     /// into the next round on send-back.
-    func denySubtask(projectId: String, taskId: String, subtaskId: String, reason: String) async throws -> MWSubtask {
-        struct Req: Encodable { let is_done: Bool; let reason: String }
+    func denySubtask(projectId: String, taskId: String, subtaskId: String, reason: String, severity: String?) async throws -> MWSubtask {
+        struct Req: Encodable { let is_done: Bool; let reason: String; let severity: String? }
         defer { invalidateProjectTasks(projectId: projectId) }
         return try await client.request(
             method: "PATCH",
             path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/subtasks/\(subtaskId)",
-            body: Req(is_done: false, reason: reason)
+            body: Req(is_done: false, reason: reason, severity: severity)
         )
     }
 

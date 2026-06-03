@@ -265,6 +265,9 @@ struct TaskViewerSheet: View {
             // to reason from column chips + history to figure it out.
             stateBanner
 
+            // On a re-review, surface only what changed this round.
+            reviewDeltaSection
+
             if let note = task.reviewNote?.trimmingCharacters(in: .whitespacesAndNewlines),
                !note.isEmpty,
                task.boardColumn == "changes_requested" || task.boardColumn == "in_progress"
@@ -286,13 +289,27 @@ struct TaskViewerSheet: View {
                             .font(.system(size: 12))
                             .foregroundColor(.white.opacity(0.9))
                             .textSelection(.enabled)
+                        // Severity tally for the denials this cycle.
+                        if let counts = denialSeverityCounts {
+                            Text(counts)
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.6))
+                        }
                         // In-review audit: the specific items the reviewer denied
-                        // this cycle (still open), each with its reason.
+                        // this cycle (still open), each with its severity + reason.
                         ForEach(Array(reviewDenials.enumerated()), id: \.offset) { _, d in
                             HStack(alignment: .top, spacing: 5) {
                                 Image(systemName: "xmark.square.fill")
                                     .font(.system(size: 9))
                                     .foregroundColor(.orange.opacity(0.9))
+                                if !d.severity.isEmpty {
+                                    Text(d.severity.uppercased())
+                                        .font(.system(size: 7, weight: .bold)).tracking(0.3)
+                                        .foregroundColor(d.severity == "blocker" ? .red : .secondary)
+                                        .padding(.horizontal, 3).padding(.vertical, 1)
+                                        .background((d.severity == "blocker" ? Color.red : Color.secondary).opacity(0.15))
+                                        .cornerRadius(2)
+                                }
                                 Text("\(d.title)\(d.reason.isEmpty ? "" : " — \(d.reason)")")
                                     .font(.system(size: 11))
                                     .foregroundColor(.white.opacity(0.75))
