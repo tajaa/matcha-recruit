@@ -1308,6 +1308,9 @@ class ProjectDetailViewModel {
                 regroupSuggestions(r.suggestions)
                 lastScanSummary = "\(r.scanned) commit\(r.scanned == 1 ? "" : "s") · \(r.suggestions.count) suggestion\(r.suggestions.count == 1 ? "" : "s")"
             }
+            // High-confidence matches auto-check subtasks server-side — refresh
+            // task aggregates so card progress (X/Y) reflects them.
+            if r.scanned > 0 { await loadTasks() }
         } catch {
             await MainActor.run { isScanningCommits = false; errorMessage = error.localizedDescription }
         }
@@ -1332,6 +1335,8 @@ class ProjectDetailViewModel {
                     lastScanSummary = "\(r.scanned) commit\(r.scanned == 1 ? "" : "s") · \(r.suggestions.count) suggestion\(r.suggestions.count == 1 ? "" : "s")"
                 }
             }
+            // Reflect any server-side auto-checks (high-confidence matches).
+            if r.scanned > 0 { await loadTasks() }
         } catch {
             await MainActor.run { isScanningCommits = false }  // silent on auto
         }

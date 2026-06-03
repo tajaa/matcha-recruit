@@ -5348,7 +5348,9 @@ async def github_scan_commits_endpoint(
         )
     except gh_svc.GitHubError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    suggestions = await cs_svc.scan_commits(project_id, company_id, commits)
+    suggestions = await cs_svc.scan_commits(
+        project_id, company_id, commits, actor_user_id=current_user.id,
+    )
     if newest_sha:
         async with get_connection() as conn:
             await conn.execute(

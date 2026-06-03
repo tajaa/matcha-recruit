@@ -36,8 +36,13 @@ logger = logging.getLogger(__name__)
 # ticket shouldn't sprout new subtask suggestions.
 OPEN_BOARD_COLUMNS = ("todo", "in_progress", "changes_requested", "review")
 
-# Below this, the model isn't confident enough to bother the user with a chip.
+# Below this, the model isn't confident enough to bother the user at all.
 CONFIDENCE_THRESHOLD = 0.55
+
+# At/above this the match is confident enough to AUTO-check the subtask (flip
+# is_done, history-logged) with no review chip. Between CONFIDENCE_THRESHOLD and
+# this, surface a one-tap suggestion chip instead. (Hybrid resolution.)
+AUTO_COMPLETE_THRESHOLD = 0.85
 
 # Flash-lite: cheapest/fastest tier — these run per-commit and should be cheap.
 FLASH_LITE_MODEL = "gemini-3.1-flash-lite"
@@ -256,7 +261,19 @@ async def _load_open_candidates(conn, project_id: UUID, limit: int = 60) -> list
     Elements/Prop *creation* flow, not for completion.)
 
     Current round = MAX(round_index) per task (the 'live' checklist). Done subtasks
-    excluded so a checked item never resurfaces. Capped at `limit` newest tickets."""
+    excluded so a checked item never resurfaces. Capped at `limit` newest tickets.
+
+    Subtasks that already carry a PENDING suggestion are also dropped: once a
+    medium-confidence match has surfaced a chip we don't re-ask Gemini about that
+    subtask on every later scan/webhook — that was the chip-spam + wasted-calls
+    the user hit. (Auto-completed subtasks are is_done and excluded already.)"""
+    pending_rows = await conn.fetch(
+        "SELECT DISTINCT subtask_id FROM mw_commit_subtask_suggestions "
+        "WHERE project_id = $1 AND status = 'pending'",
+        str(project_id),
+    )
+    already_pending = {str(r["subtask_id"]) for r in pending_rows}
+
     task_rows = await conn.fetch(
         """
         SELECT id, element_id, title
@@ -282,64 +299,140 @@ async def _load_open_candidates(conn, project_id: UUID, limit: int = 60) -> list
             """,
             t["id"],
         )
-        if not sub_rows:
+        subs = [
+            {"subtask_id": str(s["id"]), "title": s["title"]}
+            for s in sub_rows
+            if str(s["id"]) not in already_pending
+        ]
+        if not subs:
             continue
         candidates.append({
             "task_id": t["id"],
             "element_id": t["element_id"],
             "ticket_title": t["title"],
-            "subtasks": [{"subtask_id": str(s["id"]), "title": s["title"]} for s in sub_rows],
+            "subtasks": subs,
         })
     return candidates
 
 
-async def scan_commits(project_id: UUID, company_id: UUID, commits: list[dict]) -> list[dict]:
+async def scan_commits(
+    project_id: UUID, company_id: UUID, commits: list[dict],
+    *, actor_user_id: Optional[UUID] = None,
+) -> list[dict]:
     """For each recent commit, ask Gemini which of the project's OPEN ticket
-    subtasks it completes — by commit↔ticket relevance (message + diff), not globs.
-    Persists pending suggestions idempotently; returns the project's pending list.
+    subtasks it completes (commit↔ticket relevance — message + diff, not globs),
+    resolving each match by confidence (hybrid):
+
+      • >= AUTO_COMPLETE_THRESHOLD → auto-check: flip is_done via the
+        history-logged subtask service + record an 'accepted' audit row. No chip.
+      • CONFIDENCE_THRESHOLD .. AUTO_COMPLETE_THRESHOLD → one pending review chip.
+
+    A subtask is claimed at most once per scan (earliest commit wins) and
+    already-pending subtasks are excluded up front (see `_load_open_candidates`),
+    so we never re-run Gemini on the same unchecked subtask. Returns the project's
+    (collapsed) pending list.
 
     `commits`: [{sha, short_sha, message, branch, changed_files: [str], diff: str}].
-    Tenant `company_id` is supplied by the caller (derived from the project)."""
+    `company_id` is the caller-derived tenant. `actor_user_id` is whoever
+    triggered the scan (None for the push webhook → auto-completions log as a
+    system actor)."""
     commits = (commits or [])[:MAX_COMMITS_PER_SCAN]
+    auto_done: list[tuple] = []  # (task_id, subtask_id) → flip is_done after the scan conn closes
 
     async with get_connection() as conn:
-        # Project-wide candidate set, loaded once (same for every commit this scan).
         candidates = await _load_open_candidates(conn, project_id)
         if not candidates:
             return await _list_pending(conn, project_id)
 
         sub_index = {s["subtask_id"]: c for c in candidates for s in c["subtasks"]}
+        claimed: set[str] = set()
 
         for commit in commits:
-            matches = await match_commit_to_subtasks(commit, candidates)
-            for m in matches:
-                cand = sub_index.get(m["subtask_id"])
-                if not cand:
-                    continue
-                await conn.execute(
-                    """
-                    INSERT INTO mw_commit_subtask_suggestions
-                        (company_id, project_id, task_id, subtask_id, element_id,
-                         commit_sha, commit_short_sha, commit_message, confidence, reasoning)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                    ON CONFLICT (subtask_id, commit_sha) DO NOTHING
-                    """,
-                    str(company_id), str(project_id), cand["task_id"], m["subtask_id"],
-                    cand["element_id"], commit.get("sha"), commit.get("short_sha"),
-                    (commit.get("message") or "")[:1000], m["confidence"], m["reasoning"],
-                )
+            # Only ask about subtasks not already claimed this scan — the prompt
+            # shrinks as subtasks get taken, and we stop once nothing's left.
+            live = []
+            for c in candidates:
+                subs = [s for s in c["subtasks"] if s["subtask_id"] not in claimed]
+                if subs:
+                    live.append({**c, "subtasks": subs})
+            if not live:
+                break
 
+            matches = await match_commit_to_subtasks(commit, live)
+            for m in matches:
+                sid = m["subtask_id"]
+                cand = sub_index.get(sid)
+                if not cand or sid in claimed:
+                    continue
+                claimed.add(sid)
+                if m["confidence"] >= AUTO_COMPLETE_THRESHOLD:
+                    # High confidence → auto-check. Record an 'accepted' audit row
+                    # (only 'pending' rows render as chips) and queue the flip.
+                    await conn.execute(
+                        """
+                        INSERT INTO mw_commit_subtask_suggestions
+                            (company_id, project_id, task_id, subtask_id, element_id,
+                             commit_sha, commit_short_sha, commit_message, confidence,
+                             reasoning, status, resolved_at, resolved_by)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'accepted',now(),$11)
+                        ON CONFLICT (subtask_id, commit_sha) DO NOTHING
+                        """,
+                        str(company_id), str(project_id), cand["task_id"], sid,
+                        cand["element_id"], commit.get("sha"), commit.get("short_sha"),
+                        (commit.get("message") or "")[:1000], m["confidence"],
+                        m["reasoning"], str(actor_user_id) if actor_user_id else None,
+                    )
+                    auto_done.append((cand["task_id"], sid))
+                else:
+                    # Medium confidence → one-tap review chip.
+                    await conn.execute(
+                        """
+                        INSERT INTO mw_commit_subtask_suggestions
+                            (company_id, project_id, task_id, subtask_id, element_id,
+                             commit_sha, commit_short_sha, commit_message, confidence, reasoning)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                        ON CONFLICT (subtask_id, commit_sha) DO NOTHING
+                        """,
+                        str(company_id), str(project_id), cand["task_id"], sid,
+                        cand["element_id"], commit.get("sha"), commit.get("short_sha"),
+                        (commit.get("message") or "")[:1000], m["confidence"], m["reasoning"],
+                    )
+
+    # Flip is_done OUTSIDE the scan connection — the subtask service opens its own
+    # and logs subtask_completed to mw_task_history. Best-effort per subtask so a
+    # single failure never sinks the scan.
+    if auto_done:
+        from . import project_subtask_service as subtask_svc
+        for task_id, sid in auto_done:
+            try:
+                tid = task_id if isinstance(task_id, UUID) else UUID(str(task_id))
+                await subtask_svc.update_subtask(
+                    project_id, tid, UUID(sid), {"is_done": True},
+                    actor_user_id=actor_user_id,
+                )
+            except Exception as e:  # noqa: BLE001 — never fail a scan on auto-complete
+                logger.warning("commit_scan: auto-complete failed subtask=%s: %s", sid, e)
+
+    async with get_connection() as conn:
         return await _list_pending(conn, project_id)
 
 
 async def _list_pending(conn, project_id: UUID, task_id: Optional[UUID] = None) -> list[dict]:
+    # At most ONE chip per subtask — the highest-confidence pending suggestion
+    # (newest on a tie). DISTINCT ON collapses any residual dupes already stored
+    # from before the one-suggestion-per-subtask rule, then we re-sort newest-first
+    # for the list order the desktop expects.
     if task_id is not None:
         rows = await conn.fetch(
             """
-            SELECT id, task_id, subtask_id, element_id, commit_sha, commit_short_sha,
-                   commit_message, confidence, reasoning, status, created_at
-            FROM mw_commit_subtask_suggestions
-            WHERE project_id = $1 AND task_id = $2 AND status = 'pending'
+            SELECT * FROM (
+                SELECT DISTINCT ON (subtask_id)
+                       id, task_id, subtask_id, element_id, commit_sha, commit_short_sha,
+                       commit_message, confidence, reasoning, status, created_at
+                FROM mw_commit_subtask_suggestions
+                WHERE project_id = $1 AND task_id = $2 AND status = 'pending'
+                ORDER BY subtask_id, confidence DESC, created_at DESC
+            ) s
             ORDER BY created_at DESC
             """,
             str(project_id), task_id,
@@ -347,10 +440,14 @@ async def _list_pending(conn, project_id: UUID, task_id: Optional[UUID] = None) 
     else:
         rows = await conn.fetch(
             """
-            SELECT id, task_id, subtask_id, element_id, commit_sha, commit_short_sha,
-                   commit_message, confidence, reasoning, status, created_at
-            FROM mw_commit_subtask_suggestions
-            WHERE project_id = $1 AND status = 'pending'
+            SELECT * FROM (
+                SELECT DISTINCT ON (subtask_id)
+                       id, task_id, subtask_id, element_id, commit_sha, commit_short_sha,
+                       commit_message, confidence, reasoning, status, created_at
+                FROM mw_commit_subtask_suggestions
+                WHERE project_id = $1 AND status = 'pending'
+                ORDER BY subtask_id, confidence DESC, created_at DESC
+            ) s
             ORDER BY created_at DESC
             """,
             str(project_id),
