@@ -116,8 +116,8 @@ const missingLabel: Record<string, string> = {
 
 export function OshaLogsPanel() {
   const navigate = useNavigate()
-  const { hasRole } = useMe()
-  const canRevealNames = hasRole('admin') || hasRole('client')
+  const { me } = useMe()
+  const canRevealNames = me?.user?.role === 'admin' || me?.user?.role === 'client'
   const currentYear = new Date().getFullYear()
   const [year, setYear] = useState(currentYear)
   const [locations, setLocations] = useState<BusinessLocation[]>([])
