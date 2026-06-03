@@ -543,36 +543,11 @@ async def _auto_classify_incident_task(
         except Exception:
             logger.exception(f"[IR] privacy-signal extraction crashed for {incident_id}")
 
-        # Name-stripped OSHA Description (Column F). Rewrites the narrative with
-        # every human name removed so the public 300/301 log carries no patient
-        # or third-party name. Best-effort: on failure the export falls back to
-        # the structured clinical phrase (still name-free) — never the raw text.
-        try:
-            clean = await analyzer.cleanse_description(
-                title=row["title"] or "",
-                description=row["description"] or "",
-            )
-            if clean:
-                async with get_connection() as conn:
-                    await conn.execute(
-                        """
-                        UPDATE ir_incidents
-                        SET category_data = jsonb_set(
-                            COALESCE(category_data, '{}'::jsonb),
-                            '{osha_clean_description}',
-                            to_jsonb($2::text),
-                            true
-                        ),
-                        updated_at = NOW()
-                        WHERE id = $1
-                        """,
-                        incident_id,
-                        clean,
-                    )
-        except IRAnalysisError as e:
-            logger.warning(f"[IR] description cleanse failed for {incident_id}: {e}")
-        except Exception:
-            logger.exception(f"[IR] description cleanse crashed for {incident_id}")
+        # NOTE: the OSHA Description (Column F) name-cleanse is NOT run here.
+        # It moved to the recordable workflow — only incidents marked OSHA
+        # recordable reach the 300 log, so the cleanse is generated then and
+        # shown to the human for approval/edit before it prints
+        # (build_osha_clean_description_card + copilot._emit_osha_description_review).
 
     except Exception:
         logger.exception(f"[IR] auto-classify task crashed for {incident_id}")
@@ -1248,6 +1223,43 @@ def build_investigation_notes_card(questions: list[str] | None = None) -> dict:
             "prompt_text": "Investigation findings",
             "input_label": "Findings",
             "input_rows": 5,
+        },
+    }
+
+
+def build_osha_clean_description_card(prefilled: str = "") -> dict:
+    """Approve-or-edit the name-free OSHA 300 Description (Column F).
+
+    Reuses the text_input card type, prefilled with the AI-cleansed draft (or
+    the structured clinical phrase when AI is unavailable, or blank). The user
+    approves as written or edits first; the submitted text becomes the printed
+    Column F. ``target_field='osha_clean_description'`` routes the answer to the
+    dedicated branch of ``_handle_text_input``. Emitted once per incident, after
+    recordable=yes, before the per-case capture loop.
+    """
+    return {
+        "id": "osha_clean_description_review",
+        "title": "Review the OSHA 300 description",
+        "recommendation": (
+            "Confirm the injury/illness description for the OSHA 300 log. We "
+            "removed every person's name — the 300 log is a posted record. "
+            "Approve it as written, or edit the wording first."
+        ),
+        "rationale": (
+            "Column F is public, so it must name no one (employee, coworker, "
+            "patient, or visitor). Real names stay on the confidential incident "
+            "record. Only the text you approve here prints to the log."
+        ),
+        "priority": "high",
+        "blockers": [],
+        "action": {
+            "type": "text_input",
+            "label": "Approve",
+            "target_field": "osha_clean_description",
+            "prompt_text": "OSHA 300 description (no names)",
+            "input_label": "Description",
+            "input_rows": 4,
+            "prefilled": prefilled or "",
         },
     }
 

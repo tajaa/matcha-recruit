@@ -40,6 +40,7 @@ from ._shared import (
     _sse,
     _utc_now_naive,
     build_log_root_cause_query_card,
+    build_osha_clean_description_card,
     build_osha_days_count_card,
     build_osha_days_type_query_card,
     build_osha_injury_type_query_card,
@@ -53,6 +54,7 @@ from ._shared import (
     PRIVACY_CASE_REASONS,
     PRIVACY_CASE_REASON_LABELS,
 )
+from app.core.services.osha_privacy import compose_clinical_description
 
 logger = logging.getLogger(__name__)
 
@@ -416,7 +418,7 @@ async def ensure_case_chain(conn, incident_id, current_user) -> None:
         WHERE incident_id = $1
           AND message_type = 'card'
           AND (
-            metadata->'card'->>'id' IN ('osha_days_type_query', 'osha_injury_type_query', 'privacy_case_query')
+            metadata->'card'->>'id' IN ('osha_clean_description_review', 'osha_days_type_query', 'osha_injury_type_query', 'privacy_case_query')
             OR metadata->'card'->>'id' LIKE 'osha_days_count%'
           )
           AND COALESCE((metadata->>'accepted')::boolean, FALSE) = FALSE
@@ -426,6 +428,10 @@ async def ensure_case_chain(conn, incident_id, current_user) -> None:
     )
     if pending:
         return
+    # Human-approve the name-free Column F description first; the per-case loop
+    # (days/injury/privacy) resumes only after approval.
+    if await _emit_osha_description_review(conn, incident_id, current_user) is not None:
+        return
     card = await next_case_step(conn, incident_id)
     if card is None:
         return
@@ -433,6 +439,76 @@ async def ensure_case_chain(conn, incident_id, current_user) -> None:
         conn, incident_id=incident_id, card=card,
         created_by=current_user.id if current_user else None,
     )
+
+
+async def _emit_osha_description_review(conn, incident_id, current_user):
+    """Generate + emit the name-free OSHA Description (Column F) review card.
+
+    Returns ``(card, message_id)`` when a review card is emitted, else ``None``
+    (already approved, or one is already pending). Builds the prefilled DRAFT
+    best-effort — prior draft → AI ``cleanse_description`` → structured clinical
+    phrase → blank — and stores it under ``category_data.osha_clean_description_draft``
+    (a separate key, so the unapproved draft never reaches the log). The canonical
+    ``osha_clean_description`` is written only when the human approves the card.
+    """
+    cd = _safe_json_loads(
+        await conn.fetchval("SELECT category_data FROM ir_incidents WHERE id = $1", incident_id), {}
+    ) or {}
+    if cd.get("osha_description_approved") is True:
+        return None
+    already = await conn.fetchval(
+        """
+        SELECT 1 FROM ir_incident_ai_messages
+        WHERE incident_id = $1
+          AND message_type = 'card'
+          AND metadata->'card'->>'id' = 'osha_clean_description_review'
+          AND COALESCE((metadata->>'accepted')::boolean, FALSE) = FALSE
+        LIMIT 1
+        """,
+        incident_id,
+    )
+    if already:
+        return None
+
+    draft = (cd.get("osha_clean_description_draft") or "").strip()
+    if not draft:
+        try:
+            from app.matcha.services.ir_analysis import get_ir_analyzer
+            row = await conn.fetchrow(
+                "SELECT title, description FROM ir_incidents WHERE id = $1", incident_id
+            )
+            clean = await get_ir_analyzer().cleanse_description(
+                title=(row["title"] if row else "") or "",
+                description=(row["description"] if row else "") or "",
+            )
+            draft = (clean or "").strip()
+        except Exception:
+            logger.exception(f"[IR] osha description cleanse (review) failed for {incident_id}")
+            draft = ""
+        if not draft:
+            draft = (compose_clinical_description(cd) or "").strip()
+        if draft:
+            await conn.execute(
+                """
+                UPDATE ir_incidents
+                SET category_data = jsonb_set(
+                    COALESCE(category_data, '{}'::jsonb),
+                    '{osha_clean_description_draft}',
+                    to_jsonb($2::text),
+                    true
+                ),
+                updated_at = NOW()
+                WHERE id = $1
+                """,
+                incident_id, draft,
+            )
+
+    card = build_osha_clean_description_card(draft)
+    inserted = await _emit_chain_card(
+        conn, incident_id=incident_id, card=card,
+        created_by=current_user.id if current_user else None,
+    )
+    return card, str(inserted["id"])
 
 
 async def _should_emit_osha_recordable_chain(conn, incident_id) -> bool:
@@ -935,10 +1011,20 @@ async def _handle_quick_reply(
             "new_value": bool_value,
         }
         if bool_value:
-            # Recordable → create one case row per injured employee, then start
-            # the per-employee capture chain (days / classification / injury /
-            # privacy, looping case-by-case via next_case_step).
+            # Recordable → create one case row per injured employee, then ask the
+            # human to approve the name-free 300-log description (Column F). The
+            # per-employee capture chain (days / classification / injury / privacy,
+            # looping case-by-case via next_case_step) resumes after approval.
             await ensure_osha_case_rows(conn, incident_id)
+            review = await _emit_osha_description_review(conn, incident_id, current_user)
+            if review is not None:
+                review_card, review_msg_id = review
+                return {
+                    "event_summary": event_summary,
+                    "event_extra": event_extra,
+                    "next_card": review_card,
+                    "next_message_id": review_msg_id,
+                }
             next_card = await next_case_step(conn, incident_id)
             if next_card is not None:
                 inserted = await _emit_chain_card(
@@ -1145,6 +1231,53 @@ async def _handle_text_input(
     and the AI Analysis tab see a populated value.
     """
     step = (action.get("target_field") or "").strip()
+
+    # OSHA 300 Description (Column F) — human approves/edits the name-free verbiage
+    # before it prints. Writes the canonical category_data.osha_clean_description
+    # (the field the 300 log reads) + the approval gate, then resumes the
+    # per-employee capture loop (days/injury/privacy).
+    if step == "osha_clean_description":
+        approved = (body.text_value or "").strip()
+        if not approved:
+            return {"error": "Add a description before approving — it must name no one."}
+        approved = approved[:2000]
+        await conn.execute(
+            """
+            UPDATE ir_incidents
+            SET category_data = jsonb_set(
+                jsonb_set(
+                    COALESCE(category_data, '{}'::jsonb),
+                    '{osha_clean_description}',
+                    to_jsonb($1::text),
+                    true
+                ),
+                '{osha_description_approved}',
+                'true'::jsonb,
+                true
+            ),
+            updated_at = NOW()
+            WHERE id = $2
+            """,
+            approved, incident_id,
+        )
+        event_extra = {
+            "field": "osha_clean_description",
+            "field_label": "OSHA 300 description",
+            "previous_value": None,
+            "new_value": approved,
+        }
+        next_card = await next_case_step(conn, incident_id)
+        if next_card is not None:
+            inserted = await _emit_chain_card(
+                conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
+            )
+            return {
+                "event_summary": "OSHA 300 description approved",
+                "event_extra": event_extra,
+                "next_card": next_card,
+                "next_message_id": str(inserted["id"]),
+            }
+        return {"event_summary": "OSHA 300 description approved", "event_extra": event_extra}
 
     # Investigation findings — free-text documentation capture (not part of the
     # root-cause interview chain). Writes category_data.investigation_notes and

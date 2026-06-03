@@ -21,6 +21,7 @@ from app.matcha.routes.ir_incidents.osha import (
 )
 import asyncio
 import json
+from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
@@ -325,3 +326,63 @@ def test_injured_persons_reporter_fallback_no_roster():
     row2 = {"involved_employee_ids": [], "reported_by_name": "Dana Fields",
             "emp_first_name": "Dana", "emp_last_name": "Fields", "emp_job_title": "Aide"}
     assert _injured_persons(row2, {}) == [("reporter", "Dana Fields", "Aide")]
+
+
+# ── human-approved OSHA description (Column F) review card ────────────────────
+
+def test_build_osha_clean_description_card_shape():
+    from app.matcha.routes.ir_incidents._shared import build_osha_clean_description_card
+    card = build_osha_clean_description_card("An employee slipped and fell in the warehouse.")
+    assert card["id"] == "osha_clean_description_review"
+    a = card["action"]
+    assert a["type"] == "text_input"               # reuses the existing text_input renderer
+    assert a["target_field"] == "osha_clean_description"
+    assert a["label"] == "Approve"
+    assert a["prefilled"] == "An employee slipped and fell in the warehouse."
+
+
+def test_osha_description_approval_writes_and_advances(monkeypatch):
+    # Approving the review card writes the canonical osha_clean_description +
+    # the osha_description_approved gate, then resumes the per-case loop.
+    import app.matcha.routes.ir_incidents.copilot as cp
+
+    captured = {}
+
+    class FakeConn:
+        async def execute(self, query, *args):
+            captured["execute"] = (query, args)
+
+    async def fake_next_case_step(conn, incident_id):
+        return None  # no case rows in this unit context → no follow-on card
+
+    monkeypatch.setattr(cp, "next_case_step", fake_next_case_step)
+
+    res = asyncio.run(cp._handle_text_input(
+        FakeConn(),
+        incident_id="inc-1",
+        action={"target_field": "osha_clean_description"},
+        body=SimpleNamespace(text_value="  An employee slipped and fell in the warehouse.  "),
+        current_user=SimpleNamespace(id="u1"),
+    ))
+    assert res["event_summary"] == "OSHA 300 description approved"
+    assert res["event_extra"]["new_value"] == "An employee slipped and fell in the warehouse."
+    query, args = captured["execute"]
+    assert "osha_clean_description" in query and "osha_description_approved" in query
+    assert args[0] == "An employee slipped and fell in the warehouse."  # trimmed, names already gone
+
+
+def test_osha_description_approval_rejects_empty():
+    import app.matcha.routes.ir_incidents.copilot as cp
+
+    class FakeConn:  # must never be touched on the empty path
+        async def execute(self, *a, **k):
+            raise AssertionError("must not write on empty approval")
+
+    res = asyncio.run(cp._handle_text_input(
+        FakeConn(),
+        incident_id="inc-1",
+        action={"target_field": "osha_clean_description"},
+        body=SimpleNamespace(text_value="   "),
+        current_user=SimpleNamespace(id="u1"),
+    ))
+    assert "error" in res

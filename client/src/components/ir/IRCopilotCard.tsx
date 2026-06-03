@@ -38,6 +38,9 @@ export type CopilotCardAction = {
   input_max?: number
   prompt_text?: string
   input_rows?: number
+  // text_input: optional pre-filled value (e.g. the AI-cleansed OSHA 300
+  // description the user reviews/edits/approves). Omitted → blank textarea.
+  prefilled?: string
   // osha_emergency_alert: informational + acknowledgment.
   phone?: string
   deadline?: string
@@ -337,7 +340,9 @@ function TextInputControl({
   busy: boolean
   onAccept: (messageId: string, cardId: string, payload?: AcceptPayload) => void
 }) {
-  const [value, setValue] = useState('')
+  // Seed from a pre-filled value (e.g. AI-cleansed OSHA 300 description to
+  // review/edit/approve); blank for plain text_input cards.
+  const [value, setValue] = useState(card.action.prefilled ?? '')
   const rows = card.action.input_rows ?? 3
   const valid = value.trim().length > 0
   return (
