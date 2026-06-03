@@ -371,6 +371,24 @@ def test_osha_description_approval_writes_and_advances(monkeypatch):
     assert args[0] == "An employee slipped and fell in the warehouse."  # trimmed, names already gone
 
 
+def test_osha_description_review_skips_when_already_approved():
+    # Idempotent gate: once approved, the review card is never re-emitted and no
+    # cleanse/write is attempted.
+    import app.matcha.routes.ir_incidents.copilot as cp
+
+    class FakeConn:
+        async def fetchval(self, query, *args):
+            return json.dumps({"osha_description_approved": True})
+
+        async def execute(self, *a, **k):
+            raise AssertionError("must not write when already approved")
+
+    res = asyncio.run(cp._emit_osha_description_review(
+        FakeConn(), "inc-1", SimpleNamespace(id="u1"),
+    ))
+    assert res is None
+
+
 def test_osha_description_approval_rejects_empty():
     import app.matcha.routes.ir_incidents.copilot as cp
 

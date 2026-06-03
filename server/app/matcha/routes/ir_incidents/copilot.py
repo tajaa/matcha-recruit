@@ -470,7 +470,9 @@ async def _emit_osha_description_review(conn, incident_id, current_user):
     if already:
         return None
 
-    draft = (cd.get("osha_clean_description_draft") or "").strip()
+    # Prefill order: prior draft → any existing cleansed value (legacy incidents
+    # cleansed pre-approval) → AI cleanse → structured clinical phrase → blank.
+    draft = (cd.get("osha_clean_description_draft") or cd.get("osha_clean_description") or "").strip()
     if not draft:
         try:
             from app.matcha.services.ir_analysis import get_ir_analyzer
@@ -1025,17 +1027,10 @@ async def _handle_quick_reply(
                     "next_card": review_card,
                     "next_message_id": review_msg_id,
                 }
-            next_card = await next_case_step(conn, incident_id)
-            if next_card is not None:
-                inserted = await _emit_chain_card(
-                    conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
-                )
-                return {
-                    "event_summary": event_summary,
-                    "event_extra": event_extra,
-                    "next_card": next_card,
-                    "next_message_id": str(inserted["id"]),
-                }
+            # review is None only on a re-answer (card already pending/approved).
+            # The per-case loop (days/injury/privacy) is owned by the description
+            # approval handler — never start it here, so a pending review is never
+            # bypassed.
             return {"event_summary": event_summary, "event_extra": event_extra}
         # Not recordable — OSHA capture is done. Hand back to the conversational
         # guidance round (root cause / clarifying questions / closure) instead of
