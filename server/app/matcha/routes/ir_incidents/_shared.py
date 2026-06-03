@@ -773,13 +773,19 @@ def build_osha_recordable_query_card() -> dict:
     }
 
 
-def build_osha_days_type_query_card() -> dict:
-    """Days Away / Job Restriction / Neither — drives osha_classification."""
+def build_osha_days_type_query_card(*, case_key: str = "reporter", employee_name: Optional[str] = None) -> dict:
+    """Days Away / Job Restriction / Neither — drives this case's classification.
+
+    Per injured employee: ``case_key`` identifies the ir_osha_case_details row
+    the answer writes to; ``employee_name`` is shown so a multi-injured chain is
+    unambiguous about who each answer is for.
+    """
+    who = f" for {employee_name}" if employee_name else ""
     return {
         "id": "osha_days_type_query",
         "title": "OSHA Case Classification",
         "recommendation": (
-            "Did this result in days away from work or a temporary job restriction?"
+            f"Did this result in days away from work or a temporary job restriction{who}?"
         ),
         "rationale": (
             "Drives column J/K/L on OSHA Form 300 (case classification). "
@@ -791,6 +797,8 @@ def build_osha_days_type_query_card() -> dict:
             "type": "quick_reply",
             "label": "Choose one",
             "quick_reply_kind": "osha_days_type_query",
+            "case_key": case_key,
+            "employee_name": employee_name,
             "choices": [
                 {"label": "Days Away", "value": "days_away"},
                 {"label": "Job Restriction", "value": "restricted_duty"},
@@ -800,13 +808,15 @@ def build_osha_days_type_query_card() -> dict:
     }
 
 
-def build_osha_days_count_card(*, target_field: str, pending_classification: str) -> dict:
-    """Numeric input: how many days away / restricted?"""
+def build_osha_days_count_card(*, target_field: str, pending_classification: str,
+                               case_key: str = "reporter", employee_name: Optional[str] = None) -> dict:
+    """Numeric input: how many days away / restricted for this case?"""
     label_word = "away from work" if target_field == "days_away_from_work" else "on job restriction"
+    who = f" ({employee_name})" if employee_name else ""
     return {
         "id": f"osha_days_count__{pending_classification}",
         "title": f"Days {label_word.title()}",
-        "recommendation": f"How many days {label_word}?",
+        "recommendation": f"How many days {label_word}{who}?",
         "rationale": "Enter the total days (1-365). This populates the OSHA 300 day-count columns.",
         "priority": "high",
         "blockers": [],
@@ -815,6 +825,7 @@ def build_osha_days_count_card(*, target_field: str, pending_classification: str
             "label": "Save",
             "target_field": target_field,
             "pending_classification": pending_classification,
+            "case_key": case_key,
             "input_label": "Days",
             "input_min": 1,
             "input_max": 365,
@@ -822,12 +833,13 @@ def build_osha_days_count_card(*, target_field: str, pending_classification: str
     }
 
 
-def build_osha_injury_type_query_card() -> dict:
-    """6-button picker — OSHA 300 M-column injury/illness type."""
+def build_osha_injury_type_query_card(*, case_key: str = "reporter", employee_name: Optional[str] = None) -> dict:
+    """6-button picker — OSHA 300 M-column injury/illness type for this case."""
+    who = f" for {employee_name}" if employee_name else ""
     return {
         "id": "osha_injury_type_query",
         "title": "Injury / Illness Type",
-        "recommendation": "How would you classify this injury?",
+        "recommendation": f"How would you classify this injury{who}?",
         "rationale": (
             "Drives the M-columns on OSHA Form 300A (Injury / Skin Disorder / "
             "Respiratory / Poisoning / Hearing Loss / All Other Illnesses)."
@@ -838,6 +850,8 @@ def build_osha_injury_type_query_card() -> dict:
             "type": "quick_reply",
             "label": "Choose one",
             "quick_reply_kind": "osha_injury_type_query",
+            "case_key": case_key,
+            "employee_name": employee_name,
             "choices": [
                 {"label": OSHA_INJURY_TYPE_LABELS[k], "value": k}
                 for k in ("injury", "skin_disorder", "respiratory", "poisoning", "hearing_loss", "mental_illness", "other_illness")
@@ -882,60 +896,136 @@ def build_privacy_case_query_card(*, employee_key: str, employee_name: str, sugg
     }
 
 
-async def _injured_persons_for_privacy(conn, incident_id):
-    """``(injured, category_data, form_301)`` for an incident's privacy chain.
+async def next_case_step(conn, incident_id):
+    """Drive the per-injured-employee OSHA case-capture chain.
 
-    ``injured`` = ordered ``[(privacy_key, name)]`` — one per roster employee in
-    ``involved_employee_ids``, else a single ``("reporter", reporter_name)``
-    fallback (mirrors osha.py ``_injured_persons`` at the DB level for the chain).
+    Returns the next card for the first INCOMPLETE ``ir_osha_case_details`` row,
+    in ``case_seq`` order: days-type (→ days-count) until ``classification`` is
+    set, then injury-type, then the Privacy Case prompt. Returns ``None`` when
+    every case is fully captured (chain complete). Called after recordable=yes
+    and after each capture step. Each card carries ``case_key`` so the handler
+    writes the right case row.
     """
-    row = await conn.fetchrow(
-        """
-        SELECT company_id, category_data, osha_form_301_data,
-               involved_employee_ids, reported_by_name
-        FROM ir_incidents WHERE id = $1
-        """,
+    case_rows = await conn.fetch(
+        "SELECT * FROM ir_osha_case_details WHERE incident_id = $1 ORDER BY case_seq, case_key",
         incident_id,
     )
-    if not row:
-        return [], {}, {}
-    cd = _safe_json_loads(row["category_data"], {}) or {}
-    form_301 = _safe_json_loads(row["osha_form_301_data"], {}) or {}
-    ids = [str(x) for x in (row["involved_employee_ids"] or []) if x]
-    if ids:
-        hydrated = await _hydrate_involved_employees(conn, row["company_id"], ids)
-        by_id = {str(e["id"]): e for e in hydrated}
-        injured = []
-        for eid in ids:
-            emp = by_id.get(eid)
-            name = (f"{emp.get('first_name') or ''} {emp.get('last_name') or ''}".strip() if emp else "") or "this employee"
-            injured.append((eid, name))
-    else:
-        injured = [("reporter", row["reported_by_name"] or "this employee")]
-    return injured, cd, form_301
-
-
-async def next_privacy_card(conn, incident_id) -> Optional[dict]:
-    """The privacy-case card for the next injured employee without an answer yet,
-    or ``None`` when every injured employee has been answered (chain complete).
-
-    Used to both START the chain (after the injury-type card; no answers yet) and
-    ADVANCE it (after each answer is stored). The ``determine_privacy_case``
-    suggestion (incident-level) is pre-highlighted on each card.
-    """
-    injured, cd, form_301 = await _injured_persons_for_privacy(conn, incident_id)
-    if not injured:
+    if not case_rows:
         return None
-    answered = set((cd.get("privacy_cases") or {}).keys())
+    inc = await conn.fetchrow(
+        "SELECT company_id, category_data, osha_form_301_data, reported_by_name "
+        "FROM ir_incidents WHERE id = $1",
+        incident_id,
+    )
+    cd = (_safe_json_loads(inc["category_data"], {}) if inc else {}) or {}
+    form_301 = (_safe_json_loads(inc["osha_form_301_data"], {}) if inc else {}) or {}
     _is_priv, suggested = determine_privacy_case(
         cd, form_301.get("injury_type"), bool(cd.get("employee_privacy_requested")),
     )
-    for key, name in injured:
-        if key not in answered:
+    emp_ids = [str(r["employee_id"]) for r in case_rows if r["employee_id"]]
+    by_id = {}
+    if emp_ids and inc:
+        hydrated = await _hydrate_involved_employees(conn, inc["company_id"], emp_ids)
+        by_id = {str(e["id"]): e for e in hydrated}
+
+    def _name(cr):
+        if cr["case_key"] == "reporter":
+            return (inc["reported_by_name"] if inc else None) or "this employee"
+        emp = by_id.get(cr["case_key"])
+        if emp:
+            return f"{emp.get('first_name') or ''} {emp.get('last_name') or ''}".strip() or "this employee"
+        return "this employee"
+
+    for cr in case_rows:
+        name = _name(cr)
+        if cr["classification"] is None:
+            return build_osha_days_type_query_card(case_key=cr["case_key"], employee_name=name)
+        if cr["injury_type"] is None:
+            return build_osha_injury_type_query_card(case_key=cr["case_key"], employee_name=name)
+        if cr["privacy_case_reason"] is None:
             return build_privacy_case_query_card(
-                employee_key=key, employee_name=name, suggested_reason=suggested,
+                employee_key=cr["case_key"], employee_name=name, suggested_reason=suggested,
             )
     return None
+
+
+# ===========================================
+# Per-injured-employee OSHA case records (ir_osha_case_details)
+# ===========================================
+#
+# One row per injured employee on a recordable incident: each person's own OSHA
+# case (classification, days away/restricted, M-column injury type) + Privacy
+# Case answer. case_key = str(employee_id) for a roster employee, else
+# 'reporter'. These rows are the authoritative source for the 300/301/300A
+# reads; the incident-level columns remain a fallback for un-captured rows.
+
+
+async def ensure_osha_case_rows(conn, incident_id) -> None:
+    """Create one ir_osha_case_details row per injured employee for a recordable
+    incident — roster employees from ``involved_employee_ids`` (in order), else a
+    single ``'reporter'`` row. Seeds from the incident-level values + any prior
+    ``category_data.privacy_cases`` answer. Idempotent (``ON CONFLICT DO
+    NOTHING``) — safe to call whenever recordability is set, by any path.
+
+    Mirrors the migration backfill, scoped to one incident.
+    """
+    await conn.execute(
+        """
+        INSERT INTO ir_osha_case_details
+            (incident_id, case_key, employee_id, case_seq,
+             classification, days_away, days_restricted, injury_type, privacy_case_reason)
+        SELECT i.id, emp.eid::text, emp.eid, emp.ord::int,
+               i.osha_classification, COALESCE(i.days_away_from_work, 0),
+               COALESCE(i.days_restricted_duty, 0), i.osha_form_301_data->>'injury_type',
+               NULLIF(i.category_data->'privacy_cases'->>(emp.eid::text), '')
+        FROM ir_incidents i
+        CROSS JOIN LATERAL unnest(i.involved_employee_ids) WITH ORDINALITY AS emp(eid, ord)
+        WHERE i.id = $1 AND i.osha_recordable = true
+          AND array_length(i.involved_employee_ids, 1) > 0
+        ON CONFLICT (incident_id, case_key) DO NOTHING
+        """,
+        incident_id,
+    )
+    await conn.execute(
+        """
+        INSERT INTO ir_osha_case_details
+            (incident_id, case_key, employee_id, case_seq,
+             classification, days_away, days_restricted, injury_type, privacy_case_reason)
+        SELECT i.id, 'reporter', NULL, 1,
+               i.osha_classification, COALESCE(i.days_away_from_work, 0),
+               COALESCE(i.days_restricted_duty, 0), i.osha_form_301_data->>'injury_type',
+               NULLIF(i.category_data->'privacy_cases'->>'reporter', '')
+        FROM ir_incidents i
+        WHERE i.id = $1 AND i.osha_recordable = true
+          AND array_length(i.involved_employee_ids, 1) IS NULL
+        ON CONFLICT (incident_id, case_key) DO NOTHING
+        """,
+        incident_id,
+    )
+
+
+async def fetch_osha_case_rows(conn, incident_id) -> list[dict]:
+    """All case rows for one incident, ordered by case_seq."""
+    rows = await conn.fetch(
+        "SELECT * FROM ir_osha_case_details WHERE incident_id = $1 ORDER BY case_seq, case_key",
+        incident_id,
+    )
+    return [dict(r) for r in rows]
+
+
+async def fetch_osha_case_rows_for(conn, incident_ids) -> dict:
+    """Batch: ``{str(incident_id): [case rows]}`` for the 300-log (avoids N+1)."""
+    if not incident_ids:
+        return {}
+    rows = await conn.fetch(
+        "SELECT * FROM ir_osha_case_details WHERE incident_id = ANY($1::uuid[]) "
+        "ORDER BY case_seq, case_key",
+        [str(i) for i in incident_ids],
+    )
+    out: dict = {}
+    for r in rows:
+        out.setdefault(str(r["incident_id"]), []).append(dict(r))
+    return out
 
 
 # ===========================================

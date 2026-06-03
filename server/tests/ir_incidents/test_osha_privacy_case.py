@@ -12,9 +12,10 @@ from app.core.services.osha_privacy import (
 )
 from app.matcha.routes.ir_incidents._shared import _privacy_signal_overlay
 from app.matcha.routes.ir_incidents.osha import (
-    _resolve_privacy_mask,
+    _mask_from_reason,
     _resolve_osha_description,
     _injured_persons,
+    _osha_case_views,
 )
 
 
@@ -154,39 +155,61 @@ def test_clinical_description_ignores_narrative_names():
     assert out == "Bite to arm"
 
 
-# ── hybrid per-employee name masking (Column B) ──────────────────────────────
+# ── hybrid Column-B mask from a case's privacy answer ────────────────────────
 
-def test_privacy_mask_human_reason_wins():
-    cd = {"privacy_cases": {"emp1": "mental_illness"}}
-    assert _resolve_privacy_mask(cd, {}, "emp1") == (True, "mental_illness")
-
-
-def test_privacy_mask_human_none_blocks_safety_net():
-    # body_parts would auto-trigger intimate_injury, but the human reviewed this
-    # employee and explicitly cleared it → must NOT mask.
-    cd = {"privacy_cases": {"emp1": "none"}, "body_parts": ["groin"]}
-    assert _resolve_privacy_mask(cd, {}, "emp1") == (False, None)
+def test_mask_human_reason_wins():
+    assert _mask_from_reason("mental_illness", {}, None) == (True, "mental_illness")
 
 
-def test_privacy_mask_unanswered_uses_safety_net():
-    # No human answer → fall back to determine_privacy_case (incident-level).
-    assert _resolve_privacy_mask({"body_parts": ["groin"]}, {}, "emp1") == (True, "intimate_injury")
-    # Unanswered + no signal → not masked.
-    assert _resolve_privacy_mask({}, {}, "emp1") == (False, None)
-    # Safety net also reads the OSHA M-column (mental_illness).
-    assert _resolve_privacy_mask({}, {"injury_type": "mental_illness"}, "emp1") == (True, "mental_illness")
+def test_mask_human_none_blocks_safety_net():
+    # body_parts would auto-trigger intimate_injury, but the human explicitly
+    # cleared this case ("none") → must NOT mask.
+    assert _mask_from_reason("none", {"body_parts": ["groin"]}, None) == (False, None)
 
 
-def test_privacy_mask_is_per_employee():
-    cd = {"privacy_cases": {"empA": "sexual_assault", "empB": "none"}}
-    assert _resolve_privacy_mask(cd, {}, "empA") == (True, "sexual_assault")
-    assert _resolve_privacy_mask(cd, {}, "empB") == (False, None)
-    # empC has no answer and no signal → safety net says not a privacy case.
-    assert _resolve_privacy_mask(cd, {}, "empC") == (False, None)
+def test_mask_unanswered_uses_safety_net():
+    # No answer → determine_privacy_case (incident signals + this case's M-column).
+    assert _mask_from_reason(None, {"body_parts": ["groin"]}, None) == (True, "intimate_injury")
+    assert _mask_from_reason(None, {}, None) == (False, None)
+    assert _mask_from_reason(None, {}, "mental_illness") == (True, "mental_illness")
 
 
-def test_privacy_mask_reason_case_insensitive():
-    assert _resolve_privacy_mask({"privacy_cases": {"e": "Mental_Illness"}}, {}, "e") == (True, "mental_illness")
+def test_mask_reason_case_insensitive():
+    assert _mask_from_reason("Mental_Illness", {}, None) == (True, "mental_illness")
+
+
+# ── per-injured-employee case views (300/301 reads) ──────────────────────────
+
+def test_osha_case_views_from_case_rows():
+    a = "11111111-1111-1111-1111-111111111111"
+    row = {"id": "inc1", "category_data": {}, "osha_form_301_data": {},
+           "involved_employee_ids": [a], "reported_by_name": "Rep"}
+    case_rows = [{
+        "case_key": a, "case_seq": 1, "employee_id": a,
+        "classification": "days_away", "days_away": 5, "days_restricted": 0,
+        "injury_type": "injury", "privacy_case_reason": "mental_illness",
+    }]
+    emp_map = {a: {"first_name": "Alice", "last_name": "Stone", "job_title": "Nurse"}}
+    (v,) = _osha_case_views(row, case_rows, emp_map)
+    assert v["name"] == "Alice Stone" and v["job_title"] == "Nurse"
+    assert v["classification"] == "days_away" and v["days_away"] == 5
+    assert v["injury_type"] == "injury" and v["privacy_case_reason"] == "mental_illness"
+
+
+def test_osha_case_views_fallback_to_incident_level():
+    # No case rows yet → synthesize from incident-level columns + privacy_cases.
+    a = "22222222-2222-2222-2222-222222222222"
+    row = {"id": "inc2",
+           "category_data": {"privacy_cases": {a: "sexual_assault"}},
+           "osha_form_301_data": {"injury_type": "injury"},
+           "involved_employee_ids": [a], "reported_by_name": "Rep",
+           "osha_classification": "restricted_duty",
+           "days_away_from_work": 0, "days_restricted_duty": 3}
+    emp_map = {a: {"first_name": "Bob", "last_name": "Reed", "job_title": "Tech"}}
+    (v,) = _osha_case_views(row, [], emp_map)
+    assert v["name"] == "Bob Reed" and v["classification"] == "restricted_duty"
+    assert v["days_restricted"] == 3 and v["injury_type"] == "injury"
+    assert v["privacy_case_reason"] == "sexual_assault"
 
 
 # ── Column F description precedence (never the raw narrative) ─────────────────

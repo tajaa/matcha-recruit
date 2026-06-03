@@ -27,7 +27,12 @@ from app.matcha.models.ir_incident import (
     OshaPrivacyCaseEntry,
     OshaRecordabilityUpdate,
 )
-from ._shared import log_audit, _hydrate_involved_employees
+from ._shared import (
+    log_audit,
+    _hydrate_involved_employees,
+    fetch_osha_case_rows,
+    fetch_osha_case_rows_for,
+)
 from app.core.services.osha_redaction import redact_osha_text
 from app.core.services.osha_privacy import (
     determine_privacy_case,
@@ -110,31 +115,28 @@ def _safe_json_loads(val, default=None):
 _NO_STRUCTURED_DESCRIPTION = "See incident record for details"
 
 
-def _resolve_privacy_mask(category_data: dict, osha_form_301_data: dict, privacy_key):
-    """Decide whether ONE injured-employee row's name is masked (Column B).
+def _mask_from_reason(privacy_case_reason, category_data: dict, osha_injury_type):
+    """Hybrid Column-B mask decision for one case, from its privacy answer.
 
-    Hybrid, per-employee: the human's Copilot answer in
-    ``category_data.privacy_cases[privacy_key]`` is the source of truth —
+    The per-employee answer (``ir_osha_case_details.privacy_case_reason``, or the
+    legacy ``category_data.privacy_cases`` value for un-captured rows) is the
+    source of truth:
       * a reason string  → mask (human confirmed this category),
       * ``"none"``        → don't mask (human reviewed and cleared it),
-      * missing/unanswered → fall back to ``determine_privacy_case`` as a
-        fail-closed safety net (incident-level signals; may over-mask
-        co-injured rows, which is the safe direction).
+      * NULL/unanswered   → fall back to ``determine_privacy_case`` as a
+        fail-closed safety net (incident-level signals + this case's M-column
+        injury type; may over-mask, the safe direction).
     Returns ``(is_privacy_case, reason)``.
     """
-    cd = category_data or {}
-    answers = cd.get("privacy_cases") or {}
-    human = answers.get(privacy_key) if privacy_key else None
-    if isinstance(human, str):
-        h = human.strip().lower()
+    if isinstance(privacy_case_reason, str):
+        h = privacy_case_reason.strip().lower()
         if h == "none":
             return False, None
         if h:
             return True, h
+    cd = category_data or {}
     return determine_privacy_case(
-        cd,
-        (osha_form_301_data or {}).get("injury_type"),
-        bool(cd.get("employee_privacy_requested")),
+        cd, osha_injury_type, bool(cd.get("employee_privacy_requested")),
     )
 
 
@@ -155,25 +157,21 @@ def _resolve_osha_description(category_data: dict, is_privacy_case: bool) -> str
     )
 
 
-def _resolve_osha_privacy(category_data, osha_form_301_data, emp_name, privacy_key=None):
-    """Mask + description for one 300/301 row — single source for all OSHA reads.
-
-    ``privacy_key`` keys the per-employee privacy answer (``"<employee_id>"`` or
-    ``"reporter"``); ``None`` falls back to the incident-level safety net.
-    """
-    cd = category_data or {}
-    is_priv, reason = _resolve_privacy_mask(cd, osha_form_301_data, privacy_key)
-    display_name = PRIVACY_NAME if is_priv else emp_name
-    description = _resolve_osha_description(cd, is_priv)
-    return is_priv, reason, display_name, description
+def _reporter_name_title(row):
+    """``(name, job_title)`` for the reporter-fallback case — the reporter's
+    roster match if any, else the typed ``reported_by_name``."""
+    name = row["reported_by_name"]
+    if row.get("emp_first_name"):
+        name = f"{row['emp_first_name']} {row.get('emp_last_name') or ''}".strip()
+    return name, row.get("emp_job_title")
 
 
 def _injured_persons(row, emp_map: dict) -> list:
-    """One injured person per 300-log row: ``[(privacy_key, name, job_title)]``.
+    """One injured person per row: ``[(case_key, name, job_title)]`` — the
+    incident-level fallback when an incident has no ir_osha_case_details rows.
 
     Roster employees from ``involved_employee_ids`` (name + Finch-synced
-    ``job_title``), in stored order. No roster ids → a single reporter-fallback
-    row keyed ``"reporter"`` (preserves matcha-lite no-roster behavior).
+    ``job_title``), in stored order; else a single ``"reporter"`` row.
     """
     ids = [str(x) for x in (row.get("involved_employee_ids") or []) if x]
     if ids:
@@ -187,53 +185,131 @@ def _injured_persons(row, emp_map: dict) -> list:
                 # id no longer on the roster — keep a row (mask-safe), no name leak.
                 out.append((eid, "Unknown", None))
         return out
-    reporter_name = row["reported_by_name"]
-    if row.get("emp_first_name"):
-        reporter_name = f"{row['emp_first_name']} {row.get('emp_last_name') or ''}".strip()
-    return [("reporter", reporter_name, row.get("emp_job_title"))]
+    name, title = _reporter_name_title(row)
+    return [("reporter", name, title)]
 
 
-async def _hydrate_emp_map(conn, company_id, rows) -> dict:
-    """Batch-resolve every incident's ``involved_employee_ids`` → ``{str(id): emp}``
-    in one query (avoids an N+1 across the recordable rows)."""
-    all_ids = []
+def _osha_case_views(row, case_rows, emp_map) -> list:
+    """Per-incident case views for the 300/301 reads — one per injured employee.
+
+    Each view: ``{case_key, case_seq, name, job_title, classification,
+    days_away, days_restricted, injury_type, privacy_case_reason}``. Prefers the
+    ``ir_osha_case_details`` rows (per-employee classification/days/injury +
+    privacy); falls back to synthesizing from the incident-level columns +
+    ``involved_employee_ids`` + ``category_data.privacy_cases`` when an incident
+    has no case rows yet (legacy / not-yet-captured).
+    """
+    if case_rows:
+        views = []
+        for cr in case_rows:  # ordered by case_seq
+            ek = cr.get("case_key")
+            if ek == "reporter":
+                name, title = _reporter_name_title(row)
+            else:
+                emp = emp_map.get(ek)
+                if emp:
+                    name = f"{emp.get('first_name') or ''} {emp.get('last_name') or ''}".strip() or "Unknown"
+                    title = emp.get("job_title")
+                else:
+                    name, title = "Unknown", None
+            views.append({
+                "case_key": ek,
+                "case_seq": cr.get("case_seq") or 1,
+                "name": name,
+                "job_title": title,
+                "classification": cr.get("classification"),
+                "days_away": cr.get("days_away") or 0,
+                "days_restricted": cr.get("days_restricted") or 0,
+                "injury_type": cr.get("injury_type"),
+                "privacy_case_reason": cr.get("privacy_case_reason"),
+            })
+        return views
+    # Fallback: no case rows yet — synthesize from incident-level values.
+    cd = _safe_json_loads(row.get("category_data"), {})
+    form_301 = _safe_json_loads(row.get("osha_form_301_data"), {})
+    privacy_map = cd.get("privacy_cases") or {}
+    out = []
+    for idx, (key, name, title) in enumerate(_injured_persons(row, emp_map)):
+        out.append({
+            "case_key": key,
+            "case_seq": idx + 1,
+            "name": name,
+            "job_title": title,
+            "classification": row.get("osha_classification"),
+            "days_away": row.get("days_away_from_work") or 0,
+            "days_restricted": row.get("days_restricted_duty") or 0,
+            "injury_type": form_301.get("injury_type"),
+            "privacy_case_reason": privacy_map.get(key),
+        })
+    return out
+
+
+async def _hydrate_case_emp_map(conn, company_id, rows, cases_by_incident) -> dict:
+    """Batch-resolve employee ids → roster detail for the 300-log read. Gathers
+    ids from case rows' ``employee_id`` (captured incidents) and from
+    ``involved_employee_ids`` (fallback incidents). One query."""
+    emp_ids = set()
     for row in rows:
-        all_ids.extend(row.get("involved_employee_ids") or [])
-    if not all_ids:
+        crs = cases_by_incident.get(str(row["id"]))
+        if crs:
+            for cr in crs:
+                if cr.get("employee_id"):
+                    emp_ids.add(str(cr["employee_id"]))
+        else:
+            for x in (row.get("involved_employee_ids") or []):
+                if x:
+                    emp_ids.add(str(x))
+    if not emp_ids:
         return {}
-    hydrated = await _hydrate_involved_employees(conn, company_id, all_ids)
+    hydrated = await _hydrate_involved_employees(conn, company_id, list(emp_ids))
     return {str(e["id"]): e for e in hydrated}
 
 
 async def _aggregate_300a(conn, company_id, location_id, year) -> dict:
-    """Aggregate recordable-incident totals for one establishment in one year.
+    """Aggregate recordable-CASE totals for one establishment in one year.
 
-    Single source of the 300A column math — shared by the summary endpoint, the
-    PDF, and the ITA export so the three can never drift. M-column injury/illness
-    type lives in osha_form_301_data->>'injury_type'; NULL falls back to 'injury'
-    so legacy rows still land in the Standard Injury column.
+    Counts one OSHA case per injured employee from ``ir_osha_case_details`` (each
+    case's own classification / days / M-column injury type), UNION the
+    incident-level values for any recordable incident that has no case rows yet
+    (legacy / not-yet-captured) so nothing is undercounted. Single source of the
+    300A column math — shared by the summary endpoint, the PDF, and the ITA
+    export so the three can never drift. NULL injury type → Standard Injury.
     """
     return await conn.fetchrow(
         """
+        WITH cases AS (
+            SELECT cd.classification, cd.days_away, cd.days_restricted, cd.injury_type
+            FROM ir_osha_case_details cd
+            JOIN ir_incidents i ON i.id = cd.incident_id
+            WHERE i.company_id = $1
+              AND i.location_id = $2
+              AND i.osha_recordable = true
+              AND EXTRACT(YEAR FROM i.occurred_at) = $3
+            UNION ALL
+            SELECT i.osha_classification, COALESCE(i.days_away_from_work, 0),
+                   COALESCE(i.days_restricted_duty, 0), i.osha_form_301_data->>'injury_type'
+            FROM ir_incidents i
+            WHERE i.company_id = $1
+              AND i.location_id = $2
+              AND i.osha_recordable = true
+              AND EXTRACT(YEAR FROM i.occurred_at) = $3
+              AND NOT EXISTS (SELECT 1 FROM ir_osha_case_details cd WHERE cd.incident_id = i.id)
+        )
         SELECT
             COUNT(*) AS total_cases,
-            COALESCE(SUM(CASE WHEN osha_classification = 'death' THEN 1 ELSE 0 END), 0) AS total_deaths,
-            COALESCE(SUM(CASE WHEN osha_classification = 'days_away' THEN 1 ELSE 0 END), 0) AS total_days_away_cases,
-            COALESCE(SUM(CASE WHEN osha_classification = 'restricted_duty' THEN 1 ELSE 0 END), 0) AS total_restricted_cases,
-            COALESCE(SUM(CASE WHEN osha_classification NOT IN ('death','days_away','restricted_duty') THEN 1 ELSE 0 END), 0) AS total_other_recordable,
-            COALESCE(SUM(days_away_from_work), 0) AS total_days_away,
-            COALESCE(SUM(days_restricted_duty), 0) AS total_days_restricted,
-            COALESCE(SUM(CASE WHEN COALESCE(osha_form_301_data->>'injury_type','injury') = 'injury' THEN 1 ELSE 0 END), 0) AS total_injuries,
-            COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'skin_disorder' THEN 1 ELSE 0 END), 0) AS total_skin_disorders,
-            COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'respiratory' THEN 1 ELSE 0 END), 0) AS total_respiratory,
-            COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'poisoning' THEN 1 ELSE 0 END), 0) AS total_poisonings,
-            COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' = 'hearing_loss' THEN 1 ELSE 0 END), 0) AS total_hearing_loss,
-            COALESCE(SUM(CASE WHEN osha_form_301_data->>'injury_type' IN ('other_illness', 'mental_illness') THEN 1 ELSE 0 END), 0) AS total_other_illnesses
-        FROM ir_incidents
-        WHERE company_id = $1
-          AND location_id = $2
-          AND osha_recordable = true
-          AND EXTRACT(YEAR FROM occurred_at) = $3
+            COALESCE(SUM(CASE WHEN classification = 'death' THEN 1 ELSE 0 END), 0) AS total_deaths,
+            COALESCE(SUM(CASE WHEN classification = 'days_away' THEN 1 ELSE 0 END), 0) AS total_days_away_cases,
+            COALESCE(SUM(CASE WHEN classification = 'restricted_duty' THEN 1 ELSE 0 END), 0) AS total_restricted_cases,
+            COALESCE(SUM(CASE WHEN classification NOT IN ('death','days_away','restricted_duty') THEN 1 ELSE 0 END), 0) AS total_other_recordable,
+            COALESCE(SUM(days_away), 0) AS total_days_away,
+            COALESCE(SUM(days_restricted), 0) AS total_days_restricted,
+            COALESCE(SUM(CASE WHEN COALESCE(injury_type, 'injury') = 'injury' THEN 1 ELSE 0 END), 0) AS total_injuries,
+            COALESCE(SUM(CASE WHEN injury_type = 'skin_disorder' THEN 1 ELSE 0 END), 0) AS total_skin_disorders,
+            COALESCE(SUM(CASE WHEN injury_type = 'respiratory' THEN 1 ELSE 0 END), 0) AS total_respiratory,
+            COALESCE(SUM(CASE WHEN injury_type = 'poisoning' THEN 1 ELSE 0 END), 0) AS total_poisonings,
+            COALESCE(SUM(CASE WHEN injury_type = 'hearing_loss' THEN 1 ELSE 0 END), 0) AS total_hearing_loss,
+            COALESCE(SUM(CASE WHEN injury_type IN ('other_illness', 'mental_illness') THEN 1 ELSE 0 END), 0) AS total_other_illnesses
+        FROM cases
         """,
         company_id, location_id, year,
     )
@@ -342,37 +418,35 @@ async def get_osha_300_log(
             company_id,
             year,
         )
-        emp_map = await _hydrate_emp_map(conn, company_id, rows)
+        cases_by_incident = await fetch_osha_case_rows_for(conn, [r["id"] for r in rows])
+        emp_map = await _hydrate_case_emp_map(conn, company_id, rows, cases_by_incident)
 
     entries = []
     for row in rows:
         category_data = _safe_json_loads(row.get("category_data"), {})
-        injury_type = category_data.get("injury_type")
-        form_301 = _safe_json_loads(row.get("osha_form_301_data"), {})
+        injury_type_display = category_data.get("injury_type")  # clinical nature, incident-level
         base_case = row["osha_case_number"] or str(row["id"])[:8]
         date_str = row["occurred_at"].strftime("%Y-%m-%d") if row["occurred_at"] else ""
         location = redact_osha_text(row["location"])
 
-        # One row per injured employee (each its own case number); reporter
-        # fallback when no roster ids. Name masked per-employee (Column B); the
-        # Description (Column F) is name-free regardless.
-        injured = _injured_persons(row, emp_map)
-        multi = len(injured) > 1
-        for idx, (key, name, title) in enumerate(injured):
-            is_priv, reason, display_name, description = _resolve_osha_privacy(
-                category_data, form_301, name, privacy_key=key,
-            )
+        # One row per injured employee — each its OWN classification/days/injury
+        # (from its ir_osha_case_details row, incident-level fallback otherwise)
+        # and its OWN Column-B mask. Description (Column F) is name-free regardless.
+        views = _osha_case_views(row, cases_by_incident.get(str(row["id"]), []), emp_map)
+        multi = len(views) > 1
+        for v in views:
+            is_priv, reason = _mask_from_reason(v["privacy_case_reason"], category_data, v["injury_type"])
             entries.append(Osha300LogEntry(
-                case_number=f"{base_case}-{idx + 1}" if multi else base_case,
-                employee_name=display_name,
-                job_title=title,
+                case_number=f"{base_case}-{v['case_seq']}" if multi else base_case,
+                employee_name=PRIVACY_NAME if is_priv else v["name"],
+                job_title=v["job_title"],
                 date_of_injury=date_str,
                 location=location,
-                description=description,
-                classification=row["osha_classification"],
-                days_away=row["days_away_from_work"],
-                days_restricted=row["days_restricted_duty"],
-                injury_type=injury_type,
+                description=_resolve_osha_description(category_data, is_priv),
+                classification=v["classification"],
+                days_away=v["days_away"],
+                days_restricted=v["days_restricted"],
+                injury_type=injury_type_display,
                 incident_id=str(row["id"]),
                 is_privacy_case=is_priv,
                 privacy_case_reason=reason,
@@ -462,24 +536,24 @@ async def get_osha_privacy_cases(
             company_id,
             year,
         )
-        emp_map = await _hydrate_emp_map(conn, company_id, rows)
+        cases_by_incident = await fetch_osha_case_rows_for(conn, [r["id"] for r in rows])
+        emp_map = await _hydrate_case_emp_map(conn, company_id, rows, cases_by_incident)
 
         entries: list[OshaPrivacyCaseEntry] = []
         for row in rows:
             category_data = _safe_json_loads(row.get("category_data"), {})
-            form_301 = _safe_json_loads(row.get("osha_form_301_data"), {})
             base_case = row["osha_case_number"] or str(row["id"])[:8]
-            injured = _injured_persons(row, emp_map)
-            multi = len(injured) > 1
-            for idx, (key, name, _title) in enumerate(injured):
-                is_priv, reason = _resolve_privacy_mask(category_data, form_301, key)
+            views = _osha_case_views(row, cases_by_incident.get(str(row["id"]), []), emp_map)
+            multi = len(views) > 1
+            for v in views:
+                is_priv, reason = _mask_from_reason(v["privacy_case_reason"], category_data, v["injury_type"])
                 if not is_priv:
                     continue
                 entries.append(OshaPrivacyCaseEntry(
-                    case_number=f"{base_case}-{idx + 1}" if multi else base_case,
-                    real_employee_name=name or "Unknown",
+                    case_number=f"{base_case}-{v['case_seq']}" if multi else base_case,
+                    real_employee_name=v["name"] or "Unknown",
                     privacy_case_reason=reason,
-                    classification=row["osha_classification"],
+                    classification=v["classification"],
                     date_of_injury=row["occurred_at"].strftime("%Y-%m-%d") if row["occurred_at"] else "",
                     incident_id=str(row["id"]),
                 ))
@@ -535,40 +609,40 @@ async def get_osha_301_form(
         )
         if not row:
             raise HTTPException(status_code=404, detail="Recordable incident not found")
-        emp_map = await _hydrate_emp_map(conn, company_id, [row])
+        case_rows = await fetch_osha_case_rows(conn, row["id"])
+        emp_map = await _hydrate_case_emp_map(
+            conn, company_id, [row], {str(row["id"]): case_rows}
+        )
 
     category_data = _safe_json_loads(row.get("category_data"), {})
     form_301_data = _safe_json_loads(row.get("osha_form_301_data"), {})
 
     # One 301 per injured employee. Pick the requested employee (else the first
-    # injured person; reporter fallback when no roster ids) and key the privacy
-    # mask to that person so the 301 masks exactly like its 300-log row, and
-    # render the Description from structured/AI-cleansed fields (never the raw
-    # narrative). The real name stays resolvable via /osha/privacy-cases.
-    injured = _injured_persons(row, emp_map)
+    # injured person) and key the mask + facts to that person's case so the 301
+    # matches its 300-log row. Description is name-free (never the raw narrative).
+    # The real name stays resolvable via /osha/privacy-cases.
+    views = _osha_case_views(row, case_rows, emp_map)
     target = None
     if employee_id is not None:
-        target = next((p for p in injured if p[0] == str(employee_id)), None)
+        target = next((v for v in views if v["case_key"] == str(employee_id)), None)
     if target is None:
-        target = injured[0]
-    privacy_key, target_name, target_title = target
-    is_reporter = privacy_key == "reporter"
+        target = views[0]
+    is_reporter = target["case_key"] == "reporter"
     base_case = row["osha_case_number"] or str(row["id"])[:8]
-    case_number = f"{base_case}-{injured.index(target) + 1}" if len(injured) > 1 else base_case
+    case_number = f"{base_case}-{target['case_seq']}" if len(views) > 1 else base_case
 
-    is_priv, reason, display_name, clinical_description = _resolve_osha_privacy(
-        category_data, form_301_data, target_name, privacy_key=privacy_key,
-    )
+    is_priv, reason = _mask_from_reason(target["privacy_case_reason"], category_data, target["injury_type"])
+    clinical_description = _resolve_osha_description(category_data, is_priv)
     return {
         "incident_id": str(row["id"]),
         "case_number": case_number,
-        "employee_name": display_name,
+        "employee_name": PRIVACY_NAME if is_priv else target["name"],
         "is_privacy_case": is_priv,
         "privacy_case_reason": reason,
         # email/start_date come from the reporter join — valid only when this 301
         # is the reporter's own; otherwise it would show another person's PII.
         "employee_email": row.get("emp_email") if is_reporter else None,
-        "employee_job_title": target_title,
+        "employee_job_title": target["job_title"],
         "employee_start_date": row["emp_start_date"].isoformat() if (is_reporter and row.get("emp_start_date")) else None,
         "employer_name": row.get("company_name"),
         "employer_address": row.get("company_address"),
@@ -583,9 +657,9 @@ async def get_osha_301_form(
         "injury_type": category_data.get("injury_type"),
         "body_parts_affected": category_data.get("body_parts", []),
         "treatment": redact_osha_text(category_data.get("treatment")),
-        "osha_classification": row.get("osha_classification"),
-        "days_away_from_work": row.get("days_away_from_work") or 0,
-        "days_restricted_duty": row.get("days_restricted_duty") or 0,
+        "osha_classification": target["classification"],
+        "days_away_from_work": target["days_away"],
+        "days_restricted_duty": target["days_restricted"],
         "date_of_death": row["date_of_death"].isoformat() if row.get("date_of_death") else None,
         "additional_data": form_301_data,
     }
@@ -1044,8 +1118,8 @@ async def update_osha_recordability(
         # otherwise masking would fall to the safety net alone (which can't catch
         # the human-only opt-out). Idempotent + no-op if already asked/answered.
         if update.osha_recordable is True:
-            from .copilot import ensure_privacy_chain  # lazy: avoid circular import
-            await ensure_privacy_chain(conn, str(incident_id), current_user)
+            from .copilot import ensure_case_chain  # lazy: avoid circular import
+            await ensure_case_chain(conn, str(incident_id), current_user)
         return {"message": "OSHA recordability updated", "id": str(updated["id"])}
 
 

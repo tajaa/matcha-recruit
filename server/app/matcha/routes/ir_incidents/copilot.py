@@ -48,7 +48,8 @@ from ._shared import (
     build_root_cause_text_card,
     compose_root_cause_text,
     log_audit,
-    next_privacy_card,
+    next_case_step,
+    ensure_osha_case_rows,
     PRIVACY_CASE_REASONS,
     PRIVACY_CASE_REASON_LABELS,
 )
@@ -398,22 +399,26 @@ async def _emit_chain_card(conn, *, incident_id: UUID, card: dict, created_by=No
     )
 
 
-async def ensure_privacy_chain(conn, incident_id, current_user) -> None:
-    """Emit the per-injured-employee OSHA Privacy Case card when the incident is
-    recordable, the next injured employee has no answer yet, and no privacy card
-    is already pending.
+async def ensure_case_chain(conn, incident_id, current_user) -> None:
+    """Ensure the per-injured-employee OSHA case-capture chain is running.
 
-    Idempotent — safe to call after recordability is set by ANY path. Covers
+    Creates one ir_osha_case_details row per injured employee, then emits the
+    next capture card (days/classification → injury → privacy) if none is already
+    pending. Idempotent — safe after recordability is set by ANY path. Covers
     recordability set OUTSIDE the Copilot chain (e.g. the manual PUT /osha
-    override), which would otherwise skip the privacy question entirely and leave
-    Column-B masking to the determine_privacy_case safety net alone.
+    override), which would otherwise skip per-case capture + privacy entirely and
+    leave Column-B masking to the determine_privacy_case safety net alone.
     """
+    await ensure_osha_case_rows(conn, incident_id)
     pending = await conn.fetchval(
         """
         SELECT 1 FROM ir_incident_ai_messages
         WHERE incident_id = $1
           AND message_type = 'card'
-          AND metadata->'card'->>'id' = 'privacy_case_query'
+          AND (
+            metadata->'card'->>'id' IN ('osha_days_type_query', 'osha_injury_type_query', 'privacy_case_query')
+            OR metadata->'card'->>'id' LIKE 'osha_days_count%'
+          )
           AND COALESCE((metadata->>'accepted')::boolean, FALSE) = FALSE
         LIMIT 1
         """,
@@ -421,7 +426,7 @@ async def ensure_privacy_chain(conn, incident_id, current_user) -> None:
     )
     if pending:
         return
-    card = await next_privacy_card(conn, incident_id)
+    card = await next_case_step(conn, incident_id)
     if card is None:
         return
     await _emit_chain_card(
@@ -930,16 +935,22 @@ async def _handle_quick_reply(
             "new_value": bool_value,
         }
         if bool_value:
-            next_card = build_osha_days_type_query_card()
-            inserted = await _emit_chain_card(
-                conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
-            )
-            return {
-                "event_summary": event_summary,
-                "event_extra": event_extra,
-                "next_card": next_card,
-                "next_message_id": str(inserted["id"]),
-            }
+            # Recordable → create one case row per injured employee, then start
+            # the per-employee capture chain (days / classification / injury /
+            # privacy, looping case-by-case via next_case_step).
+            await ensure_osha_case_rows(conn, incident_id)
+            next_card = await next_case_step(conn, incident_id)
+            if next_card is not None:
+                inserted = await _emit_chain_card(
+                    conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
+                )
+                return {
+                    "event_summary": event_summary,
+                    "event_extra": event_extra,
+                    "next_card": next_card,
+                    "next_message_id": str(inserted["id"]),
+                }
+            return {"event_summary": event_summary, "event_extra": event_extra}
         # Not recordable — OSHA capture is done. Hand back to the conversational
         # guidance round (root cause / clarifying questions / closure) instead of
         # jumping straight to a close button. Omitting next_card makes the accept
@@ -950,95 +961,65 @@ async def _handle_quick_reply(
         }
 
     if kind == "osha_days_type_query":
+        # Per-case classification (this employee's ir_osha_case_details row).
+        case_key = (action.get("case_key") or "reporter").strip()
+        emp_name = action.get("employee_name")
         if selected == "days_away":
             next_card = build_osha_days_count_card(
-                target_field="days_away_from_work",
-                pending_classification="days_away",
+                target_field="days_away_from_work", pending_classification="days_away",
+                case_key=case_key, employee_name=emp_name,
             )
             inserted = await _emit_chain_card(
                 conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
             )
             return {
                 "event_summary": "Captured: Days Away",
-                "event_extra": {
-                    "field": "osha_classification_pending",
-                    "field_label": "OSHA case classification",
-                    "previous_value": None,
-                    "new_value": "days_away",
-                },
+                "event_extra": {"field": "osha_classification_pending", "field_label": "OSHA case classification", "previous_value": None, "new_value": "days_away"},
                 "next_card": next_card,
                 "next_message_id": str(inserted["id"]),
             }
         if selected == "restricted_duty":
             next_card = build_osha_days_count_card(
-                target_field="days_restricted_duty",
-                pending_classification="restricted_duty",
+                target_field="days_restricted_duty", pending_classification="restricted_duty",
+                case_key=case_key, employee_name=emp_name,
             )
             inserted = await _emit_chain_card(
                 conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
             )
             return {
                 "event_summary": "Captured: Job Restriction",
-                "event_extra": {
-                    "field": "osha_classification_pending",
-                    "field_label": "OSHA case classification",
-                    "previous_value": None,
-                    "new_value": "restricted_duty",
-                },
+                "event_extra": {"field": "osha_classification_pending", "field_label": "OSHA case classification", "previous_value": None, "new_value": "restricted_duty"},
                 "next_card": next_card,
                 "next_message_id": str(inserted["id"]),
             }
-        # Neither — straight to injury-type picker.
+        # Neither — medical-treatment-only; set this case's classification, then
+        # advance the chain (→ this case's injury-type step) via next_case_step.
         await conn.execute(
-            "UPDATE ir_incidents SET osha_classification = 'medical_treatment', "
-            "updated_at = NOW() WHERE id = $1",
-            incident_id,
+            "UPDATE ir_osha_case_details SET classification = 'medical_treatment', updated_at = NOW() "
+            "WHERE incident_id = $1 AND case_key = $2",
+            incident_id, case_key,
         )
-        next_card = build_osha_injury_type_query_card()
-        inserted = await _emit_chain_card(
-            conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
-        )
-        return {
-            "event_summary": "Captured: Medical treatment only",
-            "event_extra": {
-                "field": "osha_classification",
-                "field_label": "OSHA case classification",
-                "previous_value": None,
-                "new_value": "medical_treatment",
-            },
-            "next_card": next_card,
-            "next_message_id": str(inserted["id"]),
-        }
+        event_extra = {"field": "osha_classification", "field_label": "OSHA case classification", "previous_value": None, "new_value": "medical_treatment"}
+        next_card = await next_case_step(conn, incident_id)
+        if next_card is not None:
+            inserted = await _emit_chain_card(
+                conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
+            )
+            return {"event_summary": "Captured: Medical treatment only", "event_extra": event_extra, "next_card": next_card, "next_message_id": str(inserted["id"])}
+        return {"event_summary": "Captured: Medical treatment only", "event_extra": event_extra}
 
     if kind == "privacy_case_query":
-        # Per-injured-employee OSHA Privacy Case answer (Column B name masking).
-        # The human's answer is the source of truth, stored per employee in
-        # category_data.privacy_cases[employee_key]; the chain advances to the
-        # next injured employee (or ends) via next_privacy_card.
-        employee_key = (action.get("employee_key") or "").strip()
+        # Per-injured-employee OSHA Privacy Case answer (Column B name masking),
+        # written to this employee's ir_osha_case_details row (source of truth).
+        # The chain advances to the next case (or ends) via next_case_step.
+        case_key = (action.get("employee_key") or action.get("case_key") or "").strip()
         employee_name = action.get("employee_name") or "the employee"
-        if not employee_key:
+        if not case_key:
             return {"error": "Privacy-case card is missing its employee reference."}
-        # Ensure privacy_cases exists, then set this employee's key — atomic, so
-        # a co-injured employee's prior answer is preserved.
         await conn.execute(
-            """
-            UPDATE ir_incidents
-            SET category_data = jsonb_set(
-                    jsonb_set(
-                        COALESCE(category_data, '{}'::jsonb),
-                        '{privacy_cases}',
-                        COALESCE(category_data->'privacy_cases', '{}'::jsonb),
-                        true
-                    ),
-                    ARRAY['privacy_cases', $1::text],
-                    to_jsonb($2::text),
-                    true
-                ),
-                updated_at = NOW()
-            WHERE id = $3
-            """,
-            employee_key, selected, incident_id,
+            "UPDATE ir_osha_case_details SET privacy_case_reason = $1, updated_at = NOW() "
+            "WHERE incident_id = $2 AND case_key = $3",
+            selected, incident_id, case_key,
         )
         if selected == "none":
             summary = f"{employee_name}: not a privacy case"
@@ -1052,7 +1033,7 @@ async def _handle_quick_reply(
             "previous_value": None,
             "new_value": new_value,
         }
-        next_card = await next_privacy_card(conn, incident_id)
+        next_card = await next_case_step(conn, incident_id)
         if next_card is not None:
             inserted = await _emit_chain_card(
                 conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
@@ -1065,32 +1046,23 @@ async def _handle_quick_reply(
             }
         return {"event_summary": summary, "event_extra": event_extra}
 
-    # osha_injury_type_query
+    # osha_injury_type_query — write this case's OSHA M-column injury type to its
+    # ir_osha_case_details row, then advance the chain (→ this case's privacy
+    # prompt, then the next injured employee) via next_case_step.
+    case_key = (action.get("case_key") or "reporter").strip()
     await conn.execute(
-        """
-        UPDATE ir_incidents
-        SET osha_form_301_data = jsonb_set(
-            COALESCE(osha_form_301_data, '{}'::jsonb),
-            '{injury_type}',
-            to_jsonb($1::text),
-            true
-        ),
-        updated_at = NOW()
-        WHERE id = $2
-        """,
-        selected, incident_id,
+        "UPDATE ir_osha_case_details SET injury_type = $1, updated_at = NOW() "
+        "WHERE incident_id = $2 AND case_key = $3",
+        selected, incident_id, case_key,
     )
-    # Injury type captured → the incident is recordable and WILL appear on the
-    # 300/301 log, so chain the per-injured-employee OSHA Privacy Case prompt
-    # (29 CFR 1904.29) before handing back to conversational guidance.
     event_extra = {
-        "field": "osha_form_301_data.injury_type",
+        "field": "osha_case_injury_type",
         "field_label": "OSHA injury type",
         "previous_value": None,
         "new_value": selected,
     }
     summary = f"Captured injury type: {OSHA_INJURY_TYPE_LABELS[selected]}"
-    next_card = await next_privacy_card(conn, incident_id)
+    next_card = await next_case_step(conn, incident_id)
     if next_card is not None:
         inserted = await _emit_chain_card(
             conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
@@ -1135,27 +1107,25 @@ async def _handle_numeric_input(
     if days < lo or days > hi:
         return {"error": f"Days must be between {lo} and {hi}."}
 
+    # Per-case day count + classification (this employee's case row). case_col
+    # is whitelisted via `target` above, so the format is injection-safe.
+    case_key = (action.get("case_key") or "reporter").strip()
+    case_col = "days_away" if target == "days_away_from_work" else "days_restricted"
     await conn.execute(
-        f"UPDATE ir_incidents SET {target} = $1, osha_classification = $2, "
-        "updated_at = NOW() WHERE id = $3",
-        days, pending_classification, incident_id,
-    )
-    next_card = build_osha_injury_type_query_card()
-    inserted = await _emit_chain_card(
-        conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
+        f"UPDATE ir_osha_case_details SET {case_col} = $1, classification = $2, "
+        "updated_at = NOW() WHERE incident_id = $3 AND case_key = $4",
+        days, pending_classification, incident_id, case_key,
     )
     field_label = "Days away from work" if target == "days_away_from_work" else "Days on job restriction"
-    return {
-        "event_summary": f"Captured: {field_label} = {days}",
-        "event_extra": {
-            "field": target,
-            "field_label": field_label,
-            "previous_value": None,
-            "new_value": days,
-        },
-        "next_card": next_card,
-        "next_message_id": str(inserted["id"]),
-    }
+    event_extra = {"field": target, "field_label": field_label, "previous_value": None, "new_value": days}
+    summary = f"Captured: {field_label} = {days}"
+    next_card = await next_case_step(conn, incident_id)
+    if next_card is not None:
+        inserted = await _emit_chain_card(
+            conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
+        )
+        return {"event_summary": summary, "event_extra": event_extra, "next_card": next_card, "next_message_id": str(inserted["id"])}
+    return {"event_summary": summary, "event_extra": event_extra}
 
 
 async def _handle_text_input(

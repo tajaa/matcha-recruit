@@ -604,6 +604,27 @@ class OshaPrivacyCaseEntry(BaseModel):
     incident_id: str
 
 
+class OshaCaseDetail(BaseModel):
+    """One injured employee's OSHA case on a recordable incident.
+
+    The authoritative per-case record (``ir_osha_case_details``): each injured
+    person carries their own classification, days away/restricted, M-column
+    injury type, and Privacy Case answer. ``case_key`` = the employee UUID (as
+    str) or ``"reporter"``; ``privacy_case_reason`` is tri-state — ``None`` = not
+    yet asked, ``"none"`` = asked and cleared (not a privacy case), else the
+    OSHA reason.
+    """
+    incident_id: str
+    case_key: str
+    employee_id: Optional[str] = None
+    case_seq: int = 1
+    classification: Optional[str] = None
+    days_away: int = 0
+    days_restricted: int = 0
+    injury_type: Optional[str] = None
+    privacy_case_reason: Optional[str] = None
+
+
 class Osha300ASummary(BaseModel):
     """OSHA 300A annual summary — per establishment (business_location)."""
     year: int
