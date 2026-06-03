@@ -8,8 +8,14 @@ fields so no narrative (and thus no third-party name) reaches the export.
 from app.core.services.osha_privacy import (
     determine_privacy_case,
     compose_clinical_description,
+    PRIVACY_DESCRIPTION_PLACEHOLDER,
 )
 from app.matcha.routes.ir_incidents._shared import _privacy_signal_overlay
+from app.matcha.routes.ir_incidents.osha import (
+    _resolve_privacy_mask,
+    _resolve_osha_description,
+    _injured_persons,
+)
 
 
 # ── the 6 trigger conditions ────────────────────────────────────────────────
@@ -146,3 +152,103 @@ def test_clinical_description_ignores_narrative_names():
     out = compose_clinical_description(cd)
     assert "Julianna" not in out and "Simon" not in out
     assert out == "Bite to arm"
+
+
+# ── hybrid per-employee name masking (Column B) ──────────────────────────────
+
+def test_privacy_mask_human_reason_wins():
+    cd = {"privacy_cases": {"emp1": "mental_illness"}}
+    assert _resolve_privacy_mask(cd, {}, "emp1") == (True, "mental_illness")
+
+
+def test_privacy_mask_human_none_blocks_safety_net():
+    # body_parts would auto-trigger intimate_injury, but the human reviewed this
+    # employee and explicitly cleared it → must NOT mask.
+    cd = {"privacy_cases": {"emp1": "none"}, "body_parts": ["groin"]}
+    assert _resolve_privacy_mask(cd, {}, "emp1") == (False, None)
+
+
+def test_privacy_mask_unanswered_uses_safety_net():
+    # No human answer → fall back to determine_privacy_case (incident-level).
+    assert _resolve_privacy_mask({"body_parts": ["groin"]}, {}, "emp1") == (True, "intimate_injury")
+    # Unanswered + no signal → not masked.
+    assert _resolve_privacy_mask({}, {}, "emp1") == (False, None)
+    # Safety net also reads the OSHA M-column (mental_illness).
+    assert _resolve_privacy_mask({}, {"injury_type": "mental_illness"}, "emp1") == (True, "mental_illness")
+
+
+def test_privacy_mask_is_per_employee():
+    cd = {"privacy_cases": {"empA": "sexual_assault", "empB": "none"}}
+    assert _resolve_privacy_mask(cd, {}, "empA") == (True, "sexual_assault")
+    assert _resolve_privacy_mask(cd, {}, "empB") == (False, None)
+    # empC has no answer and no signal → safety net says not a privacy case.
+    assert _resolve_privacy_mask(cd, {}, "empC") == (False, None)
+
+
+def test_privacy_mask_reason_case_insensitive():
+    assert _resolve_privacy_mask({"privacy_cases": {"e": "Mental_Illness"}}, {}, "e") == (True, "mental_illness")
+
+
+# ── Column F description precedence (never the raw narrative) ─────────────────
+
+def test_description_prefers_ai_cleansed():
+    cd = {
+        "osha_clean_description": "Employee lacerated left hand on a needle.",
+        "injury_type": "laceration", "body_parts": ["left_hand"],
+    }
+    assert _resolve_osha_description(cd, False) == "Employee lacerated left hand on a needle."
+
+
+def test_description_falls_back_to_structured():
+    cd = {"injury_type": "laceration", "body_parts": ["left_hand"]}
+    assert _resolve_osha_description(cd, False) == "Laceration to left hand"
+
+
+def test_description_placeholder_when_empty():
+    assert _resolve_osha_description({}, True) == PRIVACY_DESCRIPTION_PLACEHOLDER
+    assert "incident record" in _resolve_osha_description({}, False).lower()
+
+
+def test_description_never_uses_raw_narrative():
+    # Narrative keys holding names must NEVER surface — only structured/clean fields.
+    cd = {
+        "description": "I was tending to Julianna when Simon bit me",  # ignored
+        "narrative": "Simon",  # ignored
+        "injury_type": "bite", "body_parts": ["arm"],
+    }
+    out = _resolve_osha_description(cd, False)
+    assert "Julianna" not in out and "Simon" not in out
+    assert out == "Bite to arm"
+
+
+# ── one row per injured employee ─────────────────────────────────────────────
+
+def test_injured_persons_roster_split():
+    a, b = "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"
+    row = {"involved_employee_ids": [a, b], "reported_by_name": "Reporter"}
+    emp_map = {
+        a: {"first_name": "Alice", "last_name": "Stone", "job_title": "Nurse"},
+        b: {"first_name": "Bob", "last_name": "Reed", "job_title": "Tech"},
+    }
+    assert _injured_persons(row, emp_map) == [
+        (a, "Alice Stone", "Nurse"),
+        (b, "Bob Reed", "Tech"),
+    ]
+
+
+def test_injured_persons_missing_roster_id_is_mask_safe():
+    eid = "33333333-3333-3333-3333-333333333333"
+    row = {"involved_employee_ids": [eid], "reported_by_name": "Reporter"}
+    # Unresolvable id still yields a row, never a leaked name.
+    assert _injured_persons(row, {}) == [(eid, "Unknown", None)]
+
+
+def test_injured_persons_reporter_fallback_no_roster():
+    # No roster ids → single reporter row keyed "reporter".
+    row = {"involved_employee_ids": [], "reported_by_name": "Dana Fields",
+           "emp_first_name": None, "emp_last_name": None, "emp_job_title": None}
+    assert _injured_persons(row, {}) == [("reporter", "Dana Fields", None)]
+    # Reporter matched to the roster → use the joined name + Finch title.
+    row2 = {"involved_employee_ids": [], "reported_by_name": "Dana Fields",
+            "emp_first_name": "Dana", "emp_last_name": "Fields", "emp_job_title": "Aide"}
+    assert _injured_persons(row2, {}) == [("reporter", "Dana Fields", "Aide")]

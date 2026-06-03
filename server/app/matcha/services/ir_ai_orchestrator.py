@@ -104,6 +104,7 @@ IR_VALID_QUICK_REPLY_KINDS = {
     "osha_days_type_query",
     "osha_injury_type_query",
     "log_root_cause_query",
+    "privacy_case_query",
 }
 
 

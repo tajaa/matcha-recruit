@@ -13,8 +13,7 @@ import json
 from datetime import datetime, timezone
 from typing import Optional, Any, Callable
 
-from google import genai
-
+from ...core.services.genai_client import get_genai_client
 from ...core.services.rate_limiter import get_rate_limiter, RateLimitExceeded
 
 
@@ -237,6 +236,41 @@ Field rules:
 - In body_parts, for intimate parts use exactly these keys: genitals, reproductive_system, groin, breast, buttocks, perineum, anus.
 - Base every field ONLY on the text. When unsure, use false / "none" / null. Booleans must be true or false.
 - Do NOT include any person's name anywhere in the output."""
+
+
+def _validate_cleansed_description(result: dict) -> Optional[str]:
+    """Validate the name-stripped OSHA description rewrite."""
+    if not isinstance(result, dict):
+        return "Response must be a JSON object."
+    cleaned = result.get("clean_description")
+    if cleaned is not None and not isinstance(cleaned, str):
+        return "clean_description must be a string."
+    return None
+
+
+# Rewrites the incident narrative for the OSHA 300/301 Description column with
+# EVERY human name removed (patient, coworker, the injured employee, anyone) —
+# only the mechanism of injury survives. The deterministic export never falls
+# back to the raw narrative; this is the readable (still name-free) Column F.
+CLEANSE_PROMPT = """You rewrite a workplace incident description for an OSHA 300/301 log. The log is a PUBLIC record, so it MUST contain NO person's name — not the injured employee, not coworkers, not patients, not visitors, no one.
+
+Incident title: {title}
+Incident description: {description}
+
+Rewrite the description into ONE short, factual past-tense clause describing WHAT happened and the mechanism of injury, replacing every person with a generic role noun:
+- the injured worker -> "Employee"
+- a coworker -> "a coworker"
+- a patient / resident / client -> "a patient"
+- a visitor / member of the public -> "a visitor"
+
+Rules:
+- Output absolutely NO names, initials, or other identifiers.
+- Keep the injury mechanism and body part (e.g. "Employee lacerated left hand on a needle").
+- Third person, one sentence, no commentary.
+- If the description is empty or has no injury content, return an empty string.
+
+Return ONLY this JSON object (no markdown):
+{{"clean_description": "Employee ..."}}"""
 
 
 CATEGORIZATION_PROMPT = """You are an HR incident analysis assistant. Analyze this incident report and determine the most appropriate category.
@@ -636,7 +670,7 @@ class IRAnalyzer:
             model: Model to use for analysis.
         """
         self.model = model
-        self.client = genai.Client(api_key=api_key)
+        self.client = get_genai_client(api_key=api_key)
 
     def _parse_json_response(self, text: str) -> dict[str, Any]:
         """Parse JSON from LLM response, handling markdown code blocks."""
@@ -781,6 +815,30 @@ class IRAnalyzer:
         return await self._call_with_retry(
             build_prompt, _validate_privacy_signals, label="privacy_signals"
         )
+
+    async def cleanse_description(
+        self,
+        title: str,
+        description: str,
+    ) -> Optional[str]:
+        """Rewrite the narrative for the OSHA Description column with every human
+        name stripped (the readable, name-free Column F). Returns the cleansed
+        string, or None when there's nothing injury-related to render.
+        """
+        def build_prompt(feedback: Optional[str] = None) -> str:
+            prompt = CLEANSE_PROMPT.format(
+                title=title or "",
+                description=description or "",
+            )
+            if feedback:
+                prompt += f"\n\n{feedback}"
+            return prompt
+
+        result = await self._call_with_retry(
+            build_prompt, _validate_cleansed_description, label="cleanse_description"
+        )
+        cleaned = (result.get("clean_description") or "").strip()
+        return cleaned or None
 
     async def assess_severity(
         self,

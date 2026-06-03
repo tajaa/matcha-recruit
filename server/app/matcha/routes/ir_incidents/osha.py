@@ -7,11 +7,11 @@ Covers:
 - Recordability update (manual)
 - Recordability AI determination (Gemini-backed)
 """
-import asyncio
 import csv
 import io
 import json
 import logging
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -27,7 +27,7 @@ from app.matcha.models.ir_incident import (
     OshaPrivacyCaseEntry,
     OshaRecordabilityUpdate,
 )
-from ._shared import log_audit
+from ._shared import log_audit, _hydrate_involved_employees
 from app.core.services.osha_redaction import redact_osha_text
 from app.core.services.osha_privacy import (
     determine_privacy_case,
@@ -35,6 +35,7 @@ from app.core.services.osha_privacy import (
     PRIVACY_NAME,
     PRIVACY_DESCRIPTION_PLACEHOLDER,
 )
+from app.core.services.genai_client import get_genai_client
 from app.matcha.services.naics_titles import naics_industry_description
 
 logger = logging.getLogger(__name__)
@@ -109,28 +110,99 @@ def _safe_json_loads(val, default=None):
 _NO_STRUCTURED_DESCRIPTION = "See incident record for details"
 
 
-def _resolve_osha_privacy(category_data: dict, osha_form_301_data: dict, emp_name: str):
-    """Compute OSHA privacy-case masking + clinical description for one row.
+def _resolve_privacy_mask(category_data: dict, osha_form_301_data: dict, privacy_key):
+    """Decide whether ONE injured-employee row's name is masked (Column B).
 
-    Returns ``(is_privacy_case, reason, display_name, description)``:
-    - ``display_name`` is "Privacy Case" when masked, else ``emp_name``.
-    - ``description`` is the structured clinical phrase (never the raw
-      narrative); a name-free placeholder when there's no structured injury data.
-
-    Single source of the masking logic shared by the 300 log, the 301 form, and
-    the confidential privacy-case endpoint, so the three can never drift.
+    Hybrid, per-employee: the human's Copilot answer in
+    ``category_data.privacy_cases[privacy_key]`` is the source of truth —
+      * a reason string  → mask (human confirmed this category),
+      * ``"none"``        → don't mask (human reviewed and cleared it),
+      * missing/unanswered → fall back to ``determine_privacy_case`` as a
+        fail-closed safety net (incident-level signals; may over-mask
+        co-injured rows, which is the safe direction).
+    Returns ``(is_privacy_case, reason)``.
     """
     cd = category_data or {}
-    is_priv, reason = determine_privacy_case(
+    answers = cd.get("privacy_cases") or {}
+    human = answers.get(privacy_key) if privacy_key else None
+    if isinstance(human, str):
+        h = human.strip().lower()
+        if h == "none":
+            return False, None
+        if h:
+            return True, h
+    return determine_privacy_case(
         cd,
         (osha_form_301_data or {}).get("injury_type"),
         bool(cd.get("employee_privacy_requested")),
     )
-    display_name = PRIVACY_NAME if is_priv else emp_name
-    description = compose_clinical_description(cd) or (
-        PRIVACY_DESCRIPTION_PLACEHOLDER if is_priv else _NO_STRUCTURED_DESCRIPTION
+
+
+def _resolve_osha_description(category_data: dict, is_privacy_case: bool) -> str:
+    """OSHA 300/301 Description (Column F) — NEVER the raw reporter narrative.
+
+    Precedence (all name-free by construction):
+      1. ``osha_clean_description`` — the AI-cleansed narrative (names stripped).
+      2. ``compose_clinical_description`` — structured injury phrase.
+      3. a neutral placeholder.
+    """
+    cd = category_data or {}
+    clean = (cd.get("osha_clean_description") or "").strip()
+    if clean:
+        return clean
+    return compose_clinical_description(cd) or (
+        PRIVACY_DESCRIPTION_PLACEHOLDER if is_privacy_case else _NO_STRUCTURED_DESCRIPTION
     )
+
+
+def _resolve_osha_privacy(category_data, osha_form_301_data, emp_name, privacy_key=None):
+    """Mask + description for one 300/301 row — single source for all OSHA reads.
+
+    ``privacy_key`` keys the per-employee privacy answer (``"<employee_id>"`` or
+    ``"reporter"``); ``None`` falls back to the incident-level safety net.
+    """
+    cd = category_data or {}
+    is_priv, reason = _resolve_privacy_mask(cd, osha_form_301_data, privacy_key)
+    display_name = PRIVACY_NAME if is_priv else emp_name
+    description = _resolve_osha_description(cd, is_priv)
     return is_priv, reason, display_name, description
+
+
+def _injured_persons(row, emp_map: dict) -> list:
+    """One injured person per 300-log row: ``[(privacy_key, name, job_title)]``.
+
+    Roster employees from ``involved_employee_ids`` (name + Finch-synced
+    ``job_title``), in stored order. No roster ids → a single reporter-fallback
+    row keyed ``"reporter"`` (preserves matcha-lite no-roster behavior).
+    """
+    ids = [str(x) for x in (row.get("involved_employee_ids") or []) if x]
+    if ids:
+        out = []
+        for eid in ids:
+            emp = emp_map.get(eid)
+            if emp:
+                name = f"{emp.get('first_name') or ''} {emp.get('last_name') or ''}".strip() or "Unknown"
+                out.append((eid, name, emp.get("job_title")))
+            else:
+                # id no longer on the roster — keep a row (mask-safe), no name leak.
+                out.append((eid, "Unknown", None))
+        return out
+    reporter_name = row["reported_by_name"]
+    if row.get("emp_first_name"):
+        reporter_name = f"{row['emp_first_name']} {row.get('emp_last_name') or ''}".strip()
+    return [("reporter", reporter_name, row.get("emp_job_title"))]
+
+
+async def _hydrate_emp_map(conn, company_id, rows) -> dict:
+    """Batch-resolve every incident's ``involved_employee_ids`` → ``{str(id): emp}``
+    in one query (avoids an N+1 across the recordable rows)."""
+    all_ids = []
+    for row in rows:
+        all_ids.extend(row.get("involved_employee_ids") or [])
+    if not all_ids:
+        return {}
+    hydrated = await _hydrate_involved_employees(conn, company_id, all_ids)
+    return {str(e["id"]): e for e in hydrated}
 
 
 async def _aggregate_300a(conn, company_id, location_id, year) -> dict:
@@ -253,6 +325,7 @@ async def get_osha_300_log(
                 COALESCE(i.days_restricted_duty, 0) AS days_restricted_duty,
                 i.category_data,
                 i.osha_form_301_data,
+                i.involved_employee_ids,
                 i.reported_by_name,
                 e.first_name AS emp_first_name,
                 e.last_name AS emp_last_name,
@@ -269,35 +342,41 @@ async def get_osha_300_log(
             company_id,
             year,
         )
+        emp_map = await _hydrate_emp_map(conn, company_id, rows)
 
     entries = []
     for row in rows:
-        emp_name = row["reported_by_name"]
-        if row["emp_first_name"]:
-            emp_name = f"{row['emp_first_name']} {row['emp_last_name'] or ''}".strip()
-
         category_data = _safe_json_loads(row.get("category_data"), {})
         injury_type = category_data.get("injury_type")
         form_301 = _safe_json_loads(row.get("osha_form_301_data"), {})
-        is_priv, reason, display_name, description = _resolve_osha_privacy(
-            category_data, form_301, emp_name,
-        )
+        base_case = row["osha_case_number"] or str(row["id"])[:8]
+        date_str = row["occurred_at"].strftime("%Y-%m-%d") if row["occurred_at"] else ""
+        location = redact_osha_text(row["location"])
 
-        entries.append(Osha300LogEntry(
-            case_number=row["osha_case_number"] or str(row["id"])[:8],
-            employee_name=display_name,
-            job_title=row["emp_job_title"],
-            date_of_injury=row["occurred_at"].strftime("%Y-%m-%d") if row["occurred_at"] else "",
-            location=redact_osha_text(row["location"]),
-            description=description,
-            classification=row["osha_classification"],
-            days_away=row["days_away_from_work"],
-            days_restricted=row["days_restricted_duty"],
-            injury_type=injury_type,
-            incident_id=str(row["id"]),
-            is_privacy_case=is_priv,
-            privacy_case_reason=reason,
-        ))
+        # One row per injured employee (each its own case number); reporter
+        # fallback when no roster ids. Name masked per-employee (Column B); the
+        # Description (Column F) is name-free regardless.
+        injured = _injured_persons(row, emp_map)
+        multi = len(injured) > 1
+        for idx, (key, name, title) in enumerate(injured):
+            is_priv, reason, display_name, description = _resolve_osha_privacy(
+                category_data, form_301, name, privacy_key=key,
+            )
+            entries.append(Osha300LogEntry(
+                case_number=f"{base_case}-{idx + 1}" if multi else base_case,
+                employee_name=display_name,
+                job_title=title,
+                date_of_injury=date_str,
+                location=location,
+                description=description,
+                classification=row["osha_classification"],
+                days_away=row["days_away_from_work"],
+                days_restricted=row["days_restricted_duty"],
+                injury_type=injury_type,
+                incident_id=str(row["id"]),
+                is_privacy_case=is_priv,
+                privacy_case_reason=reason,
+            ))
     return entries
 
 
@@ -366,9 +445,11 @@ async def get_osha_privacy_cases(
                 i.osha_classification,
                 i.category_data,
                 i.osha_form_301_data,
+                i.involved_employee_ids,
                 i.reported_by_name,
                 e.first_name AS emp_first_name,
-                e.last_name AS emp_last_name
+                e.last_name AS emp_last_name,
+                e.job_title AS emp_job_title
             FROM ir_incidents i
             LEFT JOIN employees e
                 ON e.email = i.reported_by_email
@@ -381,25 +462,27 @@ async def get_osha_privacy_cases(
             company_id,
             year,
         )
+        emp_map = await _hydrate_emp_map(conn, company_id, rows)
 
         entries: list[OshaPrivacyCaseEntry] = []
         for row in rows:
-            emp_name = row["reported_by_name"]
-            if row["emp_first_name"]:
-                emp_name = f"{row['emp_first_name']} {row['emp_last_name'] or ''}".strip()
             category_data = _safe_json_loads(row.get("category_data"), {})
             form_301 = _safe_json_loads(row.get("osha_form_301_data"), {})
-            is_priv, reason, _display, _desc = _resolve_osha_privacy(category_data, form_301, emp_name)
-            if not is_priv:
-                continue
-            entries.append(OshaPrivacyCaseEntry(
-                case_number=row["osha_case_number"] or str(row["id"])[:8],
-                real_employee_name=emp_name or "Unknown",
-                privacy_case_reason=reason,
-                classification=row["osha_classification"],
-                date_of_injury=row["occurred_at"].strftime("%Y-%m-%d") if row["occurred_at"] else "",
-                incident_id=str(row["id"]),
-            ))
+            base_case = row["osha_case_number"] or str(row["id"])[:8]
+            injured = _injured_persons(row, emp_map)
+            multi = len(injured) > 1
+            for idx, (key, name, _title) in enumerate(injured):
+                is_priv, reason = _resolve_privacy_mask(category_data, form_301, key)
+                if not is_priv:
+                    continue
+                entries.append(OshaPrivacyCaseEntry(
+                    case_number=f"{base_case}-{idx + 1}" if multi else base_case,
+                    real_employee_name=name or "Unknown",
+                    privacy_case_reason=reason,
+                    classification=row["osha_classification"],
+                    date_of_injury=row["occurred_at"].strftime("%Y-%m-%d") if row["occurred_at"] else "",
+                    incident_id=str(row["id"]),
+                ))
 
         # Confidential access is audited (list view → no single-incident scope).
         await log_audit(
@@ -414,9 +497,10 @@ async def get_osha_privacy_cases(
 @router.get("/osha/301/{incident_id}")
 async def get_osha_301_form(
     incident_id: UUID,
+    employee_id: Optional[UUID] = Query(None, description="Which injured employee's 301 (defaults to the first injured person)"),
     current_user=Depends(require_admin_or_client),
 ):
-    """Generate OSHA 301 form data for a specific recordable incident."""
+    """Generate OSHA 301 form data for a recordable incident + injured employee."""
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated with user")
@@ -449,34 +533,43 @@ async def get_osha_301_form(
             incident_id,
             company_id,
         )
-
-    if not row:
-        raise HTTPException(status_code=404, detail="Recordable incident not found")
+        if not row:
+            raise HTTPException(status_code=404, detail="Recordable incident not found")
+        emp_map = await _hydrate_emp_map(conn, company_id, [row])
 
     category_data = _safe_json_loads(row.get("category_data"), {})
     form_301_data = _safe_json_loads(row.get("osha_form_301_data"), {})
 
-    emp_name = row["reported_by_name"]
-    if row["emp_first_name"]:
-        emp_name = f"{row['emp_first_name']} {row['emp_last_name'] or ''}".strip()
+    # One 301 per injured employee. Pick the requested employee (else the first
+    # injured person; reporter fallback when no roster ids) and key the privacy
+    # mask to that person so the 301 masks exactly like its 300-log row, and
+    # render the Description from structured/AI-cleansed fields (never the raw
+    # narrative). The real name stays resolvable via /osha/privacy-cases.
+    injured = _injured_persons(row, emp_map)
+    target = None
+    if employee_id is not None:
+        target = next((p for p in injured if p[0] == str(employee_id)), None)
+    if target is None:
+        target = injured[0]
+    privacy_key, target_name, target_title = target
+    is_reporter = privacy_key == "reporter"
+    base_case = row["osha_case_number"] or str(row["id"])[:8]
+    case_number = f"{base_case}-{injured.index(target) + 1}" if len(injured) > 1 else base_case
 
-    # OSHA Privacy Case (29 CFR 1904.29): mask the employee name + render the
-    # Description from structured injury fields (never the raw narrative) so no
-    # patient/third-party name reaches the form. Injury structure (injury_type,
-    # body_parts, classification) is still passed through so the 301 describes
-    # the injury. The real name stays resolvable via /osha/privacy-cases.
     is_priv, reason, display_name, clinical_description = _resolve_osha_privacy(
-        category_data, form_301_data, emp_name,
+        category_data, form_301_data, target_name, privacy_key=privacy_key,
     )
     return {
         "incident_id": str(row["id"]),
-        "case_number": row["osha_case_number"] or str(row["id"])[:8],
+        "case_number": case_number,
         "employee_name": display_name,
         "is_privacy_case": is_priv,
         "privacy_case_reason": reason,
-        "employee_email": row.get("emp_email"),
-        "employee_job_title": row.get("emp_job_title"),
-        "employee_start_date": row["emp_start_date"].isoformat() if row.get("emp_start_date") else None,
+        # email/start_date come from the reporter join — valid only when this 301
+        # is the reporter's own; otherwise it would show another person's PII.
+        "employee_email": row.get("emp_email") if is_reporter else None,
+        "employee_job_title": target_title,
+        "employee_start_date": row["emp_start_date"].isoformat() if (is_reporter and row.get("emp_start_date")) else None,
         "employer_name": row.get("company_name"),
         "employer_address": row.get("company_address"),
         "establishment_name": row.get("location_name"),
@@ -945,6 +1038,14 @@ async def update_osha_recordability(
             f"UPDATE ir_incidents SET {', '.join(sets)} WHERE id = $1 AND company_id = $2 RETURNING *",
             *params,
         )
+        # Recordability set outside the Copilot chain (manual override) still
+        # needs the OSHA Privacy Case question. Emit the per-employee privacy
+        # card into the transcript so it's pending next time the Copilot opens —
+        # otherwise masking would fall to the safety net alone (which can't catch
+        # the human-only opt-out). Idempotent + no-op if already asked/answered.
+        if update.osha_recordable is True:
+            from .copilot import ensure_privacy_chain  # lazy: avoid circular import
+            await ensure_privacy_chain(conn, str(incident_id), current_user)
         return {"message": "OSHA recordability updated", "id": str(updated["id"])}
 
 
@@ -993,13 +1094,12 @@ Respond in JSON:
 
         settings = get_settings()
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=settings.gemini_api_key)
-            model = genai.GenerativeModel("gemini-3-flash-preview")
-            response = await asyncio.to_thread(
-                model.generate_content, prompt
+            client = get_genai_client()
+            response = await client.aio.models.generate_content(
+                model=settings.analysis_model,
+                contents=prompt,
             )
-            text = response.text.strip()
+            text = (response.text or "").strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
             result = json.loads(text)

@@ -18,6 +18,11 @@ from app.core.services.email import get_email_service
 from app.database import get_connection
 from app.matcha.dependencies import get_client_company_id
 from app.matcha.models.ir_incident import IRIncidentResponse, Witness
+from app.core.services.osha_privacy import (
+    determine_privacy_case,
+    PRIVACY_CASE_REASONS,
+    PRIVACY_CASE_REASON_LABELS,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -538,6 +543,37 @@ async def _auto_classify_incident_task(
         except Exception:
             logger.exception(f"[IR] privacy-signal extraction crashed for {incident_id}")
 
+        # Name-stripped OSHA Description (Column F). Rewrites the narrative with
+        # every human name removed so the public 300/301 log carries no patient
+        # or third-party name. Best-effort: on failure the export falls back to
+        # the structured clinical phrase (still name-free) — never the raw text.
+        try:
+            clean = await analyzer.cleanse_description(
+                title=row["title"] or "",
+                description=row["description"] or "",
+            )
+            if clean:
+                async with get_connection() as conn:
+                    await conn.execute(
+                        """
+                        UPDATE ir_incidents
+                        SET category_data = jsonb_set(
+                            COALESCE(category_data, '{}'::jsonb),
+                            '{osha_clean_description}',
+                            to_jsonb($2::text),
+                            true
+                        ),
+                        updated_at = NOW()
+                        WHERE id = $1
+                        """,
+                        incident_id,
+                        clean,
+                    )
+        except IRAnalysisError as e:
+            logger.warning(f"[IR] description cleanse failed for {incident_id}: {e}")
+        except Exception:
+            logger.exception(f"[IR] description cleanse crashed for {incident_id}")
+
     except Exception:
         logger.exception(f"[IR] auto-classify task crashed for {incident_id}")
 
@@ -808,6 +844,98 @@ def build_osha_injury_type_query_card() -> dict:
             ],
         },
     }
+
+
+def build_privacy_case_query_card(*, employee_key: str, employee_name: str, suggested_reason: Optional[str] = None) -> dict:
+    """Per-injured-employee OSHA Privacy Case prompt (29 CFR 1904.29(b)(6)-(b)(10)).
+
+    Extends the OSHA recordable chain: fires only after an incident is confirmed
+    recordable (so it WILL be posted on the 300/301 log). Asks whether THIS
+    injured employee's name must be withheld — shown as "Privacy Case" — forcing
+    one of the 6 sensitive categories or "Not a privacy case". The answer is the
+    source of truth, stored per employee in ``category_data.privacy_cases[key]``;
+    the real name always stays on the confidential reference list. The
+    ``determine_privacy_case`` suggestion is pre-highlighted, but the human decides.
+    """
+    choices = [{"label": PRIVACY_CASE_REASON_LABELS[r], "value": r} for r in PRIVACY_CASE_REASONS]
+    choices.append({"label": "Not a privacy case", "value": "none"})
+    return {
+        "id": "privacy_case_query",
+        "title": "OSHA Privacy Case?",
+        "recommendation": f"Is this a privacy case for {employee_name}?",
+        "rationale": (
+            "OSHA 29 CFR 1904.29(b)(6)-(b)(10): for these 6 sensitive categories the "
+            "employee's name is withheld from the posted 300/301 log (shown as "
+            "\"Privacy Case\"). The real name stays on the confidential reference list."
+        ),
+        "priority": "high",
+        "blockers": [],
+        "action": {
+            "type": "quick_reply",
+            "label": "Choose one",
+            "quick_reply_kind": "privacy_case_query",
+            "employee_key": employee_key,
+            "employee_name": employee_name,
+            "suggested_value": suggested_reason or "none",
+            "choices": choices,
+        },
+    }
+
+
+async def _injured_persons_for_privacy(conn, incident_id):
+    """``(injured, category_data, form_301)`` for an incident's privacy chain.
+
+    ``injured`` = ordered ``[(privacy_key, name)]`` — one per roster employee in
+    ``involved_employee_ids``, else a single ``("reporter", reporter_name)``
+    fallback (mirrors osha.py ``_injured_persons`` at the DB level for the chain).
+    """
+    row = await conn.fetchrow(
+        """
+        SELECT company_id, category_data, osha_form_301_data,
+               involved_employee_ids, reported_by_name
+        FROM ir_incidents WHERE id = $1
+        """,
+        incident_id,
+    )
+    if not row:
+        return [], {}, {}
+    cd = _safe_json_loads(row["category_data"], {}) or {}
+    form_301 = _safe_json_loads(row["osha_form_301_data"], {}) or {}
+    ids = [str(x) for x in (row["involved_employee_ids"] or []) if x]
+    if ids:
+        hydrated = await _hydrate_involved_employees(conn, row["company_id"], ids)
+        by_id = {str(e["id"]): e for e in hydrated}
+        injured = []
+        for eid in ids:
+            emp = by_id.get(eid)
+            name = (f"{emp.get('first_name') or ''} {emp.get('last_name') or ''}".strip() if emp else "") or "this employee"
+            injured.append((eid, name))
+    else:
+        injured = [("reporter", row["reported_by_name"] or "this employee")]
+    return injured, cd, form_301
+
+
+async def next_privacy_card(conn, incident_id) -> Optional[dict]:
+    """The privacy-case card for the next injured employee without an answer yet,
+    or ``None`` when every injured employee has been answered (chain complete).
+
+    Used to both START the chain (after the injury-type card; no answers yet) and
+    ADVANCE it (after each answer is stored). The ``determine_privacy_case``
+    suggestion (incident-level) is pre-highlighted on each card.
+    """
+    injured, cd, form_301 = await _injured_persons_for_privacy(conn, incident_id)
+    if not injured:
+        return None
+    answered = set((cd.get("privacy_cases") or {}).keys())
+    _is_priv, suggested = determine_privacy_case(
+        cd, form_301.get("injury_type"), bool(cd.get("employee_privacy_requested")),
+    )
+    for key, name in injured:
+        if key not in answered:
+            return build_privacy_case_query_card(
+                employee_key=key, employee_name=name, suggested_reason=suggested,
+            )
+    return None
 
 
 # ===========================================

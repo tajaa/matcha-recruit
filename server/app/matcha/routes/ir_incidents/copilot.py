@@ -44,9 +44,13 @@ from ._shared import (
     build_osha_days_type_query_card,
     build_osha_injury_type_query_card,
     build_osha_recordable_query_card,
+    build_privacy_case_query_card,
     build_root_cause_text_card,
     compose_root_cause_text,
     log_audit,
+    next_privacy_card,
+    PRIVACY_CASE_REASONS,
+    PRIVACY_CASE_REASON_LABELS,
 )
 
 logger = logging.getLogger(__name__)
@@ -391,6 +395,38 @@ async def _emit_chain_card(conn, *, incident_id: UUID, card: dict, created_by=No
         content=card.get("title") or "Recommendation",
         metadata={"card": card, "accepted": False},
         created_by=created_by,
+    )
+
+
+async def ensure_privacy_chain(conn, incident_id, current_user) -> None:
+    """Emit the per-injured-employee OSHA Privacy Case card when the incident is
+    recordable, the next injured employee has no answer yet, and no privacy card
+    is already pending.
+
+    Idempotent — safe to call after recordability is set by ANY path. Covers
+    recordability set OUTSIDE the Copilot chain (e.g. the manual PUT /osha
+    override), which would otherwise skip the privacy question entirely and leave
+    Column-B masking to the determine_privacy_case safety net alone.
+    """
+    pending = await conn.fetchval(
+        """
+        SELECT 1 FROM ir_incident_ai_messages
+        WHERE incident_id = $1
+          AND message_type = 'card'
+          AND metadata->'card'->>'id' = 'privacy_case_query'
+          AND COALESCE((metadata->>'accepted')::boolean, FALSE) = FALSE
+        LIMIT 1
+        """,
+        incident_id,
+    )
+    if pending:
+        return
+    card = await next_privacy_card(conn, incident_id)
+    if card is None:
+        return
+    await _emit_chain_card(
+        conn, incident_id=incident_id, card=card,
+        created_by=current_user.id if current_user else None,
     )
 
 
@@ -777,6 +813,7 @@ async def _handle_quick_reply(
         "osha_days_type_query": {"days_away", "restricted_duty", "neither"},
         "osha_injury_type_query": OSHA_INJURY_TYPES,
         "log_root_cause_query": {"yes", "no"},
+        "privacy_case_query": set(PRIVACY_CASE_REASONS) | {"none"},
     }
     if kind not in allowed_by_kind:
         return {"error": f"Unknown quick_reply kind: {kind}"}
@@ -973,6 +1010,61 @@ async def _handle_quick_reply(
             "next_message_id": str(inserted["id"]),
         }
 
+    if kind == "privacy_case_query":
+        # Per-injured-employee OSHA Privacy Case answer (Column B name masking).
+        # The human's answer is the source of truth, stored per employee in
+        # category_data.privacy_cases[employee_key]; the chain advances to the
+        # next injured employee (or ends) via next_privacy_card.
+        employee_key = (action.get("employee_key") or "").strip()
+        employee_name = action.get("employee_name") or "the employee"
+        if not employee_key:
+            return {"error": "Privacy-case card is missing its employee reference."}
+        # Ensure privacy_cases exists, then set this employee's key — atomic, so
+        # a co-injured employee's prior answer is preserved.
+        await conn.execute(
+            """
+            UPDATE ir_incidents
+            SET category_data = jsonb_set(
+                    jsonb_set(
+                        COALESCE(category_data, '{}'::jsonb),
+                        '{privacy_cases}',
+                        COALESCE(category_data->'privacy_cases', '{}'::jsonb),
+                        true
+                    ),
+                    ARRAY['privacy_cases', $1::text],
+                    to_jsonb($2::text),
+                    true
+                ),
+                updated_at = NOW()
+            WHERE id = $3
+            """,
+            employee_key, selected, incident_id,
+        )
+        if selected == "none":
+            summary = f"{employee_name}: not a privacy case"
+            new_value = "not_privacy_case"
+        else:
+            summary = f"{employee_name}: privacy case — {PRIVACY_CASE_REASON_LABELS.get(selected, selected)}"
+            new_value = selected
+        event_extra = {
+            "field": "privacy_case",
+            "field_label": "OSHA privacy case",
+            "previous_value": None,
+            "new_value": new_value,
+        }
+        next_card = await next_privacy_card(conn, incident_id)
+        if next_card is not None:
+            inserted = await _emit_chain_card(
+                conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
+            )
+            return {
+                "event_summary": summary,
+                "event_extra": event_extra,
+                "next_card": next_card,
+                "next_message_id": str(inserted["id"]),
+            }
+        return {"event_summary": summary, "event_extra": event_extra}
+
     # osha_injury_type_query
     await conn.execute(
         """
@@ -988,19 +1080,28 @@ async def _handle_quick_reply(
         """,
         selected, incident_id,
     )
-    # OSHA recordable capture complete. Hand back to the conversational guidance
-    # round so the copilot moves on to root cause / clarifying questions /
-    # closure rather than dead-ending on a close button before those are done.
-    # Omitting next_card makes the accept dispatcher run generate_guidance.
-    return {
-        "event_summary": f"Captured injury type: {OSHA_INJURY_TYPE_LABELS[selected]}",
-        "event_extra": {
-            "field": "osha_form_301_data.injury_type",
-            "field_label": "OSHA injury type",
-            "previous_value": None,
-            "new_value": selected,
-        },
+    # Injury type captured → the incident is recordable and WILL appear on the
+    # 300/301 log, so chain the per-injured-employee OSHA Privacy Case prompt
+    # (29 CFR 1904.29) before handing back to conversational guidance.
+    event_extra = {
+        "field": "osha_form_301_data.injury_type",
+        "field_label": "OSHA injury type",
+        "previous_value": None,
+        "new_value": selected,
     }
+    summary = f"Captured injury type: {OSHA_INJURY_TYPE_LABELS[selected]}"
+    next_card = await next_privacy_card(conn, incident_id)
+    if next_card is not None:
+        inserted = await _emit_chain_card(
+            conn, incident_id=incident_id, card=next_card, created_by=current_user.id,
+        )
+        return {
+            "event_summary": summary,
+            "event_extra": event_extra,
+            "next_card": next_card,
+            "next_message_id": str(inserted["id"]),
+        }
+    return {"event_summary": summary, "event_extra": event_extra}
 
 
 async def _handle_numeric_input(

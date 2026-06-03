@@ -37,6 +37,16 @@ PRIVACY_CASE_REASONS = (
     "voluntary_opt_out",
 )
 
+# Human-facing labels for the Copilot privacy-case picker (Column B reasons).
+PRIVACY_CASE_REASON_LABELS = {
+    "intimate_injury": "Intimate / reproductive injury",
+    "sexual_assault": "Sexual assault",
+    "mental_illness": "Mental illness",
+    "infectious_pathogen": "HIV / Hepatitis / Tuberculosis",
+    "contaminated_sharps": "Contaminated sharps (needlestick)",
+    "voluntary_opt_out": "Employee opt-out (illness)",
+}
+
 # category_data.body_parts values that make a case an intimate-injury privacy
 # case. Canonical lowercased keys — the frontend body-part picker uses the same.
 INTIMATE_BODY_PARTS = frozenset({
