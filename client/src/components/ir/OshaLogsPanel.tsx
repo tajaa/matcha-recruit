@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
 import { fetchLocations } from '../../api/compliance'
 import type { BusinessLocation } from '../../types/compliance'
-import { Badge, Button } from '../ui'
+import { Badge, Button, Modal } from '../ui'
 import { useMe } from '../../hooks/useMe'
 import { Download, Loader2, FileSpreadsheet, FileText, Save, AlertTriangle, Lock, Eye, EyeOff } from 'lucide-react'
 
@@ -96,6 +96,17 @@ const classificationBadge: Record<string, 'danger' | 'warning' | 'neutral'> = {
   significant_injury: 'warning',
 }
 
+// Shown in the pre-export confirm modal. Mirrors the backend EXPORT_DISCLAIMER;
+// the server also returns it on a 403 if an un-attested export slips through.
+const EXPORT_DISCLAIMER =
+  'This OSHA log was prepared with AI-assisted recordability classification, ' +
+  'injury-description cleansing, and Privacy Case name masking. These are aids, ' +
+  'not a substitute for your review. Before filing with OSHA or any agency you ' +
+  'are responsible for verifying every entry — recordability, day counts, ' +
+  'Privacy Case masking, and descriptions. Matcha does not guarantee the ' +
+  'accuracy or completeness of generated entries. By exporting you confirm you ' +
+  'have reviewed this data and accept responsibility for its accuracy and filing.'
+
 const missingLabel: Record<string, string> = {
   ein: 'EIN',
   naics: 'NAICS code',
@@ -130,6 +141,31 @@ export function OshaLogsPanel() {
   // ITA export state
   const [itaProblems, setItaProblems] = useState<ItaProblem[] | null>(null)
   const [itaBusy, setItaBusy] = useState(false)
+
+  // Pre-export reviewer attestation. No file leaves the system until the user
+  // confirms they reviewed the (AI-assisted) data; the backend re-checks via
+  // ?attested=true and writes the audit record.
+  const [attestExport, setAttestExport] = useState<{ label: string; run: () => Promise<void> } | null>(null)
+  const [attestChecked, setAttestChecked] = useState(false)
+  const [attestBusy, setAttestBusy] = useState(false)
+
+  function promptExport(label: string, run: () => Promise<void>) {
+    setAttestChecked(false)
+    setAttestExport({ label, run })
+  }
+
+  async function confirmExport() {
+    if (!attestExport) return
+    setAttestBusy(true)
+    try {
+      await attestExport.run()
+      setAttestExport(null)
+    } catch {
+      // download helper already swallows; keep the modal open on failure.
+    } finally {
+      setAttestBusy(false)
+    }
+  }
 
   // Load establishments once.
   useEffect(() => {
@@ -166,23 +202,25 @@ export function OshaLogsPanel() {
     ]).finally(() => setLoading(false))
   }, [year, locationId])
 
-  function downloadCsv(type: '300' | '300a') {
-    // Must go through api.download — the backend CSV endpoints use
-    // require_admin_or_client (header JWT). A bare window.open sends no
-    // Authorization header, so it 401s with "Not authenticated".
+  // The actual download runs only after the attestation modal is confirmed, so
+  // every path carries &attested=true (the backend gate + audit). Must go
+  // through api.download — the CSV/PDF endpoints use require_admin_or_client
+  // (header JWT); a bare window.open sends no Authorization header → 401.
+  function runCsv(type: '300' | '300a') {
     const path =
       type === '300'
-        ? `/ir/incidents/osha/300-log/csv?year=${year}`
-        : `/ir/incidents/osha/300a/csv?year=${year}&location_id=${locationId}`
+        ? `/ir/incidents/osha/300-log/csv?year=${year}&attested=true`
+        : `/ir/incidents/osha/300a/csv?year=${year}&location_id=${locationId}&attested=true`
     const filename =
       type === '300' ? `osha_300_log_${year}.csv` : `osha_300a_summary_${year}.csv`
-    api.download(path, filename).catch(() => {})
+    return api.download(path, filename)
   }
 
-  function downloadPdf() {
-    api
-      .download(`/ir/incidents/osha/300a/pdf?year=${year}&location_id=${locationId}`, `osha_300a_${year}.pdf`)
-      .catch(() => {})
+  function runPdf() {
+    return api.download(
+      `/ir/incidents/osha/300a/pdf?year=${year}&location_id=${locationId}&attested=true`,
+      `osha_300a_${year}.pdf`,
+    )
   }
 
   async function save300a() {
@@ -220,7 +258,9 @@ export function OshaLogsPanel() {
         setItaProblems(problems)
         return
       }
-      await api.download(`/ir/incidents/osha/ita/export.csv?year=${year}`, `osha_ita_${year}.csv`)
+      promptExport('OSHA ITA Establishment Export', () =>
+        api.download(`/ir/incidents/osha/ita/export.csv?year=${year}&attested=true`, `osha_ita_${year}.csv`),
+      )
     } catch {
       // Backend re-validates and may 400 with a structured detail; the validate
       // pre-check above is the primary surface, so just flag a generic failure.
@@ -296,15 +336,15 @@ export function OshaLogsPanel() {
           </select>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="ghost" onClick={() => downloadCsv('300')}>
+          <Button size="sm" variant="ghost" onClick={() => promptExport('OSHA 300 Log CSV', () => runCsv('300'))}>
             <Download size={12} className="mr-1.5" />
             300 CSV
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => downloadCsv('300a')}>
+          <Button size="sm" variant="ghost" onClick={() => promptExport('OSHA 300A Summary CSV', () => runCsv('300a'))}>
             <Download size={12} className="mr-1.5" />
             300A CSV
           </Button>
-          <Button size="sm" variant="ghost" onClick={downloadPdf}>
+          <Button size="sm" variant="ghost" onClick={() => promptExport('OSHA Form 300A PDF', () => runPdf())}>
             <FileText size={12} className="mr-1.5" />
             300A PDF
           </Button>
@@ -571,6 +611,45 @@ export function OshaLogsPanel() {
           </div>
         )}
       </div>
+
+      {/* Pre-export reviewer attestation — absolves the tool, records the human
+          sign-off (audit). No OSHA file downloads until this is confirmed. */}
+      <Modal
+        open={attestExport !== null}
+        onClose={() => { if (!attestBusy) setAttestExport(null) }}
+        title="Confirm export"
+        width="md"
+      >
+        <div className="space-y-4">
+          {attestExport && (
+            <div className="flex items-start gap-2 text-amber-300">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <span className="text-[13px] font-medium">{attestExport.label}</span>
+            </div>
+          )}
+          <p className="text-[13px] text-zinc-300 leading-relaxed">{EXPORT_DISCLAIMER}</p>
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={attestChecked}
+              onChange={(e) => setAttestChecked(e.target.checked)}
+              className="mt-0.5 accent-emerald-500"
+            />
+            <span className="text-[13px] text-zinc-200">
+              I have reviewed this data for accuracy and accept responsibility for the exported records.
+            </span>
+          </label>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button size="sm" variant="ghost" onClick={() => setAttestExport(null)} disabled={attestBusy}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={confirmExport} disabled={!attestChecked || attestBusy}>
+              {attestBusy ? <Loader2 size={12} className="mr-1.5 animate-spin" /> : <Download size={12} className="mr-1.5" />}
+              Export
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

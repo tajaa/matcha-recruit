@@ -16,7 +16,13 @@ from app.matcha.routes.ir_incidents.osha import (
     _resolve_osha_description,
     _injured_persons,
     _osha_case_views,
+    _attest_export,
+    EXPORT_DISCLAIMER,
 )
+import asyncio
+import json
+import pytest
+from fastapi import HTTPException
 
 
 # ── the 6 trigger conditions ────────────────────────────────────────────────
@@ -264,6 +270,50 @@ def test_injured_persons_missing_roster_id_is_mask_safe():
     row = {"involved_employee_ids": [eid], "reported_by_name": "Reporter"}
     # Unresolvable id still yields a row, never a leaked name.
     assert _injured_persons(row, {}) == [(eid, "Unknown", None)]
+
+
+# ── pre-export reviewer attestation gate ─────────────────────────────────────
+
+class _FakeUser:
+    id = "user-123"
+
+
+class _FakeConn:
+    """Captures log_audit's INSERT so the attested path can be asserted."""
+    def __init__(self):
+        self.calls = []
+
+    async def execute(self, query, *args):
+        self.calls.append((query, args))
+
+
+def test_export_attestation_required_blocks_without_ack():
+    # No acknowledgement → 403 carrying the disclaimer; no audit write attempted.
+    conn = _FakeConn()
+    with pytest.raises(HTTPException) as ei:
+        asyncio.run(_attest_export(conn, _FakeUser(), form="300_log", year=2026, attested=False))
+    assert ei.value.status_code == 403
+    assert ei.value.detail["code"] == "attestation_required"
+    assert EXPORT_DISCLAIMER == ei.value.detail["disclaimer"]
+    assert conn.calls == []  # nothing logged when blocked
+
+
+def test_export_attestation_records_audit_when_acknowledged():
+    # Acknowledged → one osha_export_attested audit row (who / form / year / loc).
+    conn = _FakeConn()
+    asyncio.run(_attest_export(
+        conn, _FakeUser(), form="ita", year=2026, attested=True, location_id="loc-9",
+    ))
+    assert len(conn.calls) == 1
+    query, args = conn.calls[0]
+    assert "ir_audit_log" in query
+    # log_audit positional order: incident_id, user_id, action, entity_type, entity_id, details_json, ip
+    assert args[1] == "user-123"
+    assert args[2] == "osha_export_attested"
+    assert args[3] == "osha_export"
+    assert args[4] == "loc-9"
+    details = json.loads(args[5])
+    assert details["form"] == "ita" and details["year"] == 2026
 
 
 def test_injured_persons_reporter_fallback_no_roster():

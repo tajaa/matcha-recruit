@@ -115,6 +115,54 @@ def _safe_json_loads(val, default=None):
 _NO_STRUCTURED_DESCRIPTION = "See incident record for details"
 
 
+# Reviewer attestation gate for the OSHA file exports. Recordability,
+# description cleansing, and Privacy Case masking are AI-assisted, so the human
+# filing the record must confirm they reviewed it before anything leaves the
+# system. That acknowledgement (audited per export) is what places accuracy +
+# submission responsibility on the employer rather than the tool.
+EXPORT_DISCLAIMER = (
+    "This OSHA log was prepared with AI-assisted recordability classification, "
+    "injury-description cleansing, and Privacy Case name masking. These are aids, "
+    "not a substitute for your review. Before filing with OSHA or any agency you "
+    "are responsible for verifying every entry — recordability, day counts, "
+    "Privacy Case masking, and descriptions. Matcha does not guarantee the "
+    "accuracy or completeness of generated entries. By exporting you confirm you "
+    "have reviewed this data and accept responsibility for its accuracy and filing."
+)
+
+
+async def _attest_export(conn, current_user, *, form: str, year: int, attested: bool, location_id=None):
+    """Gate an OSHA file export behind a reviewer attestation + record it.
+
+    The export endpoints emit the artifact that actually gets filed with OSHA, so
+    each download requires the user to confirm they reviewed the data (``attested``).
+    Missing → 403 carrying the disclaimer (the UI renders it in a confirm modal).
+    Present → an ``osha_export_attested`` audit row (who / when / which form +
+    year + establishment) is written before the file streams — the record that a
+    human, not the AI, signed off on this export.
+    """
+    if not attested:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "attestation_required",
+                "disclaimer": EXPORT_DISCLAIMER,
+                "form": form,
+                "year": year,
+            },
+        )
+    await log_audit(
+        conn, None, str(current_user.id), "osha_export_attested",
+        entity_type="osha_export",
+        entity_id=str(location_id) if location_id else None,
+        details={
+            "form": form,
+            "year": year,
+            "location_id": str(location_id) if location_id else None,
+        },
+    )
+
+
 def _mask_from_reason(privacy_case_reason, category_data: dict, osha_injury_type):
     """Hybrid Column-B mask decision for one case, from its privacy answer.
 
@@ -457,9 +505,16 @@ async def get_osha_300_log(
 @router.get("/osha/300-log/csv")
 async def get_osha_300_log_csv(
     year: int = Query(..., description="Calendar year for the 300 log CSV"),
+    attested: bool = Query(False, description="Reviewer confirmed they reviewed the data before export"),
     current_user=Depends(require_admin_or_client),
 ):
     """Export OSHA 300 log as CSV for a given year."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with user")
+    async with get_connection() as conn:
+        await _attest_export(conn, current_user, form="300_log", year=year, attested=attested)
+
     entries = await get_osha_300_log(year=year, current_user=current_user)
 
     output = io.StringIO()
@@ -838,9 +893,16 @@ async def save_osha_300a(
 async def get_osha_300a_pdf(
     year: int = Query(..., description="Calendar year for the 300A PDF"),
     location_id: UUID = Query(..., description="business_locations.id — 300A is per establishment"),
+    attested: bool = Query(False, description="Reviewer confirmed they reviewed the data before export"),
     current_user=Depends(require_admin_or_client),
 ):
     """Render the faithful federal OSHA Form 300A as a PDF for one establishment."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with user")
+    async with get_connection() as conn:
+        await _attest_export(conn, current_user, form="300a_pdf", year=year, attested=attested, location_id=location_id)
+
     summary = await get_osha_300a_summary(year=year, location_id=location_id, current_user=current_user)
     from ._osha_pdf import render_300a_pdf
     pdf_bytes = await render_300a_pdf(summary.model_dump())
@@ -855,9 +917,16 @@ async def get_osha_300a_pdf(
 async def get_osha_300a_csv(
     year: int = Query(..., description="Calendar year for the 300A summary CSV"),
     location_id: UUID = Query(..., description="business_locations.id — 300A is per establishment"),
+    attested: bool = Query(False, description="Reviewer confirmed they reviewed the data before export"),
     current_user=Depends(require_admin_or_client),
 ):
     """Export OSHA 300A annual summary as CSV."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with user")
+    async with get_connection() as conn:
+        await _attest_export(conn, current_user, form="300a_csv", year=year, attested=attested, location_id=location_id)
+
     summary = await get_osha_300a_summary(year=year, location_id=location_id, current_user=current_user)
 
     output = io.StringIO()
@@ -981,6 +1050,7 @@ async def validate_ita_export(
 @router.get("/osha/ita/export.csv")
 async def export_ita_csv(
     year: int = Query(..., description="Calendar year for the ITA bulk export"),
+    attested: bool = Query(False, description="Reviewer confirmed they reviewed the data before export"),
     current_user=Depends(require_admin_or_client),
 ):
     """Master ITA Establishment-and-Summary CSV — one row per establishment.
@@ -993,6 +1063,7 @@ async def export_ita_csv(
         raise HTTPException(status_code=400, detail="No company associated with user")
 
     async with get_connection() as conn:
+        await _attest_export(conn, current_user, form="ita", year=year, attested=attested)
         establishments = await _gather_ita_establishments(conn, company_id, year)
 
     if not establishments:
