@@ -4650,6 +4650,33 @@ async def reject_project_task_endpoint(
     return result
 
 
+@router.post("/projects/{project_id}/tasks/{task_id}/approve")
+async def approve_project_task_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    body: dict = Body(default={}),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Reviewer approves a task out of review → done, recording a `review_approved`
+    sign-off (approver + timestamp + optional note). Requires the task in review."""
+    from ..services import project_task_service as pt_svc
+
+    project, role = await _verify_project_access(project_id, current_user)
+    if not _can_edit_project(role):
+        raise HTTPException(status_code=403, detail="You don't have edit access to this project")
+
+    note = (body.get("note") or "").strip() or None
+    try:
+        result = await pt_svc.approve_project_task(
+            project_id, task_id, note=note, actor_user_id=current_user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not result:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return result
+
+
 @router.post("/projects/{project_id}/tasks/ai-draft")
 async def ai_draft_task_endpoint(
     project_id: UUID,
@@ -4892,10 +4919,14 @@ async def update_task_subtask_endpoint(
         v = body["assigned_to"]
         patch["assigned_to"] = UUID(v) if v else None
 
+    # A reviewer denying a completed item (is_done=false + reason) logs a
+    # `subtask_rejected` audit event instead of a plain uncheck.
+    reason = body.get("reason") if isinstance(body.get("reason"), str) else None
+
     try:
         row = await st_svc.update_subtask(
             project_id, task_id, subtask_id, patch,
-            actor_user_id=current_user.id,
+            actor_user_id=current_user.id, reason=reason,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

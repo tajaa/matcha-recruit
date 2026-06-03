@@ -1285,6 +1285,18 @@ class MatchaWorkService {
         )
     }
 
+    /// Reviewer approves a task out of review → done, recording a `review_approved`
+    /// sign-off (approver + timestamp + optional note). Returns the updated task.
+    func approveTask(projectId: String, taskId: String, note: String?) async throws -> MWProjectTask {
+        struct Req: Encodable { let note: String? }
+        defer { invalidateProjectTasks(projectId: projectId) }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/approve",
+            body: Req(note: (note?.isEmpty ?? true) ? nil : note)
+        )
+    }
+
     /// Natural-language → structured ticket draft via Gemini (no DB write).
     /// `model` is the header selector's value (same plumbing as threads).
     func draftTaskFromPrompt(projectId: String, prompt: String, model: String? = nil) async throws -> MWTaskDraft {
@@ -1639,6 +1651,19 @@ class MatchaWorkService {
             path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/subtasks/\(subtaskId)"
         )
         invalidateProjectTasks(projectId: projectId)
+    }
+
+    /// Reviewer denies a completed checklist item: reopen it (is_done=false) with
+    /// a reason → server logs a `subtask_rejected` audit event and rolls the item
+    /// into the next round on send-back.
+    func denySubtask(projectId: String, taskId: String, subtaskId: String, reason: String) async throws -> MWSubtask {
+        struct Req: Encodable { let is_done: Bool; let reason: String }
+        defer { invalidateProjectTasks(projectId: projectId) }
+        return try await client.request(
+            method: "PATCH",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/subtasks/\(subtaskId)",
+            body: Req(is_done: false, reason: reason)
+        )
     }
 
     /// Assign (or unassign) a subtask. Send `assigned_to` only so the title /

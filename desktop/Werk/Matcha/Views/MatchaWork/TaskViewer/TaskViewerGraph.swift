@@ -22,6 +22,7 @@ enum GraphGeom {
     static let nodeEvents: Set<String> = [
         "created", "activity", "column_change", "assignee_change",
         "round_started", "subtask_added", "subtask_completed", "review_rejected",
+        "subtask_rejected", "review_approved",
     ]
 
     static func laneX(_ i: Int) -> CGFloat { laneInset + CGFloat(i) * laneSpacing }

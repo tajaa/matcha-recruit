@@ -47,6 +47,8 @@ struct TaskViewerSheet: View {
     @State var replyingToNote: MWTaskHistoryEntry?
     @State var isRejecting = false
     @State var rejectNote = ""
+    @State var isApproving = false
+    @State var approveNote = ""
     @State var submitting = false
     @State var newSubtask = ""
     @State var addingSubtask = false
@@ -284,6 +286,19 @@ struct TaskViewerSheet: View {
                             .font(.system(size: 12))
                             .foregroundColor(.white.opacity(0.9))
                             .textSelection(.enabled)
+                        // In-review audit: the specific items the reviewer denied
+                        // this cycle (still open), each with its reason.
+                        ForEach(Array(reviewDenials.enumerated()), id: \.offset) { _, d in
+                            HStack(alignment: .top, spacing: 5) {
+                                Image(systemName: "xmark.square.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.orange.opacity(0.9))
+                                Text("\(d.title)\(d.reason.isEmpty ? "" : " — \(d.reason)")")
+                                    .font(.system(size: 11))
+                                    .foregroundColor(.white.opacity(0.75))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
                     }
                 }
                 .padding(.vertical, 2)
@@ -379,6 +394,35 @@ struct TaskViewerSheet: View {
                     }
                     .buttonStyle(.plain)
                     .help("Mark incomplete and send to Changes Requested — notifies the assignee")
+
+                    Button { isApproving = true } label: {
+                        Label("Approve", systemImage: "checkmark.seal")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.matcha500)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Approve out of review → Done, with a sign-off")
+                    .popover(isPresented: $isApproving, arrowEdge: .top) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Approve & close")
+                                .font(.system(size: 11, weight: .semibold)).foregroundColor(.white)
+                            TextField("Optional sign-off note…", text: $approveNote, axis: .vertical)
+                                .textFieldStyle(.plain).font(.system(size: 12)).foregroundColor(.white)
+                                .lineLimit(1...3).padding(8).background(Color.zinc800).cornerRadius(6)
+                            HStack {
+                                Spacer()
+                                Button("Cancel") { isApproving = false; approveNote = "" }
+                                    .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(.secondary)
+                                Button("Approve") {
+                                    Task { await submitApprove() }
+                                }
+                                .buttonStyle(.plain).font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.white).padding(.horizontal, 10).padding(.vertical, 4)
+                                .background(Color.matcha600).cornerRadius(5)
+                            }
+                        }
+                        .padding(12).frame(width: 260)
+                    }
                 }
                 Spacer()
                 Button("Edit") { onEdit() }

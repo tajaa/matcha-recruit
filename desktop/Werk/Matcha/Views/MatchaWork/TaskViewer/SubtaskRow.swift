@@ -10,8 +10,15 @@ struct SubtaskRow: View {
     let onToggle: () -> Void
     let onDelete: () -> Void
     let onAssign: (String?) -> Void
+    /// When the ticket is in review, a reviewer can DENY a completed item —
+    /// reopen it with a reason (audited as `subtask_rejected`).
+    var canReview: Bool = false
+    var onDeny: ((String) -> Void)? = nil
     @State private var isHovered = false
     @State private var showingAssign = false
+    @State private var showDeny = false
+    @State private var denyReason = ""
+    @FocusState private var denyFocused: Bool
 
     private var assignee: MWProjectCollaborator? {
         guard let id = item.assignedTo else { return nil }
@@ -40,6 +47,9 @@ struct SubtaskRow: View {
                     }
                 }
             Spacer(minLength: 0)
+            if canReview && item.isDone, onDeny != nil {
+                denyButton
+            }
             assigneeMenu
             if isHovered {
                 Button(action: onDelete) {
@@ -57,6 +67,45 @@ struct SubtaskRow: View {
         .cornerRadius(4)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
+    }
+
+    /// Deny = reopen a completed item with a reason. Orange ✗ → reason popover.
+    private var denyButton: some View {
+        Button { showDeny = true } label: {
+            Image(systemName: "xmark.circle")
+                .font(.system(size: 11))
+                .foregroundColor(.orange.opacity(0.85))
+        }
+        .buttonStyle(.plain)
+        .help("Deny — reopen this item with a reason for the assignee")
+        .popover(isPresented: $showDeny, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Deny completion")
+                    .font(.system(size: 11, weight: .semibold)).foregroundColor(.white)
+                Text("\u{201C}\(item.title)\u{201D}")
+                    .font(.system(size: 10)).italic().foregroundColor(.secondary).lineLimit(2)
+                TextField("Why isn't this actually done?", text: $denyReason, axis: .vertical)
+                    .textFieldStyle(.plain).font(.system(size: 12)).foregroundColor(.white)
+                    .lineLimit(1...4).padding(8).background(Color.zinc800).cornerRadius(6)
+                    .focused($denyFocused)
+                HStack {
+                    Spacer()
+                    Button("Cancel") { showDeny = false; denyReason = "" }
+                        .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(.secondary)
+                    let empty = denyReason.trimmingCharacters(in: .whitespaces).isEmpty
+                    Button("Deny") {
+                        onDeny?(denyReason.trimmingCharacters(in: .whitespacesAndNewlines))
+                        showDeny = false; denyReason = ""
+                    }
+                    .buttonStyle(.plain).font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white).padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(empty ? Color.zinc800 : Color.orange).cornerRadius(5)
+                    .disabled(empty)
+                }
+            }
+            .padding(12).frame(width: 260)
+            .onAppear { DispatchQueue.main.async { denyFocused = true } }
+        }
     }
 
     // A plain Button (NOT a Menu label) — macOS Menu labels rasterize a

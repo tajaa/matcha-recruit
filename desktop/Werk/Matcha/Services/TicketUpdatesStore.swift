@@ -25,6 +25,7 @@ final class TicketUpdatesStore {
     /// the card badge at baseline.
     static let countedEventTypes: Set<String> = [
         "activity", "round_started", "subtask_added", "column_change", "review_rejected",
+        "subtask_rejected",
     ]
 
     /// Bumped on every mutation so SwiftUI views observing the store re-render

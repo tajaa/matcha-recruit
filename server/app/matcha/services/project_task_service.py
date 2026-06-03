@@ -86,6 +86,7 @@ _ALLOWED_ACTIVITY_KINDS = {"call", "email", "note", "meeting"}
 # subtask completion/reopen/delete, created, and deleted.
 COUNTED_UPDATE_EVENTS = (
     'activity', 'round_started', 'subtask_added', 'column_change', 'review_rejected',
+    'subtask_rejected',
 )
 
 # Email + bell templates for forward-only column transitions. Destinations
@@ -838,6 +839,73 @@ async def reject_project_task(
     result = _row_to_task(dict(row))
     result["last_moved_at"] = datetime.now(timezone.utc).isoformat()
     result["review_cycle_count"] = cycle_count
+    task_payload = dict(result)
+    if actor_user_id is not None:
+        task_payload["actor_id"] = str(actor_user_id)
+    await _broadcast_task_event_safe(project_id, "task.updated", task_payload)
+    return result
+
+
+async def approve_project_task(
+    project_id: UUID,
+    task_id: UUID,
+    *,
+    note: Optional[str] = None,
+    actor_user_id: Optional[UUID] = None,
+) -> Optional[dict]:
+    """Reviewer approves a task out of review → done, with a sign-off audit row
+    (`review_approved`, carrying the approver via actor + an optional note). The
+    symmetric counterpart to `reject_project_task`. Only valid from `review`.
+    Returns the updated task row, or None if not found.
+    """
+    note = (note or "").strip()
+    async with get_connection() as conn:
+        current = await conn.fetchrow(
+            "SELECT board_column FROM mw_tasks WHERE id = $1 AND project_id = $2",
+            task_id, project_id,
+        )
+        if not current:
+            return None
+        if current["board_column"] != "review":
+            raise ValueError("Task must be in review to approve it")
+
+        row = await conn.fetchrow(
+            """
+            UPDATE mw_tasks SET
+                board_column = 'done',
+                status = 'completed',
+                completed_at = NOW(),
+                review_note = NULL,
+                updated_at = NOW()
+            WHERE id = $1 AND project_id = $2
+            RETURNING id, project_id, company_id, created_by, title, description,
+                      due_date, priority, status, board_column,
+                      COALESCE(pipeline_column, 'lead') AS pipeline_column,
+                      assigned_to, completed_at, created_at, updated_at,
+                      progress_note, category, element_id, review_note,
+                      deal_value, probability, contact_name, contact_company,
+                      contact_email, contact_phone, outcome, loss_reason,
+                      next_action_at, expected_close
+            """,
+            task_id, project_id,
+        )
+        if not row:
+            return None
+        # Sign-off: who approved (actor) + when (now) + optional note. Metadata is
+        # string-only (desktop decodes as [String: String]).
+        await _log_task_history(
+            conn,
+            task_id=task_id,
+            project_id=project_id,
+            actor_user_id=actor_user_id,
+            event_type="review_approved",
+            from_value="review",
+            to_value="done",
+            metadata={"note": note[:500]} if note else {},
+        )
+
+    result = _row_to_task(dict(row))
+    result["last_moved_at"] = datetime.now(timezone.utc).isoformat()
     task_payload = dict(result)
     if actor_user_id is not None:
         task_payload["actor_id"] = str(actor_user_id)

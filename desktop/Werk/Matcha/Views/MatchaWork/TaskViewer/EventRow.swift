@@ -60,9 +60,11 @@ struct EventRow: View {
         case "description_change": return "text.alignleft"
         case "progress_note_change": return "note.text"
         case "review_rejected": return "arrow.uturn.backward.circle"
+        case "review_approved": return "checkmark.seal.fill"
         case "round_started": return "flag.circle.fill"
         case "subtask_added": return "plus.square"
         case "subtask_completed": return "checkmark.square.fill"
+        case "subtask_rejected": return "xmark.square.fill"
         case "subtask_uncompleted": return "square"
         case "subtask_deleted": return "trash"
         case "deleted": return "trash.circle"
@@ -78,9 +80,11 @@ struct EventRow: View {
         case "description_change": return .matcha500
         case "progress_note_change": return .matcha500
         case "review_rejected": return .orange
+        case "review_approved": return .matcha500
         case "round_started": return .matcha500
         case "subtask_added": return .blue
         case "subtask_completed": return .matcha500
+        case "subtask_rejected": return .orange
         case "subtask_uncompleted": return .orange
         case "subtask_deleted": return .red
         case "deleted": return .red
@@ -109,6 +113,11 @@ struct EventRow: View {
             return note.isEmpty
                 ? "\(who) sent this back for changes"
                 : "\(who) sent back: \u{201C}\(note)\u{201D}"
+        case "review_approved":
+            let note = (e.metadata?["note"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return note.isEmpty
+                ? "\(who) approved this in review"
+                : "\(who) approved: \u{201C}\(note)\u{201D}"
         case "round_started":
             let title = (e.metadata?["title"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             return title.isEmpty
@@ -124,6 +133,11 @@ struct EventRow: View {
             return title.isEmpty
                 ? "\(who) completed a checklist item"
                 : "\(who) completed: \u{201C}\(title)\u{201D}"
+        case "subtask_rejected":
+            let title = (e.metadata?["title"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let reason = (e.metadata?["reason"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let head = title.isEmpty ? "\(who) denied a checklist item" : "\(who) denied: \u{201C}\(title)\u{201D}"
+            return reason.isEmpty ? head : "\(head) — \(reason)"
         case "subtask_uncompleted":
             let title = (e.metadata?["title"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             return title.isEmpty

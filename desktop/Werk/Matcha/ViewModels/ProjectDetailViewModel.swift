@@ -1012,6 +1012,59 @@ class ProjectDetailViewModel {
         }
     }
 
+    /// Reviewer denies a completed checklist item with a reason: reopen it +
+    /// log a `subtask_rejected` audit event. Optimistic uncheck.
+    func denySubtask(taskId: String, subtaskId: String, reason: String) async {
+        guard let pid = project?.id else { return }
+        await MainActor.run {
+            if var list = taskSubtasks[taskId],
+               let i = list.firstIndex(where: { $0.id == subtaskId }) {
+                list[i].isDone = false
+                taskSubtasks[taskId] = list
+                syncSubtaskCounts(taskId: taskId)
+            }
+        }
+        do {
+            let updated = try await service.denySubtask(
+                projectId: pid, taskId: taskId, subtaskId: subtaskId, reason: reason
+            )
+            await MainActor.run {
+                if var list = taskSubtasks[taskId],
+                   let i = list.firstIndex(where: { $0.id == subtaskId }) {
+                    list[i] = updated
+                    taskSubtasks[taskId] = list
+                    syncSubtaskCounts(taskId: taskId)
+                }
+            }
+        } catch {
+            await MainActor.run {
+                if var list = taskSubtasks[taskId],
+                   let i = list.firstIndex(where: { $0.id == subtaskId }) {
+                    list[i].isDone = true
+                    taskSubtasks[taskId] = list
+                    syncSubtaskCounts(taskId: taskId)
+                }
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    /// Reviewer approves a task out of review → done with an optional sign-off
+    /// note. Replaces the task (preserving aggregates) so the board reflects done.
+    /// Returns true on success so the sheet only closes when the move landed.
+    func approveTask(taskId: String, note: String?) async -> Bool {
+        guard let pid = project?.id else { return false }
+        do {
+            let updated = try await service.approveTask(projectId: pid, taskId: taskId, note: note)
+            await MainActor.run { replacePreservingAggregates(updated) }
+            return true
+        } catch {
+            await loadTasks()
+            await MainActor.run { errorMessage = error.localizedDescription }
+            return false
+        }
+    }
+
     func deleteSubtask(taskId: String, subtaskId: String) async {
         guard let pid = project?.id else { return }
         let snapshot = taskSubtasks[taskId]

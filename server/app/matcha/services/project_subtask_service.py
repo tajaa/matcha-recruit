@@ -139,6 +139,7 @@ async def update_subtask(
     patch: dict,
     *,
     actor_user_id: Optional[UUID] = None,
+    reason: Optional[str] = None,
 ) -> Optional[dict]:
     """Partial update of one checklist item: is_done (stamps/clears completed_at),
     title, position, assigned_to. Returns the updated row or None if the subtask
@@ -211,13 +212,28 @@ async def update_subtask(
             and bool(is_done) != previous_is_done
         ):
             from .project_task_service import _log_task_history
+            clean_reason = (reason or "").strip()
+            if not is_done and clean_reason:
+                # A reviewer denying a completed item ("you marked this done — it's
+                # not"). Distinct from a plain uncheck so the changes-requested
+                # audit can show WHAT was denied and WHY. Metadata is string-only
+                # (the desktop decodes it as [String: String]).
+                event_type = "subtask_rejected"
+                meta = {
+                    "title": row["title"],
+                    "subtask_id": str(row["id"]),
+                    "reason": clean_reason[:500],
+                }
+            else:
+                event_type = "subtask_completed" if is_done else "subtask_uncompleted"
+                meta = {"title": row["title"], "subtask_id": str(row["id"])}
             await _log_task_history(
                 conn,
                 task_id=task_id,
                 project_id=project_id,
                 actor_user_id=actor_user_id,
-                event_type=("subtask_completed" if is_done else "subtask_uncompleted"),
-                metadata={"title": row["title"], "subtask_id": str(row["id"])},
+                event_type=event_type,
+                metadata=meta,
             )
     return _row_to_subtask(dict(row))
 

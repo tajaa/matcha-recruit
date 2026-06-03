@@ -201,6 +201,22 @@ extension TaskViewerSheet {
         }
     }
 
+    /// Reviewer approves out of review → done with an optional sign-off note.
+    /// Mirrors submitReject: only closes the sheet once the move actually lands,
+    /// so a failure surfaces instead of silently vanishing.
+    func submitApprove() async {
+        guard !submitting else { return }
+        submitting = true
+        let note = approveNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ok = await viewModel.approveTask(taskId: task.id, note: note.isEmpty ? nil : note)
+        submitting = false
+        if ok {
+            isApproving = false
+            approveNote = ""
+            onClose()
+        }
+    }
+
     /// Copies the ticket as a single TEXT blob tuned for Claude Code: title,
     /// status, description, checklist (subtasks), and the screenshots written
     /// out as LOCAL file paths Claude Code can open with its Read tool.

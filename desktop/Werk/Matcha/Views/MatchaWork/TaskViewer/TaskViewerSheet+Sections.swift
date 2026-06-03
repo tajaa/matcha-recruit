@@ -48,6 +48,25 @@ extension TaskViewerSheet {
         .buttonStyle(.plain)
     }
 
+    // MARK: - In-review audit
+
+    /// Items the reviewer denied this cycle and that are still open: the latest
+    /// `subtask_rejected` reason per not-done subtask. Drives the audit list in
+    /// the changes-requested (NEEDS WORK) section. `createdAt` is ISO8601, so a
+    /// lexical compare is chronological.
+    var reviewDenials: [(title: String, reason: String)] {
+        let openIds = Set(subtasks.filter { !$0.isDone }.map { $0.id })
+        var latest: [String: MWTaskHistoryEntry] = [:]
+        for e in history where e.eventType == "subtask_rejected" {
+            guard let sid = e.metadata?["subtask_id"], openIds.contains(sid) else { continue }
+            if let prev = latest[sid], prev.createdAt >= e.createdAt { continue }
+            latest[sid] = e
+        }
+        return latest.values
+            .sorted { $0.createdAt < $1.createdAt }
+            .map { (title: $0.metadata?["title"] ?? "Item", reason: $0.metadata?["reason"] ?? "") }
+    }
+
     // MARK: - "You are here" state banner
 
     struct StatePhase {
@@ -518,6 +537,11 @@ extension TaskViewerSheet {
                         },
                         onAssign: { newAssignee in
                             Task { await viewModel.assignSubtask(taskId: task.id, subtaskId: item.id, assignedTo: newAssignee) }
+                        },
+                        // In review, the reviewer can deny a completed item.
+                        canReview: task.boardColumn == "review",
+                        onDeny: { reason in
+                            Task { await viewModel.denySubtask(taskId: task.id, subtaskId: item.id, reason: reason) }
                         }
                     )
                     // Commit-driven completion suggestions — only for items not
