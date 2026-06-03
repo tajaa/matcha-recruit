@@ -88,6 +88,9 @@ struct KanbanBoardView: View {
     /// Drives matchedGeometryEffect so a card glides from its old column to its
     /// new one when `replayOverrides` clears.
     @Namespace private var cardNS
+    /// Skippable how-to for the review/complete workflow — auto-shown once, and
+    /// re-openable from the board's "?" button.
+    @State private var showReviewGuide = false
 
     private var isPipeline: Bool { viewMode == .pipeline }
     private var pipelineSummary: PipelineSummary { PipelineSummary(tasks: viewModel.tasks) }
@@ -240,6 +243,13 @@ struct KanbanBoardView: View {
                             }
                             .buttonStyle(.plain)
                         }
+                        Button { showReviewGuide = true } label: {
+                            Image(systemName: "questionmark.circle")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("How reviewing & completing tickets works")
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
@@ -267,6 +277,14 @@ struct KanbanBoardView: View {
                 userId: appState.currentUser?.id, projectId: viewModel.project?.id)
             maybeReplay()
             openPendingTaskIfPossible()
+            // First collab-board open ever → show the review how-to once.
+            if viewModel.project?.projectType == "collab",
+               !UserDefaults.standard.bool(forKey: ReviewGuideWizard.seenKey) {
+                showReviewGuide = true
+            }
+        }
+        .sheet(isPresented: $showReviewGuide) {
+            ReviewGuideWizard(onClose: { showReviewGuide = false })
         }
         .task {
             if viewModel.tasks.isEmpty {

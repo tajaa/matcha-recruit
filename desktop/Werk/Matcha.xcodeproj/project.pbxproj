@@ -58,6 +58,7 @@
 		DEADBEEF000000000000B005 /* DealCompose.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F005 /* DealCompose.swift */; };
 		DEADBEEF000000000000B006 /* TaskEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F006 /* TaskEditor.swift */; };
 		DEADBEEF000000000000B007 /* KanbanCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F007 /* KanbanCard.swift */; };
+		DEADBEEF000000000000B0E1 /* ReviewGuideWizard.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F0E1 /* ReviewGuideWizard.swift */; };
 		DEADBEEF000000000000B008 /* KanbanSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEADBEEF000000000000F008 /* KanbanSearch.swift */; };
 		AA11BB22CC33DD44EE55000C /* ProjectFilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66000C /* ProjectFilesView.swift */; };
 		AA11BB22CC33DD44EE5500F1 /* AttachmentPreviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE6600F1 /* AttachmentPreviewSheet.swift */; };
@@ -198,6 +199,7 @@
 		DEADBEEF000000000000F005 /* DealCompose.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DealCompose.swift; sourceTree = "<group>"; };
 		DEADBEEF000000000000F006 /* TaskEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskEditor.swift; sourceTree = "<group>"; };
 		DEADBEEF000000000000F007 /* KanbanCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanbanCard.swift; sourceTree = "<group>"; };
+		DEADBEEF000000000000F0E1 /* ReviewGuideWizard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewGuideWizard.swift; sourceTree = "<group>"; };
 		DEADBEEF000000000000F008 /* KanbanSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanbanSearch.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE66000C /* ProjectFilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFilesView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE6600F1 /* AttachmentPreviewSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentPreviewSheet.swift; sourceTree = "<group>"; };
@@ -400,6 +402,7 @@
 				DEADBEEF000000000000F005 /* DealCompose.swift */,
 				DEADBEEF000000000000F006 /* TaskEditor.swift */,
 				DEADBEEF000000000000F007 /* KanbanCard.swift */,
+				DEADBEEF000000000000F0E1 /* ReviewGuideWizard.swift */,
 				DEADBEEF000000000000F008 /* KanbanSearch.swift */,
 				AA11BB22CC33DD44EE66000C /* ProjectFilesView.swift */,
 				7A5C0000000000000000F0D1 /* PropsView.swift */,
@@ -785,6 +788,7 @@
 				DEADBEEF000000000000B005 /* DealCompose.swift in Sources */,
 				DEADBEEF000000000000B006 /* TaskEditor.swift in Sources */,
 				DEADBEEF000000000000B007 /* KanbanCard.swift in Sources */,
+				DEADBEEF000000000000B0E1 /* ReviewGuideWizard.swift in Sources */,
 				DEADBEEF000000000000B008 /* KanbanSearch.swift in Sources */,
 				AA11BB22CC33DD44EE55000C /* ProjectFilesView.swift in Sources */,
 				AA11BB22CC33DD44EE5500F1 /* AttachmentPreviewSheet.swift in Sources */,
