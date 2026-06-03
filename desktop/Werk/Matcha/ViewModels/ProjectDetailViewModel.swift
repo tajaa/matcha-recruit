@@ -1216,6 +1216,14 @@ class ProjectDetailViewModel {
         (commitSuggestions[taskId] ?? []).filter { $0.subtaskId == subtaskId && $0.status == "pending" }
     }
 
+    /// How many distinct subtasks on a task a commit may have completed (still
+    /// pending accept) — drives the kanban card badge. Distinct on subtask_id so
+    /// two commits hitting the same subtask count once.
+    func pendingSuggestionCount(taskId: String) -> Int {
+        let pending = (commitSuggestions[taskId] ?? []).filter { $0.status == "pending" }
+        return Set(pending.map { $0.subtaskId }).count
+    }
+
     func acceptSuggestion(_ s: MWCommitSuggestion) async {
         guard let pid = project?.id else { return }
         // Optimistic: drop the chip and tick the box locally.

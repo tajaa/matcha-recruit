@@ -9,6 +9,9 @@ struct KanbanCardView: View {
     /// query, with a client-side fallback so freshly created/edited cards show
     /// it before the next full reload).
     var elementName: String? = nil
+    /// Count of distinct subtasks a commit may have completed (pending accept).
+    /// Drives the purple "commits may have finished N" badge on the card face.
+    var pendingCommitCount: Int = 0
     let onTap: () -> Void
     let onToggle: () -> Void
     let onMoveColumn: (String) -> Void
@@ -151,6 +154,24 @@ struct KanbanCardView: View {
                         .background(Color.blue.opacity(0.15))
                         .cornerRadius(3)
                         .help("\(unviewedUpdates) unviewed update\(unviewedUpdates == 1 ? "" : "s")")
+                    }
+
+                    // Commit → subtask suggestions waiting for review. A merge
+                    // scan (push webhook / auto-scan) flagged N subtasks this
+                    // commit may have completed; you still open the card to
+                    // Accept. Purple sparkle so it reads "AI suggestion", not the
+                    // blue unviewed bell or orange churn chip.
+                    if !pipelineMode, pendingCommitCount > 0 {
+                        HStack(spacing: 1) {
+                            Image(systemName: "sparkles").font(.system(size: 7))
+                            Text("\(pendingCommitCount)").font(.system(size: 8, weight: .bold))
+                        }
+                        .foregroundColor(.purple)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.purple.opacity(0.15))
+                        .cornerRadius(3)
+                        .help("\(pendingCommitCount) subtask\(pendingCommitCount == 1 ? "" : "s") a recent commit may have completed — open to accept")
                     }
 
                     if pipelineMode {

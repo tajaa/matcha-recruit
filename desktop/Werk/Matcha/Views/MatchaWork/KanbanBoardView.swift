@@ -271,6 +271,11 @@ struct KanbanBoardView: View {
             // Auto-pick up merged commits → subtask check-offs (gated 10-min
             // cooldown; no-op if no repo connected). "Done = merged."
             await viewModel.autoScanCommitsIfStale()
+            // Always reload from the server too: the push webhook scans
+            // server-side on merge, so suggestions can exist even when the
+            // auto-scan above short-circuits on its cooldown. Without this the
+            // card badges wouldn't appear until a manual scan.
+            await viewModel.loadCommitSuggestions()
         }
         // Tasks usually arrive after the board mounts — run the replay the
         // moment they do (maybeReplay is idempotent, guarded by didReplay), and
@@ -663,6 +668,7 @@ struct KanbanBoardView: View {
                     pipelineMode: isPipeline,
                     elementName: task.elementName
                         ?? viewModel.elements.first(where: { $0.id == task.elementId })?.name,
+                    pendingCommitCount: viewModel.pendingSuggestionCount(taskId: task.id),
                     onTap: {
                         // Acknowledge the change → drop the yellow outline and
                         // advance this user's persisted baseline for the card.
