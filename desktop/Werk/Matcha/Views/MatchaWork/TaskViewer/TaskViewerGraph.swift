@@ -109,9 +109,21 @@ struct GraphRow: View {
     let showExit: Bool
     /// The most recent real action — "you are here" on the timeline.
     var isCurrent: Bool = false
+    /// Live board status for the current node ("CHANGES REQUESTED", "IN REVIEW",
+    /// …) so the newest row reads like the ticket header, not just a log line.
+    var currentStatusLabel: String? = nil
+    var currentStatusTint: Color = .matcha500
 
     private var laneX: CGFloat { GraphGeom.laneX(node.laneIndex) }
     private var isComment: Bool { node.event.eventType == "activity" }
+
+    /// Actor name surfaced on the card so each row says WHO acted, not only the
+    /// (sometimes terse) action label. Nil for system events.
+    private var actorCaption: String? {
+        if node.isSystem { return nil }
+        let n = node.event.actorName ?? ""
+        return n.isEmpty ? nil : n
+    }
 
     private var cardIcon: String {
         isComment ? "text.bubble" : EventRow.icon(for: node.event.eventType)
@@ -205,7 +217,29 @@ struct GraphRow: View {
     private var ringWidth: CGFloat { isCurrent ? 2.5 : 1.5 }
 
     private var card: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 3) {
+            // Current node reads like the ticket header: "● YOU ARE HERE · CHANGES
+            // REQUESTED" — the live board status, not just the last logged action.
+            if isCurrent {
+                HStack(spacing: 5) {
+                    Circle().fill(currentStatusTint).frame(width: 5, height: 5)
+                    Text("YOU ARE HERE")
+                        .font(.system(size: 8, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundColor(currentStatusTint)
+                    if let s = currentStatusLabel {
+                        Text(s)
+                            .font(.system(size: 8, weight: .bold))
+                            .tracking(0.4)
+                            .foregroundColor(currentStatusTint)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(currentStatusTint.opacity(0.18))
+                            .cornerRadius(3)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
             HStack(spacing: 6) {
                 Image(systemName: cardIcon)
                     .font(.system(size: 11))
@@ -217,16 +251,6 @@ struct GraphRow: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 0)
-                if isCurrent {
-                    Text("NOW")
-                        .font(.system(size: 8, weight: .bold))
-                        .tracking(0.5)
-                        .foregroundColor(.matcha500)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Color.matcha500.opacity(0.18))
-                        .cornerRadius(3)
-                }
                 if let roundLabel {
                     Text("R\(roundLabel)")
                         .font(.system(size: 8, weight: .semibold))
@@ -238,6 +262,13 @@ struct GraphRow: View {
                 }
             }
             HStack(spacing: 6) {
+                if let who = actorCaption {
+                    Text(who)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.7))
+                        .lineLimit(1)
+                    Text("·").font(.system(size: 9)).foregroundColor(.secondary)
+                }
                 Text(PacificDateFormatter.absolute(node.event.createdAt) ?? node.event.createdAt)
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)
@@ -247,7 +278,12 @@ struct GraphRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.zinc800.opacity(0.45))
+        .background(isCurrent ? currentStatusTint.opacity(0.12) : Color.zinc800.opacity(0.45))
+        .overlay(
+            isCurrent
+                ? RoundedRectangle(cornerRadius: 6).strokeBorder(currentStatusTint.opacity(0.35), lineWidth: 1)
+                : nil
+        )
         .cornerRadius(6)
         .padding(.vertical, 3)
     }
@@ -295,9 +331,12 @@ struct GhostRow: View {
     let color: Color
     let laneCount: Int
     let gutterW: CGFloat
-    /// Lane of the row above (last real node for the first ghost, then the
-    /// ghost lane itself) so the dashed lead-in meets the spine above.
+    /// Lane of the row above so the dashed lead-in meets the spine above. Nil for
+    /// the topmost ghost (nothing precedes it now that ghosts render at the top).
     let connectFromLane: Int?
+    /// Ghosts sit above the newest real node, so each one's spine continues DOWN
+    /// to the row below (another ghost, then the current node).
+    var showExit: Bool = true
 
     private var laneX: CGFloat { GraphGeom.laneX(laneIndex) }
 
@@ -319,6 +358,13 @@ struct GhostRow: View {
             }
             if let connectFromLane {
                 IncomingEdge(fromX: GraphGeom.laneX(connectFromLane), toX: laneX)
+                    .stroke(color.opacity(0.5),
+                            style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [3, 3]))
+                    .frame(width: gutterW, height: GraphGeom.rowH)
+            }
+            // Dashed spine continuing down toward the node below.
+            if showExit {
+                ExitStub(x: laneX)
                     .stroke(color.opacity(0.5),
                             style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [3, 3]))
                     .frame(width: gutterW, height: GraphGeom.rowH)

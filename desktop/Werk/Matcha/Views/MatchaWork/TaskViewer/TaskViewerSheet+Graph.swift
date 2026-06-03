@@ -160,6 +160,20 @@ extension TaskViewerSheet {
         task.status == "done" || task.boardColumn == "done" || task.completedAt != nil
     }
 
+    /// Short uppercase live-status pill + tint for the current ("you are here")
+    /// node — mirrors `graphStatusCard`'s mapping so the newest row carries the
+    /// same signal as the ticket header.
+    var currentStatusBadge: (label: String, tint: Color) {
+        if taskIsDone { return ("COMPLETE", .matcha500) }
+        switch task.boardColumn {
+        case "review":             return ("IN REVIEW", .blue)
+        case "changes_requested":  return ("CHANGES REQUESTED", .orange)
+        case "in_progress":        return ("IN PROGRESS", .matcha500)
+        case "todo":               return ("TO DO", .secondary)
+        default:                   return (EventRow.columnLabel(task.boardColumn).uppercased(), .matcha500)
+        }
+    }
+
     /// "You are here" — current state + the implied next action, derived purely
     /// from the LIVE task/subtask state (no history needed). This is what turns
     /// the graph from a backward audit into "where we stand + what's next".
@@ -249,14 +263,18 @@ extension TaskViewerSheet {
 
     var activityGraphSection: some View {
         let model = graphModel
-        let nodes = model.nodes
+        // Newest at top, oldest at bottom (reverse-chronological). The spine flows
+        // DOWN into the past; pending work sits above the newest action.
+        let nodes = Array(model.nodes.reversed())
         let lanes = model.lanes
         let laneCount = max(1, lanes.count)
         let gutterW = GraphGeom.gutterW(laneCount: laneCount)
         let openSubtasks = taskIsDone ? [] : subtasks.filter { !$0.isDone }
         let assigneeLane = lanes.firstIndex(where: { $0.id == task.assignedTo })
-        let ghostLane = assigneeLane ?? nodes.last?.laneIndex ?? 0
+        // `nodes.first` is now the newest real node (the row the ghosts hand into).
+        let ghostLane = assigneeLane ?? nodes.first?.laneIndex ?? 0
         let ghostColor = task.assignedTo.map(UserColor.forUserId) ?? .secondary
+        let status = currentStatusBadge
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: "point.3.connected.trianglepath.dotted")
@@ -284,6 +302,24 @@ extension TaskViewerSheet {
             } else {
                 graphLegend(lanes)
                 VStack(spacing: 0) {
+                    // Pending work first — hollow "future" nodes above the newest
+                    // action, in the assignee's lane. Topmost ghost has nothing
+                    // above it; each continues DOWN into the current node.
+                    ForEach(Array(openSubtasks.enumerated()), id: \.element.id) { gi, st in
+                        GhostRow(
+                            title: st.title,
+                            assignee: assigneeName,
+                            laneIndex: ghostLane,
+                            color: ghostColor,
+                            laneCount: laneCount,
+                            gutterW: gutterW,
+                            connectFromLane: gi == 0 ? nil : ghostLane,
+                            showExit: true
+                        )
+                    }
+                    // History, newest → oldest. Each row's incoming edge comes
+                    // from the row directly above (another node, or the last
+                    // ghost for the top one), so the spine stays continuous.
                     ForEach(Array(nodes.enumerated()), id: \.element.id) { idx, node in
                         let prev = idx > 0 ? nodes[idx - 1] : nil
                         let r = roundIndex(forCreatedAt: node.event.createdAt)
@@ -293,26 +329,16 @@ extension TaskViewerSheet {
                         }
                         GraphRow(
                             node: node,
-                            prevLaneIndex: prev?.laneIndex,
-                            prevColor: prev?.color,
+                            prevLaneIndex: prev?.laneIndex ?? (openSubtasks.isEmpty ? nil : ghostLane),
+                            prevColor: prev?.color ?? (openSubtasks.isEmpty ? nil : ghostColor),
                             laneCount: laneCount,
                             gutterW: gutterW,
                             roundLabel: currentRound > 1 ? r : nil,
-                            // Spine continues into the ghost (pending) rows too.
-                            showExit: idx < nodes.count - 1 || !openSubtasks.isEmpty,
-                            isCurrent: idx == nodes.count - 1
-                        )
-                    }
-                    // Remaining work as hollow "future" nodes in the assignee's lane.
-                    ForEach(Array(openSubtasks.enumerated()), id: \.element.id) { gi, st in
-                        GhostRow(
-                            title: st.title,
-                            assignee: assigneeName,
-                            laneIndex: ghostLane,
-                            color: ghostColor,
-                            laneCount: laneCount,
-                            gutterW: gutterW,
-                            connectFromLane: gi == 0 ? nodes.last?.laneIndex : ghostLane
+                            // Oldest (bottom) row has nothing below it.
+                            showExit: idx < nodes.count - 1,
+                            isCurrent: idx == 0,
+                            currentStatusLabel: idx == 0 ? status.label : nil,
+                            currentStatusTint: status.tint
                         )
                     }
                 }
