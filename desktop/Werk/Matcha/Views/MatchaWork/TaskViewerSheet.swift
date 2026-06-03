@@ -267,28 +267,27 @@ struct TaskViewerSheet: View {
                !note.isEmpty,
                task.boardColumn == "changes_requested" || task.boardColumn == "in_progress"
                 || task.boardColumn == "todo" {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 10))
-                        Text("NEEDS WORK")
-                            .font(.system(size: 9, weight: .semibold))
-                            .tracking(0.5)
+                HStack(alignment: .top, spacing: 8) {
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color.orange.opacity(0.7))
+                        .frame(width: 2)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 10))
+                            Text("NEEDS WORK")
+                                .font(.system(size: 9, weight: .semibold))
+                                .tracking(0.5)
+                        }
+                        .foregroundColor(.orange)
+                        Text(note)
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.9))
+                            .textSelection(.enabled)
                     }
-                    .foregroundColor(.orange)
-                    Text(note)
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.9))
-                        .textSelection(.enabled)
                 }
-                .padding(10)
+                .padding(.vertical, 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.orange.opacity(0.12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.orange.opacity(0.4), lineWidth: 1)
-                )
-                .cornerRadius(6)
             }
 
             // The latest round, surfaced up top so the current changes-requested
@@ -312,20 +311,23 @@ struct TaskViewerSheet: View {
             }
 
             if let progress = task.progressNote, !progress.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("WHERE WE'RE AT")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.matcha500)
-                        .tracking(0.5)
-                    Text(progress)
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.9))
-                        .textSelection(.enabled)
+                HStack(alignment: .top, spacing: 8) {
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color.matcha500.opacity(0.7))
+                        .frame(width: 2)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("WHERE WE'RE AT")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.matcha500)
+                            .tracking(0.5)
+                        Text(progress)
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.9))
+                            .textSelection(.enabled)
+                    }
                 }
-                .padding(10)
+                .padding(.vertical, 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.matcha500.opacity(0.1))
-                .cornerRadius(6)
             }
 
             if viewMode == .list {

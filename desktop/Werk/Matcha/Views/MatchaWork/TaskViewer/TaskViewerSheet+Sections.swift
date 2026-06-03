@@ -115,20 +115,16 @@ extension TaskViewerSheet {
                 Text("Round \(currentRound)")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(p.color)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(p.color.opacity(0.15))
-                    .cornerRadius(3)
             }
         }
-        .padding(10)
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(p.color.opacity(0.1))
+        // Color lives in the text/icon, not a filled banner. A hairline keeps
+        // the status separated from the body without another tinted box.
         .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(p.color.opacity(0.4), lineWidth: 1)
+            Rectangle().frame(height: 1).foregroundColor(.white.opacity(0.06)),
+            alignment: .bottom
         )
-        .cornerRadius(6)
     }
 
     // MARK: - Rounds (foreground latest-update card)

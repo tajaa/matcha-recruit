@@ -220,6 +220,11 @@ extension TaskViewerSheet {
         }
 
         return HStack(alignment: .top, spacing: 10) {
+            // Slim accent bar instead of a filled tinted card — color in the
+            // text/icon, not another colored box.
+            RoundedRectangle(cornerRadius: 1)
+                .fill(tint.opacity(0.7))
+                .frame(width: 2)
             Image(systemName: icon)
                 .font(.system(size: 15))
                 .foregroundColor(tint)
@@ -238,10 +243,6 @@ extension TaskViewerSheet {
                             .font(.system(size: 8, weight: .bold))
                             .tracking(0.4)
                             .foregroundColor(.matcha500)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Color.matcha500.opacity(0.15))
-                            .cornerRadius(3)
                     }
                 }
                 Text(sub)
@@ -251,14 +252,8 @@ extension TaskViewerSheet {
             }
             Spacer(minLength: 0)
         }
-        .padding(11)
+        .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tint.opacity(0.12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(tint.opacity(0.3), lineWidth: 1)
-        )
-        .cornerRadius(8)
     }
 
     var activityGraphSection: some View {
