@@ -220,6 +220,9 @@ app.add_middleware(
         "localhost",
         "127.0.0.1",
         "matcha-backend",
+        # Dev-only extra hosts (e.g. a webhook tunnel like *.trycloudflare.com).
+        # Comma-separated env; unset in prod so the allowlist is unchanged.
+        *[h.strip() for h in os.getenv("EXTRA_ALLOWED_HOSTS", "").split(",") if h.strip()],
     ],
 )
 

@@ -1023,6 +1023,20 @@ class MatchaWorkService {
         return (r.scanned, r.suggestions)
     }
 
+    /// Register a GitHub push webhook on the connected repo so a merge triggers a
+    /// scan automatically (no polling). Returns true if installed/already present.
+    @discardableResult
+    func installGitHubWebhook(projectId: String) async throws -> Bool {
+        struct EmptyBody: Encodable {}
+        struct Resp: Decodable { let installed: Bool? }
+        let r: Resp = try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/github/webhook/install",
+            body: EmptyBody()
+        )
+        return r.installed ?? false
+    }
+
     // MARK: - Prop draft tickets
 
     func listTicketDrafts(projectId: String, status: String? = nil) async throws -> [MWTicketDraft] {

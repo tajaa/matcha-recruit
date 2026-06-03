@@ -9,6 +9,8 @@ Phase-1 glob matcher + the snapshot store, so nothing downstream changes.
 
 import asyncio
 import base64
+import hashlib
+import hmac
 import logging
 import os
 from typing import Optional
@@ -165,6 +167,95 @@ async def sync_element(
     return summary
 
 
+def _commit_payload(d: Optional[dict], ref: Optional[str]) -> Optional[dict]:
+    """Shape a GitHub commit-detail object into the scan_commits payload. Skips
+    missing + merge commits. Diff = concatenated per-file patches, capped."""
+    if not d or len(d.get("parents", [])) > 1:
+        return None
+    sha = d["sha"]
+    files = d.get("files", []) or []
+    parts, total = [], 0
+    for f in files:
+        patch = f.get("patch")
+        if not patch:
+            continue
+        block = f"--- {f['filename']}\n{patch}\n"
+        if total + len(block) > MAX_DIFF_CHARS:
+            break
+        parts.append(block)
+        total += len(block)
+    return {
+        "sha": sha,
+        "short_sha": sha[:7],
+        "message": (d.get("commit", {}) or {}).get("message", ""),
+        "branch": ref,
+        "changed_files": [f["filename"] for f in files],
+        "diff": "".join(parts),
+    }
+
+
+async def fetch_commits_by_sha(repo: str, shas: list[str], ref: Optional[str] = None) -> list[dict]:
+    """Fetch detail for specific commit shas (e.g. a webhook push payload) → scan
+    payloads, in the given order. Capped to 30."""
+    if not _token() or not shas:
+        return []
+    repo = repo or default_repo()
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        sem = asyncio.Semaphore(_BLOB_CONCURRENCY)
+
+        async def detail(sha: str) -> Optional[dict]:
+            async with sem:
+                d = await client.get(f"{GITHUB_API}/repos/{repo}/commits/{sha}", headers=_headers())
+                return d.json() if d.status_code == 200 else None
+
+        details = await asyncio.gather(*[detail(s) for s in shas[:30]])
+    return [p for d in details if (p := _commit_payload(d, ref)) is not None]
+
+
+# ---------------------------------------------------------------------------
+# Webhook (push → scan) — signature verify + repo hook install
+# ---------------------------------------------------------------------------
+
+def webhook_secret() -> Optional[str]:
+    return os.getenv("GITHUB_WEBHOOK_SECRET")
+
+
+def webhook_url() -> Optional[str]:
+    return os.getenv("GITHUB_WEBHOOK_URL")
+
+
+def verify_webhook_signature(raw: bytes, header: Optional[str]) -> bool:
+    """Verify GitHub's X-Hub-Signature-256 (HMAC-SHA256 of the raw body)."""
+    secret = webhook_secret()
+    if not secret or not header or not header.startswith("sha256="):
+        return False
+    expected = hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(header[len("sha256="):], expected)
+
+
+async def install_repo_webhook(repo: str, url: str, secret: str) -> dict:
+    """Create a push webhook on the repo (idempotent on url). Needs a token with
+    repo-admin/hook scope."""
+    if not _token():
+        raise GitHubError("GITHUB_TOKEN is not set on the server.")
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        existing = await client.get(f"{GITHUB_API}/repos/{repo}/hooks", headers=_headers())
+        if existing.status_code == 200:
+            for h in existing.json():
+                if (h.get("config") or {}).get("url") == url:
+                    return {"installed": True, "id": h.get("id"), "existing": True}
+        r = await client.post(
+            f"{GITHUB_API}/repos/{repo}/hooks", headers=_headers(),
+            json={
+                "name": "web", "active": True, "events": ["push"],
+                "config": {"url": url, "content_type": "json", "secret": secret, "insecure_ssl": "0"},
+            },
+        )
+        if r.status_code not in (200, 201):
+            raise GitHubError(f"Couldn't create webhook ({r.status_code}): {r.text[:200]}")
+        return {"installed": True, "id": r.json().get("id"), "existing": False}
+
+
 async def fetch_recent_commits(
     repo: Optional[str] = None, ref: Optional[str] = None,
     limit: int = DEFAULT_COMMIT_LIMIT, since_sha: Optional[str] = None,
@@ -209,30 +300,6 @@ async def fetch_recent_commits(
 
         details = await asyncio.gather(*[detail(s) for s in shas])
 
-    out: list[dict] = []
-    for d in details:
-        if not d or len(d.get("parents", [])) > 1:  # skip missing + merge commits
-            continue
-        sha = d["sha"]
-        files = d.get("files", []) or []
-        changed = [f["filename"] for f in files]
-        parts, total = [], 0
-        for f in files:
-            patch = f.get("patch")
-            if not patch:
-                continue
-            block = f"--- {f['filename']}\n{patch}\n"
-            if total + len(block) > MAX_DIFF_CHARS:
-                break
-            parts.append(block)
-            total += len(block)
-        out.append({
-            "sha": sha,
-            "short_sha": sha[:7],
-            "message": (d.get("commit", {}) or {}).get("message", ""),
-            "branch": ref,
-            "changed_files": changed,
-            "diff": "".join(parts),
-        })
+    out = [p for d in details if (p := _commit_payload(d, ref)) is not None]
     out.reverse()  # GitHub returns newest-first; scan oldest-first
     return out, newest_sha

@@ -5348,6 +5348,86 @@ async def github_scan_commits_endpoint(
     return {"scanned": len(commits), "suggestions": suggestions}
 
 
+@router.post("/projects/{project_id}/github/webhook/install")
+async def install_github_webhook_endpoint(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Register a push webhook on the connected repo so a merge to its branch
+    auto-triggers a scan (no polling). Edit-gated."""
+    project, role = await _verify_project_access(project_id, current_user)
+    if not _can_edit_project(role):
+        raise HTTPException(status_code=403, detail="You don't have edit access to this project")
+    from ..services import github_service as gh_svc
+    repo, _ref = _resolve_github_repo(project, {})
+    if not repo:
+        raise HTTPException(status_code=400, detail="No GitHub repo connected to this project.")
+    url, secret = gh_svc.webhook_url(), gh_svc.webhook_secret()
+    if not url or not secret:
+        raise HTTPException(
+            status_code=400,
+            detail="Server webhook not configured (set GITHUB_WEBHOOK_URL + GITHUB_WEBHOOK_SECRET).",
+        )
+    try:
+        result = await gh_svc.install_repo_webhook(repo, url, secret)
+    except gh_svc.GitHubError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"repo": repo, **result}
+
+
+@public_router.post("/github/webhook")
+async def github_push_webhook(request: Request):
+    """GitHub push webhook → scan the pushed commits for every project connected
+    to that repo+branch. Public (no JWT); authenticated by HMAC signature.
+    URL: /api/matcha-work/public/github/webhook"""
+    from ..services import github_service as gh_svc
+    raw = await request.body()
+    if not gh_svc.verify_webhook_signature(raw, request.headers.get("X-Hub-Signature-256")):
+        raise HTTPException(status_code=401, detail="bad signature")
+    event = request.headers.get("X-GitHub-Event", "")
+    if event == "ping":
+        return {"ok": True, "pong": True}
+    if event != "push":
+        return {"ignored": event}
+
+    import json as _json
+    payload = _json.loads(raw or b"{}")
+    ref = payload.get("ref", "") or ""
+    if not ref.startswith("refs/heads/"):
+        return {"ignored": "non-branch ref"}
+    branch = ref[len("refs/heads/"):]
+    repo = (payload.get("repository") or {}).get("full_name") or ""
+    shas = [c.get("id") for c in (payload.get("commits") or []) if c.get("id")]
+    after = payload.get("after")
+    if not repo or not shas:
+        return {"ok": True, "nothing": True}
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, company_id FROM mw_projects
+            WHERE github_repo = $1 AND (github_branch = $2 OR github_branch IS NULL)
+            """,
+            repo, branch,
+        )
+    if not rows:
+        return {"ok": True, "projects": 0}
+
+    from ..services import commit_scan_service as cs_svc
+    commits = await gh_svc.fetch_commits_by_sha(repo, shas, branch)
+    for r in rows:
+        if not r["company_id"]:
+            continue
+        await cs_svc.scan_commits(r["id"], r["company_id"], commits)
+        if after:
+            async with get_connection() as conn:
+                await conn.execute(
+                    "UPDATE mw_projects SET github_last_scanned_sha = $1 WHERE id = $2",
+                    after, str(r["id"]),
+                )
+    return {"ok": True, "projects": len(rows), "commits": len(commits)}
+
+
 @router.get("/projects/{project_id}/ticket-drafts")
 async def list_ticket_drafts_endpoint(
     project_id: UUID,

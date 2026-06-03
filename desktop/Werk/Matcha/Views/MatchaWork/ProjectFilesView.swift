@@ -1087,6 +1087,7 @@ struct ElementsView: View {
                 .buttonStyle(.plain).disabled(viewModel.isSyncingRepo)
                 .help("Pull each bound element's code from GitHub (for Prop chats)")
                 Menu {
+                    Button("Enable push auto-scan") { Task { await viewModel.installGitHubWebhook() } }
                     Button("Change repo…") { showConnectSheet = true }
                     Button("Disconnect", role: .destructive) { Task { await viewModel.disconnectGitHubRepo() } }
                 } label: {

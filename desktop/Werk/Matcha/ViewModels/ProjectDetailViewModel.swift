@@ -1329,6 +1329,17 @@ class ProjectDetailViewModel {
         }
     }
 
+    /// Register the GitHub push webhook so a merge auto-triggers a scan (no polling).
+    func installGitHubWebhook() async {
+        guard let pid = project?.id else { return }
+        do {
+            _ = try await service.installGitHubWebhook(projectId: pid)
+            await MainActor.run { lastScanSummary = "Push auto-scan enabled" }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
     func moveTask(id: String, toColumn column: String) async {
         guard let pid = project?.id else { return }
         // Optimistic update
