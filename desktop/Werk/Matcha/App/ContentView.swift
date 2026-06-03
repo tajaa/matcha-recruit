@@ -833,16 +833,17 @@ struct ContentView: View {
     @ViewBuilder
     private var sidebarBackground: some View {
         if #available(macOS 26.0, *) {
-            // Liquid Glass: system glass, tinted to the theme.
+            // Liquid Glass: system glass, tinted to the (contrasting) sidebar color.
             Rectangle()
-                .fill(appState.themeBg.opacity(sidebarTintOpacity * 0.5))
-                .glassEffect(.regular.tint(appState.themeBg.opacity(0.28)), in: Rectangle())
+                .fill(appState.themeSidebar.opacity(sidebarTintOpacity * 0.5))
+                .glassEffect(.regular.tint(appState.themeSidebar.opacity(0.28)), in: Rectangle())
         } else {
-            // Frosted vibrancy that blends with the desktop behind the window,
-            // tinted to keep the theme's identity in all three themes.
+            // Frosted vibrancy behind the window, tinted to the sidebar color so
+            // the rail reads distinct from the main body in all three themes
+            // (lighter than dark/cappuchin bg, darker than the light bg).
             ZStack {
                 VisualEffectView(material: .sidebar, blendingMode: .behindWindow)
-                appState.themeBg.opacity(sidebarTintOpacity)
+                appState.themeSidebar.opacity(sidebarTintOpacity)
             }
         }
     }

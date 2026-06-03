@@ -4,6 +4,7 @@ import AppKit
 /// One checklist row in the TaskViewerSheet: toggle checkbox + title, delete on
 /// hover. Done items strike through and dim. Dark-themed to match the sheet.
 struct SubtaskRow: View {
+    @Environment(AppState.self) private var appState
     let item: MWSubtask
     let collaborators: [MWProjectCollaborator]
     let currentUserId: String?
@@ -39,7 +40,7 @@ struct SubtaskRow: View {
             .buttonStyle(.plain)
             Text(item.title)
                 .font(.system(size: 12))
-                .foregroundColor(item.isDone ? .secondary : .white)
+                .foregroundColor(item.isDone ? appState.themeTextSecondary : appState.themeText)
                 .strikethrough(item.isDone)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
@@ -77,7 +78,7 @@ struct SubtaskRow: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(isHovered ? Color.zinc800.opacity(0.6) : Color.clear)
+        .background(isHovered ? appState.themeText.opacity(0.06) : Color.clear)
         .cornerRadius(4)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
@@ -95,9 +96,9 @@ struct SubtaskRow: View {
         .popover(isPresented: $showDeny, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Deny completion")
-                    .font(.system(size: 11, weight: .semibold)).foregroundColor(.white)
+                    .font(.system(size: 11, weight: .semibold)).foregroundColor(appState.themeText)
                 Text("\u{201C}\(item.title)\u{201D}")
-                    .font(.system(size: 10)).italic().foregroundColor(.secondary).lineLimit(2)
+                    .font(.system(size: 10)).italic().foregroundColor(appState.themeTextSecondary).lineLimit(2)
                 Picker("", selection: $denySeverity) {
                     Text("Blocker").tag("blocker")
                     Text("Nit").tag("nit")
@@ -105,8 +106,8 @@ struct SubtaskRow: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 TextField("Why isn't this actually done?", text: $denyReason, axis: .vertical)
-                    .textFieldStyle(.plain).font(.system(size: 12)).foregroundColor(.white)
-                    .lineLimit(1...4).padding(8).background(Color.zinc800).cornerRadius(6)
+                    .textFieldStyle(.plain).font(.system(size: 12)).foregroundColor(appState.themeText)
+                    .lineLimit(1...4).padding(8).background(appState.themeText.opacity(0.06)).cornerRadius(6)
                     .focused($denyFocused)
                 HStack {
                     Spacer()
@@ -119,11 +120,12 @@ struct SubtaskRow: View {
                     }
                     .buttonStyle(.plain).font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.white).padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(empty ? Color.zinc800 : Color.orange).cornerRadius(5)
+                    .background(empty ? appState.themeText.opacity(0.12) : Color.orange).cornerRadius(5)
                     .disabled(empty)
                 }
             }
             .padding(12).frame(width: 260)
+            .background(appState.themeCard)
             .onAppear { DispatchQueue.main.async { denyFocused = true } }
         }
     }

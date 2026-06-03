@@ -39,6 +39,7 @@ extension Color {
     static let grayBg = Color(red: 0.957, green: 0.957, blue: 0.961)            // zinc-100 #F4F4F5
     static let grayCard = Color.white                                           // #FFFFFF
     static let grayBorder = Color(red: 0.894, green: 0.894, blue: 0.906)        // zinc-200 #E4E4E7
+    static let graySidebar = Color(red: 0.871, green: 0.871, blue: 0.886)       // ~zinc-250 #DEDEE2 — darker than body for sidebar contrast
     static let grayAccent = Color(red: 0.153, green: 0.153, blue: 0.165)        // zinc-800 #27272A
     static let grayAccentDark = Color(red: 0.094, green: 0.094, blue: 0.106)    // zinc-900 #18181B
     static let grayText = Color(red: 0.094, green: 0.094, blue: 0.106)          // zinc-900 #18181B

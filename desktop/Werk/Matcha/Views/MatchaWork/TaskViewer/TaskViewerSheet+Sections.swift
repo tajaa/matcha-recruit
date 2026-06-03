@@ -27,7 +27,7 @@ extension TaskViewerSheet {
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background(Color.zinc800)
+                        .background(appState.themeText.opacity(0.08))
                         .cornerRadius(4)
                 }
                 Spacer()
@@ -41,7 +41,7 @@ extension TaskViewerSheet {
             .padding(.vertical, 8)
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity)
-            .background(Color.zinc800.opacity(0.4))
+            .background(appState.themeText.opacity(0.07))
             .cornerRadius(6)
             .contentShape(Rectangle())
         }
@@ -127,7 +127,7 @@ extension TaskViewerSheet {
                     ForEach(d.completed.prefix(6), id: \.self) { t in
                         HStack(spacing: 5) {
                             Image(systemName: "checkmark.circle.fill").font(.system(size: 8)).foregroundColor(.matcha500)
-                            Text(t).font(.system(size: 11)).foregroundColor(.white.opacity(0.8)).lineLimit(1)
+                            Text(t).font(.system(size: 11)).foregroundColor(appState.themeText.opacity(0.8)).lineLimit(1)
                         }
                     }
                     HStack(spacing: 10) {
@@ -215,7 +215,7 @@ extension TaskViewerSheet {
                 if !p.owner.isEmpty {
                     Text(p.owner)
                         .font(.system(size: 10))
-                        .foregroundColor(.white.opacity(0.7))
+                        .foregroundColor(appState.themeText.opacity(0.7))
                 }
             }
             Spacer()
@@ -242,7 +242,7 @@ extension TaskViewerSheet {
         // Color lives in the text/icon, not a filled banner. A hairline keeps
         // the status separated from the body without another tinted box.
         .overlay(
-            Rectangle().frame(height: 1).foregroundColor(.white.opacity(0.06)),
+            Rectangle().frame(height: 1).foregroundColor(appState.themeText.opacity(0.06)),
             alignment: .bottom
         )
     }
@@ -358,7 +358,7 @@ extension TaskViewerSheet {
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background(Color.zinc800)
+                        .background(appState.themeText.opacity(0.08))
                         .cornerRadius(4)
                 }
                 if loadingHistory {
@@ -429,9 +429,9 @@ extension TaskViewerSheet {
                 TextField(replyingToNote == nil ? "Add a note…" : "Write a reply…", text: $newNote)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
-                    .foregroundColor(.white)
+                    .foregroundColor(appState.themeText)
                     .padding(7)
-                    .background(Color.zinc800.opacity(0.6))
+                    .background(appState.themeText.opacity(0.07))
                     .cornerRadius(5)
                     .focused($isNoteFieldFocused)
                     .onSubmit { Task { await submitNote() } }
@@ -518,7 +518,7 @@ extension TaskViewerSheet {
         }
         .padding(.horizontal, 7)
         .padding(.vertical, 5)
-        .background(Color.zinc800.opacity(0.4))
+        .background(appState.themeText.opacity(0.07))
         .cornerRadius(5)
     }
 
@@ -545,7 +545,7 @@ extension TaskViewerSheet {
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
-                    .background(Color.zinc800)
+                    .background(appState.themeText.opacity(0.08))
                     .cornerRadius(4)
                 if currentRound > 1 {
                     Text("Round \(currentRound)")
@@ -615,7 +615,7 @@ extension TaskViewerSheet {
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
-                        .background(Color.zinc800)
+                        .background(appState.themeText.opacity(0.08))
                         .cornerRadius(4)
                 }
                 Spacer()
@@ -667,7 +667,7 @@ extension TaskViewerSheet {
                             Text("Completed by commit \(comp.commitShortSha ?? "?") · \(Int((comp.confidence * 100).rounded()))%"
                                  + (comp.reasoning.map { " — \($0)" } ?? ""))
                                 .font(.system(size: 10))
-                                .foregroundColor(.white.opacity(0.55))
+                                .foregroundColor(appState.themeText.opacity(0.55))
                                 .lineLimit(2)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -681,9 +681,9 @@ extension TaskViewerSheet {
                 TextField("Add a checklist item…", text: $newSubtask)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
-                    .foregroundColor(.white)
+                    .foregroundColor(appState.themeText)
                     .padding(7)
-                    .background(Color.zinc800.opacity(0.6))
+                    .background(appState.themeText.opacity(0.07))
                     .cornerRadius(5)
                     .onSubmit { submitSubtask() }
                 Button {
@@ -713,11 +713,11 @@ extension TaskViewerSheet {
                 .tracking(0.5)
             TextEditor(text: $rejectNote)
                 .font(.system(size: 12))
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundColor(appState.themeText.opacity(0.9))
                 .scrollContentBackground(.hidden)
                 .padding(5)
                 .frame(height: 64)
-                .background(Color.zinc800.opacity(0.6))
+                .background(appState.themeText.opacity(0.07))
                 .cornerRadius(5)
 
             // Re-open specific checklist items as part of sending back, so the
@@ -739,7 +739,7 @@ extension TaskViewerSheet {
                                     .foregroundColor(.matcha500)
                                 Text(item.title)
                                     .font(.system(size: 11))
-                                    .foregroundColor(.white.opacity(0.85))
+                                    .foregroundColor(appState.themeText.opacity(0.85))
                                     .strikethrough()
                                     .lineLimit(1)
                                 Spacer()

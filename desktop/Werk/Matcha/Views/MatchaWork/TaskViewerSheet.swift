@@ -155,7 +155,7 @@ struct TaskViewerSheet: View {
             }
             .foregroundColor(.secondary)
             .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(Color.zinc800).cornerRadius(3)
+            .background(appState.themeText.opacity(0.08)).cornerRadius(3)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -192,7 +192,7 @@ struct TaskViewerSheet: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(task.title)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(appState.themeText)
                     .lineLimit(2)
                 Spacer()
                 HStack(spacing: 2) {
@@ -200,7 +200,7 @@ struct TaskViewerSheet: View {
                     modeButton(.graph, icon: "point.3.connected.trianglepath.dotted")
                 }
                 .padding(2)
-                .background(Color.zinc800)
+                .background(appState.themeText.opacity(0.08))
                 .cornerRadius(5)
                 Button {
                     Task { await copyTicketToClipboard() }
@@ -287,13 +287,13 @@ struct TaskViewerSheet: View {
                         .foregroundColor(.orange)
                         Text(note)
                             .font(.system(size: 12))
-                            .foregroundColor(.white.opacity(0.9))
+                            .foregroundColor(appState.themeText.opacity(0.9))
                             .textSelection(.enabled)
                         // Severity tally for the denials this cycle.
                         if let counts = denialSeverityCounts {
                             Text(counts)
                                 .font(.system(size: 9, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.6))
+                                .foregroundColor(appState.themeText.opacity(0.6))
                         }
                         // In-review audit: the specific items the reviewer denied
                         // this cycle (still open), each with its severity + reason.
@@ -312,7 +312,7 @@ struct TaskViewerSheet: View {
                                 }
                                 Text("\(d.title)\(d.reason.isEmpty ? "" : " — \(d.reason)")")
                                     .font(.system(size: 11))
-                                    .foregroundColor(.white.opacity(0.75))
+                                    .foregroundColor(appState.themeText.opacity(0.75))
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
@@ -332,13 +332,13 @@ struct TaskViewerSheet: View {
                 ScrollView {
                     Text(description)
                         .font(.system(size: 13))
-                        .foregroundColor(.white.opacity(0.85))
+                        .foregroundColor(appState.themeText.opacity(0.85))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 }
                 .frame(maxHeight: 220)
                 .padding(10)
-                .background(Color.zinc800.opacity(0.5))
+                .background(appState.themeText.opacity(0.07))
                 .cornerRadius(6)
             }
 
@@ -354,7 +354,7 @@ struct TaskViewerSheet: View {
                             .tracking(0.5)
                         Text(progress)
                             .font(.system(size: 12))
-                            .foregroundColor(.white.opacity(0.9))
+                            .foregroundColor(appState.themeText.opacity(0.9))
                             .textSelection(.enabled)
                     }
                 }
@@ -422,10 +422,10 @@ struct TaskViewerSheet: View {
                     .popover(isPresented: $isApproving, arrowEdge: .top) {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Approve & close")
-                                .font(.system(size: 11, weight: .semibold)).foregroundColor(.white)
+                                .font(.system(size: 11, weight: .semibold)).foregroundColor(appState.themeText)
                             TextField("Optional sign-off note…", text: $approveNote, axis: .vertical)
-                                .textFieldStyle(.plain).font(.system(size: 12)).foregroundColor(.white)
-                                .lineLimit(1...3).padding(8).background(Color.zinc800).cornerRadius(6)
+                                .textFieldStyle(.plain).font(.system(size: 12)).foregroundColor(appState.themeText)
+                                .lineLimit(1...3).padding(8).background(appState.themeText.opacity(0.08)).cornerRadius(6)
                             HStack {
                                 Spacer()
                                 Button("Cancel") { isApproving = false; approveNote = "" }
@@ -439,6 +439,7 @@ struct TaskViewerSheet: View {
                             }
                         }
                         .padding(12).frame(width: 260)
+                        .background(appState.themeCard)
                     }
                 }
                 Spacer()

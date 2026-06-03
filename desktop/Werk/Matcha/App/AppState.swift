@@ -127,6 +127,18 @@ class AppState {
         }
     }
 
+    /// Sidebar background — deliberately CONTRASTS the body (`themeBg`): lighter
+    /// than the near-black dark bg, lighter than the espresso cappuchin bg, and
+    /// DARKER than the light-mode body, so the nav rail always separates from the
+    /// main content.
+    var themeSidebar: Color {
+        switch appTheme {
+        case "light": return Color.graySidebar
+        case "cappuchin": return Color.cappuchinCard
+        default: return Color.zinc900
+        }
+    }
+
     var themeBorder: Color {
         switch appTheme {
         case "light": return Color.grayBorder

@@ -4,6 +4,7 @@ import SwiftUI
 /// rich (body + image thumbnails) while structural events render as a
 /// single icon + line ("haley added subtask: 'Add EIN validation'").
 struct EventRow: View {
+    @Environment(AppState.self) private var appState
     let event: MWTaskHistoryEntry
     let files: [MWProjectFile]
     let onPreview: (MWProjectFile) -> Void
@@ -40,7 +41,7 @@ struct EventRow: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(Self.describe(event))
                         .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.9))
+                        .foregroundColor(appState.themeText.opacity(0.9))
                         .fixedSize(horizontal: false, vertical: true)
                     Text(PacificDateFormatter.absolute(event.createdAt) ?? event.createdAt)
                         .font(.system(size: 9))
