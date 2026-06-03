@@ -4932,6 +4932,15 @@ async def update_task_subtask_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
     if row is None:
         raise HTTPException(status_code=404, detail="Subtask not found")
+
+    # Review denial (reopen + reason): overturn any accepted commit→completion
+    # for this subtask, so the card stops crediting that commit and the same
+    # commit won't silently re-auto-check it.
+    if reason and patch.get("is_done") is False:
+        from ..services import commit_scan_service as cs_svc
+        await cs_svc.dismiss_accepted_for_subtask(
+            project_id, subtask_id, actor_user_id=current_user.id,
+        )
     return row
 
 
@@ -5165,6 +5174,19 @@ async def list_commit_suggestions_endpoint(
     await _verify_project_access(project_id, current_user)
     from ..services import commit_scan_service as cs_svc
     return await cs_svc.list_pending_suggestions(project_id, task_id)
+
+
+@router.get("/projects/{project_id}/tasks/{task_id}/commit-completions")
+async def list_commit_completions_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Accepted commit→subtask completions for a task — which commit completed
+    each done item, so an in-review reviewer can audit the AI auto-checks."""
+    await _verify_project_access(project_id, current_user)
+    from ..services import commit_scan_service as cs_svc
+    return await cs_svc.list_accepted_completions(project_id, task_id)
 
 
 @router.post("/projects/{project_id}/commit-suggestions/{suggestion_id}/accept")

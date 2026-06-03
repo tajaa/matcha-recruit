@@ -556,6 +556,22 @@ extension TaskViewerSheet {
                             .padding(.leading, 22)
                         }
                     }
+                    // In review: audit which commit completed a done item, so the
+                    // reviewer can judge (and ✗-deny) the AI auto-check.
+                    if task.boardColumn == "review", item.isDone,
+                       let comp = viewModel.completion(subtaskId: item.id) {
+                        HStack(alignment: .top, spacing: 5) {
+                            Image(systemName: "sparkles").font(.system(size: 8)).foregroundColor(.purple)
+                            Text("Completed by commit \(comp.commitShortSha ?? "?") · \(Int((comp.confidence * 100).rounded()))%"
+                                 + (comp.reasoning.map { " — \($0)" } ?? ""))
+                                .font(.system(size: 10))
+                                .foregroundColor(.white.opacity(0.55))
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.leading, 22)
+                        .help("This item was checked off by the commit scanner — ✗ deny it above if the work isn't actually complete.")
+                    }
                 }
             }
 

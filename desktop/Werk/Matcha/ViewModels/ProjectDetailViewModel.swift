@@ -1023,6 +1023,8 @@ class ProjectDetailViewModel {
                 taskSubtasks[taskId] = list
                 syncSubtaskCounts(taskId: taskId)
             }
+            // The denial overturns the commit→completion server-side; drop it now.
+            commitCompletions[subtaskId] = nil
         }
         do {
             let updated = try await service.denySubtask(
@@ -1268,6 +1270,23 @@ class ProjectDetailViewModel {
     func suggestions(taskId: String, subtaskId: String) -> [MWCommitSuggestion] {
         (commitSuggestions[taskId] ?? []).filter { $0.subtaskId == subtaskId && $0.status == "pending" }
     }
+
+    /// subtaskId → the accepted commit that completed it (latest). Loaded for the
+    /// in-review audit so a reviewer can see + overturn the AI auto-checks.
+    var commitCompletions: [String: MWCommitSuggestion] = [:]
+
+    func loadCommitCompletions(taskId: String) async {
+        guard let pid = project?.id else { return }
+        if let list = try? await service.listCommitCompletions(projectId: pid, taskId: taskId) {
+            await MainActor.run {
+                commitCompletions = Dictionary(list.map { ($0.subtaskId, $0) },
+                                               uniquingKeysWith: { a, _ in a })
+            }
+        }
+    }
+
+    /// Which commit completed this subtask (nil if none / human-completed).
+    func completion(subtaskId: String) -> MWCommitSuggestion? { commitCompletions[subtaskId] }
 
     /// How many distinct subtasks on a task a commit may have completed (still
     /// pending accept) — drives the kanban card badge. Distinct on subtask_id so

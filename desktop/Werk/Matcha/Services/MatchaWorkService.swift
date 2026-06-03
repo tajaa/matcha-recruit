@@ -969,6 +969,15 @@ class MatchaWorkService {
         )
     }
 
+    /// Accepted commit→subtask completions for a task (one latest per subtask):
+    /// which commit completed each done item, for the in-review audit UI.
+    func listCommitCompletions(projectId: String, taskId: String) async throws -> [MWCommitSuggestion] {
+        try await client.request(
+            method: "GET",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/commit-completions"
+        )
+    }
+
     // MARK: - Element repo snapshot (for Prop grounding)
 
     func putElementRepoSnapshot(projectId: String, elementId: String, files: [RepoFilePayload]) async throws -> MWSnapshotSummary {

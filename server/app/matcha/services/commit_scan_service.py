@@ -460,6 +460,52 @@ async def list_pending_suggestions(project_id: UUID, task_id: Optional[UUID] = N
         return await _list_pending(conn, project_id, task_id)
 
 
+async def list_accepted_completions(project_id: UUID, task_id: UUID) -> list[dict]:
+    """Accepted commit→subtask completions for a task (latest per subtask) — used
+    by the in-review UI to show WHICH commit completed each item so a reviewer can
+    audit (and overturn) the AI auto-checks. One row per subtask, newest first."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT * FROM (
+                SELECT DISTINCT ON (subtask_id)
+                       id, task_id, subtask_id, element_id, commit_sha, commit_short_sha,
+                       commit_message, confidence, reasoning, status, created_at
+                FROM mw_commit_subtask_suggestions
+                WHERE project_id = $1 AND task_id = $2 AND status = 'accepted'
+                ORDER BY subtask_id, created_at DESC
+            ) s
+            ORDER BY created_at DESC
+            """,
+            str(project_id), task_id,
+        )
+    return [_serialize_suggestion(dict(r)) for r in rows]
+
+
+async def dismiss_accepted_for_subtask(
+    project_id: UUID, subtask_id: UUID, *, actor_user_id: Optional[UUID] = None
+) -> int:
+    """Overturn the accepted commit→completion(s) for a subtask a reviewer just
+    reopened: flip them to 'dismissed' so the card stops claiming that commit
+    completed it. The (subtask_id, commit_sha) row survives, so a re-scan of the
+    SAME commit hits ON CONFLICT DO NOTHING and won't auto-check it again (a
+    DIFFERENT commit still can). Returns the number of rows overturned."""
+    async with get_connection() as conn:
+        res = await conn.execute(
+            """
+            UPDATE mw_commit_subtask_suggestions
+            SET status = 'dismissed', resolved_at = now(), resolved_by = $3
+            WHERE project_id = $1 AND subtask_id = $2 AND status = 'accepted'
+            """,
+            str(project_id), subtask_id,
+            str(actor_user_id) if actor_user_id else None,
+        )
+    try:
+        return int(res.split()[-1])  # "UPDATE N"
+    except (ValueError, AttributeError, IndexError):
+        return 0
+
+
 def _serialize_suggestion(d: dict) -> dict:
     for k in ("id", "task_id", "subtask_id", "project_id", "resolved_by"):
         if d.get(k) is not None:

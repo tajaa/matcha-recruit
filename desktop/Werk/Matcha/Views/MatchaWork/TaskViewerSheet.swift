@@ -449,6 +449,11 @@ struct TaskViewerSheet: View {
             // Refresh commit-driven suggestions so chips appear even when the
             // ticket is opened straight from the board (no-op if no repo bound).
             await viewModel.loadCommitSuggestions()
+            // In review, load which commit completed each done item so the
+            // reviewer can audit (and overturn) the AI auto-checks.
+            if task.boardColumn == "review" {
+                await viewModel.loadCommitCompletions(taskId: task.id)
+            }
             // Discussion is always shown, so load history once on open to
             // populate the notes thread (and the collapsed rounds feed).
             if !historyLoaded { await loadHistory() }
