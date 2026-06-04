@@ -203,7 +203,7 @@ export function MatchaLiteMockup() {
         </div>
 
         {/* Content */}
-        <div className="flex-1 px-5 py-4 overflow-hidden">
+        <div className="flex-1 px-5 py-4 overflow-x-auto overflow-y-hidden">
           <AnimatePresence mode="wait">
 
             {/* Step 1: Incidents list */}

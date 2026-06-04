@@ -17,6 +17,7 @@ const ConvergenceAnimation = lazy(() =>
 import { ANIMATION_BY_SIZZLE_ID } from './landing/animations'
 import { EnforcementTotalsTicker } from '../components/landing/EnforcementTotalsTicker'
 import { IrAnalysisPanel } from '../components/landing/IrAnalysisPanel'
+import { FocusSection, useScrollFocus } from '../components/landing/ScrollFocus'
 import { PricingContactModal } from '../components/PricingContactModal'
 import { useLandingMedia } from '../hooks/useLandingMedia'
 import type { LandingMedia, LandingSizzleVideo, LandingCustomerLogo, LandingTestimonial } from '../api/client'
@@ -65,8 +66,16 @@ const DEFAULT_SIZZLES: LandingSizzleVideo[] = [
 export default function Landing() {
   const [isPricingOpen, setIsPricingOpen] = useState(false)
   const { data } = useLandingMedia()
+  const focus = useScrollFocus()
 
   const sizzles = data.sizzle_videos.length > 0 ? data.sizzle_videos : DEFAULT_SIZZLES
+
+  const sectionNodes = [
+    <ConvergenceSection key="convergence" />,
+    <IncidentIntakeSection key="intake" />,
+    ...sizzles.map((s, i) => <ProductSizzle key={s.id} sizzle={s} reverse={i % 2 === 1} />),
+    <Testimonials key="testimonials" testimonials={data.testimonials} />,
+  ]
 
   return (
     <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen overflow-x-hidden">
@@ -78,15 +87,9 @@ export default function Landing() {
       <Hero data={data} onContactClick={() => setIsPricingOpen(true)} />
 
       <main>
-        <ConvergenceSection />
-
-        <IncidentIntakeSection />
-
-        {sizzles.map((s, i) => (
-          <ProductSizzle key={s.id} sizzle={s} reverse={i % 2 === 1} />
+        {sectionNodes.map((node, i) => (
+          <FocusSection key={i} idx={i} focus={focus}>{node}</FocusSection>
         ))}
-
-        <Testimonials testimonials={data.testimonials} />
       </main>
 
       <MarketingFooter />

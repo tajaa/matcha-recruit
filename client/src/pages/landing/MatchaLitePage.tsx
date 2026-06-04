@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { motion, useInView } from 'framer-motion'
 import { ShieldAlert, FileText, MapPin, Bell, Brain, ClipboardList } from 'lucide-react'
@@ -9,6 +9,7 @@ import { ComplianceTicker } from '../../components/landing/ComplianceTicker'
 import { MatchaLiteMockup } from '../../components/landing/MatchaLiteMockup'
 import { IrAnalysisPanel } from '../../components/landing/IrAnalysisPanel'
 import { RiskInsightsHero } from '../../components/landing/RiskInsightsHero'
+import { FocusSection, useScrollFocus } from '../../components/landing/ScrollFocus'
 import { PricingContactModal } from '../../components/PricingContactModal'
 
 const INK = 'var(--color-ivory-ink)'
@@ -68,78 +69,19 @@ const FEATURES: { id: string; icon: typeof ShieldAlert; title: string; caption: 
   },
 ]
 
-// Scroll "focus mode": as you scroll, the section nearest the viewport's upper
-// third is the only one held fully lit — the rest dim/blur back. Once you reach
-// the bottom of the page the lock releases and every section presents at once.
-function useScrollFocus() {
-  const els = useRef<(HTMLElement | null)[]>([])
-  const [active, setActive] = useState(0)
-  const [released, setReleased] = useState(false)
-  const register = useCallback((idx: number, el: HTMLElement | null) => { els.current[idx] = el }, [])
-
-  useEffect(() => {
-    let ticking = false
-    const compute = () => {
-      ticking = false
-      const vh = window.innerHeight
-      const focusLine = vh * 0.42
-      let best = 0
-      let bestDist = Infinity
-      els.current.forEach((el, i) => {
-        if (!el) return
-        const r = el.getBoundingClientRect()
-        const mid = r.top + r.height / 2
-        const dist = Math.abs(mid - focusLine)
-        if (dist < bestDist) { bestDist = dist; best = i }
-      })
-      setActive(best)
-      const doc = document.documentElement
-      setReleased(window.scrollY + vh >= doc.scrollHeight - 120)
-    }
-    const onScroll = () => { if (!ticking) { ticking = true; requestAnimationFrame(compute) } }
-    compute()
-    window.addEventListener('scroll', onScroll, { passive: true })
-    window.addEventListener('resize', onScroll)
-    return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll) }
-  }, [])
-
-  return { active, released, register }
-}
-
-type Focus = ReturnType<typeof useScrollFocus>
-
-function FocusSection({ idx, focus, children }: { idx: number; focus: Focus; children: React.ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    focus.register(idx, ref.current)
-    return () => focus.register(idx, null)
-  }, [idx, focus])
-  const lit = focus.released || focus.active === idx
-  return (
-    <motion.div
-      ref={ref}
-      animate={{ opacity: lit ? 1 : 0.2, filter: lit ? 'blur(0px)' : 'blur(3px)', scale: lit ? 1 : 0.985 }}
-      transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-      style={{ transformOrigin: 'center top', willChange: 'opacity, filter, transform' }}
-    >
-      {children}
-    </motion.div>
-  )
-}
-
 export default function MatchaLitePage() {
   const [isPricingOpen, setIsPricingOpen] = useState(false)
   const focus = useScrollFocus()
 
   const sections = [
     <RiskInsightsShowcase key="risk" />,
-    <FeatureGrid key="grid" />,
     <IrAnalysisSection key="ir" />,
     <OshaSection key="osha" />,
+    <FeatureGrid key="grid" />,
   ]
 
   return (
-    <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen">
+    <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen overflow-x-hidden">
       <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
       <ComplianceTicker />
       <MarketingNav onDemoClick={() => setIsPricingOpen(true)} />
@@ -394,7 +336,9 @@ function IrAnalysisSection() {
               ))}
             </ul>
           </div>
-          <IrAnalysisPanel />
+          <div className="min-w-0">
+            <IrAnalysisPanel />
+          </div>
         </div>
       </div>
     </section>
@@ -426,7 +370,7 @@ function OshaSection() {
     <section className="py-16 sm:py-24 md:py-28 border-t" style={{ borderColor: LINE }}>
       <div className="max-w-[1440px] mx-auto px-5 sm:px-10">
         <div className="grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
-          <div className="order-2 lg:order-1">
+          <div className="order-2 lg:order-1 min-w-0">
             <OshaLogPanel />
           </div>
           <div className="order-1 lg:order-2">
