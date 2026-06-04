@@ -57,7 +57,10 @@ function relativeTime(iso: string): string {
   return `${day}d ago`
 }
 
+type View = 'overview' | 'themes'
+
 export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
+  const [view, setView] = useState<View>('overview')
   const [locations, setLocations] = useState<LocationRow[] | null>(null)
   const [locationFilter, setLocationFilter] = useState<string>('')
   const [days, setDays] = useState<string>('90')
@@ -202,6 +205,25 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
         </div>
       ) : (
         <>
+          <div className="flex gap-0 border border-zinc-700 rounded-lg overflow-hidden w-fit">
+            {([
+              { v: 'overview', l: 'Overview' },
+              { v: 'themes', l: 'Themes & People' },
+            ] as const).map(({ v, l }) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                className={`px-4 py-1.5 text-[10px] uppercase tracking-widest font-bold transition-colors ${
+                  view === v ? 'bg-zinc-800 text-zinc-50' : 'bg-zinc-900 text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {view === 'overview' ? (
+          <>
           <IRRiskHeroCard assessment={assessment} periodDays={matrix?.period_days ?? days} />
 
           <IRRiskMatrixHeatmap matrix={matrix} loading={matrixLoading} error={matrixError} />
@@ -219,7 +241,9 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
           <IRSeverityDonut summary={summary} />
 
           <IRDimensionsGrid assessment={assessment} />
-
+          </>
+          ) : (
+          <>
           {/* AI Themes */}
           <section>
             <div className="flex items-center justify-between mb-3">
@@ -257,6 +281,8 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
           </section>
 
           <IRPeopleCard />
+          </>
+          )}
 
           {/* Upgrade footer */}
           <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">

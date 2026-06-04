@@ -8,6 +8,7 @@ import MarketingFooter from './MarketingFooter'
 import { ComplianceTicker } from '../../components/landing/ComplianceTicker'
 import { MatchaLiteMockup } from '../../components/landing/MatchaLiteMockup'
 import { IrAnalysisPanel } from '../../components/landing/IrAnalysisPanel'
+import { RiskInsightsHero } from '../../components/landing/RiskInsightsHero'
 import { PricingContactModal } from '../../components/PricingContactModal'
 
 const INK = 'var(--color-ivory-ink)'
@@ -87,6 +88,7 @@ export default function MatchaLitePage() {
       <Hero onContactClick={() => setIsPricingOpen(true)} />
 
       <main>
+        <RiskInsightsShowcase />
         <FeatureGrid />
         <IrAnalysisSection />
         <OshaSection />
@@ -171,6 +173,44 @@ function Hero({ onContactClick }: { onContactClick: () => void }) {
             }}
           >
             <MatchaLiteMockup />
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Risk Insights showcase — live-moving dashboard hero
+// ---------------------------------------------------------------------------
+
+function RiskInsightsShowcase() {
+  return (
+    <section className="py-16 sm:py-24 md:py-28 border-t" style={{ borderColor: LINE }}>
+      <div className="max-w-[1440px] mx-auto px-5 sm:px-10">
+        <div className="max-w-2xl mb-10 sm:mb-12">
+          <div className="text-[11px] uppercase tracking-wider font-medium mb-3 sm:mb-4" style={{ color: MUTED }}>
+            Live risk dashboard
+          </div>
+          <h2
+            className="tracking-tight"
+            style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(1.875rem, 5vw, 3.25rem)', lineHeight: 1.05 }}
+          >
+            Every incident, rolled into one risk picture.
+          </h2>
+          <p className="mt-4 sm:mt-5 text-base sm:text-lg" style={{ color: MUTED, lineHeight: 1.6 }}>
+            A location-by-location risk matrix, a live incident trend, and your
+            workers-comp posture — TRIR, DART, lost days — all auto-computed from
+            intake. The numbers a safety review actually asks for.
+          </p>
+        </div>
+
+        <div className="max-w-5xl mx-auto -mx-2 sm:mx-auto">
+          <div
+            className="relative rounded-lg sm:rounded-xl overflow-hidden ring-1 shadow-2xl"
+            style={{ boxShadow: '0 40px 80px -25px rgba(31, 29, 26, 0.3)', borderColor: 'rgba(0,0,0,0.08)' }}
+          >
+            <RiskInsightsHero />
           </div>
         </div>
       </div>

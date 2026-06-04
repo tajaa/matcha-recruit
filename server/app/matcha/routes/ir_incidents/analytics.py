@@ -729,11 +729,18 @@ async def get_analytics_risk_insights(
                 """,
                 company_id, scope_key,
             )
-            if cached and (_utc_now_naive() - cached["generated_at"]) < timedelta(hours=24):
+            if cached:
                 payload = _safe_json_loads(cached["analysis_data"])
-                payload["from_cache"] = True
-                payload["generated_at"] = cached["generated_at"].isoformat()
-                return RiskInsightsResponse(**payload)
+                # Themes are cached 24h, but a *successful-but-empty* result is
+                # usually Gemini variance (the model is non-deterministic — the
+                # same corpus that yields 8 themes one run can yield 0 the next).
+                # Pin empties for only 1h so an unlucky run self-heals on the
+                # next load instead of showing "no patterns" for a whole day.
+                ttl = timedelta(hours=1) if not payload.get("themes") else timedelta(hours=24)
+                if (_utc_now_naive() - cached["generated_at"]) < ttl:
+                    payload["from_cache"] = True
+                    payload["generated_at"] = cached["generated_at"].isoformat()
+                    return RiskInsightsResponse(**payload)
 
         # Pull the corpus. Cap at 200 most recent so the prompt stays focused.
         loc_clause = "AND i.location_id = $3" if location_id else ""
