@@ -725,6 +725,12 @@ class IRCopilotCardAction(BaseModel):
     input_max: Optional[int] = None
     prompt_text: Optional[str] = None
     input_rows: Optional[int] = None
+    # text_input: pre-filled textarea value (e.g. the AI-cleansed OSHA 300
+    # description draft, or the raw narrative for the human to strip names from).
+    # MUST be declared here — _extract_current_cards round-trips the persisted
+    # card through this model, so an undeclared field is dropped before the FE
+    # ever sees it (blank textarea bug).
+    prefilled: Optional[str] = None
     # osha_emergency_alert: informational + acknowledgment.
     phone: Optional[str] = None
     deadline: Optional[str] = None

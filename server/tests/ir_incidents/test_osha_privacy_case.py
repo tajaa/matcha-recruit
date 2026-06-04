@@ -354,6 +354,19 @@ def test_build_osha_clean_description_card_raw_fallback_copy():
     assert "names no one" in raw["recommendation"] or "strip" in raw["recommendation"].lower()
 
 
+def test_card_model_roundtrip_preserves_prefilled():
+    # _extract_current_cards round-trips the persisted card dict through
+    # IRCopilotCard before sending to the FE. If the action model omits
+    # `prefilled`, Pydantic drops it and the textarea renders blank. Guard it.
+    from app.matcha.routes.ir_incidents._shared import build_osha_clean_description_card
+    from app.matcha.models.ir_incident import IRCopilotCard
+    card = build_osha_clean_description_card("An employee slipped and fell.")
+    validated = IRCopilotCard.model_validate(card)
+    assert validated.action.prefilled == "An employee slipped and fell."
+    # and it survives serialization back out to the wire
+    assert validated.model_dump()["action"]["prefilled"] == "An employee slipped and fell."
+
+
 def test_osha_description_approval_writes_and_advances(monkeypatch):
     # Approving the review card writes the canonical osha_clean_description +
     # the osha_description_approved gate, then resumes the per-case loop.
