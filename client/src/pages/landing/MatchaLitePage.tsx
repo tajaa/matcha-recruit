@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { motion, useInView } from 'framer-motion'
-import { ShieldAlert, FileText, MapPin, Calculator, Bell, Brain, ClipboardList } from 'lucide-react'
+import { ShieldAlert, FileText, MapPin, Bell, Brain, ClipboardList } from 'lucide-react'
 
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
@@ -59,14 +59,6 @@ const FEATURES: { id: string; icon: typeof ShieldAlert; title: string; caption: 
     visual: StateDots,
   },
   {
-    id: 'calculators',
-    icon: Calculator,
-    title: 'HR calculators',
-    caption:
-      'PTO accrual, turnover cost, overtime, and total comp. Quick math, no login, results emailable. The numbers your CFO asks for in the all-hands.',
-    visual: NumberTicker,
-  },
-  {
     id: 'audit',
     icon: Bell,
     title: 'Compliance audit',
@@ -76,8 +68,75 @@ const FEATURES: { id: string; icon: typeof ShieldAlert; title: string; caption: 
   },
 ]
 
+// Scroll "focus mode": as you scroll, the section nearest the viewport's upper
+// third is the only one held fully lit — the rest dim/blur back. Once you reach
+// the bottom of the page the lock releases and every section presents at once.
+function useScrollFocus() {
+  const els = useRef<(HTMLElement | null)[]>([])
+  const [active, setActive] = useState(0)
+  const [released, setReleased] = useState(false)
+  const register = useCallback((idx: number, el: HTMLElement | null) => { els.current[idx] = el }, [])
+
+  useEffect(() => {
+    let ticking = false
+    const compute = () => {
+      ticking = false
+      const vh = window.innerHeight
+      const focusLine = vh * 0.42
+      let best = 0
+      let bestDist = Infinity
+      els.current.forEach((el, i) => {
+        if (!el) return
+        const r = el.getBoundingClientRect()
+        const mid = r.top + r.height / 2
+        const dist = Math.abs(mid - focusLine)
+        if (dist < bestDist) { bestDist = dist; best = i }
+      })
+      setActive(best)
+      const doc = document.documentElement
+      setReleased(window.scrollY + vh >= doc.scrollHeight - 120)
+    }
+    const onScroll = () => { if (!ticking) { ticking = true; requestAnimationFrame(compute) } }
+    compute()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    window.addEventListener('resize', onScroll)
+    return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll) }
+  }, [])
+
+  return { active, released, register }
+}
+
+type Focus = ReturnType<typeof useScrollFocus>
+
+function FocusSection({ idx, focus, children }: { idx: number; focus: Focus; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    focus.register(idx, ref.current)
+    return () => focus.register(idx, null)
+  }, [idx, focus])
+  const lit = focus.released || focus.active === idx
+  return (
+    <motion.div
+      ref={ref}
+      animate={{ opacity: lit ? 1 : 0.2, filter: lit ? 'blur(0px)' : 'blur(3px)', scale: lit ? 1 : 0.985 }}
+      transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+      style={{ transformOrigin: 'center top', willChange: 'opacity, filter, transform' }}
+    >
+      {children}
+    </motion.div>
+  )
+}
+
 export default function MatchaLitePage() {
   const [isPricingOpen, setIsPricingOpen] = useState(false)
+  const focus = useScrollFocus()
+
+  const sections = [
+    <RiskInsightsShowcase key="risk" />,
+    <FeatureGrid key="grid" />,
+    <IrAnalysisSection key="ir" />,
+    <OshaSection key="osha" />,
+  ]
 
   return (
     <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen">
@@ -88,10 +147,9 @@ export default function MatchaLitePage() {
       <Hero onContactClick={() => setIsPricingOpen(true)} />
 
       <main>
-        <RiskInsightsShowcase />
-        <FeatureGrid />
-        <IrAnalysisSection />
-        <OshaSection />
+        {sections.map((node, i) => (
+          <FocusSection key={i} idx={i} focus={focus}>{node}</FocusSection>
+        ))}
       </main>
 
       <MarketingFooter />
@@ -348,16 +406,19 @@ function IrAnalysisSection() {
 // ---------------------------------------------------------------------------
 
 const OSHA_ROWS = [
-  { date: 'May 12', loc: 'Atlanta — Store 7', type: 'Strain/sprain', days: 3, recordable: true },
-  { date: 'Apr 28', loc: 'Phoenix — Warehouse', type: 'Laceration', days: 1, recordable: true },
-  { date: 'Mar 31', loc: 'Seattle — Store 12', type: 'Eye irritation', days: 2, recordable: true },
-  { date: 'Mar 15', loc: 'Denver — HQ', type: 'Slip/fall', days: 0, recordable: false },
+  { date: 'May 12', loc: 'Atlanta — Store 7', type: 'Strain/sprain', cls: 'Days away', days: 3, recordable: true },
+  { date: 'Apr 28', loc: 'Phoenix — Warehouse', type: 'Laceration', cls: 'Restricted', days: 1, recordable: true },
+  { date: 'Apr 14', loc: 'Dallas — Store 3', type: 'Burn (minor)', cls: 'Med. treatment', days: 2, recordable: true },
+  { date: 'Mar 31', loc: 'Seattle — Store 12', type: 'Eye irritation', cls: 'Days away', days: 2, recordable: true },
+  { date: 'Mar 15', loc: 'Denver — HQ', type: 'Slip/fall', cls: 'First aid', days: 0, recordable: false },
 ]
 
 const OSHA_BULLETS = [
-  { label: 'Recordable / non-recordable', desc: 'Classification tied to your incident intake — no duplicate data entry.' },
-  { label: 'Days away and restricted', desc: 'Track days away from work and restricted duty automatically from each incident.' },
-  { label: 'Audit-ready export', desc: '300A summary auto-tallied. Export PDF for Feb 1 posting or any OSHA audit.' },
+  { label: 'Automatic recordability', desc: 'Every incident screened against 29 CFR 1904 — first aid vs. medical treatment, restricted duty, days away, loss of consciousness — recordable or not, decided for you.' },
+  { label: 'Forms 300, 300A & 301', desc: 'The full set generated from one intake: the 300 log, the 300A annual summary, and a 301 incident report per case.' },
+  { label: 'Days away, restricted & transfer', desc: 'DART rate, lost-day and restricted-duty counts roll up automatically from each incident’s status.' },
+  { label: 'Electronic ITA submission', desc: 'Establishments required to e-file get an export formatted for OSHA’s Injury Tracking Application.' },
+  { label: 'Per-location logs + posting reminders', desc: 'A separate log per establishment, rolled into one view, with Feb 1–Apr 30 posting nudges.' },
 ]
 
 function OshaSection() {
@@ -370,7 +431,7 @@ function OshaSection() {
           </div>
           <div className="order-1 lg:order-2">
             <div className="text-[11px] uppercase tracking-wider font-medium mb-3 sm:mb-4" style={{ color: MUTED }}>
-              OSHA 300 / 300A
+              OSHA 300 · 300A · 301
             </div>
             <h2
               className="tracking-tight"
@@ -379,7 +440,7 @@ function OshaSection() {
               OSHA logs, auto-filled.
             </h2>
             <p className="mt-4 text-base" style={{ color: MUTED, lineHeight: 1.6 }}>
-              Every recordable flows from intake to log. No manual re-entry, no spreadsheet — print or export an audit-ready 300A summary any time of year.
+              Every incident is screened against the 1904 criteria, classified, and tallied — no manual re-entry, no spreadsheet. The 300, 300A and 301 generate themselves, and e-file straight to OSHA’s ITA when you’re required to.
             </p>
             <ul className="mt-7 space-y-5">
               {OSHA_BULLETS.map(item => (
@@ -402,52 +463,61 @@ function OshaSection() {
 function OshaLogPanel() {
   const ref = useRef<HTMLDivElement>(null)
   const inView = useInView(ref, { once: true, margin: '-40px' })
+  const COLS = '64px 1fr 104px 100px 40px 52px'
   return (
-    <div ref={ref} className="rounded-xl overflow-x-auto border font-sans" style={{ borderColor: 'rgba(63,63,70,0.5)', backgroundColor: '#09090b' }}>
-    <div className="min-w-[400px]">
-      <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'rgba(39,39,42,0.5)', backgroundColor: 'rgba(24,24,27,0.3)' }}>
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold" style={{ color: '#e4e4e7' }}>OSHA 300 Log</span>
-          <span className="px-1.5 py-0.5 rounded text-[9px] font-medium" style={{ backgroundColor: 'rgba(16,185,129,0.15)', color: '#6ee7b7', border: '1px solid rgba(16,185,129,0.25)' }}>IR</span>
+    <div ref={ref} className="rounded-xl overflow-x-auto border font-sans" style={{ borderColor: 'rgba(63,63,70,0.5)', backgroundColor: '#0d0d10' }}>
+    <div className="min-w-[520px]">
+      <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: 'rgba(39,39,42,0.5)' }}>
+        <div className="flex items-center gap-2.5">
+          <span className="text-sm font-bold" style={{ color: '#f4f4f5' }}>OSHA 300 Log</span>
+          <div className="flex items-center gap-1">
+            {['300', '300A', '301'].map((t, i) => (
+              <span key={t} className="px-1.5 py-0.5 rounded text-[8px] font-bold tracking-wider"
+                style={i === 0
+                  ? { backgroundColor: '#27272a', color: '#e4e4e7', border: '1px solid #3f3f46' }
+                  : { color: '#52525b', border: '1px solid transparent' }}>{t}</span>
+            ))}
+          </div>
         </div>
-        <div className="px-2.5 py-1 rounded text-[9px] font-medium" style={{ backgroundColor: '#27272a', border: '1px solid #3f3f46', color: '#d4d4d8' }}>
-          Export 300A
-        </div>
+        <span className="px-2 py-1 rounded text-[8px]" style={{ backgroundColor: '#18181b', border: '1px solid #27272a', color: '#71717a' }}>Export 300A</span>
       </div>
-      <div className="flex items-center gap-4 px-5 py-2 border-b" style={{ borderColor: 'rgba(39,39,42,0.5)' }}>
-        <span className="text-[9px]" style={{ color: '#52525b' }}>Recordables YTD: <span style={{ color: '#e4e4e7' }}>3</span></span>
+      <div className="flex items-center gap-3 px-5 py-2.5 border-b" style={{ borderColor: 'rgba(39,39,42,0.5)' }}>
+        <span className="text-[8px] font-mono uppercase tracking-widest" style={{ color: '#52525b' }}>Recordables YTD <span style={{ color: '#e4e4e7' }}>4</span></span>
         <span style={{ color: '#3f3f46' }}>·</span>
-        <span className="text-[9px]" style={{ color: '#52525b' }}>Days away: <span style={{ color: '#e4e4e7' }}>6</span></span>
+        <span className="text-[8px] font-mono uppercase tracking-widest" style={{ color: '#52525b' }}>DART <span style={{ color: '#c98a3e' }}>2.1</span></span>
         <span style={{ color: '#3f3f46' }}>·</span>
-        <span className="text-[9px]" style={{ color: '#10b981' }}>Auto-tallied</span>
+        <span className="text-[8px] font-mono uppercase tracking-widest" style={{ color: '#52525b' }}>Restricted <span style={{ color: '#e4e4e7' }}>2d</span></span>
+        <span style={{ color: '#3f3f46' }}>·</span>
+        <span className="text-[8px] font-mono uppercase tracking-widest" style={{ color: '#2f9e74' }}>Auto-classified</span>
       </div>
-      <div className="grid px-5 py-2" style={{ gridTemplateColumns: '72px 1fr 100px 48px 60px', backgroundColor: 'rgba(39,39,42,0.4)' }}>
-        {['Date', 'Location', 'Type', 'Days', 'Rec.'].map(h => (
-          <span key={h} className="text-[9px] font-bold uppercase tracking-wider" style={{ color: '#52525b' }}>{h}</span>
+      <div className="grid px-5 py-2" style={{ gridTemplateColumns: COLS }}>
+        {['Date', 'Location', 'Type', 'Determination', 'Days', 'Rec.'].map(h => (
+          <span key={h} className="text-[7px] font-mono font-bold uppercase tracking-widest" style={{ color: '#52525b' }}>{h}</span>
         ))}
       </div>
       {OSHA_ROWS.map((row, i) => (
         <motion.div
           key={row.date + row.loc}
-          initial={{ opacity: 0 }}
-          animate={inView ? { opacity: 1 } : { opacity: 0 }}
+          initial={{ opacity: 0, x: -8 }}
+          animate={inView ? { opacity: 1, x: 0 } : { opacity: 0 }}
           transition={{ delay: i * 0.1 + 0.2 }}
-          className="grid px-5 py-2.5 border-t"
-          style={{ gridTemplateColumns: '72px 1fr 100px 48px 60px', borderColor: 'rgba(39,39,42,0.6)', backgroundColor: 'rgba(24,24,27,0.2)' }}
+          className="grid px-5 py-3 border-t items-center"
+          style={{ gridTemplateColumns: COLS, borderColor: 'rgba(39,39,42,0.6)' }}
         >
-          <span className="text-[10px]" style={{ color: '#71717a' }}>{row.date}</span>
-          <span className="text-[10px] truncate pr-2" style={{ color: '#d4d4d8' }}>{row.loc}</span>
+          <span className="text-[10px] font-mono" style={{ color: '#52525b' }}>{row.date}</span>
+          <span className="text-[12px] truncate pr-2" style={{ color: '#e4e4e7' }}>{row.loc}</span>
           <span className="text-[10px]" style={{ color: '#a1a1aa' }}>{row.type}</span>
-          <span className="text-[10px]" style={{ color: '#a1a1aa' }}>{row.days}d</span>
-          <span className="text-[9px] font-medium" style={{ color: row.recordable ? '#fbbf24' : '#52525b' }}>
+          <span className="text-[9px] font-medium uppercase tracking-wide" style={{ color: row.recordable ? '#c98a3e' : '#3f3f46' }}>{row.cls}</span>
+          <span className="text-[10px] font-mono" style={{ color: '#a1a1aa' }}>{row.days}d</span>
+          <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: row.recordable ? '#c98a3e' : '#3f3f46' }}>
             {row.recordable ? '● Yes' : '○ No'}
           </span>
         </motion.div>
       ))}
-      <div className="flex items-center justify-between px-5 py-3 border-t" style={{ borderColor: 'rgba(39,39,42,0.5)', backgroundColor: 'rgba(24,24,27,0.2)' }}>
-        <span className="text-[10px]" style={{ color: '#71717a' }}>300A summary ready for Feb 1 posting</span>
-        <span className="text-[9px] font-medium" style={{ color: '#34d399', backgroundColor: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', padding: '2px 8px', borderRadius: 4 }}>
-          Export PDF
+      <div className="flex items-center justify-between px-5 py-3 border-t" style={{ borderColor: 'rgba(39,39,42,0.5)' }}>
+        <span className="text-[10px]" style={{ color: '#52525b' }}>Forms 300 · 300A · 301 generated · 300A posted Feb 1</span>
+        <span className="text-[8px] font-medium px-2 py-0.5 rounded" style={{ color: '#6ee7b7', backgroundColor: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)' }}>
+          ITA e-file ready
         </span>
       </div>
     </div>
@@ -533,33 +603,6 @@ function StateDots() {
           style={{ backgroundColor: INK }}
         />
       ))}
-    </div>
-  )
-}
-
-function NumberTicker() {
-  const { ref, inView } = useInViewRef()
-  const [val, setVal] = useState(0)
-  useEffect(() => {
-    if (!inView) return
-    let raf = 0
-    const start = performance.now()
-    const target = 12480
-    const tick = () => {
-      const t = Math.min(1, (performance.now() - start) / 1400)
-      const eased = 1 - Math.pow(1 - t, 3)
-      setVal(Math.round(eased * target))
-      if (t < 1) raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [inView])
-  return (
-    <div ref={ref} className="flex items-baseline gap-1">
-      <span className="text-[9px]" style={{ color: MUTED }}>$</span>
-      <span style={{ fontFamily: DISPLAY, fontSize: '1.1rem', fontWeight: 500, color: INK }}>
-        {val.toLocaleString()}
-      </span>
     </div>
   )
 }
