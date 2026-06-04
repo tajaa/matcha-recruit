@@ -472,6 +472,37 @@ class MatchaWorkService {
         return res.unread_count
     }
 
+    /// Per-project unread-notification counts for the tab badges.
+    func fetchProjectUnreadCounts() async throws -> [String: Int] {
+        struct Res: Codable { let counts: [String: Int] }
+        let res: Res = try await client.request(
+            method: "GET",
+            path: "\(basePath)/notifications/project-unread-counts"
+        )
+        return res.counts
+    }
+
+    /// Clear notifications by the entity the user just opened (ticket, note
+    /// section, channel). Drops matching rows from the bell and tab badge.
+    func markNotificationsReadBy(
+        taskId: String? = nil,
+        sectionId: String? = nil,
+        channelId: String? = nil,
+        projectId: String? = nil
+    ) async throws {
+        struct Body: Encodable {
+            let task_id: String?
+            let section_id: String?
+            let channel_id: String?
+            let project_id: String?
+        }
+        _ = try await client.requestData(
+            method: "POST",
+            path: "\(basePath)/notifications/mark-read-by",
+            body: Body(task_id: taskId, section_id: sectionId, channel_id: channelId, project_id: projectId)
+        )
+    }
+
     func markNotificationsRead(ids: [String]) async throws {
         struct Body: Encodable { let notification_ids: [String] }
         _ = try await client.requestData(

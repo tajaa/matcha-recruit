@@ -348,6 +348,9 @@ struct KanbanBoardView: View {
                 },
                 onClose: { viewingTask = nil }
             )
+            // Opening the ticket = seen → clear its notifications from the bell
+            // and the project tab badge.
+            .onAppear { appState.markTicketSeen(taskId: task.id) }
         }
         .sheet(item: $editingTask) { task in
             TaskEditorSheet(

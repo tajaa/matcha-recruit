@@ -49,6 +49,15 @@ class MarkReadRequest(BaseModel):
     notification_ids: list[UUID]
 
 
+class MarkReadByRequest(BaseModel):
+    """Clear notifications by the entity the user just interacted with.
+    Exactly one of these should be set."""
+    task_id: Optional[str] = None
+    section_id: Optional[str] = None
+    channel_id: Optional[str] = None
+    project_id: Optional[str] = None
+
+
 @router.get("/notifications")
 async def list_notifications(
     unread_only: bool = False,
@@ -86,6 +95,37 @@ async def unread_count(
     company_id = await get_client_company_id(current_user)
     count = await notif_svc.get_unread_count(current_user.id, company_id=company_id)
     return {"count": count}
+
+
+@router.get("/notifications/project-unread-counts")
+async def project_unread_counts(
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Per-project unread-notification counts — powers the werk tab badge."""
+    company_id = await get_client_company_id(current_user)
+    counts = await notif_svc.get_project_unread_counts(current_user.id, company_id=company_id)
+    return {"counts": counts}
+
+
+@router.post("/notifications/mark-read-by")
+async def mark_read_by(
+    body: MarkReadByRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Mark the user's notifications read by the entity they opened (ticket,
+    note section, channel, project). Clears matching rows from both the bell
+    and the project tab badge."""
+    pairs = [
+        ("task_id", body.task_id),
+        ("section_id", body.section_id),
+        ("channel_id", body.channel_id),
+        ("project_id", body.project_id),
+    ]
+    total = 0
+    for key, value in pairs:
+        if value:
+            total += await notif_svc.mark_read_by_metadata(current_user.id, key, value)
+    return {"updated": total}
 
 
 @router.post("/notifications/mark-read")

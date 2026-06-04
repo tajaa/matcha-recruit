@@ -380,6 +380,11 @@ struct ChannelsSidebarView: View {
             ChannelsWebSocket.shared.joinBackgroundRooms(list.map { (id: $0.id, name: $0.name) })
             // API returned fresh unread counts — local overrides are now stale.
             appState.channelUnreadOverrides = [:]
+            // Mirror server unread into AppState so channel *tabs* can badge
+            // without the sidebar's local list in scope.
+            appState.channelUnreadCounts = Dictionary(
+                list.map { ($0.id, $0.unreadCount) }, uniquingKeysWith: { a, _ in a }
+            )
             isLoading = false
             maybeAutoShowAdminWizard(list)
         } catch {

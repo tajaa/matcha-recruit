@@ -39,6 +39,8 @@ struct SectionEditorView: View {
     /// Broadcast in-progress text to watchers (caller throttles).
     var onContentChange: ((_ title: String?, _ content: String) -> Void)? = nil
 
+    @Environment(AppState.self) private var appState
+
     @State private var title: String = ""
     @State private var content: String = ""
     @State private var saveTimer: Timer?
@@ -508,7 +510,12 @@ struct SectionEditorView: View {
             onEditStart?()
             if lockedByName == nil { resetIdleTimer() }
         }
-        .task(id: section.id) { await loadComments() }
+        .task(id: section.id) {
+            // Opening the note = its comment notifications are seen → clear
+            // them from the bell and the project tab badge.
+            appState.markSectionSeen(sectionId: section.id)
+            await loadComments()
+        }
         .onChange(of: section.id) {
             // Different section — flush any pending save for the prior one.
             flushSaveIfDirty()

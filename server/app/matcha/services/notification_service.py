@@ -160,6 +160,55 @@ async def mark_read(user_id: UUID, notification_ids: list[UUID]) -> int:
     return int(result.split()[-1])
 
 
+async def get_project_unread_counts(
+    user_id: UUID, company_id: UUID | None = None
+) -> dict[str, int]:
+    """Unread-notification counts grouped by the project the activity belongs
+    to. Powers the per-project tab badge in werk. Only rows whose metadata
+    carries a `project_id` (task_assigned/progress/rejected/comment,
+    section_comment, …) are counted; flat bell rows without a project are
+    ignored."""
+    where = "WHERE user_id = $1 AND is_read = FALSE AND metadata ? 'project_id'"
+    params: list = [user_id]
+    if company_id is not None:
+        params.append(company_id)
+        where += f" AND (company_id = ${len(params)} OR company_id IS NULL)"
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT metadata->>'project_id' AS project_id, COUNT(*) AS n
+            FROM mw_notifications
+            {where}
+            GROUP BY metadata->>'project_id'
+            """,
+            *params,
+        )
+    return {r["project_id"]: int(r["n"]) for r in rows if r["project_id"]}
+
+
+async def mark_read_by_metadata(
+    user_id: UUID, key: str, value: str
+) -> int:
+    """Mark the user's unread notifications read by a metadata match, e.g.
+    every `task_id == <id>` row when they open that ticket. The clearing
+    signal is per-entity interaction, not opening the project tab — so a
+    ticket's notifications drop from the bell and the tab badge only once
+    the user actually opens that ticket. `key` is allow-listed to avoid
+    interpolating arbitrary JSON paths into SQL."""
+    allowed = {"project_id", "task_id", "section_id", "channel_id"}
+    if key not in allowed:
+        raise ValueError(f"unsupported metadata key: {key}")
+    async with get_connection() as conn:
+        result = await conn.execute(
+            f"""
+            UPDATE mw_notifications SET is_read = TRUE
+            WHERE user_id = $1 AND is_read = FALSE AND metadata->>'{key}' = $2
+            """,
+            user_id, value,
+        )
+    return int(result.split()[-1])
+
+
 async def mark_all_read(user_id: UUID) -> int:
     """Mark all notifications as read for a user."""
     async with get_connection() as conn:

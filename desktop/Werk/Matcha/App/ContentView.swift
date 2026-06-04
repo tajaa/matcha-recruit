@@ -1020,12 +1020,21 @@ struct WorkTabBar: View {
 
     private func tabChip(_ tab: WorkTab) -> some View {
         let active = appState.activeTab.id == tab.id
+        let unseen = appState.tabUnread(tab)
         return HStack(spacing: 6) {
             Image(systemName: tab.icon).font(.system(size: 10))
             Text(tab.title)
                 .font(.system(size: 12, weight: active ? .semibold : .regular))
                 .lineLimit(1)
                 .truncationMode(.tail)
+            if unseen > 0 {
+                Text(unseen > 10 ? "10+" : "\(unseen)")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(appState.themeAccent))
+            }
             if tab.kind != .home {
                 Button { appState.closeTab(tab) } label: {
                     Image(systemName: "xmark")

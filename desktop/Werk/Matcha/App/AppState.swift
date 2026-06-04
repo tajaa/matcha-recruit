@@ -208,6 +208,14 @@ class AppState {
     var journalsListGeneration: Int = 0
     /// Per-channel unread increments from WebSocket — cleared after API refresh or on channel open.
     var channelUnreadOverrides: [String: Int] = [:]
+    /// Server-sourced per-channel unread (seeded by the channels list) so a
+    /// channel *tab* can badge without the sidebar's local list in scope.
+    var channelUnreadCounts: [String: Int] = [:]
+    /// Per-project unread-notification roll-up → werk project tab badge.
+    /// Seeded from `/notifications/project-unread-counts`, live-bumped by the
+    /// bell observer, and cleared per-entity when the user opens the specific
+    /// ticket/note — never on opening the project tab itself.
+    var projectUnseenCounts: [String: Int] = [:]
     private var heartbeatTask: Task<Void, Never>?
     private var inboxPollTask: Task<Void, Never>?
     private var notificationPollTask: Task<Void, Never>?
@@ -255,6 +263,7 @@ class AppState {
         startPresenceHeartbeat()
         startInboxPolling()
         startNotificationPolling()
+        Task { await refreshProjectUnseenCounts() }
         Task { await refreshSubscription() }
         Task { await refreshBetaFeatures() }
         promptForNotificationsIfNeeded()
@@ -402,6 +411,14 @@ class AppState {
                 await self.refreshNotificationsCount()
                 NotificationCenter.default.post(name: .mwNotificationsRefresh, object: nil)
 
+                // Per-project tab badge: any notification carrying a project_id
+                // bumps that project's unseen count. Bumps even when the user is
+                // in the project — the badge clears only when they open the
+                // specific ticket/note, not on opening the project tab.
+                if let pid = metaString("project_id"), !pid.isEmpty {
+                    self.projectUnseenCounts[pid, default: 0] += 1
+                }
+
                 // "X joined the collab" → in-app toast when the user is looking
                 // at Werk (the bell already ticked; the OS banner below covers
                 // the not-frontmost case).
@@ -467,6 +484,13 @@ class AppState {
     @MainActor
     func clearChannelUnread(_ channelId: String) {
         channelUnreadOverrides.removeValue(forKey: channelId)
+        channelUnreadCounts[channelId] = 0
+        // Being in the channel = seen. Drop its channel notifications from the
+        // bell too, so the bell and the channel tab badge stay in lock-step.
+        Task {
+            try? await MatchaWorkService.shared.markNotificationsReadBy(channelId: channelId)
+            await self.refreshNotificationsCount()
+        }
     }
 
     @MainActor
@@ -512,6 +536,9 @@ class AppState {
         notificationPollTask?.cancel()
         notificationPollTask = nil
         notificationsUnreadCount = 0
+        projectUnseenCounts = [:]
+        channelUnreadCounts = [:]
+        channelUnreadOverrides = [:]
         newNotificationTask?.cancel()
         newNotificationTask = nil
         betaFeatures = [:]
@@ -620,6 +647,7 @@ class AppState {
                     if let count = try? await MatchaWorkService.shared.fetchNotificationsUnreadCount() {
                         self?.notificationsUnreadCount = count
                     }
+                    await self?.refreshProjectUnseenCounts()
                 }
                 try? await Task.sleep(for: .seconds(60))
             }
@@ -633,6 +661,51 @@ class AppState {
     func refreshNotificationsCount() async {
         if let count = try? await MatchaWorkService.shared.fetchNotificationsUnreadCount() {
             notificationsUnreadCount = count
+        }
+    }
+
+    /// Server-authoritative refetch of the per-project tab badge counts.
+    @MainActor
+    func refreshProjectUnseenCounts() async {
+        if let counts = try? await MatchaWorkService.shared.fetchProjectUnreadCounts() {
+            projectUnseenCounts = counts
+        }
+    }
+
+    /// Unseen count for a tab chip. Projects roll up unread notifications;
+    /// channels reuse the channel unread (server seed + live WS overrides).
+    /// Home/thread/journal have no per-entity read state → no badge.
+    @MainActor
+    func tabUnread(_ tab: WorkTab) -> Int {
+        switch tab.kind {
+        case .project:
+            return projectUnseenCounts[tab.entityId] ?? 0
+        case .channel:
+            return (channelUnreadCounts[tab.entityId] ?? 0) + (channelUnreadOverrides[tab.entityId] ?? 0)
+        case .home, .thread, .journal:
+            return 0
+        }
+    }
+
+    /// User opened a ticket → clear its notifications from the bell + project
+    /// tab badge. Per-entity clear: opening the project tab does nothing; only
+    /// opening the specific ticket dismisses it.
+    @MainActor
+    func markTicketSeen(taskId: String) {
+        Task {
+            try? await MatchaWorkService.shared.markNotificationsReadBy(taskId: taskId)
+            await self.refreshProjectUnseenCounts()
+            await self.refreshNotificationsCount()
+        }
+    }
+
+    /// User opened a note section → clear its comment notifications.
+    @MainActor
+    func markSectionSeen(sectionId: String) {
+        Task {
+            try? await MatchaWorkService.shared.markNotificationsReadBy(sectionId: sectionId)
+            await self.refreshProjectUnseenCounts()
+            await self.refreshNotificationsCount()
         }
     }
 
