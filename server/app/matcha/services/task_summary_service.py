@@ -98,12 +98,17 @@ async def generate_task_summary(project_id: UUID, task_id: UUID) -> Optional[str
 
     context = _build_context(task, subtasks, history)
     prompt = (
-        "You are catching a teammate up on a work ticket. Using ONLY the ticket "
-        "data below, write a tight 2-4 sentence summary of where the work stands "
-        "right now and what has been done recently. Lead with the current state, "
-        "then what's left or blocking. Plain and concrete — no preamble, no bullet "
-        "points, and don't just restate the title.\n\n"
-        f"--- TICKET ---\n{context}\n--- END ---\n\nSummary:"
+        "You are briefing a teammate who's about to pick up this work ticket. "
+        "Using ONLY the ticket data below, write a tight 2-4 sentence brief that "
+        "LEADS WITH THE NEXT ACTION — what specifically has to happen right now. "
+        "If the ticket was sent back / has changes requested (a 'CHANGES REQUESTED' "
+        "line, or the latest event is a send-back), THAT send-back IS the directive: "
+        "open with exactly what the reviewer wants fixed, stated as an imperative "
+        "(e.g. 'Restore the per-incident detail on the export — it currently only "
+        "says X'). Then at most one line of context on what's already done or still "
+        "open. Be concrete and directive; no preamble, no bullets, no hedging, and "
+        "don't restate the title.\n\n"
+        f"--- TICKET ---\n{context}\n--- END ---\n\nBrief:"
     )
 
     try:
