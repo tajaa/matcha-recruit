@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -769,6 +769,40 @@ async def update_broker_client_setup(
 
     base_url = get_settings().app_base_url.rstrip("/")
     return {"status": "updated", "setup": _serialize_setup(row, invite_base_url=base_url)}
+
+
+class BrokerSetupStageRequest(BaseModel):
+    onboarding_stage: Literal["submitted", "under_review", "configuring", "live"]
+
+
+@router.post("/client-setups/{setup_id}/stage")
+async def set_broker_client_setup_stage(
+    setup_id: UUID,
+    request: BrokerSetupStageRequest,
+    current_user: CurrentUser = Depends(require_broker),
+):
+    """Move a client setup between onboarding stages for the Pipeline board.
+
+    Unlike the full PATCH (limited to draft/invited setups), stage transitions
+    are allowed at any status — ``status`` (invite lifecycle) and
+    ``onboarding_stage`` (onboarding workflow) are orthogonal.
+    """
+    async with get_connection() as conn:
+        membership = await _get_broker_membership(conn, user_id=current_user.id)
+        await _assert_terms_accepted(conn, broker_id=membership["broker_id"], user_id=current_user.id)
+        _assert_can_manage_clients(membership)
+
+        result = await conn.execute(
+            """
+            UPDATE broker_client_setups
+            SET onboarding_stage = $1, updated_by = $2, updated_at = NOW()
+            WHERE id = $3 AND broker_id = $4
+            """,
+            request.onboarding_stage, current_user.id, setup_id, membership["broker_id"],
+        )
+    if result.split()[-1] == "0":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Setup not found")
+    return {"status": "updated", "onboarding_stage": request.onboarding_stage}
 
 
 @router.post("/client-setups/{setup_id}/send-invite")

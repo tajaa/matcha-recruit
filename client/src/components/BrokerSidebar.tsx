@@ -1,17 +1,35 @@
-import { LayoutDashboard, Building2, Link2, Settings, Shield, AlertTriangle, UserCheck, Radar } from 'lucide-react'
-import SidebarShell from './SidebarShell'
-
-const nav = [
-  { to: '/broker', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/broker/clients', icon: Building2, label: 'Client Onboarding' },
-  { to: '/broker/wc-portfolio', icon: Shield, label: 'WC Portfolio' },
-  { to: '/broker/risk-alerts', icon: AlertTriangle, label: 'Risk Alerts' },
-  { to: '/broker/benefits/eligibility-exceptions', icon: UserCheck, label: 'Eligibility Exceptions' },
-  { to: '/broker/benefits/renewal-risk-radar', icon: Radar, label: 'Renewal Risk Radar' },
-  { to: '/broker/referrals', icon: Link2, label: 'Referral Links' },
-  { to: '/broker/settings', icon: Settings, label: 'Settings' },
-]
+import { useState, useEffect } from 'react'
+import { LayoutDashboard, Building2, Link2, Settings, Zap, Workflow } from 'lucide-react'
+import SidebarShell, { type NavItem, type NavGroup } from './SidebarShell'
+import { fetchBrokerRiskAlerts, fetchActionCenterMilestones } from '../api/broker'
 
 export default function BrokerSidebar() {
+  const [actionCount, setActionCount] = useState(0)
+
+  useEffect(() => {
+    Promise.allSettled([
+      fetchBrokerRiskAlerts(),
+      fetchActionCenterMilestones(),
+    ]).then(([alerts, milestones]) => {
+      const unreadAlerts = alerts.status === 'fulfilled' ? alerts.value.active_unread : 0
+      const unreadMilestones = milestones.status === 'fulfilled' ? milestones.value.summary.unread : 0
+      setActionCount(unreadAlerts + unreadMilestones)
+    })
+  }, [])
+
+  const nav: (NavItem | NavGroup)[] = [
+    { to: '/broker', icon: LayoutDashboard, label: 'Book of Business' },
+    { to: '/broker/action-center', icon: Zap, label: 'Action Center', badge: actionCount },
+    {
+      label: 'Administration',
+      items: [
+        { to: '/broker/clients', icon: Building2, label: 'Onboarding' },
+        { to: '/broker/pipeline', icon: Workflow, label: 'Pipeline' },
+        { to: '/broker/referrals', icon: Link2, label: 'Referral Links' },
+        { to: '/broker/settings', icon: Settings, label: 'Settings' },
+      ],
+    },
+  ]
+
   return <SidebarShell logoTo="/broker" logoLabel="Matcha Broker" nav={nav} />
 }

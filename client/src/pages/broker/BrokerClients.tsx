@@ -269,7 +269,7 @@ export default function BrokerClients() {
   async function sendInvite(setupId: string) {
     setSendingInvite(setupId)
     try {
-      await api.post(`/brokers/client-setups/${setupId}/invite`, { expires_days: 14 })
+      await api.post(`/brokers/client-setups/${setupId}/send-invite`, { expires_days: 14 })
       fetchSetups()
     } catch {}
     setSendingInvite(null)

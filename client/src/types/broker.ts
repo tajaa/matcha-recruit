@@ -304,3 +304,103 @@ export interface BrokerClientDetailResponse {
     source: string
   }[]
 }
+
+// --- WC portfolio (per-client TRIR / DART / premium) ---
+// Shape returned by GET /broker/wc-portfolio. Merged into the Book of Business
+// table by company_id. Previously inlined in BrokerWcPortfolio.tsx.
+
+export type WcSeverityBand = 'good' | 'fair' | 'at_risk' | 'critical' | 'unknown'
+
+export interface WcBenchmark {
+  sector: string
+  label: string
+  trir: number
+  dart: number
+}
+
+export interface WcPremiumImpact {
+  base_premium_estimate: number
+  mod_swing: number
+  annual_impact_dollars: number
+  direction: 'increase' | 'decrease' | 'neutral'
+}
+
+export interface WcPortfolioRow {
+  company_id: string
+  company_name: string
+  industry: string | null
+  headcount: number | null
+  recordable_cases: number
+  dart_cases: number
+  lost_days: number
+  trir: number | null
+  dart_rate: number | null
+  days_since_last_recordable: number | null
+  trir_delta_pct: number | null
+  benchmark: WcBenchmark | null
+  premium_impact: WcPremiumImpact | null
+  severity_band: WcSeverityBand
+  data_quality: { insufficient_population: boolean; headcount_missing: boolean }
+}
+
+export interface WcPortfolioSummary {
+  client_count: number
+  critical: number
+  at_risk: number
+  fair: number
+  good: number
+  unknown: number
+  total_recordable_cases: number
+  total_lost_days: number
+}
+
+export interface WcPortfolioResponse {
+  summary: WcPortfolioSummary
+  companies: WcPortfolioRow[]
+}
+
+// --- Action Center: positive milestones ---
+
+export type MilestoneFamily = 'incident_free' | 'dart_free' | 'trir_below_benchmark'
+
+export interface BrokerMilestone {
+  id: string
+  company_id: string
+  company_name: string
+  milestone_key: string
+  milestone_family: MilestoneFamily
+  tier: number | null
+  title: string
+  detail: string | null
+  current_value: number | null
+  benchmark_value: number | null
+  is_read: boolean
+  achieved_at: string
+  superseded_at: string | null
+}
+
+export interface BrokerMilestonesResponse {
+  summary: { total: number; unread: number }
+  milestones: BrokerMilestone[]
+}
+
+// --- Action Center: AI consultative outreach ---
+
+export type OutreachTone = 'celebratory' | 'advisory' | 'urgent'
+
+export interface OutreachPrompt {
+  title: string
+  rationale: string
+  suggested_action: string
+  resource_link: string | null
+  tone: OutreachTone
+}
+
+export interface OutreachResponse {
+  company_id: string
+  company_name: string
+  cached: boolean
+  prompts: OutreachPrompt[]
+  generated_at: string | null
+  model: string | null
+}

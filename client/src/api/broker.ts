@@ -11,10 +11,37 @@ import type {
   EligibilityExceptionsResponse,
   RenewalRadarResponse,
   RenewalRadarDetail,
+  WcPortfolioResponse,
+  BrokerMilestonesResponse,
+  OutreachResponse,
 } from '../types/broker'
 
 export function fetchBrokerPortfolio() {
   return api.get<BrokerPortfolioResponse>('/brokers/reporting/portfolio')
+}
+
+// --- WC portfolio (per-client TRIR / DART / premium) ---
+
+export function fetchWcPortfolio() {
+  return api.get<WcPortfolioResponse>('/broker/wc-portfolio')
+}
+
+// --- Action Center: milestones + outreach ---
+
+export function fetchActionCenterMilestones(includeSuperseded = false) {
+  return api.get<BrokerMilestonesResponse>(
+    `/broker/action-center/milestones${includeSuperseded ? '?include_superseded=true' : ''}`,
+  )
+}
+
+export function markMilestoneRead(milestoneId: string) {
+  return api.post<{ status: string }>(`/broker/action-center/milestones/${milestoneId}/read`, {})
+}
+
+export function fetchActionCenterOutreach(companyId: string, refresh = false) {
+  return api.get<OutreachResponse>(
+    `/broker/action-center/outreach/${companyId}${refresh ? '?refresh=true' : ''}`,
+  )
 }
 
 export function fetchBrokerHandbookCoverage() {

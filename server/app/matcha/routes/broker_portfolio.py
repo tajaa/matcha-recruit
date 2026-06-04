@@ -6,6 +6,7 @@ authenticated broker. Used by P&C brokers as a renewal-prep view —
 sort clients by deterioration to know who needs loss-control attention.
 """
 
+import json
 import logging
 from typing import Optional
 from uuid import UUID
@@ -18,6 +19,7 @@ from ..dependencies import require_broker
 from .ir_incidents import compute_wc_metrics
 from ..services.wc_benchmarks import SEVERITY_BAND_RANK
 from ..services import benefits_eligibility as be
+from ..models.broker_action_center import MilestonesResponse, OutreachResponse
 
 logger = logging.getLogger(__name__)
 
@@ -426,3 +428,151 @@ async def benefit_roster_upload(
         exc = await be.detect_eligibility_exceptions(conn, company_id)
         risk = await be.compute_renewal_risk(conn, company_id)
     return {"ingested": ingested, "exceptions_detected": exc["detected"], "risk": risk}
+
+
+# ===========================================================================
+# Action Center  (/broker/action-center/*)
+# Milestones feed (written by the broker_milestones Celery task) + on-demand
+# AI consultative outreach. The Alerts / Renewals / Eligibility tabs reuse the
+# existing feeds; only these two surfaces are net-new.
+# ===========================================================================
+
+def _serialize_milestone(r) -> dict:
+    return {
+        "id": str(r["id"]),
+        "company_id": str(r["company_id"]),
+        "company_name": r["company_name"],
+        "milestone_key": r["milestone_key"],
+        "milestone_family": r["milestone_family"],
+        "tier": r["tier"],
+        "title": r["title"],
+        "detail": r["detail"],
+        "current_value": float(r["current_value"]) if r["current_value"] is not None else None,
+        "benchmark_value": float(r["benchmark_value"]) if r["benchmark_value"] is not None else None,
+        "is_read": r["is_read"],
+        "achieved_at": r["achieved_at"].isoformat() if r["achieved_at"] else None,
+        "superseded_at": r["superseded_at"].isoformat() if r["superseded_at"] else None,
+    }
+
+
+@router.get("/action-center/milestones", response_model=MilestonesResponse)
+async def action_center_milestones(
+    include_superseded: bool = Query(False),
+    current_user=Depends(require_broker),
+):
+    """Positive client milestones across the broker's active book."""
+    import asyncpg
+
+    async with get_connection() as conn:
+        broker_id, clients = await _broker_clients(conn, current_user.id)
+        if not clients:
+            return {"summary": {"total": 0, "unread": 0}, "milestones": []}
+        try:
+            rows = await conn.fetch(
+                """
+                SELECT m.id, m.company_id, c.name AS company_name, m.milestone_key,
+                       m.milestone_family, m.tier, m.title, m.detail, m.current_value,
+                       m.benchmark_value, m.is_read, m.achieved_at, m.superseded_at
+                FROM broker_milestones m
+                JOIN companies c ON c.id = m.company_id
+                WHERE m.broker_id = $1
+                  AND m.company_id = ANY($2::uuid[])
+                  AND ($3::bool OR m.superseded_at IS NULL)
+                ORDER BY (m.superseded_at IS NOT NULL), m.achieved_at DESC
+                """,
+                broker_id, list(clients.keys()), include_superseded,
+            )
+        except asyncpg.exceptions.UndefinedTableError:
+            # Migration brokermile01 not applied yet — the sidebar polls this on
+            # every broker page load, so degrade to empty instead of 500-spamming
+            # the error reporter until the table exists.
+            return {"summary": {"total": 0, "unread": 0}, "milestones": []}
+    milestones = [_serialize_milestone(r) for r in rows]
+    summary = {
+        "total": len(milestones),
+        "unread": sum(1 for m in milestones if not m["is_read"] and m["superseded_at"] is None),
+    }
+    return {"summary": summary, "milestones": milestones}
+
+
+@router.post("/action-center/milestones/{milestone_id}/read")
+async def mark_milestone_read(milestone_id: UUID, current_user=Depends(require_broker)):
+    async with get_connection() as conn:
+        broker_id, _ = await _broker_clients(conn, current_user.id)
+        result = await conn.execute(
+            "UPDATE broker_milestones SET is_read = true WHERE id = $1 AND broker_id = $2",
+            milestone_id, broker_id,
+        )
+    if result.split()[-1] == "0":
+        raise HTTPException(status_code=404, detail="Milestone not found")
+    return {"status": "ok"}
+
+
+@router.get("/action-center/outreach/{company_id}", response_model=OutreachResponse)
+async def action_center_outreach(
+    company_id: UUID,
+    refresh: bool = Query(False),
+    current_user=Depends(require_broker),
+):
+    """AI consultative outreach prompts for ONE client, grounded in anonymized
+    aggregate trends. Cached 24h per (broker, company)."""
+    async with get_connection() as conn:
+        meta = await _assert_broker_owns_company(conn, current_user.id, company_id)
+        broker_id, _ = await _broker_clients(conn, current_user.id)
+
+        if not refresh:
+            cached = await conn.fetchrow(
+                "SELECT payload, generated_at FROM broker_outreach_cache "
+                "WHERE broker_id = $1 AND company_id = $2 AND expires_at > NOW()",
+                broker_id, company_id,
+            )
+            if cached:
+                payload = cached["payload"]
+                if isinstance(payload, str):
+                    payload = json.loads(payload)
+                return {
+                    "company_id": str(company_id), "company_name": meta["name"], "cached": True,
+                    "prompts": payload.get("prompts", []), "model": payload.get("model"),
+                    "generated_at": cached["generated_at"].isoformat() if cached["generated_at"] else None,
+                }
+
+        # Gather aggregate inputs while we hold the connection.
+        wc = await compute_wc_metrics(conn, company_id)
+        from .ir_incidents import compute_behavioral_friction
+        behavioral = await compute_behavioral_friction(conn, company_id)
+        renewal = await conn.fetchrow(
+            "SELECT * FROM benefit_renewal_risk WHERE company_id = $1 AND dimension_type = 'company'",
+            company_id,
+        )
+        milestone_rows = await conn.fetch(
+            "SELECT milestone_family, tier, title FROM broker_milestones "
+            "WHERE broker_id = $1 AND company_id = $2 AND superseded_at IS NULL",
+            broker_id, company_id,
+        )
+
+    # Gemini call happens OUTSIDE any pooled connection so a slow model call
+    # doesn't hold a connection.
+    from ..services.broker_outreach import generate_outreach_prompts
+    result = await generate_outreach_prompts(
+        company_name=meta["name"],
+        wc_metrics=wc,
+        behavioral=behavioral,
+        renewal_risk=dict(renewal) if renewal else None,
+        milestones=[dict(m) for m in milestone_rows],
+    )
+
+    async with get_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO broker_outreach_cache (broker_id, company_id, payload, expires_at)
+            VALUES ($1, $2, $3::jsonb, NOW() + interval '24 hours')
+            ON CONFLICT (broker_id, company_id) DO UPDATE SET
+                payload = EXCLUDED.payload, generated_at = NOW(), expires_at = EXCLUDED.expires_at
+            """,
+            broker_id, company_id, json.dumps(result),
+        )
+
+    return {
+        "company_id": str(company_id), "company_name": meta["name"], "cached": False,
+        "prompts": result["prompts"], "model": result.get("model"), "generated_at": None,
+    }
