@@ -235,9 +235,9 @@ struct ThreadDetailView: View {
                     }
                     .padding(.horizontal, 7)
                     .padding(.vertical, 4)
-                    .background(Color.zinc800)
-                    .cornerRadius(6)
-                    .foregroundColor(.secondary)
+                    .background(Capsule().fill(appState.themeText.opacity(0.08)))
+                    .overlay(Capsule().stroke(appState.themeBorder, lineWidth: 1))
+                    .foregroundColor(appState.themeTextSecondary)
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
@@ -351,6 +351,8 @@ struct ThreadDetailView: View {
 // MARK: - Mode Toggle Button
 
 struct ModeToggleButton: View {
+    @Environment(AppState.self) private var appState
+
     let label: String
     let icon: String
     let isOn: Bool
@@ -369,9 +371,15 @@ struct ModeToggleButton: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(isOn ? onColor : Color.zinc800)
-            .foregroundColor(isOn ? .white : .secondary)
-            .cornerRadius(12)
+            // Soft tinted pill matching the current werk design: per-mode hue
+            // when on (purple/cyan/green identity), themed-neutral when off.
+            .background(
+                Capsule().fill(isOn ? onColor.opacity(0.15) : Color.clear)
+            )
+            .overlay(
+                Capsule().stroke(isOn ? onColor.opacity(0.45) : appState.themeBorder, lineWidth: 1)
+            )
+            .foregroundColor(isOn ? onColor : appState.themeTextSecondary)
             .opacity(isLoading ? 0.5 : 1.0)
         }
         .buttonStyle(.plain)

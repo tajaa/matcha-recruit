@@ -23,6 +23,10 @@ class UserResponse(BaseModel):
     is_active: bool
     created_at: datetime
     last_login: Optional[datetime] = None
+    # Business (non-personal) company name. Null for personal/individual,
+    # admin, and other roles — the desktop top bar shows it for business
+    # accounts and falls back to email otherwise.
+    company_name: Optional[str] = None
 
 
 class LoginRequest(BaseModel):

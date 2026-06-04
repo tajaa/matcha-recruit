@@ -1010,7 +1010,15 @@ async def login(request: LoginRequest, req: Request):
                           JOIN companies c ON c.id = cl.company_id
                          WHERE cl.user_id = u.id
                            AND c.deleted_at IS NOT NULL
-                      ) AS company_deleted_at
+                      ) AS company_deleted_at,
+                      (
+                        SELECT comp.name
+                          FROM clients cl
+                          JOIN companies comp ON comp.id = cl.company_id
+                         WHERE cl.user_id = u.id
+                           AND comp.is_personal = false
+                         LIMIT 1
+                      ) AS company_name
                  FROM users u
                 WHERE lower(u.email) = lower($1)""",
             request.email
@@ -1057,7 +1065,8 @@ async def login(request: LoginRequest, req: Request):
                 role=user["role"],
                 is_active=user["is_active"],
                 created_at=user["created_at"],
-                last_login=user["last_login"]
+                last_login=user["last_login"],
+                company_name=user["company_name"],
             )
         )
 
@@ -1075,7 +1084,16 @@ async def refresh_token(request: RefreshTokenRequest):
 
     async with get_connection() as conn:
         user = await conn.fetchrow(
-            "SELECT id, email, role, is_active, created_at, last_login FROM users WHERE id = $1",
+            """SELECT id, email, role, is_active, created_at, last_login,
+                      (
+                        SELECT comp.name
+                          FROM clients cl
+                          JOIN companies comp ON comp.id = cl.company_id
+                         WHERE cl.user_id = users.id
+                           AND comp.is_personal = false
+                         LIMIT 1
+                      ) AS company_name
+                 FROM users WHERE id = $1""",
             payload.sub
         )
 
@@ -1099,7 +1117,8 @@ async def refresh_token(request: RefreshTokenRequest):
                 role=user["role"],
                 is_active=user["is_active"],
                 created_at=user["created_at"],
-                last_login=user["last_login"]
+                last_login=user["last_login"],
+                company_name=user["company_name"],
             )
         )
 

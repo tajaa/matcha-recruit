@@ -139,7 +139,9 @@ struct ContentView: View {
                         Button {
                             showProfile = true
                         } label: {
-                            Text(user.email)
+                            // Business accounts show their company name; personal
+                            // (and other) accounts fall back to email.
+                            Text(user.companyName ?? user.email)
                                 .font(.system(size: 12))
                                 .foregroundColor(appState.themeText.opacity(0.55))
                                 .underline(false)

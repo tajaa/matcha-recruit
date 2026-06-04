@@ -27,10 +27,14 @@ struct UserInfo: Codable {
     let role: String
     var avatarUrl: String?
     var phone: String?
+    /// Business (non-personal) company name — null for personal/individual and
+    /// other roles. Comes back on both login and refresh, so it survives relaunch.
+    var companyName: String?
 
     enum CodingKeys: String, CodingKey {
         case id, email, name, role, phone
         case avatarUrl = "avatar_url"
+        case companyName = "company_name"
     }
 }
 
