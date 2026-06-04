@@ -61,7 +61,7 @@ def _build_300a_html(s: dict) -> str:
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
   @page {{ size: letter landscape; margin: 0.4in 0.5in; }}
-  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 9pt; color: #111; line-height: 1.3; }}
+  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 9pt; color: #111; line-height: 1.2; }}
 
   /* Header */
   .formhdr {{ display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1.5px solid #111; padding-bottom: 6px; }}
@@ -71,8 +71,8 @@ def _build_300a_html(s: dict) -> str:
   .yearbox {{ display: inline-block; border: 1.5px solid #111; padding: 4px 14px; font-size: 13pt; font-weight: 700; margin-top: 4px; }}
 
   /* Intro / instruction paragraphs */
-  .note {{ font-size: 7.5pt; color: #444; margin: 8px 0 10px; line-height: 1.45; }}
-  .note p {{ margin: 0 0 4px; }}
+  .note {{ font-size: 7pt; color: #444; margin: 5px 0 6px; line-height: 1.3; }}
+  .note p {{ margin: 0 0 3px; }}
 
   /* Two-column main area */
   .main {{ display: flex; gap: 10px; align-items: stretch; }}
@@ -80,18 +80,18 @@ def _build_300a_html(s: dict) -> str:
   .col-right {{ flex: 1; min-width: 0; }}
 
   /* Block — a bordered card with a grey title bar */
-  .block {{ border: 1px solid #111; margin-bottom: 8px; }}
+  .block {{ border: 1px solid #111; margin-bottom: 5px; }}
   .block-hdr {{ background: #d8d8d8; padding: 4px 8px; font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }}
 
   /* Number grids (cases / days / illness types) */
   .row4 {{ display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; }}
   .row2 {{ display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid #111; }}
   .row6 {{ display: grid; grid-template-columns: repeat(6, 1fr); }}
-  .cell {{ padding: 5px 6px; border-right: 1px solid #111; min-height: 78px; position: relative; }}
+  .cell {{ padding: 4px 6px; border-right: 1px solid #111; min-height: 56px; position: relative; }}
   .cell:last-child {{ border-right: none; }}
   .cell .label {{ font-size: 7pt; line-height: 1.25; color: #222; }}
   .cell .code {{ font-size: 7pt; color: #666; font-weight: 700; }}
-  .cell .value {{ font-size: 16pt; font-weight: 300; text-align: center; margin-top: 8px; font-family: 'Courier New', monospace; }}
+  .cell .value {{ font-size: 15pt; font-weight: 300; text-align: center; margin-top: 4px; font-family: 'Courier New', monospace; }}
 
   /* Establishment / Employment Info — labeled fields with underline values */
   .field {{ display: flex; padding: 5px 8px; border-top: 1px solid #ddd; align-items: baseline; gap: 6px; }}
@@ -100,15 +100,15 @@ def _build_300a_html(s: dict) -> str:
   .field .val {{ font-size: 9pt; font-weight: 500; flex: 1; min-width: 0; border-bottom: 1px solid #aaa; min-height: 14px; padding-bottom: 1px; overflow-wrap: break-word; }}
 
   /* Cert block */
-  .cert {{ margin-top: 14px; border-top: 1.5px solid #111; padding-top: 8px; font-size: 8.5pt; }}
+  .cert {{ margin-top: 8px; border-top: 1.5px solid #111; padding-top: 6px; font-size: 8.5pt; }}
   .cert .signline {{ font-style: italic; color: #444; font-size: 7.5pt; margin-top: 2px; }}
-  .sigrow {{ display: grid; grid-template-columns: 2fr 1.4fr 1.2fr 1fr; gap: 14px; margin-top: 18px; }}
+  .sigrow {{ display: grid; grid-template-columns: 2fr 1.4fr 1.2fr 1fr; gap: 14px; margin-top: 10px; }}
   .sigrow .siglbl {{ font-size: 6.5pt; color: #555; text-transform: uppercase; letter-spacing: 0.04em; }}
   .sigrow .sigval {{ border-bottom: 1px solid #111; padding: 4px 2px; font-size: 9.5pt; min-height: 16px; }}
 
-  .postnote {{ margin-top: 14px; font-size: 9pt; font-weight: 700; color: #111; text-align: center; }}
-  .burden {{ margin-top: 6px; font-size: 7.5pt; color: #444; text-align: center; line-height: 1.4; max-width: 8.5in; margin-left: auto; margin-right: auto; }}
-  .footer {{ margin-top: 10px; font-size: 6.5pt; color: #aaa; text-align: center; }}
+  .postnote {{ margin-top: 8px; font-size: 9pt; font-weight: 700; color: #111; text-align: center; }}
+  .burden {{ margin-top: 4px; font-size: 7.5pt; color: #444; text-align: center; line-height: 1.3; max-width: 8.5in; margin-left: auto; margin-right: auto; }}
+  .footer {{ margin-top: 5px; font-size: 6.5pt; color: #aaa; text-align: center; }}
 </style></head><body>
 
   <div class="formhdr">
