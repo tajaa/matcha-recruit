@@ -1618,7 +1618,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
 
             # Resolve Lite referral token — non-blocking if invalid/expired
             lite_broker_pays = False
-            if request.lite_broker_token and request.tier == "matcha_lite" and referring_broker_id is None:
+            if request.lite_broker_token and request.tier in ("matcha_lite", "matcha_x") and referring_broker_id is None:
                 lite_ref_row = await conn.fetchrow(
                     """
                     UPDATE broker_lite_referral_tokens
@@ -1640,7 +1640,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
             # can't both pass (matches business_invitations pattern above).
             lite_invite_activated = False
             lite_invite_id = None
-            if request.lite_invite_token and request.tier == "matcha_lite":
+            if request.lite_invite_token and request.tier in ("matcha_lite", "matcha_x"):
                 invite_row = await conn.fetchrow(
                     """UPDATE matcha_lite_invite_tokens
                        SET used_at = NOW()
@@ -1659,8 +1659,9 @@ async def register_business(request: BusinessRegister, http_request: Request):
             is_ir_only = request.tier == "ir_only"
             is_resources_free = request.tier == "resources_free"
             is_matcha_lite = request.tier == "matcha_lite"
+            is_matcha_x = request.tier == "matcha_x"
 
-            if is_matcha_lite and not lite_invite_activated and request.headcount > 300:
+            if (is_matcha_lite or is_matcha_x) and not lite_invite_activated and request.headcount > 300:
                 raise HTTPException(
                     status_code=400,
                     detail="Headcount over 300 — please contact us for pricing at matcha.work",
@@ -1718,6 +1719,26 @@ async def register_business(request: BusinessRegister, http_request: Request):
                     lite_features["employees"] = True
                     lite_features["discipline"] = True
                 enabled_features_json = json.dumps(lite_features)
+            elif is_matcha_x:
+                # Matcha-X is the paid mid tier — a clone of Matcha Lite at
+                # Lite parity (extra modules layered later). Same payment
+                # model: broker-pays/invite signups activate immediately;
+                # business-pays signups complete Stripe checkout first and
+                # the webhook flips `incidents=true`. handbooks/training/
+                # employees/discipline are the always-on bundle (the latter
+                # two also overlaid via TIER_REQUIRED_FEATURES["matcha_x"],
+                # so business-pays tenants converge to the same shape after
+                # payment — Lite's discipline path-dependency is fixed here).
+                company_status = "approved"
+                signup_source = "matcha_x"
+                x_features = {k: False for k in DEFAULT_COMPANY_FEATURES}
+                x_features["handbooks"] = True
+                x_features["training"] = True
+                if lite_broker_pays or lite_invite_activated:
+                    x_features["incidents"] = True
+                    x_features["employees"] = True
+                    x_features["discipline"] = True
+                enabled_features_json = json.dumps(x_features)
             else:
                 company_status = "approved" if (invitation or referring_broker_id) else "pending"
                 if invitation:
@@ -1786,7 +1807,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
             # global lesson templates. Covers matcha_lite + ir_only_self_serve
             # (legacy alias). Idempotent — no-op when no templates exist
             # (e.g. fresh dev DB before generate_training_templates.py runs).
-            if is_matcha_lite or is_ir_only:
+            if is_matcha_lite or is_matcha_x or is_ir_only:
                 await conn.execute(
                     """
                     INSERT INTO training_requirements
@@ -1866,7 +1887,9 @@ async def register_business(request: BusinessRegister, http_request: Request):
 
             # Send appropriate email
             email_service = get_email_service()
-            if is_matcha_lite:
+            if is_matcha_lite or is_matcha_x:
+                # matcha_x reuses the Lite transactional emails for now —
+                # swap in Matcha-X-branded copy when the tier productizes.
                 if lite_broker_pays or lite_invite_activated:
                     # Broker or admin invite — account is fully active.
                     await email_service.send_business_approved_email(
@@ -1904,7 +1927,13 @@ async def register_business(request: BusinessRegister, http_request: Request):
                     company_name=request.company_name
                 )
 
-            if is_matcha_lite and (lite_broker_pays or lite_invite_activated):
+            if is_matcha_x and (lite_broker_pays or lite_invite_activated):
+                next_route = "/matcha-x/onboarding"
+                msg = "Welcome to Matcha-X. Let's set up your team."
+            elif is_matcha_x:
+                next_route = "/checkout/x"
+                msg = "Account created. Complete payment to activate Matcha-X."
+            elif is_matcha_lite and (lite_broker_pays or lite_invite_activated):
                 next_route = "/ir/onboarding"
                 msg = "Welcome to Matcha Lite. Let's set up your team."
             elif is_matcha_lite:

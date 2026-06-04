@@ -25,6 +25,27 @@ export function isMatchaLitePending(profile: MeClientProfile | null | undefined)
 }
 
 /**
+ * True when the company is on the paid Matcha-X mid tier (incidents on).
+ * Matcha-X is a clone of Matcha Lite at Lite parity; it drives a dedicated
+ * MatchaXSidebar so its nav can diverge (HRIS, credentials) without touching
+ * Lite. `incidents` must be true so a matcha_x company mid-checkout doesn't
+ * land here — see isMatchaXPending.
+ */
+export function isMatchaX(profile: MeClientProfile | null | undefined): boolean {
+  if (!profile) return false
+  return profile.signup_source === 'matcha_x' && !!profile.enabled_features?.incidents
+}
+
+/**
+ * True for a matcha_x company that registered but hasn't completed the
+ * Stripe checkout yet (incidents feature is still false).
+ */
+export function isMatchaXPending(profile: MeClientProfile | null | undefined): boolean {
+  if (!profile) return false
+  return profile.signup_source === 'matcha_x' && !profile.enabled_features?.incidents
+}
+
+/**
  * True for the free Resources-tier signup. They get access to the marketing
  * resource hub (templates, calculators, audit) but no paid features. Sidebar
  * surfaces the upgrade-to-IR + contact-for-full-platform CTAs for them.

@@ -326,6 +326,69 @@ async def create_lite_checkout(
 
 
 # ---------------------------------------------------------------------------
+# Matcha-X — headcount-based subscription checkout (mid tier; clone of Lite)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/checkout/x", response_model=UpgradeCheckoutResponse)
+async def create_matcha_x_checkout(
+    body: LiteCheckoutRequest,
+    current_user: CurrentUser = Depends(require_client),
+):
+    """Open a Stripe subscription checkout for Matcha-X (mid tier).
+
+    Clone of /checkout/lite. Headcount read from registration time; > 300 is
+    rejected (contact sales). The webhook (metadata.type == 'matcha_x')
+    activates incidents on payment; employees/discipline come from the tier
+    overlay. Only callable by matcha_x companies.
+    """
+    from ..services.stripe_service import StripeService, StripeServiceError
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with this account")
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT c.signup_source, COALESCE(chp.headcount, 0) AS headcount
+            FROM companies c
+            LEFT JOIN company_handbook_profiles chp ON chp.company_id = c.id
+            WHERE c.id = $1
+            """,
+            company_id,
+        )
+
+    if not row or row["signup_source"] != "matcha_x":
+        raise HTTPException(status_code=403, detail="This endpoint is only available for Matcha-X accounts")
+
+    headcount = int(row["headcount"])
+    if headcount < 1:
+        raise HTTPException(status_code=400, detail="Company headcount not set — please contact support")
+    if headcount > 300:
+        raise HTTPException(status_code=400, detail="Headcount over 300 — please contact us for pricing")
+
+    stripe_service = StripeService()
+    try:
+        session = await stripe_service.create_matcha_x_checkout(
+            company_id=company_id,
+            headcount=headcount,
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+        )
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    stripe_session_id = str(getattr(session, "id", "") or "")
+    checkout_url = str(getattr(session, "url", "") or "")
+    if not stripe_session_id or not checkout_url:
+        raise HTTPException(status_code=502, detail="Stripe checkout did not return expected fields")
+
+    logger.info("Matcha-X checkout opened: company=%s headcount=%d session=%s", company_id, headcount, stripe_session_id)
+    return UpgradeCheckoutResponse(checkout_url=checkout_url, stripe_session_id=stripe_session_id)
+
+
+# ---------------------------------------------------------------------------
 # Upgrade Inquiry — in-app contact form for Cap → Matcha Platform upgrade.
 # Records a lead_captures row + emails sales (best-effort).
 # ---------------------------------------------------------------------------

@@ -34,11 +34,12 @@ type Company = {
   } | null
 }
 
-type Tier = 'all' | 'free' | 'lite' | 'platform' | 'personal'
+type Tier = 'all' | 'free' | 'lite' | 'x' | 'platform' | 'personal'
 
 const TIER_LABEL: Record<Exclude<Tier, 'all'>, string> = {
   free: 'Free',
   lite: 'Lite',
+  x: 'Matcha-X',
   platform: 'Platform',
   personal: 'Personal',
 }
@@ -47,12 +48,14 @@ function tierFromCompany(c: Company): Exclude<Tier, 'all'> {
   if (c.is_personal) return 'personal'
   if (c.signup_source === 'resources_free') return 'free'
   if (c.signup_source === 'matcha_lite') return 'lite'
+  if (c.signup_source === 'matcha_x') return 'x'
   return 'platform'
 }
 
 const TIER_BADGE_CLASS: Record<Exclude<Tier, 'all'>, string> = {
   free: 'border-zinc-600 bg-zinc-700/30 text-zinc-300',
   lite: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+  x: 'border-teal-500/40 bg-teal-500/10 text-teal-300',
   platform: 'border-violet-500/40 bg-violet-500/10 text-violet-300',
   personal: 'border-sky-500/40 bg-sky-500/10 text-sky-300',
 }
@@ -240,7 +243,7 @@ export default function Companies() {
         </div>
         <div className="flex items-center gap-1">
           <span className="text-[10px] uppercase tracking-wider text-zinc-500 mr-2">Tier</span>
-          {(['all', 'free', 'lite', 'platform', 'personal'] as const).map((t) => (
+          {(['all', 'free', 'lite', 'x', 'platform', 'personal'] as const).map((t) => (
             <Button
               key={t}
               variant={tier === t ? 'primary' : 'ghost'}

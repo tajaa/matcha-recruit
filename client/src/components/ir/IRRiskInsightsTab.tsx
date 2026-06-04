@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Loader2, RefreshCw } from 'lucide-react'
 import { api } from '../../api/client'
 import { useMe } from '../../hooks/useMe'
-import { isIrOnlyTier } from '../../utils/tier'
+import { isIrOnlyTier, isMatchaX } from '../../utils/tier'
 import { Button, Select } from '../ui'
 import type {
   IRRiskInsights,
@@ -64,8 +64,9 @@ type View = 'overview' | 'themes'
 export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
   const { me } = useMe()
   // The "upgrade to Matcha Platform" footer only makes sense for lite (IR-only)
-  // tenants — on the full platform IR is just one of many features already.
-  const isLiteTenant = isIrOnlyTier(me?.profile)
+  // and Matcha-X (mid) tenants — on the full platform IR is just one of many
+  // features already.
+  const isLiteTenant = isIrOnlyTier(me?.profile) || isMatchaX(me?.profile)
   const [view, setView] = useState<View>('overview')
   const [locations, setLocations] = useState<LocationRow[] | null>(null)
   const [locationFilter, setLocationFilter] = useState<string>('')
