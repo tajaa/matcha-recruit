@@ -264,7 +264,6 @@ struct ContentView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 8)
-            .background(appState.themeBg.opacity(0.5))
         }
         .background(sidebarBackground)
         .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 380)
@@ -838,13 +837,12 @@ struct ContentView: View {
                 .fill(appState.themeSidebar.opacity(sidebarTintOpacity * 0.5))
                 .glassEffect(.regular.tint(appState.themeSidebar.opacity(0.28)), in: Rectangle())
         } else {
-            // Frosted vibrancy behind the window, tinted to the sidebar color so
-            // the rail reads distinct from the main body in all three themes
-            // (lighter than dark/cappuchin bg, darker than the light bg).
-            ZStack {
-                VisualEffectView(material: .sidebar, blendingMode: .behindWindow)
-                appState.themeSidebar.opacity(sidebarTintOpacity)
-            }
+            // macOS 14/15 can't render Liquid Glass and `.behindWindow` vibrancy
+            // samples the desktop wallpaper — at partial tint opacity that washed
+            // the intended contrast out. Render the SOLID contrasting color so the
+            // rail always separates from the opaque body: lighter than the
+            // dark/cappuchin bg, darker than the light bg.
+            appState.themeSidebar
         }
     }
 
