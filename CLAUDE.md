@@ -21,10 +21,10 @@ Sidebar dispatch in `client/src/components/TenantSidebar.tsx`. Tier-check helper
 - Backend: `server/app/core/routes/resources.py`. Public landing pages + business-gated tools (templates, state guides, calculators, audit, glossary, job descriptions).
 - Free→paid path: `<UpgradeUpsellCard>` ("Talk to sales") posts to `/api/resources/upgrade/inquiry`.
 
-### Matcha-lite — paid IR + HR records + discipline
+### Matcha-lite — paid IR + HR records (entry tier)
 - Stripe-purchasable, headcount-based (max 300 employees).
 - Checkout: `POST /resources/checkout/lite` (`server/app/core/routes/resources.py`). Stripe webhook `checkout.session.completed` flips `enabled_features.incidents=true` — until then `MatchaLitePendingSidebar` shows the Subscribe CTA.
-- Once paid: `enabled_features.incidents`, `employees`, `discipline` are on; `IrSidebar` exposes incidents, employees, discipline, company.
+- Once paid: `incidents` + `employees` + `handbooks` (handbook **generation**) on; `IrSidebar` exposes incidents, risk insights, OSHA, handbooks, employees, company. **No** handbook audit, training, discipline, or credentialing — those moved up to **Matcha-X** (the `matcha_lite` tier overlay force-asserts `training`/`discipline` off). See the tier-bundle note under Feature Flags.
 - Backend routers: `ir_incidents_router` (`/ir/incidents/*`), `ir_onboarding_router` (`/ir-onboarding/*`) in `server/app/matcha/routes/__init__.py`.
 - Onboarding: `client/src/features/ir-onboarding/IrOnboardingWizard.tsx`; completion stamps `companies.ir_onboarding_completed_at`.
 - Legacy `pages/auth/IrSignup.tsx` (`tier='ir_only'`, `signup_source='ir_only_self_serve'`) still wired at `/ir/signup` for private beta — also lands on `IrSidebar`.
@@ -195,7 +195,8 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 
 | Flag | Default | Purpose |
 |---|---|---|
-| `handbooks` | ✅ | Employee handbook generator |
+| `handbooks` | ✅ | Employee handbook **generator** (Lite keeps this) |
+| `handbook_audit` | ❌ | Handbook **audit** / gap analyzer as an in-app feature — distinct from `handbooks`. Matcha-X + Pro only (granted via X tier overlay + stored on bespoke signup). The public lead-gen analyzer is unaffected: `handbook_gap_analyzer._resolve_caller_tier` reads this flag to decide teaser (free/Lite) vs full report+PDF (X/Pro). |
 | `accommodations` | ✅ | Accommodation case mgmt |
 | `risk_assessment` | ✅ | Risk-assessment dashboard |
 | `discipline` | ✅ | Progressive discipline workflow |
@@ -204,7 +205,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 | `i9` | ❌ | I-9 compliance |
 | `cobra` | ❌ | COBRA admin |
 | `separation_agreements` | ❌ | Separation doc workflow |
-| `credential_templates` | ❌ | Credentialing templates |
+| `credential_templates` | ❌ | Credentialing / license tracking. Default-off, but in the **Matcha-X** bundle (tier overlay) and **Pro** (stored on bespoke signup). |
 | `hris_import` | ❌ | HRIS sync — legacy umbrella; gates treat it as "both providers" |
 | `hris_gusto` | ❌ | HRIS via Gusto OAuth (direct) |
 | `hris_finch` | ❌ | HRIS via Finch unified API (Rippling, BambooHR, ADP, …) |
@@ -214,6 +215,11 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 | `benefits_admin` | ❌ | Employee-benefits broker tooling — source-agnostic roster ingest (Finch + CSV), eligibility-exception detection (new-hire gaps + termination premium leaks), renewal-risk radar. Gates company-facing `/benefits/*`; broker rollups live under `/broker/benefits/*` (broker-role gated). Daily Celery `benefit_eligibility_sync` (scheduler row, default off). |
 
 `incidents` and `employees` are not in the defaults — they're flipped on by tier-specific flows (Matcha-lite Stripe webhook, IR-only signup) or admin toggle.
+
+**Tier bundles** (read-time via `TIER_REQUIRED_FEATURES` overlay in `feature_flags.py`, except Pro which stores at signup):
+- **Lite** (`matcha_lite`) = `incidents` (paid) + `employees` + `handbooks` (generation). `training`/`discipline` force-asserted **off** here; no `handbook_audit`/`credential_templates`.
+- **Matcha-X** (`matcha_x`) = Lite + `training` + `discipline` + `handbook_audit` + `credential_templates` (all forced on via overlay).
+- **Pro** (`bespoke`/`invite`/`broker`) = full `DEFAULT_COMPANY_FEATURES` + `incidents` + `handbook_audit` + `credential_templates`, stored at signup (toggleable per-company; not an overlay, so it doesn't leak to personal Werk which shares `signup_source='bespoke'`).
 
 ## Key Modules
 

@@ -1730,13 +1730,16 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 # employees feature dependency.
                 company_status = "approved"
                 signup_source = "matcha_lite"
+                # Lite (entry tier) = IR + employees + handbook GENERATION.
+                # training/discipline/handbook_audit/credentialing moved up to
+                # Matcha-X — not granted here. The matcha_lite tier overlay
+                # also force-asserts training/discipline off at read time,
+                # covering existing rows.
                 lite_features = {k: False for k in DEFAULT_COMPANY_FEATURES}
                 lite_features["handbooks"] = True
-                lite_features["training"] = True
                 if lite_broker_pays or lite_invite_activated:
                     lite_features["incidents"] = True
                     lite_features["employees"] = True
-                    lite_features["discipline"] = True
                 enabled_features_json = json.dumps(lite_features)
             elif is_matcha_x:
                 # Matcha-X is the paid mid tier — a clone of Matcha Lite at
@@ -1775,6 +1778,12 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 # global default — a global default would break the lite paywall.
                 bespoke_features = dict(DEFAULT_COMPANY_FEATURES)
                 bespoke_features["incidents"] = True
+                # Pro (full platform) includes handbook audit + credentialing.
+                # Stored here (toggleable per-company) rather than via a tier
+                # overlay — personal Werk shares signup_source='bespoke' but
+                # never reaches this branch, so storing keeps it Pro-only.
+                bespoke_features["handbook_audit"] = True
+                bespoke_features["credential_templates"] = True
                 enabled_features_json = json.dumps(bespoke_features)
 
             # Step 1: Create company
@@ -1822,11 +1831,11 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 user["id"], company_id
             )
 
-            # Step 4b: Seed training_requirements for lite tenants from
-            # global lesson templates. Covers matcha_lite + ir_only_self_serve
-            # (legacy alias). Idempotent — no-op when no templates exist
-            # (e.g. fresh dev DB before generate_training_templates.py runs).
-            if is_matcha_lite or is_matcha_x or is_ir_only:
+            # Step 4b: Seed training_requirements for tenants whose bundle
+            # includes training — Matcha-X + ir_only_self_serve (Cap). Lite no
+            # longer has training, so it's excluded. Idempotent — no-op when no
+            # templates exist (e.g. fresh dev DB before generate_training_templates.py).
+            if is_matcha_x or is_ir_only:
                 await conn.execute(
                     """
                     INSERT INTO training_requirements

@@ -32,6 +32,7 @@ from ..models.auth import CurrentUser
 from ..services.redis_cache import check_rate_limit, client_ip
 from ..services.storage import get_storage
 from ...matcha.dependencies import require_client
+from ..feature_flags import merge_company_features
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -46,11 +47,15 @@ SAMPLE_GAPS_LIMIT = 3  # how many gaps Free-tier callers see in full on the repo
 
 
 async def _resolve_caller_tier(conn, user_id: UUID) -> str:
-    """Return 'free' for resources_free companies with no features on, else 'paid'.
+    """Return 'paid' when the caller is entitled to the FULL handbook audit, else 'free'.
 
-    Mirrors client/src/utils/tier.ts:isResourcesFreeTier so frontend + backend
-    apply the exact same gating definition. Admins/brokers/employees that don't
-    have a clients row default to 'paid' (they get the full report).
+    Entitlement = the `handbook_audit` feature (Matcha-X + Pro). Free lead-gen
+    users AND Lite tenants get the teaser ('free' → sample gaps only, no PDF);
+    X/Pro get the full gap list + PDF. Uses merge_company_features so the gate
+    applies the exact per-tier overlay the in-app <FeatureGate> uses. The shared
+    public lead-gen funnel stays open — anonymous→resources_free callers simply
+    fall to the teaser. Admins/brokers/employees without a clients row default
+    to 'paid'.
     """
     row = await conn.fetchrow(
         """
@@ -63,16 +68,8 @@ async def _resolve_caller_tier(conn, user_id: UUID) -> str:
     )
     if not row:
         return "paid"
-    if row["signup_source"] != "resources_free":
-        return "paid"
-    features = row["enabled_features"] or {}
-    if isinstance(features, str):
-        try:
-            features = json.loads(features)
-        except json.JSONDecodeError:
-            features = {}
-    any_enabled = any(bool(v) for v in (features or {}).values())
-    return "paid" if any_enabled else "free"
+    merged = merge_company_features(row["enabled_features"], row["signup_source"])
+    return "paid" if merged.get("handbook_audit") else "free"
 
 
 def _build_hidden_by_state(

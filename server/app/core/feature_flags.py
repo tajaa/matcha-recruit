@@ -11,6 +11,12 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "cobra": False,
     "separation_agreements": False,
     "credential_templates": False,
+    # Handbook AUDIT (gap analyzer) as an in-app feature. Distinct from
+    # `handbooks` (the generator, which Lite keeps). Default off; granted to
+    # Matcha-X via TIER_REQUIRED overlay and to Pro/bespoke at signup time.
+    # The public lead-gen analyzer is unaffected — it gates teaser/full via
+    # handbook_gap_analyzer._resolve_caller_tier, which reads this flag.
+    "handbook_audit": False,
     # HRIS import. `hris_gusto` = connect directly to Gusto (OAuth); `hris_finch` =
     # connect via Finch unified API (Rippling, BambooHR, ADP, …). Independent per
     # company. `hris_import` is the legacy umbrella — treated as "both" by the gates
@@ -40,9 +46,17 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
 # Paid gates (incidents/employees/discipline) intentionally NOT here —
 # those flip via Stripe webhook on checkout completion.
 TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
-    # matcha_lite (paid) — employees/discipline gated on Stripe; only the
-    # always-on bundle items overlay here.
-    "matcha_lite": {"handbooks": True, "training": True, "employees": True},
+    # matcha_lite (paid, entry tier) — IR + employees + handbook GENERATION
+    # only. training + discipline are forced OFF here (they moved up to
+    # Matcha-X); the False values override any stored True (incl. existing
+    # Lite rows + the broker-pays signup path) at read time. handbook_audit
+    # + credential_templates stay off via DEFAULT (not granted to Lite).
+    "matcha_lite": {
+        "handbooks": True,
+        "employees": True,
+        "training": False,
+        "discipline": False,
+    },
     # matcha_x (paid mid tier) — clone of matcha_lite at Lite parity. Unlike
     # Lite, `discipline` is in the always-on overlay so the paid bundle is
     # identical on every payment path (Lite leaves discipline path-dependent:
@@ -53,6 +67,10 @@ TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
         "training": True,
         "employees": True,
         "discipline": True,
+        # X-and-up exclusives — forced on for every Matcha-X company
+        # (existing + new) at read time, no per-row backfill.
+        "handbook_audit": True,
+        "credential_templates": True,
     },
     # ir_only_self_serve (legacy free private beta) — full IR + HR bundle is
     # always on, no payment gate.
