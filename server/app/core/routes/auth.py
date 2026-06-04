@@ -1726,7 +1726,16 @@ async def register_business(request: BusinessRegister, http_request: Request):
                     signup_source = "broker"
                 else:
                     signup_source = "bespoke"
-                enabled_features_json = default_company_features_json()
+                # Platform (bespoke/invite/broker) business companies get the IR
+                # system on by default — it's a standard platform feature, not a
+                # paid lite add-on. Risk Insights + OSHA inherit the `incidents`
+                # gate. Personal Matcha-work companies are created elsewhere
+                # (is_personal=true) and never reach this branch, so they stay
+                # IR-free. `incidents` is per-company here (disableable), not a
+                # global default — a global default would break the lite paywall.
+                bespoke_features = dict(DEFAULT_COMPANY_FEATURES)
+                bespoke_features["incidents"] = True
+                enabled_features_json = json.dumps(bespoke_features)
 
             # Step 1: Create company
             company = await conn.fetchrow(
