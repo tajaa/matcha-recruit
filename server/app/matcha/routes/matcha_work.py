@@ -5834,6 +5834,24 @@ async def get_task_history_endpoint(
     return [_serialize_history_row(r) for r in rows]
 
 
+@router.post("/projects/{project_id}/tasks/{task_id}/summarize")
+async def summarize_task_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """1-click Gemini Flash Lite catch-up summary of a ticket — where the work
+    stands + what's been done recently. Ephemeral (not persisted); read-only."""
+    await _verify_project_access(project_id, current_user)
+    from ..services import task_summary_service
+    summary = await task_summary_service.generate_task_summary(project_id, task_id)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if not summary:
+        summary = "Couldn't generate a summary right now — try again in a moment."
+    return {"summary": summary}
+
+
 @router.post("/projects/{project_id}/tasks/{task_id}/rounds", status_code=201)
 async def start_task_round_endpoint(
     project_id: UUID,

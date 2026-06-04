@@ -36,6 +36,9 @@ class ProjectDetailViewModel {
     /// task id. Filled by `scanCommits()` / `loadCommitSuggestions()`; the
     /// TaskViewer checklist renders a chip per matching subtask.
     var commitSuggestions: [String: [MWCommitSuggestion]] = [:]
+    /// 1-click AI ticket summaries, keyed by task id. Session-ephemeral (the
+    /// server doesn't persist them) — a fresh click regenerates.
+    var taskSummaries: [String: String] = [:]
     var isScanningCommits = false
     /// One-line result of the last scan ("3 commits · 2 suggestions"), shown
     /// transiently in the Elements header.
@@ -1249,6 +1252,21 @@ class ProjectDetailViewModel {
             }
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    /// 1-click AI catch-up summary for a ticket. Stores the result in
+    /// `taskSummaries[taskId]`; on failure stores a soft retry message so the
+    /// UI always shows something.
+    func summarizeTask(taskId: String) async {
+        guard let pid = project?.id else { return }
+        do {
+            let summary = try await service.summarizeTask(projectId: pid, taskId: taskId)
+            await MainActor.run { taskSummaries[taskId] = summary }
+        } catch {
+            await MainActor.run {
+                taskSummaries[taskId] = "Couldn't generate a summary right now — try again."
+            }
         }
     }
 

@@ -39,6 +39,7 @@ struct TaskViewerSheet: View {
     @State var showEarlierAttachments = false
     @State var didCopy = false
     @State var isCopying = false
+    @State var isSummarizing = false
     @State var newNote = ""
     @State var addingNote = false
     @FocusState var isNoteFieldFocused: Bool
@@ -216,6 +217,24 @@ struct TaskViewerSheet: View {
                 .buttonStyle(.plain)
                 .disabled(isCopying)
                 .help("Copy ticket as text + screenshot paths (for Claude Code)")
+                Button {
+                    Task {
+                        isSummarizing = true
+                        await viewModel.summarizeTask(taskId: task.id)
+                        isSummarizing = false
+                    }
+                } label: {
+                    if isSummarizing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 11))
+                            .foregroundColor(.matcha500)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isSummarizing)
+                .help("AI catch-up summary — where it's at, what's been done (Gemini)")
                 Button(action: onClose) {
                     Image(systemName: "xmark")
                         .font(.system(size: 11))
@@ -257,6 +276,33 @@ struct TaskViewerSheet: View {
                 }
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
+            }
+
+            // AI catch-up summary (1-click, Gemini Flash Lite). Up top so a
+            // collaborator landing on the ticket gets oriented before reading
+            // the rounds/history. Ephemeral — regenerated on each click.
+            if let summary = viewModel.taskSummaries[task.id], !summary.isEmpty {
+                HStack(alignment: .top, spacing: 8) {
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color.matcha500.opacity(0.7))
+                        .frame(width: 2)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 9))
+                            Text("SUMMARY")
+                                .font(.system(size: 9, weight: .semibold))
+                                .tracking(0.5)
+                        }
+                        .foregroundColor(.matcha500)
+                        Text(summary)
+                            .font(.system(size: 12))
+                            .foregroundColor(appState.themeText.opacity(0.9))
+                            .textSelection(.enabled)
+                    }
+                }
+                .padding(.vertical, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             // "You are here" banner — at-a-glance answer to "what state is

@@ -1000,6 +1000,17 @@ class MatchaWorkService {
         )
     }
 
+    /// 1-click Gemini Flash Lite catch-up summary of a ticket — where the work
+    /// stands + what's been done. Ephemeral; the server doesn't persist it.
+    func summarizeTask(projectId: String, taskId: String) async throws -> String {
+        struct SummaryResponse: Decodable { let summary: String }
+        let resp: SummaryResponse = try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/summarize"
+        )
+        return resp.summary
+    }
+
     /// Accepted commit→subtask completions for a task (one latest per subtask):
     /// which commit completed each done item, for the in-review audit UI.
     func listCommitCompletions(projectId: String, taskId: String) async throws -> [MWCommitSuggestion] {
