@@ -115,6 +115,7 @@ class AppState {
         switch appTheme {
         case "light": return Color.grayBg
         case "cappuchin": return Color.cappuchinDark
+        case "graphite": return Color.graphiteBg
         default: return Color.zinc950
         }
     }
@@ -123,6 +124,7 @@ class AppState {
         switch appTheme {
         case "light": return Color.grayCard
         case "cappuchin": return Color.cappuchinCard
+        case "graphite": return Color.graphiteCard
         default: return Color.zinc900
         }
     }
@@ -135,6 +137,7 @@ class AppState {
         switch appTheme {
         case "light": return Color.graySidebar
         case "cappuchin": return Color.cappuchinCard
+        case "graphite": return Color.graphiteSidebar
         default: return Color.zinc900
         }
     }
@@ -143,6 +146,7 @@ class AppState {
         switch appTheme {
         case "light": return Color.grayBorder
         case "cappuchin": return Color.cappuchinBorder
+        case "graphite": return Color.graphiteBorder
         default: return Color.white.opacity(0.1)
         }
     }
@@ -151,6 +155,7 @@ class AppState {
         switch appTheme {
         case "light": return Color.grayAccent
         case "cappuchin": return Color.cappuchinAccent
+        case "graphite": return Color.graphiteAccent
         default: return Color.matcha500
         }
     }
@@ -159,6 +164,7 @@ class AppState {
         switch appTheme {
         case "light": return Color.grayAccentDark
         case "cappuchin": return Color.cappuchinAccentDark
+        case "graphite": return Color.graphiteAccentDark
         default: return Color.matcha600
         }
     }
@@ -167,6 +173,7 @@ class AppState {
         switch appTheme {
         case "light": return Color.grayText
         case "cappuchin": return Color.cappuchinText
+        case "graphite": return Color.graphiteText
         default: return Color.white
         }
     }
@@ -177,6 +184,7 @@ class AppState {
     var themeOnAccent: Color {
         switch appTheme {
         case "cappuchin": return Color.cappuchinDark
+        case "graphite": return Color.graphiteOnAccent
         default: return Color.white
         }
     }
@@ -185,12 +193,20 @@ class AppState {
         switch appTheme {
         case "light": return Color.grayTextSecondary
         case "cappuchin": return Color.cappuchinSecondary
+        case "graphite": return Color.graphiteSecondary
         default: return Color.secondary
         }
     }
 
     var lightMode: Bool {
         return appTheme == "light"
+    }
+
+    /// Graphite — the minimalist grayscale theme. Gates the stripped-down ASCII
+    /// chrome (rule headers, `[ ]` checkboxes, flat hero) so the other three
+    /// themes keep their normal SF-Symbol styling untouched.
+    var isGraphite: Bool {
+        return appTheme == "graphite"
     }
 
     var mwBetaLite: Bool {

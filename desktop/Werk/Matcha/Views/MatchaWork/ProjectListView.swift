@@ -475,6 +475,7 @@ private struct ProjectSidebarRowContent: View {
         switch appState.appTheme {
         case "light": return Color(white: 0.35)
         case "cappuchin": return Color(white: 0.5)
+        case "graphite": return Color(white: 0.62)
         default: return Color(white: 0.72)  // dark
         }
     }

@@ -940,6 +940,7 @@ struct ThemeRadialBackground: View {
         switch appState.appTheme {
         case "light":     pair = (.grayRadialCenter, .grayRadialEdge)
         case "cappuchin": pair = (.cappuchinRadialCenter, .cappuchinRadialEdge)
+        case "graphite":  pair = (.graphiteRadialCenter, .graphiteRadialEdge)
         default:          pair = (.darkRadialCenter, .darkRadialEdge)
         }
         return RadialGradient(

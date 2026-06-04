@@ -13,6 +13,7 @@ extension Color {
         switch UserDefaults.standard.string(forKey: "mw-theme") ?? "dark" {
         case "light":     return grayBg
         case "cappuchin": return cappuchinDark
+        case "graphite":  return graphiteBg
         default:          return zinc950
         }
     }
@@ -22,6 +23,7 @@ extension Color {
         switch UserDefaults.standard.string(forKey: "mw-theme") ?? "dark" {
         case "light":     return grayCard
         case "cappuchin": return cappuchinCard
+        case "graphite":  return graphiteCard
         default:          return zinc900
         }
     }
@@ -31,6 +33,7 @@ extension Color {
         switch UserDefaults.standard.string(forKey: "mw-theme") ?? "dark" {
         case "light":     return grayBorder
         case "cappuchin": return cappuchinBorder
+        case "graphite":  return graphiteBorder
         default:          return .white.opacity(0.1)
         }
     }
@@ -63,4 +66,20 @@ extension Color {
     static let cappuchinAccentDark = Color(red: 0.70, green: 0.52, blue: 0.35)  // Latte brown #B0855A
     static let cappuchinText = Color(red: 0.95, green: 0.90, blue: 0.85)        // Milk cream #F5ECE3
     static let cappuchinSecondary = Color(red: 0.77, green: 0.71, blue: 0.65)   // Light latte text #C4B5A6
+
+    // Graphite theme — minimalist neutral grayscale. A dark-gray base with a
+    // medium-gray radial gradient (the "actual gradient" the flat dark theme
+    // lacks), a monochrome (hue-free) accent, soft off-white text, and low
+    // hairline borders. Stripped down + elegant; nothing tinted.
+    static let graphiteBg          = Color(red: 0.110, green: 0.110, blue: 0.118) // #1C1C1E neutral dark gray
+    static let graphiteCard        = Color(red: 0.149, green: 0.149, blue: 0.161) // #262629 lifted surface
+    static let graphiteSidebar     = Color(red: 0.176, green: 0.176, blue: 0.188) // #2D2D30 lighter than body (rail contrast)
+    static let graphiteBorder      = Color(red: 0.235, green: 0.235, blue: 0.251) // #3C3C40 hairline
+    static let graphiteAccent      = Color(red: 0.612, green: 0.612, blue: 0.639) // #9C9CA3 medium-light gray accent
+    static let graphiteAccentDark  = Color(red: 0.467, green: 0.467, blue: 0.490) // #77777D
+    static let graphiteText        = Color(red: 0.894, green: 0.894, blue: 0.910) // #E4E4E8 soft white
+    static let graphiteSecondary   = Color(red: 0.557, green: 0.557, blue: 0.584) // #8E8E95 medium gray
+    static let graphiteOnAccent    = Color(red: 0.110, green: 0.110, blue: 0.118) // dark text on the light-gray accent
+    static let graphiteRadialCenter = Color(red: 0.176, green: 0.176, blue: 0.188) // #2D2D30 medium-gray spotlight
+    static let graphiteRadialEdge   = Color(red: 0.086, green: 0.086, blue: 0.094) // #161618 darker edge
 }

@@ -33,9 +33,15 @@ struct SubtaskRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Button(action: onToggle) {
-                Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 13))
-                    .foregroundColor(item.isDone ? .matcha500 : .secondary)
+                if appState.isGraphite {
+                    Text(item.isDone ? "[x]" : "[ ]")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(item.isDone ? appState.themeAccent : appState.themeTextSecondary)
+                } else {
+                    Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 13))
+                        .foregroundColor(item.isDone ? .matcha500 : .secondary)
+                }
             }
             .buttonStyle(.plain)
             Text(item.title)

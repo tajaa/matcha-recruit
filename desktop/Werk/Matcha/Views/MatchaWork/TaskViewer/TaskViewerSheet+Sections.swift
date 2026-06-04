@@ -294,73 +294,127 @@ extension TaskViewerSheet {
         return true
     }
 
-    /// Prominent left-rule hero card — bigger than the old inline banners so it
-    /// reads as the single focal point.
+    /// `── LABEL ─────────` monospace rule — the graphite ASCII section header,
+    /// stretching to fill the row. Used by the hero + collapsibles in graphite.
+    func asciiRule(_ label: String) -> some View {
+        HStack(spacing: 8) {
+            Text("──")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(appState.themeTextSecondary)
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundColor(appState.themeTextSecondary)
+                .tracking(1).fixedSize()
+            Rectangle().fill(appState.themeBorder).frame(height: 1)
+        }
+    }
+
+    /// Prominent hero. Graphite: a flat ASCII rule + text (no tinted box) for the
+    /// stripped-down terminal feel. Other themes: the left-rule card.
+    @ViewBuilder
     func heroRule(color: Color, icon: String, label: String, text: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            RoundedRectangle(cornerRadius: 1.5).fill(color.opacity(0.85)).frame(width: 3)
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 5) {
-                    Image(systemName: icon).font(.system(size: 11, weight: .semibold))
-                    Text(label).font(.system(size: 10, weight: .bold)).tracking(0.6)
-                }
-                .foregroundColor(color)
+        if appState.isGraphite {
+            VStack(alignment: .leading, spacing: 6) {
+                asciiRule(label)
                 Text(text)
                     .font(.system(size: 13))
                     .foregroundColor(appState.themeText)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(alignment: .top, spacing: 10) {
+                RoundedRectangle(cornerRadius: 1.5).fill(color.opacity(0.85)).frame(width: 3)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 5) {
+                        Image(systemName: icon).font(.system(size: 11, weight: .semibold))
+                        Text(label).font(.system(size: 10, weight: .bold)).tracking(0.6)
+                    }
+                    .foregroundColor(color)
+                    Text(text)
+                        .font(.system(size: 13))
+                        .foregroundColor(appState.themeText)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.vertical, 10).padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(color.opacity(0.06)).cornerRadius(8)
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.18), lineWidth: 1))
         }
-        .padding(.vertical, 10).padding(.horizontal, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(color.opacity(0.06)).cornerRadius(8)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.18), lineWidth: 1))
     }
 
     /// Changes-requested hero — the send-back note promoted to the focal point,
     /// with the per-item denials (severity + reason) the reviewer flagged.
     /// Absorbs the old NEEDS WORK block.
+    @ViewBuilder
     func feedbackHero(_ fb: String) -> some View {
-        let color = Color.orange
-        return HStack(alignment: .top, spacing: 10) {
-            RoundedRectangle(cornerRadius: 1.5).fill(color.opacity(0.85)).frame(width: 3)
+        if appState.isGraphite {
+            // Flat ASCII — no tinted box, monochrome denials with `!` markers.
             VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 5) {
-                    Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 11, weight: .semibold))
-                    Text("DO NOW · CHANGES REQUESTED").font(.system(size: 10, weight: .bold)).tracking(0.5)
-                }
-                .foregroundColor(color)
+                asciiRule("DO NOW · CHANGES REQUESTED")
                 Text(fb)
-                    .font(.system(size: 13))
-                    .foregroundColor(appState.themeText)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .font(.system(size: 13)).foregroundColor(appState.themeText)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 if let counts = denialSeverityCounts {
-                    Text(counts).font(.system(size: 9, weight: .semibold)).foregroundColor(appState.themeText.opacity(0.6))
+                    Text(counts).font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundColor(appState.themeText.opacity(0.6))
                 }
                 ForEach(Array(reviewDenials.enumerated()), id: \.offset) { _, d in
-                    HStack(alignment: .top, spacing: 5) {
-                        Image(systemName: "xmark.square.fill").font(.system(size: 9)).foregroundColor(color.opacity(0.9))
-                        if !d.severity.isEmpty {
-                            Text(d.severity.uppercased())
-                                .font(.system(size: 7, weight: .bold)).tracking(0.3)
-                                .foregroundColor(d.severity == "blocker" ? .red : .secondary)
-                                .padding(.horizontal, 3).padding(.vertical, 1)
-                                .background((d.severity == "blocker" ? Color.red : Color.secondary).opacity(0.15))
-                                .cornerRadius(2)
-                        }
+                    HStack(alignment: .top, spacing: 6) {
+                        Text(d.severity == "blocker" ? "[!]" : "[ ]")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(appState.themeTextSecondary)
                         Text("\(d.title)\(d.reason.isEmpty ? "" : " — \(d.reason)")")
                             .font(.system(size: 11)).foregroundColor(appState.themeText.opacity(0.75))
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            let color = Color.orange
+            HStack(alignment: .top, spacing: 10) {
+                RoundedRectangle(cornerRadius: 1.5).fill(color.opacity(0.85)).frame(width: 3)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 11, weight: .semibold))
+                        Text("DO NOW · CHANGES REQUESTED").font(.system(size: 10, weight: .bold)).tracking(0.5)
+                    }
+                    .foregroundColor(color)
+                    Text(fb)
+                        .font(.system(size: 13))
+                        .foregroundColor(appState.themeText)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let counts = denialSeverityCounts {
+                        Text(counts).font(.system(size: 9, weight: .semibold)).foregroundColor(appState.themeText.opacity(0.6))
+                    }
+                    ForEach(Array(reviewDenials.enumerated()), id: \.offset) { _, d in
+                        HStack(alignment: .top, spacing: 5) {
+                            Image(systemName: "xmark.square.fill").font(.system(size: 9)).foregroundColor(color.opacity(0.9))
+                            if !d.severity.isEmpty {
+                                Text(d.severity.uppercased())
+                                    .font(.system(size: 7, weight: .bold)).tracking(0.3)
+                                    .foregroundColor(d.severity == "blocker" ? .red : .secondary)
+                                    .padding(.horizontal, 3).padding(.vertical, 1)
+                                    .background((d.severity == "blocker" ? Color.red : Color.secondary).opacity(0.15))
+                                    .cornerRadius(2)
+                            }
+                            Text("\(d.title)\(d.reason.isEmpty ? "" : " — \(d.reason)")")
+                                .font(.system(size: 11)).foregroundColor(appState.themeText.opacity(0.75))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 10).padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(color.opacity(0.06)).cornerRadius(8)
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.18), lineWidth: 1))
         }
-        .padding(.vertical, 10).padding(.horizontal, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(color.opacity(0.06)).cornerRadius(8)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.18), lineWidth: 1))
     }
 
     // MARK: - Collapsible supporting sections (Description, AI Summary)
@@ -379,20 +433,30 @@ extension TaskViewerSheet {
                 if !isOpen.wrappedValue { onFirstOpen?() }
                 withAnimation(.easeInOut(duration: 0.18)) { isOpen.wrappedValue.toggle() }
             } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: icon).font(.system(size: 10)).foregroundColor(tint)
-                    Text(title).font(.system(size: 9, weight: .semibold)).foregroundColor(tint).tracking(0.5)
-                    if let badge {
-                        Text(badge).font(.system(size: 9)).foregroundColor(.secondary)
-                            .padding(.horizontal, 5).padding(.vertical, 1)
-                            .background(appState.themeText.opacity(0.08)).cornerRadius(4)
+                if appState.isGraphite {
+                    HStack(spacing: 8) {
+                        Text(isOpen.wrappedValue ? "[-]" : "[+]")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(appState.themeTextSecondary)
+                        asciiRule(badge.map { "\(title) · \($0)" } ?? title)
                     }
-                    Spacer()
-                    Image(systemName: isOpen.wrappedValue ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 9, weight: .semibold)).foregroundColor(.secondary)
+                    .padding(.vertical, 7).frame(maxWidth: .infinity).contentShape(Rectangle())
+                } else {
+                    HStack(spacing: 6) {
+                        Image(systemName: icon).font(.system(size: 10)).foregroundColor(tint)
+                        Text(title).font(.system(size: 9, weight: .semibold)).foregroundColor(tint).tracking(0.5)
+                        if let badge {
+                            Text(badge).font(.system(size: 9)).foregroundColor(.secondary)
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(appState.themeText.opacity(0.08)).cornerRadius(4)
+                        }
+                        Spacer()
+                        Image(systemName: isOpen.wrappedValue ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 9, weight: .semibold)).foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 8).padding(.horizontal, 10).frame(maxWidth: .infinity)
+                    .background(appState.themeText.opacity(0.07)).cornerRadius(6).contentShape(Rectangle())
                 }
-                .padding(.vertical, 8).padding(.horizontal, 10).frame(maxWidth: .infinity)
-                .background(appState.themeText.opacity(0.07)).cornerRadius(6).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             if isOpen.wrappedValue { content() }
@@ -457,23 +521,31 @@ extension TaskViewerSheet {
     @ViewBuilder
     var discussionSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Image(systemName: "bubble.left.and.bubble.right")
-                    .font(.system(size: 10))
-                    .foregroundColor(.matcha500)
-                Text("DISCUSSION")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(.secondary)
-                    .tracking(0.5)
-                Text("Ask & answer clarifications")
-                    .font(.system(size: 9))
-                    .foregroundColor(.secondary.opacity(0.7))
-                if loadingHistory {
-                    ProgressView().controlSize(.small)
+            if appState.isGraphite {
+                HStack(spacing: 8) {
+                    asciiRule("DISCUSSION")
+                    if loadingHistory { ProgressView().controlSize(.small) }
+                    if currentRound > 1 { roundScopePill }
                 }
-                Spacer()
-                if currentRound > 1 {
-                    roundScopePill
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "bubble.left.and.bubble.right")
+                        .font(.system(size: 10))
+                        .foregroundColor(.matcha500)
+                    Text("DISCUSSION")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .tracking(0.5)
+                    Text("Ask & answer clarifications")
+                        .font(.system(size: 9))
+                        .foregroundColor(.secondary.opacity(0.7))
+                    if loadingHistory {
+                        ProgressView().controlSize(.small)
+                    }
+                    Spacer()
+                    if currentRound > 1 {
+                        roundScopePill
+                    }
                 }
             }
 
@@ -803,26 +875,33 @@ extension TaskViewerSheet {
     @ViewBuilder
     var checklistSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "checklist")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                Text("CHECKLIST")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(.secondary)
-                    .tracking(0.5)
-                if !subtasks.isEmpty {
-                    Text("\(subtaskDoneCount)/\(subtasks.count)")
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(appState.themeText.opacity(0.08))
-                        .cornerRadius(4)
+            if appState.isGraphite {
+                HStack(spacing: 8) {
+                    asciiRule(subtasks.isEmpty ? "CHECKLIST" : "CHECKLIST · \(subtaskDoneCount)/\(subtasks.count)")
+                    if currentRound > 1 { roundScopePill }
                 }
-                Spacer()
-                if currentRound > 1 {
-                    roundScopePill
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "checklist")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                    Text("CHECKLIST")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .tracking(0.5)
+                    if !subtasks.isEmpty {
+                        Text("\(subtaskDoneCount)/\(subtasks.count)")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(appState.themeText.opacity(0.08))
+                            .cornerRadius(4)
+                    }
+                    Spacer()
+                    if currentRound > 1 {
+                        roundScopePill
+                    }
                 }
             }
 

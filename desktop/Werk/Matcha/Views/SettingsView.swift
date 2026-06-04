@@ -37,12 +37,13 @@ private struct AppearanceSettingsTab: View {
                     Text("Dark").tag("dark")
                     Text("Light").tag("light")
                     Text("Cappuchin").tag("cappuchin")
+                    Text("Graphite").tag("graphite")
                 }
                 .pickerStyle(.radioGroup)
             } header: {
                 Text("UI Theme").font(.subheadline).bold()
             } footer: {
-                Text("Choose your preferred workspace color theme. Cappuchin provides a cozy warm coffee atmosphere.")
+                Text("Choose your preferred workspace color theme. Cappuchin provides a cozy warm coffee atmosphere; Graphite is a minimalist neutral grayscale.")
                     .font(.caption).foregroundColor(.secondary)
             }
         }
