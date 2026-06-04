@@ -8,7 +8,7 @@ const nav = [
   { to: '/admin/matcha-work', icon: Sparkles, label: 'Matcha-Work' },
   { to: '/admin/brokers', icon: Briefcase, label: 'Brokers' },
   { to: '/admin/deal-flow', icon: Calculator, label: 'Deal Flow' },
-  { to: '/admin/matcha-lite', icon: Leaf, label: 'Matcha Lite' },
+  { to: '/admin/matcha-lite', icon: Leaf, label: 'Comp Signups' },
   { to: '/admin/features', icon: ToggleRight, label: 'Business Features' },
   { to: '/admin/compliance-mgmt', icon: ShieldCheck, label: 'Compliance Mgmt' },
   { to: '/admin/jurisdictions', icon: Globe, label: 'Jurisdictions' },

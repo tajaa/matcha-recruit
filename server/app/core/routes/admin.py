@@ -9661,7 +9661,12 @@ async def create_matcha_lite_invite_token(
     body: MatchaLiteInviteRequest,
     current_user=Depends(require_admin),
 ):
-    """Generate a one-use Matcha Lite signup link that activates on registration (no Stripe)."""
+    """Generate a one-use comp signup link that activates on registration (no Stripe).
+
+    The token is tier-agnostic — the activated tier is set by which signup page
+    the link points to. We return both a Lite link and a Matcha-X link for the
+    same token; the admin sends whichever tier they're comping.
+    """
     token = secrets.token_urlsafe(48)
     base_url = get_settings().app_base_url.rstrip("/")
     async with get_connection() as conn:
@@ -9676,6 +9681,7 @@ async def create_matcha_lite_invite_token(
         "token": row["token"],
         "note": row["note"],
         "signup_url": f"{base_url}/lite/signup?invite_token={token}",
+        "signup_url_x": f"{base_url}/matcha-x/signup?invite_token={token}",
         "created_at": row["created_at"].isoformat(),
     }
 
@@ -9699,6 +9705,7 @@ async def list_matcha_lite_invite_tokens(current_user=Depends(require_admin)):
             "token": r["token"],
             "note": r["note"],
             "signup_url": f"{base_url}/lite/signup?invite_token={r['token']}",
+            "signup_url_x": f"{base_url}/matcha-x/signup?invite_token={r['token']}",
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
             "used_at": r["used_at"].isoformat() if r["used_at"] else None,
             "company_name": r["company_name"],

@@ -7,6 +7,7 @@ type InviteToken = {
   token: string
   note: string | null
   signup_url: string
+  signup_url_x: string
   created_at: string
   used_at: string | null
   company_name: string | null
@@ -16,8 +17,9 @@ export default function MatchaLiteAdmin() {
   const [tokens, setTokens] = useState<InviteToken[]>([])
   const [note, setNote] = useState('')
   const [generating, setGenerating] = useState(false)
-  const [newUrl, setNewUrl] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
+  const [newToken, setNewToken] = useState<InviteToken | null>(null)
+  // Tracks which exact URL was last copied so the right button shows the check.
+  const [copied, setCopied] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function load() {
@@ -30,10 +32,10 @@ export default function MatchaLiteAdmin() {
   async function generate() {
     setGenerating(true)
     setError(null)
-    setNewUrl(null)
+    setNewToken(null)
     try {
       const res = await api.post<InviteToken>('/admin/matcha-lite/invite-tokens', { note: note.trim() || null })
-      setNewUrl(res.signup_url)
+      setNewToken(res)
       setNote('')
       await load()
     } catch (e: unknown) {
@@ -45,8 +47,8 @@ export default function MatchaLiteAdmin() {
 
   function copyUrl(url: string) {
     navigator.clipboard.writeText(url)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    setCopied(url)
+    setTimeout(() => setCopied((c) => (c === url ? null : c)), 2000)
   }
 
   async function deleteToken(id: string) {
@@ -57,7 +59,11 @@ export default function MatchaLiteAdmin() {
 
   return (
     <div className="p-6 max-w-3xl">
-      <h1 className="text-xl font-semibold text-zinc-100 mb-6">Matcha Lite — Signup Links</h1>
+      <h1 className="text-xl font-semibold text-zinc-100 mb-1">Comp Signup Links</h1>
+      <p className="text-sm text-zinc-500 mb-6">
+        One-use links that activate an account without Stripe. Each token works for either tier —
+        send the <span className="text-emerald-300">Lite</span> or <span className="text-teal-300">Matcha-X</span> link.
+      </p>
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-4 mb-6">
         <h2 className="text-sm font-medium text-zinc-300 mb-3">Generate signup link</h2>
@@ -79,15 +85,10 @@ export default function MatchaLiteAdmin() {
           </button>
         </div>
         {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
-        {newUrl && (
-          <div className="mt-3 flex items-center gap-2 bg-zinc-800 rounded px-3 py-2">
-            <span className="flex-1 text-xs text-zinc-300 truncate font-mono">{newUrl}</span>
-            <button
-              onClick={() => copyUrl(newUrl)}
-              className="text-zinc-400 hover:text-zinc-100 transition-colors shrink-0"
-            >
-              {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-            </button>
+        {newToken && (
+          <div className="mt-3 space-y-2">
+            <LinkRow label="Lite" url={newToken.signup_url} copied={copied} onCopy={copyUrl} />
+            <LinkRow label="Matcha-X" url={newToken.signup_url_x} copied={copied} onCopy={copyUrl} />
           </div>
         )}
       </div>
@@ -126,13 +127,8 @@ export default function MatchaLiteAdmin() {
                 <td className="px-4 py-3 text-right">
                   {!t.used_at && (
                     <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => copyUrl(t.signup_url)}
-                        className="text-zinc-400 hover:text-zinc-100 transition-colors"
-                        title="Copy signup URL"
-                      >
-                        <Copy className="w-4 h-4" />
-                      </button>
+                      <CopyChip label="Lite" url={t.signup_url} copied={copied} onCopy={copyUrl} />
+                      <CopyChip label="X" url={t.signup_url_x} copied={copied} onCopy={copyUrl} />
                       <button
                         onClick={() => deleteToken(t.id)}
                         className="text-zinc-600 hover:text-red-400 transition-colors"
@@ -149,5 +145,53 @@ export default function MatchaLiteAdmin() {
         </table>
       </div>
     </div>
+  )
+}
+
+function LinkRow({
+  label,
+  url,
+  copied,
+  onCopy,
+}: {
+  label: string
+  url: string
+  copied: string | null
+  onCopy: (url: string) => void
+}) {
+  return (
+    <div className="flex items-center gap-2 bg-zinc-800 rounded px-3 py-2">
+      <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-14 shrink-0">{label}</span>
+      <span className="flex-1 text-xs text-zinc-300 truncate font-mono">{url}</span>
+      <button
+        onClick={() => onCopy(url)}
+        className="text-zinc-400 hover:text-zinc-100 transition-colors shrink-0"
+      >
+        {copied === url ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+      </button>
+    </div>
+  )
+}
+
+function CopyChip({
+  label,
+  url,
+  copied,
+  onCopy,
+}: {
+  label: string
+  url: string
+  copied: string | null
+  onCopy: (url: string) => void
+}) {
+  return (
+    <button
+      onClick={() => onCopy(url)}
+      className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-100 border border-zinc-700 rounded px-1.5 py-0.5 transition-colors"
+      title={`Copy ${label} signup URL`}
+    >
+      {copied === url ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+      {label}
+    </button>
   )
 }
