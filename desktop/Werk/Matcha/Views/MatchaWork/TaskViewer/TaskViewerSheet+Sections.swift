@@ -192,83 +192,250 @@ extension TaskViewerSheet {
         }
     }
 
-    @ViewBuilder
-    var stateBanner: some View {
+    // (Former `stateBanner` removed — folded into `metaLine` during the
+    // action-first reorg; `currentPhase`/`StatePhase` above are still used.)
+
+    // MARK: - Reorganized header: one meta line, one directive hero
+
+    /// Single status line — folds the old status/priority pills AND the
+    /// "YOU ARE HERE" banner into one row so the top of the sheet isn't three
+    /// stacked status blocks. Phase (colored) · priority · assignee · round ·
+    /// time-in-review.
+    var metaLine: some View {
         let p = currentPhase
-        HStack(spacing: 10) {
-            Image(systemName: p.icon)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(p.color)
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
-                    Text("YOU ARE HERE")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundColor(.secondary)
-                        .tracking(0.7)
-                    Text("·")
-                        .font(.system(size: 8))
-                        .foregroundColor(.secondary)
-                    Text(p.label)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(p.color)
-                }
-                if !p.owner.isEmpty {
-                    Text(p.owner)
-                        .font(.system(size: 10))
-                        .foregroundColor(appState.themeText.opacity(0.7))
-                }
+        return HStack(spacing: 8) {
+            HStack(spacing: 4) {
+                Image(systemName: p.icon).font(.system(size: 9, weight: .semibold))
+                Text(p.label).font(.system(size: 10, weight: .semibold))
             }
-            Spacer()
-            // Time-in-review nudge — orange once it's been sitting ~3+ days.
+            .foregroundColor(p.color)
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(p.color.opacity(0.14)).cornerRadius(4)
+
+            metaPill(label: task.priority.capitalized, color: .secondary)
+            if let due = task.dueDate, !due.isEmpty {
+                metaPill(label: "Due \(String(due.prefix(10)))", color: .secondary)
+            }
+            assigneeMenu
+            if currentRound > 0 {
+                Text("Round \(currentRound)")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
             if let days = daysInReview {
                 HStack(spacing: 2) {
                     Image(systemName: "clock").font(.system(size: 8))
-                    Text(days <= 0 ? "In review today" : "In review \(days)d")
+                    Text(days <= 0 ? "review today" : "review \(days)d")
                         .font(.system(size: 9, weight: .medium))
                 }
                 .foregroundColor(days >= 3 ? .orange : .secondary)
             }
-            // Round number comes from the subtasks (currentRound), not the
-            // history feed — so it shows the moment the ticket opens, without
-            // forcing the now-lazy history fetch.
-            if currentRound > 0 {
-                Text("Round \(currentRound)")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(p.color)
+            if let elName = task.elementName
+                ?? viewModel.elements.first(where: { $0.id == task.elementId })?.name {
+                HStack(spacing: 3) {
+                    Image(systemName: "square.stack.3d.up.fill").font(.system(size: 8))
+                    Text(elName).font(.system(size: 9, weight: .semibold))
+                }
+                .foregroundColor(.matcha500)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.matcha500.opacity(0.15)).cornerRadius(3)
             }
+            Spacer(minLength: 0)
         }
-        .padding(.vertical, 6)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        // Color lives in the text/icon, not a filled banner. A hairline keeps
-        // the status separated from the body without another tinted box.
-        .overlay(
-            Rectangle().frame(height: 1).foregroundColor(appState.themeText.opacity(0.06)),
-            alignment: .bottom
-        )
     }
 
-    // MARK: - Rounds (foreground latest-update card)
-
-    /// The latest round rendered inline in the foreground — surfaces the current
-    /// changes-requested + "fixed in round N-1" so the user doesn't have to
-    /// expand History to see what changed. Multi-round tickets only.
+    /// THE one salient block: what to do right now, chosen by phase. A send-back
+    /// is the directive when present; otherwise the review prompt, the progress
+    /// note, or (fresh ticket) the brief. Everything else on the sheet is
+    /// supporting detail below this.
     @ViewBuilder
-    var currentRoundCard: some View {
-        if rounds.count > 1, let current = rounds.last {
+    var directiveHero: some View {
+        let fb = task.reviewNote?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !fb.isEmpty && ["changes_requested", "in_progress", "todo"].contains(task.boardColumn) {
+            feedbackHero(fb)
+        } else if task.boardColumn == "review" {
+            VStack(alignment: .leading, spacing: 8) {
+                heroRule(color: .blue, icon: "magnifyingglass.circle.fill",
+                         label: "DO NOW · REVIEW",
+                         text: "Assess this submission, then Approve or Send back below.")
+                reviewDeltaSection
+            }
+        } else if task.boardColumn == "in_progress",
+                  let pn = task.progressNote?.trimmingCharacters(in: .whitespacesAndNewlines), !pn.isEmpty {
+            heroRule(color: .matcha500, icon: "hammer.fill", label: "WHERE WE'RE AT", text: pn)
+        } else if task.boardColumn == "done" {
+            heroRule(color: .matcha500, icon: "checkmark.seal.fill", label: "DONE", text: "This ticket is closed.")
+        } else if descriptionIsHero {
+            // No more-specific directive (fresh/no-note ticket) → the brief is
+            // the directive. Phase-colored so it still reads as the current state.
+            heroRule(color: currentPhase.color, icon: "doc.text", label: "THE BRIEF",
+                     text: task.description!.trimmingCharacters(in: .whitespacesAndNewlines))
+        } else {
+            // No feedback, no progress note, no description → don't leave a blank
+            // hole; show the phase + owner so the sheet still answers "where is
+            // this and whose move is it?" (the old stateBanner's job).
+            heroRule(color: currentPhase.color, icon: currentPhase.icon,
+                     label: currentPhase.label.uppercased(),
+                     text: currentPhase.owner.isEmpty ? "No details yet." : currentPhase.owner)
+        }
+    }
+
+    /// True when the description is used AS the directive hero (no more-specific
+    /// directive applies) — so the Description collapsible is skipped to avoid
+    /// showing it twice. Mirrors the fall-through branch in `directiveHero`.
+    var descriptionIsHero: Bool {
+        let fb = task.reviewNote?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard task.description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else { return false }
+        if !fb.isEmpty && ["changes_requested", "in_progress", "todo"].contains(task.boardColumn) { return false }
+        if task.boardColumn == "review" { return false }
+        if task.boardColumn == "in_progress",
+           let pn = task.progressNote?.trimmingCharacters(in: .whitespacesAndNewlines), !pn.isEmpty { return false }
+        if task.boardColumn == "done" { return false }
+        return true
+    }
+
+    /// Prominent left-rule hero card — bigger than the old inline banners so it
+    /// reads as the single focal point.
+    func heroRule(color: Color, icon: String, label: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            RoundedRectangle(cornerRadius: 1.5).fill(color.opacity(0.85)).frame(width: 3)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 5) {
+                    Image(systemName: icon).font(.system(size: 11, weight: .semibold))
+                    Text(label).font(.system(size: 10, weight: .bold)).tracking(0.6)
+                }
+                .foregroundColor(color)
+                Text(text)
+                    .font(.system(size: 13))
+                    .foregroundColor(appState.themeText)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 10).padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.06)).cornerRadius(8)
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.18), lineWidth: 1))
+    }
+
+    /// Changes-requested hero — the send-back note promoted to the focal point,
+    /// with the per-item denials (severity + reason) the reviewer flagged.
+    /// Absorbs the old NEEDS WORK block.
+    func feedbackHero(_ fb: String) -> some View {
+        let color = Color.orange
+        return HStack(alignment: .top, spacing: 10) {
+            RoundedRectangle(cornerRadius: 1.5).fill(color.opacity(0.85)).frame(width: 3)
             VStack(alignment: .leading, spacing: 6) {
-                Text("LATEST UPDATE · ROUND \(current.index)")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(.matcha500)
-                    .tracking(0.5)
-                RoundView(
-                    round: current,
-                    previousFixed: rounds[rounds.count - 2].fixedSubtaskTitles,
-                    files: attachments,
-                    onPreview: { previewFile = $0 }
-                )
+                HStack(spacing: 5) {
+                    Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 11, weight: .semibold))
+                    Text("DO NOW · CHANGES REQUESTED").font(.system(size: 10, weight: .bold)).tracking(0.5)
+                }
+                .foregroundColor(color)
+                Text(fb)
+                    .font(.system(size: 13))
+                    .foregroundColor(appState.themeText)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let counts = denialSeverityCounts {
+                    Text(counts).font(.system(size: 9, weight: .semibold)).foregroundColor(appState.themeText.opacity(0.6))
+                }
+                ForEach(Array(reviewDenials.enumerated()), id: \.offset) { _, d in
+                    HStack(alignment: .top, spacing: 5) {
+                        Image(systemName: "xmark.square.fill").font(.system(size: 9)).foregroundColor(color.opacity(0.9))
+                        if !d.severity.isEmpty {
+                            Text(d.severity.uppercased())
+                                .font(.system(size: 7, weight: .bold)).tracking(0.3)
+                                .foregroundColor(d.severity == "blocker" ? .red : .secondary)
+                                .padding(.horizontal, 3).padding(.vertical, 1)
+                                .background((d.severity == "blocker" ? Color.red : Color.secondary).opacity(0.15))
+                                .cornerRadius(2)
+                        }
+                        Text("\(d.title)\(d.reason.isEmpty ? "" : " — \(d.reason)")")
+                            .font(.system(size: 11)).foregroundColor(appState.themeText.opacity(0.75))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 10).padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(color.opacity(0.06)).cornerRadius(8)
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.18), lineWidth: 1))
+    }
+
+    // MARK: - Collapsible supporting sections (Description, AI Summary)
+
+    /// Generic disclosure row mirroring `historyToggle` so supporting context
+    /// (description, AI summary) sits one click away instead of crowding the
+    /// directive. Closed by default.
+    @ViewBuilder
+    func collapsibleSection<Content: View>(
+        icon: String, title: String, badge: String? = nil, tint: Color = .secondary,
+        isOpen: Binding<Bool>, onFirstOpen: (() -> Void)? = nil,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                if !isOpen.wrappedValue { onFirstOpen?() }
+                withAnimation(.easeInOut(duration: 0.18)) { isOpen.wrappedValue.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: icon).font(.system(size: 10)).foregroundColor(tint)
+                    Text(title).font(.system(size: 9, weight: .semibold)).foregroundColor(tint).tracking(0.5)
+                    if let badge {
+                        Text(badge).font(.system(size: 9)).foregroundColor(.secondary)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(appState.themeText.opacity(0.08)).cornerRadius(4)
+                    }
+                    Spacer()
+                    Image(systemName: isOpen.wrappedValue ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 9, weight: .semibold)).foregroundColor(.secondary)
+                }
+                .padding(.vertical, 8).padding(.horizontal, 10).frame(maxWidth: .infinity)
+                .background(appState.themeText.opacity(0.07)).cornerRadius(6).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if isOpen.wrappedValue { content() }
+        }
+    }
+
+    /// Description behind a ▸ toggle (unless it's already the hero on a fresh
+    /// ticket).
+    @ViewBuilder
+    var descriptionCollapsible: some View {
+        if !descriptionIsHero,
+           let desc = task.description?.trimmingCharacters(in: .whitespacesAndNewlines), !desc.isEmpty {
+            collapsibleSection(icon: "doc.text", title: "DESCRIPTION", isOpen: $showDescription) {
+                ScrollView {
+                    Text(desc)
+                        .font(.system(size: 13)).foregroundColor(appState.themeText.opacity(0.85))
+                        .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                }
+                .frame(maxHeight: 220).padding(10)
+                .background(appState.themeText.opacity(0.07)).cornerRadius(6)
             }
         }
     }
+
+    /// AI catch-up summary behind a ▸ toggle. Only appears once generated (the
+    /// sparkle button fills it and auto-expands). Closed on a later reopen.
+    @ViewBuilder
+    var aiSummaryCollapsible: some View {
+        if let summary = viewModel.taskSummaries[task.id], !summary.isEmpty {
+            collapsibleSection(icon: "sparkles", title: "AI SUMMARY", tint: .matcha500, isOpen: $showSummary) {
+                Text(summary)
+                    .font(.system(size: 12)).foregroundColor(appState.themeText.opacity(0.9))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 2)
+            }
+        }
+    }
+
+    // MARK: - Rounds (round-scope pill)
+
+    // (Former `currentRoundCard` removed — the latest-round detail now lives in
+    // the collapsed History, which includes the current round.)
 
     /// Small "Round N" chip marking a foreground section as scoped to the live
     /// round, so it's explicit the body is showing the current round's work.
@@ -395,9 +562,11 @@ extension TaskViewerSheet {
             // Within each round events stay chronological (oldest → newest).
             // `previousFixed` threads the prior round's completed subtask
             // titles forward so round N+1 shows "Fixed in Round N · …".
-            // The current round is surfaced inline (currentRoundCard), so History
-            // keeps the prior rounds only — no duplication.
-            let historyRounds = rounds.count > 1 ? Array(rounds.dropLast()) : rounds
+            // Show ALL rounds here (newest-first). The latest round used to be a
+            // separate inline "LATEST UPDATE" card; the reorg folded it into this
+            // collapsed History, so it must include the current round or the
+            // round detail would show nowhere.
+            let historyRounds = rounds
             let reversed = Array(historyRounds.reversed())
             ForEach(Array(reversed.enumerated()), id: \.element.id) { idx, round in
                 // `reversed` is newest-first; the round AFTER this one in

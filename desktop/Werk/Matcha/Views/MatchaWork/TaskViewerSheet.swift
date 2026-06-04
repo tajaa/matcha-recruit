@@ -32,6 +32,9 @@ struct TaskViewerSheet: View {
     /// guards that one-time fetch; the rounds/audit feed stays collapsed behind
     /// `showHistory` so the audit trail is opt-in, not in the way.
     @State var showHistory = false
+    /// Supporting context collapsed by default so the directive + checklist lead.
+    @State var showDescription = false
+    @State var showSummary = false
     @State var historyLoaded = false
     @State var loadingHistory = false
     /// Earlier-round attachments tuck behind a disclosure so the foreground
@@ -222,6 +225,9 @@ struct TaskViewerSheet: View {
                         isSummarizing = true
                         await viewModel.summarizeTask(taskId: task.id)
                         isSummarizing = false
+                        // Auto-expand the (otherwise collapsed) AI Summary so the
+                        // user sees the result of their click.
+                        withAnimation(.easeInOut(duration: 0.18)) { showSummary = true }
                     }
                 } label: {
                     if isSummarizing {
@@ -243,25 +249,9 @@ struct TaskViewerSheet: View {
                 .buttonStyle(.plain)
             }
 
-            HStack(spacing: 6) {
-                metaPill(label: columnLabel, color: .matcha500)
-                metaPill(label: task.priority.capitalized, color: .secondary)
-                if let due = task.dueDate, !due.isEmpty {
-                    metaPill(label: "Due \(String(due.prefix(10)))", color: .secondary)
-                }
-                assigneeMenu
-                if let elName = task.elementName
-                    ?? viewModel.elements.first(where: { $0.id == task.elementId })?.name {
-                    HStack(spacing: 3) {
-                        Image(systemName: "square.stack.3d.up.fill").font(.system(size: 8))
-                        Text(elName).font(.system(size: 9, weight: .semibold))
-                    }
-                    .foregroundColor(.matcha500)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(Color.matcha500.opacity(0.15)).cornerRadius(3)
-                }
-                Spacer()
-            }
+            // One status line — folds the old status/priority pills and the
+            // "you are here" banner together so the top isn't a stack of blocks.
+            metaLine
 
             if PacificDateFormatter.absolute(task.createdAt) != nil
                 || PacificDateFormatter.absolute(task.lastMovedAt) != nil {
@@ -278,144 +268,20 @@ struct TaskViewerSheet: View {
                 .foregroundColor(.secondary)
             }
 
-            // AI catch-up summary (1-click, Gemini Flash Lite). Up top so a
-            // collaborator landing on the ticket gets oriented before reading
-            // the rounds/history. Ephemeral — regenerated on each click.
-            if let summary = viewModel.taskSummaries[task.id], !summary.isEmpty {
-                HStack(alignment: .top, spacing: 8) {
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(Color.matcha500.opacity(0.7))
-                        .frame(width: 2)
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 9))
-                            Text("SUMMARY")
-                                .font(.system(size: 9, weight: .semibold))
-                                .tracking(0.5)
-                        }
-                        .foregroundColor(.matcha500)
-                        Text(summary)
-                            .font(.system(size: 12))
-                            .foregroundColor(appState.themeText.opacity(0.9))
-                            .textSelection(.enabled)
-                    }
-                }
-                .padding(.vertical, 2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            // "You are here" banner — at-a-glance answer to "what state is
-            // this ticket in and who owns the next move?" Anchors the rest
-            // of the sheet (rounds, checklist) so the reader doesn't have
-            // to reason from column chips + history to figure it out.
-            stateBanner
-
-            // On a re-review, surface only what changed this round.
-            reviewDeltaSection
-
-            if let note = task.reviewNote?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !note.isEmpty,
-               task.boardColumn == "changes_requested" || task.boardColumn == "in_progress"
-                || task.boardColumn == "todo" {
-                HStack(alignment: .top, spacing: 8) {
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(Color.orange.opacity(0.7))
-                        .frame(width: 2)
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: 10))
-                            Text("NEEDS WORK")
-                                .font(.system(size: 9, weight: .semibold))
-                                .tracking(0.5)
-                        }
-                        .foregroundColor(.orange)
-                        Text(note)
-                            .font(.system(size: 12))
-                            .foregroundColor(appState.themeText.opacity(0.9))
-                            .textSelection(.enabled)
-                        // Severity tally for the denials this cycle.
-                        if let counts = denialSeverityCounts {
-                            Text(counts)
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundColor(appState.themeText.opacity(0.6))
-                        }
-                        // In-review audit: the specific items the reviewer denied
-                        // this cycle (still open), each with its severity + reason.
-                        ForEach(Array(reviewDenials.enumerated()), id: \.offset) { _, d in
-                            HStack(alignment: .top, spacing: 5) {
-                                Image(systemName: "xmark.square.fill")
-                                    .font(.system(size: 9))
-                                    .foregroundColor(.orange.opacity(0.9))
-                                if !d.severity.isEmpty {
-                                    Text(d.severity.uppercased())
-                                        .font(.system(size: 7, weight: .bold)).tracking(0.3)
-                                        .foregroundColor(d.severity == "blocker" ? .red : .secondary)
-                                        .padding(.horizontal, 3).padding(.vertical, 1)
-                                        .background((d.severity == "blocker" ? Color.red : Color.secondary).opacity(0.15))
-                                        .cornerRadius(2)
-                                }
-                                Text("\(d.title)\(d.reason.isEmpty ? "" : " — \(d.reason)")")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(appState.themeText.opacity(0.75))
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                    }
-                }
-                .padding(.vertical, 2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            // The latest round, surfaced up top so the current changes-requested
-            // + what got fixed is obvious without expanding History (the review
-            // note is cleared server-side on re-submit; History is the durable
-            // record). Hidden on single-round tickets.
-            currentRoundCard
-
-            if let description = task.description, !description.isEmpty {
-                ScrollView {
-                    Text(description)
-                        .font(.system(size: 13))
-                        .foregroundColor(appState.themeText.opacity(0.85))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                }
-                .frame(maxHeight: 220)
-                .padding(10)
-                .background(appState.themeText.opacity(0.07))
-                .cornerRadius(6)
-            }
-
-            if let progress = task.progressNote, !progress.isEmpty {
-                HStack(alignment: .top, spacing: 8) {
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(Color.matcha500.opacity(0.7))
-                        .frame(width: 2)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("WHERE WE'RE AT")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.matcha500)
-                            .tracking(0.5)
-                        Text(progress)
-                            .font(.system(size: 12))
-                            .foregroundColor(appState.themeText.opacity(0.9))
-                            .textSelection(.enabled)
-                    }
-                }
-                .padding(.vertical, 2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            // THE directive — the single salient "do this now", chosen by phase
+            // (send-back, review prompt, progress note, or the brief). Everything
+            // below this is supporting detail.
+            directiveHero
 
             if viewMode == .list {
-                // New section order matches how a ticket actually gets finished:
-                // concrete remaining work first (checklist), then a unified
-                // round-grouped discussion feed (notes + subtask events + status
-                // moves, organized by review-cycle round so each "send back →
-                // rework → re-review" pass reads as one block), then the
-                // task-level file dump.
+                // Action-first order: the concrete steps to clear this round sit
+                // directly under the directive hero.
                 checklistSection
+
+                // Supporting context, collapsed by default (one click away) so it
+                // doesn't crowd the directive: the brief, then the AI catch-up.
+                descriptionCollapsible
+                aiSummaryCollapsible
 
                 // Discussion: the always-on in-ticket Q&A thread (composer + notes).
                 // Available in every column — clarifying questions shouldn't sit
