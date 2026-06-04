@@ -221,10 +221,22 @@ async def log_task_activity(
     return {"ok": True, "kind": kind}
 
 
-async def list_project_tasks(project_id: UUID) -> list[dict]:
+async def list_project_tasks(project_id: UUID, viewer_id: Optional[UUID] = None) -> list[dict]:
     # Inline the counted-event literals (code constants, not user input) so the
     # badge subqueries stay in lock-step with COUNTED_UPDATE_EVENTS.
     _counted = ", ".join(f"'{e}'" for e in COUNTED_UPDATE_EVENTS)
+    # Exclude the viewer's OWN history events from the unviewed-updates badge +
+    # count: your own move/comment isn't "an update you haven't seen", so a
+    # reviewer who drags a ticket to Done shouldn't then see it ringed yellow.
+    # NULL viewer_id (no user context) counts every actor. Applied to both the
+    # count and the id list so they stay consistent.
+    params: list = [project_id]
+    if viewer_id is not None:
+        params.append(viewer_id)
+        _self3 = "AND h3.actor_user_id IS DISTINCT FROM $2"
+        _self4 = "AND h4.actor_user_id IS DISTINCT FROM $2"
+    else:
+        _self3 = _self4 = ""
     async with get_connection() as conn:
         rows = await conn.fetch(
             f"""
@@ -269,10 +281,12 @@ async def list_project_tasks(project_id: UUID) -> list[dict]:
                    -- history per card. Capped at 100 (overflow is cosmetic).
                    (SELECT COUNT(*) FROM mw_task_history h3
                       WHERE h3.task_id = t.id
-                        AND h3.event_type IN ({_counted})) AS update_count,
+                        AND h3.event_type IN ({_counted})
+                        {_self3}) AS update_count,
                    ARRAY(SELECT h4.id::text FROM mw_task_history h4
                       WHERE h4.task_id = t.id
                         AND h4.event_type IN ({_counted})
+                        {_self4}
                       ORDER BY h4.created_at DESC
                       LIMIT 100) AS recent_event_ids,
                    -- Split assignee fields so the client can pick a
@@ -297,7 +311,7 @@ async def list_project_tasks(project_id: UUID) -> list[dict]:
                 END,
                 t.created_at DESC
             """,
-            project_id,
+            *params,
         )
     return [_row_to_task(dict(r)) for r in rows]
 

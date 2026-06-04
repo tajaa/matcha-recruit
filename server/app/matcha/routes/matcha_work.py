@@ -3106,7 +3106,7 @@ async def get_project_bundle_endpoint(
     async def _tasks_with_attachments() -> list[dict]:
         # Mirror list_project_tasks_endpoint: embed presigned attachments per
         # task so kanban cards render thumbnails without N+1 follow-ups.
-        tasks = await pt_svc.list_project_tasks(project_id)
+        tasks = await pt_svc.list_project_tasks(project_id, viewer_id=current_user.id)
         if not tasks:
             return tasks
         task_ids = [UUID(t["id"]) for t in tasks if t.get("id")]
@@ -4242,7 +4242,7 @@ async def list_project_tasks_endpoint(
     from ..services import project_task_service as pt_svc
     from ..services import project_file_service
     await _verify_project_access(project_id, current_user)
-    tasks = await pt_svc.list_project_tasks(project_id)
+    tasks = await pt_svc.list_project_tasks(project_id, viewer_id=current_user.id)
     if not tasks:
         return tasks
     task_ids = [UUID(t["id"]) for t in tasks if t.get("id")]

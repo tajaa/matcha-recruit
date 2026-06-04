@@ -186,6 +186,22 @@ struct KanbanBoardView: View {
         saveLastSeen(pid, baseline)
     }
 
+    /// This user moved the card themselves → record it as "seen" at its new
+    /// column so the replay diff on the next board open doesn't re-flag (and
+    /// re-animate) their own move with a yellow ring. By definition a reviewer
+    /// who drags a ticket to Done has already looked at it. The unviewed-updates
+    /// side is handled server-side — the viewer's own history events are excluded
+    /// from the card's recent_event_ids.
+    private func noteSelfMove(_ taskId: String, to column: String) {
+        if changedIds.contains(taskId) {
+            _ = changedIds.remove(taskId)
+        }
+        guard let pid = viewModel.project?.id else { return }
+        var baseline = loadLastSeen(pid)
+        baseline[taskId] = column
+        saveLastSeen(pid, baseline)
+    }
+
     /// Open a ticket's viewer when chat asked us to (a ticket chip click /
     /// "Go to ticket"). Waits until the task is loaded, then clears the request.
     private func openPendingTaskIfPossible() {
@@ -674,6 +690,7 @@ struct KanbanBoardView: View {
                     await viewModel.movePipelineTask(id: taskId, toStage: key)
                 } else {
                     await viewModel.moveTask(id: taskId, toColumn: key)
+                    noteSelfMove(taskId, to: key)
                 }
             }
             return true
@@ -707,6 +724,7 @@ struct KanbanBoardView: View {
                                 await viewModel.movePipelineTask(id: task.id, toStage: col)
                             } else {
                                 await viewModel.moveTask(id: task.id, toColumn: col)
+                                noteSelfMove(task.id, to: col)
                             }
                         }
                     }
