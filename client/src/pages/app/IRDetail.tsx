@@ -18,7 +18,7 @@ import { IRCategoryDataDisplay } from '../../components/ir/IRCategoryDataDisplay
 import IRCopilotPanel from '../../components/ir/IRCopilotPanel'
 import { UpgradeUpsellCard } from '../../components/UpgradeUpsellCard'
 import { useMe } from '../../hooks/useMe'
-import { isIrOnlyTier } from '../../utils/tier'
+import { isIrOnlyTier, isMatchaX } from '../../utils/tier'
 import {
   typeLabel, statusLabel, severityLabel,
   SEVERITY_BADGE, STATUS_BADGE, SEVERITY_OPTIONS, PERSON_ROLE_LABEL,
@@ -47,7 +47,8 @@ export default function IRDetail() {
   const showPolicyMapping = hasFeature('policies')
   const showERFeatures = hasFeature('er_copilot')
   const showUpsell = !showPolicyMapping || !showERFeatures
-  const liteTier = isIrOnlyTier(me?.profile)
+  // Matcha-X is at Lite parity for IR — same restricted tab set.
+  const liteTier = isIrOnlyTier(me?.profile) || isMatchaX(me?.profile)
   const tabs: readonly Tab[] = liteTier ? LITE_TABS : FULL_TABS
   const navigate = useNavigate()
   const { incident, loading, error, updateIncident, deleteIncident, refetch } = useIRIncident(incidentId!)

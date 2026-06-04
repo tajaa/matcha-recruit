@@ -1217,6 +1217,8 @@ async def derive_signup_tags(source: str, user_id: Optional[UUID]) -> list[str]:
                 slugs.append("tier-free")
             elif row["signup_source"] == "matcha_lite":
                 slugs.append("tier-lite")
+            elif row["signup_source"] == "matcha_x":
+                slugs.append("tier-x")
             else:
                 slugs.append("tier-platform")
 

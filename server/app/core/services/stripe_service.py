@@ -73,6 +73,18 @@ def matcha_lite_price_cents(headcount: int) -> Optional[int]:
     return math.ceil(headcount / 10) * 10_000
 
 
+def matcha_x_price_cents(headcount: int) -> Optional[int]:
+    """Monthly price for Matcha-X (mid tier) in cents. None if headcount < 1 or > 300.
+
+    TODO: set the real Matcha-X price (target ~$8–10/seat direct). Currently
+    mirrors Lite's $100/mo-per-10-employees formula so the flow works
+    end-to-end; adjust this formula once mid-tier pricing is finalized.
+    """
+    if headcount < 1 or headcount > 300:
+        return None
+    return math.ceil(headcount / 10) * 10_000
+
+
 class StripeServiceError(Exception):
     """Raised when Stripe operations fail or are misconfigured."""
 
@@ -386,6 +398,67 @@ class StripeService:
             return await asyncio.to_thread(_create)
         except Exception as exc:
             raise StripeServiceError(f"Failed to create Matcha Lite checkout: {exc}") from exc
+
+    async def create_matcha_x_checkout(
+        self,
+        company_id: UUID,
+        headcount: int,
+        success_url: Optional[str] = None,
+        cancel_url: Optional[str] = None,
+    ):
+        """Subscription checkout for Matcha-X (mid tier) priced by headcount.
+
+        Clone of create_matcha_lite_checkout — see matcha_x_price_cents for the
+        pricing stub. Headcount > 300 is rejected (contact sales). The webhook
+        catches metadata.type == 'matcha_x' and activates incidents.
+        """
+        self._ensure_secret_key()
+
+        amount_cents = matcha_x_price_cents(headcount)
+        if amount_cents is None:
+            raise StripeServiceError("Headcount over 300 — please contact us for pricing")
+
+        resolved_success_url = success_url or self.settings.stripe_success_url
+        resolved_cancel_url = cancel_url or self.settings.stripe_cancel_url
+
+        metadata = {
+            "company_id": str(company_id),
+            "type": "matcha_x",
+            "headcount": str(headcount),
+            "mode": "subscription",
+        }
+
+        def _create():
+            return stripe.checkout.Session.create(
+                mode="subscription",
+                success_url=resolved_success_url,
+                cancel_url=resolved_cancel_url,
+                payment_method_types=["card"],
+                metadata=metadata,
+                subscription_data={"metadata": metadata},
+                line_items=[
+                    {
+                        "price_data": {
+                            "currency": "usd",
+                            "unit_amount": amount_cents,
+                            "recurring": {"interval": "month"},
+                            "product_data": {
+                                "name": "Matcha-X",
+                                "description": (
+                                    f"Incident reporting + HR records + discipline "
+                                    f"({headcount} employee{'s' if headcount != 1 else ''}). Auto-renews monthly."
+                                ),
+                            },
+                        },
+                        "quantity": 1,
+                    }
+                ],
+            )
+
+        try:
+            return await asyncio.to_thread(_create)
+        except Exception as exc:
+            raise StripeServiceError(f"Failed to create Matcha-X checkout: {exc}") from exc
 
     async def create_recruiter_tier_checkout(
         self,

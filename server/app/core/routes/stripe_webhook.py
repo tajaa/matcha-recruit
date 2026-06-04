@@ -246,8 +246,12 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                 except Exception as exc:
                     logger.error("Failed to fulfill IR upgrade for %s: %s", company_id_str, exc)
 
-        elif session_mode == "subscription" and meta.get("type") == "matcha_lite":
-            # ── Matcha Lite signup payment ─────────────────────────────────
+        elif session_mode == "subscription" and meta.get("type") in ("matcha_lite", "matcha_x"):
+            # ── Matcha Lite / Matcha-X signup payment ──────────────────────
+            # Both flip `incidents` on; the only differences are the
+            # subscription pack_id (used by the cancel handler) and log copy.
+            _tier_type = meta.get("type")
+            _tier_label = "Matcha-X" if _tier_type == "matcha_x" else "Matcha Lite"
             company_id_str = meta.get("company_id") or ""
             stripe_sub_id = str(event_object.get("subscription") or "")
             stripe_customer_id = str(event_object.get("customer") or "")
@@ -304,7 +308,7 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                             company_id=company_id,
                             stripe_subscription_id=stripe_sub_id,
                             stripe_customer_id=stripe_customer_id,
-                            pack_id="matcha_lite",
+                            pack_id=_tier_type,
                             credits_per_cycle=0,
                             amount_cents=0,
                         )
@@ -324,11 +328,11 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                                 company_id_str, email_exc,
                             )
                     logger.info(
-                        "Matcha Lite activated: company=%s sub=%s",
-                        company_id_str, stripe_sub_id,
+                        "%s activated: company=%s sub=%s",
+                        _tier_label, company_id_str, stripe_sub_id,
                     )
                 except Exception as exc:
-                    logger.error("Failed to activate Matcha Lite for %s: %s", company_id_str, exc)
+                    logger.error("Failed to activate %s for %s: %s", _tier_label, company_id_str, exc)
 
         elif session_mode == "subscription" and is_channel_event:
             # ── Channel subscription checkout ────────────────────────────
@@ -565,7 +569,10 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                 if sub and sub["pack_id"] == token_budget_service.SUBSCRIPTION_PACK_ID:
                     await token_budget_service.cancel_subscription_budget(sub["company_id"])
                     logger.info("Token budget zeroed for company %s", sub["company_id"])
-                elif sub and sub["pack_id"] == "matcha_lite":
+                elif sub and sub["pack_id"] in ("matcha_lite", "matcha_x"):
+                    # Both tiers gate the same headline feature (incidents);
+                    # cancellation flips it off identically.
+                    _tier_label = "Matcha-X" if sub["pack_id"] == "matcha_x" else "Matcha Lite"
                     try:
                         import json as _json
                         from ...database import get_connection as _gc
@@ -582,8 +589,8 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                                 "UPDATE companies SET enabled_features = $1::jsonb WHERE id = $2",
                                 _json.dumps(features), sub["company_id"],
                             )
-                        logger.info("Matcha Lite deactivated for company %s", sub["company_id"])
+                        logger.info("%s deactivated for company %s", _tier_label, sub["company_id"])
                     except Exception as exc:
-                        logger.error("Failed to deactivate Matcha Lite for %s: %s", sub["company_id"], exc)
+                        logger.error("Failed to deactivate %s for %s: %s", _tier_label, sub["company_id"], exc)
 
     return {"received": True}

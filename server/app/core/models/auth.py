@@ -114,7 +114,11 @@ class BusinessRegister(BaseModel):
 
     # Self-serve product tier. "ir_only" = Matcha IR free-beta signup
     # (auto-approve, only `incidents` feature on, slim IR layout).
-    # Anything else / None = bespoke sales-led path (existing behavior).
+    # "matcha_lite" = paid entry IR/HR bundle (headcount-priced Stripe).
+    # "matcha_x" = paid mid tier — clone of matcha_lite at Lite parity,
+    # branded between Lite and the full platform (extra modules layered later).
+    # "resources_free" = free resources hub. Anything else / None = bespoke
+    # sales-led path (existing behavior).
     tier: Optional[str] = None
 
 

@@ -38,19 +38,21 @@ type Registration = {
   } | null
 }
 
-type Tier = 'free' | 'lite' | 'platform' | 'personal'
+type Tier = 'free' | 'lite' | 'x' | 'platform' | 'personal'
 
 function tierFromRegistration(r: Registration): Tier {
   if (r.is_personal) return 'personal'
   if (r.signup_source === 'resources_free') return 'free'
   if (r.signup_source === 'matcha_lite') return 'lite'
+  if (r.signup_source === 'matcha_x') return 'x'
   return 'platform'
 }
 
-const TIER_LABEL: Record<Tier, string> = { free: 'Free', lite: 'Lite', platform: 'Platform', personal: 'Personal' }
+const TIER_LABEL: Record<Tier, string> = { free: 'Free', lite: 'Lite', x: 'Matcha-X', platform: 'Platform', personal: 'Personal' }
 const TIER_BADGE: Record<Tier, string> = {
   free: 'border-zinc-600 bg-zinc-700/30 text-zinc-300',
   lite: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+  x: 'border-teal-500/40 bg-teal-500/10 text-teal-300',
   platform: 'border-violet-500/40 bg-violet-500/10 text-violet-300',
   personal: 'border-sky-500/40 bg-sky-500/10 text-sky-300',
 }
@@ -718,6 +720,7 @@ type Charge = {
 const TIER_OPTIONS = [
   { value: 'resources_free', label: 'Free (Resources only)' },
   { value: 'matcha_lite', label: 'Matcha Lite' },
+  { value: 'matcha_x', label: 'Matcha-X (mid tier — requires Stripe checkout to activate)' },
   { value: 'bespoke', label: 'Platform / Bespoke (full features)' },
   { value: 'ir_only_self_serve', label: 'IR Cap (incidents + employees + discipline)' },
 ]

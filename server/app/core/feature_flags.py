@@ -43,6 +43,17 @@ TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
     # matcha_lite (paid) — employees/discipline gated on Stripe; only the
     # always-on bundle items overlay here.
     "matcha_lite": {"handbooks": True, "training": True, "employees": True},
+    # matcha_x (paid mid tier) — clone of matcha_lite at Lite parity. Unlike
+    # Lite, `discipline` is in the always-on overlay so the paid bundle is
+    # identical on every payment path (Lite leaves discipline path-dependent:
+    # only set on broker-pays/invite signup). `incidents` stays the single
+    # Stripe-gated flag, flipped by the checkout.session.completed webhook.
+    "matcha_x": {
+        "handbooks": True,
+        "training": True,
+        "employees": True,
+        "discipline": True,
+    },
     # ir_only_self_serve (legacy free private beta) — full IR + HR bundle is
     # always on, no payment gate.
     "ir_only_self_serve": {
