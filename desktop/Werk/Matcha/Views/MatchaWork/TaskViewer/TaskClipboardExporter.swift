@@ -1,33 +1,23 @@
 import Foundation
 
 /// Builds a clipboard-friendly markdown blob describing a task. Used by
-/// TaskViewerSheet's Copy button so the user can drop the full ticket
-/// (title, status, assignee, description, checklist) into Claude Code /
-/// Codex / any chat that accepts markdown. Screenshots are referenced by
-/// LOCAL file path (`screenshotPaths`) so Claude Code can open them with its
-/// Read tool — not by CloudFront URL, which CLIs can't fetch.
+/// TaskViewerSheet's Copy button so the user can drop the ticket into Claude
+/// Code / Codex / any chat that accepts markdown. Deliberately content-only
+/// (title, description, progress, checklist, attachments, screenshots) — the
+/// project-management metadata (status, priority, assignee, due date) is
+/// omitted because it's noise to a coding agent acting on the ticket.
+/// Screenshots are referenced by LOCAL file path (`screenshotPaths`) so Claude
+/// Code can open them with its Read tool — not by CloudFront URL, which CLIs
+/// can't fetch.
 enum TaskClipboardExporter {
     static func markdown(
         for task: MWProjectTask,
-        assigneeName: String?,
-        columnLabel: String,
         attachments: [MWProjectFile],
         subtasks: [MWSubtask] = [],
         screenshotPaths: [String] = [],
     ) -> String {
         var lines: [String] = []
         lines.append("# \(task.title)")
-        lines.append("")
-
-        var metaParts: [String] = [
-            "**Status:** \(columnLabel)",
-            "**Priority:** \(task.priority.capitalized)",
-        ]
-        metaParts.append("**Assignee:** \(assigneeName ?? "Unassigned")")
-        if let due = task.dueDate, !due.isEmpty {
-            metaParts.append("**Due:** \(String(due.prefix(10)))")
-        }
-        lines.append(metaParts.joined(separator: " · "))
         lines.append("")
 
         lines.append("## Description")
@@ -71,10 +61,6 @@ enum TaskClipboardExporter {
         }
 
         return lines.joined(separator: "\n")
-    }
-
-    private static func columnLabel(_ raw: String) -> String {
-        raw.replacingOccurrences(of: "_", with: " ").capitalized
     }
 
     private static func formatSize(_ bytes: Int) -> String {

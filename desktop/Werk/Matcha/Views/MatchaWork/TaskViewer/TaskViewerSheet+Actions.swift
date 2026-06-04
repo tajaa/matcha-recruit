@@ -251,8 +251,6 @@ extension TaskViewerSheet {
 
         let markdown = TaskClipboardExporter.markdown(
             for: task,
-            assigneeName: assigneeName,
-            columnLabel: columnLabel,
             attachments: attachments,
             subtasks: subtasks,
             screenshotPaths: screenshotPaths,
