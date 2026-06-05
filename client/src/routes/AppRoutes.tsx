@@ -63,6 +63,9 @@ export default function AppRoutes() {
         <Route path="er-copilot" element={<FeatureGate feature="er_copilot" label="ER Copilot"><ERCopilot /></FeatureGate>} />
         <Route path="er-copilot/:caseId" element={<FeatureGate feature="er_copilot" label="ER Copilot"><ERCaseDetail /></FeatureGate>} />
         <Route path="compliance" element={<FeatureGate anyOf={['compliance', 'compliance_lite']} label="Compliance"><Compliance /></FeatureGate>} />
+        {/* Matcha-X read-only taste — distinct URL so it's separable from the Pro
+            Compliance route; the Compliance dispatcher renders the lite view. */}
+        <Route path="matcha-x/compliance" element={<FeatureGate anyOf={['compliance', 'compliance_lite']} label="Compliance"><Compliance /></FeatureGate>} />
         <Route path="compliance-calendar" element={<ComplianceCalendar />} />
         <Route path="ir" element={<FeatureGate feature="incidents" label="Incidents"><IRList /></FeatureGate>} />
         <Route path="ir/risk-insights" element={<FeatureGate feature="incidents" label="Risk Insights"><IRRiskInsights /></FeatureGate>} />

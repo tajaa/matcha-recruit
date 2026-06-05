@@ -15,6 +15,7 @@ const PAGE_TITLES: Record<string, string> = {
   'er-copilot': 'ER Copilot',
   'compliance': 'Compliance',
   'compliance-calendar': 'Compliance Calendar',
+  'matcha-x': 'Compliance', // only /app/matcha-x/compliance today (lite taste)
   'ir': 'Incidents',
   'locations': 'Locations',
   'escalated-queries': 'Escalated Queries',
