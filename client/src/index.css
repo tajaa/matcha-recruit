@@ -63,3 +63,54 @@ html, body {
   97%  { opacity: 1; }
   100% { left: 102%; opacity: 0; }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Broker Portal — inverse light theme.
+   The whole broker surface is dark-only (hardcoded zinc utilities). Tailwind v4
+   compiles palette utilities to var(--color-*), so we flip the theme by
+   redefining the neutral ramp (inverted) + chrome tokens within a scope set on
+   <html> while a /broker route is mounted (see utils/brokerTheme.ts). No
+   per-component className changes; leaving /broker clears the attribute so every
+   other surface stays dark.
+   ──────────────────────────────────────────────────────────────────────── */
+html[data-broker-theme="light"] {
+  color-scheme: light;
+
+  /* white/x overlays → ink/x overlays so borders + glass panels stay visible */
+  --color-white: #1f1d1a;
+
+  /* inverted neutral ramp (pivot at 500) — dark bg tokens become light, light
+     text tokens become dark; tuned so white cards (zinc-900) pop on the gray
+     app base (vsc-bg) */
+  --color-zinc-50:  #09090b;
+  --color-zinc-100: #18181b;
+  --color-zinc-200: #27272a;
+  --color-zinc-300: #3f3f46;
+  --color-zinc-400: #52525b;
+  --color-zinc-500: #71717a;
+  --color-zinc-600: #a1a1aa;
+  --color-zinc-700: #d4d4d8;
+  --color-zinc-800: #e8e8eb;
+  --color-zinc-900: #ffffff;
+  --color-zinc-950: #fafafa;
+
+  /* app chrome tokens (root bg, panels, borders) */
+  --color-vsc-bg:     #f4f4f5;
+  --color-vsc-panel:  #ffffff;
+  --color-vsc-border: #e8e8eb;
+  --color-vsc-text:   #18181b;
+
+  /* darken accent text/dots for contrast on light surfaces */
+  --color-emerald-400: #059669;
+  --color-emerald-300: #047857;
+  --color-red-400:     #dc2626;
+  --color-red-300:     #dc2626;
+  --color-amber-400:   #b45309;
+  --color-amber-300:   #b45309;
+  --color-orange-400:  #c2410c;
+}
+
+/* navbar uses a literal arbitrary value, not a palette var → flip explicitly */
+html[data-broker-theme="light"] .bg-\[\#141416\] {
+  background-color: #ffffff;
+}

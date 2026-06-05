@@ -84,15 +84,15 @@ export default function BrokerReferralLinks() {
   }
 
   return (
-    <div className="max-w-3xl">
+    <div>
       <div className="mb-6">
-        <h1 className="text-xl font-semibold text-zinc-100">Referral Links</h1>
+        <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight">Referral Links</h1>
         <p className="text-sm text-zinc-500 mt-1">
           Generate shareable Matcha Lite signup links. Companies that sign up via your link are automatically attributed to your account.
         </p>
       </div>
 
-      <form onSubmit={handleCreate} className="mb-8 p-5 border border-zinc-800 rounded-xl flex flex-col gap-4">
+      <form onSubmit={handleCreate} className="mb-8 max-w-3xl p-5 border border-zinc-800 rounded-xl flex flex-col gap-4">
         <p className="text-sm font-medium text-zinc-300">Generate new link</p>
         <div className="flex gap-3 flex-wrap">
           <input
@@ -156,7 +156,7 @@ export default function BrokerReferralLinks() {
           <p className="text-sm">No referral links yet. Generate one above.</p>
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {tokens.map(t => (
             <div key={t.id} className="p-4 border border-zinc-800 rounded-xl flex flex-col gap-3">
               <div className="flex items-start justify-between gap-3">

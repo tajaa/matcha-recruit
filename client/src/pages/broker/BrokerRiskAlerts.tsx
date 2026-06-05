@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, Loader2, Check, CheckCircle2 } from 'lucide-react'
 import { fetchBrokerRiskAlerts, markBrokerRiskAlertRead } from '../../api/broker'
+import TabHeader from '../../components/broker/action-center/TabHeader'
 import type { BrokerRiskAlert, BrokerRiskMetricKey } from '../../types/broker'
 
 const METRIC_LABEL: Record<BrokerRiskMetricKey, string> = {
@@ -82,33 +83,28 @@ export default function BrokerRiskAlerts() {
   const activeUnread = alerts.filter((a) => !a.is_read && !a.resolved_at).length
 
   return (
-    <div className="max-w-4xl mx-auto px-6 py-8">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-xl font-semibold text-zinc-100 flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5 text-amber-400" />
-            Risk Alerts
-            {activeUnread > 0 && (
-              <span className="ml-1 px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 text-xs font-medium">
-                {activeUnread} new
-              </span>
-            )}
-          </h1>
-          <p className="text-sm text-zinc-500 mt-1">
-            Clients whose safety / Workers&nbsp;Comp metrics trended negative, or whose workforce shows a
-            sudden spike in behavioral friction &amp; retention risk.
-          </p>
-        </div>
-        <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={includeResolved}
-            onChange={(e) => setIncludeResolved(e.target.checked)}
-            className="accent-emerald-500"
-          />
-          Show resolved
-        </label>
-      </div>
+    <div className="space-y-4">
+      <TabHeader
+        icon={AlertTriangle}
+        title="Risk Alerts"
+        hint="Safety / Workers Comp metrics trending negative, or a spike in behavioral friction & retention risk."
+        badge={activeUnread > 0 ? (
+          <span className="px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 text-xs font-medium">
+            {activeUnread} new
+          </span>
+        ) : null}
+        actions={
+          <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={includeResolved}
+              onChange={(e) => setIncludeResolved(e.target.checked)}
+              className="accent-emerald-500"
+            />
+            Show resolved
+          </label>
+        }
+      />
 
       {loading ? (
         <div className="flex items-center justify-center py-20 text-zinc-500">

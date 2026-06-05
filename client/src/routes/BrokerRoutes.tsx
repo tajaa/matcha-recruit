@@ -1,4 +1,6 @@
+import { useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
+import { applyBrokerTheme, getBrokerTheme, clearBrokerThemeAttr } from '../utils/brokerTheme'
 import AppLayout from '../layouts/AppLayout'
 import BrokerSidebar from '../components/BrokerSidebar'
 import BrokerDashboard from '../pages/broker/BrokerDashboard'
@@ -10,6 +12,13 @@ import BrokerReferralLinks from '../pages/broker/BrokerReferralLinks'
 import BrokerActionCenter from '../pages/broker/BrokerActionCenter'
 
 export default function BrokerRoutes() {
+  // Apply the broker light/dark preference for the lifetime of any /broker route;
+  // clear it on unmount so other surfaces stay dark.
+  useEffect(() => {
+    applyBrokerTheme(getBrokerTheme())
+    return () => clearBrokerThemeAttr()
+  }, [])
+
   return (
     <Routes>
       <Route element={<AppLayout sidebar={<BrokerSidebar />} logoLabel="Matcha Broker" />}>

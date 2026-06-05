@@ -36,6 +36,9 @@ type SidebarShellProps = {
   user?: { name: string; avatarUrl?: string | null; settingsTo?: string }
   /** Renders above the user/logout footer — e.g. an upgrade panel. */
   upgradeFooter?: React.ReactNode
+  /** Small accessory rendered in the footer next to logout (both collapsed +
+   *  expanded) — e.g. a theme toggle. */
+  footerSlot?: React.ReactNode
 }
 
 function isGroup(item: NavItem | NavGroup): item is NavGroup {
@@ -149,7 +152,7 @@ function NavGroupSection({ group, location, collapsed }: { group: NavGroup; loca
   )
 }
 
-export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFooter }: SidebarShellProps) {
+export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFooter, footerSlot }: SidebarShellProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const { hasTopNav, sidebarCollapsed } = useLayoutContext()
@@ -190,6 +193,7 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
 
       {/* Footer */}
       <div className={`${navPx} py-3 border-t border-white/[0.04] space-y-1 bg-zinc-950`}>
+        {footerSlot}
         {user && !sidebarCollapsed && (
           <div className="flex items-center gap-2.5 px-3 py-2">
             <Avatar name={user.name} avatarUrl={user.avatarUrl} size="sm" />

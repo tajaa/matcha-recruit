@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { LayoutDashboard, Building2, Link2, Settings, Zap, Workflow } from 'lucide-react'
 import SidebarShell, { type NavItem, type NavGroup } from './SidebarShell'
+import BrokerThemeToggle from './BrokerThemeToggle'
 import { fetchBrokerRiskAlerts, fetchActionCenterMilestones } from '../api/broker'
 
 export default function BrokerSidebar() {
@@ -31,5 +32,12 @@ export default function BrokerSidebar() {
     },
   ]
 
-  return <SidebarShell logoTo="/broker" logoLabel="Matcha Broker" nav={nav} />
+  return (
+    <SidebarShell
+      logoTo="/broker"
+      logoLabel="Matcha Broker"
+      nav={nav}
+      footerSlot={<BrokerThemeToggle />}
+    />
+  )
 }
