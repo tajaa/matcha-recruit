@@ -280,6 +280,10 @@ async def build_compliance_baseline_stream(
     handbook_url = (data.handbook_url or "").strip() or None
 
     async def events():
+        # `handbook_url` is reassigned below (→ None on reject/non-PDF); declare it
+        # nonlocal so those writes don't shadow the outer binding and turn the
+        # earlier reads into an UnboundLocalError that crashes every build.
+        nonlocal handbook_url
         # 1. Load active locations + company context (short-lived connection).
         async with get_connection() as conn:
             company = await conn.fetchrow(
