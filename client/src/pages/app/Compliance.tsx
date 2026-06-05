@@ -1,9 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Lock } from 'lucide-react'
 import { Button } from '../../components/ui'
-import { useMe } from '../../hooks/useMe'
-import { UpgradeUpsellCard } from '../../components/UpgradeUpsellCard'
 import { useComplianceData } from '../../hooks/compliance/useComplianceData'
 import { useLocationDetail } from '../../hooks/compliance/useLocationDetail'
 import { useComplianceCheck } from '../../hooks/compliance/useComplianceCheck'
@@ -23,6 +20,8 @@ import { PayerPolicyNavigator } from '../../components/compliance/PayerPolicyNav
 import { ProtocolAnalysis } from '../../components/compliance/ProtocolAnalysis'
 import { PolicyDrafter } from '../../components/compliance/PolicyDrafter'
 import { updateAlertActionPlan } from '../../api/compliance'
+import { useMe } from '../../hooks/useMe'
+import { ComplianceLiteView } from '../../components/compliance/ComplianceLiteView'
 import type { BusinessLocation, LocationCreate, ComplianceActionPlanUpdate } from '../../types/compliance'
 
 type Tab = 'overview' | 'requirements' | 'credentials' | 'alerts' | 'upcoming' | 'history' | 'posters' | 'payer-policies' | 'protocol-analysis' | 'policy-drafting'
@@ -40,42 +39,20 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'policy-drafting', label: 'Policy Drafting' },
 ]
 
-// Tabs that belong to full Compliance (Pro). On the Matcha-X read-only taste
-// (`compliance_lite`) these stay visible but locked behind an upgrade CTA — the
-// read-only viewers (overview/requirements/upcoming) are the only live ones.
-const PRO_TABS = new Set<Tab>([
-  'credentials', 'alerts', 'history', 'posters', 'payer-policies', 'protocol-analysis', 'policy-drafting',
-])
-
-const PRO_TAB_PITCH: Partial<Record<Tab, string>> = {
-  credentials: 'Track company certifications and license renewals with automatic expiry alerts.',
-  alerts: 'Get monitored compliance alerts with assignable action plans as the law changes.',
-  history: 'See the full audit trail of every compliance re-check for this location.',
-  posters: 'Auto-generate and track the labor-law posters each location must display.',
-  'payer-policies': 'Navigate payer contract requirements alongside your jurisdictional rules.',
-  'protocol-analysis': 'AI analysis of your clinical/operational protocols against current law.',
-  'policy-drafting': 'Draft compliant, jurisdiction-aware policies with AI.',
-}
-
-function ProLock({ tab }: { tab: Tab }) {
-  return (
-    <div className="max-w-md">
-      <UpgradeUpsellCard
-        source={`feature_gate:compliance:${tab}`}
-        title="Unlock full Compliance"
-        pitch={PRO_TAB_PITCH[tab] ?? 'This is part of full Compliance monitoring on Matcha Platform.'}
-        bullets={[
-          'Live re-research as laws change',
-          'Monitored alerts + action plans',
-          'Ask AI about any requirement',
-          'Wage-violation detection',
-        ]}
-      />
-    </div>
-  )
-}
-
+// Route gate admits compliance OR compliance_lite. Dispatch here: full
+// `compliance` (Pro) → the tabbed page below; the Matcha-X read-only taste
+// (`compliance_lite` only) → a purpose-built view of the baseline + a teaser
+// of the locked Pro tooling (avoids bending the Pro tabs into a thin shell).
 export default function Compliance() {
+  const { hasFeature, loading } = useMe()
+  if (loading) return null
+  if (hasFeature('compliance_lite') && !hasFeature('compliance')) {
+    return <ComplianceLiteView />
+  }
+  return <ComplianceFull />
+}
+
+function ComplianceFull() {
   const [searchParams] = useSearchParams()
   const [tab, setTab] = useState<Tab>('overview')
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -83,12 +60,8 @@ export default function Compliance() {
   const [editingLocation, setEditingLocation] = useState<BusinessLocation | null>(null)
   const [saving, setSaving] = useState(false)
 
-  // Matcha-X read-only taste: has the lite flag but not full `compliance`.
-  const { hasFeature } = useMe()
-  const isLite = hasFeature('compliance_lite') && !hasFeature('compliance')
-
-  const data = useComplianceData(selectedId, isLite)
-  const detail = useLocationDetail(selectedId, isLite)
+  const data = useComplianceData(selectedId)
+  const detail = useLocationDetail(selectedId)
 
   const onCheckComplete = useCallback(() => {
     detail.refetch()
@@ -172,28 +145,20 @@ export default function Compliance() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100">Compliance</h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            {isLite
-              ? 'Your jurisdictional requirements baseline — read-only. Upgrade for monitoring, alerts and AI tools.'
-              : 'Jurisdictional requirements, alerts, and location management.'}
-          </p>
+          <p className="mt-1 text-sm text-zinc-500">Jurisdictional requirements, alerts, and location management.</p>
         </div>
       </div>
 
-      {/* Regulatory Q&A (AI ask — full Compliance only) */}
-      {!isLite && <RegulatoryQuickAsk locationId={selectedId} />}
+      {/* Regulatory Q&A */}
+      <RegulatoryQuickAsk locationId={selectedId} />
 
       {/* Tab nav */}
       <div className="flex items-center gap-1 mt-4 mb-5">
-        {TABS.map((t) => {
-          const locked = isLite && PRO_TABS.has(t.value)
-          return (
-            <Button key={t.value} variant={tab === t.value ? 'secondary' : 'ghost'} size="sm" onClick={() => setTab(t.value)}>
-              {locked && <Lock className="w-3 h-3 mr-1 text-zinc-500" />}
-              {t.label}{t.value === 'alerts' && !isLite && data.alerts.length > 0 ? ` (${data.alerts.length})` : ''}
-            </Button>
-          )
-        })}
+        {TABS.map((t) => (
+          <Button key={t.value} variant={tab === t.value ? 'secondary' : 'ghost'} size="sm" onClick={() => setTab(t.value)}>
+            {t.label}{t.value === 'alerts' && data.alerts.length > 0 ? ` (${data.alerts.length})` : ''}
+          </Button>
+        ))}
       </div>
 
       {/* Overview tab (no location context needed) */}
@@ -209,18 +174,11 @@ export default function Compliance() {
 
       {/* Certifications & Licenses (company-level, no location context) */}
       {tab === 'credentials' && (
-        isLite
-          ? <ProLock tab="credentials" />
-          : <ComplianceCredentialsTab companyId={searchParams.get('company_id') || undefined} />
-      )}
-
-      {/* Pro tabs on the lite taste — locked, shown without needing a location */}
-      {isLite && tab !== 'credentials' && PRO_TABS.has(tab) && (
-        <div className="mt-2"><ProLock tab={tab} /></div>
+        <ComplianceCredentialsTab companyId={searchParams.get('company_id') || undefined} />
       )}
 
       {/* Location-contextual tabs */}
-      {tab !== 'overview' && tab !== 'credentials' && !(isLite && PRO_TABS.has(tab)) && (
+      {tab !== 'overview' && tab !== 'credentials' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Left: location list */}
           <div className="col-span-1">
@@ -232,7 +190,6 @@ export default function Compliance() {
               onDelete={handleDelete}
               onAdd={() => { setEditingLocation(null); setShowModal(true) }}
               loading={data.loading}
-              readOnly={isLite}
             />
           </div>
 
@@ -255,20 +212,14 @@ export default function Compliance() {
                       <p className="text-[11px] text-zinc-500 mt-0.5">{selectedLoc.employee_count} employees</p>
                     )}
                   </div>
-                  {isLite ? (
-                    <Button variant="ghost" size="sm" disabled title="Live re-checks are part of full Compliance (Pro)">
-                      <Lock className="w-3 h-3 mr-1" />Run Compliance Check
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      disabled={check.scanning}
-                      onClick={() => check.runCheck(selectedId!)}
-                    >
-                      {check.scanning ? 'Scanning...' : 'Run Compliance Check'}
-                    </Button>
-                  )}
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={check.scanning}
+                    onClick={() => check.runCheck(selectedId!)}
+                  >
+                    {check.scanning ? 'Scanning...' : 'Run Compliance Check'}
+                  </Button>
                 </div>
 
                 <FacilityProfileBanner
@@ -277,7 +228,6 @@ export default function Compliance() {
                   onUpdated={() => data.loadLocations()}
                   allLocations={data.locations}
                   source={selectedLoc?.source}
-                  readOnly={isLite}
                 />
 
                 <ComplianceScanProgress scanning={check.scanning} messages={check.messages} />
@@ -289,10 +239,9 @@ export default function Compliance() {
                     onPin={handlePinRequirement}
                     checkMessages={check.messages}
                     facilityAttributes={selectedLoc?.facility_attributes}
-                    readOnly={isLite}
                   />
                 )}
-                {tab === 'alerts' && !isLite && (
+                {tab === 'alerts' && (
                   <ComplianceAlertsTab
                     alerts={data.alerts}
                     loading={false}
@@ -307,25 +256,25 @@ export default function Compliance() {
                     loading={detail.loading}
                   />
                 )}
-                {tab === 'history' && !isLite && (
+                {tab === 'history' && (
                   <ComplianceHistoryTab
                     checkLog={detail.checkLog}
                     loading={detail.loading}
                   />
                 )}
-                {tab === 'posters' && !isLite && (
+                {tab === 'posters' && (
                   <CompliancePostersTab locationId={selectedId!} />
                 )}
-                {tab === 'payer-policies' && !isLite && (
+                {tab === 'payer-policies' && (
                   <PayerPolicyNavigator
                     locationId={selectedId}
                     payerContracts={selectedLoc?.facility_attributes?.payer_contracts || []}
                   />
                 )}
-                {tab === 'protocol-analysis' && !isLite && (
+                {tab === 'protocol-analysis' && (
                   <ProtocolAnalysis locationId={selectedId} />
                 )}
-                {tab === 'policy-drafting' && !isLite && (
+                {tab === 'policy-drafting' && (
                   <PolicyDrafter locationId={selectedId} />
                 )}
               </div>
