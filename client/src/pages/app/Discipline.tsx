@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Badge, Button, Input, Select } from '../../components/ui'
-import { Plus, Loader2, Gavel, Settings } from 'lucide-react'
+import { Plus, Loader2, Gavel, Settings, HelpCircle } from 'lucide-react'
 import { useDisciplineList } from '../../hooks/discipline/useDiscipline'
 import IssueDisciplineModal from '../../features/discipline/IssueDisciplineModal'
+import DisciplineGuideModal, { DISCIPLINE_GUIDE_KEY } from '../../features/discipline/DisciplineGuideModal'
 import { api } from '../../api/client'
 import type {
   DisciplineLevel,
@@ -51,7 +52,15 @@ export default function Discipline() {
   const [statusFilter, setStatusFilter] = useState<DisciplineStatus | ''>('')
   const [search, setSearch] = useState('')
   const [showIssue, setShowIssue] = useState(false)
+  const [showGuide, setShowGuide] = useState(() => {
+    try { return !localStorage.getItem(DISCIPLINE_GUIDE_KEY) } catch { return false }
+  })
   const [employees, setEmployees] = useState<Record<string, EmployeeRow>>({})
+
+  function closeGuide() {
+    try { localStorage.setItem(DISCIPLINE_GUIDE_KEY, '1') } catch { /* ignore */ }
+    setShowGuide(false)
+  }
 
   const { records, loading, error, refetch } = useDisciplineList(
     (statusFilter || undefined) as DisciplineStatus | undefined,
@@ -93,6 +102,10 @@ export default function Discipline() {
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
+          <Button variant="ghost" onClick={() => setShowGuide(true)}>
+            <HelpCircle className="w-4 h-4" />
+            <span className="ml-2">Guide</span>
+          </Button>
           <Button variant="ghost" onClick={() => navigate('/app/discipline-settings')}>
             <Settings className="w-4 h-4" />
             <span className="ml-2">Settings</span>
@@ -193,6 +206,8 @@ export default function Discipline() {
         onClose={() => setShowIssue(false)}
         onIssued={() => { refetch() }}
       />
+
+      <DisciplineGuideModal open={showGuide} onClose={closeGuide} />
     </div>
   )
 }
