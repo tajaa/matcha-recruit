@@ -28,6 +28,8 @@ struct PrimaryDetailPane: View {
                 JournalDetailView(journalId: journalId)
             } else if let channelId = appState.selectedChannelId {
                 ChannelDetailView(channelId: channelId)
+            } else if let emailId = appState.selectedEmailId {
+                EmailDetailView(emailId: emailId)
             } else if appState.showChannelBrowse {
                 ChannelBrowseView()
             } else if appState.showInbox {

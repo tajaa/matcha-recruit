@@ -20,6 +20,7 @@ final class SidebarSectionOrderStore {
         case projects
         case journals
         case threads
+        case email
 
         var id: String { rawValue }
 
@@ -30,6 +31,7 @@ final class SidebarSectionOrderStore {
             case .projects: return "folder"
             case .journals: return "book.closed"
             case .threads:  return "bubble.left.and.bubble.right"
+            case .email:    return "envelope"
             }
         }
 
@@ -40,6 +42,7 @@ final class SidebarSectionOrderStore {
             case .projects: return "Projects"
             case .journals: return "Journals"
             case .threads:  return "Threads"
+            case .email:    return "Email"
             }
         }
     }

@@ -102,6 +102,9 @@
 		DD00EE11FF22334455660003 /* ChannelsWebSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */; };
 		DD00EE11FF22334455660004 /* ChannelsSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770004 /* ChannelsSidebarView.swift */; };
 		DD00EE11FF22334455660005 /* ChannelDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770005 /* ChannelDetailView.swift */; };
+		E2A1B0C0D0E0F00100000001 /* EmailService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A1B0C0D0E0F00100000002 /* EmailService.swift */; };
+		E2A1B0C0D0E0F00100000003 /* EmailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A1B0C0D0E0F00100000004 /* EmailViewModel.swift */; };
+		E2A1B0C0D0E0F00100000005 /* EmailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A1B0C0D0E0F00100000006 /* EmailView.swift */; };
 		DD00EE11FF22334455660099 /* ChannelNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770099 /* ChannelNotificationManager.swift */; };
 		DD00EE11FF22334455660D11 /* InviteToChannelSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770D11 /* InviteToChannelSheet.swift */; };
 		DD00EE11FF22334455660D22 /* ChannelAdminWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770D22 /* ChannelAdminWizardView.swift */; };
@@ -245,6 +248,9 @@
 		DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsWebSocket.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770004 /* ChannelsSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsSidebarView.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770005 /* ChannelDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelDetailView.swift; sourceTree = "<group>"; };
+		E2A1B0C0D0E0F00100000002 /* EmailService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailService.swift; sourceTree = "<group>"; };
+		E2A1B0C0D0E0F00100000004 /* EmailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailViewModel.swift; sourceTree = "<group>"; };
+		E2A1B0C0D0E0F00100000006 /* EmailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailView.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770099 /* ChannelNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelNotificationManager.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770D11 /* InviteToChannelSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteToChannelSheet.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770D22 /* ChannelAdminWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelAdminWizardView.swift; sourceTree = "<group>"; };
@@ -353,6 +359,7 @@
 				7A5C0000000000000000F0D2 /* RepoSnapshotService.swift */,
 				AA11BB22CC33DD44EE660008 /* InboxService.swift */,
 				DD00EE11FF22334455770002 /* ChannelsService.swift */,
+				E2A1B0C0D0E0F00100000002 /* EmailService.swift */,
 				DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */,
 				DD00EE11FF22334455770099 /* ChannelNotificationManager.swift */,
 				BC01DD22EE33FF445566BB02 /* BroadcastService.swift */,
@@ -570,6 +577,7 @@
 				C0C0C0C0C0C0C0C001010004 /* ProjectPresenceViewModel.swift */,
 				EEEE0J0J0J0J0J0J01010002 /* JournalDetailViewModel.swift */,
 				CC11DD22EE33FF445566DD01 /* ChannelChatViewModel.swift */,
+				E2A1B0C0D0E0F00100000004 /* EmailViewModel.swift */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -581,6 +589,7 @@
 				3F39F7E6D963F82CA7F10D0F /* MatchaWork */,
 				AA11BB22CC33DD44EE770001 /* Inbox */,
 				DD00EE11FF22334455880001 /* Channels */,
+				E2A1B0C0D0E0F00100000010 /* Email */,
 				EEEE0J0J0J0J0J0J0101000B /* Journals */,
 				FF11223344556677CC000001 /* People */,
 				A1B2C3D4E5F60708CC000001 /* Profile */,
@@ -607,6 +616,14 @@
 				FF4C96E6C5F0062D21DAB318 /* ChannelMessageComposer.swift */,
 			);
 			path = Channels;
+			sourceTree = "<group>";
+		};
+		E2A1B0C0D0E0F00100000010 /* Email */ = {
+			isa = PBXGroup;
+			children = (
+				E2A1B0C0D0E0F00100000006 /* EmailView.swift */,
+			);
+			path = Email;
 			sourceTree = "<group>";
 		};
 		EEEE0J0J0J0J0J0J0101000B /* Journals */ = {
@@ -801,6 +818,9 @@
 				AA11BB22CC33DD44EE5500E2 /* HomeDashboardView.swift in Sources */,
 				DD00EE11FF22334455660001 /* ChannelModels.swift in Sources */,
 				DD00EE11FF22334455660002 /* ChannelsService.swift in Sources */,
+				E2A1B0C0D0E0F00100000001 /* EmailService.swift in Sources */,
+				E2A1B0C0D0E0F00100000003 /* EmailViewModel.swift in Sources */,
+				E2A1B0C0D0E0F00100000005 /* EmailView.swift in Sources */,
 				5C0FF11E570E000000000001 /* WorkDetailVMStore.swift in Sources */,
 				5C0FF11E570E000000000011 /* SkeletonView.swift in Sources */,
 				DD00EE11FF22334455660003 /* ChannelsWebSocket.swift in Sources */,

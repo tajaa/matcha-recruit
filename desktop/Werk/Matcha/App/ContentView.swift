@@ -11,6 +11,7 @@ struct ContentView: View {
     @AppStorage("mw-sidebar-projects-open") private var projectsSectionOpen = false
     @AppStorage("mw-sidebar-journals-open") private var journalsSectionOpen = false
     @AppStorage("mw-sidebar-threads-open") private var threadsSectionOpen = false
+    @AppStorage("mw-sidebar-email-open") private var emailSectionOpen = false
     @State private var showNewJournal = false
     @State private var showNewBlog = false
     @State private var pendingConnectionsCount = 0
@@ -217,6 +218,7 @@ struct ContentView: View {
             HStack(spacing: 6) {
                 InboxFooterButton {
                     appState.showInbox = true
+                    appState.selectedEmailId = nil
                     appState.showPeople = false
                     appState.showHome = false
                     appState.showChannelBrowse = false
@@ -235,6 +237,7 @@ struct ContentView: View {
                     isActive: appState.showPeople
                 ) {
                     appState.showPeople = true
+                    appState.selectedEmailId = nil
                     appState.showInbox = false
                     appState.showHome = false
                     appState.showChannelBrowse = false
@@ -253,6 +256,7 @@ struct ContentView: View {
                     isActive: appState.showArchive
                 ) {
                     appState.showArchive = true
+                    appState.selectedEmailId = nil
                     appState.showInbox = false
                     appState.showPeople = false
                     appState.showHome = false
@@ -280,6 +284,7 @@ struct ContentView: View {
             appState.selectedThreadId == nil &&
             appState.selectedProjectId == nil &&
             appState.selectedChannelId == nil &&
+            appState.selectedEmailId == nil &&
             !appState.showInbox &&
             !appState.showPeople &&
             !appState.showSkills &&
@@ -287,6 +292,7 @@ struct ContentView: View {
         )
         sidebarFooterButton(icon: "house", label: "Home", badge: 0, isActive: isHomeActive) {
             appState.showHome = true
+            appState.selectedEmailId = nil
             appState.showInbox = false
             appState.showPeople = false
             appState.showSkills = false
@@ -384,6 +390,7 @@ struct ContentView: View {
         case .projects: projectsSidebarSection
         case .journals: journalsSidebarSection
         case .threads:  threadsSidebarSection
+        case .email:    emailSidebarSection
         }
     }
 
@@ -639,6 +646,31 @@ struct ContentView: View {
         }
     }
 
+    @ViewBuilder
+    private var emailSidebarSection: some View {
+        sidebarSection(
+            title: "Email",
+            icon: "envelope",
+            isOpen: $emailSectionOpen,
+            trailing: {
+                Button {
+                    Task { await EmailViewModel.shared.loadInbox() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 18, height: 18)
+                        .background(Color.zinc800)
+                        .cornerRadius(4)
+                }
+                .buttonStyle(.plain)
+                .help("Refresh unread")
+            }
+        ) {
+            EmailSidebarView(searchText: searchText)
+        }
+    }
+
     private func setThreadFilter(_ status: String?) {
         threadListVM.filterStatus = status
         Task { await threadListVM.loadThreads() }
@@ -659,6 +691,7 @@ struct ContentView: View {
         appState.selectedProjectId = nil
         appState.selectedChannelId = nil
         appState.selectedJournalId = nil
+        appState.selectedEmailId = nil
         appState.showInbox = false
         appState.showPeople = false
         appState.showSkills = false
@@ -1274,6 +1307,7 @@ struct ArchiveView: View {
     private func open(_ select: () -> Void) {
         appState.selectedThreadId = nil; appState.selectedProjectId = nil
         appState.selectedChannelId = nil; appState.selectedJournalId = nil
+        appState.selectedEmailId = nil
         appState.showInbox = false; appState.showPeople = false; appState.showSkills = false
         appState.showChannelBrowse = false; appState.showArchive = false
         select()
