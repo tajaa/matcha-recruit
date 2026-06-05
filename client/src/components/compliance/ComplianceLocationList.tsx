@@ -11,9 +11,12 @@ type Props = {
   onDelete: (id: string) => void
   onAdd: () => void
   loading: boolean
+  /** Read-only mode (Matcha-X compliance_lite taste) — hides add/edit/delete so
+   *  the page is view-only and can't side-door background research via add. */
+  readOnly?: boolean
 }
 
-export function ComplianceLocationList({ locations, selectedId, onSelect, onEdit, onDelete, onAdd, loading }: Props) {
+export function ComplianceLocationList({ locations, selectedId, onSelect, onEdit, onDelete, onAdd, loading, readOnly }: Props) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   if (loading) {
@@ -75,21 +78,23 @@ export function ComplianceLocationList({ locations, selectedId, onSelect, onEdit
                 {/* Always-visible Edit. Render as a span (not a <button>) — nesting
                     a button inside the row's <button> is invalid HTML; we stop
                     the click from bubbling up to onSelect. */}
-                <span
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`Edit ${loc.name || loc.city}`}
-                  onClick={(e) => { e.stopPropagation(); onEdit(loc) }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onEdit(loc) }
-                  }}
-                  className="p-1 -m-1 text-zinc-500 hover:text-zinc-200 cursor-pointer transition-colors rounded"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                </span>
+                {!readOnly && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Edit ${loc.name || loc.city}`}
+                    onClick={(e) => { e.stopPropagation(); onEdit(loc) }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onEdit(loc) }
+                    }}
+                    className="p-1 -m-1 text-zinc-500 hover:text-zinc-200 cursor-pointer transition-colors rounded"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </span>
+                )}
               </div>
             </button>
-            {loc.id === selectedId && (
+            {loc.id === selectedId && !readOnly && (
               <div className="flex items-center gap-2 px-3 pb-2">
                 <button type="button" onClick={() => onEdit(loc)}
                   className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">Edit</button>
@@ -110,9 +115,11 @@ export function ComplianceLocationList({ locations, selectedId, onSelect, onEdit
           </div>
         ))}
       </div>
-      <div className="mt-2">
-        <Button variant="ghost" size="sm" onClick={onAdd}>+ Add Location</Button>
-      </div>
+      {!readOnly && (
+        <div className="mt-2">
+          <Button variant="ghost" size="sm" onClick={onAdd}>+ Add Location</Button>
+        </div>
+      )}
     </div>
   )
 }

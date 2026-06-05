@@ -206,6 +206,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 | `cobra` | ❌ | COBRA admin |
 | `separation_agreements` | ❌ | Separation doc workflow |
 | `credential_templates` | ❌ | Credentialing / license tracking. Default-off, but in the **Matcha-X** bundle (tier overlay) and **Pro** (stored on bespoke signup). |
+| `compliance_lite` | ❌ | **Read-only** "taste" of Compliance for **Matcha-X** (tier overlay). Surfaces the per-location requirements + jurisdiction stack + summary + upcoming-legislation the onboarding build wrote; Pro power-tools render locked. Distinct from full `compliance` (Pro, stored at bespoke signup — live re-research, alerts/action-plans, AI ask, wage-violations, payer policies). Gating: read-only GETs moved to `compliance.py:shared_router`, mounted under `require_any_feature("compliance","compliance_lite")`; all mutating/power endpoints stay on the `compliance`-gated `router`. FE reuses `pages/app/Compliance.tsx` tier-shaped by `isLite` + `<FeatureGate anyOf={['compliance','compliance_lite']}>`. |
 | `hris_import` | ❌ | HRIS sync — legacy umbrella; gates treat it as "both providers" |
 | `hris_gusto` | ❌ | HRIS via Gusto OAuth (direct) |
 | `hris_finch` | ❌ | HRIS via Finch unified API (Rippling, BambooHR, ADP, …) |
@@ -218,7 +219,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 
 **Tier bundles** (read-time via `TIER_REQUIRED_FEATURES` overlay in `feature_flags.py`, except Pro which stores at signup):
 - **Lite** (`matcha_lite`) = `incidents` (paid) + `employees` + `handbooks` (generation). `training`/`discipline` force-asserted **off** here; no `handbook_audit`/`credential_templates`.
-- **Matcha-X** (`matcha_x`) = Lite + `training` + `discipline` + `handbook_audit` + `credential_templates` (all forced on via overlay).
+- **Matcha-X** (`matcha_x`) = Lite + `training` + `discipline` + `handbook_audit` + `credential_templates` + `compliance_lite` (read-only Compliance taste) — all forced on via overlay.
 - **Pro** (`bespoke`/`invite`/`broker`) = full `DEFAULT_COMPANY_FEATURES` + `incidents` + `handbook_audit` + `credential_templates`, stored at signup (toggleable per-company; not an overlay, so it doesn't leak to personal Werk which shares `signup_source='bespoke'`).
 
 ## Key Modules

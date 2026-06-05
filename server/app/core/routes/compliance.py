@@ -71,6 +71,12 @@ router = APIRouter()
 # core/routes/__init__.py without `require_feature("compliance")`.
 lite_router = APIRouter()
 
+# Read-only viewers shared between Pro (full `compliance`) and Matcha-X's
+# read-only `compliance_lite` taste. Mounted in core/routes/__init__.py under
+# require_any_feature("compliance", "compliance_lite"). ONLY read-only GETs live
+# here — every mutating / power-tool endpoint stays on `router` (compliance-only).
+shared_router = APIRouter()
+
 
 async def resolve_company_id(
     current_user, company_id_override: str | None
@@ -383,7 +389,7 @@ async def delete_location_endpoint(
     return {"message": "Location deleted successfully"}
 
 
-@router.get("/locations/{location_id}/requirements")
+@shared_router.get("/locations/{location_id}/requirements")
 async def get_location_requirements_endpoint(
     location_id: str,
     category: Optional[str] = None,
@@ -409,7 +415,7 @@ async def get_location_requirements_endpoint(
     return await get_location_requirements(loc_uuid, company_id, category)
 
 
-@router.get("/categories")
+@shared_router.get("/categories")
 async def get_compliance_categories(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
@@ -504,7 +510,7 @@ async def get_check_log_endpoint(
     return await get_check_log(loc_uuid, company_id, limit)
 
 
-@router.get(
+@shared_router.get(
     "/locations/{location_id}/upcoming-legislation",
     response_model=List[UpcomingLegislationResponse],
 )
@@ -723,7 +729,7 @@ async def update_alert_action_plan_endpoint(
     return {"message": "Action plan updated", **updated}
 
 
-@router.get("/summary", response_model=ComplianceSummary)
+@shared_router.get("/summary", response_model=ComplianceSummary)
 async def get_compliance_summary_endpoint(
     company_id: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),

@@ -27,9 +27,12 @@ type Props = {
   onPin: (requirementId: string, isPinned: boolean) => void
   checkMessages: ComplianceCheckMessage[]
   facilityAttributes?: FacilityAttributes | null
+  /** Read-only mode (compliance_lite taste) — hide Pin (the pin endpoint is
+   *  Pro-gated and would 403). */
+  readOnly?: boolean
 }
 
-export function ComplianceRequirementsTab({ requirements, loading, onPin, checkMessages, facilityAttributes }: Props) {
+export function ComplianceRequirementsTab({ requirements, loading, onPin, checkMessages, facilityAttributes, readOnly }: Props) {
   const isBehavioralHealth = facilityAttributes?.entity_type === 'behavioral_health'
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [groupFilter, setGroupFilter] = useState<'all' | CategoryGroup>(isBehavioralHealth ? 'behavioral_health' : 'all')
@@ -213,10 +216,12 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                                 {req.effective_date && (
                                   <span className="text-[11px] text-zinc-600">Eff. {new Date(req.effective_date).toLocaleDateString()}</span>
                                 )}
-                                <button type="button" onClick={() => onPin(req.id, !req.is_pinned)}
-                                  className={`text-[11px] transition-colors ${req.is_pinned ? 'text-amber-400' : 'text-zinc-600 hover:text-amber-400'}`}>
-                                  {req.is_pinned ? 'Pinned' : 'Pin'}
-                                </button>
+                                {!readOnly && (
+                                  <button type="button" onClick={() => onPin(req.id, !req.is_pinned)}
+                                    className={`text-[11px] transition-colors ${req.is_pinned ? 'text-amber-400' : 'text-zinc-600 hover:text-amber-400'}`}>
+                                    {req.is_pinned ? 'Pinned' : 'Pin'}
+                                  </button>
+                                )}
                               </div>
                               {req.source_url && (
                                 <a href={req.source_url} target="_blank" rel="noopener noreferrer"

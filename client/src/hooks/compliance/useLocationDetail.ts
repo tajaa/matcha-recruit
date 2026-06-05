@@ -2,7 +2,9 @@ import { useState, useCallback, useEffect } from 'react'
 import { fetchRequirements, fetchUpcomingLegislation, fetchCheckLog } from '../../api/compliance'
 import type { ComplianceRequirement, UpcomingLegislation, CheckLogEntry } from '../../types/compliance'
 
-export function useLocationDetail(locationId: string | null) {
+// `lite` = Matcha-X read-only taste: skips the Pro-only check-log fetch
+// (`/check-log` stays compliance-gated; History tab is locked for lite anyway).
+export function useLocationDetail(locationId: string | null, lite = false) {
   const [requirements, setRequirements] = useState<ComplianceRequirement[]>([])
   const [upcomingLegislation, setUpcomingLegislation] = useState<UpcomingLegislation[]>([])
   const [checkLog, setCheckLog] = useState<CheckLogEntry[]>([])
@@ -26,9 +28,9 @@ export function useLocationDetail(locationId: string | null) {
   const refetch = useCallback(async () => {
     if (!locationId) return
     setLoading(true)
-    await Promise.all([loadRequirements(), loadUpcoming(), loadCheckLog()])
+    await Promise.all([loadRequirements(), loadUpcoming(), ...(lite ? [] : [loadCheckLog()])])
     setLoading(false)
-  }, [locationId, loadRequirements, loadUpcoming, loadCheckLog])
+  }, [locationId, lite, loadRequirements, loadUpcoming, loadCheckLog])
 
   useEffect(() => {
     if (locationId) { refetch() }

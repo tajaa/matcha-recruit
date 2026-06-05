@@ -5,8 +5,12 @@ import { UpgradeUpsellCard } from './UpgradeUpsellCard'
 const STALE_REVALIDATE_AFTER_MS = 60_000
 
 type Props = {
-  /** Company feature flag (`enabled_features.<name>`) required to view children. */
-  feature: string
+  /** Company feature flag (`enabled_features.<name>`) required to view children.
+   *  Mutually exclusive with `anyOf` — provide one or the other. */
+  feature?: string
+  /** Admit the page if the company has ANY of these flags (e.g. a Pro flag OR
+   *  its lite-tier counterpart). Takes precedence over `feature` when present. */
+  anyOf?: string[]
   /** Page label used for the upsell title + lead-source tag. */
   label: string
   children: ReactNode
@@ -27,9 +31,10 @@ type Props = {
  * company's feature flags and the user URL-hops to the page in the same
  * session.
  */
-export function FeatureGate({ feature, label, children, pitch, bullets }: Props) {
+export function FeatureGate({ feature, anyOf, label, children, pitch, bullets }: Props) {
   const { hasFeature, loading, refresh } = useMe()
-  const allowed = hasFeature(feature)
+  const allowed = anyOf ? anyOf.some((f) => hasFeature(f)) : hasFeature(feature ?? '')
+  const sourceFlag = feature ?? anyOf?.[0] ?? 'unknown'
 
   useEffect(() => {
     if (!loading && !allowed && getMeCacheAgeMs() > STALE_REVALIDATE_AFTER_MS) {
@@ -42,7 +47,7 @@ export function FeatureGate({ feature, label, children, pitch, bullets }: Props)
   return (
     <div className="p-6">
       <UpgradeUpsellCard
-        source={`feature_gate:${feature}`}
+        source={`feature_gate:${sourceFlag}`}
         title={`Upgrade to unlock ${label}`}
         pitch={pitch ?? `${label} is part of Matcha Platform. Talk to our team about adding it to your account.`}
         bullets={bullets}

@@ -17,6 +17,14 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # The public lead-gen analyzer is unaffected — it gates teaser/full via
     # handbook_gap_analyzer._resolve_caller_tier, which reads this flag.
     "handbook_audit": False,
+    # Read-only "taste" of Compliance for Matcha-X. Distinct from the full
+    # `compliance` feature (Pro-only, stored at bespoke signup) which unlocks the
+    # power tools (live re-research, AI ask, action plans, wage-violations, payer
+    # policies). `compliance_lite` exposes ONLY the read-only viewers (per-location
+    # requirements, jurisdiction stack, summary, upcoming legislation) that the
+    # X onboarding build already populated. Default off; granted to Matcha-X via
+    # the TIER_REQUIRED overlay. The shared read-only endpoints admit either flag.
+    "compliance_lite": False,
     # HRIS import. `hris_gusto` = connect directly to Gusto (OAuth); `hris_finch` =
     # connect via Finch unified API (Rippling, BambooHR, ADP, …). Independent per
     # company. `hris_import` is the legacy umbrella — treated as "both" by the gates
@@ -71,6 +79,10 @@ TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
         # (existing + new) at read time, no per-row backfill.
         "handbook_audit": True,
         "credential_templates": True,
+        # Read-only compliance taste — lets X view the baseline the onboarding
+        # build wrote (requirements + jurisdiction stack + summary + upcoming
+        # legislation). Full `compliance` (power tools) stays Pro-only.
+        "compliance_lite": True,
     },
     # ir_only_self_serve (legacy free private beta) — full IR + HR bundle is
     # always on, no payment gate.

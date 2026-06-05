@@ -9,7 +9,11 @@ from .blog import router as blog_router
 from .policies import router as policies_router
 from .handbooks import router as handbooks_router
 from .public_signatures import router as public_signatures_router
-from .compliance import router as compliance_router, lite_router as compliance_lite_router
+from .compliance import (
+    router as compliance_router,
+    lite_router as compliance_lite_router,
+    shared_router as compliance_shared_router,
+)
 from .bulk_import import router as bulk_import_router
 from .chat import router as chat_router, ws_router as chat_ws_router
 from .contact import router as contact_router
@@ -35,7 +39,7 @@ from .landing_media import public_router as landing_media_public_router, admin_r
 from .resources import router as resources_router
 from .handbook_gap_analyzer import router as handbook_gap_analyzer_router
 from .expert_advice import router as expert_advice_router
-from ...matcha.dependencies import require_feature
+from ...matcha.dependencies import require_feature, require_any_feature
 
 # Create main core router
 core_router = APIRouter()
@@ -55,6 +59,10 @@ core_router.include_router(public_signatures_router, tags=["public-signatures"])
 # first WITHOUT the compliance feature gate so matcha-lite tenants can use the
 # Compliance Calendar even though the full Compliance feature is off.
 core_router.include_router(compliance_lite_router, prefix="/compliance", tags=["compliance-lite"])
+# Read-only viewers (requirements, jurisdiction-stack, summary, upcoming-legislation,
+# categories) — admit full `compliance` (Pro) OR `compliance_lite` (Matcha-X taste).
+core_router.include_router(compliance_shared_router, prefix="/compliance", tags=["compliance-shared"],
+                           dependencies=[Depends(require_any_feature("compliance", "compliance_lite"))])
 core_router.include_router(compliance_router, prefix="/compliance", tags=["compliance"],
                            dependencies=[Depends(require_feature("compliance"))])
 core_router.include_router(bulk_import_router, prefix="/bulk", tags=["bulk-import"])

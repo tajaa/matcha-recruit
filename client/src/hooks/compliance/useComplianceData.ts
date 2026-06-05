@@ -22,7 +22,11 @@ import type {
   LocationUpdate,
 } from '../../types/compliance'
 
-export function useComplianceData(selectedLocationId?: string | null) {
+// `lite` = Matcha-X read-only taste (compliance_lite). Skips the Pro-only
+// alerts + pinned-requirements fetches (their endpoints stay `compliance`-gated
+// and would 403). The try/catch swallows the 403 either way; this just avoids
+// the noise and the wasted round-trips.
+export function useComplianceData(selectedLocationId?: string | null, lite = false) {
   const [locations, setLocations] = useState<BusinessLocation[]>([])
   const [summary, setSummary] = useState<ComplianceSummary | null>(null)
   const [alerts, setAlerts] = useState<ComplianceAlert[]>([])
@@ -56,9 +60,13 @@ export function useComplianceData(selectedLocationId?: string | null) {
 
   const refreshAll = useCallback(async () => {
     setLoading(true)
-    await Promise.all([loadLocations(), loadSummary(), loadAlerts('unread'), loadPinnedRequirements()])
+    await Promise.all([
+      loadLocations(),
+      loadSummary(),
+      ...(lite ? [] : [loadAlerts('unread'), loadPinnedRequirements()]),
+    ])
     setLoading(false)
-  }, [loadLocations, loadSummary, loadAlerts, loadPinnedRequirements])
+  }, [lite, loadLocations, loadSummary, loadAlerts, loadPinnedRequirements])
 
   useEffect(() => { refreshAll() }, [refreshAll])
 
@@ -66,8 +74,8 @@ export function useComplianceData(selectedLocationId?: string | null) {
   const mounted = useRef(false)
   useEffect(() => {
     if (!mounted.current) { mounted.current = true; return }
-    loadAlerts('unread')
-  }, [selectedLocationId, loadAlerts])
+    if (!lite) loadAlerts('unread')
+  }, [selectedLocationId, lite, loadAlerts])
 
   // Mutations
   const createLoc = useCallback(async (data: LocationCreate) => {

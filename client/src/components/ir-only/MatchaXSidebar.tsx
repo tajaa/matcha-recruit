@@ -1,4 +1,4 @@
-import { AlertTriangle, BadgeCheck, BookOpen, Building2, ClipboardList, FileText, Gavel, GraduationCap, ShieldAlert, TrendingUp, Users, Zap } from 'lucide-react'
+import { AlertTriangle, BadgeCheck, BookOpen, Building2, ClipboardList, FileText, Gavel, GraduationCap, Shield, ShieldAlert, TrendingUp, Users, Zap } from 'lucide-react'
 import SidebarShell from '../SidebarShell'
 import type { NavItem, NavGroup } from '../SidebarShell'
 import { useMe } from '../../hooks/useMe'
@@ -17,6 +17,7 @@ const nav: (NavItem | NavGroup)[] = [
   { to: '/app/training', icon: GraduationCap, label: 'Training', feature: 'training' },
   { to: '/app/discipline', icon: Gavel, label: 'Performance Action', feature: 'discipline' },
   { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credentialing', feature: 'credential_templates' },
+  { to: '/app/compliance', icon: Shield, label: 'Compliance', feature: 'compliance_lite' },
   { to: '/app/resources', icon: BookOpen, label: 'Resources' },
   { to: '/app/company', icon: Building2, label: 'Company' },
   { to: '/app/employees', icon: Users, label: 'Employees', feature: 'employees' },

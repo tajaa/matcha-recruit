@@ -55,9 +55,11 @@ type Props = {
   allLocations?: LocationSummary[]
   /** Location source — hide banner for employee-derived locations */
   source?: 'manual' | 'employee_derived'
+  /** Read-only mode (compliance_lite taste) — hide the Edit affordance. */
+  readOnly?: boolean
 }
 
-export function FacilityProfileBanner({ locationId, facilityAttributes, onUpdated, allLocations, source }: Props) {
+export function FacilityProfileBanner({ locationId, facilityAttributes, onUpdated, allLocations, source, readOnly }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -155,13 +157,15 @@ export function FacilityProfileBanner({ locationId, facilityAttributes, onUpdate
             </p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
-            <Button variant="ghost" size="sm" onClick={() => {
-              setEntityType(facilityAttributes.entity_type || '')
-              setPayers(facilityAttributes.payer_contracts || [])
-              setExpanded(true)
-            }}>
-              Edit
-            </Button>
+            {!readOnly && (
+              <Button variant="ghost" size="sm" onClick={() => {
+                setEntityType(facilityAttributes.entity_type || '')
+                setPayers(facilityAttributes.payer_contracts || [])
+                setExpanded(true)
+              }}>
+                Edit
+              </Button>
+            )}
             <Button variant="ghost" size="sm" onClick={handleDismiss}>
               Dismiss
             </Button>
@@ -170,6 +174,10 @@ export function FacilityProfileBanner({ locationId, facilityAttributes, onUpdate
       </div>
     )
   }
+
+  // Read-only taste (compliance_lite): the only remaining paths are the
+  // "set up" prompt and the edit form — both mutations — so render nothing.
+  if (readOnly) return null
 
   // No attrs set: prompt to set up
   // Or expanded from inferred view: show edit form
