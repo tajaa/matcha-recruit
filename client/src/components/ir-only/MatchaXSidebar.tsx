@@ -1,4 +1,4 @@
-import { AlertTriangle, BadgeCheck, BookOpen, Building2, ClipboardList, FileText, Gavel, GraduationCap, ShieldAlert, TrendingUp, Users } from 'lucide-react'
+import { AlertTriangle, BadgeCheck, BookOpen, Building2, ClipboardList, FileText, Gavel, GraduationCap, ShieldAlert, TrendingUp, Users, Zap } from 'lucide-react'
 import SidebarShell from '../SidebarShell'
 import type { NavItem, NavGroup } from '../SidebarShell'
 import { useMe } from '../../hooks/useMe'
@@ -20,6 +20,7 @@ const nav: (NavItem | NavGroup)[] = [
   { to: '/app/resources', icon: BookOpen, label: 'Resources' },
   { to: '/app/company', icon: Building2, label: 'Company' },
   { to: '/app/employees', icon: Users, label: 'Employees', feature: 'employees' },
+  { to: '/matcha-x/onboarding', icon: Zap, label: 'Compliance Setup' },
 ]
 
 export default function MatchaXSidebar() {

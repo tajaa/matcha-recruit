@@ -13,6 +13,7 @@ from .er_copilot import router as er_copilot_router, public_router as er_copilot
 from .ir_incidents import router as ir_incidents_router
 from .broker_portfolio import router as broker_portfolio_router
 from .ir_onboarding import router as ir_onboarding_router
+from .matcha_x_onboarding import router as matcha_x_onboarding_router
 from .ir_surveys import router as ir_surveys_router
 from .accommodations import router as accommodations_router
 from .dashboard import router as dashboard_router
@@ -66,6 +67,9 @@ matcha_router.include_router(ir_incidents_router, prefix="/ir/incidents", tags=[
                              dependencies=[Depends(require_feature("incidents"))])
 matcha_router.include_router(ir_onboarding_router, prefix="/ir-onboarding", tags=["ir-onboarding"],
                              dependencies=[Depends(require_feature("incidents"))])
+matcha_router.include_router(matcha_x_onboarding_router, prefix="/matcha-x-onboarding",
+                             tags=["matcha-x-onboarding"],
+                             dependencies=[Depends(require_feature("handbook_audit"))])
 matcha_router.include_router(ir_surveys_router, prefix="/ir/surveys", tags=["ir-surveys"],
                              dependencies=[Depends(require_feature("incidents"))])
 matcha_router.include_router(accommodations_router, prefix="/accommodations", tags=["accommodations"],

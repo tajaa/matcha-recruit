@@ -1,0 +1,588 @@
+"""Matcha-X self-serve onboarding wizard companion endpoints.
+
+A stripped-down, *performative* counterpart to the admin white-glove
+``/admin/gap-analysis`` flow. Matcha-X tenants onboard themselves: add
+locations, drop in their handbook, add employees — then watch Matcha build
+their compliance baseline live (``POST /build/stream``): per-location
+jurisdiction resolution → fetch from the directory → codify brand-new
+jurisdictions on screen → overlay their handbook's coverage.
+
+Mounted under ``require_feature("handbook_audit")`` — the exact Matcha-X /
+Pro entitlement (``matcha_x`` is a ``signup_source``, not a boolean flag;
+``handbook_audit`` is on for X via the tier overlay and stored for Pro, off
+for Free/Lite and personal Werk).
+
+No new table: wizard step is inferred from data presence (mirrors
+``ir_onboarding.get_onboarding_status``); "skip / done" is a client-side
+localStorage flag.
+"""
+
+import asyncio
+import json
+from typing import List, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+from ...database import get_connection
+from ..dependencies import require_admin_or_client, get_client_company_id
+from ...core.services.compliance_service import (
+    run_compliance_check_stream,
+    MATCHA_X_LITE_CATEGORIES,
+    _get_industry_profile,
+    _heartbeat_while,
+)
+from ...core.services.handbook_audit_service import (
+    _extract_sections_from_pdf,
+    _grade_state_coverage,
+)
+from ...core.services.storage import get_storage
+
+router = APIRouter()
+
+
+# ── Status (data-presence step inference; no completion column) ───────────
+
+
+@router.get("/status")
+async def get_matcha_x_onboarding_status(
+    current_user=Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated")
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT
+                (SELECT COUNT(*) FROM business_locations
+                   WHERE company_id = $1 AND is_active = true) AS locations_count,
+                (SELECT COUNT(*) FROM employees WHERE org_id = $1) AS employees_count,
+                EXISTS(SELECT 1 FROM handbooks WHERE company_id = $1) AS handbook_present,
+                EXISTS(
+                    SELECT 1 FROM compliance_requirements cr
+                    JOIN business_locations bl ON bl.id = cr.location_id
+                    WHERE bl.company_id = $1
+                ) AS built
+            """,
+            company_id,
+        )
+
+    locations_count = int(row["locations_count"] or 0)
+    employees_count = int(row["employees_count"] or 0)
+    built = bool(row["built"])
+
+    if locations_count == 0:
+        step = "locations"
+    elif employees_count == 0:
+        step = "people"
+    elif not built:
+        step = "build"
+    else:
+        step = "done"
+
+    return {
+        "step": step,
+        "locations_count": locations_count,
+        "employees_count": employees_count,
+        "handbook_present": bool(row["handbook_present"]),
+        "built": built,
+    }
+
+
+@router.post("/complete")
+async def complete_matcha_x_onboarding(
+    current_user=Depends(require_admin_or_client),
+):
+    """Best-effort marker. Completion is tracked client-side (localStorage);
+    this exists for symmetry and future server-side persistence."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated")
+    return {"completed": True}
+
+
+# ── Locations (decoupled from the incidents paywall) ──────────────────────
+# Mirrors /ir-onboarding/locations but lives on the handbook_audit-gated router
+# so the wizard works for EVERY Matcha-X tenant — including business-pays
+# tenants whose `incidents` flag hasn't been flipped by the Stripe webhook yet
+# (the /ir-onboarding/* router is incidents-gated and would 403 in that window).
+# Same business_locations table, so any later upgrade carries the data over.
+
+
+class MatchaXLocationCreate(BaseModel):
+    name: Optional[str] = None
+    address: Optional[str] = None
+    city: str
+    state: str
+    zipcode: str
+
+
+def _serialize_location(row) -> dict:
+    return {
+        "id": str(row["id"]),
+        "name": row["name"],
+        "address": row["address"],
+        "city": row["city"],
+        "state": row["state"],
+        "zipcode": row["zipcode"],
+        "is_active": bool(row["is_active"]),
+    }
+
+
+@router.get("/locations")
+async def list_matcha_x_locations(
+    current_user=Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated")
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, name, address, city, state, zipcode, is_active
+            FROM business_locations
+            WHERE company_id = $1 AND is_active = true
+            ORDER BY name NULLS LAST, city
+            """,
+            company_id,
+        )
+    return [_serialize_location(r) for r in rows]
+
+
+@router.post("/locations")
+async def create_matcha_x_location(
+    data: MatchaXLocationCreate,
+    current_user=Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated")
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO business_locations (
+                company_id, name, address, city, state, zipcode, is_active
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, true)
+            RETURNING id, name, address, city, state, zipcode, is_active
+            """,
+            company_id,
+            data.name,
+            data.address,
+            data.city.strip(),
+            data.state.strip().upper(),
+            data.zipcode.strip(),
+        )
+    return _serialize_location(row)
+
+
+@router.delete("/locations/{location_id}")
+async def deactivate_matcha_x_location(
+    location_id: UUID,
+    current_user=Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated")
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE business_locations
+               SET is_active = false, updated_at = NOW()
+             WHERE id = $1 AND company_id = $2
+            RETURNING id
+            """,
+            location_id,
+            company_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Location not found")
+    return {"deactivated": True}
+
+
+# ── Handbook upload (per-company key namespace → ownership-checkable) ──────
+
+
+@router.post("/handbook-upload")
+async def upload_x_handbook(
+    file: UploadFile = File(...),
+    current_user=Depends(require_admin_or_client),
+):
+    """Handbook upload for the onboarding coverage overlay. Stores the file
+    under a per-company key prefix (``handbooks/{company_id}/…``) so the build
+    can verify the file belongs to the caller before downloading it — closing
+    the IDOR / arbitrary-read a raw client-supplied storage URL would open."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    url = await get_storage().upload_file(
+        file_bytes=data,
+        filename=file.filename or "handbook.pdf",
+        prefix=f"handbooks/{company_id}",
+        content_type=file.content_type,
+    )
+    return {"url": url, "filename": file.filename or "handbook.pdf"}
+
+
+def _is_owned_handbook_url(url: str, company_id) -> bool:
+    """Allow only a storage reference THIS company uploaded via
+    /handbook-upload: our own CloudFront URL whose key sits under
+    ``handbooks/{company_id}/``, or (local dev backend) an ``/uploads/`` path
+    that storage._resolve_local_upload_path confines to the uploads dir.
+    Rejects ``s3://`` (arbitrary-bucket read), foreign hosts (SSRF), path
+    traversal, and another tenant's handbook key."""
+    if not url or ".." in url:
+        return False
+    storage = get_storage()
+    domain = getattr(storage, "cloudfront_domain", None)
+    if domain and url.startswith(f"https://{domain}/"):
+        key = url[len(f"https://{domain}/"):].split("?", 1)[0]
+        return key.startswith(f"handbooks/{company_id}/")
+    # Local dev backend ignores the prefix (returns /uploads/resources/…) and
+    # confines reads to the uploads dir — acceptable for dev-only data.
+    if url.startswith("/uploads/") or url.startswith("uploads/"):
+        return True
+    return False
+
+
+# ── The performative live build (SSE) ─────────────────────────────────────
+
+
+class MatchaXBuildRequest(BaseModel):
+    # The exact string returned by POST /matcha-x-onboarding/handbook-upload.
+    # Optional — absent / non-PDF / not-owned ⇒ the coverage overlay is skipped.
+    handbook_url: Optional[str] = None
+
+
+@router.post("/build/stream")
+async def build_compliance_baseline_stream(
+    data: MatchaXBuildRequest,
+    current_user=Depends(require_admin_or_client),
+):
+    """Loop the company's locations through the live compliance engine
+    (``run_compliance_check_stream`` with the lite category set + live
+    research), pass each child event through tagged per-location, then overlay
+    the uploaded handbook's coverage per state. SSE envelope mirrors the admin
+    enrich stream (``data: {json}\\n\\n``, ``: heartbeat``, terminal
+    ``data: [DONE]``).
+    """
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated")
+
+    handbook_url = (data.handbook_url or "").strip() or None
+
+    async def events():
+        # 1. Load active locations + company context (short-lived connection).
+        async with get_connection() as conn:
+            company = await conn.fetchrow(
+                "SELECT name FROM companies WHERE id = $1", company_id
+            )
+            if not company:
+                yield {"type": "error", "message": "Company not found"}
+                return
+            locs = await conn.fetch(
+                """
+                SELECT id, name, city, state
+                FROM business_locations
+                WHERE company_id = $1 AND is_active = true
+                ORDER BY name NULLS LAST, city
+                """,
+                company_id,
+            )
+            industry_profile = await _get_industry_profile(conn, company_id)
+        industry = (industry_profile or {}).get("canonical_industry")
+        company_name = company["name"] or "your company"
+
+        def _label(row) -> str:
+            return row["name"] or f"{row['city']}, {row['state']}"
+
+        if not locs:
+            yield {
+                "type": "complete",
+                "locations": 0,
+                "jurisdictions": 0,
+                "requirements": 0,
+                "codified_new": 0,
+                "handbook_states_graded": 0,
+                "handbook_coverage_pct": None,
+                "message": "Add a location to build your compliance baseline.",
+            }
+            return
+
+        yield {
+            "type": "started",
+            "message": f"Building {company_name}'s compliance baseline…",
+        }
+        yield {
+            "type": "locations_scanned",
+            "count": len(locs),
+            "labels": [_label(l) for l in locs],
+            "message": (
+                f"{len(locs)} location(s) — each gets its own local compliance."
+            ),
+        }
+
+        # 2. Kick off handbook section extraction in parallel so it overlaps the
+        #    location loop (it's a slow Gemini call). PDF-only in v1.
+        #    Reject any handbook_url not issued to THIS company (IDOR / arbitrary
+        #    file read guard) before it ever reaches storage.download_file.
+        section_task = None
+        if handbook_url and not _is_owned_handbook_url(handbook_url, company_id):
+            yield {
+                "type": "handbook_skipped",
+                "reason": "invalid",
+                "message": "Handbook reference not recognized — skipping coverage overlay.",
+            }
+            handbook_url = None
+        if handbook_url and handbook_url.lower().split("?")[0].endswith(".pdf"):
+            yield {"type": "handbook_detected", "message": "Reading your handbook…"}
+
+            async def _extract():
+                try:
+                    pdf_bytes = await get_storage().download_file(handbook_url)
+                except Exception:
+                    return None
+                if not pdf_bytes:
+                    return None
+                return await _extract_sections_from_pdf(pdf_bytes)
+
+            section_task = asyncio.create_task(_extract())
+        elif handbook_url:
+            yield {
+                "type": "handbook_skipped",
+                "reason": "non_pdf",
+                "message": "Handbook coverage overlay supports PDF uploads only.",
+            }
+
+        # 3. Build each location live.
+        total_covered = 0
+        total_codified = 0
+        jurisdictions_seen: set = set()
+
+        for loc in locs:
+            loc_id = loc["id"]
+            label = _label(loc)
+            yield {
+                "type": "location_start",
+                "location_id": str(loc_id),
+                "label": label,
+                "city": loc["city"],
+                "state": loc["state"],
+                "message": f"Resolving jurisdiction for {label}…",
+            }
+
+            # Count directory rows before, to surface "codified live" delta.
+            async with get_connection() as conn:
+                jid_before = await conn.fetchval(
+                    "SELECT jurisdiction_id FROM business_locations WHERE id = $1",
+                    loc_id,
+                )
+                before_count = 0
+                if jid_before:
+                    before_count = (
+                        await conn.fetchval(
+                            "SELECT COUNT(*) FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+                            jid_before,
+                        )
+                        or 0
+                    )
+
+            researched_live = False
+            try:
+                async for ev in run_compliance_check_stream(
+                    loc_id,
+                    company_id,
+                    allow_live_research=True,
+                    categories=MATCHA_X_LITE_CATEGORIES,
+                ):
+                    etype = ev.get("type")
+                    if etype == "heartbeat":
+                        yield {"type": "heartbeat"}
+                        continue
+                    if etype == "error":
+                        # Recoverable per-location hiccup → warning, keep going.
+                        yield {
+                            "type": "warning",
+                            "message": ev.get("message") or f"Research issue for {label}",
+                            "location_id": str(loc_id),
+                            "label": label,
+                        }
+                        continue
+                    if etype in (
+                        "researching",
+                        "repository_refresh",
+                        "discovering_sources",
+                        "trigger_research",
+                    ):
+                        researched_live = True
+                    yield {**ev, "location_id": str(loc_id), "label": label}
+            except Exception as exc:
+                yield {
+                    "type": "warning",
+                    "message": f"Build incomplete for {label}: {exc}",
+                    "location_id": str(loc_id),
+                    "label": label,
+                }
+
+            # Post-build counts.
+            async with get_connection() as conn:
+                jid = await conn.fetchval(
+                    "SELECT jurisdiction_id FROM business_locations WHERE id = $1",
+                    loc_id,
+                )
+                after_count = before_count
+                if jid:
+                    after_count = (
+                        await conn.fetchval(
+                            "SELECT COUNT(*) FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+                            jid,
+                        )
+                        or 0
+                    )
+                covered = (
+                    await conn.fetchval(
+                        "SELECT COUNT(*) FROM compliance_requirements WHERE location_id = $1",
+                        loc_id,
+                    )
+                    or 0
+                )
+            codified_new = max(0, after_count - before_count)
+            total_covered += covered
+            total_codified += codified_new
+            if jid:
+                jurisdictions_seen.add(str(jid))
+
+            yield {
+                "type": "location_built",
+                "location_id": str(loc_id),
+                "label": label,
+                "covered": covered,
+                "codified_new": codified_new,
+                "researched_live": researched_live,
+                "message": (
+                    f"{label}: {covered} requirement(s) mapped"
+                    + (f", {codified_new} newly codified" if codified_new else "")
+                ),
+            }
+
+        # 4. Handbook coverage overlay (per state present across locations).
+        handbook_states_graded = 0
+        hb_covered = 0
+        hb_total = 0
+        if section_task is not None:
+            async for evt in _heartbeat_while(section_task):
+                yield evt
+            try:
+                sections = section_task.result()
+            except Exception:
+                sections = None
+
+            if not sections:
+                yield {
+                    "type": "handbook_skipped",
+                    "reason": "unreadable",
+                    "message": "Couldn't read the handbook — skipping coverage overlay.",
+                }
+            else:
+                async with get_connection() as conn:
+                    req_rows = await conn.fetch(
+                        """
+                        SELECT bl.state AS state, cr.category, cr.title,
+                               cr.description, cr.source_url
+                        FROM compliance_requirements cr
+                        JOIN business_locations bl ON bl.id = cr.location_id
+                        WHERE bl.company_id = $1 AND bl.is_active = true
+                        """,
+                        company_id,
+                    )
+                by_state: dict = {}
+                for r in req_rows:
+                    st = (r["state"] or "").upper()
+                    if not st:
+                        continue
+                    by_state.setdefault(st, []).append(
+                        {
+                            "category": r["category"],
+                            "title": r["title"],
+                            "description": r["description"],
+                            "source_url": r["source_url"],
+                        }
+                    )
+
+                for st, reqs in by_state.items():
+                    if not reqs:
+                        continue
+                    yield {
+                        "type": "handbook_grading",
+                        "state": st,
+                        "message": f"Matching your handbook against {st} law…",
+                    }
+                    grade_task = asyncio.create_task(
+                        _grade_state_coverage(
+                            state=st,
+                            industry=industry,
+                            requirements=reqs,
+                            sections=sections,
+                        )
+                    )
+                    async for evt in _heartbeat_while(grade_task):
+                        yield evt
+                    try:
+                        results = grade_task.result()
+                    except Exception:
+                        results = None
+                    if not results:
+                        continue
+                    covered_items = [r for r in results if r.get("covered")]
+                    gaps = [r for r in results if not r.get("covered")]
+                    handbook_states_graded += 1
+                    hb_covered += len(covered_items)
+                    hb_total += len(results)
+                    yield {
+                        "type": "handbook_coverage",
+                        "state": st,
+                        "covered": covered_items,
+                        "gaps": gaps,
+                        "covered_count": len(covered_items),
+                        "gap_count": len(gaps),
+                        "message": (
+                            f"{st}: {len(covered_items)} covered, {len(gaps)} gap(s)"
+                        ),
+                    }
+
+        coverage_pct = round(100 * hb_covered / hb_total) if hb_total else None
+        yield {
+            "type": "complete",
+            "locations": len(locs),
+            "jurisdictions": len(jurisdictions_seen),
+            "requirements": total_covered,
+            "codified_new": total_codified,
+            "handbook_states_graded": handbook_states_graded,
+            "handbook_coverage_pct": coverage_pct,
+            "message": "Your compliance baseline is live.",
+        }
+
+    async def sse():
+        try:
+            async for ev in events():
+                if ev.get("type") == "heartbeat":
+                    yield ": heartbeat\n\n"
+                else:
+                    yield f"data: {json.dumps(ev, default=str)}\n\n"
+        except Exception as exc:  # last-resort guard so the stream always closes
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        sse(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no"},
+    )

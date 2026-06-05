@@ -52,6 +52,7 @@ const IrSignup = lazy(() => import('./pages/auth/IrSignup'))
 const MatchaLiteSignup = lazy(() => import('./pages/auth/MatchaLiteSignup'))
 const MatchaXSignup = lazy(() => import('./pages/auth/MatchaXSignup'))
 const IrOnboardingWizard = lazy(() => import('./features/ir-onboarding/IrOnboardingWizard'))
+const MatchaXOnboardingWizard = lazy(() => import('./features/matcha-x-onboarding/MatchaXOnboardingWizard'))
 const AnonymousReport = lazy(() => import('./pages/shared/AnonymousReport'))
 const LocationIntake = lazy(() => import('./pages/shared/LocationIntake'))
 
@@ -107,7 +108,7 @@ export default function App() {
         <Route path="/lite/signup" element={<MatchaLiteSignup />} />
         <Route path="/matcha-x/signup" element={<MatchaXSignup />} />
         <Route path="/ir/onboarding" element={<IrOnboardingWizard />} />
-        <Route path="/matcha-x/onboarding" element={<IrOnboardingWizard />} />
+        <Route path="/matcha-x/onboarding" element={<MatchaXOnboardingWizard />} />
         <Route path="/report/:token" element={<AnonymousReport />} />
         <Route path="/intake/:token" element={<LocationIntake />} />
         <Route path="/work/*" element={<WorkRoutes />} />

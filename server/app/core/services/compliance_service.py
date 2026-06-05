@@ -725,6 +725,24 @@ def _missing_required_categories(requirements: list[dict]) -> list[str]:
     return sorted(cat for cat in REQUIRED_LABOR_CATEGORIES if cat not in present)
 
 
+# Reduced category set for the Matcha-X self-serve onboarding finale: basic
+# federal + labor + common state-specific law. Passed as ``categories`` to
+# run_compliance_check_stream so the live build researches ~9 categories instead
+# of the full required-labor sweep — faster and cheaper for self-serve. All keys
+# are valid entries in compliance_registry.
+MATCHA_X_LITE_CATEGORIES: List[str] = [
+    "minimum_wage",
+    "overtime",
+    "sick_leave",
+    "meal_breaks",
+    "pay_frequency",
+    "final_pay",
+    "anti_discrimination",
+    "workplace_safety",
+    "i9_everify",
+]
+
+
 def _normalize_title_key(title: Optional[str]) -> str:
     if not title:
         return ""
@@ -4332,14 +4350,42 @@ async def run_compliance_check_stream(
     location_id: UUID,
     company_id: UUID,
     allow_live_research: bool = True,
+    categories: Optional[List[str]] = None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Runs a compliance check for a specific location.
     Checks the jurisdiction repository first; only calls Gemini if stale/missing.
     Yields progress dicts as SSE-friendly events.
+
+    ``categories`` optionally narrows the "required" set this run cares about
+    (e.g. the Matcha-X self-serve onboarding finale passes
+    ``MATCHA_X_LITE_CATEGORIES`` for a faster, cheaper basic-law sweep). When
+    None — every existing caller — behaviour is identical to before.
     """
     from ...database import get_connection
     from .gemini_compliance import get_gemini_compliance_service
+
+    # ── Matcha-X lite scope ────────────────────────────────────────────────
+    # When the caller passes a reduced ``categories`` set, shadow the
+    # module-level ``_missing_required_categories`` with a local that treats
+    # those as the required set. Every internal call below (which drives what
+    # Tier-3 Gemini research fetches) then narrows automatically — no call-site
+    # edits. With categories=None this shadow is identical to the module helper,
+    # so the full (Pro) compliance check is byte-for-byte unaffected.
+    _required_override = set(categories) if categories else None
+
+    def _missing_required_categories(requirements: list[dict]) -> list[str]:
+        present = {
+            _normalize_category((req or {}).get("category"))
+            for req in requirements
+            if isinstance(req, dict) and (req or {}).get("category")
+        }
+        required = (
+            _required_override
+            if _required_override is not None
+            else REQUIRED_LABOR_CATEGORIES
+        )
+        return sorted(cat for cat in required if cat not in present)
 
     location = await get_location(location_id, company_id)
     if not location:
