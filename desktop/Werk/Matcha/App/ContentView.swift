@@ -7,10 +7,13 @@ struct ContentView: View {
     @State private var isOpeningCheckout = false
     @State private var upgradeError: String?
     @State private var showProfile = false
-    @AppStorage("mw-sidebar-channels-open") private var channelsSectionOpen = false
-    @AppStorage("mw-sidebar-projects-open") private var projectsSectionOpen = false
-    @AppStorage("mw-sidebar-journals-open") private var journalsSectionOpen = false
-    @AppStorage("mw-sidebar-threads-open") private var threadsSectionOpen = false
+    // -v2 keys: sections now default-collapsed (clean sidebar — click a header
+    // to reveal its items). Bumping the key resets anyone whose old state was
+    // persisted open. Starred channels stay pinned-visible even when collapsed.
+    @AppStorage("mw-sidebar-channels-open-v2") private var channelsSectionOpen = false
+    @AppStorage("mw-sidebar-projects-open-v2") private var projectsSectionOpen = false
+    @AppStorage("mw-sidebar-journals-open-v2") private var journalsSectionOpen = false
+    @AppStorage("mw-sidebar-threads-open-v2") private var threadsSectionOpen = false
     @AppStorage("mw-sidebar-email-open") private var emailSectionOpen = false
     @State private var showNewJournal = false
     @State private var showNewBlog = false
@@ -430,6 +433,9 @@ struct ContentView: View {
             title: "Channels",
             icon: "number",
             isOpen: $channelsSectionOpen,
+            // Always render the channels view: when collapsed it shows only the
+            // starred (pinned) channels; expanding reveals the rest.
+            alwaysRenderContent: true,
             trailing: {
                 HStack(spacing: 4) {
                     Button {
@@ -439,7 +445,7 @@ struct ContentView: View {
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundColor(.secondary)
                             .frame(width: 18, height: 18)
-                            .background(Color.zinc800)
+                            .background(Color(white: 0.58))
                             .cornerRadius(4)
                     }
                     .buttonStyle(.plain)
@@ -471,7 +477,7 @@ struct ContentView: View {
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundColor(.secondary)
                             .frame(width: 18, height: 18)
-                            .background(Color.zinc800)
+                            .background(Color(white: 0.58))
                             .cornerRadius(4)
                     }
                     .menuStyle(.borderlessButton)
@@ -481,7 +487,7 @@ struct ContentView: View {
                 }
             }
         ) {
-            ChannelsSidebarView(showHeader: false, searchText: searchText)
+            ChannelsSidebarView(showHeader: false, searchText: searchText, expanded: channelsSectionOpen)
         }
     }
 
@@ -497,7 +503,7 @@ struct ContentView: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.secondary)
                         .frame(width: 18, height: 18)
-                        .background(Color.zinc800)
+                        .background(Color(white: 0.58))
                         .cornerRadius(4)
                 }
                 .buttonStyle(.plain)
@@ -646,7 +652,7 @@ struct ContentView: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.secondary)
                         .frame(width: 18, height: 18)
-                        .background(Color.zinc800)
+                        .background(Color(white: 0.58))
                         .cornerRadius(4)
                 }
                 .buttonStyle(.plain)
@@ -702,7 +708,7 @@ struct ContentView: View {
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundColor(.secondary)
                             .frame(width: 18, height: 18)
-                            .background(Color.zinc800)
+                            .background(Color(white: 0.58))
                             .cornerRadius(4)
                     }
                     .buttonStyle(.plain)
@@ -728,7 +734,7 @@ struct ContentView: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.secondary)
                         .frame(width: 18, height: 18)
-                        .background(Color.zinc800)
+                        .background(Color(white: 0.58))
                         .cornerRadius(4)
                 }
                 .buttonStyle(.plain)
@@ -770,6 +776,10 @@ struct ContentView: View {
         title: String,
         icon: String,
         isOpen: Binding<Bool>,
+        // When true the content always renders (collapsed or not) and decides
+        // for itself what to show while collapsed — used by Channels to keep
+        // starred channels pinned-visible. Other sections hide content when shut.
+        alwaysRenderContent: Bool = false,
         @ViewBuilder trailing: () -> Trailing = { EmptyView() },
         @ViewBuilder content: () -> Content
     ) -> some View {
@@ -801,7 +811,7 @@ struct ContentView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
 
-            if isOpen.wrappedValue {
+            if isOpen.wrappedValue || alwaysRenderContent {
                 content()
             }
         }

@@ -5,6 +5,10 @@ struct ChannelsSidebarView: View {
     @Environment(\.openWindow) private var openWindow
     var showHeader: Bool = true
     var searchText: String = ""
+    /// When false, the section is collapsed in the sidebar: only **starred**
+    /// channels render (a pinned strip), and the "Show N more" pager is hidden.
+    /// Non-starred channels are revealed only when the user expands the header.
+    var expanded: Bool = true
     @State private var channels: [ChannelSummary] = []
     @State private var isLoading = true
     @State private var showCreate = false
@@ -93,19 +97,32 @@ struct ChannelsSidebarView: View {
 
     @ViewBuilder
     private var content: some View {
+        // Observe the star store so the pinned strip recomputes when a star is
+        // toggled (membership of `displayChannels` depends on it).
+        let _ = ChannelStarStore.shared.generation
         VStack(spacing: 0) {
             if showHeader {
                 header
                 Divider().opacity(0.3)
             }
             if isLoading {
-                loadingView
-            } else if channels.isEmpty {
-                emptyView
+                // No "Loading…" placeholder in a collapsed pinned strip.
+                if expanded { loadingView }
+            } else if displayChannels.isEmpty {
+                // Collapsed + nothing starred → render nothing (stays collapsed).
+                if expanded { emptyView }
             } else {
                 channelList
             }
         }
+    }
+
+    /// Channels shown right now: everything when expanded, only starred when the
+    /// section is collapsed (the pinned strip).
+    private var displayChannels: [ChannelSummary] {
+        guard !expanded else { return channels }
+        let stars = ChannelStarStore.shared
+        return channels.filter { stars.isStarred($0.id) }
     }
 
     private var loadingView: some View {
@@ -135,15 +152,18 @@ struct ChannelsSidebarView: View {
     }
 
     private var channelList: some View {
-        let filtered = channels.filter {
+        let filtered = displayChannels.filter {
             searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(searchText)
         }
-        let limit = searchText.isEmpty ? visibleCount : filtered.count
+        // Collapsed strip shows every starred channel (few); pager only paginates
+        // the full expanded list.
+        let paginate = expanded && searchText.isEmpty
+        let limit = paginate ? visibleCount : filtered.count
         return LazyVStack(spacing: 0) {
             ForEach(filtered.prefix(limit), id: \.id) { channel in
                 row(for: channel)
             }
-            if searchText.isEmpty && filtered.count > visibleCount {
+            if paginate && filtered.count > visibleCount {
                 SidebarShowMoreButton(remaining: filtered.count - visibleCount, pageSize: pageSize) {
                     visibleCount += pageSize
                 }
