@@ -14,6 +14,7 @@ import {
   TrendingDown,
 } from 'lucide-react'
 import { StatCard } from '../../components/dashboard'
+import TabHeader from '../../components/broker/action-center/TabHeader'
 import { Button, Modal, Select, FileUpload, useToast } from '../../components/ui'
 import {
   fetchBenefitEligibilityExceptions,
@@ -374,24 +375,18 @@ export default function BrokerEligibilityExceptions() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">
-            <UserCheck className="w-6 h-6 text-emerald-400" />
-            Eligibility Exceptions
-          </h1>
-          <p className="text-sm text-zinc-500 mt-1">
-            Open benefit-enrollment gaps and active premium leaks across your book — work the queue
-            top to bottom.
-          </p>
-        </div>
-        <Button size="sm" variant="secondary" onClick={() => setShowUpload(true)}>
-          <Upload size={14} className="mr-1" />
-          Upload roster (CSV)
-        </Button>
-      </div>
+    <div className="space-y-4">
+      <TabHeader
+        icon={UserCheck}
+        title="Eligibility Exceptions"
+        hint="Open benefit-enrollment gaps and active premium leaks across your book — work the queue top to bottom."
+        actions={
+          <Button size="sm" variant="secondary" onClick={() => setShowUpload(true)}>
+            <Upload size={14} className="mr-1" />
+            Upload roster (CSV)
+          </Button>
+        }
+      />
 
       {/* Summary stat row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

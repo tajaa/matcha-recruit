@@ -16,6 +16,7 @@ import { StatCard } from '../../components/dashboard'
 import { Button, Badge, Modal, useToast } from '../../components/ui'
 import type { BadgeVariant } from '../../components/ui'
 import { fetchRenewalRadar, fetchRenewalRadarDetail, downloadStabilizationKit } from '../../api/broker'
+import TabHeader from '../../components/broker/action-center/TabHeader'
 import type {
   RenewalRadarCompany,
   RenewalRadarSummary,
@@ -267,17 +268,12 @@ export default function BrokerRenewalRiskRadar() {
   )
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">
-          <Radar className="w-6 h-6 text-emerald-400" />
-          Renewal Risk Radar
-        </h1>
-        <p className="text-sm text-zinc-500 mt-1">
-          Workforce signals that predict premium exposure at renewal. Open a client to see the drivers.
-        </p>
-      </div>
+    <div className="space-y-4">
+      <TabHeader
+        icon={Radar}
+        title="Renewal Risk Radar"
+        hint="Workforce signals that predict premium exposure at renewal. Open a client to see the drivers."
+      />
 
       {/* Summary */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
