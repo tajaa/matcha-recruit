@@ -196,6 +196,7 @@ export function ComplianceLiteView() {
                     checkMessages={[]}
                     facilityAttributes={selectedLoc.facility_attributes}
                     readOnly
+                    previewCategoryLimit={2}
                   />
                 )}
                 {tab === 'upcoming' && (

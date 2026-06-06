@@ -14,6 +14,8 @@ export type NavItem = {
   label: string
   badge?: number
   onSeen?: () => void
+  /** Small text chip after the label (e.g. "Pro" on an upsell / teaser entry). */
+  tag?: string
   /** Optional company feature flag — item is hidden when the flag is false. */
   feature?: string
   /** Renders the item grayed out with a lock icon. Click fires `onLockedClick`
@@ -94,6 +96,11 @@ function NavItemLink({ item, location, collapsed }: { item: NavItem; location: R
       {!collapsed && (
         <>
           <span className="flex-1 tracking-wide">{item.label}</span>
+          {item.tag && (
+            <span className="text-[8.5px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20 leading-none">
+              {item.tag}
+            </span>
+          )}
           {!!item.badge && item.badge > 0 && (
             <span className="min-w-[18px] h-[16px] flex items-center justify-center rounded bg-emerald-500/10 text-[9px] font-mono text-emerald-400 px-1.5 leading-none">
               {item.badge > 99 ? '99+' : item.badge}
