@@ -1,7 +1,6 @@
 import React, { useMemo } from 'react'
 import { FileText, Package, PlusCircle } from 'lucide-react'
 import Markdown from 'react-markdown'
-import rehypeRaw from 'rehype-raw'
 import type { MWMessage } from '../../types/matcha-work'
 import ComplianceReasoningPanel from './ComplianceReasoningPanel'
 
@@ -41,7 +40,7 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
   onAddToProject?: (messageId: string, content: string) => void
 }) {
   const markdownContent = useMemo(() => (
-    <Markdown rehypePlugins={[rehypeRaw]}>{m.content}</Markdown>
+    <Markdown>{m.content}</Markdown>
   ), [m.content])
   const penalties = useMemo(() => extractPenalties(m.metadata), [m.metadata])
 

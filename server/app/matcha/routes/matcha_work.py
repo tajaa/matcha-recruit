@@ -8015,15 +8015,15 @@ def _render_inline_md(text: str) -> str:
     headings, checkboxes) as literal text so the PDF matches the desktop preview.
 
     Standalone image lines `![alt](url)` are emitted as <img> tags so the
-    downstream _inline_images() pass can convert storage URLs to base64
-    data URIs. Mirrors the desktop preview's parseImage() in
+    downstream storage.inline_storage_images() pass can convert storage URLs to
+    base64 data URIs. Mirrors the desktop preview's parseImage() in
     MarkdownPreviewView.swift.
     """
     import re as _re_i, html as _html_i
     out = []
     for line in text.split('\n'):
         # Standalone image line: ![alt](url) — emit <img>, bypass escape so
-        # _inline_images() can pick up the src.
+        # storage.inline_storage_images() can pick up the src.
         img_match = _IMG_LINE_RE.match(line.strip())
         if img_match:
             alt = _html_i.escape(img_match.group(1))
@@ -8049,31 +8049,11 @@ async def _render_project_pdf(project: dict) -> bytes:
     endpoint.
     """
     import html as _html
-    import re as _re
-    import base64
 
     title = project.get("title") or "Document"
     sections = project.get("sections") or []
 
     storage = get_storage()
-    img_pattern = _re.compile(r'<img\s+[^>]*src="([^"]+)"', _re.IGNORECASE)
-
-    async def _inline_images(html_str: str) -> str:
-        result = html_str
-        for match in reversed(list(img_pattern.finditer(result))):
-            src = match.group(1)
-            if not storage.is_supported_storage_path(src):
-                continue
-            try:
-                data = await storage.download_file(src)
-                ext = src.rsplit(".", 1)[-1].lower() if "." in src else "png"
-                mime = {"svg": "image/svg+xml", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}.get(ext, "image/png")
-                b64 = base64.b64encode(data).decode()
-                data_uri = f"data:{mime};base64,{b64}"
-                result = result[:match.start(1)] + data_uri + result[match.end(1):]
-            except Exception:
-                pass
-        return result
 
     sections_html = []
     for idx, s in enumerate(sections):
@@ -8085,11 +8065,13 @@ async def _render_project_pdf(project: dict) -> bytes:
         # THEN inline images so those <img src="..."> URLs get base64'd. The
         # opposite order leaves the just-emitted <img src=https://s3...> tags
         # unprocessed and WeasyPrint can't fetch private storage URLs.
+        # External (non-storage) image URLs stay un-inlined and are blocked by
+        # the SSRF-safe fetcher at render time (intended).
         if content.lstrip().startswith("<"):
-            content_html = await _inline_images(content)
+            content_html = await storage.inline_storage_images(content)
         else:
             content_html = f"<div>{_render_inline_md(content)}</div>"
-            content_html = await _inline_images(content_html)
+            content_html = await storage.inline_storage_images(content_html)
         sections_html.append(f"{heading}\n<div class='section-body'>{content_html}</div>")
 
     body_html = "\n".join(sections_html)
@@ -8124,6 +8106,7 @@ async def _render_project_pdf(project: dict) -> bytes:
 
     try:
         from weasyprint import HTML
+        from ...core.services.pdf import safe_url_fetcher
     except ImportError as ie:
         # Surface the real installation hint instead of an opaque 500 so
         # the desktop alert tells the operator what to do.
@@ -8135,7 +8118,7 @@ async def _render_project_pdf(project: dict) -> bytes:
 
     try:
         return await asyncio.wait_for(
-            asyncio.to_thread(lambda: HTML(string=full_html).write_pdf()),
+            asyncio.to_thread(lambda: HTML(string=full_html, url_fetcher=safe_url_fetcher).write_pdf()),
             timeout=60.0,
         )
     except asyncio.TimeoutError:
@@ -8203,26 +8186,10 @@ async def export_project_endpoint(
     if fmt == "pdf":
         import html as _html
 
-        # Inline remote images as base64 data URIs so WeasyPrint can render them
-        async def _inline_images(html_str: str) -> str:
-            import re as _re, base64
-            storage = get_storage()
-            img_pattern = _re.compile(r'<img\s+[^>]*src="([^"]+)"', _re.IGNORECASE)
-            result = html_str
-            for match in reversed(list(img_pattern.finditer(result))):
-                src = match.group(1)
-                if not storage.is_supported_storage_path(src):
-                    continue
-                try:
-                    data = await storage.download_file(src)
-                    ext = src.rsplit(".", 1)[-1].lower() if "." in src else "png"
-                    mime = {"svg": "image/svg+xml", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}.get(ext, "image/png")
-                    b64 = base64.b64encode(data).decode()
-                    data_uri = f"data:{mime};base64,{b64}"
-                    result = result[:match.start(1)] + data_uri + result[match.end(1):]
-                except Exception:
-                    pass
-            return result
+        # Inline storage-owned images as base64 data URIs so WeasyPrint can
+        # render them; external (non-storage) URLs stay un-inlined and are
+        # blocked by the SSRF-safe fetcher at render time (intended).
+        storage = get_storage()
 
         sections_html = []
         for idx, s in enumerate(sections):
@@ -8235,10 +8202,10 @@ async def export_project_endpoint(
             # left freshly-emitted <img src=https://s3...> tags unprocessed and
             # WeasyPrint couldn't fetch them — image rendered as the URL string.
             if content.lstrip().startswith("<"):
-                content_html = await _inline_images(content)
+                content_html = await storage.inline_storage_images(content)
             else:
                 content_html = f"<div>{_render_inline_md(content)}</div>"
-                content_html = await _inline_images(content_html)
+                content_html = await storage.inline_storage_images(content_html)
             sections_html.append(f"{heading}\n<div class='section-body'>{content_html}</div>")
 
         body_html = "\n".join(sections_html)
@@ -8273,12 +8240,13 @@ async def export_project_endpoint(
 
         try:
             from weasyprint import HTML
+            from ...core.services.pdf import safe_url_fetcher
         except ImportError:
             raise HTTPException(status_code=500, detail="PDF generation not available")
 
         try:
             pdf_bytes = await asyncio.wait_for(
-                asyncio.to_thread(lambda: HTML(string=full_html).write_pdf()),
+                asyncio.to_thread(lambda: HTML(string=full_html, url_fetcher=safe_url_fetcher).write_pdf()),
                 timeout=60.0,
             )
         except asyncio.TimeoutError:
@@ -8618,12 +8586,19 @@ def _pdf_document_html(title: str, body_html: str) -> str:
 
 
 async def _html_to_pdf_bytes(full_html: str) -> bytes:
-    """Render an HTML document string to PDF bytes via WeasyPrint, off-thread."""
+    """Render an HTML document string to PDF bytes via WeasyPrint, off-thread.
+
+    Storage-owned `<img src=...>` references are base64-inlined to `data:` URIs
+    first, since the SSRF-safe fetcher blocks raw storage URLs. External/
+    non-storage image URLs are intentionally left for the fetcher to block.
+    """
     try:
         from weasyprint import HTML
+        from ...core.services.pdf import safe_url_fetcher
     except ImportError:
         raise HTTPException(status_code=501, detail="PDF generation not available — install weasyprint")
-    return await asyncio.to_thread(lambda: HTML(string=full_html).write_pdf())
+    full_html = await get_storage().inline_storage_images(full_html)
+    return await asyncio.to_thread(lambda: HTML(string=full_html, url_fetcher=safe_url_fetcher).write_pdf())
 
 
 def _pdf_title_from_markdown(content: str, fallback: str = "Deal Memo") -> str:

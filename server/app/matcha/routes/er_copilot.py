@@ -1021,7 +1021,8 @@ th {{ background: #f5f5f5; font-weight: 600; text-transform: uppercase; font-siz
 
     try:
         from weasyprint import HTML as WeasyHTML
-        pdf_bytes = WeasyHTML(string=html).write_pdf()
+        from ...core.services.pdf import safe_url_fetcher
+        pdf_bytes = WeasyHTML(string=html, url_fetcher=safe_url_fetcher).write_pdf()
     except ImportError:
         raise HTTPException(status_code=500, detail="PDF generation not available (WeasyPrint not installed)")
     except Exception as exc:
@@ -1095,7 +1096,10 @@ async def create_share_link(
 
     try:
         storage = get_storage()
-        storage_path = await storage.upload_file(pdf_bytes, filename, prefix="er-exports", content_type="application/pdf")
+        # Private bucket: ER exports are confidential. The download is served only
+        # via the password+lockout-gated /shared/er-export/{token}/download stream,
+        # never a public CloudFront URL.
+        storage_path = await storage.upload_private_file(pdf_bytes, filename, prefix="er-exports", content_type="application/pdf")
     except Exception as exc:
         logger.error("Failed to upload share link PDF for case %s: %s", case_id, exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to store export file") from exc

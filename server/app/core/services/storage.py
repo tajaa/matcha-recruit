@@ -1,5 +1,8 @@
 import asyncio
+import base64
+import logging
 import os
+import re
 import urllib.request
 from typing import Optional
 from uuid import uuid4
@@ -9,6 +12,21 @@ from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
 
 from ...config import get_settings
+
+logger = logging.getLogger(__name__)
+
+# Map common image file extensions to MIME types for data-URI inlining.
+_IMAGE_EXT_MIME = {
+    "svg": "image/svg+xml",
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "gif": "image/gif",
+    "webp": "image/webp",
+}
+
+# Matches the src="..." of an <img> tag (double-quoted attribute value).
+_IMG_SRC_RE = re.compile(r'<img\s+[^>]*src="([^"]+)"', re.IGNORECASE)
 
 
 class StorageService:
@@ -183,6 +201,53 @@ class StorageService:
         local_path = self._resolve_local_upload_path(path)
         with open(local_path, "rb") as f:
             return f.read()
+
+    async def inline_image_data_uri(self, src: Optional[str]) -> Optional[str]:
+        """Return a base64 `data:` URI for a storage-owned image, else None.
+
+        Used to embed our own legitimate assets (company logos, generated cover
+        images) into HTML *before* PDF render, since the SSRF-safe WeasyPrint
+        fetcher (`core.services.pdf.safe_url_fetcher`) blocks every non-`data:`
+        URL. Only storage-owned paths are inlined; external/arbitrary URLs are
+        intentionally left alone (and will be blocked at render time). Returns
+        None on any download/encode failure so callers can drop the asset
+        gracefully instead of crashing the render.
+        """
+        if not src:
+            return None
+        if src.startswith("data:"):
+            return src  # already inlined
+        if not self.is_supported_storage_path(src):
+            return None  # external URL — leave it for safe_url_fetcher to block
+        try:
+            data = await self.download_file(src)
+            ext = src.rsplit(".", 1)[-1].lower() if "." in src else "png"
+            mime = _IMAGE_EXT_MIME.get(ext, "image/png")
+            b64 = base64.b64encode(data).decode("ascii")
+            return f"data:{mime};base64,{b64}"
+        except Exception:
+            logger.warning("Could not inline storage image for PDF: %s", src, exc_info=True)
+            return None
+
+    async def inline_storage_images(self, html: str) -> str:
+        """Rewrite `<img src="...">` tags to base64 `data:` URIs for storage-owned srcs.
+
+        Mirrors the inline pass formerly duplicated in matcha_work's PDF export.
+        Non-storage (external) image URLs are left untouched so the SSRF-safe
+        fetcher blocks them at render time. A failed download leaves that one
+        `<img>` unchanged (it then gets blocked) rather than aborting the pass.
+        """
+        if not html:
+            return html
+        result = html
+        for match in reversed(list(_IMG_SRC_RE.finditer(result))):
+            src = match.group(1)
+            if not self.is_supported_storage_path(src):
+                continue
+            data_uri = await self.inline_image_data_uri(src)
+            if data_uri:
+                result = result[: match.start(1)] + data_uri + result[match.end(1) :]
+        return result
 
     async def delete_file(self, path: str) -> bool:
         """Delete a file from storage.

@@ -1668,8 +1668,9 @@ async def generate_pdf(
                 """
                 html_content = html_content.replace("</style>", watermark_css + "</style>")
             from weasyprint import HTML
+            from ...core.services.pdf import safe_url_fetcher
 
-            return HTML(string=html_content).write_pdf()
+            return HTML(string=html_content, url_fetcher=safe_url_fetcher).write_pdf()
         except ImportError:
             logger.error("WeasyPrint not installed — PDF generation skipped")
             return None
@@ -1821,11 +1822,24 @@ async def generate_presentation_pdf(
     if cached:
         return cached
 
+    # Inline the storage-owned cover image to a `data:` URI BEFORE the render
+    # thread — the SSRF-safe fetcher blocks raw storage URLs, so the cover would
+    # otherwise silently drop. Inlining returns None for external/failed URLs,
+    # in which case the cover is omitted gracefully (None falls back to the
+    # original value so a data:/non-storage URL is left as-is for the fetcher).
+    render_state = state
+    cover_url = state.get("cover_image_url")
+    if cover_url:
+        inlined_cover = await get_storage().inline_image_data_uri(cover_url)
+        render_state = dict(state)
+        render_state["cover_image_url"] = inlined_cover  # None → cover omitted
+
     def _render() -> Optional[bytes]:
         try:
             from weasyprint import HTML, CSS
-            html_content = _render_presentation_html(state)
-            return HTML(string=html_content).write_pdf(
+            from ...core.services.pdf import safe_url_fetcher
+            html_content = _render_presentation_html(render_state)
+            return HTML(string=html_content, url_fetcher=safe_url_fetcher).write_pdf(
                 stylesheets=[CSS(string="@page { size: 1280px 720px; margin: 0; }")]
             )
         except ImportError:

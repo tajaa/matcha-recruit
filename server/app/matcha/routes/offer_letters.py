@@ -1206,7 +1206,8 @@ async def download_offer_letter_pdf(
     # Try to use weasyprint for PDF generation
     try:
         from weasyprint import HTML
-        pdf_bytes = HTML(string=html_content).write_pdf()
+        from ...core.services.pdf import safe_url_fetcher
+        pdf_bytes = HTML(string=html_content, url_fetcher=safe_url_fetcher).write_pdf()
         return StreamingResponse(
             BytesIO(pdf_bytes),
             media_type="application/pdf",

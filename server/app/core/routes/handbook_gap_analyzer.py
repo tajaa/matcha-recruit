@@ -521,7 +521,8 @@ async def export_handbook_audit_pdf(
     html = _build_audit_report_html(report)
     try:
         from weasyprint import HTML  # local import: heavy native dep
-        pdf_bytes = await asyncio.to_thread(lambda: HTML(string=html).write_pdf())
+        from ..services.pdf import safe_url_fetcher
+        pdf_bytes = await asyncio.to_thread(lambda: HTML(string=html, url_fetcher=safe_url_fetcher).write_pdf())
     except Exception as exc:
         logger.exception("Handbook audit PDF render failed for report %s: %s", report_id, exc)
         raise HTTPException(status_code=500, detail="Could not generate the report PDF")

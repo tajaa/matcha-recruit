@@ -1762,29 +1762,39 @@ async def register_business(request: BusinessRegister, http_request: Request):
                     x_features["discipline"] = True
                 enabled_features_json = json.dumps(x_features)
             else:
-                company_status = "approved" if (invitation or referring_broker_id) else "pending"
+                # Bespoke/platform tier from a PUBLIC endpoint. Only an
+                # admin-issued invite token may provision a full Pro company
+                # here. A broker referral (`broker_ref`) is a public marketing
+                # slug (no secret) — it attributes the lead but must NEVER grant
+                # approval or paid features. Previously `broker_ref` flipped
+                # status→approved AND the branch stored the full Pro feature set,
+                # which let anyone self-provision a free Pro platform tenant.
+                company_status = "approved" if invitation else "pending"
                 if invitation:
                     signup_source = "invite"
                 elif referring_broker_id:
                     signup_source = "broker"
                 else:
                     signup_source = "bespoke"
-                # Platform (bespoke/invite/broker) business companies get the IR
-                # system on by default — it's a standard platform feature, not a
-                # paid lite add-on. Risk Insights + OSHA inherit the `incidents`
-                # gate. Personal Matcha-work companies are created elsewhere
-                # (is_personal=true) and never reach this branch, so they stay
-                # IR-free. `incidents` is per-company here (disableable), not a
-                # global default — a global default would break the lite paywall.
-                bespoke_features = dict(DEFAULT_COMPANY_FEATURES)
-                bespoke_features["incidents"] = True
-                # Pro (full platform) includes handbook audit + credentialing.
-                # Stored here (toggleable per-company) rather than via a tier
-                # overlay — personal Werk shares signup_source='bespoke' but
-                # never reaches this branch, so storing keeps it Pro-only.
-                bespoke_features["handbook_audit"] = True
-                bespoke_features["credential_templates"] = True
-                enabled_features_json = json.dumps(bespoke_features)
+
+                if invitation:
+                    # Invited (admin-issued) bespoke companies get the full
+                    # platform: IR on by default, plus handbook audit +
+                    # credentialing (Pro, toggleable per-company). Personal
+                    # Matcha-work companies are created elsewhere
+                    # (is_personal=true) and never reach this branch.
+                    bespoke_features = dict(DEFAULT_COMPANY_FEATURES)
+                    bespoke_features["incidents"] = True
+                    bespoke_features["handbook_audit"] = True
+                    bespoke_features["credential_templates"] = True
+                    enabled_features_json = json.dumps(bespoke_features)
+                else:
+                    # Self-serve / broker-referred lead with no invite: stay
+                    # pending with NO paid features until an admin verifies/closes
+                    # the sale. No tier escalation from a public request.
+                    enabled_features_json = json.dumps(
+                        {k: False for k in DEFAULT_COMPANY_FEATURES}
+                    )
 
             # Step 1: Create company
             company = await conn.fetchrow(

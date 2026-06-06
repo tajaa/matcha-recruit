@@ -4358,10 +4358,11 @@ class HandbookService:
 
         try:
             from weasyprint import HTML
+            from .pdf import safe_url_fetcher
         except ImportError as exc:
             raise RuntimeError("PDF generation is not available because WeasyPrint is not installed") from exc
 
-        pdf_bytes = HTML(string=html_content).write_pdf()
+        pdf_bytes = HTML(string=html_content, url_fetcher=safe_url_fetcher).write_pdf()
         filename = _handbook_filename(handbook.title, handbook.active_version)
         return pdf_bytes, filename
 

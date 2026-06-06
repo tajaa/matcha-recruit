@@ -54,9 +54,15 @@ def _render_html(
     employee: dict[str, Any],
     company: dict[str, Any],
     issuer: Optional[dict[str, Any]],
+    *,
+    logo_src: Optional[str] = None,
 ) -> str:
     company_name = _html.escape(str(company.get("name") or "Company"))
-    company_logo = company.get("logo_url") or ""
+    # `logo_src`, when supplied, is a pre-resolved `data:` URI (storage logo
+    # downloaded + base64'd by the async caller). The SSRF-safe PDF fetcher
+    # blocks raw storage URLs, so we only embed an inlined data URI; otherwise
+    # the logo is dropped gracefully.
+    company_logo = logo_src or ""
     name_parts = [
         str(employee.get("first_name") or "").strip(),
         str(employee.get("last_name") or "").strip(),
@@ -243,16 +249,24 @@ async def render_discipline_letter(
     timeout_seconds: float = 30.0,
 ) -> bytes:
     """Render the disciplinary letter to PDF bytes via WeasyPrint."""
-    full_html = _render_html(record, employee, company, issuer)
+    # Inline the company logo to a `data:` URI BEFORE the render thread — the
+    # SSRF-safe fetcher blocks raw storage URLs, so an un-inlined logo would
+    # silently drop. Non-storage/external URLs return None and the logo is
+    # omitted gracefully.
+    from ...core.services.storage import get_storage
+
+    logo_src = await get_storage().inline_image_data_uri(company.get("logo_url"))
+    full_html = _render_html(record, employee, company, issuer, logo_src=logo_src)
 
     try:
         from weasyprint import HTML
+        from ...core.services.pdf import safe_url_fetcher
     except ImportError:
         raise HTTPException(status_code=500, detail="PDF generation not available (weasyprint missing)")
 
     try:
         return await asyncio.wait_for(
-            asyncio.to_thread(lambda: HTML(string=full_html).write_pdf()),
+            asyncio.to_thread(lambda: HTML(string=full_html, url_fetcher=safe_url_fetcher).write_pdf()),
             timeout=timeout_seconds,
         )
     except asyncio.TimeoutError:

@@ -225,6 +225,12 @@ class EmailService(
         attachments: Optional[list[dict]] = None,
     ) -> bool:
         """Send via Gmail first, fall back to MailerSend if Gmail fails."""
+        # Reserved-domain guard must be transport-independent: the Gmail path
+        # checks this in send_email(), but when no Gmail token is loaded we skip
+        # straight to MailerSend below — so guard here too (bounce-storm defense).
+        if _is_reserved_test_domain(to_email):
+            logger.info("Skipping send to reserved test domain: %s", to_email)
+            return False
         # Try Gmail first
         gmail_token = self._load_token()
         if gmail_token and gmail_token.get("refresh_token"):

@@ -1,6 +1,7 @@
 """Lightweight Redis cache module for server-side response caching."""
 
 import json
+import os
 import time as _time
 from collections import defaultdict
 from typing import Any, Optional
@@ -94,11 +95,25 @@ def admin_bookmarked_requirements_key() -> str:
 _rl_attempts: dict[str, list[float]] = defaultdict(list)
 
 
+_TRUSTED_PROXY_COUNT = int(os.getenv("TRUSTED_PROXY_COUNT", "1"))
+
+
 def client_ip(request: Request) -> str:
-    """Extract client IP from X-Forwarded-For header (nginx-set) with safe fallback."""
+    """Real client IP, proxy-aware (anti-spoofing for rate limits).
+
+    nginx appends to X-Forwarded-For via `$proxy_add_x_forwarded_for`, so the
+    RIGHTMOST entries are set by our own trusted proxies and the LEFTMOST are
+    client-supplied and spoofable. Taking the leftmost (the old behaviour) let an
+    attacker rotate `X-Forwarded-For` per request and defeat every IP rate limit.
+    We take the entry just left of our trusted proxies (default 1 = single nginx
+    hop; override with TRUSTED_PROXY_COUNT if more proxies sit in front).
+    """
     fwd = request.headers.get("x-forwarded-for")
     if fwd:
-        return fwd.split(",")[0].strip()
+        parts = [p.strip() for p in fwd.split(",") if p.strip()]
+        if parts:
+            idx = max(0, len(parts) - _TRUSTED_PROXY_COUNT)
+            return parts[idx]
     return request.client.host if request.client else "unknown"
 
 

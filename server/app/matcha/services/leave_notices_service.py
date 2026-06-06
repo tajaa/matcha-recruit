@@ -690,7 +690,8 @@ class LeaveNoticeService:
 
         # Generate PDF via WeasyPrint
         from weasyprint import HTML
-        pdf_bytes = HTML(string=html_content).write_pdf()
+        from ...core.services.pdf import safe_url_fetcher
+        pdf_bytes = HTML(string=html_content, url_fetcher=safe_url_fetcher).write_pdf()
 
         # Upload to S3
         emp_name_slug = f"{employee['first_name']}-{employee['last_name']}".replace(" ", "-").lower()

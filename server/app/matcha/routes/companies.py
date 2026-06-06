@@ -163,8 +163,17 @@ async def get_my_company(
 
 
 @router.get("/{company_id}", response_model=CompanyResponse)
-async def get_company(company_id: UUID):
+async def get_company(
+    company_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
     """Get a company by ID with its culture profile."""
+    # Tenant isolation: clients may only read their own company.
+    if current_user.role != "admin":
+        user_company_id = await get_client_company_id(current_user)
+        if str(user_company_id) != str(company_id):
+            raise HTTPException(status_code=403, detail="Not authorized to view this company")
+
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
@@ -327,8 +336,11 @@ async def upload_company_logo(
 
 
 @router.delete("/{company_id}")
-async def delete_company(company_id: UUID):
-    """Delete a company and all related data."""
+async def delete_company(
+    company_id: UUID,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Delete a company and all related data. Platform-admin only — hard delete cascades."""
     async with get_connection() as conn:
         result = await conn.execute(
             "DELETE FROM companies WHERE id = $1",

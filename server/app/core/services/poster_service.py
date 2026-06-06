@@ -366,8 +366,9 @@ async def generate_poster_pdf(conn, jurisdiction_id: UUID) -> dict:
 
     try:
         from weasyprint import HTML
+        from .pdf import safe_url_fetcher
 
-        pdf_bytes = HTML(string=html_content).write_pdf()
+        pdf_bytes = HTML(string=html_content, url_fetcher=safe_url_fetcher).write_pdf()
     except ImportError as e:
         logger.error("WeasyPrint not installed: %s", e)
         await conn.execute(

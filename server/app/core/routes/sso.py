@@ -15,10 +15,22 @@ from ...config import get_settings
 from ...database import get_connection
 from ..services.auth import create_access_token, create_refresh_token
 from ..dependencies import require_admin
-from ...matcha.dependencies import require_admin_or_client
+from ...matcha.dependencies import require_admin_or_client, get_client_company_id
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# SSO auto-provision may only mint low-privilege roles. Never `admin`/`broker`.
+ALLOWED_SSO_ROLES = {"employee", "client"}
+
+
+async def _assert_company_access(current_user, company_id: UUID) -> None:
+    """Tenant isolation for SSO config: a client may only touch its own company."""
+    if getattr(current_user, "role", None) == "admin":
+        return
+    user_company_id = await get_client_company_id(current_user)
+    if str(user_company_id) != str(company_id):
+        raise HTTPException(status_code=403, detail="Not authorized for this company's SSO config")
 
 
 # ── Pydantic models ─────────────────────────────────────────────────────────
@@ -336,6 +348,7 @@ async def assertion_consumer_service(request: Request):
 @router.get("/admin/config/{company_id}", response_model=SSOConfigResponse)
 async def get_sso_config(company_id: UUID, current_user=Depends(require_admin_or_client)):
     """Get SSO configuration for a company."""
+    await _assert_company_access(current_user, company_id)
     async with get_connection() as conn:
         config = await conn.fetchrow(
             "SELECT * FROM company_sso_configs WHERE company_id = $1",
@@ -366,6 +379,12 @@ async def upsert_sso_config(
     current_user=Depends(require_admin_or_client),
 ):
     """Create or update SSO configuration for a company."""
+    await _assert_company_access(current_user, company_id)
+    if body.default_role not in ALLOWED_SSO_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"default_role must be one of {sorted(ALLOWED_SSO_ROLES)}",
+        )
     async with get_connection() as conn:
         # Verify company exists
         company = await conn.fetchrow("SELECT id FROM companies WHERE id = $1", company_id)
@@ -425,6 +444,7 @@ async def upsert_sso_config_from_metadata(
     This is the easiest setup path — the client pastes their IdP metadata URL
     (e.g. from Okta or Azure AD) and we extract the entity ID, SSO URL, and cert.
     """
+    await _assert_company_access(current_user, company_id)
     try:
         idp_data = OneLogin_Saml2_IdPMetadataParser.parse_remote(body.metadata_url)
     except Exception as e:
