@@ -395,3 +395,105 @@ enum JournalBlockParser {
         return .image(alt: alt, url: url)
     }
 }
+
+// MARK: - Export
+
+/// Markdown / HTML export for the markdown journal kinds (blog, note, novel,
+/// to-dos, diary). Reuses `JournalBlockParser` so block handling matches what
+/// the reader renders. Screenplay export (Fountain + PDF) lives separately.
+enum JournalMarkdownExport {
+    /// The stored content is already markdown; just neutralize any in-flight
+    /// upload placeholder URLs so a half-finished upload doesn't leak `(pending)`.
+    static func markdown(_ content: String) -> String {
+        content.replacingOccurrences(of: "](pending)", with: "]()")
+    }
+
+    /// Render the content to a standalone HTML fragment (no <html> wrapper —
+    /// see `htmlDocument` for that). Consecutive list items are grouped.
+    static func html(_ content: String) -> String {
+        let blocks = JournalBlockParser.parse(content)
+        var out = ""
+        var i = 0
+        while i < blocks.count {
+            switch blocks[i] {
+            case .bullet:
+                var items: [String] = []
+                while i < blocks.count, case .bullet(let t) = blocks[i] { items.append("<li>\(inlineHTML(t))</li>"); i += 1 }
+                out += "<ul>\n\(items.joined(separator: "\n"))\n</ul>\n"
+                continue
+            case .numbered:
+                var items: [String] = []
+                while i < blocks.count, case .numbered(_, let t) = blocks[i] { items.append("<li>\(inlineHTML(t))</li>"); i += 1 }
+                out += "<ol>\n\(items.joined(separator: "\n"))\n</ol>\n"
+                continue
+            case .todo:
+                var items: [String] = []
+                while i < blocks.count, case .todo(let c, let t, _) = blocks[i] {
+                    items.append("<li><input type=\"checkbox\" disabled\(c ? " checked" : "")> \(inlineHTML(t))</li>")
+                    i += 1
+                }
+                out += "<ul class=\"todo\">\n\(items.joined(separator: "\n"))\n</ul>\n"
+                continue
+            case .paragraph(let t):       out += "<p>\(inlineHTML(t))</p>\n"
+            case .heading(let lvl, let t): out += "<h\(lvl)>\(inlineHTML(t))</h\(lvl)>\n"
+            case .quote(let t):           out += "<blockquote>\(inlineHTML(t))</blockquote>\n"
+            case .codeBlock(let c):       out += "<pre><code>\(escape(c))</code></pre>\n"
+            case .image(let alt, let url): out += "<img src=\"\(url.absoluteString)\" alt=\"\(escape(alt))\">\n"
+            case .divider:                out += "<hr>\n"
+            }
+            i += 1
+        }
+        return out
+    }
+
+    /// A full, self-contained HTML document for file export.
+    static func htmlDocument(_ content: String, title: String) -> String {
+        """
+        <!doctype html>
+        <html><head><meta charset="utf-8"><title>\(escape(title))</title>
+        <style>body{font:16px/1.6 -apple-system,Georgia,serif;max-width:42rem;margin:3rem auto;padding:0 1rem;color:#1a1a1a}img{max-width:100%}blockquote{border-left:3px solid #ccc;margin:0;padding-left:1rem;color:#555}pre{background:#f4f4f4;padding:1rem;overflow:auto;border-radius:6px}code{font-family:ui-monospace,monospace}</style>
+        </head>
+        <body>
+        \(html(content))</body></html>
+        """
+    }
+
+    private static func escape(_ s: String) -> String {
+        s.replacingOccurrences(of: "&", with: "&amp;")
+         .replacingOccurrences(of: "<", with: "&lt;")
+         .replacingOccurrences(of: ">", with: "&gt;")
+    }
+
+    /// Inline markdown → HTML. Escapes first, then applies bold/strike/highlight/
+    /// code/italic pairs and `[text](url)` links so injected tags survive.
+    private static func inlineHTML(_ s: String) -> String {
+        var t = escape(s)
+        t = pair(t, "**", "<strong>", "</strong>")
+        t = pair(t, "~~", "<del>", "</del>")
+        t = pair(t, "==", "<mark>", "</mark>")
+        t = pair(t, "`", "<code>", "</code>")
+        t = pair(t, "*", "<em>", "</em>")
+        return links(t)
+    }
+
+    private static func pair(_ s: String, _ marker: String, _ open: String, _ close: String) -> String {
+        let parts = s.components(separatedBy: marker)
+        guard parts.count >= 3 else { return s }
+        var result = parts[0]
+        for idx in 1..<parts.count { result += (idx % 2 == 1 ? open : close) + parts[idx] }
+        return result
+    }
+
+    private static func links(_ s: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: "\\[([^\\]]+)\\]\\(([^)]+)\\)") else { return s }
+        let ns = s as NSString
+        var result = s
+        for m in regex.matches(in: s, range: NSRange(location: 0, length: ns.length)).reversed() {
+            guard m.numberOfRanges == 3, let r = Range(m.range, in: result) else { continue }
+            let text = ns.substring(with: m.range(at: 1))
+            let url = ns.substring(with: m.range(at: 2))
+            result.replaceSubrange(r, with: "<a href=\"\(url)\">\(text)</a>")
+        }
+        return result
+    }
+}

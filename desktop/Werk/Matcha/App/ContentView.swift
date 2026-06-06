@@ -3,6 +3,7 @@ import AppKit
 
 struct ContentView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.openWindow) private var openWindow
     @State private var threadListVM = ThreadListViewModel()
     @State private var isOpeningCheckout = false
     @State private var upgradeError: String?
@@ -16,6 +17,10 @@ struct ContentView: View {
     @AppStorage("mw-sidebar-threads-open-v2") private var threadsSectionOpen = false
     @AppStorage("mw-sidebar-email-open") private var emailSectionOpen = false
     @State private var showNewJournal = false
+    @State private var newDocFolderId: String? = nil
+    @State private var journalSidebar = JournalSidebarModel()
+    @State private var journalRenameTarget: MWJournalFolder? = nil
+    @State private var journalRenameText = ""
     @State private var showNewBlog = false
     @State private var pendingConnectionsCount = 0
     @State private var showCreateChannel = false
@@ -274,6 +279,7 @@ struct ContentView: View {
             appState.selectedThreadId == nil &&
             appState.selectedProjectId == nil &&
             appState.selectedChannelId == nil &&
+            appState.selectedJournalId == nil &&
             appState.selectedEmailId == nil &&
             !appState.showInbox &&
             !appState.showPeople &&
@@ -535,21 +541,237 @@ struct ContentView: View {
     private func openThreadsHub()   { appState.clearPrimaryNav(); appState.showThreadsHub = true }
     private func openChannelsHub()  { appState.clearPrimaryNav(); appState.showChannelsHub = true }
 
+    /// Persistent folder + document tree (Obsidian/Scrivener-style). Unlike the
+    /// other nav-only sections, Journals shows its contents inline so documents
+    /// are browsable like files. The header label still opens the card-grid hub.
     @ViewBuilder
     private var journalsSidebarSection: some View {
-        sidebarNavRow(title: "Journals", icon: "book.closed",
-                      isActive: appState.showJournalsHub, onOpen: openJournalsHub) {
-            Button { showNewJournal = true } label: { plusChip }
-                .buttonStyle(.plain)
-                .help("New journal")
-                .sheet(isPresented: $showNewJournal) {
-                    NewJournalSheet { journal in
-                        appState.clearPrimaryNav()
-                        appState.selectedJournalId = journal.id
-                        appState.journalsListGeneration &+= 1
+        VStack(alignment: .leading, spacing: 1) {
+            sidebarNavRow(title: "Journals", icon: "book.closed",
+                          isActive: appState.showJournalsHub, onOpen: openJournalsHub) {
+                Menu {
+                    Button { newDocFolderId = nil; showNewJournal = true } label: {
+                        Label("New document", systemImage: "doc.badge.plus")
                     }
-                    .environment(appState)
+                    Button { Task { await journalCreateFolder(parent: nil) } } label: {
+                        Label("New folder", systemImage: "folder.badge.plus")
+                    }
+                } label: { plusChip }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("New document or folder")
+            }
+            journalTree
+        }
+        .task { await journalSidebar.load() }
+        .onChange(of: appState.journalsListGeneration) { _, _ in Task { await journalSidebar.load() } }
+        .sheet(isPresented: $showNewJournal) {
+            NewJournalSheet(initialFolderId: newDocFolderId) { journal in
+                appState.clearPrimaryNav()
+                appState.selectedJournalId = journal.id
+                appState.journalsListGeneration &+= 1
+            }
+            .environment(appState)
+        }
+        .sheet(item: $journalRenameTarget) { folder in journalRenameSheet(folder) }
+    }
+
+    @ViewBuilder
+    private var journalTree: some View {
+        if journalSidebar.isLoading && journalSidebar.rows.isEmpty {
+            ProgressView().controlSize(.small).frame(maxWidth: .infinity).padding(.vertical, 6)
+        } else if let err = journalSidebar.error {
+            Text(err).font(.system(size: 10)).foregroundColor(.red.opacity(0.8))
+                .padding(.horizontal, 12).padding(.vertical, 4)
+        } else if journalSidebar.rows.isEmpty {
+            Text("No documents yet — use + to add one.")
+                .font(.system(size: 11)).foregroundColor(appState.themeTextSecondary)
+                .padding(.horizontal, 14).padding(.vertical, 6)
+        } else {
+            LazyVStack(alignment: .leading, spacing: 1) {
+                ForEach(journalSidebar.rows) { row in
+                    switch row.kind {
+                    case .folder(let f): journalFolderRow(f, depth: row.depth)
+                    case .doc(let d):    journalDocRow(d, depth: row.depth)
+                    }
                 }
+            }
+        }
+    }
+
+    private func journalFolderRow(_ folder: MWJournalFolder, depth: Int) -> some View {
+        let isExpanded = journalSidebar.expanded.contains(folder.id)
+        let kids = journalSidebar.hasChildren(folder.id)
+        return Button { journalSidebar.toggle(folder.id) } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(appState.themeTextSecondary)
+                    .frame(width: 10)
+                    .opacity(kids ? 1 : 0.25)
+                Image(systemName: isExpanded ? "folder.fill" : "folder")
+                    .font(.system(size: 11)).foregroundColor(appState.themeTextSecondary).frame(width: 15)
+                Text(folder.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(appState.themeText.opacity(0.9)).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, CGFloat(depth) * 12 + 8)
+            .padding(.trailing, 8)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .dropDestination(for: String.self) { items, _ in handleJournalDrop(items, intoFolder: folder.id) }
+        .contextMenu {
+            Button("New document here") { newDocFolderId = folder.id; showNewJournal = true }
+            Button("New subfolder") { Task { await journalCreateFolder(parent: folder.id) } }
+            Button("Rename…") { journalRenameText = folder.name; journalRenameTarget = folder }
+            Divider()
+            Button("Delete folder", role: .destructive) { Task { await journalDeleteFolder(folder) } }
+        }
+    }
+
+    private func journalDocRow(_ j: MWJournal, depth: Int) -> some View {
+        let selected = appState.selectedJournalId == j.id
+        let kind = JournalKind.from(j.kind)
+        return Button {
+            appState.clearPrimaryNav()
+            appState.selectedJournalId = j.id
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: j.icon ?? kind.icon)
+                    .font(.system(size: 11)).foregroundColor(colorForJournal(j.color)).frame(width: 15)
+                Text(j.title.isEmpty ? "Untitled" : j.title)
+                    .font(.system(size: 12, weight: selected ? .bold : .regular))
+                    .foregroundColor(appState.themeText.opacity(0.9)).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, CGFloat(depth) * 12 + 22)   // indent past the folder chevron+icon
+            .padding(.trailing, 8)
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 6)
+                .fill(selected ? appState.themeAccent.opacity(0.14) : Color.clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .draggable(j.id)
+        .contextMenu { journalDocMenu(j) }
+    }
+
+    @ViewBuilder
+    private func journalDocMenu(_ j: MWJournal) -> some View {
+        Button { appState.clearPrimaryNav(); appState.selectedJournalId = j.id } label: {
+            Label("Open", systemImage: "arrow.up.forward.app")
+        }
+        Button { openWindow(id: "aux", value: AuxWindowTarget.journal(j.id)) } label: {
+            Label("Open in new window", systemImage: "macwindow.on.rectangle")
+        }
+        Button { appState.splitTarget = .journal(j.id) } label: {
+            Label("Open in split", systemImage: "rectangle.split.2x1")
+        }
+        Divider()
+        Menu("Move to") {
+            Button("Root (unfiled)") { Task { await journalMoveId(j.id, to: nil) } }
+            if !journalSidebar.folders.isEmpty { Divider() }
+            ForEach(journalSidebar.folders.sorted {
+                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }) { f in
+                Button(f.name) { Task { await journalMoveId(j.id, to: f.id) } }
+            }
+        }
+        Button(JournalStarStore.shared.isStarred(j.id) ? "Unstar" : "Star") {
+            JournalStarStore.shared.toggle(j.id)
+        }
+        Divider()
+        Button("Archive") { Task { await journalArchive(j) } }
+        Button("Delete…", role: .destructive) { journalConfirmDelete(j) }
+    }
+
+    private func journalRenameSheet(_ folder: MWJournalFolder) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Rename folder").font(.system(size: 14, weight: .semibold)).foregroundColor(appState.themeText)
+            TextField("Folder name", text: $journalRenameText).textFieldStyle(.roundedBorder)
+            HStack {
+                Spacer()
+                Button("Cancel") { journalRenameTarget = nil }.buttonStyle(.plain)
+                Button("Save") {
+                    let name = journalRenameText.trimmingCharacters(in: .whitespaces)
+                    let id = folder.id
+                    journalRenameTarget = nil
+                    guard !name.isEmpty else { return }
+                    Task {
+                        _ = try? await MatchaWorkService.shared.renameJournalFolder(id: id, name: name)
+                        await journalSidebar.load()
+                    }
+                }
+                .keyboardShortcut(.return)
+            }
+        }
+        .padding(18).frame(width: 320).background(appState.themeBg)
+    }
+
+    // MARK: - Journals tree actions
+
+    private func colorForJournal(_ name: String?) -> Color {
+        switch name {
+        case "amber": return .orange
+        case "blue": return .blue
+        case "purple": return .purple
+        case "pink": return .pink
+        default: return appState.themeAccent
+        }
+    }
+
+    private func journalCreateFolder(parent: String?) async {
+        _ = try? await MatchaWorkService.shared.createJournalFolder(name: "New Folder", parentId: parent)
+        if let parent { journalSidebar.expanded.insert(parent) }
+        await journalSidebar.load()
+    }
+
+    private func journalDeleteFolder(_ folder: MWJournalFolder) async {
+        try? await MatchaWorkService.shared.deleteJournalFolder(id: folder.id)
+        appState.journalsListGeneration &+= 1   // documents SET NULL → fall back to root
+        await journalSidebar.load()
+    }
+
+    private func journalMoveId(_ id: String, to folderId: String?) async {
+        _ = try? await MatchaWorkService.shared.moveJournal(id: id, folderId: folderId)
+        if let folderId { journalSidebar.expanded.insert(folderId) }
+        await journalSidebar.load()
+    }
+
+    private func journalArchive(_ j: MWJournal) async {
+        try? await JournalService.shared.archiveJournal(id: j.id)
+        if appState.selectedJournalId == j.id { appState.selectedJournalId = nil }
+        appState.journalsListGeneration &+= 1
+        await journalSidebar.load()
+    }
+
+    /// Accept a dropped document id onto a folder (ignore the sidebar-section
+    /// reorder payload, whose string is a `Section` rawValue).
+    private func handleJournalDrop(_ items: [String], intoFolder folderId: String) -> Bool {
+        guard let raw = items.first else { return false }
+        if SidebarSectionOrderStore.Section(rawValue: raw) != nil { return false }
+        Task { await journalMoveId(raw, to: folderId) }
+        return true
+    }
+
+    private func journalConfirmDelete(_ j: MWJournal) {
+        let alert = NSAlert()
+        alert.messageText = "Delete \"\(j.title)\"?"
+        alert.informativeText = "Permanently deletes the document and its contents. Cannot be undone."
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "Delete Permanently")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn {
+            Task {
+                try? await JournalService.shared.deleteJournal(id: j.id)
+                if appState.selectedJournalId == j.id { appState.selectedJournalId = nil }
+                appState.journalsListGeneration &+= 1
+                await journalSidebar.load()
+            }
         }
     }
 

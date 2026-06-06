@@ -61,14 +61,26 @@ JOURNAL_KIND_SEEDS: dict[str, dict] = {
             "The opening line.\n"
         ),
     },
+    # Screenplay seeds VALID FOUNTAIN (not markdown) — the desktop screenplay
+    # editor parses `content` as Fountain. Title page = key:value lines at the
+    # very top followed by a blank line; then sluglines (INT./EXT.), action,
+    # CHARACTER cues, dialogue, and TO:-terminated transitions.
     "screenplay": {
-        "title": "Scene 1",
+        "title": None,
         "content": (
-            "**INT. LOCATION — DAY**\n\n"
-            "Action describing the scene.\n\n"
+            "Title: Untitled\n"
+            "Credit: Written by\n"
+            "Author: \n"
+            "Draft date: \n"
+            "\n"
+            "INT. LOCATION - DAY\n"
+            "\n"
+            "Action describing the scene.\n"
+            "\n"
             "CHARACTER\n"
-            "Their first line of dialogue.\n\n"
-            "**CUT TO:**\n"
+            "Their first line of dialogue.\n"
+            "\n"
+            "CUT TO:\n"
         ),
     },
 }

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Controller surface shared between the editor view and its toolbar so the
 /// same selection-mutating routines back both keyboard shortcuts and the
@@ -118,6 +119,45 @@ final class JournalEditorController: ObservableObject {
         replace(range: tv.selectedRange(), with: token)
     }
 
+    /// Insert a raw snippet (e.g. a divider or fenced code block) as its own
+    /// block at the cursor. Shared by toolbar buttons and the "/" slash menu.
+    func insertSnippet(_ text: String) { insertBlock(text) }
+
+    /// Show a file picker, upload the chosen image, and inline its URL. Shared
+    /// by the toolbar photo button and the "/image" slash command so both paths
+    /// behave identically.
+    func pickImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType.image]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url,
+              let data = try? Data(contentsOf: url) else { return }
+        let mime = Self.imageMimeType(for: url)
+        let alt = "Uploading-\(UUID().uuidString.prefix(8))"
+        let placeholder = "![\(alt)](pending)"
+        insertImage(url: "pending", alt: alt)
+        Task { @MainActor in
+            guard let resolved = await onUploadImage?(data, url.lastPathComponent, mime) else {
+                replacePlaceholder(placeholder, with: "![upload failed]()")
+                return
+            }
+            replacePlaceholder(placeholder, with: "![](\(resolved))")
+        }
+    }
+
+    static func imageMimeType(for url: URL) -> String {
+        switch url.pathExtension.lowercased() {
+        case "png": return "image/png"
+        case "jpg", "jpeg": return "image/jpeg"
+        case "gif": return "image/gif"
+        case "webp": return "image/webp"
+        case "heic": return "image/heic"
+        default: return "application/octet-stream"
+        }
+    }
+
     /// Replace the placeholder token with a real (or failure-marker) URL.
     /// Used by the drop pipeline: we drop a placeholder at the cursor while
     /// the upload runs, then swap it out when the URL resolves.
@@ -153,6 +193,11 @@ struct RichJournalEditor: NSViewRepresentable {
     let lineSpacing: CGFloat
     /// Optional minimum height; the enclosing layout still bounds max height.
     var minHeight: CGFloat = 80
+    /// Blocks offered by the "/" slash menu. Empty = no slash menu.
+    var slashBlocks: [SlashBlock] = []
+    /// Body text color — theme-derived so the editor is legible on light themes
+    /// (the old hardcoded white was invisible on platinum/light).
+    var textColor: NSColor = .labelColor
 
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
@@ -174,6 +219,8 @@ struct RichJournalEditor: NSViewRepresentable {
         tv.drawsBackground = false
         tv.font = font()
         tv.string = text
+        tv.textColor = textColor
+        tv.insertionPointColor = textColor
         tv.typingAttributes = typingAttributes()
         tv.registerForDraggedTypes([.fileURL, .tiff, .png])
         context.coordinator.bind(tv: tv)
@@ -192,6 +239,8 @@ struct RichJournalEditor: NSViewRepresentable {
             tv.setSelectedRange(safe)
         }
         tv.font = font()
+        tv.textColor = textColor
+        tv.insertionPointColor = textColor
         tv.typingAttributes = typingAttributes()
         tv.invalidateIntrinsicContentSize()
     }
@@ -213,7 +262,7 @@ struct RichJournalEditor: NSViewRepresentable {
         para.lineSpacing = lineSpacing
         return [
             .font: font(),
-            .foregroundColor: NSColor.white.withAlphaComponent(0.92),
+            .foregroundColor: textColor,
             .paragraphStyle: para,
         ]
     }
@@ -226,22 +275,170 @@ struct RichJournalEditor: NSViewRepresentable {
         /// callback can swap them out when complete.
         private var pendingPlaceholders: Set<String> = []
         init(parent: RichJournalEditor) { self.parent = parent }
+        deinit { slashPanel?.orderOut(nil) }
 
         func bind(tv: NSTextView) { /* hook for future delegate wiring */ }
 
-        // Text change → push into binding.
+        // MARK: Slash menu state
+        private var slashActive = false
+        private var slashRange = NSRange(location: 0, length: 0)
+        private var slashPanel: NSPanel?
+        private var slashHost: NSHostingView<SlashMenuView>?
+        private var slashModel: SlashMenuModel?
+
+        // Text change → push into binding, then refresh the slash menu.
         func textDidChange(_ notification: Notification) {
             guard let tv = notification.object as? NSTextView else { return }
             // Re-apply typing attributes so newly typed text picks up
             // current font/spacing instead of inheriting from prior runs.
             tv.typingAttributes = parent.typingAttributes()
             parent.text = tv.string
+            updateSlashMenu(tv)
         }
 
-        // Keyboard shortcuts: intercept Cmd+B/I/K/etc.
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard slashActive, let tv = notification.object as? NSTextView else { return }
+            updateSlashMenu(tv)   // caret moved out of the "/query" → dismiss
+        }
+
+        // Editor lost first responder (clicked away, switched view) → don't leave
+        // a detached slash panel floating.
+        func textDidEndEditing(_ notification: Notification) {
+            dismissSlash()
+        }
+
+        // Keyboard shortcuts: when the slash menu is open, the arrow keys /
+        // return / tab / escape drive it instead of the text view.
         func textView(_ tv: NSTextView, doCommandBy selector: Selector) -> Bool {
-            if selector == #selector(NSResponder.cancelOperation(_:)) { return false }
-            return false
+            guard slashActive else { return false }
+            switch selector {
+            case #selector(NSResponder.moveDown(_:)):    moveSlashSelection(1);  return true
+            case #selector(NSResponder.moveUp(_:)):      moveSlashSelection(-1); return true
+            case #selector(NSResponder.insertNewline(_:)),
+                 #selector(NSResponder.insertTab(_:)):   commitSlashSelection(); return true
+            case #selector(NSResponder.cancelOperation(_:)): dismissSlash();     return true
+            default: return false
+            }
+        }
+
+        // MARK: Slash menu driving
+
+        /// Recompute the live "/query" before the caret and show/refresh the
+        /// floating menu, or dismiss when there's no active trigger.
+        private func updateSlashMenu(_ tv: NSTextView) {
+            guard !parent.slashBlocks.isEmpty else { dismissSlash(); return }
+            let sel = tv.selectedRange()
+            guard sel.length == 0 else { dismissSlash(); return }
+            let ns = tv.string as NSString
+            let caret = sel.location
+            var slashIdx = -1
+            var k = caret
+            while k > 0 {
+                let ch = ns.substring(with: NSRange(location: k - 1, length: 1))
+                if ch == "/" { slashIdx = k - 1; break }
+                if ch == " " || ch == "\n" || ch == "\t" { break }
+                k -= 1
+                if caret - k > 24 { break }   // queries don't run this long
+            }
+            guard slashIdx >= 0 else { dismissSlash(); return }
+            let boundaryOK: Bool = slashIdx == 0 || {
+                let p = ns.substring(with: NSRange(location: slashIdx - 1, length: 1))
+                return p == " " || p == "\n" || p == "\t"
+            }()
+            guard boundaryOK else { dismissSlash(); return }
+            let query = ns.substring(with: NSRange(location: slashIdx + 1, length: caret - slashIdx - 1))
+            showSlash(tv: tv, query: query, range: NSRange(location: slashIdx, length: caret - slashIdx))
+        }
+
+        private func showSlash(tv: NSTextView, query: String, range: NSRange) {
+            let q = query.lowercased()
+            let filtered = q.isEmpty ? parent.slashBlocks : parent.slashBlocks.filter { b in
+                b.title.lowercased().contains(q) || b.keywords.contains { $0.lowercased().contains(q) }
+            }
+            guard !filtered.isEmpty else { dismissSlash(); return }
+            slashRange = range
+            let model = ensureSlashMenu()
+            model.blocks = filtered
+            if model.selection >= filtered.count { model.selection = 0 }
+            positionSlashPanel(tv: tv, at: range.location)
+            slashPanel?.orderFront(nil)
+            slashActive = true
+        }
+
+        private func ensureSlashMenu() -> SlashMenuModel {
+            if let m = slashModel { return m }
+            let m = SlashMenuModel()
+            m.onPick = { [weak self] block in self?.commitSlash(block) }
+            let host = NSHostingView(rootView: SlashMenuView(model: m))
+            let panel = NSPanel(
+                contentRect: NSRect(x: 0, y: 0, width: 248, height: 200),
+                styleMask: [.nonactivatingPanel, .borderless],
+                backing: .buffered, defer: true,
+            )
+            panel.isFloatingPanel = true
+            panel.level = .popUpMenu
+            panel.hasShadow = true
+            panel.isOpaque = false
+            panel.backgroundColor = .clear
+            panel.contentView = host
+            slashModel = m
+            slashHost = host
+            slashPanel = panel
+            return m
+        }
+
+        private func positionSlashPanel(tv: NSTextView, at charIndex: Int) {
+            // firstRect returns the caret rect in SCREEN coordinates (y-up).
+            let caretRect = tv.firstRect(
+                forCharacterRange: NSRange(location: charIndex, length: 0), actualRange: nil,
+            )
+            let h = slashHost?.fittingSize.height ?? 200
+            let gap: CGFloat = 4
+            let originX = caretRect.minX
+            let originY = caretRect.minY - gap - h   // drop the panel just below the caret
+            slashPanel?.setFrame(NSRect(x: originX, y: originY, width: 248, height: max(h, 1)), display: true)
+        }
+
+        private func moveSlashSelection(_ delta: Int) {
+            guard let m = slashModel, !m.blocks.isEmpty else { return }
+            let n = m.blocks.count
+            m.selection = ((m.selection + delta) % n + n) % n
+        }
+
+        private func commitSlashSelection() {
+            guard let m = slashModel, m.selection < m.blocks.count else { return }
+            commitSlash(m.blocks[m.selection])
+        }
+
+        private func commitSlash(_ block: SlashBlock) {
+            // Always invoked on the main thread (key handling or a SwiftUI tap);
+            // assert it so we can touch the @MainActor controller.
+            MainActor.assumeIsolated {
+                guard let tv = parent.controller.textView else { dismissSlash(); return }
+                let ns = tv.string as NSString
+                let r = slashRange
+                guard r.location >= 0, r.location + r.length <= ns.length else { dismissSlash(); return }
+                // Strip the "/query" first, then run the block's insert at that spot.
+                if tv.shouldChangeText(in: r, replacementString: "") {
+                    tv.textStorage?.replaceCharacters(in: r, with: "")
+                    tv.didChangeText()
+                }
+                tv.setSelectedRange(NSRange(location: r.location, length: 0))
+                dismissSlash()
+                switch block.insert {
+                case .linePrefix(let p): parent.controller.togglePrefix(p)
+                case .snippet(let s):    parent.controller.insertSnippet(s)
+                case .image:             parent.controller.pickImage()
+                case .link:              parent.controller.wrapLink()
+                }
+                parent.text = tv.string
+            }
+        }
+
+        private func dismissSlash() {
+            guard slashActive || slashPanel != nil else { return }
+            slashActive = false
+            slashPanel?.orderOut(nil)
         }
 
         // Drag-drop image handling — NSTextView default would embed an
@@ -312,3 +509,53 @@ struct RichJournalEditor: NSViewRepresentable {
 /// shows a file picker — covers the common path. Drop support is best-effort
 /// via the coordinator's `handleDrop` if the user wires it in. Avoiding a
 /// custom NSTextView subclass keeps this file shorter and tighter.
+
+// MARK: - Slash menu UI
+
+/// Observable backing the floating "/" command menu. Mutated only on the main
+/// thread (from NSTextView delegate callbacks), so a plain ObservableObject.
+final class SlashMenuModel: ObservableObject {
+    @Published var blocks: [SlashBlock] = []
+    @Published var selection: Int = 0
+    var onPick: ((SlashBlock) -> Void)?
+}
+
+/// The list shown in the slash-menu panel. Uses system materials/labels so it
+/// reads correctly in both light and dark appearances without app-theme access.
+struct SlashMenuView: View {
+    @ObservedObject var model: SlashMenuModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            if model.blocks.isEmpty {
+                Text("No matching blocks")
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+                    .padding(.horizontal, 8).padding(.vertical, 6)
+            } else {
+                ForEach(Array(model.blocks.enumerated()), id: \.element.id) { idx, block in
+                    HStack(spacing: 8) {
+                        Image(systemName: block.icon)
+                            .font(.system(size: 12)).frame(width: 18)
+                            .foregroundColor(idx == model.selection ? .accentColor : .secondary)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(block.title).font(.system(size: 12, weight: .medium)).foregroundColor(.primary)
+                            Text(block.subtitle).font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
+                        }
+                        Spacer(minLength: 12)
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(RoundedRectangle(cornerRadius: 5)
+                        .fill(idx == model.selection ? Color.accentColor.opacity(0.18) : Color.clear))
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.onPick?(block) }
+                    .onHover { if $0 { model.selection = idx } }
+                }
+            }
+        }
+        .padding(5)
+        .frame(width: 248, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.10)))
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}

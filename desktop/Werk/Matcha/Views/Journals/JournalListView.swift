@@ -230,6 +230,80 @@ enum JournalKind: String, CaseIterable, Identifiable {
         }
     }
     static func from(_ raw: String?) -> JournalKind { JournalKind(rawValue: raw ?? "journal") ?? .journal }
+
+    // MARK: - Workspace behavior
+
+    /// A document opens straight into one editor (single body entry). Only the
+    /// diary `.journal` kind keeps the dated-entries timeline.
+    var isDocKind: Bool { self != .journal }
+
+    /// Screenplays use the dedicated Final-Draft-style element editor + Fountain
+    /// storage instead of the shared markdown editor.
+    var usesScreenplayEditor: Bool { self == .screenplay }
+
+    /// Default editor typography for the markdown kinds (screenplay overrides
+    /// this with Courier inside its own editor).
+    var defaultFontFamily: String {
+        switch self {
+        case .novel, .blog: return "serif"
+        default: return "system"
+        }
+    }
+
+    /// Blocks offered by the "/" slash menu in the markdown editor. Screenplay
+    /// is empty — it drives formatting through Tab/Enter element cycling.
+    var slashBlocks: [SlashBlock] {
+        switch self {
+        case .blog:
+            return [.heading, .subheading, .image, .quote, .divider, .bullet, .numbered, .code, .link]
+        case .novel:
+            return [.chapter, .sceneBreak, .quote, .image]
+        case .note:
+            return [.heading, .bullet, .todo, .quote, .code, .image, .divider, .link]
+        case .todo:
+            return [.todo, .heading, .bullet, .divider]
+        case .journal:
+            return [.heading, .bullet, .todo, .quote, .image, .divider]
+        case .screenplay:
+            return []
+        }
+    }
+}
+
+// MARK: - Slash command blocks
+
+/// One entry in the editor's "/" slash menu. `insert` says how committing the
+/// block mutates the text; `keywords` widen fuzzy filtering beyond the title.
+struct SlashBlock: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let icon: String
+    let keywords: [String]
+    let insert: SlashInsert
+}
+
+/// How a chosen slash block edits the document.
+enum SlashInsert: Hashable {
+    case linePrefix(String)   // toggle/prepend a line prefix ("## ", "- [ ] ", "> ")
+    case snippet(String)      // drop a raw block at the caret ("\n---\n", code fence)
+    case image                // run the image picker/upload path
+    case link                 // insert/wrap a [text](url) link
+}
+
+extension SlashBlock {
+    static let heading    = SlashBlock(id: "heading",    title: "Heading",        subtitle: "Section heading",     icon: "textformat.size",                        keywords: ["h2", "section"],        insert: .linePrefix("## "))
+    static let subheading = SlashBlock(id: "subheading", title: "Subheading",     subtitle: "Smaller heading",     icon: "textformat",                             keywords: ["h3"],                   insert: .linePrefix("### "))
+    static let bullet     = SlashBlock(id: "bullet",     title: "Bulleted list",  subtitle: "Unordered list item", icon: "list.bullet",                            keywords: ["ul", "list"],           insert: .linePrefix("- "))
+    static let numbered   = SlashBlock(id: "numbered",   title: "Numbered list",  subtitle: "Ordered list item",   icon: "list.number",                            keywords: ["ol", "ordered"],        insert: .linePrefix("1. "))
+    static let todo       = SlashBlock(id: "todo",       title: "To-do",          subtitle: "Checkbox item",       icon: "checklist",                              keywords: ["task", "checkbox"],     insert: .linePrefix("- [ ] "))
+    static let quote      = SlashBlock(id: "quote",      title: "Quote",          subtitle: "Block quote",         icon: "text.quote",                             keywords: ["blockquote"],           insert: .linePrefix("> "))
+    static let code       = SlashBlock(id: "code",       title: "Code block",     subtitle: "Fenced code",         icon: "chevron.left.forwardslash.chevron.right", keywords: ["pre", "monospace"],     insert: .snippet("\n```\ncode\n```\n"))
+    static let divider    = SlashBlock(id: "divider",    title: "Divider",        subtitle: "Horizontal rule",     icon: "minus",                                  keywords: ["hr", "rule", "break"],  insert: .snippet("\n---\n"))
+    static let image      = SlashBlock(id: "image",      title: "Image",          subtitle: "Upload or drop a file", icon: "photo",                                keywords: ["picture", "media", "img"], insert: .image)
+    static let link       = SlashBlock(id: "link",       title: "Link",           subtitle: "Insert a hyperlink",  icon: "link",                                   keywords: ["url", "href"],          insert: .link)
+    static let chapter    = SlashBlock(id: "chapter",    title: "Chapter",        subtitle: "New chapter heading", icon: "book",                                   keywords: ["heading"],              insert: .linePrefix("# Chapter "))
+    static let sceneBreak = SlashBlock(id: "sceneBreak", title: "Scene break",    subtitle: "Section divider",     icon: "arrow.left.and.right",                   keywords: ["divider", "hr"],        insert: .snippet("\n---\n"))
 }
 
 // MARK: - Journals hub (the Obsidian-style parent module)
@@ -660,5 +734,82 @@ struct JournalsLibraryView: View {
             appState.journalsListGeneration &+= 1
             await load()
         } catch { errorMessage = error.localizedDescription }
+    }
+}
+
+// MARK: - Sidebar document tree
+
+/// Backing model for the persistent Journals tree in the app sidebar
+/// (Obsidian/Scrivener-style: folders + documents nested, always visible). The
+/// flattened, DFS-ordered rows are precomputed in `rebuild()` — never in a
+/// SwiftUI body — so the sidebar LazyVStack stays cheap as the document count
+/// grows. Folder CRUD + document moves reuse the existing service methods.
+@MainActor
+@Observable
+final class JournalSidebarModel {
+    var folders: [MWJournalFolder] = []
+    var journals: [MWJournal] = []
+    var expanded: Set<String> = []
+    var isLoading = false
+    var error: String?
+    private(set) var rows: [Row] = []
+
+    enum RowKind: Hashable { case folder(MWJournalFolder); case doc(MWJournal) }
+    struct Row: Identifiable, Hashable {
+        let id: String        // "f:<id>" for folders, "d:<id>" for documents
+        let kind: RowKind
+        let depth: Int
+    }
+
+    func load() async {
+        isLoading = true
+        error = nil
+        defer { isLoading = false }
+        do {
+            async let f = MatchaWorkService.shared.listJournalFolders()
+            async let j = MatchaWorkService.shared.listJournals(forceRefresh: true)
+            folders = try await f
+            journals = try await j
+            // Forget expansion of folders that no longer exist.
+            expanded = expanded.intersection(Set(folders.map { $0.id }))
+            rebuild()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    func toggle(_ folderId: String) {
+        if expanded.contains(folderId) { expanded.remove(folderId) } else { expanded.insert(folderId) }
+        rebuild()
+    }
+
+    func hasChildren(_ folderId: String) -> Bool {
+        folders.contains { $0.parentId == folderId } || journals.contains { $0.folderId == folderId }
+    }
+
+    /// Flatten the tree honoring collapse state: each folder, then (if expanded)
+    /// its subfolders and its documents; unfiled documents trail at the root.
+    func rebuild() {
+        var out: [Row] = []
+        func walk(_ parentId: String?, _ depth: Int) {
+            let childFolders = folders.filter { $0.parentId == parentId }
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            for f in childFolders {
+                out.append(Row(id: "f:\(f.id)", kind: .folder(f), depth: depth))
+                if expanded.contains(f.id) {
+                    walk(f.id, depth + 1)
+                    let docs = journals.filter { $0.folderId == f.id }
+                        .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+                    for d in docs { out.append(Row(id: "d:\(d.id)", kind: .doc(d), depth: depth + 1)) }
+                }
+            }
+            if parentId == nil {
+                let rootDocs = journals.filter { $0.folderId == nil }
+                    .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+                for d in rootDocs { out.append(Row(id: "d:\(d.id)", kind: .doc(d), depth: 0)) }
+            }
+        }
+        walk(nil, 0)
+        rows = out
     }
 }

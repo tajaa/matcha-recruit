@@ -39,7 +39,7 @@ struct JournalEditorToolbar: View {
                 btn("chevron.left.forwardslash.chevron.right", help: "Code block") { controller.insertCodeBlock() }
                 btn("link", help: "Link (⌘K)") { controller.wrapLink() }
                     .keyboardShortcut("k", modifiers: .command)
-                btn("photo", help: "Insert image") { pickImage() }
+                btn("photo", help: "Insert image") { controller.pickImage() }
                 btn("minus", help: "Divider") { controller.insertDivider() }
             }
             .padding(.horizontal, 6)
@@ -81,40 +81,4 @@ struct JournalEditorToolbar: View {
         .help(help)
     }
 
-    /// Show a native file picker for a single image. On success the bytes
-    /// are uploaded via the controller and the resolved URL inserted at
-    /// the cursor as `![](url)`. Each upload gets a unique placeholder so
-    /// concurrent uploads don't collide on the same token.
-    private func pickImage() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [UTType.image]
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard let data = try? Data(contentsOf: url) else { return }
-        let mime = mimeType(for: url)
-        let pendingId = UUID().uuidString.prefix(8)
-        let alt = "Uploading-\(pendingId)"
-        let placeholder = "![\(alt)](pending)"
-        controller.insertImage(url: "pending", alt: alt)
-        Task { @MainActor in
-            guard let resolved = await controller.onUploadImage?(data, url.lastPathComponent, mime) else {
-                controller.replacePlaceholder(placeholder, with: "![upload failed]()")
-                return
-            }
-            controller.replacePlaceholder(placeholder, with: "![](\(resolved))")
-        }
-    }
-
-    private func mimeType(for url: URL) -> String {
-        switch url.pathExtension.lowercased() {
-        case "png": return "image/png"
-        case "jpg", "jpeg": return "image/jpeg"
-        case "gif": return "image/gif"
-        case "webp": return "image/webp"
-        case "heic": return "image/heic"
-        default: return "application/octet-stream"
-        }
-    }
 }

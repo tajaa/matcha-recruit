@@ -36,6 +36,34 @@ final class JournalDetailViewModel {
         await load(id: id)
     }
 
+    // MARK: - Single-document model
+
+    /// The journal's kind, derived from the loaded record (diary by default).
+    var kind: JournalKind { JournalKind.from(journal?.kind) }
+
+    /// For a doc-kind journal (everything except the diary), the one entry that
+    /// holds the document body. Diary journals have many dated entries and use
+    /// the timeline instead, so this is only meaningful for doc-kinds.
+    var bodyEntry: MWJournalEntry? { entries.first }
+
+    /// Doc-kinds open straight into a single editor. Most kinds seed a starter
+    /// entry on the backend at create time, but `note` (and any pre-seed
+    /// journals) can be empty — lazily create one body entry so the editor
+    /// always has something to bind to.
+    func ensureBodyEntry() async {
+        guard let id = loadedId, let j = journal else { return }
+        guard JournalKind.from(j.kind).isDocKind, entries.isEmpty else { return }
+        do {
+            let entry = try await MatchaWorkService.shared.createJournalEntry(
+                journalId: id, title: nil, content: "", entryDate: nil,
+            )
+            guard loadedId == id else { return }   // navigation switched mid-flight
+            entries = [entry]
+        } catch {
+            errorMessage = "Couldn't initialize document: \(error.localizedDescription)"
+        }
+    }
+
     func createEntry(title: String?, content: String, entryDate: String?) async {
         guard let id = loadedId else { return }
         errorMessage = nil
