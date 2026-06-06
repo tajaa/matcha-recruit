@@ -466,9 +466,14 @@ def main():
     print(f"{DIM}BASE={BASE}  admin={admin_email}{RESET}\n")
 
     # 0. Force flash-lite for the live research, then wait past the getter cache.
-    set_model_mode("lite")
-    print(f"{DIM}waiting {GETTER_CACHE_TTL + 2}s for backend settings cache to expire…{RESET}")
-    time.sleep(GETTER_CACHE_TTL + 2)
+    # Skippable (MATCHA_SKIP_MODEL_MODE=1) when the target already runs lite — e.g.
+    # a prod run where the platform setting is lite and the dev DB isn't tunnelled.
+    if os.environ.get("MATCHA_SKIP_MODEL_MODE"):
+        ok("MATCHA_SKIP_MODEL_MODE set — leaving the target's research model mode as-is")
+    else:
+        set_model_mode("lite")
+        print(f"{DIM}waiting {GETTER_CACHE_TTL + 2}s for backend settings cache to expire…{RESET}")
+        time.sleep(GETTER_CACHE_TTL + 2)
 
     # 1. Register the Matcha-X tenant + admin.
     r = requests.post(
