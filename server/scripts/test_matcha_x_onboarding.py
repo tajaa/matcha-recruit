@@ -253,6 +253,101 @@ def seed_discipline(email: str):
     print(f"{DIM}refresh /app/discipline to view.{RESET}")
 
 
+# (credential_type key, priority, review_status, due_days, ai_confidence, source)
+_CRED_SPEC = [
+    ("food_handler_card", "blocking", "approved", 30, None, "admin_manual"),
+    ("background_check", "blocking", "approved", 7, None, "admin_manual"),
+    ("drug_screening", "standard", "approved", 14, None, "auto_approved"),
+    ("drivers_license", "optional", "approved", 30, None, "admin_manual"),
+    ("tb_test", "standard", "pending", 30, 0.95, "ai_research"),
+    ("cpr_cert", "optional", "pending", 60, 0.90, "ai_research"),
+    ("health_clearance", "standard", "approved", 30, None, "admin_manual"),
+]
+
+
+async def _seed_credentialing(conn, company_id, reviewed_by, states):
+    """Insert the credential-requirement TEMPLATE catalog for a company across its
+    states (non-clinical role) — what /app/credential-templates renders. Returns
+    the count. Idempotent: clears the company's templates first. Reference tables
+    (credential_types, role_categories) must already be seeded."""
+    role_id = await conn.fetchval("SELECT id FROM role_categories WHERE key = 'non_clinical'")
+    if role_id is None:
+        fail("role_categories not seeded (no 'non_clinical')")
+    type_rows = await conn.fetch(
+        "SELECT key, id FROM credential_types WHERE key = ANY($1::text[])",
+        [s[0] for s in _CRED_SPEC],
+    )
+    type_id = {r["key"]: r["id"] for r in type_rows}
+    missing = [s[0] for s in _CRED_SPEC if s[0] not in type_id]
+    if missing:
+        fail(f"credential_types missing in this DB: {missing}")
+
+    reviewed_at = dt.datetime.combine(dt.date.today() - dt.timedelta(days=3), dt.time(10, 0))
+
+    await conn.execute("DELETE FROM credential_requirement_templates WHERE company_id = $1", company_id)
+
+    n = 0
+    for state in states:
+        for key, priority, review_status, due_days, ai_conf, source in _CRED_SPEC:
+            approved = review_status in ("approved", "auto_approved")
+            await conn.execute(
+                """
+                INSERT INTO credential_requirement_templates (
+                    company_id, state, city, role_category_id, credential_type_id,
+                    is_required, due_days, priority, source, ai_confidence,
+                    review_status, reviewed_by, reviewed_at, is_active
+                ) VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true)
+                """,
+                company_id, state, role_id, type_id[key],
+                priority != "optional", due_days, priority, source, ai_conf,
+                review_status, (reviewed_by if approved else None),
+                (reviewed_at if approved else None),
+            )
+            n += 1
+    return n
+
+
+async def _seed_credentialing_for_email(email: str):
+    import asyncpg  # type: ignore
+
+    url = _database_url()
+    if not url:
+        fail("Could not resolve DATABASE_URL")
+    conn = await asyncpg.connect(url)
+    try:
+        row = await conn.fetchrow(
+            """
+            SELECT c.company_id AS company_id, comp.name AS company_name, c.user_id AS reviewed_by
+            FROM clients c
+            JOIN users u ON u.id = c.user_id
+            JOIN companies comp ON comp.id = c.company_id
+            WHERE u.email = $1
+            """,
+            email,
+        )
+        if not row:
+            fail(f"no company found for {email}")
+        states = [
+            r["state"]
+            for r in await conn.fetch(
+                "SELECT DISTINCT UPPER(state) AS state FROM business_locations WHERE company_id = $1 AND is_active = true AND state <> '' ORDER BY 1",
+                row["company_id"],
+            )
+        ]
+        if not states:
+            fail("no active locations with a state to scope templates to")
+        n = await _seed_credentialing(conn, row["company_id"], row["reviewed_by"], states)
+        return row["company_name"], states, n
+    finally:
+        await conn.close()
+
+
+def seed_credentialing(email: str):
+    company_name, states, n = asyncio.run(_seed_credentialing_for_email(email))
+    ok(f"seeded {n} credential templates for {company_name} across {', '.join(states)}")
+    print(f"{DIM}refresh /app/credential-templates to view.{RESET}")
+
+
 def build_csv() -> bytes:
     """10 employees — 5 Los Angeles/CA, 5 Denver/CO — to mirror the two offices."""
     rows = [
@@ -351,6 +446,9 @@ def main():
         return
     if len(sys.argv) >= 3 and sys.argv[1] == "--seed-discipline":
         seed_discipline(sys.argv[2])
+        return
+    if len(sys.argv) >= 3 and sys.argv[1] == "--seed-credentialing":
+        seed_credentialing(sys.argv[2])
         return
     if len(sys.argv) >= 3 and sys.argv[1] == "--check-compliance":
         # Verify the compliance_lite read access against an already-built X tenant
