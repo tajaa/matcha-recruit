@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Bell, ClipboardCheck, Lock, MapPin, ScanLine, Scale, ShieldCheck, Sparkles } from 'lucide-react'
-import { Button, Card, Badge } from '../ui'
+import { Button, Card } from '../ui'
 import { useComplianceData } from '../../hooks/compliance/useComplianceData'
 import { useLocationDetail } from '../../hooks/compliance/useLocationDetail'
 import { ComplianceLocationList } from './ComplianceLocationList'
 import { ComplianceRequirementsTab } from './ComplianceRequirementsTab'
 import { ComplianceUpcomingTab } from './ComplianceUpcomingTab'
 import { UpgradeUpsellCard } from '../UpgradeUpsellCard'
-import { CATEGORY_LABELS } from '../../types/compliance'
 
 /**
  * Matcha-X read-only "taste" of Compliance (`compliance_lite`).
@@ -24,9 +23,9 @@ type LiteTab =
   | 'overview' | 'requirements' | 'credentials' | 'alerts' | 'upcoming'
   | 'history' | 'posters' | 'payer-policies' | 'protocol-analysis' | 'policy-drafting'
 
-// Same labels/order as the Pro page so the lite taste looks like the full thing.
+// Overview is folded into Requirements (a slim stats strip on top), so the lite
+// tab bar drops the standalone Overview. Same labels/order as Pro otherwise.
 const TABS: { value: LiteTab; label: string }[] = [
-  { value: 'overview', label: 'Overview' },
   { value: 'requirements', label: 'Requirements' },
   { value: 'credentials', label: 'Certifications & Licenses' },
   { value: 'alerts', label: 'Alerts' },
@@ -39,13 +38,13 @@ const TABS: { value: LiteTab; label: string }[] = [
 ]
 
 // Tabs that are live (read-only) on the lite taste. Everything else is locked.
-const LIVE_TABS = new Set<LiteTab>(['overview', 'requirements', 'upcoming'])
+const LIVE_TABS = new Set<LiteTab>(['requirements', 'upcoming'])
 const LOCATION_TABS = new Set<LiteTab>(['requirements', 'upcoming'])
 
 const noop = () => {}
 
 export function ComplianceLiteView() {
-  const [tab, setTab] = useState<LiteTab>('overview')
+  const [tab, setTab] = useState<LiteTab>('requirements')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const data = useComplianceData(selectedId, true)
   const detail = useLocationDetail(selectedId, true)
@@ -106,56 +105,15 @@ export function ComplianceLiteView() {
         })}
       </div>
 
-      {/* Overview — real stats + recent changes + upcoming */}
-      {tab === 'overview' && (
-        <div className="space-y-5">
-          <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
-            {stats.map((s) => (
-              <Card key={s.label} className="px-4 py-3.5">
-                <p className="text-2xl font-semibold text-zinc-100 tabular-nums">{s.value}</p>
-                <p className="text-[11px] text-zinc-500 uppercase tracking-wide mt-0.5">{s.label}</p>
-              </Card>
-            ))}
-          </div>
-
-          {summary && summary.recent_changes.length > 0 && (
-            <div>
-              <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">Recent Changes</h2>
-              <Card className="p-0 divide-y divide-zinc-800/60">
-                {summary.recent_changes.slice(0, 5).map((c, i) => (
-                  <div key={i} className="px-4 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-zinc-200">{c.title}</span>
-                      <Badge variant="neutral">{CATEGORY_LABELS[c.category] || c.category}</Badge>
-                    </div>
-                    <p className="text-xs text-zinc-500 mt-0.5">
-                      {c.old_value} &rarr; <span className="text-zinc-300">{c.new_value}</span>
-                    </p>
-                    <span className="text-[11px] text-zinc-600">{c.location}</span>
-                  </div>
-                ))}
-              </Card>
+      {/* Overview folded in: a slim stats strip sits on top of Requirements */}
+      {tab === 'requirements' && (
+        <div className="flex items-stretch rounded-lg border border-zinc-800 bg-zinc-900/40 divide-x divide-zinc-800 mb-4 overflow-hidden">
+          {stats.map((s) => (
+            <div key={s.label} className="px-4 py-2.5 flex-1 min-w-0">
+              <p className="text-[10px] text-zinc-500 uppercase tracking-wider truncate">{s.label}</p>
+              <p className="text-base font-semibold text-zinc-100 tabular-nums mt-0.5">{s.value}</p>
             </div>
-          )}
-
-          {upcoming.length > 0 && (
-            <div>
-              <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">Upcoming Deadlines</h2>
-              <Card className="p-0 divide-y divide-zinc-800/60">
-                {upcoming.map((d, i) => (
-                  <div key={i} className="flex items-center justify-between px-4 py-2.5">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm text-zinc-200 truncate">{d.title}</p>
-                      <p className="text-[11px] text-zinc-500 mt-0.5">{d.location} &middot; {new Date(d.effective_date).toLocaleDateString()}</p>
-                    </div>
-                    <span className={`text-lg font-mono font-semibold ml-3 ${d.days_until <= 30 ? 'text-red-400' : d.days_until <= 90 ? 'text-amber-400' : 'text-zinc-500'}`}>
-                      {d.days_until <= 0 ? 'NOW' : `${d.days_until}d`}
-                    </span>
-                  </div>
-                ))}
-              </Card>
-            </div>
-          )}
+          ))}
         </div>
       )}
 

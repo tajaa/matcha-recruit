@@ -4,14 +4,13 @@ import { CATEGORY_LABELS } from '../../types/compliance'
 
 type Props = { legislation: UpcomingLegislation[]; loading: boolean }
 
+// Color is reserved for urgency only — `effective_soon` stays red; every other
+// status is neutral zinc so the list reads calm. The day-countdown on the right
+// carries the red/amber urgency signal.
 const STATUS_STYLE: Record<string, string> = {
-  proposed: 'bg-blue-900/20 text-blue-400 border-blue-800/40',
-  passed: 'bg-amber-900/20 text-amber-400 border-amber-800/40',
-  signed: 'bg-amber-900/20 text-amber-400 border-amber-800/40',
   effective_soon: 'bg-red-900/20 text-red-400 border-red-800/40',
-  effective: 'bg-emerald-900/20 text-emerald-400 border-emerald-800/40',
-  dismissed: 'bg-zinc-800 text-zinc-500 border-zinc-700',
 }
+const STATUS_DEFAULT = 'bg-zinc-800 text-zinc-400 border-zinc-700'
 
 export function ComplianceUpcomingTab({ legislation, loading }: Props) {
   if (loading) return <p className="text-sm text-zinc-500">Loading legislation...</p>
@@ -33,7 +32,7 @@ export function ComplianceUpcomingTab({ legislation, loading }: Props) {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <p className="text-sm font-medium text-zinc-200">{leg.title}</p>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded border ${STATUS_STYLE[leg.current_status] || 'bg-zinc-800 text-zinc-400 border-zinc-700'}`}>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded border ${STATUS_STYLE[leg.current_status] || STATUS_DEFAULT}`}>
                   {leg.current_status.replace(/_/g, ' ')}
                 </span>
                 {leg.category && (
@@ -44,8 +43,8 @@ export function ComplianceUpcomingTab({ legislation, loading }: Props) {
                 <p className="text-xs text-zinc-400 mt-1.5 leading-relaxed">{leg.description}</p>
               )}
               {leg.impact_summary && (
-                <div className="mt-2 px-3 py-2 bg-amber-900/10 border border-amber-800/30 rounded">
-                  <p className="text-xs text-amber-300">{leg.impact_summary}</p>
+                <div className="mt-2 px-3 py-2 bg-zinc-900/50 border border-zinc-800 rounded">
+                  <p className="text-xs text-zinc-300">{leg.impact_summary}</p>
                 </div>
               )}
               <div className="flex items-center gap-3 mt-2">

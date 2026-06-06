@@ -132,11 +132,11 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                         </span>
                       )}
                       {req.applicable_industries?.includes('healthcare') && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-900/20 text-cyan-400 border border-cyan-800/40">Medical</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">Medical</span>
                       )}
                       {(req.affected_employee_count ?? 0) > 0 && (
                         <EmployeesTooltip names={req.affected_employee_names} count={req.affected_employee_count!}>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-900/20 text-violet-400 border border-violet-800/40 cursor-default">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700 cursor-default">
                             {req.affected_employee_count} employee{req.affected_employee_count !== 1 ? 's' : ''}
                           </span>
                         </EmployeesTooltip>
@@ -149,7 +149,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                     </div>
                   </div>
                   {req.current_value && (
-                    <span className="text-sm font-mono text-emerald-400 bg-emerald-900/20 border border-emerald-800/40 px-2.5 py-1 rounded shrink-0">
+                    <span className="text-sm font-mono text-zinc-200 bg-zinc-800/60 border border-zinc-700 px-2.5 py-1 rounded shrink-0">
                       {req.current_value}
                     </span>
                   )}
@@ -257,7 +257,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                         <div className="flex items-start justify-between gap-3">
                           <p className="text-sm text-zinc-200 truncate">{r.req.title}</p>
                           {r.req.current_value && (
-                            <span className="text-[11px] font-mono text-emerald-400 bg-emerald-900/20 border border-emerald-800/40 px-2 py-0.5 rounded shrink-0">{r.req.current_value}</span>
+                            <span className="text-[11px] font-mono text-zinc-200 bg-zinc-800/60 border border-zinc-700 px-2 py-0.5 rounded shrink-0">{r.req.current_value}</span>
                           )}
                         </div>
                         {r.req.description && (
@@ -391,11 +391,11 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                                     </span>
                                   )}
                                   {req.applicable_industries?.includes('healthcare') && (
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-900/20 text-cyan-400 border border-cyan-800/40">Medical</span>
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">Medical</span>
                                   )}
                                   {(req.affected_employee_count ?? 0) > 0 && (
                                     <EmployeesTooltip names={req.affected_employee_names} count={req.affected_employee_count!}>
-                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-900/20 text-violet-400 border border-violet-800/40 cursor-default">
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700 cursor-default">
                                         {req.affected_employee_count} employee{req.affected_employee_count !== 1 ? 's' : ''}
                                       </span>
                                     </EmployeesTooltip>
@@ -408,7 +408,7 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
                                 </div>
                               </div>
                               {req.current_value && (
-                                <span className="text-sm font-mono text-emerald-400 bg-emerald-900/20 border border-emerald-800/40 px-2.5 py-1 rounded shrink-0">
+                                <span className="text-sm font-mono text-zinc-200 bg-zinc-800/60 border border-zinc-700 px-2.5 py-1 rounded shrink-0">
                                   {req.current_value}
                                 </span>
                               )}
