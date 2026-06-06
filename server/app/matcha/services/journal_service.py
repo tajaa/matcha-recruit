@@ -15,8 +15,72 @@ from ...database import get_connection
 
 logger = logging.getLogger(__name__)
 
+# Create-time templates. `kind` is stored on the journal; if a kind ships a
+# `seed`, a starter entry is inserted so the writer opens to a scaffold instead
+# of a blank page. `icon` is a sensible default when the create form didn't pick
+# one. Keep kinds in sync with the desktop NewJournalSheet picker + the
+# `mw_journals.kind` column comment.
+JOURNAL_KINDS = {"journal", "note", "blog", "todo", "novel", "screenplay"}
+
+JOURNAL_KIND_DEFAULTS: dict[str, dict] = {
+    "journal": {"icon": "book.closed"},
+    "note":    {"icon": "note.text"},
+    "blog":    {"icon": "doc.richtext"},
+    "todo":    {"icon": "checklist"},
+    "novel":   {"icon": "books.vertical"},
+    "screenplay": {"icon": "film"},
+}
+
+# Starter-entry scaffolds (markdown, matching the journal editor's syntax).
+JOURNAL_KIND_SEEDS: dict[str, dict] = {
+    "blog": {
+        "title": "Untitled post",
+        "content": (
+            "# Working title\n\n"
+            "_One-line hook — why should a reader care?_\n\n"
+            "## Introduction\n\n"
+            "## Key points\n\n- \n- \n- \n\n"
+            "## Conclusion\n\n"
+            "**Call to action:** \n"
+        ),
+    },
+    "todo": {
+        "title": "To-dos",
+        "content": (
+            "## Today\n\n- [ ] \n- [ ] \n- [ ] \n\n"
+            "## This week\n\n- [ ] \n- [ ] \n\n"
+            "## Someday\n\n- [ ] \n"
+        ),
+    },
+    "novel": {
+        "title": "Chapter 1",
+        "content": (
+            "# Chapter 1\n\n"
+            "> Notes: POV, setting, what changes by the end.\n\n"
+            "---\n\n"
+            "The opening line.\n"
+        ),
+    },
+    "screenplay": {
+        "title": "Scene 1",
+        "content": (
+            "**INT. LOCATION — DAY**\n\n"
+            "Action describing the scene.\n\n"
+            "CHARACTER\n"
+            "Their first line of dialogue.\n\n"
+            "**CUT TO:**\n"
+        ),
+    },
+}
+
+
+def _normalize_kind(kind: Optional[str]) -> str:
+    k = (kind or "journal").lower().strip()
+    return k if k in JOURNAL_KINDS else "journal"
+
 
 def _parse_journal(row) -> dict:
+    keys = row.keys()
     return {
         "id": str(row["id"]),
         "title": row["title"],
@@ -24,6 +88,10 @@ def _parse_journal(row) -> dict:
         "color": row["color"],
         "icon": row["icon"],
         "status": row["status"],
+        "kind": row["kind"] if "kind" in keys else "journal",
+        "folder_id": (
+            str(row["folder_id"]) if "folder_id" in keys and row["folder_id"] else None
+        ),
         "created_by": str(row["created_by"]),
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
@@ -90,7 +158,7 @@ async def list_journals(user_id: UUID, company_id: Optional[UUID], status: str =
         rows = await conn.fetch(
             """
             SELECT j.id, j.title, j.description, j.color, j.icon, j.status,
-                   j.created_by, j.created_at, j.updated_at,
+                   j.kind, j.folder_id, j.created_by, j.created_at, j.updated_at,
                    (SELECT COUNT(*) FROM mw_journal_entries WHERE journal_id = j.id) AS entry_count,
                    (SELECT COUNT(*) FROM mw_journal_collaborators
                        WHERE journal_id = j.id AND status = 'active') AS collaborator_count,
@@ -134,7 +202,7 @@ async def get_journal(journal_id: UUID, viewer_id: UUID) -> Optional[dict]:
         row = await conn.fetchrow(
             """
             SELECT j.id, j.title, j.description, j.color, j.icon, j.status,
-                   j.created_by, j.created_at, j.updated_at,
+                   j.kind, j.folder_id, j.created_by, j.created_at, j.updated_at,
                    (SELECT COUNT(*) FROM mw_journal_entries WHERE journal_id = j.id) AS entry_count,
                    (SELECT COUNT(*) FROM mw_journal_collaborators
                        WHERE journal_id = j.id AND status = 'active') AS collaborator_count,
@@ -156,22 +224,51 @@ async def create_journal(
     description: Optional[str] = None,
     color: Optional[str] = None,
     icon: Optional[str] = None,
+    kind: Optional[str] = None,
+    folder_id: Optional[UUID] = None,
 ) -> dict:
+    kind = _normalize_kind(kind)
+    # Fall back to the kind's default icon when the form didn't pick one.
+    if not icon:
+        icon = JOURNAL_KIND_DEFAULTS.get(kind, {}).get("icon")
     async with get_connection() as conn:
+        # A folder, if given, must belong to the same company.
+        if folder_id is not None:
+            ok = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM mw_journal_folders WHERE id = $1 AND company_id = $2)",
+                folder_id, company_id,
+            )
+            if not ok:
+                folder_id = None
         row = await conn.fetchrow(
             """
-            INSERT INTO mw_journals (company_id, created_by, title, description, color, icon)
-            VALUES ($1, $2, COALESCE(NULLIF($3, ''), 'Untitled Journal'), $4, $5, $6)
-            RETURNING id, title, description, color, icon, status,
+            INSERT INTO mw_journals (company_id, created_by, title, description, color, icon, kind, folder_id)
+            VALUES ($1, $2, COALESCE(NULLIF($3, ''), 'Untitled Journal'), $4, $5, $6, $7, $8)
+            RETURNING id, title, description, color, icon, status, kind, folder_id,
                       created_by, created_at, updated_at
             """,
-            company_id, creator_id, title, description, color, icon,
+            company_id, creator_id, title, description, color, icon, kind, folder_id,
         )
-        return _parse_journal(row)
+        journal = _parse_journal(row)
+        # Seed a starter entry so writers open to a scaffold, not a blank page.
+        seed = JOURNAL_KIND_SEEDS.get(kind)
+        if seed:
+            await conn.execute(
+                """
+                INSERT INTO mw_journal_entries (journal_id, author_id, title, content)
+                VALUES ($1, $2, $3, $4)
+                """,
+                UUID(journal["id"]), creator_id, seed.get("title"), seed.get("content", ""),
+            )
+        return journal
 
 
 async def update_journal(journal_id: UUID, viewer_id: UUID, patch: dict) -> dict:
-    """Owner-only metadata edit (title/description/color/icon)."""
+    """Owner-only edit: title/description/color/icon/kind + folder placement.
+
+    `folder_id` is handled specially so an explicit null moves the journal to
+    the root of the hub (the simple loop below skips Nones, which is correct for
+    the other fields but would block un-foldering)."""
     async with get_connection() as conn:
         if not await _is_creator(conn, journal_id, viewer_id):
             raise PermissionError("Only the journal creator can update metadata")
@@ -182,9 +279,34 @@ async def update_journal(journal_id: UUID, viewer_id: UUID, patch: dict) -> dict
                 sets.append(f"{k} = ${idx}")
                 params.append(patch[k])
                 idx += 1
+        if "kind" in patch and patch["kind"] is not None:
+            sets.append(f"kind = ${idx}")
+            params.append(_normalize_kind(patch["kind"]))
+            idx += 1
+        # folder move — present-but-null = move to root; validate same-company.
+        if "folder_id" in patch:
+            target = patch["folder_id"]
+            if target is not None:
+                fid = target if isinstance(target, UUID) else UUID(str(target))
+                ok = await conn.fetchval(
+                    """
+                    SELECT EXISTS(
+                        SELECT 1 FROM mw_journal_folders f
+                        JOIN mw_journals j ON j.id = $2
+                        WHERE f.id = $1 AND f.company_id = j.company_id
+                    )
+                    """,
+                    fid, journal_id,
+                )
+                if not ok:
+                    raise PermissionError("Folder not found in this workspace")
+                sets.append(f"folder_id = ${idx}")
+                params.append(fid)
+            else:
+                sets.append("folder_id = NULL")
         if not sets:
             row = await conn.fetchrow(
-                "SELECT id, title, description, color, icon, status, "
+                "SELECT id, title, description, color, icon, status, kind, folder_id, "
                 "created_by, created_at, updated_at FROM mw_journals WHERE id = $1",
                 journal_id,
             )
@@ -195,8 +317,8 @@ async def update_journal(journal_id: UUID, viewer_id: UUID, patch: dict) -> dict
             f"""
             UPDATE mw_journals
             SET {", ".join(sets)}
-            WHERE id = ${idx}
-            RETURNING id, title, description, color, icon, status,
+            WHERE id = ${len(params)}
+            RETURNING id, title, description, color, icon, status, kind, folder_id,
                       created_by, created_at, updated_at
             """,
             *params,
@@ -442,3 +564,137 @@ async def remove_collaborator(journal_id: UUID, user_id: UUID, removed_by: UUID)
             "DELETE FROM mw_journal_collaborators WHERE journal_id = $1 AND user_id = $2",
             journal_id, user_id,
         )
+
+
+# ── Folders (Obsidian-style hub organization) ───────────────────────────
+#
+# Company-scoped adjacency-list tree (mirrors mw_project_folders). Journals
+# carry a single `folder_id` placement; deleting a folder cascades to child
+# folders and SET-NULLs the journals back to the hub root.
+
+
+def _parse_folder(row) -> dict:
+    return {
+        "id": str(row["id"]),
+        "name": row["name"],
+        "parent_id": str(row["parent_id"]) if row["parent_id"] else None,
+        "created_by": str(row["created_by"]) if row["created_by"] else None,
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+    }
+
+
+async def list_journal_folders(company_id: UUID) -> list[dict]:
+    """The full folder tree for the company (flat list; client builds the
+    hierarchy from parent_id)."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, name, parent_id, created_by, created_at
+            FROM mw_journal_folders
+            WHERE company_id = $1
+            ORDER BY name ASC
+            """,
+            company_id,
+        )
+        return [_parse_folder(r) for r in rows]
+
+
+async def create_journal_folder(
+    creator_id: UUID, company_id: UUID, *, name: str, parent_id: Optional[UUID] = None
+) -> dict:
+    async with get_connection() as conn:
+        if parent_id is not None:
+            ok = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM mw_journal_folders WHERE id = $1 AND company_id = $2)",
+                parent_id, company_id,
+            )
+            if not ok:
+                raise PermissionError("Parent folder not found in this workspace")
+        row = await conn.fetchrow(
+            """
+            INSERT INTO mw_journal_folders (company_id, parent_id, name, created_by)
+            VALUES ($1, $2, COALESCE(NULLIF($3, ''), 'New Folder'), $4)
+            RETURNING id, name, parent_id, created_by, created_at
+            """,
+            company_id, parent_id, name, creator_id,
+        )
+        return _parse_folder(row)
+
+
+async def _is_descendant(conn, folder_id: UUID, maybe_ancestor: UUID) -> bool:
+    """True if `maybe_ancestor` is folder_id itself or sits below it — used to
+    reject reparenting a folder into its own subtree (which would orphan a
+    cycle)."""
+    cur = maybe_ancestor
+    seen = set()
+    while cur is not None and cur not in seen:
+        if cur == folder_id:
+            return True
+        seen.add(cur)
+        cur = await conn.fetchval(
+            "SELECT parent_id FROM mw_journal_folders WHERE id = $1", cur,
+        )
+    return False
+
+
+async def update_journal_folder(
+    folder_id: UUID, company_id: UUID, patch: dict
+) -> dict:
+    """Rename and/or reparent a folder (company-scoped). Guards against moving a
+    folder into its own subtree."""
+    async with get_connection() as conn:
+        owned = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM mw_journal_folders WHERE id = $1 AND company_id = $2)",
+            folder_id, company_id,
+        )
+        if not owned:
+            raise PermissionError("Folder not found in this workspace")
+        sets, params = [], []
+        if "name" in patch and patch["name"]:
+            params.append(patch["name"])
+            sets.append(f"name = ${len(params)}")
+        if "parent_id" in patch:
+            target = patch["parent_id"]
+            if target is not None:
+                pid = target if isinstance(target, UUID) else UUID(str(target))
+                ok = await conn.fetchval(
+                    "SELECT EXISTS(SELECT 1 FROM mw_journal_folders WHERE id = $1 AND company_id = $2)",
+                    pid, company_id,
+                )
+                if not ok:
+                    raise PermissionError("Parent folder not found in this workspace")
+                if await _is_descendant(conn, folder_id, pid):
+                    raise PermissionError("Cannot move a folder into its own subtree")
+                params.append(pid)
+                sets.append(f"parent_id = ${len(params)}")
+            else:
+                sets.append("parent_id = NULL")
+        if not sets:
+            row = await conn.fetchrow(
+                "SELECT id, name, parent_id, created_by, created_at "
+                "FROM mw_journal_folders WHERE id = $1", folder_id,
+            )
+            return _parse_folder(row)
+        params.append(folder_id)
+        row = await conn.fetchrow(
+            f"""
+            UPDATE mw_journal_folders SET {", ".join(sets)}
+            WHERE id = ${len(params)}
+            RETURNING id, name, parent_id, created_by, created_at
+            """,
+            *params,
+        )
+        return _parse_folder(row)
+
+
+async def delete_journal_folder(folder_id: UUID, company_id: UUID) -> None:
+    """Delete a folder. Child folders cascade; journals filed here SET NULL
+    back to the hub root (FK on mw_journals.folder_id)."""
+    async with get_connection() as conn:
+        owned = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM mw_journal_folders WHERE id = $1 AND company_id = $2)",
+            folder_id, company_id,
+        )
+        if not owned:
+            raise PermissionError("Folder not found in this workspace")
+        await conn.execute("DELETE FROM mw_journal_folders WHERE id = $1", folder_id)

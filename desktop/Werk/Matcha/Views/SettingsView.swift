@@ -34,6 +34,7 @@ private struct AppearanceSettingsTab: View {
         Form {
             Section {
                 Picker("Theme", selection: $appState.appTheme) {
+                    Text("Platinum").tag("platinum")
                     Text("Dark").tag("dark")
                     Text("Light").tag("light")
                     Text("Cappuchin").tag("cappuchin")
@@ -43,7 +44,7 @@ private struct AppearanceSettingsTab: View {
             } header: {
                 Text("UI Theme").font(.subheadline).bold()
             } footer: {
-                Text("Choose your preferred workspace color theme. Cappuchin provides a cozy warm coffee atmosphere; Graphite is a minimalist neutral grayscale.")
+                Text("Choose your preferred workspace color theme. Platinum is the signature cool light-gray look; Cappuchin provides a cozy warm coffee atmosphere; Graphite is a minimalist neutral grayscale.")
                     .font(.caption).foregroundColor(.secondary)
             }
         }

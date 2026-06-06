@@ -30,7 +30,7 @@ struct MatchaApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     private var colorScheme: ColorScheme {
-        appState.appTheme == "light" ? .light : .dark
+        appState.isLightFamily ? .light : .dark
     }
 
     var body: some Scene {

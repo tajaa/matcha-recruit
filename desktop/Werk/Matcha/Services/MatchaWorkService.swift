@@ -2054,20 +2054,45 @@ class MatchaWorkService {
     }
 
     func createJournal(
-        title: String, description: String? = nil, color: String? = nil, icon: String? = nil
+        title: String, description: String? = nil, color: String? = nil, icon: String? = nil,
+        kind: String? = nil, folderId: String? = nil
     ) async throws -> MWJournal {
-        try await JournalService.shared.createJournal(title: title, description: description, color: color, icon: icon)
+        try await JournalService.shared.createJournal(
+            title: title, description: description, color: color, icon: icon,
+            kind: kind, folderId: folderId)
     }
 
     func updateJournal(
         id: String, title: String? = nil, description: String? = nil,
-        color: String? = nil, icon: String? = nil
+        color: String? = nil, icon: String? = nil, kind: String? = nil
     ) async throws -> MWJournal {
-        try await JournalService.shared.updateJournal(id: id, title: title, description: description, color: color, icon: icon)
+        try await JournalService.shared.updateJournal(id: id, title: title, description: description, color: color, icon: icon, kind: kind)
+    }
+
+    func moveJournal(id: String, folderId: String?) async throws -> MWJournal {
+        try await JournalService.shared.moveJournal(id: id, folderId: folderId)
     }
 
     func archiveJournal(id: String) async throws {
         try await JournalService.shared.archiveJournal(id: id)
+    }
+
+    // ── Journal folders ─────────────────────────────────────────────────
+
+    func listJournalFolders() async throws -> [MWJournalFolder] {
+        try await JournalService.shared.listFolders()
+    }
+
+    func createJournalFolder(name: String, parentId: String? = nil) async throws -> MWJournalFolder {
+        try await JournalService.shared.createFolder(name: name, parentId: parentId)
+    }
+
+    func renameJournalFolder(id: String, name: String) async throws -> MWJournalFolder {
+        try await JournalService.shared.renameFolder(id: id, name: name)
+    }
+
+    func deleteJournalFolder(id: String) async throws {
+        try await JournalService.shared.deleteFolder(id: id)
     }
 
     func listJournalEntries(

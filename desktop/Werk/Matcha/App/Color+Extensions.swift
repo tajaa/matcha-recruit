@@ -10,8 +10,9 @@ extension Color {
     /// Dynamic — switches with the active theme so all views get the right
     /// background without individually reading AppState.
     static var appBackground: Color {
-        switch UserDefaults.standard.string(forKey: "mw-theme") ?? "dark" {
+        switch UserDefaults.standard.string(forKey: "mw-theme") ?? "platinum" {
         case "light":     return grayBg
+        case "platinum":  return platinumBg
         case "cappuchin": return cappuchinDark
         case "graphite":  return graphiteBg
         default:          return zinc950
@@ -20,8 +21,9 @@ extension Color {
 
     /// Dynamic card/surface color, mirrors AppState.themeCard.
     static var cardBackground: Color {
-        switch UserDefaults.standard.string(forKey: "mw-theme") ?? "dark" {
+        switch UserDefaults.standard.string(forKey: "mw-theme") ?? "platinum" {
         case "light":     return grayCard
+        case "platinum":  return platinumCard
         case "cappuchin": return cappuchinCard
         case "graphite":  return graphiteCard
         default:          return zinc900
@@ -30,8 +32,9 @@ extension Color {
 
     /// Dynamic border color, mirrors AppState.themeBorder.
     static var borderColor: Color {
-        switch UserDefaults.standard.string(forKey: "mw-theme") ?? "dark" {
+        switch UserDefaults.standard.string(forKey: "mw-theme") ?? "platinum" {
         case "light":     return grayBorder
+        case "platinum":  return platinumBorder
         case "cappuchin": return cappuchinBorder
         case "graphite":  return graphiteBorder
         default:          return .white.opacity(0.1)
@@ -82,4 +85,18 @@ extension Color {
     static let graphiteOnAccent    = Color(red: 0.110, green: 0.110, blue: 0.118) // dark text on the light-gray accent
     static let graphiteRadialCenter = Color(red: 0.176, green: 0.176, blue: 0.188) // #2D2D30 medium-gray spotlight
     static let graphiteRadialEdge   = Color(red: 0.086, green: 0.086, blue: 0.094) // #161618 darker edge
+
+    // Platinum theme — the signature MW look (default). A cool light-gray base
+    // with a soft light-gray radial gradient and a dark cool-charcoal accent
+    // (the MW monogram color). Grayscale, faintly blue-cool, premium-light.
+    static let platinumBg          = Color(red: 0.925, green: 0.929, blue: 0.941) // #ECEDF0 cool light gray
+    static let platinumCard        = Color(red: 0.984, green: 0.988, blue: 0.996) // #FBFCFE near-white card
+    static let platinumSidebar     = Color(red: 0.871, green: 0.878, blue: 0.902) // #DEE0E6 darker than body (rail contrast)
+    static let platinumBorder      = Color(red: 0.835, green: 0.847, blue: 0.875) // #D5D8DF hairline
+    static let platinumAccent      = Color(red: 0.169, green: 0.180, blue: 0.208) // #2B2E35 dark cool charcoal (MW mark)
+    static let platinumAccentDark  = Color(red: 0.106, green: 0.114, blue: 0.133) // #1B1D22
+    static let platinumText        = Color(red: 0.106, green: 0.114, blue: 0.133) // #1B1D22
+    static let platinumSecondary   = Color(red: 0.416, green: 0.431, blue: 0.471) // #6A6E78 cool gray text
+    static let platinumRadialCenter = Color(red: 0.969, green: 0.973, blue: 0.984) // #F7F8FB bright spotlight
+    static let platinumRadialEdge   = Color(red: 0.863, green: 0.871, blue: 0.898) // #DCDEE5 darker edge
 }

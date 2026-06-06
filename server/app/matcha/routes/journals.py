@@ -25,6 +25,8 @@ class JournalCreate(BaseModel):
     description: Optional[str] = None
     color: Optional[str] = None
     icon: Optional[str] = None
+    kind: Optional[str] = None          # note|blog|todo|novel|screenplay|journal
+    folder_id: Optional[UUID] = None    # initial hub-folder placement
 
 
 class JournalPatch(BaseModel):
@@ -32,6 +34,21 @@ class JournalPatch(BaseModel):
     description: Optional[str] = None
     color: Optional[str] = None
     icon: Optional[str] = None
+    kind: Optional[str] = None
+    # folder move; an explicit null moves the journal to the hub root, so this
+    # is sent through model_dump(exclude_unset=True) to distinguish "untouched"
+    # from "move to root".
+    folder_id: Optional[UUID] = None
+
+
+class FolderCreate(BaseModel):
+    name: str
+    parent_id: Optional[UUID] = None
+
+
+class FolderPatch(BaseModel):
+    name: Optional[str] = None
+    parent_id: Optional[UUID] = None
 
 
 class EntryCreate(BaseModel):
@@ -77,6 +94,8 @@ async def create_journal_endpoint(
         description=body.description,
         color=body.color,
         icon=body.icon,
+        kind=body.kind,
+        folder_id=body.folder_id,
     )
 
 
@@ -137,6 +156,66 @@ async def delete_journal_permanent_endpoint(
         await journal_service.delete_journal_permanent(journal_id, current_user.id)
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
+
+
+# ── Folders (hub organization) ──────────────────────────────────────────
+
+
+@router.get("/journal-folders")
+async def list_journal_folders_endpoint(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return []
+    return await journal_service.list_journal_folders(company_id)
+
+
+@router.post("/journal-folders", status_code=201)
+async def create_journal_folder_endpoint(
+    body: FolderCreate,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated")
+    try:
+        return await journal_service.create_journal_folder(
+            current_user.id, company_id, name=body.name, parent_id=body.parent_id,
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.patch("/journal-folders/{folder_id}")
+async def update_journal_folder_endpoint(
+    folder_id: UUID,
+    body: FolderPatch,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated")
+    try:
+        return await journal_service.update_journal_folder(
+            folder_id, company_id, body.model_dump(exclude_unset=True),
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/journal-folders/{folder_id}", status_code=204)
+async def delete_journal_folder_endpoint(
+    folder_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated")
+    try:
+        await journal_service.delete_journal_folder(folder_id, company_id)
+    except PermissionError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 # ── Entries ─────────────────────────────────────────────────────────────

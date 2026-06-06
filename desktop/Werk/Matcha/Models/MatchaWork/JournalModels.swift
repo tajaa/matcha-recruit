@@ -9,6 +9,8 @@ struct MWJournal: Codable, Identifiable, Hashable {
     let color: String?
     let icon: String?
     let status: String
+    let kind: String?           // note|blog|todo|novel|screenplay|journal
+    let folderId: String?       // hub-folder placement (nil = root)
     let createdBy: String
     let createdAt: String?
     let updatedAt: String?
@@ -17,13 +19,32 @@ struct MWJournal: Codable, Identifiable, Hashable {
     let collaboratorRole: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, description, color, icon, status
+        case id, title, description, color, icon, status, kind
+        case folderId = "folder_id"
         case createdBy = "created_by"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case entryCount = "entry_count"
         case collaboratorCount = "collaborator_count"
         case collaboratorRole = "collaborator_role"
+    }
+}
+
+/// A folder in the Journals hub. Company-scoped adjacency-list tree
+/// (`parentId == nil` → root). The client builds the hierarchy from the flat
+/// list returned by `/matcha-work/journal-folders`.
+struct MWJournalFolder: Codable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let parentId: String?
+    let createdBy: String?
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case parentId = "parent_id"
+        case createdBy = "created_by"
+        case createdAt = "created_at"
     }
 }
 

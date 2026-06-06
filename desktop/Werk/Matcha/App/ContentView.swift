@@ -204,6 +204,18 @@ struct ContentView: View {
     @ViewBuilder
     private var sidebarColumn: some View {
         VStack(spacing: 0) {
+            // Brand header — MW monogram + wordmark, pinned above the scroll.
+            HStack(spacing: 9) {
+                MWMonogram(size: 26)
+                Text("Matcha Work")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundColor(appState.themeText)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
+
             ScrollView {
                 VStack(spacing: 0) {
                     sidebarHomeButton
@@ -218,6 +230,7 @@ struct ContentView: View {
             HStack(spacing: 6) {
                 InboxFooterButton {
                     appState.showInbox = true
+                    appState.showJournalsHub = false
                     appState.selectedEmailId = nil
                     appState.showPeople = false
                     appState.showHome = false
@@ -237,6 +250,7 @@ struct ContentView: View {
                     isActive: appState.showPeople
                 ) {
                     appState.showPeople = true
+                    appState.showJournalsHub = false
                     appState.selectedEmailId = nil
                     appState.showInbox = false
                     appState.showHome = false
@@ -256,6 +270,7 @@ struct ContentView: View {
                     isActive: appState.showArchive
                 ) {
                     appState.showArchive = true
+                    appState.showJournalsHub = false
                     appState.selectedEmailId = nil
                     appState.showInbox = false
                     appState.showPeople = false
@@ -280,7 +295,7 @@ struct ContentView: View {
 
     @ViewBuilder
     private var sidebarHomeButton: some View {
-        let isHomeActive = appState.showHome || (
+        let isHomeActive = !appState.showJournalsHub && (appState.showHome || (
             appState.selectedThreadId == nil &&
             appState.selectedProjectId == nil &&
             appState.selectedChannelId == nil &&
@@ -289,9 +304,10 @@ struct ContentView: View {
             !appState.showPeople &&
             !appState.showSkills &&
             !appState.showChannelBrowse
-        )
+        ))
         sidebarFooterButton(icon: "house", label: "Home", badge: 0, isActive: isHomeActive) {
             appState.showHome = true
+            appState.showJournalsHub = false
             appState.selectedEmailId = nil
             appState.showInbox = false
             appState.showPeople = false
@@ -332,7 +348,7 @@ struct ContentView: View {
         .padding(.vertical, 5)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(appState.themeCard.opacity(appState.appTheme == "light" ? 0.8 : 0.4))
+                .fill(appState.themeCard.opacity(appState.isLightFamily ? 0.8 : 0.4))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 6)
@@ -572,13 +588,59 @@ struct ContentView: View {
         }
     }
 
+    /// Open the Journals hub — the Obsidian-style parent module that houses all
+    /// journals in a folder tree. Clears the other nav surfaces so the hub takes
+    /// the primary pane.
+    private func openJournalsHub() {
+        appState.showJournalsHub = true
+        appState.selectedThreadId = nil
+        appState.selectedProjectId = nil
+        appState.selectedChannelId = nil
+        appState.selectedJournalId = nil
+        appState.selectedEmailId = nil
+        appState.showInbox = false
+        appState.showPeople = false
+        appState.showArchive = false
+        appState.showHome = false
+        appState.showSkills = false
+        appState.showChannelBrowse = false
+    }
+
     @ViewBuilder
     private var journalsSidebarSection: some View {
-        sidebarSection(
-            title: "Journals",
-            icon: "book.closed",
-            isOpen: $journalsSectionOpen,
-            trailing: {
+        // Custom header: tapping "Journals" opens the hub (the parent module);
+        // the chevron still toggles the quick inline list; "+" makes a journal.
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { journalsSectionOpen.toggle() }
+                } label: {
+                    Image(systemName: journalsSectionOpen ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .frame(width: 10)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    openJournalsHub()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "book.closed")
+                            .font(.system(size: 11))
+                            .foregroundColor(appState.showJournalsHub ? appState.themeAccent : .secondary)
+                        Text("JOURNALS")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(appState.showJournalsHub ? appState.themeAccent : .secondary)
+                            .tracking(0.5)
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Open Journals hub")
+
                 Button { showNewJournal = true } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 10, weight: .semibold))
@@ -592,15 +654,21 @@ struct ContentView: View {
                 .sheet(isPresented: $showNewJournal) {
                     NewJournalSheet { journal in
                         appState.selectedJournalId = journal.id
+                        appState.showJournalsHub = false
                         appState.selectedThreadId = nil
                         appState.selectedProjectId = nil
                         appState.selectedChannelId = nil
                         appState.journalsListGeneration &+= 1
                     }
+                    .environment(appState)
                 }
             }
-        ) {
-            JournalListView(showHeader: false, searchText: searchText)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            if journalsSectionOpen {
+                JournalListView(showHeader: false, searchText: searchText)
+            }
         }
     }
 
@@ -860,6 +928,7 @@ struct ContentView: View {
         switch appState.appTheme {
         case "cappuchin": return 0.72
         case "light": return 0.55
+        case "platinum": return 0.55
         default: return 0.40
         }
     }
@@ -972,6 +1041,7 @@ struct ThemeRadialBackground: View {
         let pair: (Color, Color)
         switch appState.appTheme {
         case "light":     pair = (.grayRadialCenter, .grayRadialEdge)
+        case "platinum":  pair = (.platinumRadialCenter, .platinumRadialEdge)
         case "cappuchin": pair = (.cappuchinRadialCenter, .cappuchinRadialEdge)
         case "graphite":  pair = (.graphiteRadialCenter, .graphiteRadialEdge)
         default:          pair = (.darkRadialCenter, .darkRadialEdge)
@@ -983,6 +1053,53 @@ struct ThemeRadialBackground: View {
             endRadius: 1100
         )
         .ignoresSafeArea()
+    }
+}
+
+// MARK: - MW monogram (brand mark)
+
+/// The Matcha-Work "MW" monogram — the signature brand mark for the platinum
+/// identity. Typographic (SF Rounded Bold), dark cool-charcoal letters on a
+/// soft light-gray gradient tile. Used on the login screen and at the top of
+/// the sidebar. Sizes scale off `size` so it stays crisp at 22pt or 72pt.
+struct MWMonogram: View {
+    /// Edge length of the rounded tile (the glyph scales from this).
+    var size: CGFloat = 64
+    /// Draw the gradient tile + border, or just the bare letters.
+    var showTile: Bool = true
+
+    var body: some View {
+        let letters = Text("MW")
+            .font(.system(size: size * 0.40, weight: .bold, design: .rounded))
+            .tracking(-size * 0.018)
+            .foregroundStyle(
+                LinearGradient(
+                    colors: [Color.platinumAccent, Color.platinumAccentDark],
+                    startPoint: .top, endPoint: .bottom
+                )
+            )
+
+        if showTile {
+            letters
+                .frame(width: size, height: size)
+                .background(
+                    RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.platinumRadialCenter, Color.platinumRadialEdge],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
+                        )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                        .strokeBorder(Color.platinumBorder, lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.10), radius: size * 0.14, y: size * 0.05)
+                .shadow(color: .black.opacity(0.06), radius: 1, y: 1)
+        } else {
+            letters
+        }
     }
 }
 
@@ -998,7 +1115,7 @@ struct ElevatedCardModifier: ViewModifier {
     @Environment(AppState.self) private var appState
 
     func body(content: Content) -> some View {
-        let isLight = appState.appTheme == "light"
+        let isLight = appState.isLightFamily
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         return content
             .background(shape.fill(Color.cardBackground))
@@ -1128,13 +1245,13 @@ struct SidebarRowModifier: ViewModifier {
     @State private var isHovered = false
 
     func body(content: Content) -> some View {
-        let activeTheme = appState.appTheme
+        let isLight = appState.isLightFamily
         content
             .background(
                 RoundedRectangle(cornerRadius: 6)
                     .fill(isSelected
-                          ? appState.themeAccent.opacity(activeTheme == "light" ? 0.25 : 0.15)
-                          : (isHovered ? (activeTheme == "light" ? Color.black.opacity(0.04) : Color.white.opacity(0.04)) : Color.clear))
+                          ? appState.themeAccent.opacity(isLight ? 0.25 : 0.15)
+                          : (isHovered ? (isLight ? Color.black.opacity(0.04) : Color.white.opacity(0.04)) : Color.clear))
                     .padding(.horizontal, 6)
             )
             .onHover { hovering in

@@ -78,6 +78,11 @@ class AppState {
     /// Full-pane Archive home (archived projects/threads/journals/channels).
     var showArchive: Bool = false
     var showHome: Bool = false
+    /// Full-pane Journals hub — the Obsidian-style parent module that houses all
+    /// journals in a folder tree. Reached by clicking the sidebar "Journals"
+    /// header. Lowest routing priority (a selected journal opens its detail over
+    /// the hub), so it's safe to leave set; explicit nav (home/footer) clears it.
+    var showJournalsHub: Bool = false
     /// Full-pane "Browse Channels" surface. Reached from the sidebar Channels
     /// section header. Mutually exclusive with thread/project/channel/journal
     /// selection — toggling on clears those.
@@ -108,16 +113,19 @@ class AppState {
 
     // Theme storage and properties
     var appTheme: String = UserDefaults.standard.string(forKey: "mw-theme") ??
-        (UserDefaults.standard.bool(forKey: "mw-chat-theme") ? "light" : "dark") {
+        (UserDefaults.standard.bool(forKey: "mw-chat-theme") ? "light" : "platinum") {
         didSet {
             UserDefaults.standard.set(appTheme, forKey: "mw-theme")
-            UserDefaults.standard.set(appTheme == "light", forKey: "mw-chat-theme")
+            // Light-family themes drive the chat surfaces into light mode too
+            // (ChatPanel / MessageBubble / ThreadDetail read `mw-chat-theme`).
+            UserDefaults.standard.set(appTheme == "light" || appTheme == "platinum", forKey: "mw-chat-theme")
         }
     }
 
     var themeBg: Color {
         switch appTheme {
         case "light": return Color.grayBg
+        case "platinum": return Color.platinumBg
         case "cappuchin": return Color.cappuchinDark
         case "graphite": return Color.graphiteBg
         default: return Color.zinc950
@@ -127,6 +135,7 @@ class AppState {
     var themeCard: Color {
         switch appTheme {
         case "light": return Color.grayCard
+        case "platinum": return Color.platinumCard
         case "cappuchin": return Color.cappuchinCard
         case "graphite": return Color.graphiteCard
         default: return Color.zinc900
@@ -140,6 +149,7 @@ class AppState {
     var themeSidebar: Color {
         switch appTheme {
         case "light": return Color.graySidebar
+        case "platinum": return Color.platinumSidebar
         case "cappuchin": return Color.cappuchinCard
         case "graphite": return Color.graphiteSidebar
         default: return Color.zinc900
@@ -149,6 +159,7 @@ class AppState {
     var themeBorder: Color {
         switch appTheme {
         case "light": return Color.grayBorder
+        case "platinum": return Color.platinumBorder
         case "cappuchin": return Color.cappuchinBorder
         case "graphite": return Color.graphiteBorder
         default: return Color.white.opacity(0.1)
@@ -158,6 +169,7 @@ class AppState {
     var themeAccent: Color {
         switch appTheme {
         case "light": return Color.grayAccent
+        case "platinum": return Color.platinumAccent
         case "cappuchin": return Color.cappuchinAccent
         case "graphite": return Color.graphiteAccent
         default: return Color.matcha500
@@ -167,6 +179,7 @@ class AppState {
     var themeAccentDark: Color {
         switch appTheme {
         case "light": return Color.grayAccentDark
+        case "platinum": return Color.platinumAccentDark
         case "cappuchin": return Color.cappuchinAccentDark
         case "graphite": return Color.graphiteAccentDark
         default: return Color.matcha600
@@ -176,6 +189,7 @@ class AppState {
     var themeText: Color {
         switch appTheme {
         case "light": return Color.grayText
+        case "platinum": return Color.platinumText
         case "cappuchin": return Color.cappuchinText
         case "graphite": return Color.graphiteText
         default: return Color.white
@@ -196,6 +210,7 @@ class AppState {
     var themeTextSecondary: Color {
         switch appTheme {
         case "light": return Color.grayTextSecondary
+        case "platinum": return Color.platinumSecondary
         case "cappuchin": return Color.cappuchinSecondary
         case "graphite": return Color.graphiteSecondary
         default: return Color.secondary
@@ -203,7 +218,15 @@ class AppState {
     }
 
     var lightMode: Bool {
-        return appTheme == "light"
+        return isLightFamily
+    }
+
+    /// Light-family themes (`light` + `platinum`) share the light-mode render
+    /// path: light card shadows instead of dark borders, `.light` colorScheme,
+    /// light chat bubbles. New light themes MUST join this, or chrome that keys
+    /// off `appTheme == "light"` renders in the dark path on top of a light bg.
+    var isLightFamily: Bool {
+        return appTheme == "light" || appTheme == "platinum"
     }
 
     /// Graphite — the minimalist grayscale theme. Gates the stripped-down ASCII

@@ -7,21 +7,21 @@ struct LoginView: View {
 
     var body: some View {
         ZStack {
-            // Layered gradient backdrop
+            // Light-gray gradient backdrop — the platinum brand identity.
             LinearGradient(
                 colors: [
-                    Color(red: 0.04, green: 0.08, blue: 0.06),
-                    Color(red: 0.02, green: 0.04, blue: 0.03),
-                    Color.black,
+                    Color.platinumRadialCenter,
+                    Color.platinumBg,
+                    Color.platinumRadialEdge,
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             .ignoresSafeArea()
 
-            // Soft ambient glow
+            // Soft ambient gray glows — quiet depth, no color.
             Circle()
-                .fill(Color.matcha500.opacity(0.18))
+                .fill(Color.white.opacity(0.55))
                 .frame(width: 520, height: 520)
                 .blur(radius: 120)
                 .offset(x: -220, y: -180)
@@ -29,7 +29,7 @@ struct LoginView: View {
                 .animation(.easeInOut(duration: 6).repeatForever(autoreverses: true), value: animate)
 
             Circle()
-                .fill(Color(red: 0.2, green: 0.35, blue: 0.8).opacity(0.15))
+                .fill(Color.platinumAccent.opacity(0.06))
                 .frame(width: 480, height: 480)
                 .blur(radius: 140)
                 .offset(x: 240, y: 220)
@@ -39,31 +39,17 @@ struct LoginView: View {
             VStack(spacing: 28) {
                 Spacer(minLength: 0)
 
-                // Brand
+                // Brand — MW monogram + wordmark
                 VStack(spacing: 14) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 18)
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.matcha500, Color.matcha600],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                            .frame(width: 68, height: 68)
-                            .shadow(color: Color.matcha500.opacity(0.35), radius: 18, x: 0, y: 8)
-                        Image(systemName: "leaf.fill")
-                            .font(.system(size: 30, weight: .semibold))
-                            .foregroundColor(.white)
-                    }
+                    MWMonogram(size: 68)
 
                     VStack(spacing: 4) {
                         Text("Matcha Work")
-                            .font(.system(size: 30, weight: .bold))
-                            .foregroundColor(.white)
+                            .font(.system(size: 30, weight: .bold, design: .rounded))
+                            .foregroundColor(Color.platinumText)
                         Text("Your AI workspace for teams and creators.")
                             .font(.system(size: 13))
-                            .foregroundColor(.white.opacity(0.55))
+                            .foregroundColor(Color.platinumSecondary)
                     }
                 }
 
@@ -93,14 +79,14 @@ struct LoginView: View {
                                 .padding(.top, 1)
                             Text(errorHint(error))
                                 .font(.system(size: 12))
-                                .foregroundColor(.red.opacity(0.85))
+                                .foregroundColor(.red.opacity(0.9))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .padding(10)
-                        .background(Color.red.opacity(0.08))
+                        .background(Color.red.opacity(0.07))
                         .overlay(
                             RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.red.opacity(0.25), lineWidth: 1)
+                                .stroke(Color.red.opacity(0.22), lineWidth: 1)
                         )
                         .cornerRadius(8)
                     }
@@ -130,7 +116,7 @@ struct LoginView: View {
                     .foregroundColor(.white)
                     .background(
                         LinearGradient(
-                            colors: [Color.matcha500, Color.matcha600],
+                            colors: [Color.platinumAccent, Color.platinumAccentDark],
                             startPoint: .top,
                             endPoint: .bottom
                         )
@@ -138,27 +124,25 @@ struct LoginView: View {
                     )
                     .cornerRadius(10)
                     .contentShape(Rectangle())
-                    .shadow(color: Color.matcha500.opacity(0.25), radius: 10, x: 0, y: 4)
+                    .shadow(color: Color.platinumAccent.opacity(0.25), radius: 10, x: 0, y: 4)
                     .disabled(viewModel.isLoading)
                 }
                 .padding(28)
                 .background(
                     RoundedRectangle(cornerRadius: 16)
-                        .fill(Color.white.opacity(0.03))
+                        .fill(Color.platinumCard)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        .stroke(Color.platinumBorder, lineWidth: 1)
                 )
-                .background(
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(.ultraThinMaterial)
-                )
+                .shadow(color: .black.opacity(0.10), radius: 24, x: 0, y: 10)
+                .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
                 .frame(width: 380)
 
                 Text("v1.0 · \(APIClient.shared.baseURL.replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "http://", with: ""))")
                     .font(.system(size: 10))
-                    .foregroundColor(.white.opacity(0.25))
+                    .foregroundColor(Color.platinumSecondary.opacity(0.7))
 
                 Spacer(minLength: 0)
             }
@@ -180,11 +164,11 @@ struct LoginView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.white.opacity(0.6))
+                .foregroundColor(Color.platinumSecondary)
             HStack(spacing: 8) {
                 Image(systemName: icon)
                     .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(Color.platinumSecondary.opacity(0.7))
                     .frame(width: 14)
                 Group {
                     if isSecure {
@@ -194,16 +178,16 @@ struct LoginView: View {
                     }
                 }
                 .textFieldStyle(.plain)
-                .foregroundColor(.white)
+                .foregroundColor(Color.platinumText)
                 .font(.system(size: 14))
                 .onSubmit { onSubmit?() }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 11)
-            .background(Color.black.opacity(0.3))
+            .background(Color.platinumBg.opacity(0.6))
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    .stroke(Color.platinumBorder, lineWidth: 1)
             )
             .cornerRadius(10)
         }

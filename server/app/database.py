@@ -5345,6 +5345,24 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_mw_journal_collaborators_user
             ON mw_journal_collaborators(user_id, status)
         """)
+        # Obsidian-style folder tree for the Journals hub (adjacency list,
+        # company-scoped) + journal folder placement + kind discriminator
+        # (note/blog/todo/novel/screenplay) for create-time templates.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_journal_folders (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                parent_id UUID REFERENCES mw_journal_folders(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                created_by UUID REFERENCES users(id),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_journal_folders_company ON mw_journal_folders(company_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_journal_folders_parent ON mw_journal_folders(parent_id)")
+        await conn.execute("ALTER TABLE mw_journals ADD COLUMN IF NOT EXISTS folder_id UUID REFERENCES mw_journal_folders(id) ON DELETE SET NULL")
+        await conn.execute("ALTER TABLE mw_journals ADD COLUMN IF NOT EXISTS kind VARCHAR(20) NOT NULL DEFAULT 'journal'")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_journals_folder ON mw_journals(folder_id)")
 
         # Training compliance tables
         await conn.execute("""

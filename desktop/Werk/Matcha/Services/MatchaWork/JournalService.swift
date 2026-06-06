@@ -35,18 +35,27 @@ final class JournalService {
         title: String,
         description: String? = nil,
         color: String? = nil,
-        icon: String? = nil
+        icon: String? = nil,
+        kind: String? = nil,
+        folderId: String? = nil
     ) async throws -> MWJournal {
         struct Body: Codable {
             let title: String
             let description: String?
             let color: String?
             let icon: String?
+            let kind: String?
+            let folderId: String?
+            enum CodingKeys: String, CodingKey {
+                case title, description, color, icon, kind
+                case folderId = "folder_id"
+            }
         }
         let journal: MWJournal = try await client.request(
             method: "POST",
             path: "\(basePath)/journals",
-            body: Body(title: title, description: description, color: color, icon: icon),
+            body: Body(title: title, description: description, color: color,
+                       icon: icon, kind: kind, folderId: folderId),
         )
         invalidateLists()
         return journal
@@ -57,21 +66,80 @@ final class JournalService {
         title: String? = nil,
         description: String? = nil,
         color: String? = nil,
-        icon: String? = nil
+        icon: String? = nil,
+        kind: String? = nil
     ) async throws -> MWJournal {
         struct Body: Codable {
             let title: String?
             let description: String?
             let color: String?
             let icon: String?
+            let kind: String?
         }
         let journal: MWJournal = try await client.request(
             method: "PATCH",
             path: "\(basePath)/journals/\(id)",
-            body: Body(title: title, description: description, color: color, icon: icon),
+            body: Body(title: title, description: description, color: color, icon: icon, kind: kind),
         )
         invalidateLists()
         return journal
+    }
+
+    /// Move a journal into a folder, or to the hub root (`folderId == nil`,
+    /// which sends an explicit JSON null so the backend un-files it).
+    func moveJournal(id: String, folderId: String?) async throws -> MWJournal {
+        struct Body: Encodable {
+            let folderId: String?
+            enum CodingKeys: String, CodingKey { case folderId = "folder_id" }
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                // Always encode the key (even when nil) so the move-to-root
+                // intent reaches the server as `folder_id: null`.
+                try c.encode(folderId, forKey: .folderId)
+            }
+        }
+        let journal: MWJournal = try await client.request(
+            method: "PATCH",
+            path: "\(basePath)/journals/\(id)",
+            body: Body(folderId: folderId),
+        )
+        invalidateLists()
+        return journal
+    }
+
+    // ── Folders ─────────────────────────────────────────────────────────
+
+    func listFolders() async throws -> [MWJournalFolder] {
+        try await client.request(method: "GET", path: "\(basePath)/journal-folders")
+    }
+
+    func createFolder(name: String, parentId: String? = nil) async throws -> MWJournalFolder {
+        struct Body: Codable {
+            let name: String
+            let parentId: String?
+            enum CodingKeys: String, CodingKey {
+                case name
+                case parentId = "parent_id"
+            }
+        }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/journal-folders",
+            body: Body(name: name, parentId: parentId),
+        )
+    }
+
+    func renameFolder(id: String, name: String) async throws -> MWJournalFolder {
+        struct Body: Codable { let name: String }
+        return try await client.request(
+            method: "PATCH",
+            path: "\(basePath)/journal-folders/\(id)",
+            body: Body(name: name),
+        )
+    }
+
+    func deleteFolder(id: String) async throws {
+        _ = try await client.requestData(method: "DELETE", path: "\(basePath)/journal-folders/\(id)")
     }
 
     func archiveJournal(id: String) async throws {

@@ -40,6 +40,8 @@ struct PrimaryDetailPane: View {
                 SkillsView()
             } else if appState.showArchive {
                 ArchiveView()
+            } else if appState.showJournalsHub {
+                JournalsLibraryView()
             } else {
                 HomeDashboardView()
             }
