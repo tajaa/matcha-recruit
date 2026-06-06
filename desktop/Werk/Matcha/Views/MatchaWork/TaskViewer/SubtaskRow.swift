@@ -40,7 +40,7 @@ struct SubtaskRow: View {
                 } else {
                     Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 13))
-                        .foregroundColor(item.isDone ? .matcha500 : .secondary)
+                        .foregroundColor(item.isDone ? .mwInkStrong : .secondary)
                 }
             }
             .buttonStyle(.plain)
@@ -62,9 +62,9 @@ struct SubtaskRow: View {
                     Image(systemName: "person.badge.plus").font(.system(size: 7))
                     Text("added by \(by)").font(.system(size: 8, weight: .medium))
                 }
-                .foregroundColor(.blue)
+                .foregroundColor(.mwInkSoft)
                 .padding(.horizontal, 4).padding(.vertical, 1)
-                .background(Color.blue.opacity(0.15)).cornerRadius(3)
+                .background(Color.mwInkSoft.opacity(0.15)).cornerRadius(3)
                 .help("Added during review by \(by) — new scope, not part of your original checklist")
             }
             Spacer(minLength: 0)
@@ -76,7 +76,7 @@ struct SubtaskRow: View {
                 Button(action: onDelete) {
                     Image(systemName: "trash")
                         .font(.system(size: 10))
-                        .foregroundColor(.red.opacity(0.8))
+                        .foregroundColor(.mwInkSoft)
                 }
                 .buttonStyle(.plain)
                 .help("Delete item")
@@ -95,7 +95,7 @@ struct SubtaskRow: View {
         Button { showDeny = true } label: {
             Image(systemName: "xmark.circle")
                 .font(.system(size: 11))
-                .foregroundColor(.orange.opacity(0.85))
+                .foregroundColor(.mwAttention.opacity(0.85))
         }
         .buttonStyle(.plain)
         .help("Deny — reopen this item with a reason for the assignee")
@@ -126,7 +126,7 @@ struct SubtaskRow: View {
                     }
                     .buttonStyle(.plain).font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.white).padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(empty ? appState.themeText.opacity(0.12) : Color.orange).cornerRadius(5)
+                    .background(empty ? appState.themeText.opacity(0.12) : Color.mwAttention).cornerRadius(5)
                     .disabled(empty)
                 }
             }

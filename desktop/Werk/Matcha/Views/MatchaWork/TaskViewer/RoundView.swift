@@ -43,16 +43,16 @@ struct RoundView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text("FIXED IN ROUND \(round.index - 1)")
                                 .font(.system(size: 8, weight: .semibold))
-                                .foregroundColor(.matcha500)
+                                .foregroundColor(.mwInkStrong)
                                 .tracking(0.6)
                             ForEach(Array(previousFixed.enumerated()), id: \.offset) { _, title in
                                 HStack(spacing: 6) {
                                     Image(systemName: "checkmark.circle.fill")
                                         .font(.system(size: 10))
-                                        .foregroundColor(.matcha500)
+                                        .foregroundColor(.mwInkStrong)
                                     Text(title)
                                         .font(.system(size: 11))
-                                        .foregroundColor(.white.opacity(0.85))
+                                        .foregroundColor(.mwInk.opacity(0.85))
                                         .strikethrough()
                                         .lineLimit(2)
                                 }
@@ -60,7 +60,7 @@ struct RoundView: View {
                         }
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.matcha500.opacity(0.08))
+                        .background(Color.mwInkStrong.opacity(0.08))
                         .cornerRadius(5)
                     }
 
@@ -101,7 +101,7 @@ struct RoundView: View {
                         }
                         Text("Round \(round.index)")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.9))
+                            .foregroundColor(.mwInk.opacity(0.9))
                         Text("·")
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
@@ -122,7 +122,7 @@ struct RoundView: View {
                     // each round is a modular sub-todo with its own scope.
                     Text(round.title)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(.mwInk)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                 }
@@ -131,7 +131,7 @@ struct RoundView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(round.isLatest ? Color.zinc800.opacity(0.55) : Color.zinc800.opacity(0.3))
+        .background(round.isLatest ? Color.mwInk.opacity(0.08) : Color.mwInk.opacity(0.04))
         .overlay(
             RoundedRectangle(cornerRadius: 6)
                 .stroke(round.isLatest ? phaseColor.opacity(0.45) : Color.clear, lineWidth: 1.5)

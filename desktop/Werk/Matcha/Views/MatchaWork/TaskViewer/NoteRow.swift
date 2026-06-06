@@ -70,14 +70,14 @@ struct NoteRow: View {
                     if let excerpt = replyParentExcerpt {
                         HStack(spacing: 5) {
                             Rectangle()
-                                .fill(Color.matcha500.opacity(0.7))
+                                .fill(Color.mwInkStrong.opacity(0.7))
                                 .frame(width: 2)
                                 .cornerRadius(1)
                             VStack(alignment: .leading, spacing: 0) {
                                 if let name = replyParentName {
                                     Text(name)
                                         .font(.system(size: 8, weight: .semibold))
-                                        .foregroundColor(.matcha500)
+                                        .foregroundColor(.mwInkStrong)
                                 }
                                 Text(excerpt)
                                     .font(.system(size: 10))
@@ -90,7 +90,7 @@ struct NoteRow: View {
                     if !bodyText.isEmpty {
                         Text(bodyText)
                             .font(.system(size: 12))
-                            .foregroundColor(.white.opacity(0.9))
+                            .foregroundColor(.mwInk.opacity(0.9))
                             .textSelection(.enabled)
                     }
                     if !linked.isEmpty {
@@ -112,10 +112,10 @@ struct NoteRow: View {
                         if currentRound > 1 {
                             Text("Round \(noteRound)")
                                 .font(.system(size: 8, weight: .semibold))
-                                .foregroundColor(isPriorRound ? .secondary : .matcha500)
+                                .foregroundColor(isPriorRound ? .secondary : .mwInkStrong)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 1)
-                                .background((isPriorRound ? Color.secondary : Color.matcha500).opacity(0.15))
+                                .background((isPriorRound ? Color.secondary : Color.mwInkStrong).opacity(0.15))
                                 .cornerRadius(3)
                         }
                         if let onReply, isHovered {
@@ -126,7 +126,7 @@ struct NoteRow: View {
                                     Text("Reply")
                                         .font(.system(size: 9, weight: .semibold))
                                 }
-                                .foregroundColor(.matcha500)
+                                .foregroundColor(.mwInkStrong)
                             }
                             .buttonStyle(.plain)
                         }
@@ -136,7 +136,7 @@ struct NoteRow: View {
             }
             .padding(8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.zinc800.opacity(0.5))
+            .background(Color.mwInk.opacity(0.06))
             .cornerRadius(5)
             .opacity(isPriorRound ? 0.6 : 1)   // prior-round comments recede
             .onHover { isHovered = $0 }

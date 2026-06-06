@@ -214,7 +214,7 @@ struct TaskViewerSheet: View {
                     } else {
                         Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
                             .font(.system(size: 11))
-                            .foregroundColor(didCopy ? .matcha500 : .secondary)
+                            .foregroundColor(didCopy ? .mwInkStrong : .secondary)
                     }
                 }
                 .buttonStyle(.plain)
@@ -235,7 +235,7 @@ struct TaskViewerSheet: View {
                     } else {
                         Image(systemName: "sparkles")
                             .font(.system(size: 11))
-                            .foregroundColor(.matcha500)
+                            .foregroundColor(.mwInkStrong)
                     }
                 }
                 .buttonStyle(.plain)
@@ -319,7 +319,7 @@ struct TaskViewerSheet: View {
                     } label: {
                         Label("Send back", systemImage: "arrow.uturn.backward")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.orange)
+                            .foregroundColor(.mwAttention)
                     }
                     .buttonStyle(.plain)
                     .help("Mark incomplete and send to Changes Requested — notifies the assignee")
@@ -327,7 +327,7 @@ struct TaskViewerSheet: View {
                     Button { isApproving = true } label: {
                         Label("Approve", systemImage: "checkmark.seal")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.matcha500)
+                            .foregroundColor(.mwInkStrong)
                     }
                     .buttonStyle(.plain)
                     .help("Approve out of review → Done, with a sign-off")
@@ -347,7 +347,7 @@ struct TaskViewerSheet: View {
                                 }
                                 .buttonStyle(.plain).font(.system(size: 11, weight: .semibold))
                                 .foregroundColor(.white).padding(.horizontal, 10).padding(.vertical, 4)
-                                .background(Color.matcha600).cornerRadius(5)
+                                .background(Color.mwSolid).cornerRadius(5)
                             }
                         }
                         .padding(12).frame(width: 260)
@@ -358,7 +358,7 @@ struct TaskViewerSheet: View {
                 Button("Edit") { onEdit() }
                     .buttonStyle(.plain)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.matcha500)
+                    .foregroundColor(.mwInkStrong)
             }
         }
         .padding(16)

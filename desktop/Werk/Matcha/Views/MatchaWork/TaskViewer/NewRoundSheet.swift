@@ -33,11 +33,11 @@ struct NewRoundSheet: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("START ROUND \(nextRoundIndex)")
                         .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.matcha500)
+                        .foregroundColor(.mwInkStrong)
                         .tracking(0.5)
                     Text("Chain a new sub-todo onto this ticket")
                         .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.85))
+                        .foregroundColor(.mwInk.opacity(0.85))
                 }
                 Spacer()
                 Button(action: onCancel) {
@@ -55,7 +55,7 @@ struct NewRoundSheet: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("DID YOU COMPLETE ANY OF THESE?")
                         .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.matcha500)
+                        .foregroundColor(.mwInkStrong)
                         .tracking(0.5)
                     Text("Check off what's done — it archives into this round; unchecked items carry into Round \(nextRoundIndex).")
                         .font(.system(size: 10))
@@ -68,10 +68,10 @@ struct NewRoundSheet: View {
                             HStack(spacing: 8) {
                                 Image(systemName: completedIds.contains(item.id) ? "checkmark.circle.fill" : "circle")
                                     .font(.system(size: 13))
-                                    .foregroundColor(completedIds.contains(item.id) ? .matcha500 : .secondary)
+                                    .foregroundColor(completedIds.contains(item.id) ? .mwInkStrong : .secondary)
                                 Text(item.title)
                                     .font(.system(size: 12))
-                                    .foregroundColor(.white.opacity(0.9))
+                                    .foregroundColor(.mwInk.opacity(0.9))
                                     .strikethrough(completedIds.contains(item.id))
                                     .lineLimit(2)
                                 Spacer(minLength: 0)
@@ -84,7 +84,7 @@ struct NewRoundSheet: View {
                 }
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.matcha500.opacity(0.08))
+                .background(Color.mwInkStrong.opacity(0.08))
                 .cornerRadius(6)
             }
 
@@ -96,9 +96,9 @@ struct NewRoundSheet: View {
                 TextField("e.g. Add EIN validation before export", text: $suggestedFix)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
-                    .foregroundColor(.white)
+                    .foregroundColor(.mwInk)
                     .padding(8)
-                    .background(Color.zinc800.opacity(0.7))
+                    .background(Color.mwInk.opacity(0.06))
                     .cornerRadius(5)
                     .onSubmit {
                         if canSubmit { Task { await submit() } }
@@ -115,11 +115,11 @@ struct NewRoundSheet: View {
                     .tracking(0.5)
                 TextEditor(text: $noteBody)
                     .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.9))
+                    .foregroundColor(.mwInk.opacity(0.9))
                     .scrollContentBackground(.hidden)
                     .padding(5)
                     .frame(height: 80)
-                    .background(Color.zinc800.opacity(0.6))
+                    .background(Color.mwInk.opacity(0.06))
                     .cornerRadius(5)
                 HStack(spacing: 8) {
                     Button {
@@ -160,7 +160,7 @@ struct NewRoundSheet: View {
             if let err = error {
                 Text(err)
                     .font(.system(size: 11))
-                    .foregroundColor(.red)
+                    .foregroundColor(.mwAttention)
             }
 
             HStack {
@@ -177,7 +177,7 @@ struct NewRoundSheet: View {
                     } else {
                         Text("Open Round \(nextRoundIndex)")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(canSubmit ? .matcha500 : .secondary)
+                            .foregroundColor(canSubmit ? .mwInkStrong : .secondary)
                     }
                 }
                 .buttonStyle(.plain)

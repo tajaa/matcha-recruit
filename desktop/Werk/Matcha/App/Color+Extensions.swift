@@ -41,6 +41,66 @@ extension Color {
         }
     }
 
+    // ── MW semantic palette: grayscale scale + ONE burnt-amber accent ──────
+    // Used by the TaskViewer / activity-graph surfaces so we ride a gray *scale*
+    // (gray-300 … gray-900) for all structure/status and reserve burnt amber
+    // (≈amber-700 on light, amber-500 on dark) as the single attention accent.
+    // Theme-aware via `mw-theme` so views without AppState still adapt.
+    private static var mwIsLightTheme: Bool {
+        switch UserDefaults.standard.string(forKey: "mw-theme") ?? "platinum" {
+        case "light", "platinum": return true
+        default: return false
+        }
+    }
+    /// Primary text — gray-900 on light, gray-200 on dark.
+    static var mwInk: Color {
+        mwIsLightTheme ? Color(red: 0.106, green: 0.114, blue: 0.133)
+                       : Color(red: 0.898, green: 0.906, blue: 0.922)
+    }
+    /// Muted text / secondary — gray-500 on light, gray-400 on dark.
+    static var mwInkSoft: Color {
+        mwIsLightTheme ? Color(red: 0.416, green: 0.431, blue: 0.471)
+                       : Color(red: 0.612, green: 0.639, blue: 0.686)
+    }
+    /// Strongest neutral accent (replaces the old green/blue "primary") —
+    /// gray-800 on light, near-white on dark.
+    static var mwInkStrong: Color {
+        mwIsLightTheme ? Color(red: 0.169, green: 0.180, blue: 0.208)
+                       : Color(red: 0.965, green: 0.969, blue: 0.976)
+    }
+    /// Hairline / faint rule — gray-300 on light, white@12% on dark.
+    static var mwHairline: Color {
+        mwIsLightTheme ? Color(red: 0.835, green: 0.847, blue: 0.875)
+                       : Color.white.opacity(0.12)
+    }
+    /// Solid charcoal for filled action buttons that carry WHITE text — fixed
+    /// (theme-independent) so it stays dark enough for white to read on every
+    /// theme (light or dark).
+    static let mwSolid = Color(red: 0.169, green: 0.180, blue: 0.208)   // #2B2E35
+    /// The single accent — burnt amber. amber-700 on light, amber-500 on dark.
+    static var mwAttention: Color {
+        mwIsLightTheme ? Color(red: 0.706, green: 0.325, blue: 0.035)   // #B45309
+                       : Color(red: 0.961, green: 0.620, blue: 0.043)   // #F59E0B
+    }
+    /// Distinct gray *levels* per collaborator (honors "emphasis on scale" —
+    /// people are told apart by gray weight + their avatar photo, not by hue).
+    static func mwLaneGray(_ index: Int) -> Color {
+        let light: [Color] = [
+            Color(red: 0.216, green: 0.255, blue: 0.318),   // gray-700
+            Color(red: 0.420, green: 0.447, blue: 0.502),   // gray-500
+            Color(red: 0.612, green: 0.639, blue: 0.686),   // gray-400
+            Color(red: 0.294, green: 0.333, blue: 0.388),   // gray-600
+        ]
+        let dark: [Color] = [
+            Color(red: 0.820, green: 0.835, blue: 0.859),   // gray-300
+            Color(red: 0.612, green: 0.639, blue: 0.686),   // gray-400
+            Color(red: 0.706, green: 0.722, blue: 0.749),   // gray-350
+            Color(red: 0.420, green: 0.447, blue: 0.502),   // gray-500
+        ]
+        let p = mwIsLightTheme ? light : dark
+        return p[abs(index) % p.count]
+    }
+
     // Grayscale light theme components (zinc scale, charcoal accent)
     static let grayBg = Color(red: 0.957, green: 0.957, blue: 0.961)            // zinc-100 #F4F4F5
     static let grayCard = Color.white                                           // #FFFFFF

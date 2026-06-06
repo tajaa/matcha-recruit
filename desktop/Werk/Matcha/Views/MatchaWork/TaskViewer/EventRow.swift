@@ -73,23 +73,14 @@ struct EventRow: View {
         }
     }
 
+    /// Grayscale scale + ONE accent: burnt amber (`mwAttention`) is reserved for
+    /// "needs attention" events (sent-back / denied). Positive milestones read a
+    /// hair stronger (`mwInkStrong`); routine audit events recede to `mwInkSoft`.
     static func tint(for event: String) -> Color {
         switch event {
-        case "created": return .matcha500
-        case "column_change": return .matcha500
-        case "assignee_change": return .blue
-        case "description_change": return .matcha500
-        case "progress_note_change": return .matcha500
-        case "review_rejected": return .orange
-        case "review_approved": return .matcha500
-        case "round_started": return .matcha500
-        case "subtask_added": return .blue
-        case "subtask_completed": return .matcha500
-        case "subtask_rejected": return .orange
-        case "subtask_uncompleted": return .orange
-        case "subtask_deleted": return .red
-        case "deleted": return .red
-        default: return .secondary
+        case "review_rejected", "subtask_rejected": return .mwAttention
+        case "review_approved", "subtask_completed", "round_started", "created": return .mwInkStrong
+        default: return .mwInkSoft
         }
     }
 

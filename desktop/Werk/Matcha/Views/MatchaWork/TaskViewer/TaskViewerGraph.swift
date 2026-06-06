@@ -113,7 +113,7 @@ struct GraphRow: View {
     /// Live board status for the current node ("CHANGES REQUESTED", "IN REVIEW",
     /// …) so the newest row reads like the ticket header, not just a log line.
     var currentStatusLabel: String? = nil
-    var currentStatusTint: Color = .matcha500
+    var currentStatusTint: Color = .mwInkStrong
 
     @Environment(AppState.self) private var appState
     /// Tap a node → read its full (untruncated) note/text in a popover, so the
@@ -147,7 +147,7 @@ struct GraphRow: View {
         isComment ? "text.bubble" : EventRow.icon(for: node.event.eventType)
     }
     private var cardTint: Color {
-        isComment ? .blue : EventRow.tint(for: node.event.eventType)
+        isComment ? .mwInkSoft : EventRow.tint(for: node.event.eventType)
     }
     private var who: String {
         node.event.actorName?.isEmpty == false ? node.event.actorName! : "Someone"
@@ -230,7 +230,7 @@ struct GraphRow: View {
     }
 
     private var ringColor: Color {
-        isCurrent ? .matcha500 : (node.isSystem ? .appBackground : node.color.opacity(0.9))
+        isCurrent ? .mwInkStrong : (node.isSystem ? .appBackground : node.color.opacity(0.9))
     }
     private var ringWidth: CGFloat { isCurrent ? 2.5 : 1.5 }
 
@@ -277,10 +277,10 @@ struct GraphRow: View {
                 if let roundLabel {
                     Text("R\(roundLabel)")
                         .font(.system(size: 8, weight: .semibold))
-                        .foregroundColor(.matcha500)
+                        .foregroundColor(.mwInkSoft)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
-                        .background(Color.matcha500.opacity(0.15))
+                        .background(Color.mwInkSoft.opacity(0.12))
                         .cornerRadius(3)
                 }
             }
@@ -349,10 +349,10 @@ struct GraphRow: View {
                     Text(to).fontWeight(.semibold)
                 }
                 .font(.system(size: 8, weight: .medium))
-                .foregroundColor(.matcha500)
+                .foregroundColor(.mwInkStrong)
                 .padding(.horizontal, 5)
                 .padding(.vertical, 1)
-                .background(Color.matcha500.opacity(0.15))
+                .background(Color.mwInkStrong.opacity(0.10))
                 .cornerRadius(3)
             } else {
                 Text(to)

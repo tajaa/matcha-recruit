@@ -14,13 +14,13 @@ struct CommitSuggestionChip: View {
         HStack(alignment: .top, spacing: 6) {
             Image(systemName: "sparkles")
                 .font(.system(size: 9))
-                .foregroundColor(.matcha500)
+                .foregroundColor(.mwInkStrong)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     if let sha = suggestion.commitShortSha, !sha.isEmpty {
                         Text(sha)
                             .font(.system(size: 9, design: .monospaced))
-                            .foregroundColor(.matcha500)
+                            .foregroundColor(.mwInkStrong)
                     }
                     Text("may have completed this")
                         .font(.system(size: 9))
@@ -43,7 +43,7 @@ struct CommitSuggestionChip: View {
                 } label: {
                     Text("Accept")
                         .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.matcha500)
+                        .foregroundColor(.mwInkStrong)
                 }
                 .buttonStyle(.plain)
                 Button {
@@ -60,10 +60,10 @@ struct CommitSuggestionChip: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(Color.matcha500.opacity(0.08))
+        .background(Color.mwInkStrong.opacity(0.08))
         .overlay(
             RoundedRectangle(cornerRadius: 5)
-                .stroke(Color.matcha500.opacity(0.25), lineWidth: 1)
+                .stroke(Color.mwInkStrong.opacity(0.25), lineWidth: 1)
         )
         .cornerRadius(5)
     }

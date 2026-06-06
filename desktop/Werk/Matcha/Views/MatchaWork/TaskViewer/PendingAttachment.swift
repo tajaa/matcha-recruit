@@ -36,7 +36,7 @@ struct PendingAttachmentChip: View {
             }
             Text(attachment.filename)
                 .font(.system(size: 10))
-                .foregroundColor(.white)
+                .foregroundColor(.mwInk)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Button(action: onRemove) {
@@ -49,7 +49,7 @@ struct PendingAttachmentChip: View {
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
-        .background(Color.zinc800.opacity(0.8))
+        .background(Color.mwInk.opacity(0.06))
         .cornerRadius(4)
     }
 }

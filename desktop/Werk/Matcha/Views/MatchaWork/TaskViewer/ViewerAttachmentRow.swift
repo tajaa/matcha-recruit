@@ -48,7 +48,7 @@ struct ViewerAttachmentRow: View {
             }
             Text(file.filename)
                 .font(.system(size: 11))
-                .foregroundColor(.white)
+                .foregroundColor(.mwInk)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer()
@@ -58,7 +58,7 @@ struct ViewerAttachmentRow: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(isHovered ? Color.zinc800.opacity(0.8) : Color.zinc800.opacity(0.5))
+        .background(isHovered ? Color.mwInk.opacity(0.08) : Color.mwInk.opacity(0.04))
         .cornerRadius(4)
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }

@@ -33,10 +33,10 @@ extension TaskViewerSheet {
                 Spacer()
                 Text("Show")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.matcha500)
+                    .foregroundColor(.mwInkStrong)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(.matcha500)
+                    .foregroundColor(.mwInkStrong)
             }
             .padding(.vertical, 8)
             .padding(.horizontal, 10)
@@ -119,14 +119,14 @@ extension TaskViewerSheet {
         if task.boardColumn == "review", currentRound > 1,
            !d.completed.isEmpty || d.comments > 0 || !d.commits.isEmpty {
             HStack(alignment: .top, spacing: 8) {
-                RoundedRectangle(cornerRadius: 1).fill(Color.matcha500.opacity(0.7)).frame(width: 2)
+                RoundedRectangle(cornerRadius: 1).fill(Color.mwInkStrong.opacity(0.7)).frame(width: 2)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("SINCE LAST REVIEW")
                         .font(.system(size: 9, weight: .semibold)).tracking(0.5)
-                        .foregroundColor(.matcha500)
+                        .foregroundColor(.mwInkStrong)
                     ForEach(d.completed.prefix(6), id: \.self) { t in
                         HStack(spacing: 5) {
-                            Image(systemName: "checkmark.circle.fill").font(.system(size: 8)).foregroundColor(.matcha500)
+                            Image(systemName: "checkmark.circle.fill").font(.system(size: 8)).foregroundColor(.mwInkStrong)
                             Text(t).font(.system(size: 11)).foregroundColor(appState.themeText.opacity(0.8)).lineLimit(1)
                         }
                     }
@@ -174,19 +174,19 @@ extension TaskViewerSheet {
         // not a cold never-started task.
         let hasFeedback = (task.reviewNote?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
         if task.boardColumn == "todo" && hasFeedback {
-            return StatePhase(label: "Changes Requested", owner: "Assignee to address feedback", color: .orange, icon: "arrow.uturn.backward.circle.fill")
+            return StatePhase(label: "Changes Requested", owner: "Assignee to address feedback", color: .mwAttention, icon: "arrow.uturn.backward.circle.fill")
         }
         switch task.boardColumn {
         case "todo":
             return StatePhase(label: "Not Started", owner: "Assignee to begin", color: .secondary, icon: "circle.dashed")
         case "in_progress":
-            return StatePhase(label: "In Progress", owner: "Assignee working", color: .yellow, icon: "hammer.fill")
+            return StatePhase(label: "In Progress", owner: "Assignee working", color: .mwInkStrong, icon: "hammer.fill")
         case "review":
-            return StatePhase(label: "In Review", owner: "Reviewer to assess", color: .blue, icon: "magnifyingglass.circle.fill")
+            return StatePhase(label: "In Review", owner: "Reviewer to assess", color: .mwInkStrong, icon: "magnifyingglass.circle.fill")
         case "changes_requested":
-            return StatePhase(label: "Changes Requested", owner: "Assignee to address feedback", color: .orange, icon: "arrow.uturn.backward.circle.fill")
+            return StatePhase(label: "Changes Requested", owner: "Assignee to address feedback", color: .mwAttention, icon: "arrow.uturn.backward.circle.fill")
         case "done":
-            return StatePhase(label: "Done", owner: "Closed", color: .matcha500, icon: "checkmark.seal.fill")
+            return StatePhase(label: "Done", owner: "Closed", color: .mwInkStrong, icon: "checkmark.seal.fill")
         default:
             return StatePhase(label: columnLabel, owner: "", color: .secondary, icon: "circle")
         }
@@ -228,7 +228,7 @@ extension TaskViewerSheet {
                     Text(days <= 0 ? "review today" : "review \(days)d")
                         .font(.system(size: 9, weight: .medium))
                 }
-                .foregroundColor(days >= 3 ? .orange : .secondary)
+                .foregroundColor(days >= 3 ? .mwAttention : .secondary)
             }
             if let elName = task.elementName
                 ?? viewModel.elements.first(where: { $0.id == task.elementId })?.name {
@@ -236,9 +236,9 @@ extension TaskViewerSheet {
                     Image(systemName: "square.stack.3d.up.fill").font(.system(size: 8))
                     Text(elName).font(.system(size: 9, weight: .semibold))
                 }
-                .foregroundColor(.matcha500)
+                .foregroundColor(.mwInkStrong)
                 .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(Color.matcha500.opacity(0.15)).cornerRadius(3)
+                .background(Color.mwInkStrong.opacity(0.15)).cornerRadius(3)
             }
             Spacer(minLength: 0)
         }
@@ -255,16 +255,16 @@ extension TaskViewerSheet {
             feedbackHero(fb)
         } else if task.boardColumn == "review" {
             VStack(alignment: .leading, spacing: 8) {
-                heroRule(color: .blue, icon: "magnifyingglass.circle.fill",
+                heroRule(color: .mwInkStrong, icon: "magnifyingglass.circle.fill",
                          label: "DO NOW · REVIEW",
                          text: "Assess this submission, then Approve or Send back below.")
                 reviewDeltaSection
             }
         } else if task.boardColumn == "in_progress",
                   let pn = task.progressNote?.trimmingCharacters(in: .whitespacesAndNewlines), !pn.isEmpty {
-            heroRule(color: .matcha500, icon: "hammer.fill", label: "WHERE WE'RE AT", text: pn)
+            heroRule(color: .mwInkStrong, icon: "hammer.fill", label: "WHERE WE'RE AT", text: pn)
         } else if task.boardColumn == "done" {
-            heroRule(color: .matcha500, icon: "checkmark.seal.fill", label: "DONE", text: "This ticket is closed.")
+            heroRule(color: .mwInkStrong, icon: "checkmark.seal.fill", label: "DONE", text: "This ticket is closed.")
         } else if descriptionIsHero {
             // No more-specific directive (fresh/no-note ticket) → the brief is
             // the directive. Phase-colored so it still reads as the current state.
@@ -375,7 +375,7 @@ extension TaskViewerSheet {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            let color = Color.orange
+            let color = Color.mwAttention
             HStack(alignment: .top, spacing: 10) {
                 RoundedRectangle(cornerRadius: 1.5).fill(color.opacity(0.85)).frame(width: 3)
                 VStack(alignment: .leading, spacing: 6) {
@@ -398,9 +398,9 @@ extension TaskViewerSheet {
                             if !d.severity.isEmpty {
                                 Text(d.severity.uppercased())
                                     .font(.system(size: 7, weight: .bold)).tracking(0.3)
-                                    .foregroundColor(d.severity == "blocker" ? .red : .secondary)
+                                    .foregroundColor(d.severity == "blocker" ? .mwAttention : .secondary)
                                     .padding(.horizontal, 3).padding(.vertical, 1)
-                                    .background((d.severity == "blocker" ? Color.red : Color.secondary).opacity(0.15))
+                                    .background((d.severity == "blocker" ? Color.mwAttention : Color.secondary).opacity(0.15))
                                     .cornerRadius(2)
                             }
                             Text("\(d.title)\(d.reason.isEmpty ? "" : " — \(d.reason)")")
@@ -486,7 +486,7 @@ extension TaskViewerSheet {
     @ViewBuilder
     var aiSummaryCollapsible: some View {
         if let summary = viewModel.taskSummaries[task.id], !summary.isEmpty {
-            collapsibleSection(icon: "sparkles", title: "AI SUMMARY", tint: .matcha500, isOpen: $showSummary) {
+            collapsibleSection(icon: "sparkles", title: "AI SUMMARY", tint: .mwInkStrong, isOpen: $showSummary) {
                 Text(summary)
                     .font(.system(size: 12)).foregroundColor(appState.themeText.opacity(0.9))
                     .textSelection(.enabled)
@@ -506,10 +506,10 @@ extension TaskViewerSheet {
     var roundScopePill: some View {
         Text("Round \(currentRound)")
             .font(.system(size: 8, weight: .semibold))
-            .foregroundColor(.matcha500)
+            .foregroundColor(.mwInkStrong)
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
-            .background(Color.matcha500.opacity(0.15))
+            .background(Color.mwInkStrong.opacity(0.15))
             .cornerRadius(4)
     }
 
@@ -531,7 +531,7 @@ extension TaskViewerSheet {
                 HStack(spacing: 6) {
                     Image(systemName: "bubble.left.and.bubble.right")
                         .font(.system(size: 10))
-                        .foregroundColor(.matcha500)
+                        .foregroundColor(.mwInkStrong)
                     Text("DISCUSSION")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundColor(.secondary)
@@ -620,10 +620,10 @@ extension TaskViewerSheet {
                         Text("Start Next Round")
                             .font(.system(size: 10, weight: .semibold))
                     }
-                    .foregroundColor(.matcha500)
+                    .foregroundColor(.mwInkStrong)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Color.matcha500.opacity(0.12))
+                    .background(Color.mwInkStrong.opacity(0.12))
                     .cornerRadius(4)
                 }
                 .buttonStyle(.plain)
@@ -716,7 +716,7 @@ extension TaskViewerSheet {
                         ProgressView().controlSize(.small)
                     } else {
                         Text("Add").font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(canSubmitNote ? .matcha500 : .secondary)
+                            .foregroundColor(canSubmitNote ? .mwInkStrong : .secondary)
                     }
                 }
                 .buttonStyle(.plain)
@@ -727,7 +727,7 @@ extension TaskViewerSheet {
             // the text reads like a task, offer to capture it as a subtask instead.
             if looksLikeSubtask(newNote) {
                 HStack(spacing: 6) {
-                    Image(systemName: "checklist").font(.system(size: 9)).foregroundColor(.matcha500)
+                    Image(systemName: "checklist").font(.system(size: 9)).foregroundColor(.mwInkStrong)
                     Text("Looks like a to-do — add it as a subtask instead?")
                         .font(.system(size: 10)).foregroundColor(appState.themeTextSecondary)
                     Button("Add as subtask") {
@@ -735,7 +735,7 @@ extension TaskViewerSheet {
                         Task { await viewModel.addSubtask(taskId: task.id, title: t) }
                         newNote = ""
                     }
-                    .buttonStyle(.plain).font(.system(size: 10, weight: .semibold)).foregroundColor(.matcha500)
+                    .buttonStyle(.plain).font(.system(size: 10, weight: .semibold)).foregroundColor(.mwInkStrong)
                     Spacer(minLength: 0)
                 }
                 .padding(.leading, 2)
@@ -765,13 +765,13 @@ extension TaskViewerSheet {
             .replacingOccurrences(of: "\n", with: " ")
         HStack(spacing: 6) {
             Rectangle()
-                .fill(Color.matcha500)
+                .fill(Color.mwInkStrong)
                 .frame(width: 2)
                 .cornerRadius(1)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Replying to \(name)")
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(.matcha500)
+                    .foregroundColor(.mwInkStrong)
                 if !excerpt.isEmpty {
                     Text(excerpt)
                         .font(.system(size: 10))
@@ -944,7 +944,7 @@ extension TaskViewerSheet {
                     if task.boardColumn == "review", item.isDone,
                        let comp = viewModel.completion(subtaskId: item.id) {
                         HStack(alignment: .top, spacing: 5) {
-                            Image(systemName: "sparkles").font(.system(size: 8)).foregroundColor(.purple)
+                            Image(systemName: "sparkles").font(.system(size: 8)).foregroundColor(.mwInkSoft)
                             Text("Completed by commit \(comp.commitShortSha ?? "?") · \(Int((comp.confidence * 100).rounded()))%"
                                  + (comp.reasoning.map { " — \($0)" } ?? ""))
                                 .font(.system(size: 10))
@@ -974,7 +974,7 @@ extension TaskViewerSheet {
                         ProgressView().controlSize(.small)
                     } else {
                         Text("Add").font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.matcha500)
+                            .foregroundColor(.mwInkStrong)
                     }
                 }
                 .buttonStyle(.plain)
@@ -990,7 +990,7 @@ extension TaskViewerSheet {
         VStack(alignment: .leading, spacing: 6) {
             Text("WHAT'S INCOMPLETE?")
                 .font(.system(size: 9, weight: .semibold))
-                .foregroundColor(.orange)
+                .foregroundColor(.mwAttention)
                 .tracking(0.5)
             TextEditor(text: $rejectNote)
                 .font(.system(size: 12))
@@ -1008,7 +1008,7 @@ extension TaskViewerSheet {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("RE-OPEN ITEMS")
                         .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.orange)
+                        .foregroundColor(.mwAttention)
                         .tracking(0.5)
                     ForEach(subtasks.filter { $0.isDone }) { item in
                         Button {
@@ -1017,7 +1017,7 @@ extension TaskViewerSheet {
                             HStack(spacing: 6) {
                                 Image(systemName: "checkmark.circle.fill")
                                     .font(.system(size: 11))
-                                    .foregroundColor(.matcha500)
+                                    .foregroundColor(.mwInkStrong)
                                 Text(item.title)
                                     .font(.system(size: 11))
                                     .foregroundColor(appState.themeText.opacity(0.85))
@@ -1026,7 +1026,7 @@ extension TaskViewerSheet {
                                 Spacer()
                                 Text("Re-open")
                                     .font(.system(size: 9, weight: .semibold))
-                                    .foregroundColor(.orange)
+                                    .foregroundColor(.mwAttention)
                             }
                         }
                         .buttonStyle(.plain)
@@ -1048,7 +1048,7 @@ extension TaskViewerSheet {
                     } else {
                         Text("Send back")
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.orange)
+                            .foregroundColor(.mwAttention)
                     }
                 }
                 .buttonStyle(.plain)
@@ -1056,7 +1056,7 @@ extension TaskViewerSheet {
             }
         }
         .padding(10)
-        .background(Color.orange.opacity(0.08))
+        .background(Color.mwAttention.opacity(0.08))
         .cornerRadius(6)
     }
 }

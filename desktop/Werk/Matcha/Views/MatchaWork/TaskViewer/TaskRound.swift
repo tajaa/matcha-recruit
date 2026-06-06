@@ -67,14 +67,14 @@ struct TaskRound: Identifiable {
     func phaseColor(isLatest: Bool) -> Color {
         if let last = events.reversed().first(where: { $0.eventType == "column_change" }) {
             switch last.toValue ?? "" {
-            case "review": return .blue
-            case "changes_requested": return .orange
-            case "done": return .matcha500
-            case "in_progress": return .yellow
+            case "review": return .mwInkStrong
+            case "changes_requested": return .mwAttention
+            case "done": return .mwInkStrong
+            case "in_progress": return .mwInkStrong
             default: break
             }
         }
-        return isLatest ? .matcha500 : .secondary
+        return isLatest ? .mwInkStrong : .secondary
     }
 
     /// Build rounds from a flat history list. Round boundaries are EXPLICIT

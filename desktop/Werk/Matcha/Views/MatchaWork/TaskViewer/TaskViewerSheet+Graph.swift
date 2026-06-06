@@ -9,9 +9,9 @@ extension TaskViewerSheet {
         Button { viewMode = mode } label: {
             Image(systemName: icon)
                 .font(.system(size: 10))
-                .foregroundColor(viewMode == mode ? .matcha500 : .secondary)
+                .foregroundColor(viewMode == mode ? .mwInkStrong : .mwInkSoft)
                 .frame(width: 22, height: 18)
-                .background(viewMode == mode ? Color.matcha500.opacity(0.18) : Color.clear)
+                .background(viewMode == mode ? Color.mwInkStrong.opacity(0.12) : Color.clear)
                 .cornerRadius(3)
         }
         .buttonStyle(.plain)
@@ -73,19 +73,21 @@ extension TaskViewerSheet {
 
             let isSystem = (e.actorUserId == nil)
             let key = e.actorUserId ?? "system"
-            let color = e.actorUserId.map(UserColor.forUserId) ?? .secondary
             if !laneKeys.contains(key) {
                 laneKeys.append(key)
+                // People are told apart by gray *level* (+ their avatar), not hue.
+                let laneColor: Color = isSystem ? .mwInkSoft : .mwLaneGray(laneKeys.count - 1)
                 laneInfo[key] = GraphLane(
                     id: key,
                     name: isSystem ? "System"
                         : (e.actorName?.isEmpty == false ? e.actorName! : "Someone"),
                     avatarUrl: e.actorAvatarUrl,
-                    color: color,
+                    color: laneColor,
                     isSystem: isSystem
                 )
             }
             let lane = laneKeys.firstIndex(of: key) ?? 0
+            let color: Color = isSystem ? .mwInkSoft : .mwLaneGray(lane)
             nodes.append(GraphNode(
                 id: e.id, laneIndex: lane, color: color,
                 laneKey: key, event: e, isSystem: isSystem,
@@ -129,7 +131,7 @@ extension TaskViewerSheet {
                         .overlay(Circle().stroke(lane.color.opacity(0.9), lineWidth: 1.5))
                     Text(lane.name)
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white.opacity(0.8))
+                        .foregroundColor(.mwInk.opacity(0.85))
                         .lineLimit(1)
                 }
             }
@@ -142,13 +144,13 @@ extension TaskViewerSheet {
             Text("ROUND \(round)")
                 .font(.system(size: 8, weight: .bold))
                 .tracking(0.5)
-                .foregroundColor(.matcha500)
+                .foregroundColor(.mwInkSoft)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(Color.matcha500.opacity(0.15))
+                .background(Color.mwInkSoft.opacity(0.12))
                 .cornerRadius(3)
             Rectangle()
-                .fill(Color.matcha500.opacity(0.2))
+                .fill(Color.mwHairline)
                 .frame(height: 1)
         }
         .padding(.top, 8)
@@ -164,13 +166,13 @@ extension TaskViewerSheet {
     /// node — mirrors `graphStatusCard`'s mapping so the newest row carries the
     /// same signal as the ticket header.
     var currentStatusBadge: (label: String, tint: Color) {
-        if taskIsDone { return ("COMPLETE", .matcha500) }
+        if taskIsDone { return ("COMPLETE", .mwInkStrong) }
         switch task.boardColumn {
-        case "review":             return ("IN REVIEW", .blue)
-        case "changes_requested":  return ("CHANGES REQUESTED", .orange)
-        case "in_progress":        return ("IN PROGRESS", .matcha500)
-        case "todo":               return ("TO DO", .secondary)
-        default:                   return (EventRow.columnLabel(task.boardColumn).uppercased(), .matcha500)
+        case "review":             return ("IN REVIEW", .mwInkStrong)
+        case "changes_requested":  return ("CHANGES REQUESTED", .mwAttention)
+        case "in_progress":        return ("IN PROGRESS", .mwInkStrong)
+        case "todo":               return ("TO DO", .mwInkSoft)
+        default:                   return (EventRow.columnLabel(task.boardColumn).uppercased(), .mwInkStrong)
         }
     }
 
@@ -193,28 +195,28 @@ extension TaskViewerSheet {
         if taskIsDone {
             headline = "Complete"
             sub = "Nothing left — this ticket is done."
-            tint = .matcha500
+            tint = .mwInkStrong
             icon = "checkmark.seal.fill"
         } else {
             switch col {
             case "review":
                 headline = "In review"
                 sub = "Waiting on \(assignee) to sign off."
-                tint = .blue
+                tint = .mwInkStrong
                 icon = "eye.fill"
             case "changes_requested":
                 headline = "Changes requested"
                 sub = open.isEmpty
                     ? "\(assignee) to rework and resubmit."
                     : "\(assignee) to fix \(items): \(titles)\(more)"
-                tint = .orange
+                tint = .mwAttention
                 icon = "arrow.uturn.backward"
             default:
                 headline = EventRow.columnLabel(col)
                 sub = open.isEmpty
                     ? "\(assignee) · checklist clear — ready to move forward."
                     : "\(assignee) · \(items) left: \(titles)\(more)"
-                tint = .matcha500
+                tint = .mwInkStrong
                 icon = "location.fill"
             }
         }
@@ -242,12 +244,12 @@ extension TaskViewerSheet {
                         Text("ROUND \(currentRound)")
                             .font(.system(size: 8, weight: .bold))
                             .tracking(0.4)
-                            .foregroundColor(.matcha500)
+                            .foregroundColor(.mwInkSoft)
                     }
                 }
                 Text(sub)
                     .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.85))
+                    .foregroundColor(.mwInkSoft)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
@@ -268,7 +270,7 @@ extension TaskViewerSheet {
         let assigneeLane = lanes.firstIndex(where: { $0.id == task.assignedTo })
         // `nodes.first` is now the newest real node (the row the ghosts hand into).
         let ghostLane = assigneeLane ?? nodes.first?.laneIndex ?? 0
-        let ghostColor = task.assignedTo.map(UserColor.forUserId) ?? .secondary
+        let ghostColor: Color = .mwInkSoft
         let status = currentStatusBadge
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
@@ -281,10 +283,10 @@ extension TaskViewerSheet {
                 if nodes.count > 1 {
                     Text("\(nodes.count) actions · \(lanes.count) \(lanes.count == 1 ? "person" : "people")")
                         .font(.system(size: 9))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.mwInkSoft)
                 }
             }
-            .foregroundColor(.matcha500)
+            .foregroundColor(.mwInkSoft)
 
             // Where we stand + what's next — always first, even before history loads.
             graphStatusCard
