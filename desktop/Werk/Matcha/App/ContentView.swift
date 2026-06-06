@@ -223,6 +223,7 @@ struct ContentView: View {
                 VStack(spacing: 0) {
                     sidebarHomeButton
                     sidebarSearchBar
+                    SidebarStarredView()
                     sidebarOrderedSections
                 }
             }
@@ -232,18 +233,8 @@ struct ContentView: View {
             // Footer — Inbox + People always-visible buttons with live badges
             HStack(spacing: 6) {
                 InboxFooterButton {
+                    appState.clearPrimaryNav()
                     appState.showInbox = true
-                    appState.showJournalsHub = false
-                    appState.selectedEmailId = nil
-                    appState.showPeople = false
-                    appState.showHome = false
-                    appState.showChannelBrowse = false
-                    appState.showArchive = false
-                    appState.selectedThreadId = nil
-                    appState.selectedProjectId = nil
-                    appState.selectedChannelId = nil
-                    appState.selectedJournalId = nil
-                    appState.showSkills = false
                 }
 
                 sidebarFooterButton(
@@ -252,18 +243,8 @@ struct ContentView: View {
                     badge: pendingConnectionsCount,
                     isActive: appState.showPeople
                 ) {
+                    appState.clearPrimaryNav()
                     appState.showPeople = true
-                    appState.showJournalsHub = false
-                    appState.selectedEmailId = nil
-                    appState.showInbox = false
-                    appState.showHome = false
-                    appState.showChannelBrowse = false
-                    appState.showArchive = false
-                    appState.selectedThreadId = nil
-                    appState.selectedProjectId = nil
-                    appState.selectedChannelId = nil
-                    appState.selectedJournalId = nil
-                    appState.showSkills = false
                 }
 
                 sidebarFooterButton(
@@ -272,18 +253,8 @@ struct ContentView: View {
                     badge: 0,
                     isActive: appState.showArchive
                 ) {
+                    appState.clearPrimaryNav()
                     appState.showArchive = true
-                    appState.showJournalsHub = false
-                    appState.selectedEmailId = nil
-                    appState.showInbox = false
-                    appState.showPeople = false
-                    appState.showHome = false
-                    appState.showChannelBrowse = false
-                    appState.showSkills = false
-                    appState.selectedThreadId = nil
-                    appState.selectedProjectId = nil
-                    appState.selectedChannelId = nil
-                    appState.selectedJournalId = nil
                 }
             }
             .padding(.horizontal, 8)
@@ -298,7 +269,8 @@ struct ContentView: View {
 
     @ViewBuilder
     private var sidebarHomeButton: some View {
-        let isHomeActive = !appState.showJournalsHub && (appState.showHome || (
+        let isHomeActive = !appState.showJournalsHub && !appState.showProjectsHub
+            && !appState.showThreadsHub && !appState.showChannelsHub && (appState.showHome || (
             appState.selectedThreadId == nil &&
             appState.selectedProjectId == nil &&
             appState.selectedChannelId == nil &&
@@ -309,17 +281,8 @@ struct ContentView: View {
             !appState.showChannelBrowse
         ))
         sidebarFooterButton(icon: "house", label: "Home", badge: 0, isActive: isHomeActive) {
+            appState.clearPrimaryNav()
             appState.showHome = true
-            appState.showJournalsHub = false
-            appState.selectedEmailId = nil
-            appState.showInbox = false
-            appState.showPeople = false
-            appState.showSkills = false
-            appState.showChannelBrowse = false
-            appState.selectedThreadId = nil
-            appState.selectedProjectId = nil
-            appState.selectedChannelId = nil
-            appState.selectedJournalId = nil
         }
         .padding(.horizontal, 8)
         .padding(.top, 8)
@@ -427,84 +390,80 @@ struct ContentView: View {
         .cornerRadius(6)
     }
 
+    /// A single nav-only sidebar row: clicking the label opens that surface's
+    /// full-pane hub; the optional trailing slot carries a create "+" control.
+    /// The sidebar lists NO individual items — browsing/organizing lives in the
+    /// hub (only the Starred pins strip surfaces specific items).
+    @ViewBuilder
+    private func sidebarNavRow<Trailing: View>(
+        title: String, icon: String, isActive: Bool,
+        onOpen: @escaping () -> Void,
+        @ViewBuilder trailing: () -> Trailing = { EmptyView() }
+    ) -> some View {
+        HStack(spacing: 6) {
+            Button(action: onOpen) {
+                HStack(spacing: 8) {
+                    Image(systemName: icon)
+                        .font(.system(size: 12))
+                        .foregroundColor(isActive ? appState.themeAccent : appState.themeTextSecondary)
+                        .frame(width: 16)
+                    Text(title.uppercased())
+                        .font(.system(size: 10, weight: .semibold))
+                        .tracking(0.5)
+                        .foregroundColor(isActive ? appState.themeAccent : appState.themeTextSecondary)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            trailing()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isActive ? appState.themeAccent.opacity(0.12) : Color.clear)
+        )
+    }
+
+    /// Small "+" chip reused by the section create controls.
+    private var plusChip: some View {
+        Image(systemName: "plus")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundColor(.secondary)
+            .frame(width: 18, height: 18)
+            .background(Color(white: 0.58))
+            .cornerRadius(4)
+    }
+
     @ViewBuilder
     private var channelsSidebarSection: some View {
-        sidebarSection(
-            title: "Channels",
-            icon: "number",
-            isOpen: $channelsSectionOpen,
-            // Always render the channels view: when collapsed it shows only the
-            // starred (pinned) channels; expanding reveals the rest.
-            alwaysRenderContent: true,
-            trailing: {
-                HStack(spacing: 4) {
-                    Button {
-                        showChannelBrowse()
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.secondary)
-                            .frame(width: 18, height: 18)
-                            .background(Color(white: 0.58))
-                            .cornerRadius(4)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Browse public channels")
-
-                    Menu {
-                        Button("New channel") {
-                            appState.channelAdminWizardMode = .create
-                            appState.showChannelAdminWizard = true
-                        }
-                        Button("Quick create (no guide)") {
-                            showCreateChannel = true
-                        }
-                        Divider()
-                        Button("Browse public channels") {
-                            showChannelBrowse()
-                        }
-                        Divider()
-                        Button("Channel admin guide") {
-                            if let id = appState.selectedChannelId {
-                                appState.channelAdminWizardMode = .manage(channelId: id)
-                            } else {
-                                appState.channelAdminWizardMode = .create
-                            }
-                            appState.showChannelAdminWizard = true
-                        }
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.secondary)
-                            .frame(width: 18, height: 18)
-                            .background(Color(white: 0.58))
-                            .cornerRadius(4)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .frame(width: 22, height: 18)
-                    .help("New channel · admin guide")
+        sidebarNavRow(title: "Channels", icon: "number",
+                      isActive: appState.showChannelsHub, onOpen: openChannelsHub) {
+            Menu {
+                Button("New channel") {
+                    appState.channelAdminWizardMode = .create
+                    appState.showChannelAdminWizard = true
                 }
+                Button("Quick create (no guide)") { showCreateChannel = true }
+                Divider()
+                Button("Browse public channels") { showChannelBrowse() }
+            } label: {
+                plusChip
             }
-        ) {
-            ChannelsSidebarView(showHeader: false, searchText: searchText, expanded: channelsSectionOpen)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .frame(width: 22, height: 18)
+            .help("New channel · browse")
         }
     }
 
     @ViewBuilder
     private var projectsSidebarSection: some View {
-        sidebarSection(
-            title: "Projects",
-            icon: "folder",
-            isOpen: $projectsSectionOpen,
-            trailing: {
+        sidebarNavRow(title: "Projects", icon: "folder",
+                      isActive: appState.showProjectsHub, onOpen: openProjectsHub) {
                 Button { showProjectTypePicker = true } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.secondary)
-                        .frame(width: 18, height: 18)
-                        .background(Color(white: 0.58))
-                        .cornerRadius(4)
+                    plusChip
                 }
                 .buttonStyle(.plain)
                 .help("New project")
@@ -566,157 +525,55 @@ struct ContentView: View {
                     }
                 }
             }
-        ) {
-            VStack(alignment: .leading, spacing: 0) {
-                if let err = projectCreateError {
-                    HStack(alignment: .top, spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 9))
-                            .foregroundColor(.red)
-                        Text(err)
-                            .font(.system(size: 10))
-                            .foregroundColor(.red)
-                            .lineLimit(3)
-                        Spacer()
-                        Button { projectCreateError = nil } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 8))
-                                .foregroundColor(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.red.opacity(0.1))
-                }
-                ProjectListView(showHeader: false, searchText: searchText)
-            }
-        }
     }
 
     /// Open the Journals hub — the Obsidian-style parent module that houses all
     /// journals in a folder tree. Clears the other nav surfaces so the hub takes
     /// the primary pane.
-    private func openJournalsHub() {
-        appState.showJournalsHub = true
-        appState.selectedThreadId = nil
-        appState.selectedProjectId = nil
-        appState.selectedChannelId = nil
-        appState.selectedJournalId = nil
-        appState.selectedEmailId = nil
-        appState.showInbox = false
-        appState.showPeople = false
-        appState.showArchive = false
-        appState.showHome = false
-        appState.showSkills = false
-        appState.showChannelBrowse = false
-    }
+    private func openJournalsHub()  { appState.clearPrimaryNav(); appState.showJournalsHub = true }
+    private func openProjectsHub()  { appState.clearPrimaryNav(); appState.showProjectsHub = true }
+    private func openThreadsHub()   { appState.clearPrimaryNav(); appState.showThreadsHub = true }
+    private func openChannelsHub()  { appState.clearPrimaryNav(); appState.showChannelsHub = true }
 
     @ViewBuilder
     private var journalsSidebarSection: some View {
-        // Custom header: tapping "Journals" opens the hub (the parent module);
-        // the chevron still toggles the quick inline list; "+" makes a journal.
-        VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Button {
-                    withAnimation(.easeOut(duration: 0.15)) { journalsSectionOpen.toggle() }
-                } label: {
-                    Image(systemName: journalsSectionOpen ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.secondary)
-                        .frame(width: 10)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    openJournalsHub()
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "book.closed")
-                            .font(.system(size: 11))
-                            .foregroundColor(appState.showJournalsHub ? appState.themeAccent : .secondary)
-                        Text("JOURNALS")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(appState.showJournalsHub ? appState.themeAccent : .secondary)
-                            .tracking(0.5)
-                        Spacer()
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Open Journals hub")
-
-                Button { showNewJournal = true } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.secondary)
-                        .frame(width: 18, height: 18)
-                        .background(Color(white: 0.58))
-                        .cornerRadius(4)
-                }
+        sidebarNavRow(title: "Journals", icon: "book.closed",
+                      isActive: appState.showJournalsHub, onOpen: openJournalsHub) {
+            Button { showNewJournal = true } label: { plusChip }
                 .buttonStyle(.plain)
                 .help("New journal")
                 .sheet(isPresented: $showNewJournal) {
                     NewJournalSheet { journal in
+                        appState.clearPrimaryNav()
                         appState.selectedJournalId = journal.id
-                        appState.showJournalsHub = false
-                        appState.selectedThreadId = nil
-                        appState.selectedProjectId = nil
-                        appState.selectedChannelId = nil
                         appState.journalsListGeneration &+= 1
                     }
                     .environment(appState)
                 }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-
-            if journalsSectionOpen {
-                JournalListView(showHeader: false, searchText: searchText)
-            }
         }
     }
 
     @ViewBuilder
     private var threadsSidebarSection: some View {
-        sidebarSection(
-            title: "Threads",
-            icon: "bubble.left.and.bubble.right",
-            isOpen: $threadsSectionOpen,
-            trailing: {
-                HStack(spacing: 4) {
-                    Menu {
-                        Button("All") { setThreadFilter(nil) }
-                        Button("Active") { setThreadFilter("active") }
-                        Button("Finalized") { setThreadFilter("finalized") }
-                    } label: {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(threadListVM.filterStatus == nil ? .secondary : appState.themeAccent)
-                            .frame(width: 18, height: 18)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .help("Filter threads")
+        sidebarNavRow(title: "Threads", icon: "bubble.left.and.bubble.right",
+                      isActive: appState.showThreadsHub, onOpen: openThreadsHub) {
+            Button { createThreadFromSidebar() } label: { plusChip }
+                .buttonStyle(.plain)
+                .help("New thread")
+        }
+    }
 
-                    Button {
-                        NotificationCenter.default.post(name: .mwCreateNewThread, object: nil)
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(.secondary)
-                            .frame(width: 18, height: 18)
-                            .background(Color(white: 0.58))
-                            .cornerRadius(4)
-                    }
-                    .buttonStyle(.plain)
-                    .help("New thread")
+    /// Create a thread straight from the sidebar "+" and open it (the inline
+    /// list that used to handle `.mwCreateNewThread` is gone — the Threads hub
+    /// owns browsing now).
+    private func createThreadFromSidebar() {
+        Task {
+            if let t = await threadListVM.createThread(title: nil) {
+                await MainActor.run {
+                    appState.clearPrimaryNav()
+                    appState.selectedThreadId = t.id
                 }
             }
-        ) {
-            ThreadListView(viewModel: threadListVM, showHeader: false, searchText: searchText)
         }
     }
 
@@ -1479,6 +1336,104 @@ struct ArchiveView: View {
             try? await ChannelsService.shared.unarchiveChannel(id: c.id)
             await MainActor.run { channels.removeAll { $0.id == c.id }; appState.channelsListGeneration &+= 1 }
         }
+    }
+}
+
+// MARK: - Sidebar "Starred" pins
+
+/// The only place the sidebar surfaces specific items: a compact strip of
+/// pinned projects + starred channels + pinned threads for quick access.
+/// Everything else lives in the per-surface hubs. Tapping a pin opens that
+/// item directly. Hidden entirely when nothing is pinned/starred.
+struct SidebarStarredView: View {
+    @Environment(AppState.self) private var appState
+    @State private var pins: [Pin] = []
+
+    struct Pin: Identifiable {
+        let id: String
+        let name: String
+        let icon: String
+        let kind: Kind
+        enum Kind { case project, channel, thread }
+    }
+
+    var body: some View {
+        Group {
+            if !pins.isEmpty {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("STARRED")
+                        .font(.system(size: 9, weight: .semibold))
+                        .tracking(0.5)
+                        .foregroundColor(appState.themeTextSecondary)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 6)
+                        .padding(.bottom, 3)
+                    ForEach(pins) { pin in row(pin) }
+                    Divider().background(appState.themeBorder).padding(.top, 6)
+                }
+            }
+        }
+        .task { await load() }
+        .onChange(of: appState.projectsListGeneration) { _, _ in Task { await load() } }
+        .onChange(of: appState.channelsListGeneration) { _, _ in Task { await load() } }
+    }
+
+    private func row(_ pin: Pin) -> some View {
+        let active = isActive(pin)
+        return Button { open(pin) } label: {
+            HStack(spacing: 8) {
+                Image(systemName: pin.icon)
+                    .font(.system(size: 11))
+                    .foregroundColor(pin.kind == .channel ? appState.themeAccent : appState.themeTextSecondary)
+                    .frame(width: 16)
+                Text(pin.name)
+                    .font(.system(size: 12, weight: active ? .semibold : .regular))
+                    .foregroundColor(appState.themeText.opacity(0.9))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(active ? appState.themeAccent.opacity(0.12) : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func isActive(_ pin: Pin) -> Bool {
+        switch pin.kind {
+        case .project: return appState.selectedProjectId == pin.id
+        case .channel: return appState.selectedChannelId == pin.id
+        case .thread:  return appState.selectedThreadId == pin.id
+        }
+    }
+
+    private func open(_ pin: Pin) {
+        appState.clearPrimaryNav()
+        switch pin.kind {
+        case .project: appState.selectedProjectId = pin.id
+        case .channel: appState.selectedChannelId = pin.id
+        case .thread:  appState.selectedThreadId = pin.id
+        }
+    }
+
+    private func load() async {
+        async let pj = (try? await MatchaWorkService.shared.listProjects()) ?? []
+        async let th = (try? await MatchaWorkService.shared.listThreads()) ?? []
+        async let ch = (try? await ChannelsService.shared.listChannels()) ?? []
+        let projects = await pj, threads = await th, channels = await ch
+        let stars = ChannelStarStore.shared
+        var out: [Pin] = []
+        out += projects.filter { $0.isPinned ?? false }
+            .map { Pin(id: $0.id, name: $0.title, icon: $0.icon ?? "folder", kind: .project) }
+        out += channels.filter { $0.isMember && stars.isStarred($0.id) }
+            .map { Pin(id: $0.id, name: $0.name, icon: "star.fill", kind: .channel) }
+        out += threads.filter { $0.isPinned }
+            .map { Pin(id: $0.id, name: $0.displayName, icon: "bubble.left.and.bubble.right", kind: .thread) }
+        await MainActor.run { pins = out }
     }
 }
 

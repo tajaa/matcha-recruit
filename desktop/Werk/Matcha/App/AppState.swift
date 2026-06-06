@@ -83,10 +83,40 @@ class AppState {
     /// header. Lowest routing priority (a selected journal opens its detail over
     /// the hub), so it's safe to leave set; explicit nav (home/footer) clears it.
     var showJournalsHub: Bool = false
+    /// Full-pane hubs for the other three surfaces — same model as the Journals
+    /// hub: the sidebar is nav-only (a row per surface), and clicking a row opens
+    /// that surface's dashboard where all items are listed / organized / created.
+    /// Lowest routing priority, so a selected item opens its detail over the hub.
+    var showProjectsHub: Bool = false
+    var showThreadsHub: Bool = false
+    var showChannelsHub: Bool = false
     /// Full-pane "Browse Channels" surface. Reached from the sidebar Channels
     /// section header. Mutually exclusive with thread/project/channel/journal
     /// selection — toggling on clears those.
     var showChannelBrowse: Bool = false
+
+    /// Reset every primary-pane nav flag + selection. Each nav entry point calls
+    /// this then sets its ONE destination, so a stale hub/selection can never
+    /// mask the new target (Home is the routing `else`, so a lingering
+    /// show*Hub would otherwise hide it). Keep in sync with PrimaryDetailPane.
+    func clearPrimaryNav() {
+        selectedThreadId = nil
+        selectedProjectId = nil
+        selectedChannelId = nil
+        selectedJournalId = nil
+        selectedEmailId = nil
+        showInbox = false
+        showPeople = false
+        showArchive = false
+        showHome = false
+        showSkills = false
+        showChannelBrowse = false
+        showJournalsHub = false
+        showProjectsHub = false
+        showThreadsHub = false
+        showChannelsHub = false
+    }
+
     var onlineUsers: [MWOnlineUser] = []
     var unreadInboxCount: Int = 0
     var notificationsUnreadCount: Int = 0

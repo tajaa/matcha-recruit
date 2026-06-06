@@ -631,3 +631,158 @@ struct CreateChannelSheet: View {
         }
     }
 }
+
+// MARK: - Channels hub (full-pane dashboard)
+
+/// Full-pane "Channels" hub — opened from the sidebar Channels nav row. Lists
+/// the channels you're in; filter (Starred / Mine), create, and browse-public
+/// live here. Picking a card sets `selectedChannelId` so the channel opens over
+/// the hub.
+struct ChannelsLibraryView: View {
+    @Environment(AppState.self) private var appState
+
+    @State private var channels: [ChannelSummary] = []
+    @State private var isLoading = true
+    @State private var search = ""
+    @State private var filter: Filter = .mine
+    @State private var showCreate = false
+    @State private var starGen = 0
+
+    enum Filter: String, CaseIterable, Identifiable {
+        case mine = "Mine", starred = "Starred"
+        var id: String { rawValue }
+    }
+
+    private let columns = [GridItem(.adaptive(minimum: 220, maximum: 300), spacing: 14)]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider().background(appState.themeBorder)
+            content
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(ThemeRadialBackground())
+        .task { await load() }
+        .onChange(of: appState.channelsListGeneration) { _, _ in Task { await load() } }
+        .sheet(isPresented: $showCreate) {
+            CreateChannelSheet { ch in
+                appState.channelsListGeneration &+= 1
+                open(ch.id)
+            }
+        }
+    }
+
+    private var shown: [ChannelSummary] {
+        _ = starGen
+        let stars = ChannelStarStore.shared
+        var out = channels.filter { $0.isMember }
+        if filter == .starred { out = out.filter { stars.isStarred($0.id) } }
+        if !search.isEmpty { out = out.filter { $0.name.localizedCaseInsensitiveContains(search) } }
+        return out.sorted { (stars.isStarred($0.id) ? 1 : 0, $0.lastMessageAt ?? "") > (stars.isStarred($1.id) ? 1 : 0, $1.lastMessageAt ?? "") }
+    }
+
+    private var header: some View {
+        VStack(spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Channels").font(.system(size: 20, weight: .bold)).foregroundColor(appState.themeText)
+                    Text("Team spaces and real-time conversations")
+                        .font(.system(size: 12)).foregroundColor(appState.themeTextSecondary)
+                }
+                Spacer()
+                Button { browse() } label: {
+                    HStack(spacing: 5) { Image(systemName: "magnifyingglass"); Text("Browse").font(.system(size: 12, weight: .semibold)) }
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(appState.themeAccent.opacity(0.10)).foregroundColor(appState.themeAccent).cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+                Button { showCreate = true } label: {
+                    HStack(spacing: 5) { Image(systemName: "plus"); Text("New Channel").font(.system(size: 12, weight: .semibold)) }
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(appState.themeAccent).foregroundColor(appState.themeOnAccent).cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+            }
+            HStack(spacing: 8) {
+                ForEach(Filter.allCases) { f in MWHubPill(label: f.rawValue, selected: filter == f) { filter = f } }
+                Spacer()
+                MWHubSearch(text: $search)
+            }
+        }
+        .padding(20)
+    }
+
+    @ViewBuilder private var content: some View {
+        if isLoading {
+            Spacer(); ProgressView().tint(appState.themeTextSecondary); Spacer()
+        } else if shown.isEmpty {
+            MWHubEmpty(icon: "number",
+                       title: filter == .starred ? "No starred channels" : "No channels yet",
+                       cta: "New Channel") { showCreate = true }
+        } else {
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 14) {
+                    ForEach(shown) { c in card(c) }
+                }
+                .padding(20)
+            }
+        }
+    }
+
+    private func card(_ c: ChannelSummary) -> some View {
+        let starred = ChannelStarStore.shared.isStarred(c.id)
+        return Button { open(c.id) } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: starred ? "star.fill" : "number")
+                        .font(.system(size: 14)).foregroundColor(starred ? appState.themeAccent : appState.themeTextSecondary)
+                    Spacer()
+                    if c.isPaid {
+                        Image(systemName: "dollarsign.circle.fill").font(.system(size: 10)).foregroundColor(appState.themeTextSecondary)
+                    }
+                    if c.unreadCount > 0 {
+                        Text("\(min(c.unreadCount, 99))")
+                            .font(.system(size: 8, weight: .bold)).foregroundColor(appState.themeOnAccent)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Capsule().fill(appState.themeAccent))
+                    }
+                }
+                Text(c.name).font(.system(size: 13, weight: .semibold)).foregroundColor(appState.themeText).lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let d = c.description, !d.isEmpty {
+                    Text(d).font(.system(size: 11)).foregroundColor(appState.themeTextSecondary).lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(14).frame(height: 108, alignment: .top)
+            .background(RoundedRectangle(cornerRadius: 10).fill(appState.themeCard))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(appState.themeBorder, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button(starred ? "Unstar" : "Star") {
+                ChannelStarStore.shared.toggle(c.id); starGen += 1
+            }
+        }
+    }
+
+    private func open(_ id: String) {
+        appState.selectedChannelId = id   // hub flag stays set → back returns here
+        appState.selectedThreadId = nil; appState.selectedProjectId = nil
+        appState.selectedJournalId = nil; appState.selectedEmailId = nil
+    }
+
+    private func browse() {
+        appState.showChannelBrowse = true
+        appState.showChannelsHub = false
+        appState.selectedThreadId = nil; appState.selectedProjectId = nil
+        appState.selectedChannelId = nil; appState.selectedJournalId = nil
+    }
+
+    private func load() async {
+        let list = (try? await ChannelsService.shared.listChannels()) ?? []
+        await MainActor.run { channels = list; isLoading = false }
+    }
+}

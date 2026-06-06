@@ -384,3 +384,132 @@ struct ThreadRowView: View {
         .onHover { isHovered = $0 }
     }
 }
+
+// MARK: - Threads hub (full-pane dashboard)
+
+/// Full-pane "Threads" hub — opened from the sidebar Threads nav row. Lists
+/// every AI thread; filter (All / Active / Finalized), search, and create live
+/// here. Picking a card sets `selectedThreadId` so the thread opens over the hub.
+struct ThreadsLibraryView: View {
+    @Environment(AppState.self) private var appState
+
+    @State private var threads: [MWThread] = []
+    @State private var isLoading = true
+    @State private var search = ""
+    @State private var filter: Filter = .all
+    @State private var creating = false
+
+    enum Filter: String, CaseIterable, Identifiable {
+        case all = "All", active = "Active", finalized = "Finalized"
+        var id: String { rawValue }
+        var status: String? { self == .all ? nil : (self == .active ? "active" : "finalized") }
+    }
+
+    private let columns = [GridItem(.adaptive(minimum: 220, maximum: 300), spacing: 14)]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider().background(appState.themeBorder)
+            content
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(ThemeRadialBackground())
+        .task { await load() }
+        .onChange(of: filter) { _, _ in Task { await load() } }
+    }
+
+    private var shown: [MWThread] {
+        let base = search.isEmpty ? threads : threads.filter { $0.displayName.localizedCaseInsensitiveContains(search) }
+        return base.sorted { ($0.isPinned ? 1 : 0, $0.lastActivityAt) > ($1.isPinned ? 1 : 0, $1.lastActivityAt) }
+    }
+
+    private var header: some View {
+        VStack(spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Threads").font(.system(size: 20, weight: .bold)).foregroundColor(appState.themeText)
+                    Text("Your AI chats and working sessions")
+                        .font(.system(size: 12)).foregroundColor(appState.themeTextSecondary)
+                }
+                Spacer()
+                Button { Task { await create() } } label: {
+                    HStack(spacing: 5) {
+                        if creating { ProgressView().controlSize(.small) }
+                        else { Image(systemName: "plus") }
+                        Text("New Thread").font(.system(size: 12, weight: .semibold))
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(appState.themeAccent).foregroundColor(appState.themeOnAccent).cornerRadius(8)
+                }
+                .buttonStyle(.plain).disabled(creating)
+            }
+            HStack(spacing: 8) {
+                ForEach(Filter.allCases) { f in MWHubPill(label: f.rawValue, selected: filter == f) { filter = f } }
+                Spacer()
+                MWHubSearch(text: $search)
+            }
+        }
+        .padding(20)
+    }
+
+    @ViewBuilder private var content: some View {
+        if isLoading {
+            Spacer(); ProgressView().tint(appState.themeTextSecondary); Spacer()
+        } else if shown.isEmpty {
+            MWHubEmpty(icon: "bubble.left.and.bubble.right",
+                       title: search.isEmpty ? "No threads yet" : "No matches",
+                       cta: "New Thread") { Task { await create() } }
+        } else {
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 14) {
+                    ForEach(shown) { t in card(t) }
+                }
+                .padding(20)
+            }
+        }
+    }
+
+    private func card(_ t: MWThread) -> some View {
+        Button { open(t.id) } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 14)).foregroundColor(appState.themeAccent)
+                    Spacer()
+                    if t.isPinned { Image(systemName: "pin.fill").font(.system(size: 9)).foregroundColor(appState.themeTextSecondary) }
+                    Text(t.status.capitalized)
+                        .font(.system(size: 8, weight: .bold)).tracking(0.5).foregroundColor(appState.themeTextSecondary)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Capsule().fill(appState.themeAccent.opacity(0.10)))
+                }
+                Text(t.displayName).font(.system(size: 13, weight: .semibold)).foregroundColor(appState.themeText).lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer(minLength: 0)
+            }
+            .padding(14).frame(height: 104, alignment: .top)
+            .background(RoundedRectangle(cornerRadius: 10).fill(appState.themeCard))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(appState.themeBorder, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func open(_ id: String) {
+        appState.selectedThreadId = id   // hub flag stays set → back returns here
+        appState.selectedProjectId = nil; appState.selectedChannelId = nil
+        appState.selectedJournalId = nil; appState.selectedEmailId = nil
+    }
+
+    private func create() async {
+        creating = true
+        defer { creating = false }
+        if let t = try? await MatchaWorkService.shared.createThread(title: nil, initialMessage: nil) {
+            await MainActor.run { open(t.id) }
+        }
+    }
+
+    private func load() async {
+        isLoading = true
+        let list = (try? await MatchaWorkService.shared.listThreads(status: filter.status)) ?? []
+        await MainActor.run { threads = list; isLoading = false }
+    }
+}

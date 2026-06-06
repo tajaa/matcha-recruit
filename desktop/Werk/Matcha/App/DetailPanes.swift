@@ -42,6 +42,12 @@ struct PrimaryDetailPane: View {
                 ArchiveView()
             } else if appState.showJournalsHub {
                 JournalsLibraryView()
+            } else if appState.showProjectsHub {
+                ProjectsLibraryView()
+            } else if appState.showThreadsHub {
+                ThreadsLibraryView()
+            } else if appState.showChannelsHub {
+                ChannelsLibraryView()
             } else {
                 HomeDashboardView()
             }
