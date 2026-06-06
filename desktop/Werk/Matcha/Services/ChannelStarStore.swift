@@ -72,3 +72,49 @@ final class ChannelStarStore {
         UserDefaults.standard.set(Array(starred), forKey: key(for: userId))
     }
 }
+
+/// Per-user starred journals — same client-side UserDefaults model as
+/// `ChannelStarStore` (no backend column, no migration). Surfaces starred
+/// journals in the sidebar Starred pins strip and floats them in the
+/// Journals hub. v2 could move to a `mw_journals.starred_at` column.
+@MainActor
+@Observable
+final class JournalStarStore {
+    static let shared = JournalStarStore()
+
+    private(set) var generation: Int = 0
+    private var starred: Set<String> = []
+    private var userId: String?
+
+    private init() {}
+
+    private func key(for userId: String) -> String { "mw-starred-journals:\(userId)" }
+
+    func bind(userId: String?) {
+        guard self.userId != userId else { return }
+        self.userId = userId
+        if let userId, let raw = UserDefaults.standard.array(forKey: key(for: userId)) as? [String] {
+            starred = Set(raw)
+        } else {
+            starred = []
+        }
+        generation &+= 1
+    }
+
+    func isStarred(_ journalId: String) -> Bool { starred.contains(journalId) }
+
+    func toggle(_ journalId: String) {
+        if starred.contains(journalId) {
+            starred.remove(journalId)
+        } else {
+            starred.insert(journalId)
+        }
+        persist()
+        generation &+= 1
+    }
+
+    private func persist() {
+        guard let userId else { return }
+        UserDefaults.standard.set(Array(starred), forKey: key(for: userId))
+    }
+}

@@ -467,9 +467,13 @@ struct JournalsLibraryView: View {
     }
 
     private var shownJournals: [MWJournal] {
-        if unfiledSelected { return journals.filter { $0.folderId == nil } }
-        if let id = selectedFolderId { return journals.filter { $0.folderId == id } }
-        return journals
+        _ = JournalStarStore.shared.generation
+        let base: [MWJournal]
+        if unfiledSelected { base = journals.filter { $0.folderId == nil } }
+        else if let id = selectedFolderId { base = journals.filter { $0.folderId == id } }
+        else { base = journals }
+        let stars = JournalStarStore.shared
+        return base.sorted { stars.isStarred($0.id) && !stars.isStarred($1.id) }
     }
 
     private var emptyState: some View {
@@ -493,6 +497,8 @@ struct JournalsLibraryView: View {
 
     private func journalCard(_ j: MWJournal) -> some View {
         let kind = JournalKind.from(j.kind)
+        _ = JournalStarStore.shared.generation   // re-render on star changes
+        let starred = JournalStarStore.shared.isStarred(j.id)
         return Button {
             appState.selectedJournalId = j.id   // hub stays set → back returns here
         } label: {
@@ -502,6 +508,9 @@ struct JournalsLibraryView: View {
                         .font(.system(size: 16))
                         .foregroundColor(colorFor(j.color))
                     Spacer()
+                    if starred {
+                        Image(systemName: "star.fill").font(.system(size: 10)).foregroundColor(appState.themeAccent)
+                    }
                     Text(kind.label.uppercased())
                         .font(.system(size: 8, weight: .bold))
                         .tracking(0.5)
@@ -533,6 +542,10 @@ struct JournalsLibraryView: View {
 
     @ViewBuilder
     private func cardMenu(_ j: MWJournal) -> some View {
+        Button(JournalStarStore.shared.isStarred(j.id) ? "Unstar" : "Star") {
+            JournalStarStore.shared.toggle(j.id)
+        }
+        Divider()
         Menu("Move to") {
             Button("Root (unfiled)") { Task { await move(j, to: nil) } }
             Divider()

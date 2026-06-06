@@ -1354,11 +1354,16 @@ struct SidebarStarredView: View {
         let name: String
         let icon: String
         let kind: Kind
-        enum Kind { case project, channel, thread }
+        enum Kind { case project, channel, thread, journal }
     }
 
     var body: some View {
-        Group {
+        // Observe the client-side star stores so the strip reloads when a
+        // channel/journal is (un)starred — those bump their OWN generation,
+        // not the list generations.
+        let _ = ChannelStarStore.shared.generation
+        let _ = JournalStarStore.shared.generation
+        return Group {
             if !pins.isEmpty {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("STARRED")
@@ -1376,6 +1381,9 @@ struct SidebarStarredView: View {
         .task { await load() }
         .onChange(of: appState.projectsListGeneration) { _, _ in Task { await load() } }
         .onChange(of: appState.channelsListGeneration) { _, _ in Task { await load() } }
+        .onChange(of: appState.journalsListGeneration) { _, _ in Task { await load() } }
+        .onChange(of: ChannelStarStore.shared.generation) { _, _ in Task { await load() } }
+        .onChange(of: JournalStarStore.shared.generation) { _, _ in Task { await load() } }
     }
 
     private func row(_ pin: Pin) -> some View {
@@ -1408,6 +1416,7 @@ struct SidebarStarredView: View {
         case .project: return appState.selectedProjectId == pin.id
         case .channel: return appState.selectedChannelId == pin.id
         case .thread:  return appState.selectedThreadId == pin.id
+        case .journal: return appState.selectedJournalId == pin.id
         }
     }
 
@@ -1417,6 +1426,7 @@ struct SidebarStarredView: View {
         case .project: appState.selectedProjectId = pin.id
         case .channel: appState.selectedChannelId = pin.id
         case .thread:  appState.selectedThreadId = pin.id
+        case .journal: appState.selectedJournalId = pin.id
         }
     }
 
@@ -1424,13 +1434,17 @@ struct SidebarStarredView: View {
         async let pj = (try? await MatchaWorkService.shared.listProjects()) ?? []
         async let th = (try? await MatchaWorkService.shared.listThreads()) ?? []
         async let ch = (try? await ChannelsService.shared.listChannels()) ?? []
-        let projects = await pj, threads = await th, channels = await ch
-        let stars = ChannelStarStore.shared
+        async let jr = (try? await JournalService.shared.listJournals()) ?? []
+        let projects = await pj, threads = await th, channels = await ch, journals = await jr
+        let cStars = ChannelStarStore.shared
+        let jStars = JournalStarStore.shared
         var out: [Pin] = []
         out += projects.filter { $0.isPinned ?? false }
             .map { Pin(id: $0.id, name: $0.title, icon: $0.icon ?? "folder", kind: .project) }
-        out += channels.filter { $0.isMember && stars.isStarred($0.id) }
+        out += channels.filter { $0.isMember && cStars.isStarred($0.id) }
             .map { Pin(id: $0.id, name: $0.name, icon: "star.fill", kind: .channel) }
+        out += journals.filter { jStars.isStarred($0.id) }
+            .map { Pin(id: $0.id, name: $0.title, icon: $0.icon ?? "book.closed", kind: .journal) }
         out += threads.filter { $0.isPinned }
             .map { Pin(id: $0.id, name: $0.displayName, icon: "bubble.left.and.bubble.right", kind: .thread) }
         await MainActor.run { pins = out }

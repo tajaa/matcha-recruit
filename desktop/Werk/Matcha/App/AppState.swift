@@ -332,6 +332,7 @@ class AppState {
         isAuthenticated = true
         MatchaWorkService.shared.updateCacheScope(user.id)
         ChannelStarStore.shared.bind(userId: user.id)
+        JournalStarStore.shared.bind(userId: user.id)
         SidebarSectionOrderStore.shared.bind(userId: user.id)
         startPresenceHeartbeat()
         startInboxPolling()
@@ -602,6 +603,7 @@ class AppState {
         showChannelBrowse = false
         ChannelsWebSocket.shared.disconnect()
         ChannelStarStore.shared.bind(userId: nil)
+        JournalStarStore.shared.bind(userId: nil)
         SidebarSectionOrderStore.shared.bind(userId: nil)
         heartbeatTask?.cancel()
         heartbeatTask = nil
