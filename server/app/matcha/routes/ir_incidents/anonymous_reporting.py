@@ -78,7 +78,7 @@ async def generate_anonymous_reporting_token(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Company not found")
-    token = secrets.token_hex(6)
+    token = secrets.token_urlsafe(24)
     async with get_connection() as conn:
         await conn.execute(
             "UPDATE companies SET report_email_token = $1, report_token_used_at = NULL WHERE id = $2",
@@ -201,7 +201,7 @@ async def generate_location_link(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Company not found")
-    token = secrets.token_hex(6)
+    token = secrets.token_urlsafe(24)
     async with get_connection() as conn:
         async with conn.transaction():
             owns = await conn.fetchrow(

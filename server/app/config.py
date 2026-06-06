@@ -211,20 +211,30 @@ def load_settings() -> Settings:
     if not database_url:
         raise ValueError("DATABASE_URL environment variable is required")
 
+    # Production = secrets come from AWS Secrets Manager (set in prod) or an
+    # explicit ENV flag. In prod a missing JWT secret must FAIL CLOSED — the old
+    # random-fallback let the server boot "healthy" while silently invalidating
+    # every session on restart and signing tokens with different keys per process.
+    is_production = bool(secret_id) or os.getenv("ENV", "").lower() in ("prod", "production")
+
     # JWT settings
     jwt_secret_key = os.getenv("JWT_SECRET_KEY", "")
     if not jwt_secret_key:
-        # Generate a default for development, but warn
+        if is_production:
+            raise ValueError("JWT_SECRET_KEY is required in production")
+        # Dev only: generate a throwaway key, but warn.
         import secrets
         jwt_secret_key = secrets.token_urlsafe(32)
-        print("[WARNING] JWT_SECRET_KEY not set. Using random key (sessions won't persist across restarts)")
+        print("[WARNING] JWT_SECRET_KEY not set. Using random key (dev only; sessions won't persist across restarts)")
 
     # Chat JWT settings (separate secret for chat system isolation)
     chat_jwt_secret_key = os.getenv("CHAT_JWT_SECRET_KEY", "")
     if not chat_jwt_secret_key:
+        if is_production:
+            raise ValueError("CHAT_JWT_SECRET_KEY is required in production")
         import secrets
         chat_jwt_secret_key = secrets.token_urlsafe(32)
-        print("[WARNING] CHAT_JWT_SECRET_KEY not set. Using random key (chat sessions won't persist across restarts)")
+        print("[WARNING] CHAT_JWT_SECRET_KEY not set. Using random key (dev only; chat sessions won't persist across restarts)")
 
     database_url_clean = database_url.strip().strip('"')
     database_ssl = os.getenv("DATABASE_SSL", "disable")

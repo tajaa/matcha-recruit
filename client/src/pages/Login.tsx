@@ -71,7 +71,10 @@ export default function Login() {
       localStorage.setItem('matcha_access_token', res.access_token)
       localStorage.setItem('matcha_refresh_token', res.refresh_token)
       invalidateMeCache()
-      navigate(nextParam || roleRoutes[res.user.role] || '/app')
+      // Open-redirect guard: only honor `next` if it's a same-origin relative
+      // path (single leading slash, not `//host` or a scheme).
+      const safeNext = nextParam && nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextParam : null
+      navigate(safeNext || roleRoutes[res.user.role] || '/app')
     } catch {
       setError('Invalid email or password')
     } finally {

@@ -141,7 +141,7 @@ async def download_bulk_upload_template(
 async def bulk_upload_employees_csv(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="CSV file with employee data"),
-    send_invitations: bool = Query(True, description="Send invitation emails immediately"),
+    send_invitations: bool = Query(False, description="Send invitation emails immediately (default OFF to prevent bounce-storms; opt in explicitly)"),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """
@@ -191,6 +191,16 @@ async def bulk_upload_employees_csv(
             detail=f"Missing required columns: {', '.join(missing_columns)}"
         )
 
+    # Cap rows per upload — bounds the work + email blast radius when
+    # send_invitations is on. Split larger rosters into multiple files.
+    rows = list(csv_reader)
+    MAX_BULK_ROWS = 1000
+    if len(rows) > MAX_BULK_ROWS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Too many rows: {len(rows)} (max {MAX_BULK_ROWS} per upload). Split into smaller files.",
+        )
+
     # Process rows
     created = 0
     failed = 0
@@ -235,7 +245,7 @@ async def bulk_upload_employees_csv(
         logger.info("[BulkUpload] Integration flags: google_auto_provision=%s, slack_auto_provision=%s",
                     google_workspace_auto_provision, slack_auto_provision)
 
-        for row_num, row in enumerate(csv_reader, start=2):  # Start at 2 to account for header
+        for row_num, row in enumerate(rows, start=2):  # Start at 2 to account for header
             try:
                 # Validate email format
                 email = row.get('email', '').strip()

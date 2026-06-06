@@ -182,11 +182,18 @@ async def lifespan(app: FastAPI):
     print("[Matcha] Server shutdown complete")
 
 
+# Interactive API docs + OpenAPI schema enumerate every endpoint/param/model —
+# a free attack-surface map. Expose them only in development.
+_debug = os.getenv("DEBUG", "").lower() in ("1", "true")
+
 app = FastAPI(
     title="Matcha Recruit API",
     description="AI-powered recruitment tool with voice interviews",
     version="0.1.0",
     lifespan=lifespan,
+    docs_url="/docs" if _debug else None,
+    redoc_url="/redoc" if _debug else None,
+    openapi_url="/openapi.json" if _debug else None,
 )
 
 # CORS - allow frontend dev server
@@ -206,7 +213,7 @@ _cors_kwargs: dict = dict(
     allow_headers=["*"],
 )
 # Only allow the wildcard localhost regex in development
-if os.getenv("DEBUG", "").lower() in ("1", "true"):
+if _debug:
     _cors_kwargs["allow_origin_regex"] = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
 app.add_middleware(CORSMiddleware, **_cors_kwargs)

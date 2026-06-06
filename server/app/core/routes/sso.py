@@ -1,7 +1,10 @@
 """SAML 2.0 SSO routes for enterprise single sign-on."""
 
+import ipaddress
 import logging
+import socket
 from uuid import UUID
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Request, Depends, status
 from fastapi.responses import RedirectResponse, Response
@@ -32,6 +35,38 @@ async def _assert_company_access(current_user, company_id: UUID) -> None:
     user_company_id = await get_client_company_id(current_user)
     if str(user_company_id) != str(company_id):
         raise HTTPException(status_code=403, detail="Not authorized for this company's SSO config")
+
+
+def _assert_safe_external_url(url: str) -> None:
+    """SSRF guard for server-side metadata fetches (parse_remote).
+
+    Reject non-http(s) schemes and any host that resolves to a private,
+    loopback, link-local (incl. 169.254.169.254 cloud metadata), reserved, or
+    multicast address. Best-effort against DNS rebinding — the lib re-resolves on
+    fetch — but it raises the bar well above an open SSRF for an authenticated
+    client-triggered fetch.
+    """
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid metadata URL")
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="Metadata URL must be http(s)")
+    host = parsed.hostname
+    if not host:
+        raise HTTPException(status_code=400, detail="Invalid metadata URL host")
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Cannot resolve metadata URL host")
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            raise HTTPException(status_code=400, detail="Metadata URL resolves to a disallowed address")
 
 
 # ── Pydantic models ─────────────────────────────────────────────────────────
@@ -508,6 +543,7 @@ async def upsert_sso_config_from_metadata(
     (e.g. from Okta or Azure AD) and we extract the entity ID, SSO URL, and cert.
     """
     await _assert_company_access(current_user, company_id)
+    _assert_safe_external_url(body.metadata_url)
     try:
         idp_data = OneLogin_Saml2_IdPMetadataParser.parse_remote(body.metadata_url)
     except Exception as e:
