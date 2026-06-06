@@ -1258,12 +1258,24 @@ class ProjectDetailViewModel {
     /// 1-click AI catch-up summary for a ticket. Stores the result in
     /// `taskSummaries[taskId]`; on failure stores a soft retry message so the
     /// UI always shows something.
-    func summarizeTask(taskId: String) async {
-        guard let pid = project?.id else { return }
+    /// `projectId` should be the ticket's own `project_id` (always populated on
+    /// the task payload) — the viewer can be driven by a VM whose `project`
+    /// hasn't loaded (Home, split panes, embedded boards), and the old
+    /// `guard let pid = project?.id` path returned SILENTLY there: no request,
+    /// no message, sparkle button looked dead. Fall back to the VM project only
+    /// when no explicit id is passed.
+    func summarizeTask(taskId: String, projectId: String? = nil) async {
+        guard let pid = projectId ?? project?.id else {
+            await MainActor.run {
+                taskSummaries[taskId] = "Couldn't generate a summary — missing project context."
+            }
+            return
+        }
         do {
             let summary = try await service.summarizeTask(projectId: pid, taskId: taskId)
             await MainActor.run { taskSummaries[taskId] = summary }
         } catch {
+            print("[summarizeTask] failed project=\(pid) task=\(taskId): \(error)")
             await MainActor.run {
                 taskSummaries[taskId] = "Couldn't generate a summary right now — try again."
             }

@@ -223,7 +223,7 @@ struct TaskViewerSheet: View {
                 Button {
                     Task {
                         isSummarizing = true
-                        await viewModel.summarizeTask(taskId: task.id)
+                        await viewModel.summarizeTask(taskId: task.id, projectId: task.projectId)
                         isSummarizing = false
                         // Auto-expand the (otherwise collapsed) AI Summary so the
                         // user sees the result of their click.
