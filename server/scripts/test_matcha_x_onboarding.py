@@ -23,6 +23,7 @@ Revert model mode afterwards: ./venv/bin/python scripts/test_matcha_x_onboarding
 """
 
 import asyncio
+import datetime as dt
 import io
 import json
 import os
@@ -139,6 +140,119 @@ def activate_incidents(email: str):
     print(f"{DIM}refresh/re-login in the UI; Subscribe gate is now bypassed.{RESET}")
 
 
+def _utc(d: dt.date) -> dt.datetime:
+    return dt.datetime.combine(d, dt.time(9, 0), tzinfo=dt.timezone.utc)
+
+
+async def _seed_discipline(email: str):
+    """Insert a realistic spread of progressive_discipline rows for the tenant's
+    employees so /app/discipline looks populated. Direct insert (no API) so it
+    skips manager emails + the supersede engine and lets us set every status /
+    signature state explicitly. DEV ONLY — existing table, no DDL."""
+    import asyncpg  # type: ignore
+
+    url = _database_url()
+    if not url:
+        fail("Could not resolve DATABASE_URL")
+    conn = await asyncpg.connect(url)
+    try:
+        row = await conn.fetchrow(
+            """
+            SELECT c.company_id AS company_id, comp.name AS company_name, c.user_id AS issued_by
+            FROM clients c
+            JOIN users u ON u.id = c.user_id
+            JOIN companies comp ON comp.id = c.company_id
+            WHERE u.email = $1
+            """,
+            email,
+        )
+        if not row:
+            fail(f"no company found for {email}")
+        company_id, issued_by = row["company_id"], row["issued_by"]
+        emps = await conn.fetch(
+            "SELECT id, first_name, last_name FROM employees WHERE org_id = $1 ORDER BY created_at LIMIT 10",
+            company_id,
+        )
+        if len(emps) < 7:
+            fail(f"need >=7 employees to seed a good spread, found {len(emps)}")
+
+        today = dt.date.today()
+
+        def issued(days_ago: int) -> dt.date:
+            return today - dt.timedelta(days=days_ago)
+
+        # Wipe any prior seed for a clean, idempotent re-run.
+        await conn.execute("DELETE FROM progressive_discipline WHERE company_id = $1", company_id)
+
+        # (emp_idx, type, severity, infraction, days_ago, lookback, status, sig,
+        #  description, expected_improvement, review_in_days, override_reason)
+        spec = [
+            (0, "verbal_warning", "minor", "attendance", 210, 6, "escalated", "refused",
+             "Three unexcused late arrivals within a two-week period.", None, None, None),
+            (0, "written_warning", "moderate", "attendance", 55, 9, "active", "signed",
+             "Continued tardiness after a prior verbal warning.", "Arrive by scheduled start time for 60 days.", 60, None),
+            (1, "written_warning", "moderate", "performance", 30, 9, "active", "signed",
+             "Repeated failure to meet documented quality targets.", "Meet the agreed QA threshold for two review cycles.", 45, None),
+            (2, "final_warning", "severe", "safety", 14, 12, "active", "requested",
+             "Bypassed a required lockout/tagout procedure on the line.", "Zero safety-procedure deviations going forward.", 30, None),
+            (3, "verbal_warning", "moderate", "policy_violation", 410, 6, "expired", "refused",
+             "Used a personal device on the floor against posted policy.", None, None, None),
+            (4, "final_warning", "severe", "harassment", 21, 12, "active", "signed",
+             "Substantiated complaint of inappropriate conduct toward a coworker.",
+             "Complete harassment-prevention training; no further incidents.", 30,
+             "Conduct severity warrants skipping intermediate steps per HR review."),
+            (5, "suspension", "immediate_written", "gross_misconduct", 7, 12, "pending_signature", "requested",
+             "Falsified time records across multiple shifts.", "Unpaid 3-day suspension; full compliance on return.", 14, None),
+            (6, "pip", "severe", "performance", 10, 9, "active", "physical_uploaded",
+             "Sustained underperformance across two evaluation periods.",
+             "Hit all PIP milestones over the next 60 days.", 60, None),
+        ]
+
+        first_attendance_id = None
+        created = []
+        for (ei, dtype, sev, infraction, days, lookback, status, sig,
+             desc, improve, review_days, override_reason) in spec:
+            emp = emps[ei]
+            issued_date = issued(days)
+            expires = _utc(issued_date + dt.timedelta(days=30 * lookback))
+            review_date = (issued_date + dt.timedelta(days=review_days)) if review_days else None
+            escalated_from = first_attendance_id if (status == "active" and infraction == "attendance" and dtype == "written_warning") else None
+            sig_requested_at = _utc(issued_date + dt.timedelta(days=1)) if sig in ("requested", "signed", "physical_uploaded") else None
+            sig_completed_at = _utc(issued_date + dt.timedelta(days=3)) if sig in ("signed", "physical_uploaded") else None
+            meeting_at = _utc(issued_date + dt.timedelta(days=1)) if status in ("active", "pending_signature", "escalated", "expired") else None
+
+            rec_id = await conn.fetchval(
+                """
+                INSERT INTO progressive_discipline (
+                    employee_id, company_id, discipline_type, issued_date, issued_by,
+                    description, expected_improvement, review_date, status, infraction_type,
+                    severity, lookback_months, expires_at, escalated_from_id, override_level,
+                    override_reason, signature_status, signature_requested_at,
+                    signature_completed_at, meeting_held_at
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+                RETURNING id
+                """,
+                emp["id"], company_id, dtype, issued_date, issued_by,
+                desc, improve, review_date, status, infraction,
+                sev, lookback, expires, escalated_from, bool(override_reason),
+                override_reason, sig, sig_requested_at, sig_completed_at, meeting_at,
+            )
+            if infraction == "attendance" and dtype == "verbal_warning":
+                first_attendance_id = rec_id
+            created.append((f"{emp['first_name']} {emp['last_name']}", dtype, status, sig))
+        return row["company_name"], created
+    finally:
+        await conn.close()
+
+
+def seed_discipline(email: str):
+    company_name, created = asyncio.run(_seed_discipline(email))
+    ok(f"seeded {len(created)} performance-action records for {company_name}")
+    for name, dtype, status, sig in created:
+        print(f"  {DIM}· {name:22} {dtype:16} {status:18} sig={sig}{RESET}")
+    print(f"{DIM}refresh /app/discipline to view.{RESET}")
+
+
 def build_csv() -> bytes:
     """10 employees — 5 Los Angeles/CA, 5 Denver/CO — to mirror the two offices."""
     rows = [
@@ -234,6 +348,9 @@ def main():
         return
     if len(sys.argv) >= 3 and sys.argv[1] == "--activate":
         activate_incidents(sys.argv[2])
+        return
+    if len(sys.argv) >= 3 and sys.argv[1] == "--seed-discipline":
+        seed_discipline(sys.argv[2])
         return
     if len(sys.argv) >= 3 and sys.argv[1] == "--check-compliance":
         # Verify the compliance_lite read access against an already-built X tenant
