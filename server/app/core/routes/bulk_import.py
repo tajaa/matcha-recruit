@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
 from fastapi.responses import PlainTextResponse
 
 from ...database import get_connection
+from ..dependencies import require_admin
 from ..models.bulk_import import BulkImportResult
 from ..services.bulk_importer import (
     BulkImporter,
@@ -14,7 +15,7 @@ importer = BulkImporter()
 
 
 @router.post("/companies", response_model=BulkImportResult)
-async def bulk_import_companies(file: UploadFile = File(...)):
+async def bulk_import_companies(file: UploadFile = File(...), current_user=Depends(require_admin)):
     """
     Bulk import companies from CSV or JSON file.
 
@@ -58,7 +59,7 @@ async def bulk_import_companies(file: UploadFile = File(...)):
 
 
 @router.post("/positions", response_model=BulkImportResult)
-async def bulk_import_positions(file: UploadFile = File(...)):
+async def bulk_import_positions(file: UploadFile = File(...), current_user=Depends(require_admin)):
     """
     Bulk import positions from CSV or JSON file.
 

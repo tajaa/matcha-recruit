@@ -843,7 +843,10 @@ async def get_vocabulary_stats(
 
 
 @router.get("/interviews/{interview_id}", response_model=InterviewResponse)
-async def get_interview(interview_id: UUID):
+async def get_interview(
+    interview_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
     """Get an interview by ID."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -858,6 +861,14 @@ async def get_interview(interview_id: UUID):
         )
         if not row:
             raise HTTPException(status_code=404, detail="Interview not found")
+
+        # Tenant isolation: transcripts/analysis are confidential. Clients may
+        # only read interviews belonging to their own company (404, not 403, to
+        # avoid leaking existence).
+        if current_user.role != "admin":
+            owned = await get_client_company_id(current_user)
+            if str(row["company_id"]) != str(owned):
+                raise HTTPException(status_code=404, detail="Interview not found")
 
         raw_culture_data = None
         if row["raw_culture_data"]:
@@ -893,8 +904,16 @@ async def get_interview(interview_id: UUID):
 
 
 @router.get("/companies/{company_id}/interviews", response_model=list[InterviewResponse])
-async def list_company_interviews(company_id: UUID):
+async def list_company_interviews(
+    company_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
     """List all interviews for a company."""
+    # Tenant isolation: a client may only list its own company's interviews.
+    if current_user.role != "admin":
+        owned = await get_client_company_id(current_user)
+        if str(company_id) != str(owned):
+            raise HTTPException(status_code=404, detail="Company not found")
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
@@ -936,12 +955,15 @@ async def list_company_interviews(company_id: UUID):
 
 
 @router.get("/interviews/{interview_id}/analysis")
-async def get_interview_analysis(interview_id: UUID):
+async def get_interview_analysis(
+    interview_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
     """Get the conversation analysis for an interview."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            SELECT conversation_analysis
+            SELECT company_id, conversation_analysis
             FROM interviews
             WHERE id = $1
             """,
@@ -949,6 +971,12 @@ async def get_interview_analysis(interview_id: UUID):
         )
         if not row:
             raise HTTPException(status_code=404, detail="Interview not found")
+
+        # Tenant isolation: clients may only read their own company's analysis.
+        if current_user.role != "admin":
+            owned = await get_client_company_id(current_user)
+            if str(row["company_id"]) != str(owned):
+                raise HTTPException(status_code=404, detail="Interview not found")
 
         if not row["conversation_analysis"]:
             raise HTTPException(status_code=404, detail="Analysis not yet generated for this interview")

@@ -14,6 +14,7 @@ from onelogin.saml2.idp_metadata_parser import OneLogin_Saml2_IdPMetadataParser
 from ...config import get_settings
 from ...database import get_connection
 from ..services.auth import create_access_token, create_refresh_token
+from ..services.redis_cache import get_redis_cache
 from ..dependencies import require_admin
 from ...matcha.dependencies import require_admin_or_client, get_client_company_id
 
@@ -256,6 +257,29 @@ async def assertion_consumer_service(request: Request):
     if not auth.is_authenticated():
         raise HTTPException(status_code=403, detail="Authentication failed")
 
+    # Replay protection: IdP-initiated SSO carries no InResponseTo, so the
+    # library's replay check is skipped. Enforce one-time use of each assertion
+    # ID via Redis SETNX so a captured SAMLResponse can't be replayed within its
+    # NotOnOrAfter window. (Degrades open if Redis is unavailable — logged.)
+    try:
+        assertion_id = auth.get_last_assertion_id()
+    except Exception:
+        assertion_id = None
+    if assertion_id:
+        redis = get_redis_cache()
+        if redis is not None:
+            try:
+                fresh = await redis.set(
+                    f"saml_assertion:{assertion_id}", "1", nx=True, ex=86400
+                )
+                if not fresh:
+                    logger.warning("SAML assertion replay blocked: %s", assertion_id)
+                    raise HTTPException(status_code=403, detail="SAML assertion already used")
+            except HTTPException:
+                raise
+            except Exception as e:  # noqa: BLE001 — cache failure must not block legit login
+                logger.warning("SAML replay cache unavailable (%s); proceeding", e)
+
     # Extract user info from SAML attributes
     nameid = auth.get_nameid()  # Usually the email
     attributes = auth.get_attributes()
@@ -285,15 +309,47 @@ async def assertion_consumer_service(request: Request):
         or "User"
     )
 
+    # The IdP may only assert identities within ITS OWN tenant and verified email
+    # domain. Without this binding, a correctly-signed assertion from ANY
+    # SSO-enabled customer could name an arbitrary email — a user in another
+    # company, or a platform admin — and the ACS would log in as them. The
+    # signature is valid (signed by that customer's own cert; config is selected
+    # by their issuer), so identity binding is the only thing standing between a
+    # tenant's IdP and full cross-tenant / admin account takeover.
+    config_domain = (config["email_domain"] or "").lower().strip()
+    email_domain = email.split("@", 1)[1] if "@" in email else ""
+    if not config_domain or email_domain != config_domain:
+        logger.warning("SSO domain mismatch: %r not permitted for company %s",
+                       email_domain, config["company_id"])
+        raise HTTPException(status_code=403, detail="Email domain not permitted for this IdP")
+
     # Find or create the user
     async with get_connection() as conn:
         user = await conn.fetchrow(
-            "SELECT id, email, role, is_active FROM users WHERE lower(email) = $1",
+            "SELECT id, email, role, is_active, is_suspended FROM users WHERE lower(email) = $1",
             email,
         )
 
         if user and not user["is_active"]:
             raise HTTPException(status_code=403, detail="Account is disabled")
+        if user and user["is_suspended"]:
+            raise HTTPException(status_code=403, detail="Account is suspended")
+
+        if user:
+            # An existing user must ALREADY belong to this IdP's company. Blocks a
+            # tenant's IdP from asserting (and logging in as) a user in another
+            # company or a platform admin (admins aren't linked via employees/clients).
+            member = await conn.fetchval(
+                """SELECT 1 FROM employees WHERE user_id = $1 AND company_id = $2
+                   UNION
+                   SELECT 1 FROM clients   WHERE user_id = $1 AND company_id = $2
+                   LIMIT 1""",
+                user["id"], config["company_id"],
+            )
+            if not member:
+                logger.warning("SSO cross-company login blocked: user %s not in company %s",
+                               email, config["company_id"])
+                raise HTTPException(status_code=403, detail="User does not belong to this company")
 
         if not user:
             if not config["auto_provision"]:
@@ -302,8 +358,15 @@ async def assertion_consumer_service(request: Request):
                     detail="Account not found. Contact your administrator to be provisioned.",
                 )
 
-            # Auto-provision: create user with the configured default role
+            # Auto-provision: create user with the configured default role.
+            # Defense-in-depth: re-validate the stored default_role against the
+            # allowlist (a row written before the allowlist existed could carry
+            # 'admin' and silently mint a platform admin here).
             role = config["default_role"]
+            if role not in ALLOWED_SSO_ROLES:
+                logger.warning("SSO config for company %s has invalid default_role %r; refusing to provision",
+                               config["company_id"], role)
+                raise HTTPException(status_code=403, detail="SSO is misconfigured (invalid default role)")
             user = await conn.fetchrow(
                 """INSERT INTO users (email, password_hash, role, is_active)
                    VALUES ($1, $2, $3, true)

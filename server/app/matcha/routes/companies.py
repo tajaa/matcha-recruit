@@ -118,8 +118,9 @@ async def create_company(
 
 
 @router.get("", response_model=list[CompanyResponse])
-async def list_companies():
-    """List all companies with interview counts."""
+async def list_companies(current_user: CurrentUser = Depends(require_admin)):
+    """List all companies with interview counts. Platform-admin only — returns
+    the entire tenant roster incl. EIN/PII, so it must never be public."""
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
