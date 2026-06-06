@@ -136,7 +136,7 @@ export default function Customers() {
   }, [tab, registrations, individuals])
 
   const counts = useMemo(() => {
-    const c = { all: 0, free: 0, lite: 0, platform: 0, personal: individuals?.length ?? 0 }
+    const c = { all: 0, free: 0, lite: 0, x: 0, platform: 0, personal: individuals?.length ?? 0 }
     if (registrations) {
       c.all = registrations.length
       for (const r of registrations) {
