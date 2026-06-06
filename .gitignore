@@ -11,6 +11,8 @@ ENV/
 # Environment
 .env
 .env.local
+.env.bak*
+*.env.bak*
 
 # Secrets / credentials
 client_secret*.json
