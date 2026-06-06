@@ -17,17 +17,33 @@ import SwiftUI
 struct PrimaryDetailPane: View {
     @Environment(AppState.self) private var appState
 
+    // A category "context" persists its hub (rail + grid) even while a specific
+    // item is open — the hub view embeds the detail in its right pane, so the
+    // rail never unmounts. Context is whichever item is selected, else whichever
+    // hub flag is set. selected*Id wins so a cross-link (e.g. project → channel)
+    // switches rails to the active item.
+    private enum WorkCategory { case threads, projects, journals, channels }
+    private var workCategory: WorkCategory? {
+        if appState.selectedThreadId != nil  { return .threads }
+        if appState.selectedProjectId != nil { return .projects }
+        if appState.selectedJournalId != nil { return .journals }
+        if appState.selectedChannelId != nil { return .channels }
+        if appState.showThreadsHub  { return .threads }
+        if appState.showProjectsHub { return .projects }
+        if appState.showJournalsHub { return .journals }
+        if appState.showChannelsHub { return .channels }
+        return nil
+    }
+
     var body: some View {
         Group {
-            if let threadId = appState.selectedThreadId {
-                ThreadDetailView(threadId: threadId)
-                    .onChange(of: threadId) { appState.showSkills = false }
-            } else if let projectId = appState.selectedProjectId {
-                ProjectDetailView(projectId: projectId)
-            } else if let journalId = appState.selectedJournalId {
-                JournalDetailView(journalId: journalId)
-            } else if let channelId = appState.selectedChannelId {
-                ChannelDetailView(channelId: channelId)
+            if let cat = workCategory {
+                switch cat {
+                case .threads:  ThreadsLibraryView()
+                case .projects: ProjectsLibraryView()
+                case .journals: JournalsLibraryView()
+                case .channels: ChannelsLibraryView()
+                }
             } else if let emailId = appState.selectedEmailId {
                 EmailDetailView(emailId: emailId)
             } else if appState.showChannelBrowse {
@@ -40,18 +56,17 @@ struct PrimaryDetailPane: View {
                 SkillsView()
             } else if appState.showArchive {
                 ArchiveView()
-            } else if appState.showJournalsHub {
-                JournalsLibraryView()
-            } else if appState.showProjectsHub {
-                ProjectsLibraryView()
-            } else if appState.showThreadsHub {
-                ThreadsLibraryView()
-            } else if appState.showChannelsHub {
-                ChannelsLibraryView()
             } else {
                 HomeDashboardView()
             }
         }
+        // Opening an item from ANY entry point (sidebar pin, recent row,
+        // notification, cross-link) flips its hub on, so the hub's rail shows
+        // and "back" (clearing the id) lands on the grid rather than Home.
+        .onChange(of: appState.selectedThreadId)  { _, v in if v != nil { appState.showThreadsHub = true; appState.showSkills = false } }
+        .onChange(of: appState.selectedProjectId) { _, v in if v != nil { appState.showProjectsHub = true } }
+        .onChange(of: appState.selectedJournalId) { _, v in if v != nil { appState.showJournalsHub = true } }
+        .onChange(of: appState.selectedChannelId) { _, v in if v != nil { appState.showChannelsHub = true } }
     }
 }
 

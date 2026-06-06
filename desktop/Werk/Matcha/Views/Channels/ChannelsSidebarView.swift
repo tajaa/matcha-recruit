@@ -647,6 +647,7 @@ struct ChannelsLibraryView: View {
     @State private var filter: Filter = .mine
     @State private var showCreate = false
     @State private var starGen = 0
+    @State private var railSearch = ""
 
     enum Filter: String, CaseIterable, Identifiable {
         case mine = "Mine", starred = "Starred"
@@ -656,19 +657,74 @@ struct ChannelsLibraryView: View {
     private let columns = [GridItem(.adaptive(minimum: 220, maximum: 300), spacing: 14)]
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider().background(appState.themeBorder)
-            content
+        HSplitView {
+            rail.frame(minWidth: 232, idealWidth: 258, maxWidth: 320)
+            Group {
+                if let id = appState.selectedChannelId {
+                    ChannelDetailView(channelId: id)
+                } else {
+                    VStack(spacing: 0) {
+                        header
+                        Divider().background(appState.themeBorder)
+                        content
+                    }
+                    .background(ThemeRadialBackground())
+                }
+            }
+            .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(ThemeRadialBackground())
         .task { await load() }
         .onChange(of: appState.channelsListGeneration) { _, _ in Task { await load() } }
         .sheet(isPresented: $showCreate) {
             CreateChannelSheet { ch in
                 appState.channelsListGeneration &+= 1
                 open(ch.id)
+            }
+        }
+    }
+
+    // ── Rail ────────────────────────────────────────────────────────────
+    private var railChannels: [ChannelSummary] {
+        _ = starGen
+        let stars = ChannelStarStore.shared
+        var out = channels.filter { $0.isMember }
+        if !railSearch.isEmpty { out = out.filter { $0.name.localizedCaseInsensitiveContains(railSearch) } }
+        return out.sorted { (stars.isStarred($0.id) ? 1 : 0, $0.lastMessageAt ?? "") > (stars.isStarred($1.id) ? 1 : 0, $1.lastMessageAt ?? "") }
+    }
+
+    private var rail: some View {
+        MWHubRail {
+            VStack(spacing: 8) {
+                HStack {
+                    Text("Channels").font(.system(size: 12, weight: .semibold)).foregroundColor(appState.themeTextSecondary)
+                    Spacer()
+                    MWHubRailIconButton(icon: "magnifyingglass", help: "Browse") { browse() }
+                    MWHubRailIconButton(icon: "plus", help: "New channel") { showCreate = true }
+                }
+                HStack(spacing: 6) {
+                    Image(systemName: "line.3.horizontal.decrease").font(.system(size: 10)).foregroundColor(appState.themeTextSecondary)
+                    TextField("Filter", text: $railSearch).textFieldStyle(.plain)
+                        .font(.system(size: 11)).foregroundColor(appState.themeText)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .background(Capsule().fill(appState.themeText.opacity(0.06)))
+            }
+        } rows: {
+            MWHubRailRow(icon: "square.grid.2x2", title: "All Channels",
+                         selected: appState.selectedChannelId == nil) {
+                appState.selectedChannelId = nil
+            }
+            ForEach(railChannels) { c in
+                let starred = ChannelStarStore.shared.isStarred(c.id)
+                MWHubRailRow(icon: starred ? "star.fill" : "number",
+                             title: c.name,
+                             selected: appState.selectedChannelId == c.id,
+                             accent: starred,
+                             trailing: c.unreadCount > 0 ? "\(min(c.unreadCount, 99))" : nil) { open(c.id) }
+                    .contextMenu {
+                        Button(starred ? "Unstar" : "Star") { ChannelStarStore.shared.toggle(c.id); starGen += 1 }
+                    }
             }
         }
     }

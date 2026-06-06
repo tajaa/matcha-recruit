@@ -585,6 +585,7 @@ struct ProjectsLibraryView: View {
     @State private var search = ""
     @State private var filter: Filter = .all
     @State private var showTypePicker = false
+    @State private var railSearch = ""
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All", pinned = "Pinned"
@@ -600,15 +601,81 @@ struct ProjectsLibraryView: View {
     ]
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider().background(appState.themeBorder)
-            content
+        HSplitView {
+            rail.frame(minWidth: 232, idealWidth: 258, maxWidth: 320)
+            Group {
+                if let id = appState.selectedProjectId {
+                    ProjectDetailView(projectId: id)
+                } else {
+                    VStack(spacing: 0) {
+                        header
+                        Divider().background(appState.themeBorder)
+                        content
+                    }
+                    .background(ThemeRadialBackground())
+                }
+            }
+            .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(ThemeRadialBackground())
         .task { await load() }
         .onChange(of: appState.projectsListGeneration) { _, _ in Task { await load() } }
+    }
+
+    // ── Rail ────────────────────────────────────────────────────────────
+    private var railProjects: [MWProject] {
+        var out = projects
+        if !railSearch.isEmpty { out = out.filter { $0.title.localizedCaseInsensitiveContains(railSearch) } }
+        return out.sorted { ($0.isPinned ?? false) && !($1.isPinned ?? false) }
+    }
+
+    private var rail: some View {
+        MWHubRail {
+            VStack(spacing: 8) {
+                HStack {
+                    Text("Projects").font(.system(size: 12, weight: .semibold)).foregroundColor(appState.themeTextSecondary)
+                    Spacer()
+                    MWHubRailIconButton(icon: "plus", help: "New project") { showTypePicker = true }
+                        .popover(isPresented: $showTypePicker) { typeMenu }
+                }
+                HStack(spacing: 6) {
+                    Image(systemName: "line.3.horizontal.decrease").font(.system(size: 10)).foregroundColor(appState.themeTextSecondary)
+                    TextField("Filter", text: $railSearch).textFieldStyle(.plain)
+                        .font(.system(size: 11)).foregroundColor(appState.themeText)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .background(Capsule().fill(appState.themeText.opacity(0.06)))
+            }
+        } rows: {
+            MWHubRailRow(icon: "square.grid.2x2", title: "All Projects",
+                         selected: appState.selectedProjectId == nil) {
+                appState.selectedProjectId = nil
+            }
+            ForEach(railProjects) { p in
+                MWHubRailRow(icon: p.icon ?? "folder",
+                             title: p.title,
+                             selected: appState.selectedProjectId == p.id,
+                             accent: p.isPinned ?? false) { open(p) }
+                    .contextMenu {
+                        Button(p.isPinned ?? false ? "Unpin" : "Pin") { Task { await togglePin(p) } }
+                    }
+            }
+        }
+    }
+
+    private var typeMenu: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("New Project").font(.system(size: 12, weight: .semibold))
+                .foregroundColor(appState.themeTextSecondary).padding(.bottom, 4)
+            ForEach(types, id: \.type) { t in
+                Button { showTypePicker = false; create(type: t.type) } label: {
+                    HStack { Image(systemName: t.icon).frame(width: 16); Text(t.label).font(.system(size: 12)); Spacer() }
+                        .padding(.vertical, 4).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).foregroundColor(appState.themeText)
+            }
+        }
+        .padding(12).frame(width: 200)
     }
 
     private var shown: [MWProject] {
@@ -639,26 +706,14 @@ struct ProjectsLibraryView: View {
     }
 
     private var newButton: some View {
+        // Popover is anchored on the always-present rail "+" button, so this
+        // header button just toggles the shared state.
         Button { showTypePicker = true } label: {
             HStack(spacing: 5) { Image(systemName: "plus"); Text("New Project").font(.system(size: 12, weight: .semibold)) }
                 .padding(.horizontal, 12).padding(.vertical, 7)
                 .background(appState.themeAccent).foregroundColor(appState.themeOnAccent).cornerRadius(8)
         }
         .buttonStyle(.plain)
-        .popover(isPresented: $showTypePicker) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("New Project").font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(appState.themeTextSecondary).padding(.bottom, 4)
-                ForEach(types, id: \.type) { t in
-                    Button { showTypePicker = false; create(type: t.type) } label: {
-                        HStack { Image(systemName: t.icon).frame(width: 16); Text(t.label).font(.system(size: 12)); Spacer() }
-                            .padding(.vertical, 4).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain).foregroundColor(appState.themeText)
-                }
-            }
-            .padding(12).frame(width: 200)
-        }
     }
 
     @ViewBuilder private var content: some View {
@@ -767,6 +822,80 @@ struct MWHubSearch: View {
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
         .background(Capsule().fill(appState.themeText.opacity(0.06)))
+    }
+}
+
+/// Persistent left rail for a hub: a small titled header + a scrollable list of
+/// item rows. Stays mounted while a specific item is open in the right pane, so
+/// the user can switch items / get back to the grid without losing context.
+struct MWHubRail<Header: View, Rows: View>: View {
+    @ViewBuilder var header: () -> Header
+    @ViewBuilder var rows: () -> Rows
+    @Environment(AppState.self) private var appState
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header()
+                .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 8)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) { rows() }
+                    .padding(.horizontal, 8).padding(.bottom, 12)
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(appState.themeSidebar.opacity(0.5))
+    }
+}
+
+/// One row in a hub rail. `accent` tints the leading icon (star/pin); `selected`
+/// fills the row. `trailing` is an optional small badge (unread count, status).
+struct MWHubRailRow: View {
+    let icon: String
+    let title: String
+    let selected: Bool
+    var accent: Bool = false
+    var trailing: String? = nil
+    let action: () -> Void
+    @Environment(AppState.self) private var appState
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Image(systemName: icon)
+                    .font(.system(size: 11))
+                    .foregroundColor(accent || selected ? appState.themeAccent : appState.themeTextSecondary)
+                    .frame(width: 15)
+                Text(title)
+                    .font(.system(size: 12, weight: selected ? .semibold : .regular))
+                    .foregroundColor(appState.themeText.opacity(0.92))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if let trailing {
+                    Text(trailing)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(appState.themeTextSecondary)
+                }
+            }
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: 6)
+                .fill(selected ? appState.themeAccent.opacity(0.14) : Color.clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Small icon button used in hub rail headers (New / Browse).
+struct MWHubRailIconButton: View {
+    let icon: String
+    let help: String
+    let action: () -> Void
+    @Environment(AppState.self) private var appState
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 12))
+                .foregroundColor(appState.themeTextSecondary)
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 }
 

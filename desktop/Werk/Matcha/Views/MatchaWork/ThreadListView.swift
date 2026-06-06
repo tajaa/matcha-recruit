@@ -398,6 +398,7 @@ struct ThreadsLibraryView: View {
     @State private var search = ""
     @State private var filter: Filter = .all
     @State private var creating = false
+    @State private var railSearch = ""
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All", active = "Active", finalized = "Finalized"
@@ -408,15 +409,62 @@ struct ThreadsLibraryView: View {
     private let columns = [GridItem(.adaptive(minimum: 220, maximum: 300), spacing: 14)]
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider().background(appState.themeBorder)
-            content
+        HSplitView {
+            rail.frame(minWidth: 232, idealWidth: 258, maxWidth: 320)
+            Group {
+                if let id = appState.selectedThreadId {
+                    ThreadDetailView(threadId: id)
+                } else {
+                    VStack(spacing: 0) {
+                        header
+                        Divider().background(appState.themeBorder)
+                        content
+                    }
+                    .background(ThemeRadialBackground())
+                }
+            }
+            .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(ThemeRadialBackground())
         .task { await load() }
         .onChange(of: filter) { _, _ in Task { await load() } }
+    }
+
+    // ── Rail ────────────────────────────────────────────────────────────
+    private var railThreads: [MWThread] {
+        let base = railSearch.isEmpty ? threads : threads.filter { $0.displayName.localizedCaseInsensitiveContains(railSearch) }
+        return base.sorted { ($0.isPinned ? 1 : 0, $0.lastActivityAt) > ($1.isPinned ? 1 : 0, $1.lastActivityAt) }
+    }
+
+    private var rail: some View {
+        MWHubRail {
+            VStack(spacing: 8) {
+                HStack {
+                    Text("Threads").font(.system(size: 12, weight: .semibold)).foregroundColor(appState.themeTextSecondary)
+                    Spacer()
+                    if creating { ProgressView().controlSize(.small) }
+                    else { MWHubRailIconButton(icon: "plus", help: "New thread") { Task { await create() } } }
+                }
+                HStack(spacing: 6) {
+                    Image(systemName: "line.3.horizontal.decrease").font(.system(size: 10)).foregroundColor(appState.themeTextSecondary)
+                    TextField("Filter", text: $railSearch).textFieldStyle(.plain)
+                        .font(.system(size: 11)).foregroundColor(appState.themeText)
+                }
+                .padding(.horizontal, 8).padding(.vertical, 5)
+                .background(Capsule().fill(appState.themeText.opacity(0.06)))
+            }
+        } rows: {
+            MWHubRailRow(icon: "square.grid.2x2", title: "All Threads",
+                         selected: appState.selectedThreadId == nil) {
+                appState.selectedThreadId = nil
+            }
+            ForEach(railThreads) { t in
+                MWHubRailRow(icon: t.isPinned ? "pin.fill" : "bubble.left.and.bubble.right",
+                             title: t.displayName,
+                             selected: appState.selectedThreadId == t.id,
+                             accent: t.isPinned) { open(t.id) }
+            }
+        }
     }
 
     private var shown: [MWThread] {

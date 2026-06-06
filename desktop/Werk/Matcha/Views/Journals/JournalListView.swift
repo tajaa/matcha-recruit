@@ -260,8 +260,16 @@ struct JournalsLibraryView: View {
         HSplitView {
             folderRail
                 .frame(minWidth: 200, idealWidth: 230, maxWidth: 300)
-            mainArea
-                .frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
+            Group {
+                if let jid = appState.selectedJournalId {
+                    // Embed the open journal in the right pane so the folder
+                    // rail stays put — pick a folder to come back to the grid.
+                    JournalDetailView(journalId: jid)
+                } else {
+                    mainArea
+                }
+            }
+            .frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(ThemeRadialBackground())
         .task { await load() }
@@ -307,6 +315,7 @@ struct JournalsLibraryView: View {
                               count: journals.count, isSelected: selectedFolderId == nil && !unfiledSelected,
                               depth: 0) {
                         selectedFolderId = nil; unfiledSelected = false
+                        appState.selectedJournalId = nil
                     }
                     ForEach(visibleFolders, id: \.0.id) { pair in
                         folderTreeRow(pair.0, depth: pair.1)
@@ -316,6 +325,7 @@ struct JournalsLibraryView: View {
                         folderRow(title: "Unfiled", icon: "tray",
                                   count: unfiled, isSelected: unfiledSelected, depth: 0) {
                             unfiledSelected = true; selectedFolderId = nil
+                            appState.selectedJournalId = nil
                         }
                     }
                 }
@@ -366,6 +376,7 @@ struct JournalsLibraryView: View {
             folderRow(title: folder.name, icon: "folder", count: count,
                       isSelected: isSel, depth: depth, inset: false) {
                 selectedFolderId = folder.id; unfiledSelected = false
+                appState.selectedJournalId = nil
             }
         }
         .padding(.leading, CGFloat(depth) * 12)
