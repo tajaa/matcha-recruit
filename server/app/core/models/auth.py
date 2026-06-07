@@ -47,6 +47,7 @@ class TokenPayload(BaseModel):
     email: str
     role: UserRole
     exp: int
+    iat: Optional[int] = None  # issued-at (epoch); used for session revocation
     token_type: Optional[str] = None  # "access" or "refresh"
 
 

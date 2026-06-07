@@ -1,13 +1,58 @@
 """Core authentication and authorization dependencies."""
+import logging
 from typing import Optional
 from uuid import UUID
 
+import asyncpg
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from ..database import get_connection, set_is_admin, set_user_id
 
+logger = logging.getLogger(__name__)
 security = HTTPBearer()
+
+# Cached once per process: does users.tokens_valid_after exist? Lets the session
+# revocation check degrade to a no-op if the authsess01 migration isn't applied
+# yet, so a deploy-before-migrate can't take down all authentication.
+_users_has_valid_after: Optional[bool] = None
+
+
+async def _has_valid_after_column(conn) -> bool:
+    global _users_has_valid_after
+    if _users_has_valid_after is None:
+        _users_has_valid_after = bool(await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+            "WHERE table_name='users' AND column_name='tokens_valid_after')"
+        ))
+    return _users_has_valid_after
+
+
+async def session_revoked(conn, user_id, token_iat: Optional[int]) -> bool:
+    """True if a token (by its iat) predates the user's session-revocation
+    watermark. Returns False (no revocation) for tokens minted before this
+    feature shipped (no iat) or before the column exists."""
+    if token_iat is None:
+        return False
+    if not await _has_valid_after_column(conn):
+        return False
+    valid_after = await conn.fetchval(
+        "SELECT tokens_valid_after FROM users WHERE id = $1", user_id
+    )
+    return valid_after is not None and token_iat < valid_after.timestamp()
+
+
+async def revoke_user_sessions(conn, user_id) -> None:
+    """Invalidate all of a user's existing access + refresh tokens by advancing
+    the watermark. Best-effort no-op (logged) until authsess01 is applied."""
+    try:
+        await conn.execute(
+            "UPDATE users SET tokens_valid_after = NOW() WHERE id = $1", user_id
+        )
+    except asyncpg.UndefinedColumnError:
+        logger.warning(
+            "revoke_user_sessions: tokens_valid_after column missing — apply migration authsess01"
+        )
 
 
 async def get_token_payload(
@@ -75,6 +120,15 @@ async def get_current_user(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="This account's company has been deactivated"
+            )
+
+        # Session revocation: reject tokens issued before the user logged out or
+        # changed their password.
+        if await session_revoked(conn, user_row["id"], payload.iat):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session has been revoked. Please log in again.",
+                headers={"WWW-Authenticate": "Bearer"},
             )
 
         beta_features = user_row["beta_features"] if user_row["beta_features"] else {}

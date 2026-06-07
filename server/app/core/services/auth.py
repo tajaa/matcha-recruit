@@ -54,6 +54,7 @@ def create_access_token(
         "email": email,
         "role": role,
         "exp": expire,
+        "iat": datetime.now(timezone.utc),
         "type": "access"
     }
 
@@ -70,6 +71,7 @@ def create_refresh_token(user_id: UUID, email: str, role: UserRole) -> str:
         "email": email,
         "role": role,
         "exp": expire,
+        "iat": datetime.now(timezone.utc),
         "type": "refresh"
     }
 
@@ -176,6 +178,7 @@ def decode_token(token: str, expected_type: Optional[str] = None) -> Optional[To
             email=payload["email"],
             role=payload["role"],
             exp=payload["exp"],
+            iat=payload.get("iat"),
             token_type=token_type,
         )
     except (JWTError, KeyError, TypeError):

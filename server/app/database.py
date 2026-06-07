@@ -654,6 +654,20 @@ async def init_db():
             END $$;
         """)
 
+        # Session-revocation watermark: any token with iat < tokens_valid_after
+        # is rejected. Logout + password change/reset bump it. See authsess01.
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'users' AND column_name = 'tokens_valid_after'
+                ) THEN
+                    ALTER TABLE users ADD COLUMN tokens_valid_after TIMESTAMPTZ;
+                END IF;
+            END $$;
+        """)
+
         # Add interview_prep_tokens column to users table (token system for interview prep)
         await conn.execute("""
             DO $$

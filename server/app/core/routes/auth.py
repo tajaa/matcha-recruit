@@ -31,7 +31,10 @@ from ..services.auth import (
     create_access_token, create_refresh_token, decode_token,
     create_email_verify_token, decode_email_verify_token,
 )
-from ..dependencies import get_current_user, require_admin, require_broker, get_token_payload
+from ..dependencies import (
+    get_current_user, require_admin, require_broker, get_token_payload,
+    session_revoked, revoke_user_sessions,
+)
 from ..feature_flags import (
     DEFAULT_COMPANY_FEATURES,
     default_company_features_json,
@@ -1101,6 +1104,13 @@ async def refresh_token(request: RefreshTokenRequest):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found or inactive"
+            )
+
+        # A revoked refresh token (logout / password change) can't mint new tokens.
+        if await session_revoked(conn, user["id"], payload.iat):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token has been revoked. Please log in again."
             )
 
         settings = get_settings()
@@ -2708,7 +2718,9 @@ async def accept_broker_terms(
 
 @router.post("/logout")
 async def logout(current_user: CurrentUser = Depends(get_current_user)):
-    """Logout endpoint (for audit/future token blacklist)."""
+    """Logout — revoke all of this user's existing access + refresh tokens."""
+    async with get_connection() as conn:
+        await revoke_user_sessions(conn, current_user.id)
     return {"status": "logged_out"}
 
 
@@ -2742,6 +2754,8 @@ async def change_password(
             "UPDATE users SET password_hash = $1 WHERE id = $2",
             new_hash, current_user.id
         )
+        # Invalidate all other sessions after a password change.
+        await revoke_user_sessions(conn, current_user.id)
 
     # Security notification — fire after connection is released
     try:
@@ -2875,6 +2889,8 @@ async def reset_password(request: ResetPasswordRequest, http_request: Request):
             "UPDATE users SET password_hash = $1 WHERE id = $2",
             new_hash, row["user_id"],
         )
+        # Invalidate all existing sessions after a password reset.
+        await revoke_user_sessions(conn, row["user_id"])
         # Mark token as used
         await conn.execute(
             "UPDATE password_reset_tokens SET used_at = NOW() WHERE token = $1",
