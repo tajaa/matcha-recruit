@@ -12,7 +12,8 @@ shipped. This is the **reference doc** — if something breaks after these chang
   | `b8b3963` | pass 2 — SAML takeover, missing-auth, IDOR, react-router bump |
   | `18d4e6e` | medium backlog — docs/secrets/SSRF/limits hardening |
   | `5d03e49` | session revocation — real logout + refresh-token invalidation |
-- **Scope:** server + client only. The macOS **Werk** Swift app was out of scope.
+  | `e80da98` | **Werk (macOS)** — external-URL scheme allowlist + delete dead local-git code (branch `werk-6-7`, 2026-06-07) |
+- **Scope:** server + client (`3fd66af`–`5d03e49`) **and** the macOS **Werk** app (`e80da98`) — see [§ Werk (macOS app)](#werk-macos-app).
 
 > ## ⚠️ One action still required
 > Commit `5d03e49` adds Alembic migration **`authsess01`** (`users.tokens_valid_after`). It is
@@ -32,9 +33,10 @@ shipped. This is the **reference doc** — if something breaks after these chang
 4. [New config / env knobs](#new-config--env-knobs)
 5. [Session revocation (deep dive)](#session-revocation-commit-5d03e49)
 6. [Troubleshooting — if something breaks](#troubleshooting--if-something-breaks)
-7. [Verified clean (don't re-audit)](#verified-clean-dont-re-audit)
-8. [Remaining backlog](#remaining-backlog)
-9. [Verification commands](#verification-commands)
+7. [Werk (macOS app)](#werk-macos-app)
+8. [Verified clean (don't re-audit)](#verified-clean-dont-re-audit)
+9. [Remaining backlog](#remaining-backlog)
+10. [Verification commands](#verification-commands)
 
 ---
 
@@ -182,6 +184,46 @@ Symptom → most-likely cause → resolution.
 | **Rate limits feel wrong** (one user limits everyone, or limits never trigger) | H5: `TRUSTED_PROXY_COUNT` doesn't match the real proxy-hop count | If only nginx is in front, keep `1`. If a CDN is added, set to the number of trusted proxies so the correct XFF entry is used. |
 | **Gusto webhook starts rejecting events** | `GUSTO_WEBHOOK_REQUIRE_SIGNATURE=true` was set before the HMAC scheme was verified | Unset it, watch logs for "signature mismatch", confirm a real signed delivery verifies, then re-enable. |
 | **`npm install` fails with an ERESOLVE peer-dep error** | Pre-existing: `react-simple-maps@3` wants React ≤18, project is React 19 | Use `npm install --legacy-peer-deps` (and `npm audit fix --legacy-peer-deps`). Not caused by this work. |
+| **(Werk) a link/attachment won't open** | W1 `SafeURL` opens only `http`/`https`; `file://`/`smb://`/etc. are intentionally blocked | If it's a legit web link, ensure it has an `http(s)` scheme. Non-web schemes are blocked by design. |
+| **(Werk) saving a link does nothing** | W1: `addLink` now rejects non-web schemes (a bare host is auto-prefixed `https://`) | Enter a web URL. |
+| **(Werk) build error: cannot find `GitService`/`RepoSnapshotService`** | Those files were deleted (dead code) | Nothing should reference them; the live path is `MatchaWorkService.scanCommitsFromGitHub`. If a stale reference remains, remove it. |
+
+---
+
+## Werk (macOS app)
+
+Reviewed 2026-06-07 (`desktop/Werk`, SwiftUI). Same 4-class fan-out (credentials/storage,
+network/transport, local-exec/files, URL-handling/IPC). **Overall much healthier than
+server/web — zero Critical, one High.** Tokens are in the Keychain, no hardcoded secrets, no
+cert-validation bypass, ATS at the secure default, no WKWebView, no custom URL scheme (so no
+forgeable OAuth callback), app is sandboxed.
+
+### Fixed (commit `e80da98`)
+
+| ID | Severity | Issue | Fix |
+|---|---|---|---|
+| W1 | High | Peer/server-controlled URL fields (chat attachments, project links, element notes, file storage URLs, channel attachments — all `Codable` from API/WS) were opened via `NSWorkspace.shared.open` with **no scheme check** → a malicious peer could plant `file://`, `smb://` (remote-share mount → credential leak), `ssh://`, `x-apple.*` and have a click trigger it | New `Matcha/Services/Support/SafeURL.swift` (http/https only); all 5 open sinks routed through it + write-time validation in `addLink` |
+| W3 | (latent) | `GitService.swift` + `RepoSnapshotService.swift` were **orphaned dead code** (commit-scan re-implemented server-side via the GitHub API) carrying a latent symlink-escape arbitrary-file-read → exfil and a git arg-injection gap | Deleted both files + the unused `MatchaWorkService.scanCommits` / `putElementRepoSnapshot` methods. Live `scanCommitsFromGitHub` path unaffected. Verified `xcodebuild BUILD SUCCEEDED` |
+
+Reuse `SafeURL.open(_:)` / `SafeURL.isAllowed(_:)` for any future external-URL open of
+network/user data. The pre-existing safe pattern at `JournalContentView.swift:394` is the precedent.
+
+### Werk — not fixed (Low; deferred per scope)
+
+- **W2** JWT in WebSocket URL `?token=` (`ChannelsWebSocket`/`ProjectWebSocket`) — log-leak surface; `wss` in prod. Prefer header/ticket; keep the no-log discipline (`ProjectWebSocket` already does).
+- **W4** Keychain uses `kSecAttrAccessibleAfterFirstUnlock` — add `…ThisDeviceOnly` to stop iCloud/backup propagation of tokens (`KeychainHelper.swift:35`).
+- **W5** Decode-failure log prints a 500-byte response snippet — could print tokens if an auth response fails to decode (`APIClient.swift:223`); `#if DEBUG`-gate or redact.
+- **W6** `MATCHA_API_URL` env override has no `https://` validation → downgrade vector (needs local env access) (`APIClient.swift:73`).
+- **W7** Entitlement `com.apple.security.network.server` is over-broad for a pure client — remove unless a feature opens a listening socket (`Matcha.entitlements`).
+- **W8** Backend-derived opens (Stripe checkout / Gmail OAuth / PDF) lack a scheme assertion; OAuth uses browser handoff + polling rather than `ASWebAuthenticationSession` with a client `state`.
+
+### Werk — verified clean
+
+Keychain token storage (data-protection keychain, legacy UserDefaults leak already migrated out),
+no hardcoded secrets, no cert-validation bypass / no ATS exception, no WKWebView, no custom URL
+scheme or deep-link handler, no insecure deserialization (`Data(contentsOf:)` is on user-picked
+files only), `SecureField` for passwords, no secrets to pasteboard, sandbox entitlements otherwise
+minimal, the single `Process()` (now deleted) used the safe argv-array pattern (no shell).
 
 ---
 
