@@ -1,88 +1,6 @@
 import Foundation
 import SwiftUI
 
-// MARK: - Resume Candidate
-
-struct MWResumeCandidate: Codable, Identifiable {
-    let id: String
-    let filename: String
-    let resumeUrl: String?
-    let name: String?
-    let email: String?
-    let phone: String?
-    let location: String?
-    let currentTitle: String?
-    let experienceYears: Double?
-    let skills: [String]?
-    let education: String?
-    let certifications: [String]?
-    let summary: String?
-    let strengths: [String]?
-    let flags: [String]?
-    let status: String?
-    let interviewId: String?
-    let interviewStatus: String?
-    let interviewScore: Double?
-    let interviewSummary: String?
-    let matchScore: Double?
-    let matchSummary: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id, filename, name, email, phone, location, skills, education
-        case certifications, summary, strengths, flags, status
-        case resumeUrl = "resume_url"
-        case currentTitle = "current_title"
-        case experienceYears = "experience_years"
-        case interviewId = "interview_id"
-        case interviewStatus = "interview_status"
-        case interviewScore = "interview_score"
-        case interviewSummary = "interview_summary"
-        case matchScore = "match_score"
-        case matchSummary = "match_summary"
-    }
-
-    var displayName: String { name ?? filename }
-}
-
-struct MWSendInterviewsRequest: Codable {
-    let candidateIds: [String]
-    let positionTitle: String?
-    let customMessage: String?
-
-    enum CodingKeys: String, CodingKey {
-        case candidateIds = "candidate_ids"
-        case positionTitle = "position_title"
-        case customMessage = "custom_message"
-    }
-}
-
-// MARK: - Inventory Item
-
-struct MWInventoryItem: Codable, Identifiable {
-    let id: String
-    let filename: String
-    let productName: String?
-    let sku: String?
-    let category: String?
-    let quantity: Double?
-    let unit: String?
-    let unitCost: Double?
-    let totalCost: Double?
-    let vendor: String?
-    let parLevel: Double?
-    let status: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id, filename, sku, category, quantity, unit, vendor, status
-        case productName = "product_name"
-        case unitCost = "unit_cost"
-        case totalCost = "total_cost"
-        case parLevel = "par_level"
-    }
-
-    var displayName: String { productName ?? filename }
-}
-
 // MARK: - Projects
 
 enum MWProjectType: String, Codable {
@@ -177,585 +95,9 @@ struct MWProjectFolder: Codable, Identifiable, Hashable {
     }
 }
 
-/// AI-generated ticket draft (Gemini Flash Lite) returned by
-/// `POST /projects/{id}/tasks/ai-draft`. Not persisted — the user reviews/edits
-/// it in `AIDraftReviewSheet`, then creates via the normal task POST.
-struct MWTaskDraft: Codable {
-    var title: String
-    var description: String?
-    var priority: String
-    var category: String
-    var boardColumn: String
-    var assignedTo: String?
-    var assignedName: String?
-    var elementId: String?
-    var elementName: String?
-    /// AI-suggested checklist steps. Reviewed/edited in AIDraftReviewSheet, then
-    /// created as mw_subtasks after the task on Create.
-    var subtasks: [String]?
-
-    enum CodingKeys: String, CodingKey {
-        case title, description, priority, category, subtasks
-        case boardColumn = "board_column"
-        case assignedTo = "assigned_to"
-        case assignedName = "assigned_name"
-        case elementId = "element_id"
-        case elementName = "element_name"
-    }
-}
-
-/// A note or link pinned to a project element's context repo
-/// (`mw_element_notes`). `kind` is "note" (free text in `body`) or "link"
-/// (`url` + optional `body` label).
-struct MWElementNote: Codable, Identifiable, Hashable {
-    let id: String
-    var elementId: String?
-    var projectId: String?
-    var createdBy: String?
-    var authorName: String?
-    var kind: String
-    var body: String?
-    var url: String?
-    var createdAt: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id, kind, body, url
-        case elementId = "element_id"
-        case projectId = "project_id"
-        case createdBy = "created_by"
-        case authorName = "author_name"
-        case createdAt = "created_at"
-    }
-}
-
-/// One row from `mw_task_history` — appears in the TaskViewerSheet
-/// timeline. `eventType` is one of: created | column_change |
-/// assignee_change | deleted.
-struct MWTaskHistoryEntry: Codable, Identifiable, Hashable {
-    let id: String
-    let taskId: String?
-    let actorUserId: String?
-    let actorName: String?
-    /// users.avatar_url for the actor of this event. Joined server-side from
-    /// the users table. nil for system-generated events or users that never
-    /// uploaded an avatar (initials fallback handled by ChannelAvatarView).
-    let actorAvatarUrl: String?
-    let eventType: String
-    let fromValue: String?
-    let toValue: String?
-    let metadata: [String: String]?
-    /// mw_project_files row ids tied to THIS note. Server pulls them out of
-    /// the metadata JSONB so the client decoder sees a flat field. nil/empty
-    /// = a plain text note.
-    let attachmentIds: [String]?
-    let createdAt: String
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case taskId = "task_id"
-        case actorUserId = "actor_user_id"
-        case actorName = "actor_name"
-        case actorAvatarUrl = "actor_avatar_url"
-        case eventType = "event_type"
-        case fromValue = "from_value"
-        case toValue = "to_value"
-        case metadata
-        case attachmentIds = "attachment_ids"
-        case createdAt = "created_at"
-    }
-
-    // Custom decode so `metadata` tolerates non-string JSON values. The server
-    // stores metadata as JSONB and MOSTLY uses string values, but a stray bool
-    // or number (e.g. an event flag) would otherwise fail the WHOLE
-    // [MWTaskHistoryEntry] decode — silently emptying a ticket's notes + rounds.
-    // Coerce scalars to strings; drop nested objects/arrays/null.
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decode(String.self, forKey: .id)
-        taskId = try c.decodeIfPresent(String.self, forKey: .taskId)
-        actorUserId = try c.decodeIfPresent(String.self, forKey: .actorUserId)
-        actorName = try c.decodeIfPresent(String.self, forKey: .actorName)
-        actorAvatarUrl = try c.decodeIfPresent(String.self, forKey: .actorAvatarUrl)
-        eventType = try c.decode(String.self, forKey: .eventType)
-        fromValue = try c.decodeIfPresent(String.self, forKey: .fromValue)
-        toValue = try c.decodeIfPresent(String.self, forKey: .toValue)
-        metadata = (try? c.decode(LenientStringMap.self, forKey: .metadata))?.values
-        attachmentIds = try c.decodeIfPresent([String].self, forKey: .attachmentIds)
-        createdAt = try c.decode(String.self, forKey: .createdAt)
-    }
-}
-
-/// Decodes a JSON object whose values may be strings, bools, or numbers into a
-/// `[String: String]`, coercing scalars to their string form and dropping
-/// nested containers / null. Keeps one stray non-string value from failing the
-/// surrounding decode (see `MWTaskHistoryEntry.init(from:)`).
-private struct LenientStringMap: Decodable {
-    let values: [String: String]
-
-    private struct DynamicKey: CodingKey {
-        var stringValue: String
-        var intValue: Int?
-        init?(stringValue: String) { self.stringValue = stringValue; self.intValue = nil }
-        init?(intValue: Int) { self.stringValue = String(intValue); self.intValue = intValue }
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: DynamicKey.self)
-        var out: [String: String] = [:]
-        for key in c.allKeys {
-            if let s = try? c.decode(String.self, forKey: key) {
-                out[key.stringValue] = s
-            } else if let b = try? c.decode(Bool.self, forKey: key) {
-                out[key.stringValue] = b ? "true" : "false"
-            } else if let i = try? c.decode(Int.self, forKey: key) {
-                out[key.stringValue] = String(i)
-            } else if let d = try? c.decode(Double.self, forKey: key) {
-                out[key.stringValue] = String(d)
-            }
-            // null / nested object / array → skipped
-        }
-        values = out
-    }
-}
-
-/// One row from the project-scoped activity feed
-/// (`/projects/{id}/activity`). `source` discriminates the payload
-/// shape: task_history | file_upload | collaborator_added.
-struct MWProjectActivityEntry: Codable, Identifiable {
-    let source: String
-    let actorUserId: String?
-    let actorName: String?
-    let createdAt: String
-    let payload: [String: AnyCodable]
-
-    var id: String { "\(source)-\(createdAt)-\(actorUserId ?? "?")" }
-
-    enum CodingKeys: String, CodingKey {
-        case source
-        case actorUserId = "actor_user_id"
-        case actorName = "actor_name"
-        case createdAt = "created_at"
-        case payload
-    }
-
-    /// Best-effort string accessor for payload keys. Most values arrive
-    /// as String / Int from PG's jsonb_build_object; fall back to a
-    /// cast via NSString-coercion for anything else.
-    func string(_ key: String) -> String? {
-        guard let v = payload[key]?.value else { return nil }
-        if let s = v as? String { return s }
-        if v is NSNull { return nil }
-        return "\(v)"
-    }
-}
-
-struct MWProjectTask: Codable, Identifiable, Hashable {
-    let id: String
-    var projectId: String?
-    var title: String
-    var description: String?
-    var boardColumn: String
-    var priority: String
-    var status: String
-    var assignedTo: String?
-    var assignedName: String?
-    var assignedEmail: String?
-    var dueDate: String?
-    var completedAt: String?
-    var createdAt: String?
-    var updatedAt: String?
-    var progressNote: String?
-    var category: String?
-    var elementId: String?
-    var elementName: String?
-    /// Last time the card crossed columns (from mw_task_history). Null until
-    /// the first move. Drives the "Moved …" stamp on the kanban card.
-    var lastMovedAt: String?
-    var attachments: [MWProjectFile]?
-
-    // ── Pipeline position (independent of kanban board_column) ──
-    // Defaults to "lead" on the server; nil until the migration runs.
-    var pipelineColumn: String?
-
-    // ── Sales-pipeline fields ──
-    // Defaulted to nil so the synthesized memberwise init stays backward-compatible.
-    var dealValue: Double? = nil
-    var probability: Int? = nil
-    var contactName: String? = nil
-    var contactCompany: String? = nil
-    var contactEmail: String? = nil
-    var contactPhone: String? = nil
-    var outcome: String? = nil        // open | won | lost
-    var lossReason: String? = nil
-    var nextActionAt: String? = nil
-    var expectedClose: String? = nil
-
-    /// Reviewer's "needs work" note set when a task is sent back from review
-    /// to the changes_requested lane. Cleared server-side once it re-enters
-    /// review/done. Drives the bounce-back banner in TaskViewerSheet and the
-    /// one-line reason on the card face.
-    var reviewNote: String? = nil
-    /// How many times this card has been sent back from review (count of
-    /// `review_rejected` history events). Optional because only the list query
-    /// and the reject response carry it — create/update RETURNING clauses
-    /// don't. Drives the "↻ ×N" churn chip; treat nil as 0.
-    var reviewCycleCount: Int? = nil
-    /// Checklist progress, present only on the list query (nil elsewhere).
-    /// Card face shows "done/total" with a thin bar. Treat nil as 0.
-    var subtaskTotal: Int? = nil
-    var subtaskDone: Int? = nil
-    /// Unviewed-updates badge inputs, present only on the list query (nil on
-    /// create/update/WS payloads — preserved across those in the VM). `update_count`
-    /// is the total count of viewable history events; `recentEventIds` are the
-    /// newest such event ids, diffed against the per-user viewed set in
-    /// TicketUpdatesStore to compute the unviewed count. Treat nil as "unknown".
-    var updateCount: Int? = nil
-    var recentEventIds: [String]? = nil
-
-    enum CodingKeys: String, CodingKey {
-        case id, title, description, priority, status, attachments, category
-        case probability, outcome
-        case reviewNote = "review_note"
-        case reviewCycleCount = "review_cycle_count"
-        case subtaskTotal = "subtask_total"
-        case subtaskDone = "subtask_done"
-        case updateCount = "update_count"
-        case recentEventIds = "recent_event_ids"
-        case projectId = "project_id"
-        case boardColumn = "board_column"
-        case pipelineColumn = "pipeline_column"
-        case assignedTo = "assigned_to"
-        case assignedName = "assigned_name"
-        case assignedEmail = "assigned_email"
-        case dueDate = "due_date"
-        case completedAt = "completed_at"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
-        case progressNote = "progress_note"
-        case lastMovedAt = "last_moved_at"
-        case elementId = "element_id"
-        case elementName = "element_name"
-        case dealValue = "deal_value"
-        case contactName = "contact_name"
-        case contactCompany = "contact_company"
-        case contactEmail = "contact_email"
-        case contactPhone = "contact_phone"
-        case lossReason = "loss_reason"
-        case nextActionAt = "next_action_at"
-        case expectedClose = "expected_close"
-    }
-
-    /// Convenience for the card chip — "open" when unset.
-    var dealOutcome: String { outcome ?? "open" }
-}
-
-/// A checklist item under a kanban task (`mw_subtasks`). Ordered by `position`.
-/// Lets a complex feature card decompose into trackable child items; the board
-/// shows done/total and a reviewer can re-open specific items on send-back.
-struct MWSubtask: Codable, Identifiable, Hashable {
-    let id: String
-    var taskId: String?
-    var projectId: String?
-    var title: String
-    var isDone: Bool
-    var position: Int
-    /// Review-cycle round this checklist item belongs to (1 = initial work).
-    /// The live checklist shows only the current round; older rounds' items
-    /// archive into the rounds history feed. Optional so legacy payloads decode.
-    var roundIndex: Int?
-    var assignedTo: String?
-    var createdBy: String?
-    var completedAt: String?
-    var createdAt: String?
-    var updatedAt: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id, title, position
-        case taskId = "task_id"
-        case projectId = "project_id"
-        case isDone = "is_done"
-        case roundIndex = "round_index"
-        case assignedTo = "assigned_to"
-        case createdBy = "created_by"
-        case completedAt = "completed_at"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
-    }
-}
-
-// MARK: - Sales pipeline
-
-/// Fixed sales-pipeline stages, used in place of the default kanban columns
-/// when a project is in pipeline mode. Keys are stored in
-/// `mw_tasks.board_column`. `defaultProbability` seeds a new deal's win
-/// likelihood from its stage (editable per deal).
-enum SalesStage {
-    static let columns: [(key: String, label: String)] = [
-        ("lead", "Lead"),
-        ("qualified", "Qualified"),
-        ("proposal", "Proposal"),
-        ("negotiation", "Negotiation"),
-        ("closed", "Closed"),
-    ]
-    static let keys: Set<String> = Set(columns.map { $0.key })
-    static let defaultProbability: [String: Int] = [
-        "lead": 10, "qualified": 30, "proposal": 60, "negotiation": 80, "closed": 100,
-    ]
-}
-
-/// Aggregate sales metrics over a board's tasks, computed client-side (the
-/// board already holds every task in memory, so no extra round-trip).
-struct PipelineSummary {
-    var openCount = 0
-    var wonCount = 0
-    var lostCount = 0
-    var openValue: Double = 0       // Σ deal_value of open deals
-    var weightedValue: Double = 0   // Σ deal_value × probability/100 of open deals
-    var wonValue: Double = 0        // Σ deal_value of won deals
-
-    /// won / (won + lost); 0 when nothing has been decided yet.
-    var winRate: Double {
-        let decided = wonCount + lostCount
-        return decided == 0 ? 0 : Double(wonCount) / Double(decided)
-    }
-
-    init(tasks: [MWProjectTask]) {
-        for t in tasks {
-            let value = t.dealValue ?? 0
-            switch t.dealOutcome {
-            case "won":
-                wonCount += 1
-                wonValue += value
-            case "lost":
-                lostCount += 1
-            default:
-                openCount += 1
-                openValue += value
-                let p = Double(t.probability ?? SalesStage.defaultProbability[t.pipelineColumn ?? "lead"] ?? 0)
-                weightedValue += value * p / 100.0
-            }
-        }
-    }
-}
-
-extension MWProject {
-    /// Sales-pipeline mode is opt-in per project, stored in
-    /// `project_data.pipeline_mode` (merged server-side, see
-    /// matcha_work `PATCH /projects/{id}/pipeline-mode`).
-    var pipelineMode: Bool {
-        guard let raw = projectData?["pipeline_mode"]?.value else { return false }
-        if let b = raw as? Bool { return b }
-        if let i = raw as? Int { return i != 0 }
-        if let s = raw as? String { return s == "true" || s == "1" }
-        return false
-    }
-}
-
-// MARK: - Project Element
-
-struct MWProjectElement: Identifiable, Codable, Equatable {
-    let id: String
-    let projectId: String
-    var name: String
-    var kind: String?
-    var description: String?
-    var assignedTo: String?
-    var assignedName: String?
-    var order: Int
-    /// Git repo-binding: glob patterns (e.g. ["server/**"]) scoping which
-    /// changed files in a commit map to this element. Optional so older /
-    /// cached payloads without the columns still decode.
-    var repoPaths: [String]?
-    /// Optional branch pin — only commits on this branch match this element.
-    var repoBranch: String?
-    let createdAt: String
-    var updatedAt: String
-
-    enum CodingKeys: String, CodingKey {
-        case id, name, kind, description, order
-        case projectId = "project_id"
-        case assignedTo = "assigned_to"
-        case assignedName = "assigned_name"
-        case repoPaths = "repo_paths"
-        case repoBranch = "repo_branch"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
-    }
-
-    /// True once the element has at least one glob bound — drives the git badge.
-    var hasRepoBinding: Bool { !(repoPaths ?? []).isEmpty }
-}
-
-// MARK: - Commit-driven subtask suggestion
-
-/// A Gemini proposal that a local git commit completed a checklist subtask.
-/// Surfaced as a chip on the ticket; the user Accepts (flips is_done) or
-/// Dismisses. Mirrors the backend `mw_commit_subtask_suggestions` row.
-struct MWCommitSuggestion: Identifiable, Codable, Equatable {
-    let id: String
-    let taskId: String
-    let subtaskId: String
-    var elementId: String?
-    let commitSha: String
-    var commitShortSha: String?
-    var commitMessage: String?
-    var confidence: Double
-    var reasoning: String?
-    var status: String
-    let createdAt: String
-
-    enum CodingKeys: String, CodingKey {
-        case id, status, confidence, reasoning
-        case taskId = "task_id"
-        case subtaskId = "subtask_id"
-        case elementId = "element_id"
-        case commitSha = "commit_sha"
-        case commitShortSha = "commit_short_sha"
-        case commitMessage = "commit_message"
-        case createdAt = "created_at"
-    }
-}
-
-// MARK: - Prop (repo-grounded draft ticket)
-
-/// A "Prop" — a feat|fix draft ticket shaped via repo-grounded chat, promotable
-/// to a real kanban ticket. Mirrors `mw_ticket_drafts`.
-struct MWTicketDraft: Identifiable, Codable, Equatable {
-    let id: String
-    let projectId: String
-    var elementId: String?
-    var kind: String            // "feat" | "fix"
-    var title: String?
-    var description: String?
-    var draftSubtasks: [String]?
-    var priority: String
-    var status: String          // "draft" | "promoted" | "discarded"
-    var promotedTaskId: String?
-    let createdAt: String
-    var updatedAt: String
-
-    enum CodingKeys: String, CodingKey {
-        case id, kind, title, description, priority, status
-        case projectId = "project_id"
-        case elementId = "element_id"
-        case draftSubtasks = "draft_subtasks"
-        case promotedTaskId = "promoted_task_id"
-        case createdAt = "created_at"
-        case updatedAt = "updated_at"
-    }
-
-    var isFeat: Bool { kind == "feat" }
-}
-
-/// One message in a Prop's repo-grounded chat. Mirrors `mw_ticket_draft_messages`.
-struct MWPropMessage: Identifiable, Codable, Equatable {
-    let id: String
-    var draftId: String?
-    let role: String            // "user" | "assistant" | "system"
-    let content: String
-    var createdAt: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id, role, content
-        case draftId = "draft_id"
-        case createdAt = "created_at"
-    }
-}
-
-/// Wrapper for the chat turn response (user + assistant messages).
-struct MWPropChatTurn: Codable {
-    let userMessage: MWPropMessage
-    let assistantMessage: MWPropMessage
-    enum CodingKeys: String, CodingKey {
-        case userMessage = "user_message"
-        case assistantMessage = "assistant_message"
-    }
-}
-
-/// Result of an element repo-snapshot sync (server summary).
-struct MWSnapshotSummary: Codable {
-    let stored: Int
-    let skipped: Int
-    let totalBytes: Int
-    enum CodingKeys: String, CodingKey {
-        case stored, skipped
-        case totalBytes = "total_bytes"
-    }
-}
-
-/// Result of a GitHub sync across all bound elements.
-struct GitHubSyncResult: Decodable {
-    let repo: String?
-    let totalStored: Int
-    enum CodingKeys: String, CodingKey {
-        case repo
-        case totalStored = "total_stored"
-    }
-}
-
-/// A project's GitHub connection (owner/name + branch).
-struct GitHubConnection: Codable {
-    let repo: String?
-    let branch: String?
-    let connected: Bool
-    var defaultRepo: String?
-    var tokenPresent: Bool?
-    enum CodingKeys: String, CodingKey {
-        case repo, branch, connected
-        case defaultRepo = "default_repo"
-        case tokenPresent = "token_present"
-    }
-}
-
 /// Time-since-last-activity bucket driving the kanban card header tint.
 /// none → no tint, warn → orange, overdue → red.
 enum TaskAging { case none, warn, overdue }
-
-extension MWProjectTask {
-    /// Priority bucket for column ordering (critical highest). Mirrors the
-    /// backend `list_project_tasks` ORDER BY and CollabOverview.upcomingTasks().
-    var priorityRank: Int {
-        switch priority {
-        case "critical": return 0
-        case "high": return 1
-        case "medium": return 2
-        case "low": return 3
-        default: return 4
-        }
-    }
-
-    /// Time-since-last-activity bucket. Anchor = lastMovedAt ?? createdAt, so
-    /// moving a card between columns resets its clock. Done/completed cards
-    /// never age.
-    var aging: TaskAging {
-        if boardColumn == "done" || status == "completed" { return .none }
-        guard let d = PacificDateFormatter.parse(lastMovedAt ?? createdAt) else { return .none }
-        let hours = Date().timeIntervalSince(d) / 3600
-        if hours >= 12 { return .overdue }
-        if hours >= 6 { return .warn }
-        return .none
-    }
-
-    /// Human-readable assignee label, or nil when no assignee is set.
-    /// Prefers the server-provided `assignedName` when it's a real name
-    /// (not an email). When the server falls back to email (legacy rows
-    /// without a name in clients/employees/admins), derives a name from
-    /// the local-part: "jane.doe@…" → "Jane Doe".
-    var displayAssignee: String? {
-        if let n = assignedName?.trimmingCharacters(in: .whitespaces),
-           !n.isEmpty, !n.contains("@") {
-            return n
-        }
-        let raw = assignedEmail ?? assignedName
-        guard let local = raw?.split(separator: "@").first.map(String.init),
-              !local.isEmpty
-        else { return nil }
-        return local
-            .replacingOccurrences(of: ".", with: " ")
-            .replacingOccurrences(of: "_", with: " ")
-            .capitalized
-    }
-}
 
 /// SF Symbols offered in the project icon picker (mirrors the journal grid).
 /// `"folder"` is the default fallback when a project has no chosen icon.
@@ -956,152 +298,50 @@ struct MWProjectCollaborator: Codable, Identifiable {
     }
 }
 
-// MARK: - Recruiting Project Helpers
-
-struct MWJobPosting: Codable {
-    var title: String?
-    var content: String?
-    var finalized: Bool?
-
-    enum CodingKeys: String, CodingKey {
-        case title, content, finalized
-    }
-}
-
-/// View-model helper that decodes/encodes the recruiting slice of `project_data`.
-/// Round-trips via `JSONSerialization` over the `AnyCodable` blob stored on `MWProject`.
-struct MWRecruitingData {
-    var posting: MWJobPosting
-    var candidates: [MWResumeCandidate]
-    var shortlistIds: Set<String>
-    var dismissedIds: Set<String>
-
-    static func from(projectData: [String: AnyCodable]?) -> MWRecruitingData {
-        var posting = MWJobPosting(title: nil, content: nil, finalized: false)
-        var candidates: [MWResumeCandidate] = []
-        var shortlist: Set<String> = []
-        var dismissed: Set<String> = []
-
-        guard let data = projectData else {
-            return MWRecruitingData(posting: posting, candidates: candidates,
-                                    shortlistIds: shortlist, dismissedIds: dismissed)
-        }
-
-        let encoder = JSONEncoder()
-        let decoder = JSONDecoder()
-
-        func decode<T: Decodable>(_ key: String, as type: T.Type) -> T? {
-            guard let any = data[key] else { return nil }
-            guard let json = try? encoder.encode(any) else { return nil }
-            return try? decoder.decode(T.self, from: json)
-        }
-
-        if let decoded: MWJobPosting = decode("posting", as: MWJobPosting.self) {
-            posting = decoded
-        }
-        if let decoded: [MWResumeCandidate] = decode("candidates", as: [MWResumeCandidate].self) {
-            candidates = decoded
-        }
-        if let ids: [String] = decode("shortlist_ids", as: [String].self) {
-            shortlist = Set(ids)
-        }
-        if let ids: [String] = decode("dismissed_ids", as: [String].self) {
-            dismissed = Set(ids)
-        }
-
-        return MWRecruitingData(posting: posting, candidates: candidates,
-                                shortlistIds: shortlist, dismissedIds: dismissed)
-    }
-}
-
-struct MWAdminSearchUser: Codable, Identifiable {
-    let id: String
-    let email: String
-    let name: String
-    let avatarUrl: String?
+struct MWProjectInvite: Codable, Identifiable {
+    var id: String { projectId }
+    let projectId: String
+    let projectTitle: String
+    let invitedBy: String
+    let invitedAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, email, name
-        case avatarUrl = "avatar_url"
+        case projectId = "project_id"
+        case projectTitle = "project_title"
+        case invitedBy = "invited_by"
+        case invitedAt = "invited_at"
     }
 }
 
-// MARK: - Blog (project_type == "blog")
+/// One row from the project-scoped activity feed
+/// (`/projects/{id}/activity`). `source` discriminates the payload
+/// shape: task_history | file_upload | collaborator_added.
+struct MWProjectActivityEntry: Codable, Identifiable {
+    let source: String
+    let actorUserId: String?
+    let actorName: String?
+    let createdAt: String
+    let payload: [String: AnyCodable]
 
-struct MWBlogAuthor: Codable, Hashable {
-    var name: String?
-    var bio: String?
-    var avatarUrl: String?
+    var id: String { "\(source)-\(createdAt)-\(actorUserId ?? "?")" }
 
     enum CodingKeys: String, CodingKey {
-        case name, bio
-        case avatarUrl = "avatar_url"
+        case source
+        case actorUserId = "actor_user_id"
+        case actorName = "actor_name"
+        case createdAt = "created_at"
+        case payload
     }
-}
 
-struct MWBlogData {
-    var slug: String
-    var excerpt: String
-    var status: String          // draft | scheduled | published
-    var tone: String
-    var audience: String
-    var tags: [String]
-    var author: MWBlogAuthor
-    var wordCount: Int
-    var readMinutes: Int
-    var publishedAt: String?
-    var coverImageUrl: String?
-    var scheduledFor: String?
-
-    static func from(projectData: [String: AnyCodable]?) -> MWBlogData {
-        let data = projectData ?? [:]
-        let encoder = JSONEncoder()
-        let decoder = JSONDecoder()
-
-        func decode<T: Decodable>(_ key: String, as type: T.Type) -> T? {
-            guard let any = data[key] else { return nil }
-            guard let json = try? encoder.encode(any) else { return nil }
-            return try? decoder.decode(T.self, from: json)
-        }
-
-        let author = decode("author", as: MWBlogAuthor.self) ?? MWBlogAuthor()
-        let tags: [String]
-        if let ts = data["tags"]?.value as? [String] {
-            tags = ts
-        } else if let ts = data["tags"]?.value as? [AnyCodable] {
-            tags = ts.compactMap { $0.value as? String }
-        } else {
-            tags = []
-        }
-
-        return MWBlogData(
-            slug: data["slug"]?.value as? String ?? "",
-            excerpt: data["excerpt"]?.value as? String ?? "",
-            status: data["status"]?.value as? String ?? "draft",
-            tone: data["tone"]?.value as? String ?? "expert-casual",
-            audience: data["audience"]?.value as? String ?? "",
-            tags: tags,
-            author: author,
-            wordCount: data["word_count"]?.value as? Int ?? 0,
-            readMinutes: data["read_minutes"]?.value as? Int ?? 1,
-            publishedAt: data["published_at"]?.value as? String,
-            coverImageUrl: data["cover_image_url"]?.value as? String,
-            scheduledFor: data["scheduled_for"]?.value as? String
-        )
+    /// Best-effort string accessor for payload keys. Most values arrive
+    /// as String / Int from PG's jsonb_build_object; fall back to a
+    /// cast via NSString-coercion for anything else.
+    func string(_ key: String) -> String? {
+        guard let v = payload[key]?.value else { return nil }
+        if let s = v as? String { return s }
+        if v is NSNull { return nil }
+        return "\(v)"
     }
-}
-
-struct MWBlogPatchRequest: Codable {
-    var slug: String?
-    var excerpt: String?
-    var tone: String?
-    var audience: String?
-    var tags: [String]?
-    var author: MWBlogAuthor?
-}
-
-struct MWBlogStatusRequest: Codable {
-    var status: String
 }
 
 // MARK: - Dashboard models
@@ -1164,299 +404,71 @@ struct MWActivityItem: Codable, Identifiable, Hashable {
     }
 }
 
-struct MWProjectInvite: Codable, Identifiable {
-    var id: String { projectId }
-    let projectId: String
-    let projectTitle: String
-    let invitedBy: String
-    let invitedAt: String?
+// MARK: - Sales pipeline
 
-    enum CodingKeys: String, CodingKey {
-        case projectId = "project_id"
-        case projectTitle = "project_title"
-        case invitedBy = "invited_by"
-        case invitedAt = "invited_at"
+/// Fixed sales-pipeline stages, used in place of the default kanban columns
+/// when a project is in pipeline mode. Keys are stored in
+/// `mw_tasks.board_column`. `defaultProbability` seeds a new deal's win
+/// likelihood from its stage (editable per deal).
+enum SalesStage {
+    static let columns: [(key: String, label: String)] = [
+        ("lead", "Lead"),
+        ("qualified", "Qualified"),
+        ("proposal", "Proposal"),
+        ("negotiation", "Negotiation"),
+        ("closed", "Closed"),
+    ]
+    static let keys: Set<String> = Set(columns.map { $0.key })
+    static let defaultProbability: [String: Int] = [
+        "lead": 10, "qualified": 30, "proposal": 60, "negotiation": 80, "closed": 100,
+    ]
+}
+
+/// Aggregate sales metrics over a board's tasks, computed client-side (the
+/// board already holds every task in memory, so no extra round-trip).
+struct PipelineSummary {
+    var openCount = 0
+    var wonCount = 0
+    var lostCount = 0
+    var openValue: Double = 0       // Σ deal_value of open deals
+    var weightedValue: Double = 0   // Σ deal_value × probability/100 of open deals
+    var wonValue: Double = 0        // Σ deal_value of won deals
+
+    /// won / (won + lost); 0 when nothing has been decided yet.
+    var winRate: Double {
+        let decided = wonCount + lostCount
+        return decided == 0 ? 0 : Double(wonCount) / Double(decided)
+    }
+
+    init(tasks: [MWProjectTask]) {
+        for t in tasks {
+            let value = t.dealValue ?? 0
+            switch t.dealOutcome {
+            case "won":
+                wonCount += 1
+                wonValue += value
+            case "lost":
+                lostCount += 1
+            default:
+                openCount += 1
+                openValue += value
+                let p = Double(t.probability ?? SalesStage.defaultProbability[t.pipelineColumn ?? "lead"] ?? 0)
+                weightedValue += value * p / 100.0
+            }
+        }
     }
 }
 
-// MARK: - Kanban ticket templates
-
-/// Built-in ticket starting points. The rawValue is the wire string stored in
-/// `mw_tasks.category`; `manual` (blank task / legacy rows) maps to no
-/// template, so `from(category:)` returns nil and the card shows no badge.
-enum KanbanTemplate: String, CaseIterable, Identifiable {
-    case engineering
-    case sales
-    case product
-    case bug
-    case general
-    case feat   // promoted from a "Prop" feature draft
-    case fix    // promoted from a "Prop" fix draft
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .engineering: return "Engineering"
-        case .sales: return "Sales"
-        case .product: return "Product Feature"
-        case .bug: return "Bug"
-        case .general: return "General"
-        case .feat: return "Feature"
-        case .fix: return "Fix"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .engineering: return "hammer"
-        case .sales: return "dollarsign.circle"
-        case .product: return "sparkles"
-        case .bug: return "ant"
-        case .general: return "doc.text"
-        case .feat: return "sparkles"
-        case .fix: return "wrench.and.screwdriver"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .engineering: return .blue
-        case .sales: return .green
-        case .product: return .purple
-        case .bug: return .red
-        case .general: return .secondary
-        case .feat: return .teal
-        case .fix: return .orange
-        }
-    }
-
-    var defaultPriority: String {
-        switch self {
-        case .bug, .fix: return "high"
-        default: return "medium"
-        }
-    }
-
-    /// Markdown description starter prefilled into the compose sheet. Italic
-    /// `_prompts_` are inline guidance the author replaces or deletes.
-    var scaffold: String {
-        switch self {
-        case .engineering:
-            return """
-            ## Context
-            _What's the problem and why now?_
-
-            ## Scope
-            - [ ] \n- [ ]
-
-            ## Acceptance criteria
-            - [ ]
-
-            ## Technical notes
-            _Approach, affected files/services, risks._
-
-            ## Out of scope
-            -
-            """
-        case .sales:
-            return """
-            ## Account
-            _Company · contact · role_
-
-            ## Opportunity
-            _Deal size · timeline · source_
-
-            ## Stage
-            _Prospecting / Demo / Proposal / Negotiation / Closing_
-
-            ## Pain / need
-            -
-
-            ## Next step
-            - [ ]
-
-            ## Blockers
-            -
-            """
-        case .product:
-            return """
-            ## Problem
-            _Who hurts, and how today?_
-
-            ## User story
-            As a _____, I want _____ so that _____.
-
-            ## Proposed solution
-            -
-
-            ## Success metric
-            _How we'll know it worked._
-
-            ## Open questions
-            -
-
-            ## Out of scope
-            -
-            """
-        case .bug:
-            return """
-            ## Summary
-            _One line._
-
-            ## Environment
-            _Build / OS / device_
-
-            ## Steps to reproduce
-            1. \n2.
-
-            ## Expected
-            -
-
-            ## Actual
-            -
-
-            ## Severity / impact
-            _Who's affected, how often._
-
-            ## Evidence
-            _Screenshots / logs — drag files onto the ticket._
-            """
-        case .general:
-            return """
-            ## Goal
-            -
-
-            ## Tasks
-            - [ ]
-
-            ## Notes
-            -
-            """
-        case .feat:
-            return """
-            ## What & why
-            _The feature and the user value._
-
-            ## Where in the code
-            _Files/areas it touches (from the repo chat)._
-
-            ## Steps
-            - [ ]
-            """
-        case .fix:
-            return """
-            ## Problem
-            _What's broken._
-
-            ## Root cause
-            _Where in the code (from the repo chat)._
-
-            ## Steps
-            - [ ]
-            """
-        }
-    }
-
-    /// One labeled input rendered in the compose sheet. The label doubles as
-    /// the `## Heading` in the composed markdown description.
-    struct TicketField: Identifiable {
-        enum Kind: Equatable {
-            case singleLine
-            case multiLine
-            case picker([String])
-        }
-        let key: String          // stable identity
-        let label: String        // shown in the form + used as markdown heading
-        let placeholder: String
-        let kind: Kind
-        var id: String { key }
-    }
-
-    /// Structured fields shown in the compose sheet, per template. Replaces the
-    /// raw-markdown scaffold so the author fills labeled inputs instead of
-    /// deleting placeholder text. `general` (and the blank/manual path) use a
-    /// single free-form Description box for back-compat.
-    var fields: [TicketField] {
-        switch self {
-        case .engineering:
-            return [
-                .init(key: "context", label: "Context", placeholder: "What's the problem and why now?", kind: .multiLine),
-                .init(key: "scope", label: "Scope", placeholder: "- \n- ", kind: .multiLine),
-                .init(key: "acceptance", label: "Acceptance criteria", placeholder: "- ", kind: .multiLine),
-                .init(key: "technical", label: "Technical notes", placeholder: "Approach, affected files/services, risks.", kind: .multiLine),
-                .init(key: "outofscope", label: "Out of scope", placeholder: "What this explicitly does not cover.", kind: .multiLine),
-            ]
-        case .sales:
-            return [
-                .init(key: "account", label: "Account", placeholder: "Company · contact · role", kind: .singleLine),
-                .init(key: "opportunity", label: "Opportunity", placeholder: "Deal size · timeline · source", kind: .singleLine),
-                .init(key: "stage", label: "Stage", placeholder: "", kind: .picker(["Prospecting", "Demo", "Proposal", "Negotiation", "Closing"])),
-                .init(key: "pain", label: "Pain / need", placeholder: "What hurts today?", kind: .multiLine),
-                .init(key: "nextstep", label: "Next step", placeholder: "The single next action.", kind: .singleLine),
-                .init(key: "blockers", label: "Blockers", placeholder: "What's in the way?", kind: .multiLine),
-            ]
-        case .product:
-            return [
-                .init(key: "problem", label: "Problem", placeholder: "Who hurts, and how today?", kind: .multiLine),
-                .init(key: "userstory", label: "User story", placeholder: "As a ___, I want ___ so that ___.", kind: .multiLine),
-                .init(key: "solution", label: "Proposed solution", placeholder: "", kind: .multiLine),
-                .init(key: "metric", label: "Success metric", placeholder: "How we'll know it worked.", kind: .singleLine),
-                .init(key: "questions", label: "Open questions", placeholder: "", kind: .multiLine),
-                .init(key: "outofscope", label: "Out of scope", placeholder: "", kind: .multiLine),
-            ]
-        case .bug:
-            return [
-                .init(key: "summary", label: "Summary", placeholder: "One line.", kind: .singleLine),
-                .init(key: "environment", label: "Environment", placeholder: "Build / OS / device", kind: .singleLine),
-                .init(key: "steps", label: "Steps to reproduce", placeholder: "1. \n2. ", kind: .multiLine),
-                .init(key: "expected", label: "Expected", placeholder: "What should happen.", kind: .multiLine),
-                .init(key: "actual", label: "Actual", placeholder: "What happens instead.", kind: .multiLine),
-                .init(key: "severity", label: "Severity / impact", placeholder: "", kind: .picker(["Critical", "High", "Medium", "Low"])),
-                .init(key: "evidence", label: "Evidence", placeholder: "Screenshots / logs — drag files onto the ticket.", kind: .multiLine),
-            ]
-        case .general:
-            return [
-                .init(key: "description", label: "Description", placeholder: "What needs to happen?", kind: .multiLine),
-            ]
-        case .feat:
-            return [
-                .init(key: "what", label: "What & why", placeholder: "The feature and the user value.", kind: .multiLine),
-                .init(key: "where", label: "Where in the code", placeholder: "Files/areas it touches.", kind: .multiLine),
-                .init(key: "steps", label: "Steps", placeholder: "- ", kind: .multiLine),
-            ]
-        case .fix:
-            return [
-                .init(key: "problem", label: "Problem", placeholder: "What's broken.", kind: .multiLine),
-                .init(key: "rootcause", label: "Root cause", placeholder: "Where in the code.", kind: .multiLine),
-                .init(key: "steps", label: "Steps", placeholder: "- ", kind: .multiLine),
-            ]
-        }
-    }
-
-    /// Builds the markdown `description` from filled compose-sheet field values.
-    /// Empty fields are skipped. A lone free-form "description" field
-    /// (general/manual) is emitted as plain text with no heading so it reads
-    /// naturally; everything else becomes `## Label\n<value>` blocks — the same
-    /// on-disk format the viewer/edit/copy paths already expect.
-    static func composeDescription(fields: [TicketField], values: [String: String]) -> String {
-        if fields.count == 1, fields[0].key == "description" {
-            return (values["description"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        var blocks: [String] = []
-        for f in fields {
-            let v = (values[f.key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !v.isEmpty else { continue }
-            blocks.append("## \(f.label)\n\(v)")
-        }
-        return blocks.joined(separator: "\n\n")
-    }
-
-    /// Maps a stored `category` string back to a template for badge rendering.
-    /// Returns nil for "manual"/unknown so those cards render without a badge.
-    static func from(category: String?) -> KanbanTemplate? {
-        guard let category, category != "manual" else { return nil }
-        return KanbanTemplate(rawValue: category)
+extension MWProject {
+    /// Sales-pipeline mode is opt-in per project, stored in
+    /// `project_data.pipeline_mode` (merged server-side, see
+    /// matcha_work `PATCH /projects/{id}/pipeline-mode`).
+    var pipelineMode: Bool {
+        guard let raw = projectData?["pipeline_mode"]?.value else { return false }
+        if let b = raw as? Bool { return b }
+        if let i = raw as? Int { return i != 0 }
+        if let s = raw as? String { return s == "true" || s == "1" }
+        return false
     }
 }
 
