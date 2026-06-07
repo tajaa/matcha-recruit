@@ -199,7 +199,7 @@ struct AgentPanelView: View {
         do {
             let authUrl = try await service.agentConnectGmail()
             if let url = URL(string: authUrl) {
-                await MainActor.run { NSWorkspace.shared.open(url) }
+                await MainActor.run { SafeURL.open(url) }
             }
             // Poll status after a delay
             try? await Task.sleep(for: .seconds(5))

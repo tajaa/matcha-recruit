@@ -776,7 +776,7 @@ struct ContentView: View {
                     upgradeError = "invalid checkout URL from server"
                     return
                 }
-                NSWorkspace.shared.open(checkoutURL)
+                SafeURL.open(checkoutURL)
                 // Subscription refresh happens when the user returns to the app
                 // via the scenePhase .active observer in MatchaApp.
             } catch {

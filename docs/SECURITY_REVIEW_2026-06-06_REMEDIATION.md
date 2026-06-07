@@ -13,7 +13,8 @@ shipped. This is the **reference doc** — if something breaks after these chang
   | `18d4e6e` | medium backlog — docs/secrets/SSRF/limits hardening |
   | `5d03e49` | session revocation — real logout + refresh-token invalidation |
   | `e80da98` | **Werk (macOS)** — external-URL scheme allowlist + delete dead local-git code (branch `werk-6-7`, 2026-06-07) |
-- **Scope:** server + client (`3fd66af`–`5d03e49`) **and** the macOS **Werk** app (`e80da98`) — see [§ Werk (macOS app)](#werk-macos-app).
+  | `270c06d`+ | **Werk Low backlog** — WS header auth, Keychain ThisDeviceOnly, log redaction, https assert, entitlement trim, remaining NSWorkspace sinks (2026-06-07) |
+- **Scope:** server + client (`3fd66af`–`5d03e49`) **and** the macOS **Werk** app (`e80da98`, Low-backlog commit) — see [§ Werk (macOS app)](#werk-macos-app).
 
 > ## ⚠️ One action still required
 > Commit `5d03e49` adds Alembic migration **`authsess01`** (`users.tokens_valid_after`). It is
@@ -187,6 +188,8 @@ Symptom → most-likely cause → resolution.
 | **(Werk) a link/attachment won't open** | W1 `SafeURL` opens only `http`/`https`; `file://`/`smb://`/etc. are intentionally blocked | If it's a legit web link, ensure it has an `http(s)` scheme. Non-web schemes are blocked by design. |
 | **(Werk) saving a link does nothing** | W1: `addLink` now rejects non-web schemes (a bare host is auto-prefixed `https://`) | Enter a web URL. |
 | **(Werk) build error: cannot find `GitService`/`RepoSnapshotService`** | Those files were deleted (dead code) | Nothing should reference them; the live path is `MatchaWorkService.scanCommitsFromGitHub`. If a stale reference remains, remove it. |
+| **(Werk) WS connection fails after Low-backlog deploy** | W2: Werk now sends `Authorization: Bearer` header; backend accepts both header and `?token=` query param | Web client still uses `?token=` and is unaffected. If a backend deploy lags, the header path returns 4001 "Missing token" — redeploy the backend first. |
+| **(Werk) a checkout / PDF / OAuth URL won't open** | W8: now gated by `SafeURL` (http/https only) | Ensure the URL from the server uses an `https://` scheme. Non-http schemes are intentionally blocked. |
 
 ---
 
@@ -208,14 +211,16 @@ forgeable OAuth callback), app is sandboxed.
 Reuse `SafeURL.open(_:)` / `SafeURL.isAllowed(_:)` for any future external-URL open of
 network/user data. The pre-existing safe pattern at `JournalContentView.swift:394` is the precedent.
 
-### Werk — not fixed (Low; deferred per scope)
+### Fixed — Low backlog (2026-06-07)
 
-- **W2** JWT in WebSocket URL `?token=` (`ChannelsWebSocket`/`ProjectWebSocket`) — log-leak surface; `wss` in prod. Prefer header/ticket; keep the no-log discipline (`ProjectWebSocket` already does).
-- **W4** Keychain uses `kSecAttrAccessibleAfterFirstUnlock` — add `…ThisDeviceOnly` to stop iCloud/backup propagation of tokens (`KeychainHelper.swift:35`).
-- **W5** Decode-failure log prints a 500-byte response snippet — could print tokens if an auth response fails to decode (`APIClient.swift:223`); `#if DEBUG`-gate or redact.
-- **W6** `MATCHA_API_URL` env override has no `https://` validation → downgrade vector (needs local env access) (`APIClient.swift:73`).
-- **W7** Entitlement `com.apple.security.network.server` is over-broad for a pure client — remove unless a feature opens a listening socket (`Matcha.entitlements`).
-- **W8** Backend-derived opens (Stripe checkout / Gmail OAuth / PDF) lack a scheme assertion; OAuth uses browser handoff + polling rather than `ASWebAuthenticationSession` with a client `state`.
+| ID | Issue | Fix |
+|---|---|---|
+| W2 | JWT in WebSocket URL `?token=` → log-leak + proxy log exposure | Backend `channels_ws.py` / `project_ws.py`: added `_token_from_request()` — prefers `Authorization: Bearer` header, falls back to `?token=` (web clients). Werk clients (`ChannelsWebSocket`, `ProjectWebSocket`): switched to `URLRequest` + `Authorization` header; token no longer appears in any URL or log |
+| W4 | Keychain used `kSecAttrAccessibleAfterFirstUnlock` — tokens synced via iCloud Keychain / iTunes backup to other devices | Changed to `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` (`KeychainHelper.swift:35`). Existing items migrate on next `save()` (every token refresh) |
+| W5 | Decode-failure log printed a 500-byte response snippet — would leak `access_token`/`refresh_token` if an auth endpoint response failed to decode | `APIClient.swift:222`: redact snippet to `<redacted>` when `path` contains `/auth` or `token` |
+| W6 | `MATCHA_API_URL` env override had no scheme validation → HTTP downgrade in release builds | `APIClient.swift:76`: `precondition(override.hasPrefix("https://"))` in `#if !DEBUG` blocks |
+| W7 | `com.apple.security.network.server` entitlement was over-broad — app is a pure client, never opens listening sockets | Removed from `Matcha.entitlements` |
+| W8 | Six remaining `NSWorkspace.shared.open` sinks for server-derived URLs (Stripe checkout, Gmail OAuth consent, Presentation PDF, channel checkout ×2, Gmail connect in AgentPanel) bypassed SafeURL scheme check | Routed all six through `SafeURL.open(_:)`. Note: Gmail OAuth uses browser-handoff + server-callback (no registered URL scheme), so `ASWebAuthenticationSession` is not applicable — polling is correct |
 
 ### Werk — verified clean
 
@@ -244,7 +249,7 @@ These were checked and found sound — no action taken:
 - **JWT** — algorithm pinned (`HS256`), `require_exp` enforced (no `alg:none`).
 - **Long-tail routers** (accommodations, pre_termination, separation, training, cobra, i9, flight_risk,
   broker_portfolio, notifications, employee_portal, …) — tenant-scoped.
-- **WebSockets** (interview / channel / thread / project / chat) — authenticate the `?token=` and check membership before join.
+- **WebSockets** (interview / channel / thread / project / chat) — authenticate via JWT (Werk native: `Authorization: Bearer` header; web: `?token=` query) and check membership before join.
 - **OAuth callbacks** (Gusto/Finch/Slack) — state-validated.
 - **`pip-audit`** — no known vulnerabilities.
 

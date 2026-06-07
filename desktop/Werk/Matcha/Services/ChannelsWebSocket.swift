@@ -126,12 +126,14 @@ final class ChannelsWebSocket: NSObject {
             .replacingOccurrences(of: "http://", with: "ws://")
             .replacingOccurrences(of: "https://", with: "wss://")
             .replacingOccurrences(of: "/api", with: "")
-        guard let url = URL(string: "\(wsBase)/ws/channels?token=\(token)") else { return }
+        guard let url = URL(string: "\(wsBase)/ws/channels") else { return }
 
         isConnecting = true
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         self.session = session
-        let task = session.webSocketTask(with: url)
+        let task = session.webSocketTask(with: request)
         self.task = task
         task.resume()
         listen()

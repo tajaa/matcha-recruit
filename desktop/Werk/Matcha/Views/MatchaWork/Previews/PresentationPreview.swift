@@ -89,7 +89,7 @@ struct PresentationPreview: View {
             do {
                 let url = try await MatchaWorkService.shared.getPresentationPdfUrl(threadId: id)
                 if let nsUrl = URL(string: url) {
-                    await MainActor.run { NSWorkspace.shared.open(nsUrl) }
+                    await MainActor.run { SafeURL.open(nsUrl) }
                 }
             } catch {
                 // Silently fail — user can retry

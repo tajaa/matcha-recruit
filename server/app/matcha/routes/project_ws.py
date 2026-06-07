@@ -681,6 +681,16 @@ async def broadcast_task_event(project_id: UUID, event: str, payload: dict) -> N
     })
 
 
+def _token_from_request(websocket: WebSocket, query_token: Optional[str]) -> Optional[str]:
+    """Prefer Authorization: Bearer header (native clients); fall back to ?token= (web)."""
+    if query_token:
+        return query_token
+    auth = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
+    if auth and auth.startswith("Bearer "):
+        return auth[7:]
+    return None
+
+
 async def _authenticate(token: str) -> Optional[ProjectUser]:
     payload = decode_token(token, expected_type="access")
     if not payload:
@@ -747,10 +757,14 @@ async def _can_access_project(conn, user: ProjectUser, project_id: UUID) -> bool
 @router.websocket("")
 async def project_websocket(
     websocket: WebSocket,
-    token: str = Query(...),
+    token: Optional[str] = Query(None),
 ):
     """WebSocket for matcha-work project presence (cursor + caret + cross-tab pill)."""
-    user = await _authenticate(token)
+    auth_token = _token_from_request(websocket, token)
+    if not auth_token:
+        await websocket.close(code=4001, reason="Missing token")
+        return
+    user = await _authenticate(auth_token)
     if not user:
         await websocket.close(code=4001, reason="Invalid token")
         return

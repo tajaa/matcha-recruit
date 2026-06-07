@@ -92,18 +92,17 @@ final class ProjectWebSocket: NSObject {
             .replacingOccurrences(of: "http://", with: "ws://")
             .replacingOccurrences(of: "https://", with: "wss://")
             .replacingOccurrences(of: "/api", with: "")
-        guard let url = URL(string: "\(wsBase)/ws/projects?token=\(token)") else {
+        guard let url = URL(string: "\(wsBase)/ws/projects") else {
             print("[ProjectWS] connect skipped — invalid URL base=\(base)")
             return
         }
-        // Log the endpoint only — never url.absoluteString, which carries the
-        // JWT in its ?token= query and would leak the bearer credential into
-        // unified logging.
         print("[ProjectWS] connect initiated → \(wsBase)/ws/projects")
         isConnecting = true
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         self.session = session
-        let task = session.webSocketTask(with: url)
+        let task = session.webSocketTask(with: request)
         self.task = task
         task.resume()
         listen()

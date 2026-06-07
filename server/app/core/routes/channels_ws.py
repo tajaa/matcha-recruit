@@ -540,6 +540,16 @@ async def broadcast_reaction_update(
 # Auth helper
 # ---------------------------------------------------------------------------
 
+def _token_from_request(websocket: WebSocket, query_token: Optional[str]) -> Optional[str]:
+    """Prefer Authorization: Bearer header (native clients); fall back to ?token= (web)."""
+    if query_token:
+        return query_token
+    auth = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
+    if auth and auth.startswith("Bearer "):
+        return auth[7:]
+    return None
+
+
 async def _authenticate(token: str) -> Optional[ChannelUser]:
     """Authenticate a WebSocket connection using the main app JWT."""
     payload = decode_token(token, expected_type="access")
@@ -595,10 +605,14 @@ async def _authenticate(token: str) -> Optional[ChannelUser]:
 @router.websocket("")
 async def channel_websocket(
     websocket: WebSocket,
-    token: str = Query(...),
+    token: Optional[str] = Query(None),
 ):
     """WebSocket endpoint for real-time channel messaging."""
-    user = await _authenticate(token)
+    auth_token = _token_from_request(websocket, token)
+    if not auth_token:
+        await websocket.close(code=4001, reason="Missing token")
+        return
+    user = await _authenticate(auth_token)
     if not user:
         await websocket.close(code=4001, reason="Invalid token")
         return

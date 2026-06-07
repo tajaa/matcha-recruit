@@ -299,7 +299,7 @@ struct DiscoverChannelsSheet: View {
         do {
             let url = try await ChannelsService.shared.createChannelCheckout(id: channel.id)
             if let nsUrl = URL(string: url) {
-                NSWorkspace.shared.open(nsUrl)
+                SafeURL.open(nsUrl)
             }
             // Show the in-app banner. didBecomeActive will refresh on return.
             waitingForCheckoutChannel = channel

@@ -73,6 +73,9 @@ class APIClient {
     let baseURL: String = {
         if let override = ProcessInfo.processInfo.environment["MATCHA_API_URL"],
            !override.isEmpty {
+            #if !DEBUG
+            precondition(override.hasPrefix("https://"), "MATCHA_API_URL must use https:// in release builds (got: \(override))")
+            #endif
             return override
         }
         #if DEBUG
@@ -219,7 +222,8 @@ class APIClient {
             // actionable instead of opaque. Without this we get the generic
             // "data couldn't be read" Foundation message and have no idea
             // which field/shape mismatched.
-            let snippet = String(data: data.prefix(500), encoding: .utf8) ?? "<binary>"
+            let isSensitive = path.contains("/auth") || path.lowercased().contains("token")
+            let snippet = isSensitive ? "<redacted>" : (String(data: data.prefix(500), encoding: .utf8) ?? "<binary>")
             print("[APIClient] decode failed for \(T.self) at \(path): \(error.localizedDescription)\nresponse snippet: \(snippet)")
             throw APIError.decodingError(error)
         }

@@ -395,7 +395,7 @@ struct ChannelBrowseView: View {
         do {
             let url = try await ChannelsService.shared.createChannelCheckout(id: channel.id)
             if let nsUrl = URL(string: url) {
-                NSWorkspace.shared.open(nsUrl)
+                SafeURL.open(nsUrl)
             }
             waitingForCheckoutChannel = channel
         } catch {

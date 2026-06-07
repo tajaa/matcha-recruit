@@ -44,7 +44,7 @@ final class EmailViewModel {
                 errorMessage = "Couldn't open the Google sign-in page."
                 return
             }
-            NSWorkspace.shared.open(url)
+            SafeURL.open(url)
             // Poll status (~90s) waiting for the browser OAuth to finish.
             for _ in 0..<45 {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
