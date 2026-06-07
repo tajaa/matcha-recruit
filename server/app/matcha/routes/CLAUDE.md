@@ -30,6 +30,7 @@
 | `dashboard.py` | `/dashboard` | Cross-feature dashboard aggregation (2,141 lines) |
 | `brokers.py` | `/brokers` | HR broker admin (1,605 lines) |
 | `broker_portfolio.py` | `/broker-portfolio` | Per-broker client roster + cross-client metrics |
+| `fractional_hr.py` | `/fractional-hr` | Fractional HR engagement tooling — internal master-admin only (`require_admin` at mount, **not** feature-gated). Clients/scope/tasks/time + aggregate book-of-business overview. `fractional_*` tables; `company_id` nullable (client may have no tenant) |
 | `provisioning.py` | `/provisioning` | Google Workspace + Slack auto-provision (1,606 lines) |
 | `matcha_work.py` | (multiple) | Matcha-work projects/threads/channels/inbox (8,902 lines — biggest, but cohesive websocket+AI surface) |
 | `journals.py` | `/journals` | Matcha-work journals |

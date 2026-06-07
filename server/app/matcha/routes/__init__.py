@@ -18,6 +18,7 @@ from .ir_surveys import router as ir_surveys_router
 from .accommodations import router as accommodations_router
 from .dashboard import router as dashboard_router
 from .brokers import router as brokers_router
+from .fractional_hr import router as fractional_hr_router
 from .provisioning import router as provisioning_router
 from .matcha_work import router as matcha_work_router, public_router as matcha_work_public_router, presence_router as matcha_work_presence_router
 from .journals import router as journals_router
@@ -36,6 +37,7 @@ from .separation import router as separation_router
 from .fake_hris import router as fake_hris_router
 from .twilio_webhook import router as twilio_webhook_router
 from ..dependencies import require_feature
+from ...core.dependencies import require_admin
 
 # Create main Matcha router
 matcha_router = APIRouter()
@@ -76,6 +78,9 @@ matcha_router.include_router(accommodations_router, prefix="/accommodations", ta
                              dependencies=[Depends(require_feature("accommodations"))])
 matcha_router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
 matcha_router.include_router(brokers_router, prefix="/brokers", tags=["brokers"])
+# Fractional HR — internal master-admin engagement tooling (admin-gated, not feature-flagged)
+matcha_router.include_router(fractional_hr_router, prefix="/fractional-hr", tags=["fractional-hr"],
+                             dependencies=[Depends(require_admin)])
 matcha_router.include_router(broker_portfolio_router, prefix="/broker", tags=["broker-portfolio"])
 matcha_router.include_router(provisioning_router, prefix="/provisioning", tags=["provisioning"])
 matcha_router.include_router(
