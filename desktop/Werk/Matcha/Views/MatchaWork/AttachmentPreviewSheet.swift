@@ -51,8 +51,8 @@ struct AttachmentPreviewSheet: View {
 
                 Spacer()
 
-                if let url = URL(string: file.storageUrl) {
-                    Button(action: { NSWorkspace.shared.open(url) }) {
+                if SafeURL.isAllowed(file.storageUrl) {
+                    Button(action: { SafeURL.open(file.storageUrl) }) {
                         Image(systemName: "arrow.up.right.square")
                             .font(.system(size: 12, weight: .semibold))
                             .frame(width: 24, height: 24)
@@ -118,9 +118,9 @@ struct AttachmentPreviewSheet: View {
                 Text(sizeLabel)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
-                if let url = URL(string: file.storageUrl) {
+                if SafeURL.isAllowed(file.storageUrl) {
                     Button("Open in default app") {
-                        NSWorkspace.shared.open(url)
+                        SafeURL.open(file.storageUrl)
                     }
                     .buttonStyle(.borderedProminent)
                 }

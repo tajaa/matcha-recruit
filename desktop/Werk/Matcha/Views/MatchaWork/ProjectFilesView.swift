@@ -888,7 +888,7 @@ struct ProjectMediaView: View {
         .cornerRadius(4)
         .contentShape(Rectangle())
         .onTapGesture {
-            if let url = URL(string: link.url) { NSWorkspace.shared.open(url) }
+            SafeURL.open(link.url)
         }
     }
 
@@ -1484,7 +1484,7 @@ struct ElementDetailView: View {
                 if isLink, let u = note.url {
                     Text(note.body?.isEmpty == false ? note.body! : u)
                         .font(.system(size: 12)).foregroundColor(.matcha500).lineLimit(2)
-                        .onTapGesture { if let url = URL(string: u) { NSWorkspace.shared.open(url) } }
+                        .onTapGesture { SafeURL.open(u) }
                 } else if let b = note.body {
                     Text(b).font(.system(size: 12)).foregroundColor(.white.opacity(0.9)).textSelection(.enabled)
                 }
@@ -1569,8 +1569,12 @@ struct ElementDetailView: View {
     }
 
     private func addLink() async {
-        let url = newLink.trimmingCharacters(in: .whitespacesAndNewlines)
+        var url = newLink.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !url.isEmpty, let pid = projectId else { return }
+        // Default a bare host to https, then only persist web links — a stored
+        // file:// / smb:// would later be opened by every project member.
+        if let parsed = URL(string: url), parsed.scheme == nil { url = "https://" + url }
+        guard SafeURL.isAllowed(url) else { return }
         newLink = ""
         if let n = try? await MatchaWorkService.shared.addElementNote(
             projectId: pid, elementId: element.id, kind: "link", body: nil, url: url

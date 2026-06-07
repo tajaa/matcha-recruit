@@ -48,12 +48,11 @@
 		7A5C0000000000000000B012 /* TaskViewerSheet+Sections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F012 /* TaskViewerSheet+Sections.swift */; };
 		7A5C0000000000000000B013 /* TaskViewerSheet+Actions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F013 /* TaskViewerSheet+Actions.swift */; };
 		7A5C0000000000000000B0C1 /* CommitSuggestionChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F0C1 /* CommitSuggestionChip.swift */; };
-		7A5C0000000000000000B0C2 /* GitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F0C2 /* GitService.swift */; };
 		7A5C0000000000000000B0D1 /* PropsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F0D1 /* PropsView.swift */; };
-		7A5C0000000000000000B0D2 /* RepoSnapshotService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A5C0000000000000000F0D2 /* RepoSnapshotService.swift */; };
 		84947A5F80A1EC7B15C1B8E9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 043A0A515D971904874F82FA /* Assets.xcassets */; };
 		8563D547DEF316259DBF144C /* BillingUsageModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B06A176992AA39C8E304EFD0 /* BillingUsageModels.swift */; };
 		8E5D6EC70EEDBE08AE76BDEA /* ThreadModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2945FB0998BBD2E516955D3 /* ThreadModels.swift */; };
+		9845D484782C6962A4479A86 /* SafeURL.swift in Sources */ = {isa = PBXBuildFile; fileRef = 181ADEB8343F9C92BC77CA4F /* SafeURL.swift */; };
 		A1B2C3D4E5F60708AA000001 /* ProfileSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60708BB000001 /* ProfileSheet.swift */; };
 		A31D7A9BF3074252D07F87A8 /* DashboardModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94FBACAA706BADE04CF26DE2 /* DashboardModels.swift */; };
 		A7F2C319E8B045D16F3CA982 /* SkillsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9E4D71F3C825A064D17F308 /* SkillsView.swift */; };
@@ -163,6 +162,7 @@
 		0FAD57D16922818CB8ECD1BE /* ReviewPreview.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ReviewPreview.swift; sourceTree = "<group>"; };
 		15F1E6446AC5C08F85073A51 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		1768B8AD82B9DE8709D0ADF7 /* NewThreadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewThreadView.swift; sourceTree = "<group>"; };
+		181ADEB8343F9C92BC77CA4F /* SafeURL.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SafeURL.swift; sourceTree = "<group>"; };
 		210A398CCEA5FA1784C2C92D /* AuthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthModels.swift; sourceTree = "<group>"; };
 		28F1337BB8013FD3C4C0366C /* WorkbookPreview.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WorkbookPreview.swift; sourceTree = "<group>"; };
 		3737282FBC93D1C7D4F69B52 /* CollabOverviewView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CollabOverviewView.swift; sourceTree = "<group>"; };
@@ -193,9 +193,7 @@
 		7A5C0000000000000000F012 /* TaskViewerSheet+Sections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Sections.swift"; sourceTree = "<group>"; };
 		7A5C0000000000000000F013 /* TaskViewerSheet+Actions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TaskViewerSheet+Actions.swift"; sourceTree = "<group>"; };
 		7A5C0000000000000000F0C1 /* CommitSuggestionChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommitSuggestionChip.swift; sourceTree = "<group>"; };
-		7A5C0000000000000000F0C2 /* GitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitService.swift; sourceTree = "<group>"; };
 		7A5C0000000000000000F0D1 /* PropsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Props/PropsView.swift; sourceTree = "<group>"; };
-		7A5C0000000000000000F0D2 /* RepoSnapshotService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoSnapshotService.swift; sourceTree = "<group>"; };
 		87CD3FA8F0164D2F29731B2D /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		88DD03E26D63AB66B7AF4B39 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		94FBACAA706BADE04CF26DE2 /* DashboardModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DashboardModels.swift; sourceTree = "<group>"; };
@@ -363,8 +361,6 @@
 				15F1E6446AC5C08F85073A51 /* APIClient.swift */,
 				696FF167B14C8BBD12958A10 /* AuthService.swift */,
 				4CDEE91D105D2B702A920ED3 /* MatchaWorkService.swift */,
-				7A5C0000000000000000F0C2 /* GitService.swift */,
-				7A5C0000000000000000F0D2 /* RepoSnapshotService.swift */,
 				AA11BB22CC33DD44EE660008 /* InboxService.swift */,
 				DD00EE11FF22334455770002 /* ChannelsService.swift */,
 				E2A1B0C0D0E0F00100000002 /* EmailService.swift */,
@@ -449,6 +445,7 @@
 			children = (
 				E5C3CE5229A938126E840ABD /* MultipartUploadBuilder.swift */,
 				5ADDBEAEEBA9E4439ECD6181 /* ServiceCache.swift */,
+				181ADEB8343F9C92BC77CA4F /* SafeURL.swift */,
 			);
 			name = Support;
 			path = Support;
@@ -778,9 +775,7 @@
 				E5454454BDC033D4A00E1FFC /* APIClient.swift in Sources */,
 				0CBD0CD62319C7801E72CE1A /* AuthService.swift in Sources */,
 				1544DF6ADC7DC9778A60BEA8 /* MatchaWorkService.swift in Sources */,
-				7A5C0000000000000000B0C2 /* GitService.swift in Sources */,
 				7A5C0000000000000000B0D1 /* PropsView.swift in Sources */,
-				7A5C0000000000000000B0D2 /* RepoSnapshotService.swift in Sources */,
 				1896C192062FDFA5D66338DF /* AuthViewModel.swift in Sources */,
 				FADFA74F8E449B203A55B306 /* ThreadListViewModel.swift in Sources */,
 				EC4ABAA381C7E136838EDD09 /* ThreadDetailViewModel.swift in Sources */,
@@ -899,6 +894,7 @@
 				2CE474903EF8D244D54217A4 /* ScreenplayEditorView.swift in Sources */,
 				B8EF0BA967250612BA7375C9 /* ScreenplayPaginator.swift in Sources */,
 				55E3216B24ACA8EAA93FCC78 /* ScreenplayPDF.swift in Sources */,
+				9845D484782C6962A4479A86 /* SafeURL.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -212,7 +212,7 @@ struct MessageBubbleView: View {
             }
             ForEach(files, id: \.url) { att in
                 Button {
-                    if let u = URL(string: att.url) { NSWorkspace.shared.open(u) }
+                    SafeURL.open(att.url)
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "doc")

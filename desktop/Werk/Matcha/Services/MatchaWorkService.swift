@@ -969,17 +969,6 @@ class MatchaWorkService {
 
     // MARK: - Commit-driven subtask suggestions
 
-    func scanCommits(projectId: String, branch: String?, commits: [GitCommitPayload]) async throws -> [MWCommitSuggestion] {
-        struct Body: Encodable { let branch: String?; let commits: [GitCommitPayload] }
-        struct ScanResponse: Decodable { let suggestions: [MWCommitSuggestion] }
-        let resp: ScanResponse = try await client.request(
-            method: "POST",
-            path: "\(basePath)/projects/\(projectId)/commit-scan",
-            body: Body(branch: branch, commits: commits)
-        )
-        return resp.suggestions
-    }
-
     func listCommitSuggestions(projectId: String, taskId: String? = nil) async throws -> [MWCommitSuggestion] {
         var path = "\(basePath)/projects/\(projectId)/commit-suggestions"
         if let taskId { path += "?task_id=\(taskId)" }
@@ -1017,17 +1006,6 @@ class MatchaWorkService {
         try await client.request(
             method: "GET",
             path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)/commit-completions"
-        )
-    }
-
-    // MARK: - Element repo snapshot (for Prop grounding)
-
-    func putElementRepoSnapshot(projectId: String, elementId: String, files: [RepoFilePayload]) async throws -> MWSnapshotSummary {
-        struct Body: Encodable { let files: [RepoFilePayload] }
-        return try await client.request(
-            method: "PUT",
-            path: "\(basePath)/projects/\(projectId)/elements/\(elementId)/repo-snapshot",
-            body: Body(files: files)
         )
     }
 
