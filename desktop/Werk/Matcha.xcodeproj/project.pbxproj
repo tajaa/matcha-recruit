@@ -12,6 +12,7 @@
 		0CBD0CD62319C7801E72CE1A /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 696FF167B14C8BBD12958A10 /* AuthService.swift */; };
 		0F5C621C255ED1D1ED92354A /* CommonModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F0C8E2B8D1614829B174F9A /* CommonModels.swift */; };
 		13EAEBAAAC7381CA06D71B4A /* HandbookPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72F0FDE017AA63842A64DD61 /* HandbookPreview.swift */; };
+		145CDAD58E100F28EBFACF44 /* ContentViewComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EA68D04368CE35CA6B98DC5 /* ContentViewComponents.swift */; };
 		1544DF6ADC7DC9778A60BEA8 /* MatchaWorkService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDEE91D105D2B702A920ED3 /* MatchaWorkService.swift */; };
 		15E1BD123DCD5C4F06029703 /* ProjectLayoutEnums.swift in Sources */ = {isa = PBXBuildFile; fileRef = E21DF105CC19746BC2BF16B1 /* ProjectLayoutEnums.swift */; };
 		177C0859669D81A618CBABFE /* ProjectDetailViewModel+Core.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBAE334A7AAA459BAEE4E4F8 /* ProjectDetailViewModel+Core.swift */; };
@@ -67,6 +68,7 @@
 		9D0EC37421438D754621DB13 /* MatchaWorkService+Elements.swift in Sources */ = {isa = PBXBuildFile; fileRef = E86DDE94CCCCD549EE767827 /* MatchaWorkService+Elements.swift */; };
 		A1B2C3D4E5F60708AA000001 /* ProfileSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60708BB000001 /* ProfileSheet.swift */; };
 		A31D7A9BF3074252D07F87A8 /* DashboardModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94FBACAA706BADE04CF26DE2 /* DashboardModels.swift */; };
+		A3DDAF2CEBC9747C16A4FF05 /* ContentViewSidebars.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF7F875E51859F0196E4CB23 /* ContentViewSidebars.swift */; };
 		A7F2C319E8B045D16F3CA982 /* SkillsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9E4D71F3C825A064D17F308 /* SkillsView.swift */; };
 		A8B0E4F8719EE4B839FFBCBC /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88DD03E26D63AB66B7AF4B39 /* AppState.swift */; };
 		AA11BB22CC33DD44EE550001 /* ProjectDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660001 /* ProjectDetailViewModel.swift */; };
@@ -198,6 +200,7 @@
 		5C0FF11E570E000000000002 /* WorkDetailVMStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkDetailVMStore.swift; sourceTree = "<group>"; };
 		5C0FF11E570E000000000012 /* SkeletonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkeletonView.swift; sourceTree = "<group>"; };
 		5C6EEE903BD7EDAD4CB23C91 /* ProjectBizModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProjectBizModels.swift; sourceTree = "<group>"; };
+		5EA68D04368CE35CA6B98DC5 /* ContentViewComponents.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ContentViewComponents.swift; sourceTree = "<group>"; };
 		603136FE150BA8CD056B028C /* ProjectDetailViewModel+Biz.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "ProjectDetailViewModel+Biz.swift"; sourceTree = "<group>"; };
 		696FF167B14C8BBD12958A10 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
 		6F0C8E2B8D1614829B174F9A /* CommonModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CommonModels.swift; sourceTree = "<group>"; };
@@ -322,6 +325,7 @@
 		EEEE0J0J0J0J0J0J01010006 /* JournalDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalDetailView.swift; sourceTree = "<group>"; };
 		EEEE0J0J0J0J0J0J01010008 /* NewJournalSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewJournalSheet.swift; sourceTree = "<group>"; };
 		EEEE0J0J0J0J0J0J0101000A /* InviteToJournalSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteToJournalSheet.swift; sourceTree = "<group>"; };
+		EF7F875E51859F0196E4CB23 /* ContentViewSidebars.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ContentViewSidebars.swift; sourceTree = "<group>"; };
 		EFC745338E971AFA15B607A9 /* MatchaWorkService+Files.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "MatchaWorkService+Files.swift"; sourceTree = "<group>"; };
 		F2122823C3D149F37FE040CC /* ChannelMessageRowView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ChannelMessageRowView.swift; sourceTree = "<group>"; };
 		F2945FB0998BBD2E516955D3 /* ThreadModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThreadModels.swift; sourceTree = "<group>"; };
@@ -585,6 +589,8 @@
 				9A53863E4FE1105A953775B9 /* ContentView.swift */,
 				DETA11PANE000000000000F2 /* DetailPanes.swift */,
 				AD198140CC378D9E843FA827 /* Color+Extensions.swift */,
+				5EA68D04368CE35CA6B98DC5 /* ContentViewComponents.swift */,
+				EF7F875E51859F0196E4CB23 /* ContentViewSidebars.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -967,6 +973,8 @@
 				B66274A51FD5BFEC6FC84CDC /* ProjectDetailViewModel+Elements.swift in Sources */,
 				63AAB332DC7A629087AAE04F /* ProjectDetailViewModel+Files.swift in Sources */,
 				0C8B6F21E815D47AF2A01A7D /* ProjectDetailViewModel+Biz.swift in Sources */,
+				145CDAD58E100F28EBFACF44 /* ContentViewComponents.swift in Sources */,
+				A3DDAF2CEBC9747C16A4FF05 /* ContentViewSidebars.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
