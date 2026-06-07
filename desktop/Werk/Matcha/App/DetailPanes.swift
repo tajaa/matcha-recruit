@@ -29,23 +29,21 @@ struct PrimaryDetailPane: View {
         if appState.selectedChannelId != nil { return .channels }
         if appState.showThreadsHub  { return .threads }
         if appState.showProjectsHub { return .projects }
-        // A selected journal opens its full-pane editor (handled in `body`); the
-        // hub is only the no-selection "browse all documents" overview, since
-        // the persistent sidebar tree is now the journal navigator.
-        if appState.showJournalsHub && appState.selectedJournalId == nil { return .journals }
+        // Journals = the Notes-style workspace. A selected journal stays inside
+        // it (the workspace embeds the editor in its third column), so route to
+        // .journals for either the hub flag OR a selection.
+        if appState.showJournalsHub || appState.selectedJournalId != nil { return .journals }
         if appState.showChannelsHub { return .channels }
         return nil
     }
 
     var body: some View {
         Group {
-            if let jid = appState.selectedJournalId {
-                JournalDetailView(journalId: jid)
-            } else if let cat = workCategory {
+            if let cat = workCategory {
                 switch cat {
                 case .threads:  ThreadsLibraryView()
                 case .projects: ProjectsLibraryView()
-                case .journals: JournalsLibraryView()
+                case .journals: JournalsWorkspace()
                 case .channels: ChannelsLibraryView()
                 }
             } else if let emailId = appState.selectedEmailId {

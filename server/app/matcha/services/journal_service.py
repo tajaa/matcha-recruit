@@ -91,6 +91,43 @@ def _normalize_kind(kind: Optional[str]) -> str:
     return k if k in JOURNAL_KINDS else "journal"
 
 
+# Fountain title-page key lines to skip when building a note-list preview.
+_FOUNTAIN_TP_KEYS = (
+    "title:", "credit:", "author:", "authors:", "source:",
+    "draft date:", "date:", "contact:", "notes:", "copyright:",
+)
+
+
+def _preview(text: Optional[str], limit: int = 140) -> Optional[str]:
+    """A one-line snippet of a journal's body for the Notes-style list — first
+    non-empty content, with light markdown/fountain markers stripped."""
+    if not text:
+        return None
+    parts: list[str] = []
+    total = 0
+    for raw in text.split("\n"):
+        line = raw.strip()
+        if not line:
+            continue
+        if line.lower().startswith(_FOUNTAIN_TP_KEYS):
+            continue  # skip Fountain title-page lines
+        line = line.lstrip("#>=-*• \t").strip()
+        for chk in ("[ ]", "[x]", "[X]"):
+            if line.startswith(chk):
+                line = line[len(chk):].strip()
+        line = line.replace("**", "").replace("`", "").replace("==", "").replace("~~", "")
+        if not line:
+            continue
+        parts.append(line)
+        total += len(line)
+        if total >= limit:
+            break
+    s = " ".join(parts).strip()
+    if not s:
+        return None
+    return s[:limit] + "…" if len(s) > limit else s
+
+
 def _parse_journal(row) -> dict:
     keys = row.keys()
     return {
@@ -113,6 +150,9 @@ def _parse_journal(row) -> dict:
         ),
         "collaborator_role": (
             row["collaborator_role"] if "collaborator_role" in row.keys() else None
+        ),
+        "preview": (
+            _preview(row["preview_raw"]) if "preview_raw" in row.keys() else None
         ),
     }
 
@@ -175,7 +215,11 @@ async def list_journals(user_id: UUID, company_id: Optional[UUID], status: str =
                    (SELECT COUNT(*) FROM mw_journal_collaborators
                        WHERE journal_id = j.id AND status = 'active') AS collaborator_count,
                    (SELECT role FROM mw_journal_collaborators
-                       WHERE journal_id = j.id AND user_id = $1 AND status = 'active') AS collaborator_role
+                       WHERE journal_id = j.id AND user_id = $1 AND status = 'active') AS collaborator_role,
+                   (SELECT e.content FROM mw_journal_entries e
+                       WHERE e.journal_id = j.id
+                       ORDER BY e.updated_at DESC, e.created_at DESC
+                       LIMIT 1) AS preview_raw
             FROM mw_journals j
             WHERE j.status = $2
               AND (
@@ -434,6 +478,10 @@ async def update_entry(entry_id: UUID, viewer_id: UUID, patch: dict) -> dict:
             raise PermissionError("Entry not found")
         if row["author_id"] != viewer_id and row["journal_creator"] != viewer_id:
             raise PermissionError("Only the entry author or journal creator can edit")
+        # Bump the parent journal so the Notes-style list re-sorts by recent edit.
+        await conn.execute(
+            "UPDATE mw_journals SET updated_at = NOW() WHERE id = $1", row["journal_id"],
+        )
         sets, params = [], []
         idx = 1
         for k in ("title", "content", "entry_date"):
@@ -592,6 +640,7 @@ def _parse_folder(row) -> dict:
         "parent_id": str(row["parent_id"]) if row["parent_id"] else None,
         "created_by": str(row["created_by"]) if row["created_by"] else None,
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "color": row["color"] if "color" in row.keys() else None,
     }
 
 
@@ -601,7 +650,7 @@ async def list_journal_folders(company_id: UUID) -> list[dict]:
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, name, parent_id, created_by, created_at
+            SELECT id, name, parent_id, created_by, created_at, color
             FROM mw_journal_folders
             WHERE company_id = $1
             ORDER BY name ASC
@@ -612,7 +661,8 @@ async def list_journal_folders(company_id: UUID) -> list[dict]:
 
 
 async def create_journal_folder(
-    creator_id: UUID, company_id: UUID, *, name: str, parent_id: Optional[UUID] = None
+    creator_id: UUID, company_id: UUID, *, name: str,
+    parent_id: Optional[UUID] = None, color: Optional[str] = None,
 ) -> dict:
     async with get_connection() as conn:
         if parent_id is not None:
@@ -624,11 +674,11 @@ async def create_journal_folder(
                 raise PermissionError("Parent folder not found in this workspace")
         row = await conn.fetchrow(
             """
-            INSERT INTO mw_journal_folders (company_id, parent_id, name, created_by)
-            VALUES ($1, $2, COALESCE(NULLIF($3, ''), 'New Folder'), $4)
-            RETURNING id, name, parent_id, created_by, created_at
+            INSERT INTO mw_journal_folders (company_id, parent_id, name, created_by, color)
+            VALUES ($1, $2, COALESCE(NULLIF($3, ''), 'New Folder'), $4, $5)
+            RETURNING id, name, parent_id, created_by, created_at, color
             """,
-            company_id, parent_id, name, creator_id,
+            company_id, parent_id, name, creator_id, color,
         )
         return _parse_folder(row)
 
@@ -665,6 +715,9 @@ async def update_journal_folder(
         if "name" in patch and patch["name"]:
             params.append(patch["name"])
             sets.append(f"name = ${len(params)}")
+        if "color" in patch and patch["color"] is not None:
+            params.append(patch["color"])
+            sets.append(f"color = ${len(params)}")
         if "parent_id" in patch:
             target = patch["parent_id"]
             if target is not None:
@@ -683,7 +736,7 @@ async def update_journal_folder(
                 sets.append("parent_id = NULL")
         if not sets:
             row = await conn.fetchrow(
-                "SELECT id, name, parent_id, created_by, created_at "
+                "SELECT id, name, parent_id, created_by, created_at, color "
                 "FROM mw_journal_folders WHERE id = $1", folder_id,
             )
             return _parse_folder(row)
@@ -692,7 +745,7 @@ async def update_journal_folder(
             f"""
             UPDATE mw_journal_folders SET {", ".join(sets)}
             WHERE id = ${len(params)}
-            RETURNING id, name, parent_id, created_by, created_at
+            RETURNING id, name, parent_id, created_by, created_at, color
             """,
             *params,
         )

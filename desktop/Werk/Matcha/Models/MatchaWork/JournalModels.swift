@@ -17,9 +17,10 @@ struct MWJournal: Codable, Identifiable, Hashable {
     let entryCount: Int?
     let collaboratorCount: Int?
     let collaboratorRole: String?
+    let preview: String?        // one-line body snippet for the Notes-style list
 
     enum CodingKeys: String, CodingKey {
-        case id, title, description, color, icon, status, kind
+        case id, title, description, color, icon, status, kind, preview
         case folderId = "folder_id"
         case createdBy = "created_by"
         case createdAt = "created_at"
@@ -39,9 +40,10 @@ struct MWJournalFolder: Codable, Identifiable, Hashable {
     let parentId: String?
     let createdBy: String?
     let createdAt: String?
+    let color: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name
+        case id, name, color
         case parentId = "parent_id"
         case createdBy = "created_by"
         case createdAt = "created_at"

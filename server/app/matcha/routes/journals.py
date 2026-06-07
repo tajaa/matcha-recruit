@@ -44,11 +44,13 @@ class JournalPatch(BaseModel):
 class FolderCreate(BaseModel):
     name: str
     parent_id: Optional[UUID] = None
+    color: Optional[str] = None
 
 
 class FolderPatch(BaseModel):
     name: Optional[str] = None
     parent_id: Optional[UUID] = None
+    color: Optional[str] = None
 
 
 class EntryCreate(BaseModel):
@@ -182,6 +184,7 @@ async def create_journal_folder_endpoint(
     try:
         return await journal_service.create_journal_folder(
             current_user.id, company_id, name=body.name, parent_id=body.parent_id,
+            color=body.color,
         )
     except PermissionError as e:
         raise HTTPException(status_code=400, detail=str(e))

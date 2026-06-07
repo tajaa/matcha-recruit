@@ -2061,12 +2061,16 @@ class MatchaWorkService {
         try await JournalService.shared.listFolders()
     }
 
-    func createJournalFolder(name: String, parentId: String? = nil) async throws -> MWJournalFolder {
-        try await JournalService.shared.createFolder(name: name, parentId: parentId)
+    func createJournalFolder(name: String, parentId: String? = nil, color: String? = nil) async throws -> MWJournalFolder {
+        try await JournalService.shared.createFolder(name: name, parentId: parentId, color: color)
     }
 
     func renameJournalFolder(id: String, name: String) async throws -> MWJournalFolder {
         try await JournalService.shared.renameFolder(id: id, name: name)
+    }
+
+    func updateJournalFolder(id: String, name: String? = nil, color: String? = nil) async throws -> MWJournalFolder {
+        try await JournalService.shared.updateFolder(id: id, name: name, color: color)
     }
 
     func deleteJournalFolder(id: String) async throws {

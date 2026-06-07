@@ -113,28 +113,35 @@ final class JournalService {
         try await client.request(method: "GET", path: "\(basePath)/journal-folders")
     }
 
-    func createFolder(name: String, parentId: String? = nil) async throws -> MWJournalFolder {
+    func createFolder(name: String, parentId: String? = nil, color: String? = nil) async throws -> MWJournalFolder {
         struct Body: Codable {
             let name: String
             let parentId: String?
+            let color: String?
             enum CodingKeys: String, CodingKey {
-                case name
+                case name, color
                 case parentId = "parent_id"
             }
         }
         return try await client.request(
             method: "POST",
             path: "\(basePath)/journal-folders",
-            body: Body(name: name, parentId: parentId),
+            body: Body(name: name, parentId: parentId, color: color),
         )
     }
 
     func renameFolder(id: String, name: String) async throws -> MWJournalFolder {
-        struct Body: Codable { let name: String }
+        try await updateFolder(id: id, name: name)
+    }
+
+    /// Patch a folder's name and/or color. A nil field is sent as JSON null,
+    /// which the backend skips (only non-nil patch keys are applied).
+    func updateFolder(id: String, name: String? = nil, color: String? = nil) async throws -> MWJournalFolder {
+        struct Body: Codable { let name: String?; let color: String? }
         return try await client.request(
             method: "PATCH",
             path: "\(basePath)/journal-folders/\(id)",
-            body: Body(name: name),
+            body: Body(name: name, color: color),
         )
     }
 

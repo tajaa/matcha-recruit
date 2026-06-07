@@ -5498,6 +5498,7 @@ async def init_db():
         """)
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_journal_folders_company ON mw_journal_folders(company_id)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_journal_folders_parent ON mw_journal_folders(parent_id)")
+        await conn.execute("ALTER TABLE mw_journal_folders ADD COLUMN IF NOT EXISTS color VARCHAR(20)")
         await conn.execute("ALTER TABLE mw_journals ADD COLUMN IF NOT EXISTS folder_id UUID REFERENCES mw_journal_folders(id) ON DELETE SET NULL")
         await conn.execute("ALTER TABLE mw_journals ADD COLUMN IF NOT EXISTS kind VARCHAR(20) NOT NULL DEFAULT 'journal'")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_journals_folder ON mw_journals(folder_id)")
