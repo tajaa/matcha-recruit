@@ -4259,7 +4259,7 @@ async def init_db():
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS fractional_audit_log (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                client_id UUID REFERENCES fractional_clients(id) ON DELETE CASCADE,
+                client_id UUID REFERENCES fractional_clients(id) ON DELETE SET NULL,
                 actor_id UUID REFERENCES users(id),
                 action VARCHAR(64) NOT NULL,
                 detail JSONB NOT NULL DEFAULT '{}'::jsonb,

@@ -5,14 +5,14 @@ engagements (clients), pro assignments, scope items, tasks, time entries,
 and an audit log. No client-facing login — operated by Matcha admins.
 
 Revision ID: zzzzfhr1a2b3
-Revises: zzzzdi4e5f6g7
+Revises: authsess01
 Create Date: 2026-06-07
 """
 from alembic import op
 
 
 revision = "zzzzfhr1a2b3"
-down_revision = "zzzzdi4e5f6g7"
+down_revision = "authsess01"
 branch_labels = None
 depends_on = None
 
@@ -138,7 +138,7 @@ def upgrade() -> None:
     op.execute("""
         CREATE TABLE IF NOT EXISTS fractional_audit_log (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            client_id UUID REFERENCES fractional_clients(id) ON DELETE CASCADE,
+            client_id UUID REFERENCES fractional_clients(id) ON DELETE SET NULL,
             actor_id UUID REFERENCES users(id),
             action VARCHAR(64) NOT NULL,
             detail JSONB NOT NULL DEFAULT '{}'::jsonb,
