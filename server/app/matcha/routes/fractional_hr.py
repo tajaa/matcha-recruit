@@ -18,6 +18,7 @@ from datetime import date, datetime
 from typing import Optional
 from uuid import UUID
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ...core.dependencies import require_admin
@@ -46,6 +47,20 @@ _PERIOD_BUCKET = {"weekly": "wk_hours", "monthly": "mo_hours", "quarterly": "qtr
 def _f(value) -> Optional[float]:
     """asyncpg returns Decimal for NUMERIC; normalize to float for JSON."""
     return float(value) if value is not None else None
+
+
+def _client_out(row) -> dict:
+    """Serialize a fractional_clients row. The pool has no JSONB codec, so
+    ``jurisdictions`` comes back as a JSON string — parse it to a list."""
+    d = dict(row)
+    j = d.get("jurisdictions")
+    if isinstance(j, str):
+        try:
+            parsed = json.loads(j)
+            d["jurisdictions"] = parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            d["jurisdictions"] = []
+    return d
 
 
 async def _log_audit(conn, client_id, actor_id, action: str, detail: dict | None = None) -> None:
@@ -105,7 +120,7 @@ async def _get_client_or_404(conn, client_id: str) -> dict:
     row = await conn.fetchrow("SELECT * FROM fractional_clients WHERE id = $1", cid)
     if not row:
         raise HTTPException(status_code=404, detail="Client not found")
-    return dict(row)
+    return _client_out(row)
 
 
 def _uuid_or_none(value: Optional[str]) -> Optional[UUID]:
@@ -340,7 +355,7 @@ async def list_clients(
     tasks_by = {r["client_id"]: r for r in tasks}
     result = []
     for row in clients:
-        c = dict(row)
+        c = _client_out(row)
         h = hours_by.get(c["id"])
         period_bucket = _PERIOD_BUCKET.get(c["retainer_period"], "mo_hours")
         period_logged = _f(h[period_bucket]) if h else 0.0
@@ -390,7 +405,7 @@ async def create_client(body: ClientCreateRequest, admin: CurrentUser = Depends(
             admin.id,
         )
         await _log_audit(conn, row["id"], admin.id, "client.create", {"name": body.name})
-    return dict(row)
+    return _client_out(row)
 
 
 @router.get("/clients/{client_id}")
@@ -472,7 +487,7 @@ async def update_client(client_id: str, body: ClientUpdateRequest, admin: Curren
             *params,
         )
         await _log_audit(conn, row["id"], admin.id, "client.update", {"fields": list(fields.keys())})
-    return dict(row)
+    return _client_out(row)
 
 
 @router.delete("/clients/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -505,7 +520,7 @@ async def add_assignment(client_id: str, body: AssignmentCreateRequest, admin: C
                 pro_id,
                 body.role,
             )
-        except Exception:
+        except asyncpg.exceptions.UniqueViolationError:
             raise HTTPException(status_code=409, detail="Pro already assigned to this client")
         await _log_audit(conn, UUID(client_id), admin.id, "assignment.add", {"pro_user_id": body.pro_user_id, "role": body.role})
     return dict(row)
