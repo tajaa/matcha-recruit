@@ -12,7 +12,7 @@ const NAV_LINKS = [
   { to: '/matcha-lite', label: 'Matcha Lite' },
   // { to: '/services', label: 'Consulting' }, // muted
   { to: '/resources', label: 'Resources' },
-  { to: '/handbook-gap-analyzer', label: 'Handbook Audit' },
+  { to: '/fractional', label: 'Fractional' },
   { to: '/blog', label: 'Blog' },
 ]
 

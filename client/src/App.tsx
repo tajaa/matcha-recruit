@@ -37,8 +37,7 @@ const CalcTurnoverCost = lazy(() => import('./pages/landing/resources/calculator
 const CalcOvertime = lazy(() => import('./pages/landing/resources/calculators/Overtime'))
 const CalcTotalComp = lazy(() => import('./pages/landing/resources/calculators/TotalComp'))
 const ResourcesComplianceAudit = lazy(() => import('./pages/landing/resources/ComplianceAudit'))
-const HandbookGapAnalyzer = lazy(() => import('./pages/landing/HandbookGapAnalyzer'))
-const HandbookGapResult = lazy(() => import('./pages/landing/HandbookGapResult'))
+const FractionalPage = lazy(() => import('./pages/landing/FractionalPage'))
 const SignupPicker = lazy(() => import('./pages/auth/SignupPicker'))
 const ResourcesSignup = lazy(() => import('./pages/auth/ResourcesSignup'))
 const VerifyEmail = lazy(() => import('./pages/auth/VerifyEmail'))
@@ -92,8 +91,7 @@ export default function App() {
         <Route path="/resources/calculators/overtime" element={<CalcOvertime />} />
         <Route path="/resources/calculators/total-comp" element={<CalcTotalComp />} />
         <Route path="/resources/audit" element={<RequireBusinessAccount><ResourcesComplianceAudit /></RequireBusinessAccount>} />
-        <Route path="/handbook-gap-analyzer" element={<HandbookGapAnalyzer />} />
-        <Route path="/handbook-gap-analyzer/result/:reportId" element={<HandbookGapResult />} />
+        <Route path="/fractional" element={<FractionalPage />} />
         <Route path="/signup" element={<SignupPicker />} />
         <Route path="/auth/resources-signup" element={<ResourcesSignup />} />
         <Route path="/auth/verify-email" element={<VerifyEmail />} />
