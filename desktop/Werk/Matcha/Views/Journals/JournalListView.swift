@@ -331,6 +331,7 @@ struct JournalsWorkspace: View {
     @State private var renameText = ""
     @State private var isLoading = true
     @State private var errorMessage: String?
+    @State private var folderRailCollapsed = false
     @FocusState private var renameFocused: Bool
 
     private static let relFmt: RelativeDateTimeFormatter = {
@@ -340,7 +341,11 @@ struct JournalsWorkspace: View {
 
     var body: some View {
         HSplitView {
-            folderRail.frame(minWidth: 180, idealWidth: 210, maxWidth: 260)
+            if folderRailCollapsed {
+                MWHubRailStrip { folderRailCollapsed = false }
+            } else {
+                folderRail.frame(minWidth: 180, idealWidth: 210, maxWidth: 260)
+            }
             noteList.frame(minWidth: 250, idealWidth: 290, maxWidth: 380)
             editorPane.frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -369,6 +374,12 @@ struct JournalsWorkspace: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(appState.themeTextSecondary)
                 Spacer()
+                Button { folderRailCollapsed = true } label: {
+                    Image(systemName: "sidebar.left").font(.system(size: 12))
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(appState.themeTextSecondary)
+                .help("Hide sidebar")
                 Button { Task { await newFolder(parent: nil) } } label: {
                     Image(systemName: "folder.badge.plus").font(.system(size: 12))
                 }

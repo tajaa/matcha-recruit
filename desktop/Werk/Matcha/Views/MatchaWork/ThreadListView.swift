@@ -399,6 +399,7 @@ struct ThreadsLibraryView: View {
     @State private var filter: Filter = .all
     @State private var creating = false
     @State private var railSearch = ""
+    @State private var railCollapsed = false
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All", active = "Active", finalized = "Finalized"
@@ -410,7 +411,11 @@ struct ThreadsLibraryView: View {
 
     var body: some View {
         HSplitView {
-            rail.frame(minWidth: 232, idealWidth: 258, maxWidth: 320)
+            if railCollapsed {
+                MWHubRailStrip { railCollapsed = false }
+            } else {
+                rail.frame(minWidth: 232, idealWidth: 258, maxWidth: 320)
+            }
             Group {
                 if let id = appState.selectedThreadId {
                     ThreadDetailView(threadId: id)
@@ -442,6 +447,7 @@ struct ThreadsLibraryView: View {
                 HStack {
                     Text("Threads").font(.system(size: 12, weight: .semibold)).foregroundColor(appState.themeTextSecondary)
                     Spacer()
+                    MWHubRailIconButton(icon: "sidebar.left", help: "Hide sidebar") { railCollapsed = true }
                     if creating { ProgressView().controlSize(.small) }
                     else { MWHubRailIconButton(icon: "plus", help: "New thread") { Task { await create() } } }
                 }

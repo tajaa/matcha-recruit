@@ -586,6 +586,7 @@ struct ProjectsLibraryView: View {
     @State private var filter: Filter = .all
     @State private var showTypePicker = false
     @State private var railSearch = ""
+    @State private var railCollapsed = false
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All", pinned = "Pinned"
@@ -602,7 +603,11 @@ struct ProjectsLibraryView: View {
 
     var body: some View {
         HSplitView {
-            rail.frame(minWidth: 232, idealWidth: 258, maxWidth: 320)
+            if railCollapsed {
+                MWHubRailStrip { railCollapsed = false }
+            } else {
+                rail.frame(minWidth: 232, idealWidth: 258, maxWidth: 320)
+            }
             Group {
                 if let id = appState.selectedProjectId {
                     ProjectDetailView(projectId: id)
@@ -635,6 +640,7 @@ struct ProjectsLibraryView: View {
                 HStack {
                     Text("Projects").font(.system(size: 12, weight: .semibold)).foregroundColor(appState.themeTextSecondary)
                     Spacer()
+                    MWHubRailIconButton(icon: "sidebar.left", help: "Hide sidebar") { railCollapsed = true }
                     MWHubRailIconButton(icon: "plus", help: "New project") { showTypePicker = true }
                         .popover(isPresented: $showTypePicker) { typeMenu }
                 }
@@ -845,6 +851,32 @@ struct MWHubRail<Header: View, Rows: View>: View {
                     .padding(.horizontal, 8).padding(.bottom, 12)
             }
         }
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(appState.themeSidebar.opacity(0.5))
+    }
+}
+
+/// Collapsed form of a hub rail: a slim vertical strip with a single expand
+/// control, handing the freed width to the detail pane. Shared by every hub
+/// (Projects / Threads / Channels) and the Journals folder rail. Click to
+/// restore the full rail.
+struct MWHubRailStrip: View {
+    let expand: () -> Void
+    @Environment(AppState.self) private var appState
+    var body: some View {
+        VStack(spacing: 0) {
+            Button(action: expand) {
+                Image(systemName: "sidebar.left")
+                    .font(.system(size: 13))
+                    .foregroundColor(appState.themeTextSecondary)
+                    .frame(width: 36, height: 40)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Show sidebar")
+            Spacer(minLength: 0)
+        }
+        .frame(width: 36)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(appState.themeSidebar.opacity(0.5))
     }

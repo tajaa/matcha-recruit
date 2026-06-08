@@ -836,6 +836,11 @@ extension ChatPanelView {
             
             Spacer()
         }
+        // Fill the pane so the centered hero/composer block sits in the middle.
+        // Without this the VStack shrink-wraps to its ~560pt content width and a
+        // parent left-aligns it — pinning the new-chat landing to the left edge
+        // (visible in a bottom/side split pane).
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

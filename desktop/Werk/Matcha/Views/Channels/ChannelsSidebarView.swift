@@ -648,6 +648,7 @@ struct ChannelsLibraryView: View {
     @State private var showCreate = false
     @State private var starGen = 0
     @State private var railSearch = ""
+    @State private var railCollapsed = false
 
     enum Filter: String, CaseIterable, Identifiable {
         case mine = "Mine", starred = "Starred"
@@ -658,7 +659,11 @@ struct ChannelsLibraryView: View {
 
     var body: some View {
         HSplitView {
-            rail.frame(minWidth: 232, idealWidth: 258, maxWidth: 320)
+            if railCollapsed {
+                MWHubRailStrip { railCollapsed = false }
+            } else {
+                rail.frame(minWidth: 232, idealWidth: 258, maxWidth: 320)
+            }
             Group {
                 if let id = appState.selectedChannelId {
                     ChannelDetailView(channelId: id)
@@ -699,6 +704,7 @@ struct ChannelsLibraryView: View {
                 HStack {
                     Text("Channels").font(.system(size: 12, weight: .semibold)).foregroundColor(appState.themeTextSecondary)
                     Spacer()
+                    MWHubRailIconButton(icon: "sidebar.left", help: "Hide sidebar") { railCollapsed = true }
                     MWHubRailIconButton(icon: "magnifyingglass", help: "Browse") { browse() }
                     MWHubRailIconButton(icon: "plus", help: "New channel") { showCreate = true }
                 }
