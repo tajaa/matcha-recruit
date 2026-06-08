@@ -16,6 +16,7 @@ struct HomeDashboardView: View {
     @State private var errorMessage: String?
     @State private var isCreatingChat = false
     @State private var showOlder = false
+    @State private var search = ""
 
     private func isRecentlyActive(_ dateString: String?, days: Int = 7) -> Bool {
         guard let ds = dateString, let date = parseMWDate(ds) else { return true }
@@ -75,18 +76,23 @@ struct HomeDashboardView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                header
-                quickActions
+                searchHero
                 if let err = errorMessage {
                     errorBanner(err)
                 }
-                // Lead with the user's own work, then a compact view of what's
-                // active. Blogs moved out; older items tuck behind a disclosure.
-                assignedToMeCard
-                activeProjectsCard
-                recentActivityCard
-                if !olderProjects.isEmpty || !olderThreads.isEmpty || !olderJournals.isEmpty || !olderChannels.isEmpty {
-                    olderItemsDisclosure
+                if !trimmedSearch.isEmpty {
+                    // Search mode: replace the dashboard with cross-surface hits.
+                    searchResultsCard
+                } else {
+                    quickActions
+                    // Lead with the user's own work, then a compact view of what's
+                    // active. Blogs moved out; older items tuck behind a disclosure.
+                    assignedToMeCard
+                    activeProjectsCard
+                    recentActivityCard
+                    if !olderProjects.isEmpty || !olderThreads.isEmpty || !olderJournals.isEmpty || !olderChannels.isEmpty {
+                        olderItemsDisclosure
+                    }
                 }
             }
             .padding(20)
@@ -153,37 +159,175 @@ struct HomeDashboardView: View {
         .keyboardShortcut("n", modifiers: .command)
     }
 
-    // MARK: - Header
+    // MARK: - Search hero
 
-    private var header: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Home")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(appState.themeText)
-                Text("What's in flight across your work.")
-                    .font(.system(size: 11))
-                    .foregroundColor(appState.themeText.opacity(0.5))
+    private var trimmedSearch: String {
+        search.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// First name (or capitalized email handle) for the greeting line.
+    private var firstName: String {
+        if let user = appState.currentUser {
+            if let full = user.name,
+               !full.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return String(full.split(separator: " ").first ?? Substring(full))
             }
-            Spacer()
-            Button { Task { await loadAll() } } label: {
-                HStack(spacing: 4) {
-                    if isLoading {
-                        ProgressView().controlSize(.small).tint(appState.themeOnAccent)
-                    } else {
-                        Image(systemName: "arrow.clockwise").font(.system(size: 11))
-                    }
-                    Text("Refresh").font(.system(size: 11, weight: .medium))
-                }
-                .foregroundColor(appState.themeOnAccent)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(appState.themeAccent)
-                .cornerRadius(5)
+            if let handle = user.email.split(separator: "@").first {
+                return String(handle).capitalized
             }
-            .buttonStyle(.plain)
-            .disabled(isLoading)
         }
+        return "there"
+    }
+
+    private var searchHero: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("What are we working on today, \(firstName)?")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundColor(appState.themeText)
+                Spacer(minLength: 8)
+                Button { Task { await loadAll() } } label: {
+                    if isLoading {
+                        ProgressView().controlSize(.small).tint(appState.themeTextSecondary)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12))
+                            .foregroundColor(appState.themeTextSecondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoading)
+                .help("Refresh")
+            }
+
+            HStack(spacing: 9) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14))
+                    .foregroundColor(appState.themeTextSecondary)
+                TextField("Search projects, chats, threads, journals…", text: $search)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 15))
+                    .foregroundColor(appState.themeText)
+                if !search.isEmpty {
+                    Button { search = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 13))
+                            .foregroundColor(appState.themeTextSecondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.cardBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(appState.themeBorder, lineWidth: 1)
+            )
+        }
+    }
+
+    // MARK: - Cross-surface search
+
+    private enum HitKind { case project, thread, journal, channel }
+
+    private struct Hit: Identifiable {
+        let id: String        // prefixed, unique across kinds
+        let rawId: String     // entity id for navigation
+        let kind: HitKind
+        let title: String
+    }
+
+    private var hits: [Hit] {
+        let q = trimmedSearch
+        guard !q.isEmpty else { return [] }
+        var out: [Hit] = []
+        out += projects
+            .filter { $0.title.localizedCaseInsensitiveContains(q) }
+            .map { Hit(id: "p:\($0.id)", rawId: $0.id, kind: .project, title: $0.title) }
+        out += threads
+            .filter { $0.title.localizedCaseInsensitiveContains(q) }
+            .map { Hit(id: "t:\($0.id)", rawId: $0.id, kind: .thread, title: $0.displayName) }
+        out += journals
+            .filter { $0.title.localizedCaseInsensitiveContains(q) }
+            .map { Hit(id: "j:\($0.id)", rawId: $0.id, kind: .journal, title: $0.title) }
+        out += channels
+            .filter { $0.name.localizedCaseInsensitiveContains(q) }
+            .map { Hit(id: "c:\($0.id)", rawId: $0.id, kind: .channel, title: $0.name) }
+        return out
+    }
+
+    private func hitTypeLabel(_ k: HitKind) -> String {
+        switch k {
+        case .project: return "project"
+        case .thread:  return "chat"
+        case .journal: return "journal entry"
+        case .channel: return "channel"
+        }
+    }
+
+    private func hitIcon(_ k: HitKind) -> String {
+        switch k {
+        case .project: return "folder"
+        case .thread:  return "bubble.left"
+        case .journal: return "book.closed"
+        case .channel: return "number"
+        }
+    }
+
+    private func openHit(_ hit: Hit) {
+        appState.selectedProjectId = nil
+        appState.selectedThreadId = nil
+        appState.selectedJournalId = nil
+        appState.selectedChannelId = nil
+        switch hit.kind {
+        case .project: appState.selectedProjectId = hit.rawId
+        case .thread:  appState.selectedThreadId = hit.rawId
+        case .journal: appState.selectedJournalId = hit.rawId
+        case .channel: appState.selectedChannelId = hit.rawId
+        }
+        appState.showHome = false
+        search = ""
+    }
+
+    @ViewBuilder
+    private var searchResultsCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            cardHeader(title: "RESULTS", trailing: hits.isEmpty ? nil : "\(hits.count)")
+            if hits.isEmpty {
+                Text("No matches for “\(trimmedSearch)”.")
+                    .font(.system(size: 12))
+                    .foregroundColor(appState.themeText.opacity(0.4))
+                    .padding(.vertical, 6)
+            } else {
+                ForEach(hits) { hit in
+                    Button { openHit(hit) } label: {
+                        HStack(spacing: 9) {
+                            Image(systemName: hitIcon(hit.kind))
+                                .font(.system(size: 11))
+                                .foregroundColor(appState.themeAccent)
+                                .frame(width: 16)
+                            Text(hit.title.isEmpty ? "Untitled" : hit.title)
+                                .font(.system(size: 13))
+                                .foregroundColor(appState.themeText.opacity(0.9))
+                                .lineLimit(1)
+                            Text("(\(hitTypeLabel(hit.kind)))")
+                                .font(.system(size: 11))
+                                .foregroundColor(appState.themeText.opacity(0.45))
+                            Spacer(minLength: 0)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.vertical, 3)
+                }
+            }
+        }
+        .padding(16)
+        .elevatedCard(cornerRadius: 14)
     }
 
     // MARK: - Cards
