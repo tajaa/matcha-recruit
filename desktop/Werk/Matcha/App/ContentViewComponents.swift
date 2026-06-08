@@ -186,6 +186,7 @@ extension View {
 /// "×" to close, "+" to pin the currently-open item.
 struct WorkTabBar: View {
     @Environment(AppState.self) private var appState
+    @State private var showSplitFinder = false
 
     var body: some View {
         HStack(spacing: 4) {
@@ -204,11 +205,23 @@ struct WorkTabBar: View {
             .opacity(appState.canPinActiveTab ? 1 : 0.3)
             .help(pinHelp)
             Spacer(minLength: 0)
+            Button { showSplitFinder = true } label: {
+                Image(systemName: "rectangle.split.2x1")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(appState.themeTextSecondary)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Open another surface in a split pane")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(appState.themeBg)
         .overlay(alignment: .bottom) { Divider().opacity(0.4) }
+        .sheet(isPresented: $showSplitFinder) {
+            SplitFinderPalette().environment(appState)
+        }
     }
 
     private var pinHelp: String {

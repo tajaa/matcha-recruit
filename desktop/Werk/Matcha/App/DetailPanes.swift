@@ -293,6 +293,167 @@ struct AuxOpenMenuButtons: View {
     }
 }
 
+// MARK: - Split finder palette
+
+/// A Spotlight-style picker for opening ANY surface (thread / channel / project
+/// / journal) into the right or bottom split pane. Reached from the WorkTabBar
+/// "split" button — the general entry point that doesn't require first
+/// navigating to a surface's hub. Reuses SplitSwitcherModel to load + title the
+/// four surface lists; filters them live by the search field.
+struct SplitFinderPalette: View {
+    @Environment(AppState.self) private var appState
+    @Environment(\.dismiss) private var dismiss
+    @State private var model = SplitSwitcherModel()
+    @State private var search = ""
+    @State private var slot: Slot = .right
+    @State private var didInitSlot = false
+    @FocusState private var searchFocused: Bool
+
+    enum Slot: String, CaseIterable, Identifiable {
+        case right = "Right Pane", bottom = "Bottom Pane"
+        var id: String { rawValue }
+    }
+
+    private struct Entry: Identifiable {
+        let id: String
+        let target: AuxWindowTarget
+        let title: String
+        let icon: String
+        let group: String
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider().opacity(0.3)
+            results
+        }
+        .frame(width: 480, height: 460)
+        .background(appState.themeBg)
+        .task {
+            // Reload every open — the cached model would otherwise miss surfaces
+            // created since the palette was last shown.
+            await model.load()
+            if !didInitSlot {
+                // Default to the first free slot; if the right pane is already
+                // taken, land on bottom so the common "add a third" case is one tap.
+                slot = appState.splitTarget == nil ? .right : .bottom
+                didInitSlot = true
+            }
+            searchFocused = true
+        }
+    }
+
+    // ── Header: search + destination toggle ─────────────────────────────
+    private var header: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 13)).foregroundColor(appState.themeTextSecondary)
+                TextField("Find a thread, channel, project, or journal…", text: $search)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 14))
+                    .foregroundColor(appState.themeText)
+                    .focused($searchFocused)
+                    .onSubmit { if let first = filtered.first { open(first) } }
+                if !search.isEmpty {
+                    Button { search = "" } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12)).foregroundColor(appState.themeTextSecondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Picker("", selection: $slot) {
+                ForEach(Slot.allCases) { s in
+                    Text(label(for: s)).tag(s)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
+        .padding(14)
+    }
+
+    /// Annotate a slot with "(in use)" so picking it reads as a replace.
+    private func label(for s: Slot) -> String {
+        let occupied = (s == .right && appState.splitTarget != nil)
+            || (s == .bottom && appState.bottomSplitTarget != nil)
+        return occupied ? "\(s.rawValue) (replace)" : s.rawValue
+    }
+
+    // ── Results list ────────────────────────────────────────────────────
+    private var allEntries: [Entry] {
+        var out: [Entry] = []
+        out += model.threads.map { Entry(id: "t:\($0.id)", target: .thread($0.id), title: $0.displayName, icon: "bubble.left.and.bubble.right", group: "Threads") }
+        out += model.channels.map { Entry(id: "c:\($0.id)", target: .channel($0.id), title: "#\($0.name)", icon: "number", group: "Channels") }
+        out += model.projects.map { Entry(id: "p:\($0.id)", target: .project($0.id), title: $0.title, icon: "folder", group: "Projects") }
+        out += model.journals.map { Entry(id: "j:\($0.id)", target: .journal($0.id), title: $0.title, icon: "book.closed", group: "Journals") }
+        return out
+    }
+
+    private var filtered: [Entry] {
+        guard !search.isEmpty else { return allEntries }
+        return allEntries.filter { $0.title.localizedCaseInsensitiveContains(search) }
+    }
+
+    private let groupOrder = ["Threads", "Channels", "Projects", "Journals"]
+
+    @ViewBuilder
+    private var results: some View {
+        if filtered.isEmpty {
+            VStack(spacing: 8) {
+                Spacer()
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 22)).foregroundColor(appState.themeTextSecondary.opacity(0.6))
+                Text(search.isEmpty ? "Nothing to open yet" : "No matches")
+                    .font(.system(size: 12)).foregroundColor(appState.themeTextSecondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    ForEach(groupOrder, id: \.self) { group in
+                        let rows = filtered.filter { $0.group == group }
+                        if !rows.isEmpty {
+                            Text(group.uppercased())
+                                .font(.system(size: 9, weight: .semibold)).tracking(0.5)
+                                .foregroundColor(appState.themeTextSecondary)
+                                .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 4)
+                            ForEach(rows) { entry in row(entry) }
+                        }
+                    }
+                }
+                .padding(.bottom, 10)
+            }
+        }
+    }
+
+    private func row(_ entry: Entry) -> some View {
+        Button { open(entry) } label: {
+            HStack(spacing: 9) {
+                Image(systemName: entry.icon)
+                    .font(.system(size: 12)).foregroundColor(appState.themeAccent).frame(width: 16)
+                Text(entry.title.isEmpty ? "Untitled" : entry.title)
+                    .font(.system(size: 13)).foregroundColor(appState.themeText).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func open(_ entry: Entry) {
+        switch slot {
+        case .right:  appState.splitTarget = entry.target
+        case .bottom: appState.bottomSplitTarget = entry.target
+        }
+        dismiss()
+    }
+}
+
 // MARK: - Churning-counter leaf badges
 
 /// Toolbar bell label. Reads `notificationsUnreadCount` here so its ticks
