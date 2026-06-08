@@ -724,6 +724,8 @@ struct ChannelsLibraryView: View {
                              trailing: c.unreadCount > 0 ? "\(min(c.unreadCount, 99))" : nil) { open(c.id) }
                     .contextMenu {
                         Button(starred ? "Unstar" : "Star") { ChannelStarStore.shared.toggle(c.id); starGen += 1 }
+                        Divider()
+                        AuxOpenMenuButtons(target: .channel(c.id))
                     }
             }
         }

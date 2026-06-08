@@ -463,6 +463,9 @@ struct ThreadsLibraryView: View {
                              title: t.displayName,
                              selected: appState.selectedThreadId == t.id,
                              accent: t.isPinned) { open(t.id) }
+                    .contextMenu {
+                        AuxOpenMenuButtons(target: .thread(t.id))
+                    }
             }
         }
     }
@@ -539,6 +542,9 @@ struct ThreadsLibraryView: View {
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(appState.themeBorder, lineWidth: 1))
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            AuxOpenMenuButtons(target: .thread(t.id))
+        }
     }
 
     private func open(_ id: String) {

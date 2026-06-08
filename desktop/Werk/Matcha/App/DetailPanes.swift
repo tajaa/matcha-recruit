@@ -268,6 +268,31 @@ final class SplitSwitcherModel {
     }
 }
 
+// MARK: - Shared "open elsewhere" context-menu actions
+
+/// The three open-elsewhere actions (new window · right split · bottom split)
+/// shared by every hub's row + card context menu. Setting `splitTarget` /
+/// `bottomSplitTarget` is what lights up the side/bottom panes in ContentView —
+/// this is the single affordance that lets two surfaces (e.g. a journal + a
+/// thread) live on screen at once. Reads only `target` + env, no churn.
+struct AuxOpenMenuButtons: View {
+    let target: AuxWindowTarget
+    @Environment(AppState.self) private var appState
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button { openWindow(id: "aux", value: target) } label: {
+            Label("Open in New Window", systemImage: "macwindow.on.rectangle")
+        }
+        Button { appState.splitTarget = target } label: {
+            Label("Open in Split", systemImage: "rectangle.split.2x1")
+        }
+        Button { appState.bottomSplitTarget = target } label: {
+            Label("Open in Bottom Split", systemImage: "rectangle.split.1x2")
+        }
+    }
+}
+
 // MARK: - Churning-counter leaf badges
 
 /// Toolbar bell label. Reads `notificationsUnreadCount` here so its ticks

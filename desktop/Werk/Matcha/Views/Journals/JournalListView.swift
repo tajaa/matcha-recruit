@@ -315,7 +315,6 @@ extension SlashBlock {
 /// not route the primary pane away from this workspace.
 struct JournalsWorkspace: View {
     @Environment(AppState.self) private var appState
-    @Environment(\.openWindow) private var openWindow
 
     enum FolderMode: Equatable { case all, starred, folder(String) }
     enum SortKey: String, CaseIterable { case modified = "Date Modified", created = "Date Created", title = "Title" }
@@ -613,12 +612,7 @@ struct JournalsWorkspace: View {
         }
         Button(JournalStarStore.shared.isStarred(j.id) ? "Unstar" : "Star") { JournalStarStore.shared.toggle(j.id) }
         Divider()
-        Button { openWindow(id: "aux", value: AuxWindowTarget.journal(j.id)) } label: {
-            Label("Open in New Window", systemImage: "macwindow.on.rectangle")
-        }
-        Button { appState.splitTarget = .journal(j.id) } label: {
-            Label("Open in Split", systemImage: "rectangle.split.2x1")
-        }
+        AuxOpenMenuButtons(target: .journal(j.id))
         Divider()
         Button("Archive") { Task { await archive(j) } }
         Button("Delete…", role: .destructive) { confirmDelete(j) }

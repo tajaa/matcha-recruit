@@ -658,6 +658,8 @@ struct ProjectsLibraryView: View {
                              accent: p.isPinned ?? false) { open(p) }
                     .contextMenu {
                         Button(p.isPinned ?? false ? "Unpin" : "Pin") { Task { await togglePin(p) } }
+                        Divider()
+                        AuxOpenMenuButtons(target: .project(p.id))
                     }
             }
         }
@@ -758,6 +760,8 @@ struct ProjectsLibraryView: View {
         .buttonStyle(.plain)
         .contextMenu {
             Button(p.isPinned ?? false ? "Unpin" : "Pin") { Task { await togglePin(p) } }
+            Divider()
+            AuxOpenMenuButtons(target: .project(p.id))
         }
     }
 
