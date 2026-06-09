@@ -2,21 +2,30 @@
 # refresh-dev-from-prod.sh
 # Replace the DEV database with an ANONYMIZED clone of PRODUCTION.
 #
-# Both Postgres instances live as containers on the SAME DB EC2 (3.101.83.217):
-#   prod  = matcha-postgres-prod  (:5433)  -- READ ONLY here, never mutated
-#   dev   = matcha-postgres       (:5432)  -- destroyed + rebuilt
+# PROD = the matcha-prod RDS instance (app VPC). It is reachable ONLY from the
+# app EC2 (54.177.107.107) — the DB EC2 is a different VPC and cannot route to
+# it. DEV = the matcha-postgres container (:5432) on the DB EC2 (3.101.83.217).
 #
-# The prod->dev copy happens host-side (docker exec | docker exec) so no
-# customer data leaves the EC2 box. Strategy is clone-into-staging then
-# rename-swap, so a failed/aborted clone leaves the existing dev DB intact.
-# A gzipped snapshot of dev is taken first for belt-and-suspenders recovery.
+# Copy path: pg_dump runs on the APP EC2 (PG16 client, dumps the PG15 RDS,
+# read-only) and streams through this laptop into a dump file on the DB EC2,
+# then restores into a staging DB inside the dev container. Rename-swap at the
+# end, so a failed/aborted clone leaves the existing dev DB intact. A gzipped
+# snapshot of dev is taken first for belt-and-suspenders recovery.
+# NOTE: the dump transits this laptop (the two EC2s have no SSH trust). Fine
+# pre-customer; revisit once real PII exists.
+#
+# --legacy-source: clone from the OLD prod container (matcha-postgres-prod
+# :5433 on the DB EC2, host-side pipe like the original flow) — the live DB
+# until cutover, frozen afterwards.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PEM="${PEM:-$REPO_ROOT/roonMT-arm.pem}"
 DB_EC2="${DB_EC2:-ec2-user@3.101.83.217}"
+APP_EC2="${APP_EC2:-ec2-user@54.177.107.107}"
+RDS_HOST="${RDS_HOST:-matcha-prod.cbego6cwwdqy.us-west-1.rds.amazonaws.com}"
 
-PROD_CONTAINER="${PROD_CONTAINER:-matcha-postgres-prod}"   # source (read-only)
+PROD_CONTAINER="${PROD_CONTAINER:-matcha-postgres-prod}"   # legacy source (read-only)
 DEV_CONTAINER="${DEV_CONTAINER:-matcha-postgres}"          # target (rebuilt)
 DB_NAME="${DB_NAME:-matcha}"
 DB_USER="${DB_USER:-matcha}"
@@ -68,7 +77,24 @@ if lsof -n -P -iTCP:5432 -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 
 DRY_RUN=false
-[[ "${1:-}" == "--dry-run" ]] && DRY_RUN=true
+SOURCE="rds"
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run)       DRY_RUN=true;;
+        --legacy-source) SOURCE="container";;
+        *) echo "${RED}Unknown arg: $arg${NC} (use --dry-run / --legacy-source)"; exit 1;;
+    esac
+done
+
+# RDS creds come from PROD_DATABASE_URL in server/.env (the laptop-tunnel form;
+# only the password is reused here — host is the real endpoint, used from the
+# app EC2 which is the only box that can route to RDS).
+RDS_PW=""
+if [[ "$SOURCE" == "rds" ]]; then
+    RDS_URL="$(sed -n 's/^PROD_DATABASE_URL=//p' "$REPO_ROOT/server/.env" | head -1 | tr -d "\"'")"
+    RDS_PW="$(printf '%s' "$RDS_URL" | sed -nE 's#^[a-z+]+://[^:/@]+:([^@]*)@.*#\1#p')"
+    [[ -n "$RDS_PW" ]] || { echo "${RED}Could not parse password from PROD_DATABASE_URL in server/.env${NC}"; exit 1; }
+fi
 
 if [[ "$SKIP_ANON" == true ]]; then
     ANON_STATUS="${RED}OFF — dev becomes a FULL, UNSCRUBBED copy of prod (real emails/passwords/PII)${NC}"
@@ -76,9 +102,15 @@ else
     ANON_STATUS="on (PII scrubbed; preserve list keeps your real logins)"
 fi
 
+if [[ "$SOURCE" == "rds" ]]; then
+    SRC_DESC="RDS $RDS_HOST : $DB_NAME (dumped on $APP_EC2)"
+else
+    SRC_DESC="$DB_EC2 -> $PROD_CONTAINER : $DB_NAME (LEGACY container)"
+fi
+
 cat <<EOF
 ${YELLOW}This will REPLACE the dev database with a copy of PRODUCTION.${NC}
-  source (prod, read-only): $DB_EC2  ->  $PROD_CONTAINER : $DB_NAME
+  source (prod, read-only): $SRC_DESC
   target (dev,  REBUILT)  : $DB_EC2  ->  $DEV_CONTAINER  : $DB_NAME
   anonymize PII: $ANON_STATUS
   non-preserved dev user password becomes: $DEV_LOGIN_PASSWORD
@@ -124,7 +156,11 @@ TS=$(date +%F_%H-%M-%S)
 SNAP_DIR=/home/ec2-user/dev-snapshots
 ddev()  { docker exec -i "$DEV"  psql -U "$U" -v ON_ERROR_STOP=1 "$@"; }   # stdin free (script is a file)
 
-docker ps --format '{{.Names}}' | grep -qx "$PROD" || { echo "prod container $PROD not running"; exit 1; }
+if [ "$SOURCE" = "container" ]; then
+    docker ps --format '{{.Names}}' | grep -qx "$PROD" || { echo "prod container $PROD not running"; exit 1; }
+else
+    [ -s /tmp/prod_rds.dump ] || { echo "missing/empty /tmp/prod_rds.dump (RDS dump stage failed?)"; exit 1; }
+fi
 docker ps --format '{{.Names}}' | grep -qx "$DEV"  || { echo "dev container $DEV not running";  exit 1; }
 
 echo "[1/6] Pre-refresh dev snapshot..."
@@ -138,9 +174,15 @@ ddev -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHER
 ddev -d postgres -c "DROP DATABASE IF EXISTS ${DB}_new;"
 ddev -d postgres -c "CREATE DATABASE ${DB}_new OWNER $U;"
 
-echo "[3/6] Cloning prod -> ${DB}_new (host-local pipe, no egress)..."
-docker exec "$PROD" pg_dump -U "$U" -Fc "$DB" \
-  | docker exec -i "$DEV" pg_restore -U "$U" -d "${DB}_new" --no-owner --no-privileges --exit-on-error
+if [ "$SOURCE" = "container" ]; then
+    echo "[3/6] Cloning legacy prod container -> ${DB}_new (host-local pipe)..."
+    docker exec "$PROD" pg_dump -U "$U" -Fc "$DB" \
+      | docker exec -i "$DEV" pg_restore -U "$U" -d "${DB}_new" --no-owner --no-privileges --exit-on-error
+else
+    echo "[3/6] Restoring staged RDS dump -> ${DB}_new ($(du -h /tmp/prod_rds.dump | cut -f1))..."
+    docker exec -i "$DEV" pg_restore -U "$U" -d "${DB}_new" --no-owner --no-privileges --exit-on-error < /tmp/prod_rds.dump
+    rm -f /tmp/prod_rds.dump
+fi
 
 if [ "${SKIP_ANON:-false}" = "true" ]; then
     echo "[4/6] SKIPPING anonymization — dev will be a FULL UNSCRUBBED prod mirror (SKIP_ANONYMIZE set)."
@@ -187,9 +229,19 @@ REMOTE
 scp -q -i "$PEM" "$RENDERED" "$DB_EC2:/tmp/anonymize_dev.sql"
 scp -q -i "$PEM" "$REMOTE_SCRIPT" "$DB_EC2:/tmp/refresh_dev_remote.sh"
 
+if [[ "$SOURCE" == "rds" ]]; then
+    echo "${YELLOW}Dumping RDS prod on the app EC2, staging on the DB EC2 (via laptop)...${NC}"
+    # Password rides stdin (read by the remote shell) so it never appears in
+    # argv/ps on the app EC2. PGSSLMODE=require: rds.force_ssl=1.
+    printf '%s\n' "$RDS_PW" | ssh -i "$PEM" "$APP_EC2" \
+        "IFS= read -r PGPASSWORD; export PGPASSWORD PGSSLMODE=require; pg_dump -h '$RDS_HOST' -p 5432 -U '$DB_USER' -d '$DB_NAME' -Fc" \
+      | ssh -i "$PEM" "$DB_EC2" "cat > /tmp/prod_rds.dump"
+    ssh -n -i "$PEM" "$DB_EC2" "du -h /tmp/prod_rds.dump"
+fi
+
 # -n: don't let our local stdin (the confirm pipe) leak into the remote command.
 ssh -n -i "$PEM" "$DB_EC2" \
-    "PROD='$PROD_CONTAINER' DEV='$DEV_CONTAINER' DB='$DB_NAME' U='$DB_USER' DRY_RUN='$DRY_RUN' KEEP_OLD='$KEEP_OLD' PRESERVE_SQL=\"$PRESERVE_SQL\" SKIP_ANON='$SKIP_ANON' bash /tmp/refresh_dev_remote.sh; rc=\$?; rm -f /tmp/refresh_dev_remote.sh /tmp/anonymize_dev.sql; exit \$rc"
+    "SOURCE='$SOURCE' PROD='$PROD_CONTAINER' DEV='$DEV_CONTAINER' DB='$DB_NAME' U='$DB_USER' DRY_RUN='$DRY_RUN' KEEP_OLD='$KEEP_OLD' PRESERVE_SQL=\"$PRESERVE_SQL\" SKIP_ANON='$SKIP_ANON' bash /tmp/refresh_dev_remote.sh; rc=\$?; rm -f /tmp/refresh_dev_remote.sh /tmp/anonymize_dev.sql /tmp/prod_rds.dump; exit \$rc"
 
 echo
 if [[ "$DRY_RUN" == "true" ]]; then

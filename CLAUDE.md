@@ -65,16 +65,17 @@ Sidebar dispatch in `client/src/components/TenantSidebar.tsx`. Tier-check helper
 
 ## Database
 
-**Two PostgreSQL containers on a dedicated DB EC2 (`3.101.83.217`)** — both DB name `matcha`, user `matcha` (currently superuser — part of the RLS problem). The app servers run on a **separate** EC2 (`54.177.107.107`). Full workflow + scripts live in `docs/ops/DB_WORKFLOW.md`.
+**Prod is moving to RDS (2026-06-09, cutover pending).** `matcha-prod` RDS (PG 15.18, encrypted, app VPC) holds a verified clone of prod; the app EC2 still points at the old `:5433` container until `DATABASE_URL` is flipped there. All DBs use name `matcha`, user `matcha`. Full workflow + scripts in `docs/ops/DB_WORKFLOW.md`.
 
-| Container | Port | Role | Who connects |
+| Instance | Where | Role | Who connects |
 |---|---|---|---|
-| `matcha-postgres-prod` | 5433 | **PROD** (encrypted sidecar) | app EC2 `54.177.107.107`; hey-matcha.com |
-| `matcha-postgres` | 5432 | **DEV** (+ 8 other apps' DBs) | your laptop via `dev-remote.sh` SSH tunnel |
+| `matcha-prod` RDS | `matcha-prod.cbego6cwwdqy.us-west-1.rds.amazonaws.com:5432` (app VPC) | **PROD** (post-cutover) | app EC2 only (SG-locked); laptop via app-EC2 tunnel → `localhost:5434`. `rds.force_ssl=1` → `sslmode=require` |
+| `matcha-postgres-prod` container | DB EC2 `3.101.83.217` `:5433` | **PROD until cutover**, frozen after | app EC2; hey-matcha.com |
+| `matcha-postgres` container | DB EC2 `3.101.83.217` `:5432` | **DEV** (+ 8 other apps' DBs) | laptop via `dev-remote.sh` SSH tunnel |
 
-**⚠️ Treat `matcha-postgres-prod` (:5433) as live production.** Local dev (`dev-remote.sh`, `DATABASE_URL`) connects to the **dev** container (:5432) — but both live on the same box, so never confuse them and never point a destructive op at the prod container. (The old "Postgres runs directly on the host, not Docker / matcha-only" framing is stale — it's two containers as above, sharing the box with 8 other apps' DBs.)
+**⚠️ Treat both the RDS instance and `matcha-postgres-prod` (:5433) as live production.** Local dev (`dev-remote.sh`, `DATABASE_URL`) connects to the **dev** container (:5432). The DB EC2 is a **different VPC** and cannot route to RDS — everything that reaches RDS goes through the app EC2 (`54.177.107.107`); laptop tools use an SSH tunnel on `localhost:5434` (`PROD_DATABASE_URL` in `server/.env`; old container kept as `PROD_LEGACY_DATABASE_URL`).
 
-**NEVER do the following without explicit user approval — especially against prod :5433:**
+**NEVER do the following without explicit user approval — especially against prod (RDS or :5433):**
 - CREATE ROLE / DROP ROLE
 - CREATE TABLE / DROP TABLE on real tables
 - `alembic upgrade head` against prod
@@ -88,8 +89,8 @@ Sidebar dispatch in `client/src/components/TenantSidebar.tsx`. Tier-check helper
 
 Schema is managed via Alembic migrations in `server/alembic/versions/`; `server/app/database.py:init_db()` only bootstraps a fresh DB (it does **not** run migrations). The two DBs drift unless synced deliberately:
 
-- **Schema, dev → prod:** author migration → `./scripts/migrate-dev.sh` (applies to dev :5432) → test → `./scripts/migrate-prod.sh` (applies the same revision to prod :5433). Applying to only one DB is the drift that caused real `UndefinedColumnError` 500s. `alembic_version` must match on both afterward.
-- **Data, prod → dev:** `./scripts/refresh-dev-from-prod.sh` — host-side **anonymized** clone of prod into dev (closes the backflow gap; dev used to never reflect prod data). `--dry-run` previews into a staging DB without swapping. After a scrubbed run, **every dev user's password becomes `devpass123`**; PII is scrubbed by `scripts/sql/anonymize_dev.sql`.
+- **Schema, dev → prod:** author migration → `./scripts/migrate-dev.sh` (applies to dev :5432) → test → `./scripts/migrate-prod.sh` (applies the same revision to RDS prod via app-EC2 tunnel; `--legacy` targets the old :5433 container — pre-cutover a live-prod migration needs **both**). Applying to only one DB is the drift that caused real `UndefinedColumnError` 500s. `alembic_version` must match afterward.
+- **Data, prod → dev:** `./scripts/refresh-dev-from-prod.sh` — **anonymized** clone of RDS prod into dev (dump on app EC2, streamed via laptop to the DB EC2; `--legacy-source` clones the old :5433 container host-side instead). `--dry-run` previews into a staging DB without swapping. After a scrubbed run, **every dev user's password becomes `devpass123`**; PII is scrubbed by `scripts/sql/anonymize_dev.sql`.
 - **Anonymization gate — currently OFF (pre-customer).** `SKIP_ANONYMIZE=1` in `server/.env` makes the refresh clone prod → dev **verbatim** (real emails + passwords, every account logs in) — fine while there's no customer PII. **Turn it back ON the moment real customers exist:** delete/unset `SKIP_ANONYMIZE` in `server/.env` (default = on/scrubbed), then re-run `./scripts/refresh-dev-from-prod.sh` — dev re-anonymizes. To keep *your own* logins working after re-enabling, list them in `DEV_PRESERVE_EMAILS` (comma-sep, env or `server/.env`) — those keep real email + password while everyone else is scrubbed. Details in `docs/ops/DB_WORKFLOW.md`.
 - **Backups:** host cron `~/backup-to-s3.sh` (every 12h) → `s3://matcha-recruit-backups/postgres/` (SSE-AES256); inspect/restore via `./scripts/backups.sh`.
 

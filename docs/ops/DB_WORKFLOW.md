@@ -6,18 +6,23 @@ data between them. Companion to [`DB_ENCRYPTION_RUNBOOK.md`](./DB_ENCRYPTION_RUN
 
 ## Topology
 
-Two Postgres **containers on one DB EC2** (`3.101.83.217`):
+**2026-06-09: prod is moving to RDS.** `matcha-prod` (PG 15.18, encrypted, single-AZ,
+`db.t4g.small`) was created in the app VPC and loaded with a verified clone of the
+prod container. **Cutover is pending** — until the app EC2's `DATABASE_URL` is flipped
+to RDS, the live DB is still the `:5433` container.
 
-| Container | Port | Role | Who connects |
+| Instance | Where | Role | Reachable from |
 |---|---|---|---|
-| `matcha-postgres-prod` | 5433 | **PROD** (encrypted sidecar) | app EC2 `54.177.107.107`; hey-matcha.com |
-| `matcha-postgres` | 5432 | **DEV** (+ 8 other apps' DBs) | your laptop via `dev-remote.sh` SSH tunnel |
+| `matcha-prod` RDS | `matcha-prod.cbego6cwwdqy.us-west-1.rds.amazonaws.com:5432` (app VPC) | **PROD** (post-cutover) | app EC2 only (SG-locked); laptop via app-EC2 tunnel `localhost:5434`. `rds.force_ssl=1` → `sslmode=require` |
+| `matcha-postgres-prod` container | DB EC2 `3.101.83.217` `:5433` | **PROD until cutover**, frozen copy after | app EC2; laptop via DB-EC2 tunnel |
+| `matcha-postgres` container | DB EC2 `3.101.83.217` `:5432` | **DEV** (+ 8 other apps' DBs) | laptop via `dev-remote.sh` SSH tunnel |
 
-App containers (backend/worker/frontend/redis/livekit) run on the separate app EC2
-`54.177.107.107` and point at prod `:5433`.
+The DB EC2 and the app VPC are **different VPCs** — the DB EC2 cannot route to RDS.
+Anything that talks to RDS goes through the app EC2 (`54.177.107.107`).
 
-> The root `CLAUDE.md` line "Postgres runs directly on the host, NOT in Docker" is
-> stale — it's two containers, as above.
+App containers (backend/worker/frontend/redis/livekit) run on the app EC2 and point
+at prod `:5433` until cutover (runbook: set `DATABASE_URL` to the RDS endpoint +
+`DATABASE_SSL=require`, restart backend, smoke-test; revert = point back).
 
 ## The two flows
 
@@ -39,8 +44,8 @@ App containers (backend/worker/frontend/redis/livekit) run on the separate app E
 |---|---|---|
 | `scripts/dev-remote.sh` | dev `:5432` | Start the local stack (tunnel + backend + worker + frontend). Does **not** run migrations. |
 | `scripts/migrate-dev.sh` | dev `:5432` | `alembic upgrade head` against dev. Reuses an existing dev-remote tunnel if present. |
-| `scripts/migrate-prod.sh` | prod `:5433` | `alembic upgrade head` against prod (reads `PROD_DATABASE_URL` from `server/.env`). |
-| `scripts/refresh-dev-from-prod.sh` | both, host-side | Clone prod → dev and anonymize. See below. |
+| `scripts/migrate-prod.sh` | RDS via app EC2 (`localhost:5434`) | `alembic upgrade head` against RDS prod (reads `PROD_DATABASE_URL` from `server/.env`). `--legacy` targets the old `:5433` container (`PROD_LEGACY_DATABASE_URL`). Pre-cutover, a migration that must hit live prod needs **both**. |
+| `scripts/refresh-dev-from-prod.sh` | app EC2 (dump) + DB EC2 (restore) | Clone RDS prod → dev and anonymize; dump streams app EC2 → laptop → DB EC2. `--legacy-source` clones from the old `:5433` container host-side instead. See below. |
 | `scripts/backups.sh` | DB host | Convenience CLI over the S3 backup bucket (list/latest/create/download/restore/size). |
 | `scripts/sql/anonymize_dev.sql` | — | PII/secret scrub applied during a refresh. |
 

@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 from logging.config import fileConfig
 
 from sqlalchemy import pool
@@ -21,6 +22,10 @@ if database_url:
     # Convert postgresql:// to postgresql+asyncpg:// for async
     if database_url.startswith("postgresql://"):
         database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        # The asyncpg dialect takes ssl=, not libpq's sslmode= (which the URL
+        # keeps for psql/pg_dump/asyncpg-raw compat; RDS rds.force_ssl=1
+        # requires it).
+        database_url = re.sub(r"([?&])sslmode=", r"\1ssl=", database_url)
     config.set_main_option("sqlalchemy.url", database_url)
 
 # Interpret the config file for Python logging.
