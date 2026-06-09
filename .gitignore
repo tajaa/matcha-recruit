@@ -137,6 +137,7 @@ HEALTHCARE_SAVINGS_MODEL.md
 NOTES - Matcha_Healthcare_Proposal.pdf
 PLAN-*.md
 scripts/grab-ss.sh
+scripts/set-master-admin-password.py
 
 # Deal proposals (confidential, not tracked)
 deals/
