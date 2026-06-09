@@ -39,7 +39,11 @@ struct TaskProgressBar: View {
                 : "\(doneCount) / \(tasks.count) · \(percentLabel)")
                 .font(.system(size: compact ? 9 : 10, weight: .medium))
                 .foregroundColor(.white.opacity(0.55))
-                .fixedSize()
+                // Truncate instead of overflowing the pane edge — hard
+                // .fixedSize() clipped the counter in narrow split panes.
+                .lineLimit(1)
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
         }
     }
 }

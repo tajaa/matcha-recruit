@@ -26,11 +26,16 @@ struct AIComposeBar: View {
                 Image(systemName: "sparkles")
                     .font(.system(size: 11))
                     .foregroundColor(appState.themeAccent)
-                TextField("Describe a task… e.g. \"fix the 503 in console <error> and assign haley\"", text: $text)
+                // Short placeholder — the example-laden version forced the row
+                // wider than a narrow split pane (Draft button clipped off the
+                // edge). The example moved to .help.
+                TextField("Describe a task to draft…", text: $text)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .foregroundColor(appState.themeText)
+                    .frame(maxWidth: .infinity)
                     .onSubmit { submit() }
+                    .help("e.g. \"fix the 503 in console <error> and assign haley\"")
                 if isDrafting {
                     ProgressView().controlSize(.small)
                 } else {

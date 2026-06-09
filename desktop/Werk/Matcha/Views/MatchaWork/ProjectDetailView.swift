@@ -408,6 +408,23 @@ struct ProjectDetailView: View {
 
     private var collabTabStrip: some View {
         HStack(spacing: 2) {
+            // Full icon+label row needs ~680pt; in a split pane the project can
+            // get ~360pt, which used to compress every label into a one-letter-
+            // per-line vertical smear. Fall back to icon-only tabs (tooltips
+            // carry the labels) when the labeled row doesn't fit.
+            ViewThatFits(in: .horizontal) {
+                collabTabButtons(iconOnly: false)
+                collabTabButtons(iconOnly: true)
+            }
+            Spacer(minLength: 4)
+            collabStatusPill
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+    }
+
+    private func collabTabButtons(iconOnly: Bool) -> some View {
+        HStack(spacing: 2) {
             ForEach(CollabRightPanel.allCases) { panel in
                 Button {
                     collabPanel = panel
@@ -415,10 +432,14 @@ struct ProjectDetailView: View {
                     HStack(spacing: 5) {
                         Image(systemName: panel.icon)
                             .font(.system(size: 11))
-                        Text(panel.label)
-                            .font(.system(size: 11, weight: .medium))
+                        if !iconOnly {
+                            Text(panel.label)
+                                .font(.system(size: 11, weight: .medium))
+                                .lineLimit(1)
+                                .fixedSize()
+                        }
                     }
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, iconOnly ? 7 : 10)
                     .padding(.vertical, 5)
                     .foregroundColor(collabPanel == panel ? appState.themeText : appState.themeText.opacity(0.55))
                     .background(
@@ -432,12 +453,9 @@ struct ProjectDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(panel.shortcutKey, modifiers: .command)
+                .help(panel.label)
             }
-            Spacer()
-            collabStatusPill
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
     }
 
     @ViewBuilder

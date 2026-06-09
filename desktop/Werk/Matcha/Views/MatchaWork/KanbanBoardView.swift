@@ -247,10 +247,15 @@ struct KanbanBoardView: View {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
-                        TextField("Search tasks… (space = AND, \"quotes\" = phrase)", text: $searchText)
+                        // Short placeholder — the long syntax-hint version forced
+                        // the row past a narrow split pane's width (clipped the
+                        // help button + progress counter). Syntax lives in .help.
+                        TextField("Search tasks…", text: $searchText)
                             .textFieldStyle(.plain)
                             .font(.system(size: 12))
                             .foregroundColor(appState.themeText)
+                            .frame(maxWidth: .infinity)
+                            .help("space = AND, \"quotes\" = exact phrase")
                         if !searchText.isEmpty {
                             Button { searchText = "" } label: {
                                 Image(systemName: "xmark.circle.fill")
