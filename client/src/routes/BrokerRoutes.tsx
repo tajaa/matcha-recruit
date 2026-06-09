@@ -10,6 +10,8 @@ import BrokerSettings from '../pages/broker/BrokerSettings'
 import BrokerClientDetail from '../pages/broker/BrokerClientDetail'
 import BrokerReferralLinks from '../pages/broker/BrokerReferralLinks'
 import BrokerActionCenter from '../pages/broker/BrokerActionCenter'
+import BrokerClientSeats from '../pages/broker/BrokerClientSeats'
+import BrokerTeam from '../pages/broker/BrokerTeam'
 
 export default function BrokerRoutes() {
   // Apply the broker light/dark preference for the lifetime of any /broker route;
@@ -30,6 +32,8 @@ export default function BrokerRoutes() {
 
         {/* Module 3 — Administration */}
         <Route path="clients" element={<BrokerClients />} />
+        <Route path="seats" element={<BrokerClientSeats />} />
+        <Route path="team" element={<BrokerTeam />} />
         <Route path="pipeline" element={<BrokerPipeline />} />
         <Route path="referrals" element={<BrokerReferralLinks />} />
         <Route path="settings" element={<BrokerSettings />} />

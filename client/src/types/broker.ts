@@ -404,3 +404,63 @@ export interface OutreachResponse {
   generated_at: string | null
   model: string | null
 }
+
+// --- Seat allocation: pool + company-pinned client invites ---
+
+export type ClientInviteTier = 'matcha_lite' | 'matcha_x'
+export type ClientInviteStatus = 'outstanding' | 'redeemed' | 'revoked'
+
+export interface BrokerClientInvite {
+  id: string
+  company_name: string | null
+  seat_count: number | null
+  tier: ClientInviteTier
+  status: ClientInviteStatus
+  redeemed_company_id: string | null
+  redeemed_company_name?: string | null
+  employees_used?: number
+  created_at: string | null
+  expires_at: string | null
+  is_active: boolean
+  signup_url: string
+}
+
+export interface BrokerSeatsResponse {
+  allocated: number
+  committed: number
+  remaining: number
+  clients: BrokerClientInvite[]
+}
+
+export interface BrokerClientInviteListResponse {
+  invites: BrokerClientInvite[]
+  total: number
+}
+
+// --- Broker team members ---
+
+export type BrokerMemberRole = 'owner' | 'admin' | 'member'
+
+export interface BrokerMember {
+  id: string
+  user_id: string
+  email: string
+  role: BrokerMemberRole
+  is_active: boolean
+  last_login: string | null
+  created_at: string | null
+  is_self: boolean
+}
+
+export interface BrokerMemberListResponse {
+  members: BrokerMember[]
+  total: number
+}
+
+export interface BrokerMemberCreateResponse {
+  status: string
+  member: { user_id: string; name: string; email: string; role: string }
+  generated_password: boolean
+  password: string
+  email_sent: boolean
+}

@@ -1111,6 +1111,7 @@ class BrokerCreateRequest(BaseModel):
     billing_mode: str = Field(default="direct")
     invoice_owner: str = Field(default="matcha")
     terms_required_version: str = Field(default="v1", min_length=1, max_length=50)
+    allocated_seats: int = Field(default=0, ge=0, le=1_000_000)
 
 
 class BrokerUpdateRequest(BaseModel):
@@ -1120,6 +1121,7 @@ class BrokerUpdateRequest(BaseModel):
     terminated_at: Optional[datetime] = None
     grace_until: Optional[datetime] = None
     post_termination_mode: Optional[str] = None
+    allocated_seats: Optional[int] = Field(default=None, ge=0, le=1_000_000)
 
 
 class BrokerContractRequest(BaseModel):
@@ -1293,10 +1295,10 @@ async def create_broker(
                 """
                 INSERT INTO brokers (
                     name, slug, status, support_routing, billing_mode, invoice_owner,
-                    terms_required_version, created_by
+                    terms_required_version, allocated_seats, created_by
                 )
-                VALUES ($1, $2, 'active', $3, $4, $5, $6, $7)
-                RETURNING id, name, slug, status, support_routing, billing_mode, invoice_owner, terms_required_version, created_at
+                VALUES ($1, $2, 'active', $3, $4, $5, $6, $7, $8)
+                RETURNING id, name, slug, status, support_routing, billing_mode, invoice_owner, terms_required_version, allocated_seats, created_at
                 """,
                 request.broker_name.strip(),
                 slug,
@@ -1304,6 +1306,7 @@ async def create_broker(
                 request.billing_mode,
                 request.invoice_owner,
                 request.terms_required_version.strip(),
+                request.allocated_seats,
                 current_user.id,
             )
 
@@ -1370,6 +1373,7 @@ async def create_broker(
             "billing_mode": broker["billing_mode"],
             "invoice_owner": broker["invoice_owner"],
             "terms_required_version": broker["terms_required_version"],
+            "allocated_seats": broker["allocated_seats"],
             "created_at": broker["created_at"].isoformat() if broker["created_at"] else None,
         },
         "owner": {
@@ -1392,10 +1396,23 @@ async def list_brokers():
             """
             SELECT
                 b.id, b.name, b.slug, b.status, b.support_routing, b.billing_mode,
-                b.invoice_owner, b.terms_required_version, b.created_at,
+                b.invoice_owner, b.terms_required_version, b.allocated_seats, b.created_at,
                 COALESCE(bb.branding_mode, 'direct') as branding_mode,
                 COUNT(DISTINCT bm.user_id) FILTER (WHERE bm.is_active = true) AS active_member_count,
                 COUNT(DISTINCT bcl.company_id) FILTER (WHERE bcl.status IN ('active', 'grace')) AS active_company_count,
+                COALESCE((
+                    SELECT SUM(t.seat_count)
+                    FROM broker_lite_referral_tokens t
+                    LEFT JOIN broker_company_links l
+                      ON l.broker_id = t.broker_id AND l.company_id = t.redeemed_company_id
+                    WHERE t.broker_id = b.id
+                      AND t.intended_company_name IS NOT NULL
+                      AND (
+                        (t.redeemed_company_id IS NULL AND t.is_active = true)
+                        OR (t.redeemed_company_id IS NOT NULL
+                            AND COALESCE(l.status, 'active') NOT IN ('terminated', 'transferred'))
+                      )
+                ), 0) AS seats_used,
                 bc.id AS active_contract_id,
                 bc.currency,
                 bc.base_platform_fee,
@@ -1414,7 +1431,7 @@ async def list_brokers():
             ) bc ON true
             GROUP BY
                 b.id, b.name, b.slug, b.status, b.support_routing, b.billing_mode,
-                b.invoice_owner, b.terms_required_version, b.created_at, bb.branding_mode,
+                b.invoice_owner, b.terms_required_version, b.allocated_seats, b.created_at, bb.branding_mode,
                 bc.id, bc.currency, bc.base_platform_fee, bc.pepm_rate, bc.minimum_monthly_commit
             ORDER BY b.created_at DESC
             """
@@ -1431,6 +1448,8 @@ async def list_brokers():
                     "billing_mode": row["billing_mode"],
                     "invoice_owner": row["invoice_owner"],
                     "terms_required_version": row["terms_required_version"],
+                    "allocated_seats": row["allocated_seats"],
+                    "seats_used": int(row["seats_used"] or 0),
                     "branding_mode": row["branding_mode"],
                     "active_member_count": row["active_member_count"],
                     "active_company_count": row["active_company_count"],
@@ -1478,6 +1497,9 @@ async def update_broker(broker_id: UUID, request: BrokerUpdateRequest):
     if request.post_termination_mode is not None:
         updates.append(f"post_termination_mode = ${len(values) + 1}")
         values.append(request.post_termination_mode)
+    if request.allocated_seats is not None:
+        updates.append(f"allocated_seats = ${len(values) + 1}")
+        values.append(request.allocated_seats)
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields provided for update")
@@ -1492,7 +1514,7 @@ async def update_broker(broker_id: UUID, request: BrokerUpdateRequest):
             SET {', '.join(updates)}
             WHERE id = ${len(values)}
             RETURNING id, name, slug, status, support_routing, billing_mode, invoice_owner, terms_required_version,
-                     terminated_at, grace_until, post_termination_mode, updated_at
+                     allocated_seats, terminated_at, grace_until, post_termination_mode, updated_at
             """,
             *values,
         )
@@ -1510,6 +1532,7 @@ async def update_broker(broker_id: UUID, request: BrokerUpdateRequest):
             "billing_mode": row["billing_mode"],
             "invoice_owner": row["invoice_owner"],
             "terms_required_version": row["terms_required_version"],
+            "allocated_seats": row["allocated_seats"],
             "terminated_at": row["terminated_at"].isoformat() if row["terminated_at"] else None,
             "grace_until": row["grace_until"].isoformat() if row["grace_until"] else None,
             "post_termination_mode": row["post_termination_mode"],

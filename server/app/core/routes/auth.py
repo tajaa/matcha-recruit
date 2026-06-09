@@ -1555,6 +1555,38 @@ async def accept_broker_client_invite(token: str, request: BrokerClientInviteAcc
             }
 
 
+@router.get("/client-invite-info")
+async def get_client_invite_info(ref: str):
+    """Public, non-consuming: resolve a broker client-seat invite so the signup page
+    can prefill the company name + seat count. Returns {valid:false} for unknown,
+    revoked, redeemed, or expired tokens (and for generic, non-pinned referral links)."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT t.intended_company_name, t.seat_count, t.tier, t.is_active,
+                   t.redeemed_company_id, t.expires_at, b.name AS broker_name
+            FROM broker_lite_referral_tokens t
+            JOIN brokers b ON b.id = t.broker_id
+            WHERE t.token = $1 AND t.intended_company_name IS NOT NULL
+            """,
+            ref.strip(),
+        )
+    if not row:
+        return {"valid": False}
+    valid = bool(
+        row["is_active"]
+        and row["redeemed_company_id"] is None
+        and (row["expires_at"] is None or row["expires_at"] > datetime.utcnow())
+    )
+    return {
+        "valid": valid,
+        "company_name": row["intended_company_name"],
+        "seat_count": row["seat_count"],
+        "tier": row["tier"] or "matcha_lite",
+        "broker_name": row["broker_name"],
+    }
+
+
 @router.post("/register/business")
 async def register_business(request: BusinessRegister, http_request: Request):
     """
@@ -1647,6 +1679,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
 
             # Resolve Lite referral token — non-blocking if invalid/expired
             lite_broker_pays = False
+            broker_seat_count = None  # set when a company-pinned broker seat invite is redeemed
             if request.lite_broker_token and request.tier in ("matcha_lite", "matcha_x") and referring_broker_id is None:
                 lite_ref_row = await conn.fetchrow(
                     """
@@ -1655,14 +1688,16 @@ async def register_business(request: BusinessRegister, http_request: Request):
                         last_used_at = NOW()
                     WHERE token     = $1
                       AND is_active  = true
+                      AND redeemed_company_id IS NULL
                       AND (expires_at IS NULL OR expires_at > NOW())
-                    RETURNING broker_id, payer
+                    RETURNING broker_id, payer, seat_count, intended_company_name
                     """,
                     request.lite_broker_token.strip(),
                 )
                 if lite_ref_row:
                     referring_broker_id = lite_ref_row["broker_id"]
                     lite_broker_pays = lite_ref_row["payer"] == "broker"
+                    broker_seat_count = lite_ref_row["seat_count"]
 
             # Admin invite token — activates Matcha Lite immediately (no Stripe).
             # Atomic UPDATE-RETURNING so concurrent signups with the same link
@@ -1690,7 +1725,9 @@ async def register_business(request: BusinessRegister, http_request: Request):
             is_matcha_lite = request.tier == "matcha_lite"
             is_matcha_x = request.tier == "matcha_x"
 
-            if (is_matcha_lite or is_matcha_x) and not lite_invite_activated and request.headcount > 300:
+            # Broker seat invites carry their own allocation, so they bypass the
+            # self-serve 300 cap (same as an admin comp invite).
+            if (is_matcha_lite or is_matcha_x) and not lite_invite_activated and broker_seat_count is None and request.headcount > 300:
                 raise HTTPException(
                     status_code=400,
                     detail="Headcount over 300 — please contact us for pricing at matcha.work",
@@ -1927,6 +1964,22 @@ async def register_business(request: BusinessRegister, http_request: Request):
                     """,
                     referring_broker_id, company_id, user["id"],
                 )
+
+                # Redeem a company-pinned broker seat invite: record the granted seat
+                # count on the company (track/display) and single-use the token.
+                if broker_seat_count is not None:
+                    await conn.execute(
+                        "UPDATE companies SET seat_limit = $1 WHERE id = $2",
+                        broker_seat_count, company_id,
+                    )
+                    await conn.execute(
+                        """
+                        UPDATE broker_lite_referral_tokens
+                        SET redeemed_company_id = $1, is_active = false
+                        WHERE token = $2
+                        """,
+                        company_id, request.lite_broker_token.strip(),
+                    )
 
             # Generate tokens
             settings = get_settings()

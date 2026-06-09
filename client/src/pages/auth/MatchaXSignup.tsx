@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../../hooks/useMe'
@@ -22,11 +22,31 @@ export default function MatchaXSignup() {
   const [headcount, setHeadcount] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [inviteInfo, setInviteInfo] = useState<
+    { valid: boolean; company_name: string; seat_count: number | null; broker_name: string } | null
+  >(null)
 
+  // Broker seat invites pin the company name + seats; prefill + lock them.
+  useEffect(() => {
+    if (!brokerRef) return
+    fetch(`${BASE}/auth/client-invite-info?ref=${encodeURIComponent(brokerRef)}`)
+      .then((r) => r.json())
+      .then((info) => {
+        if (info?.valid) {
+          setInviteInfo(info)
+          setCompanyName(info.company_name ?? '')
+          if (info.seat_count) setHeadcount(String(info.seat_count))
+        }
+      })
+      .catch(() => {})
+  }, [brokerRef])
+
+  const seatInvite = inviteInfo?.valid === true
+  const comped = !!inviteToken || seatInvite
   const hc = parseInt(headcount, 10)
   const headcountValid = !isNaN(hc) && hc >= 1
-  const overLimit = headcountValid && !inviteToken && hc > 300
-  const price = headcountValid && !overLimit && !inviteToken ? matchaXPriceDollars(hc) : null
+  const overLimit = headcountValid && !comped && hc > 300
+  const price = headcountValid && !overLimit && !comped ? matchaXPriceDollars(hc) : null
 
   const canSubmit =
     companyName.trim() &&
@@ -111,8 +131,14 @@ export default function MatchaXSignup() {
           </p>
         </div>
 
+        {seatInvite && (
+          <div className="mb-5 p-3 rounded-lg bg-emerald-950/40 border border-emerald-900/50 text-xs text-emerald-200 text-center">
+            Invited by <span className="font-medium">{inviteInfo?.broker_name}</span> · {inviteInfo?.seat_count} seats included
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
-          <Field label="Company name" value={companyName} onChange={setCompanyName} />
+          <Field label="Company name" value={companyName} onChange={setCompanyName} readOnly={seatInvite} />
           <Field label="Your name" value={name} onChange={setName} />
           <Field label="Work email" type="email" value={email} onChange={setEmail} />
           <Field
@@ -131,8 +157,9 @@ export default function MatchaXSignup() {
                 min={1}
                 value={headcount}
                 onChange={(e) => setHeadcount(e.target.value)}
+                readOnly={seatInvite}
                 placeholder="e.g. 25"
-                className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
+                className={`mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700 ${seatInvite ? 'opacity-60 cursor-not-allowed' : ''}`}
               />
             </label>
             {overLimit ? (
@@ -186,12 +213,14 @@ function Field({
   onChange,
   type = 'text',
   hint,
+  readOnly = false,
 }: {
   label: string
   value: string
   onChange: (v: string) => void
   type?: string
   hint?: string
+  readOnly?: boolean
 }) {
   return (
     <label className="block">
@@ -200,7 +229,8 @@ function Field({
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
+        readOnly={readOnly}
+        className={`mt-1 w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700 ${readOnly ? 'opacity-60 cursor-not-allowed' : ''}`}
       />
       {hint && <span className="block mt-1 text-xs text-zinc-500">{hint}</span>}
     </label>

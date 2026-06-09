@@ -22,6 +22,8 @@ type Broker = {
   branding_mode: string
   active_member_count: number
   active_company_count: number
+  allocated_seats?: number
+  seats_used?: number
   active_contract: BrokerContract | null
   created_at: string
 }
@@ -39,6 +41,7 @@ type CreateForm = {
   support_routing: string
   billing_mode: string
   invoice_owner: string
+  allocated_seats: string
 }
 
 const EMPTY_FORM: CreateForm = {
@@ -50,11 +53,13 @@ const EMPTY_FORM: CreateForm = {
   support_routing: 'shared',
   billing_mode: 'direct',
   invoice_owner: 'matcha',
+  allocated_seats: '',
 }
 
 type EditForm = {
   status: string
   support_routing: string
+  allocated_seats: string
 }
 
 type CreateResult = {
@@ -142,6 +147,7 @@ export default function Brokers() {
           support_routing: form.support_routing,
           billing_mode: form.billing_mode,
           invoice_owner: form.invoice_owner,
+          allocated_seats: parseInt(form.allocated_seats, 10) || 0,
         }
       )
       setShowAdd(false)
@@ -157,7 +163,7 @@ export default function Brokers() {
 
   function openEdit(b: Broker) {
     setEditBroker(b)
-    setEditForm({ status: b.status, support_routing: b.support_routing })
+    setEditForm({ status: b.status, support_routing: b.support_routing, allocated_seats: String(b.allocated_seats ?? 0) })
     setEditError('')
   }
 
@@ -170,6 +176,7 @@ export default function Brokers() {
       await api.patch(`/admin/brokers/${editBroker.id}`, {
         status: editForm.status,
         support_routing: editForm.support_routing,
+        allocated_seats: parseInt(editForm.allocated_seats, 10) || 0,
       })
       setEditBroker(null)
       fetchBrokers()
@@ -266,6 +273,7 @@ export default function Brokers() {
                   <th className="px-4 py-3 font-medium">Status</th>
                   <th className="px-4 py-3 font-medium">Members</th>
                   <th className="px-4 py-3 font-medium">Companies</th>
+                  <th className="px-4 py-3 font-medium">Seats</th>
                   <th className="px-4 py-3 font-medium">Billing</th>
                   <th className="px-4 py-3 font-medium text-right">Actions</th>
                 </tr>
@@ -280,6 +288,11 @@ export default function Brokers() {
                     <td className="px-4 py-3">{statusBadge(b.status)}</td>
                     <td className="px-4 py-3">{b.active_member_count}</td>
                     <td className="px-4 py-3">{b.active_company_count}</td>
+                    <td className="px-4 py-3">
+                      <span className="text-xs text-zinc-400 tabular-nums">
+                        {b.seats_used ?? 0} / {b.allocated_seats ?? 0}
+                      </span>
+                    </td>
                     <td className="px-4 py-3">
                       <span className="text-xs text-zinc-400 capitalize">{b.billing_mode}</span>
                       {b.active_contract?.pepm_rate ? (
@@ -396,6 +409,19 @@ export default function Brokers() {
             </div>
           </div>
 
+          <div>
+            <label className="block text-sm font-medium text-zinc-300 mb-1">Allocated Seats</label>
+            <input
+              type="number"
+              min={0}
+              value={form.allocated_seats}
+              onChange={(e) => setForm({ ...form, allocated_seats: e.target.value })}
+              placeholder="0"
+              className="w-40 bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
+            />
+            <p className="mt-1 text-xs text-zinc-500">Seat pool the brokerage can apportion to its clients.</p>
+          </div>
+
           {addError && <p className="text-sm text-red-400">{addError}</p>}
 
           <div className="flex items-center gap-2 pt-2 border-t border-zinc-800">
@@ -442,6 +468,20 @@ export default function Brokers() {
                   <option value="matcha_first">Matcha First</option>
                 </select>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-1">Allocated Seats</label>
+              <input
+                type="number"
+                min={0}
+                value={editForm.allocated_seats}
+                onChange={(e) => setEditForm({ ...editForm, allocated_seats: e.target.value })}
+                className="w-40 bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
+              />
+              {editBroker && (editBroker.seats_used ?? 0) > 0 && (
+                <p className="mt-1 text-xs text-zinc-500">{editBroker.seats_used} seats currently apportioned.</p>
+              )}
             </div>
 
             {editForm.status === 'terminated' && (

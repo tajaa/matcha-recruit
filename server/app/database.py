@@ -800,6 +800,7 @@ async def init_db():
                 report_email_token VARCHAR(32) UNIQUE,
                 report_token_used_at TIMESTAMPTZ,
                 policy_suggestions_dismissed JSONB DEFAULT '[]'::jsonb,
+                seat_limit INTEGER,
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)
@@ -3980,6 +3981,7 @@ async def init_db():
                 grace_until TIMESTAMPTZ,
                 post_termination_mode VARCHAR(30)
                     CHECK (post_termination_mode IN ('convert_to_direct', 'transfer_to_broker', 'sunset', 'matcha_managed')),
+                allocated_seats INTEGER NOT NULL DEFAULT 0,
                 metadata JSONB DEFAULT '{}'::jsonb,
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW()

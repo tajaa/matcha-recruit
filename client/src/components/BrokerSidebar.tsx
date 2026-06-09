@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { LayoutDashboard, Building2, Link2, Settings, Zap, Workflow } from 'lucide-react'
+import { LayoutDashboard, Building2, Link2, Settings, Zap, Workflow, Ticket, UserPlus } from 'lucide-react'
 import SidebarShell, { type NavItem, type NavGroup } from './SidebarShell'
 import BrokerThemeToggle from './BrokerThemeToggle'
 import { fetchBrokerRiskAlerts, fetchActionCenterMilestones } from '../api/broker'
@@ -25,8 +25,10 @@ export default function BrokerSidebar() {
       label: 'Administration',
       items: [
         { to: '/broker/clients', icon: Building2, label: 'Onboarding' },
+        { to: '/broker/seats', icon: Ticket, label: 'Client Seats' },
         { to: '/broker/pipeline', icon: Workflow, label: 'Pipeline' },
         { to: '/broker/referrals', icon: Link2, label: 'Referral Links' },
+        { to: '/broker/team', icon: UserPlus, label: 'Team' },
         { to: '/broker/settings', icon: Settings, label: 'Settings' },
       ],
     },

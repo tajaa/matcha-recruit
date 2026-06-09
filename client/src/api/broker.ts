@@ -14,6 +14,12 @@ import type {
   WcPortfolioResponse,
   BrokerMilestonesResponse,
   OutreachResponse,
+  BrokerSeatsResponse,
+  BrokerClientInvite,
+  BrokerClientInviteListResponse,
+  ClientInviteTier,
+  BrokerMemberListResponse,
+  BrokerMemberCreateResponse,
 } from '../types/broker'
 
 export function fetchBrokerPortfolio() {
@@ -70,6 +76,50 @@ export function createLiteReferralToken(label?: string, expiresDays?: number, pa
 
 export function deactivateLiteReferralToken(tokenId: string) {
   return api.delete<{ status: string }>(`/brokers/lite-referral-tokens/${tokenId}`)
+}
+
+// --- Seat allocation: pool + company-pinned client invites ---
+
+export function fetchBrokerSeats() {
+  return api.get<BrokerSeatsResponse>('/brokers/seats')
+}
+
+export function createClientInvite(payload: {
+  company_name: string
+  seat_count: number
+  tier: ClientInviteTier
+  expires_days?: number
+}) {
+  return api.post<BrokerClientInvite>('/brokers/client-invites', payload)
+}
+
+export function listClientInvites(includeRevoked = false) {
+  return api.get<BrokerClientInviteListResponse>(
+    `/brokers/client-invites${includeRevoked ? '?include_revoked=true' : ''}`,
+  )
+}
+
+export function revokeClientInvite(inviteId: string) {
+  return api.delete<{ status: string }>(`/brokers/client-invites/${inviteId}`)
+}
+
+// --- Broker team members ---
+
+export function fetchBrokerMembers() {
+  return api.get<BrokerMemberListResponse>('/brokers/members')
+}
+
+export function createBrokerMember(payload: {
+  name: string
+  email: string
+  role: 'admin' | 'member'
+  password?: string
+}) {
+  return api.post<BrokerMemberCreateResponse>('/brokers/members', payload)
+}
+
+export function deactivateBrokerMember(memberId: string) {
+  return api.delete<{ status: string }>(`/brokers/members/${memberId}`)
 }
 
 export function fetchBrokerRiskAlerts(includeResolved = false) {
