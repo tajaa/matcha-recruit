@@ -151,43 +151,48 @@ struct ChatPanelView: View {
         for provider in providers {
             provider.loadItem(forTypeIdentifier: "public.file-url") { item, _ in
                 guard let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
-                let ext = url.pathExtension.lowercased()
-                guard let fileData = try? Data(contentsOf: url) else {
-                    Task { @MainActor in viewModel.errorMessage = "Could not read \(url.lastPathComponent)" }
-                    return
-                }
-
-                let mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
-                let file = (data: fileData, filename: url.lastPathComponent, mimeType: mime)
-
-                if imageExtensions.contains(ext) {
-                    Task { await self.uploadDroppedImage(file) }
-                    return
-                }
-
-                guard attachableExtensions.contains(ext) else {
-                    Task { @MainActor in
-                        viewModel.errorMessage = "Unsupported file type: .\(ext). Supported: images, PDF, DOC/DOCX, TXT, MD, CSV, JSON."
-                    }
-                    return
-                }
-
-                // Generic attach: queue as a pending chip. The file is NOT
-                // analyzed on drop — it uploads + feeds the AI only when the
-                // user sends a message with it (server guardrail handles the
-                // no-instruction case with a clarifying reply).
-                Task { @MainActor in
-                    if pendingFiles.count >= maxPendingFiles {
-                        viewModel.errorMessage = "Up to \(maxPendingFiles) files per message."
-                        return
-                    }
-                    if fileData.count > maxFileBytes {
-                        viewModel.errorMessage = "\(file.filename) exceeds 10 MB."
-                        return
-                    }
-                    pendingFiles.append(file)
-                }
+                ingest(url: url)
             }
+        }
+    }
+
+    /// Shared intake for the drop handler AND the file picker: images go to
+    /// the thread's image set, attachable docs (PDF/DOC/TXT/MD/CSV/JSON) queue
+    /// as pending chips. The file is NOT analyzed on attach — it uploads +
+    /// feeds the AI only when the user sends a message with it (server
+    /// guardrail handles the no-instruction case with a clarifying reply).
+    private func ingest(url: URL) {
+        let ext = url.pathExtension.lowercased()
+        guard let fileData = try? Data(contentsOf: url) else {
+            Task { @MainActor in viewModel.errorMessage = "Could not read \(url.lastPathComponent)" }
+            return
+        }
+
+        let mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
+        let file = (data: fileData, filename: url.lastPathComponent, mimeType: mime)
+
+        if imageExtensions.contains(ext) {
+            Task { await self.uploadDroppedImage(file) }
+            return
+        }
+
+        guard attachableExtensions.contains(ext) else {
+            Task { @MainActor in
+                viewModel.errorMessage = "Unsupported file type: .\(ext). Supported: images, PDF, DOC/DOCX, TXT, MD, CSV, JSON."
+            }
+            return
+        }
+
+        Task { @MainActor in
+            if pendingFiles.count >= maxPendingFiles {
+                viewModel.errorMessage = "Up to \(maxPendingFiles) files per message."
+                return
+            }
+            if fileData.count > maxFileBytes {
+                viewModel.errorMessage = "\(file.filename) exceeds 10 MB."
+                return
+            }
+            pendingFiles.append(file)
         }
     }
 
@@ -203,26 +208,20 @@ struct ChatPanelView: View {
         await MainActor.run { uploadProgress = nil }
     }
 
-    private func pickImages() {
+    /// Attach via the file picker. Was image-only (`allowedContentTypes` of
+    /// image UTTypes) which made CSV/PDF/DOC unpickable even though drag-drop
+    /// accepted them — now any file is selectable and routed through the same
+    /// `ingest(url:)` the drop handler uses (extension-validated there).
+    private func pickFiles() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        panel.allowedContentTypes = [.jpeg, .png, .gif, .heic, .webP, .bmp, .tiff]
-        let remaining = 4 - viewModel.presentationImageURLs.count
+        panel.allowsOtherFileTypes = true   // allow any type; validated on ingest
         panel.begin { response in
             guard response == .OK else { return }
-            let selected = Array(panel.urls.prefix(remaining))
-            Task {
-                var images: [(data: Data, filename: String, mimeType: String)] = []
-                for url in selected {
-                    guard let data = try? Data(contentsOf: url) else { continue }
-                    let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "image/jpeg"
-                    images.append((data: data, filename: url.lastPathComponent, mimeType: mime))
-                }
-                if !images.isEmpty {
-                    await viewModel.uploadImages(images)
-                }
+            for url in panel.urls {
+                ingest(url: url)
             }
         }
     }
@@ -312,16 +311,21 @@ struct ChatPanelView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
             }
+            // Always follow new messages to the bottom. The isAtBottom gate was
+            // unreliable (the lazy sentinel's appear/disappear mis-fires — same
+            // finding as ChannelDetailView), so sends/replies often landed
+            // off-screen. Chat-standard: a new message always reveals itself.
             .onChange(of: viewModel.messages.count) {
-                guard isAtBottom, let lastId = viewModel.messages.last?.id else { return }
+                guard let lastId = viewModel.messages.last?.id else { return }
                 withAnimation(.easeOut(duration: 0.2)) {
                     proxy.scrollTo(lastId, anchor: .bottom)
                 }
             }
             .onChange(of: viewModel.isStreaming) {
                 // No animation during streaming — token-rate scrolls churn the
-                // main thread; only follow if the user is already at the bottom.
-                if viewModel.isStreaming, isAtBottom {
+                // main thread. Streaming starts right after a send, so always
+                // bring the streaming bubble into view.
+                if viewModel.isStreaming {
                     proxy.scrollTo("streaming", anchor: .bottom)
                 }
             }
@@ -468,26 +472,20 @@ struct ChatPanelView: View {
         }
     }
 
-    private var imgAtLimit: Bool { viewModel.presentationImageURLs.count >= 4 }
-
     @ViewBuilder private var inputBar: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            Button { pickImages() } label: {
-                Image(systemName: "photo.badge.plus")
+            Button { pickFiles() } label: {
+                Image(systemName: "paperclip")
                     .font(.system(size: 17))
                     .foregroundColor(
-                        imgAtLimit || viewModel.isUploadingImages
+                        viewModel.isUploadingImages
                         ? Color.secondary.opacity(0.35)
                         : .secondary
                     )
             }
             .buttonStyle(.plain)
-            .disabled(imgAtLimit || viewModel.isUploadingImages)
-            .help(
-                imgAtLimit
-                ? "Maximum 4 images per thread"
-                : "Upload images (\(viewModel.presentationImageURLs.count)/4)"
-            )
+            .disabled(viewModel.isUploadingImages)
+            .help("Attach files — images, PDF, DOC/DOCX, TXT, MD, CSV, JSON")
 
             TextField(inputPlaceholder, text: $inputText, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -761,22 +759,18 @@ extension ChatPanelView {
                     ticketRefBar
 
                     HStack(alignment: .bottom, spacing: 10) {
-                        Button { pickImages() } label: {
-                            Image(systemName: "photo.badge.plus")
+                        Button { pickFiles() } label: {
+                            Image(systemName: "paperclip")
                                 .font(.system(size: 17))
                                 .foregroundColor(
-                                    imgAtLimit || viewModel.isUploadingImages
+                                    viewModel.isUploadingImages
                                     ? Color.secondary.opacity(0.35)
                                     : .secondary
                                 )
                         }
                         .buttonStyle(.plain)
-                        .disabled(imgAtLimit || viewModel.isUploadingImages)
-                        .help(
-                            imgAtLimit
-                            ? "Maximum 4 images per thread"
-                            : "Upload images (\(viewModel.presentationImageURLs.count)/4)"
-                        )
+                        .disabled(viewModel.isUploadingImages)
+                        .help("Attach files — images, PDF, DOC/DOCX, TXT, MD, CSV, JSON")
 
                         TextField(inputPlaceholder, text: $inputText, axis: .vertical)
                             .textFieldStyle(.plain)

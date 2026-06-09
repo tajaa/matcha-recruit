@@ -60,6 +60,16 @@ struct MatchaApp: App {
         .defaultSize(width: 1200, height: 800)
         .commands {
             CommandGroup(replacing: .newItem) { }
+            // Cmd+F — the find-anything palette (surfaces + project files,
+            // open into main/right/bottom pane, star to sidebar). ContentView
+            // presents the sheet off this flag.
+            CommandGroup(after: .textEditing) {
+                Button("Find in Werk…") {
+                    appState.showFinderPalette = true
+                }
+                .keyboardShortcut("f", modifiers: .command)
+                .disabled(!appState.isAuthenticated)
+            }
         }
 
         // Secondary windows — opened via openWindow(id:"aux", value:) from

@@ -118,3 +118,56 @@ final class JournalStarStore {
         UserDefaults.standard.set(Array(starred), forKey: key(for: userId))
     }
 }
+
+/// Per-user starred project FILES — same client-side UserDefaults model as the
+/// channel/journal stores, but persists full `MWFileRef` snapshots (JSON) so a
+/// pinned file can render + preview without refetching its project's file
+/// list. Surfaces in the sidebar Starred strip; opening a pin presents the
+/// shared attachment preview.
+@MainActor
+@Observable
+final class FileStarStore {
+    static let shared = FileStarStore()
+
+    private(set) var generation: Int = 0
+    private(set) var pins: [MWFileRef] = []
+    private var userId: String?
+
+    private init() {}
+
+    private func key(for userId: String) -> String { "mw-starred-files:\(userId)" }
+
+    func bind(userId: String?) {
+        guard self.userId != userId else { return }
+        self.userId = userId
+        if let userId,
+           let raw = UserDefaults.standard.data(forKey: key(for: userId)),
+           let decoded = try? JSONDecoder().decode([MWFileRef].self, from: raw) {
+            pins = decoded
+        } else {
+            pins = []
+        }
+        generation &+= 1
+    }
+
+    func isStarred(_ fileId: String) -> Bool { pins.contains { $0.id == fileId } }
+
+    func ref(for fileId: String) -> MWFileRef? { pins.first { $0.id == fileId } }
+
+    func toggle(_ ref: MWFileRef) {
+        if let idx = pins.firstIndex(where: { $0.id == ref.id }) {
+            pins.remove(at: idx)
+        } else {
+            pins.append(ref)
+        }
+        persist()
+        generation &+= 1
+    }
+
+    private func persist() {
+        guard let userId else { return }
+        if let data = try? JSONEncoder().encode(pins) {
+            UserDefaults.standard.set(data, forKey: key(for: userId))
+        }
+    }
+}

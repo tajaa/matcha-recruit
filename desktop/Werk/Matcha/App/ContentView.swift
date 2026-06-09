@@ -47,8 +47,11 @@ struct ContentView: View {
                     VSplitView {
                         topPanes
                             .frame(minHeight: 200, maxHeight: .infinity)
+                        // 240 min: pane header (~33) + a chat surface's own
+                        // header + composer need ~200pt of fixed chrome — any
+                        // less and the composer clips off the bottom edge.
                         BottomSplitPane(target: bottom)
-                            .frame(minHeight: 160, maxHeight: .infinity)
+                            .frame(minHeight: 240, maxHeight: .infinity)
                     }
                 } else {
                     topPanes
@@ -70,6 +73,16 @@ struct ContentView: View {
         .sheet(isPresented: $showProfile) {
             ProfileSheet()
                 .environment(appState)
+        }
+        // Cmd+F find-anything palette (also via the WorkTabBar magnifier).
+        .sheet(isPresented: $appState.showFinderPalette) {
+            SplitFinderPalette()
+                .environment(appState)
+        }
+        // Shared file preview — raised by sidebar file pins and the finder
+        // palette's "Main Pane" file opens.
+        .sheet(item: $appState.globalPreviewFile) { file in
+            AttachmentPreviewSheet(file: file)
         }
         .alert("Enable notifications?", isPresented: $appState.showNotificationReprompt) {
             Button("Open Settings") {

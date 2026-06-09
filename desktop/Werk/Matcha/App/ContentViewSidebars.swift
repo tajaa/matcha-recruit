@@ -27,6 +27,10 @@ struct AuxWindowRootView: View {
                     ThreadDetailView(threadId: id, isEmbedded: true)
                 case .journal(let id):
                     JournalDetailView(journalId: id, isEmbedded: true)
+                case .file(let ref):
+                    // Chrome-less preview body — the split-pane headers (and
+                    // the aux window title bar) already carry the filename.
+                    AttachmentPreviewContent(file: ref.asProjectFile)
                 case nil:
                     Text("Nothing to show")
                         .foregroundColor(.secondary)
@@ -195,9 +199,10 @@ struct ArchiveView: View {
 // MARK: - Sidebar "Starred" pins
 
 /// The only place the sidebar surfaces specific items: a compact strip of
-/// pinned projects + starred channels + pinned threads for quick access.
-/// Everything else lives in the per-surface hubs. Tapping a pin opens that
-/// item directly. Hidden entirely when nothing is pinned/starred.
+/// pinned projects + starred channels + pinned threads + starred journals +
+/// starred files for quick access. Everything else lives in the per-surface
+/// hubs. Tapping a pin opens that item directly (file pins open the shared
+/// preview sheet). Hidden entirely when nothing is pinned/starred.
 struct SidebarStarredView: View {
     @Environment(AppState.self) private var appState
     @State private var pins: [Pin] = []
@@ -207,15 +212,16 @@ struct SidebarStarredView: View {
         let name: String
         let icon: String
         let kind: Kind
-        enum Kind { case project, channel, thread, journal }
+        enum Kind { case project, channel, thread, journal, file }
     }
 
     var body: some View {
         // Observe the client-side star stores so the strip reloads when a
-        // channel/journal is (un)starred — those bump their OWN generation,
-        // not the list generations.
+        // channel/journal/file is (un)starred — those bump their OWN
+        // generation, not the list generations.
         let _ = ChannelStarStore.shared.generation
         let _ = JournalStarStore.shared.generation
+        let _ = FileStarStore.shared.generation
         return Group {
             if !pins.isEmpty {
                 VStack(alignment: .leading, spacing: 1) {
@@ -237,6 +243,10 @@ struct SidebarStarredView: View {
         .onChange(of: appState.journalsListGeneration) { _, _ in Task { await load() } }
         .onChange(of: ChannelStarStore.shared.generation) { _, _ in Task { await load() } }
         .onChange(of: JournalStarStore.shared.generation) { _, _ in Task { await load() } }
+        .onChange(of: FileStarStore.shared.generation) { _, _ in Task { await load() } }
+        .onReceive(NotificationCenter.default.publisher(for: .mwThreadsChanged)) { _ in
+            Task { await load() }
+        }
     }
 
     private func row(_ pin: Pin) -> some View {
@@ -270,16 +280,26 @@ struct SidebarStarredView: View {
         case .channel: return appState.selectedChannelId == pin.id
         case .thread:  return appState.selectedThreadId == pin.id
         case .journal: return appState.selectedJournalId == pin.id
+        case .file:    return false
         }
     }
 
     private func open(_ pin: Pin) {
+        if pin.kind == .file {
+            // Files aren't a primary-pane surface — open the shared preview
+            // sheet (presented by ContentView) without touching nav state.
+            if let ref = FileStarStore.shared.ref(for: pin.id) {
+                appState.globalPreviewFile = ref.asProjectFile
+            }
+            return
+        }
         appState.clearPrimaryNav()
         switch pin.kind {
         case .project: appState.selectedProjectId = pin.id
         case .channel: appState.selectedChannelId = pin.id
         case .thread:  appState.selectedThreadId = pin.id
         case .journal: appState.selectedJournalId = pin.id
+        case .file:    break
         }
     }
 
@@ -300,6 +320,8 @@ struct SidebarStarredView: View {
             .map { Pin(id: $0.id, name: $0.title, icon: $0.icon ?? "book.closed", kind: .journal) }
         out += threads.filter { $0.isPinned }
             .map { Pin(id: $0.id, name: $0.displayName, icon: "bubble.left.and.bubble.right", kind: .thread) }
+        out += FileStarStore.shared.pins
+            .map { Pin(id: $0.id, name: $0.filename, icon: "doc", kind: .file) }
         await MainActor.run { pins = out }
     }
 }

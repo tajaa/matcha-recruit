@@ -47,6 +47,13 @@ class AppState {
     /// one full-width below. nil = no bottom pane. Reuses AuxWindowTarget; its
     /// header carries a switcher to swap between any of the four surfaces.
     var bottomSplitTarget: AuxWindowTarget? = nil
+    /// Cmd+F (or the tab-bar magnifier): shows the find-anything palette —
+    /// search every surface + project file, open into main/right/bottom pane,
+    /// star to the sidebar. Presented as a sheet by ContentView.
+    var showFinderPalette = false
+    /// Globally-presented file preview (sidebar file pins, finder palette
+    /// "Main Pane" file opens). Presented as a sheet by ContentView.
+    var globalPreviewFile: MWProjectFile? = nil
     /// Deep-link hint: when set, the project detail view switches its collab
     /// panel to this tab once it mounts/updates, then clears it. Used by
     /// notification taps so a task notification opens the kanban board.
@@ -333,6 +340,7 @@ class AppState {
         MatchaWorkService.shared.updateCacheScope(user.id)
         ChannelStarStore.shared.bind(userId: user.id)
         JournalStarStore.shared.bind(userId: user.id)
+        FileStarStore.shared.bind(userId: user.id)
         SidebarSectionOrderStore.shared.bind(userId: user.id)
         startPresenceHeartbeat()
         startInboxPolling()
@@ -604,6 +612,7 @@ class AppState {
         ChannelsWebSocket.shared.disconnect()
         ChannelStarStore.shared.bind(userId: nil)
         JournalStarStore.shared.bind(userId: nil)
+        FileStarStore.shared.bind(userId: nil)
         SidebarSectionOrderStore.shared.bind(userId: nil)
         heartbeatTask?.cancel()
         heartbeatTask = nil
@@ -957,4 +966,39 @@ enum AuxWindowTarget: Codable, Hashable {
     case channel(String)
     case thread(String)
     case journal(String)
+    /// A project file — previewable in a split pane / aux window like any
+    /// surface. Carries a snapshot ref (not just an id) so panes don't have to
+    /// refetch project file lists to resolve it.
+    case file(MWFileRef)
+}
+
+/// Lightweight Codable snapshot of a project file, used wherever a file needs
+/// to outlive its source list: split-pane targets (`AuxWindowTarget.file`) and
+/// sidebar Starred pins (`FileStarStore`).
+struct MWFileRef: Codable, Hashable {
+    let id: String
+    let projectId: String?
+    let filename: String
+    let storageUrl: String
+    let contentType: String?
+    let fileSize: Int
+
+    init(file: MWProjectFile) {
+        id = file.id
+        projectId = file.projectId
+        filename = file.filename
+        storageUrl = file.storageUrl
+        contentType = file.contentType
+        fileSize = file.fileSize
+    }
+
+    /// Adapt back to the shared preview model (`AttachmentPreviewSheet` /
+    /// `AttachmentPreviewContent` take an MWProjectFile).
+    var asProjectFile: MWProjectFile {
+        MWProjectFile(
+            id: id, projectId: projectId, taskId: nil, uploadedBy: nil,
+            filename: filename, storageUrl: storageUrl,
+            contentType: contentType, fileSize: fileSize, createdAt: nil
+        )
+    }
 }

@@ -4,20 +4,14 @@ import AppKit
 
 /// Modal preview for task / project attachments. Images render inline via
 /// `AsyncImage`, PDFs via the existing `PDFKitView` (defined in
-/// `OfferLetterPreview.swift`), and everything else shows metadata plus an
-/// "Open in default app" fallback. Used by `TaskViewerSheet`,
-/// `TaskEditorSheet`, and `ProjectFilesView` so clicking an attachment no
-/// longer punts to Safari.
+/// `OfferLetterPreview.swift`), CSVs as an inline table, and other text-like
+/// files (TXT/MD/JSON/log/…) as monospaced text. Everything else shows
+/// metadata plus an "Open in default app" fallback. Used by `TaskViewerSheet`,
+/// `TaskEditorSheet`, `ProjectFilesView`, and channel chat so clicking an
+/// attachment no longer punts to the browser.
 struct AttachmentPreviewSheet: View {
     let file: MWProjectFile
     @Environment(\.dismiss) private var dismiss
-    @State private var pdfData: Data?
-    @State private var loadError: String?
-
-    private var isPDF: Bool {
-        if let ct = file.contentType, ct.lowercased() == "application/pdf" { return true }
-        return (file.filename as NSString).pathExtension.lowercased() == "pdf"
-    }
 
     private var sizeLabel: String {
         let bytes = Double(file.fileSize)
@@ -66,14 +60,58 @@ struct AttachmentPreviewSheet: View {
 
             Divider()
 
-            content
+            AttachmentPreviewContent(file: file)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 900, minHeight: 700)
     }
+}
 
-    @ViewBuilder
-    private var content: some View {
+/// The chrome-less preview body — shared by `AttachmentPreviewSheet` and the
+/// split-pane file view (`AuxWindowTarget.file`), which supplies its own
+/// header. No min-size frame here so it can live in a small bottom pane.
+struct AttachmentPreviewContent: View {
+    let file: MWProjectFile
+    @State private var pdfData: Data?
+    @State private var textContent: String?
+    @State private var csvRows: [[String]]?
+    @State private var loadError: String?
+
+    /// Hard caps so a huge export can't lock the main thread on parse/render.
+    private static let maxTextBytes = 512 * 1024
+    private static let maxCSVRows = 500
+
+    private var ext: String {
+        (file.filename as NSString).pathExtension.lowercased()
+    }
+
+    private var isPDF: Bool {
+        if let ct = file.contentType, ct.lowercased() == "application/pdf" { return true }
+        return ext == "pdf"
+    }
+
+    private var isCSV: Bool {
+        if let ct = file.contentType, ct.lowercased().contains("csv") { return true }
+        return ext == "csv" || ext == "tsv"
+    }
+
+    private var isTextLike: Bool {
+        let textExts: Set<String> = ["txt", "md", "markdown", "json", "log", "yml", "yaml", "xml"]
+        if textExts.contains(ext) { return true }
+        if let ct = file.contentType?.lowercased() {
+            return ct.hasPrefix("text/") || ct == "application/json"
+        }
+        return false
+    }
+
+    private var sizeLabel: String {
+        let bytes = Double(file.fileSize)
+        if bytes < 1024 { return "\(file.fileSize) B" }
+        if bytes < 1024 * 1024 { return String(format: "%.1f KB", bytes / 1024) }
+        return String(format: "%.1f MB", bytes / 1024 / 1024)
+    }
+
+    var body: some View {
         if file.isImage, let url = URL(string: file.storageUrl) {
             AsyncImage(url: url) { phase in
                 switch phase {
@@ -102,10 +140,48 @@ struct AttachmentPreviewSheet: View {
             } else if let err = loadError {
                 centeredMessage(icon: "exclamationmark.triangle", text: err)
             } else {
-                ProgressView().tint(.white)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black)
-                    .task { await loadPDF() }
+                loadingView.task { await loadRemote { pdfData = $0 } }
+            }
+        } else if isCSV {
+            if let rows = csvRows {
+                csvTable(rows)
+            } else if let err = loadError {
+                centeredMessage(icon: "exclamationmark.triangle", text: err)
+            } else {
+                loadingView.task {
+                    await loadRemote { data in
+                        let text = Self.decodeText(data) ?? ""
+                        csvRows = Self.parseCSV(
+                            text,
+                            separator: ext == "tsv" ? "\t" : ",",
+                            maxRows: Self.maxCSVRows
+                        )
+                    }
+                }
+            }
+        } else if isTextLike {
+            if let text = textContent {
+                ScrollView {
+                    Text(text)
+                        .font(.system(size: 12, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .padding(16)
+                }
+                .background(Color.appBackground)
+            } else if let err = loadError {
+                centeredMessage(icon: "exclamationmark.triangle", text: err)
+            } else {
+                loadingView.task {
+                    await loadRemote { data in
+                        let capped = data.prefix(Self.maxTextBytes)
+                        var text = Self.decodeText(Data(capped)) ?? "Couldn't decode file as text."
+                        if data.count > Self.maxTextBytes {
+                            text += "\n\n… preview truncated (\(sizeLabel) total)"
+                        }
+                        textContent = text
+                    }
+                }
             }
         } else {
             VStack(spacing: 14) {
@@ -130,6 +206,111 @@ struct AttachmentPreviewSheet: View {
         }
     }
 
+    // MARK: - CSV table
+
+    @ViewBuilder
+    private func csvTable(_ rows: [[String]]) -> some View {
+        if rows.isEmpty {
+            centeredMessage(icon: "tablecells", text: "Empty CSV")
+        } else {
+            let columns = rows.map(\.count).max() ?? 0
+            ScrollView([.horizontal, .vertical]) {
+                Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { rowIdx, row in
+                        GridRow {
+                            ForEach(0..<columns, id: \.self) { colIdx in
+                                Text(colIdx < row.count ? row[colIdx] : "")
+                                    .font(.system(size: 11.5,
+                                                  weight: rowIdx == 0 ? .semibold : .regular,
+                                                  design: .monospaced))
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                    .frame(maxWidth: 280, alignment: .leading)
+                                    .fixedSize(horizontal: true, vertical: false)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                            }
+                        }
+                        .background(rowIdx == 0
+                                    ? Color.primary.opacity(0.08)
+                                    : (rowIdx % 2 == 0 ? Color.primary.opacity(0.025) : Color.clear))
+                    }
+                    if rows.count >= Self.maxCSVRows {
+                        GridRow {
+                            Text("… preview truncated at \(Self.maxCSVRows) rows")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .padding(10)
+                                .gridCellColumns(max(columns, 1))
+                        }
+                    }
+                }
+                .padding(12)
+            }
+            .background(Color.appBackground)
+        }
+    }
+
+    /// Minimal RFC-4180-ish parser: handles quoted fields (embedded separators,
+    /// doubled quotes, newlines inside quotes). Good enough for previews.
+    static func parseCSV(_ text: String, separator: Character, maxRows: Int) -> [[String]] {
+        var rows: [[String]] = []
+        var row: [String] = []
+        var field = ""
+        var inQuotes = false
+        var i = text.startIndex
+
+        while i < text.endIndex, rows.count < maxRows {
+            let ch = text[i]
+            if inQuotes {
+                if ch == "\"" {
+                    let next = text.index(after: i)
+                    if next < text.endIndex, text[next] == "\"" {
+                        field.append("\"")
+                        i = next
+                    } else {
+                        inQuotes = false
+                    }
+                } else {
+                    field.append(ch)
+                }
+            } else {
+                switch ch {
+                case "\"":
+                    inQuotes = true
+                case separator:
+                    row.append(field); field = ""
+                case "\r":
+                    break
+                case "\n":
+                    row.append(field); field = ""
+                    rows.append(row); row = []
+                default:
+                    field.append(ch)
+                }
+            }
+            i = text.index(after: i)
+        }
+        if !field.isEmpty || !row.isEmpty {
+            row.append(field)
+            rows.append(row)
+        }
+        // Drop a trailing fully-empty row from a terminating newline.
+        if rows.last?.allSatisfy(\.isEmpty) == true { rows.removeLast() }
+        return rows
+    }
+
+    private static func decodeText(_ data: Data) -> String? {
+        String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
+    }
+
+    // MARK: - Shared bits
+
+    private var loadingView: some View {
+        ProgressView().tint(.secondary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private func centeredMessage(icon: String, text: String) -> some View {
         VStack(spacing: 8) {
             Image(systemName: icon)
@@ -138,20 +319,19 @@ struct AttachmentPreviewSheet: View {
             Text(text).foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
     }
 
-    private func loadPDF() async {
+    private func loadRemote(_ apply: @MainActor (Data) -> Void) async {
         guard let url = URL(string: file.storageUrl) else {
             await MainActor.run { loadError = "Invalid URL" }
             return
         }
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
-            await MainActor.run { pdfData = data }
+            await MainActor.run { apply(data) }
         } catch {
             await MainActor.run {
-                loadError = "Failed to load PDF: \(error.localizedDescription)"
+                loadError = "Failed to load file: \(error.localizedDescription)"
             }
         }
     }

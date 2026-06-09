@@ -83,7 +83,11 @@ struct ThreadDetailView: View {
                         .frame(minWidth: 320, idealWidth: 420, maxWidth: .infinity)
                     }
                 }
-                .frame(minHeight: 500)
+                // Keep this low: in a bottom split pane the whole view gets as
+                // little as ~240pt — a large min here overflows the pane and
+                // clips the composer off-screen (the "can't type in the bottom
+                // pane" bug). 220 still guarantees the input bar fits.
+                .frame(minHeight: 220)
             }
         }
         .background(Color.appBackground)
