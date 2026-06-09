@@ -88,7 +88,7 @@ export default function Brokers() {
 
   // Edit state
   const [editBroker, setEditBroker] = useState<Broker | null>(null)
-  const [editForm, setEditForm] = useState<EditForm>({ status: '', support_routing: '' })
+  const [editForm, setEditForm] = useState<EditForm>({ status: '', support_routing: '', allocated_seats: '' })
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
 
