@@ -2,6 +2,7 @@ import SwiftUI
 import AuthenticationServices
 
 struct AgentPanelView: View {
+    @Environment(AppState.self) private var appState
     @State private var status: MWAgentEmailStatus?
     @State private var emails: [MWAgentEmail] = []
     @State private var selectedEmail: MWAgentEmail?
@@ -134,15 +135,24 @@ struct AgentPanelView: View {
                                 .font(.system(size: 12))
 
                             Button {
-                                Task { await draftReply(emailId: email.id) }
+                                if appState.canEmailAI {
+                                    Task { await draftReply(emailId: email.id) }
+                                } else {
+                                    // AI drafting is Lite+ (fetch/send stay free).
+                                    appState.presentPaywall(for: "email_ai")
+                                }
                             } label: {
                                 HStack(spacing: 4) {
                                     if isDrafting { ProgressView().controlSize(.mini) }
+                                    if !appState.canEmailAI {
+                                        Image(systemName: "lock.fill").font(.system(size: 9))
+                                    }
                                     Text("Draft Reply")
                                 }
                             }
                             .buttonStyle(.borderedProminent).tint(Color.matcha600).controlSize(.small)
-                            .disabled(draftInstructions.isEmpty || isDrafting)
+                            .disabled((draftInstructions.isEmpty && appState.canEmailAI) || isDrafting)
+                            .help(appState.canEmailAI ? "" : "Email AI drafting needs Werk Lite")
 
                             if !draftContent.isEmpty {
                                 TextEditor(text: $draftContent)

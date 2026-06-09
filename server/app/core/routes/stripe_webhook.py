@@ -429,6 +429,20 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                 try:
                     company_id = UUID(company_id_str)
 
+                    # Price comes from the session metadata (set at checkout
+                    # creation). Fallback map covers sessions created before
+                    # amount_cents was added to metadata — previously this
+                    # hardcoded the $40 token-pack price for every pack, so
+                    # $20 personal subs were recorded as $40.
+                    _pack_amount_fallbacks = {
+                        "matcha_work_personal": 2000,
+                        "matcha_work_lite": 900,
+                        token_budget_service.SUBSCRIPTION_PACK_ID: token_budget_service.SUBSCRIPTION_AMOUNT_CENTS,
+                    }
+                    amount_cents = int(meta.get("amount_cents") or 0) or _pack_amount_fallbacks.get(
+                        pack_id, token_budget_service.SUBSCRIPTION_AMOUNT_CENTS
+                    )
+
                     # Record subscription in mw_subscriptions
                     await billing_service.upsert_subscription(
                         company_id=company_id,
@@ -436,8 +450,12 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                         stripe_customer_id=stripe_customer_id,
                         pack_id=pack_id,
                         credits_per_cycle=0,
-                        amount_cents=token_budget_service.SUBSCRIPTION_AMOUNT_CENTS,
+                        amount_cents=amount_cents,
                     )
+
+                    # New subscription changes the user's resolved plan.
+                    from ...matcha.services import entitlements_service
+                    entitlements_service.invalidate_plan_cache()
 
                     # Activate token budget
                     if billing_type == "token_budget" and tokens_per_cycle > 0:

@@ -2937,11 +2937,19 @@ async def create_project_endpoint(
 ):
     """Create a new project with an auto-created first chat."""
     from ..services import project_service as proj_svc
+    from ..services import entitlements_service
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated")
     title = body.get("title", "Untitled Project")
     project_type = body.get("project_type", "general")
+
+    # Plan gate (creation only — existing projects stay readable/editable):
+    # solo types need Lite+, collab/recruiting need Pro/Business.
+    if project_type in entitlements_service.COLLAB_PROJECT_TYPES:
+        await entitlements_service.require_plan(current_user.id, entitlements_service.PLAN_PRO, "projects_collab")
+    else:
+        await entitlements_service.require_plan(current_user.id, entitlements_service.PLAN_LITE, "projects_solo")
     icon = body.get("icon")
     hiring_client_id_raw = body.get("hiring_client_id")
     hiring_client_id = UUID(hiring_client_id_raw) if hiring_client_id_raw else None
@@ -4772,6 +4780,7 @@ async def ai_draft_task_endpoint(
             recent_done=recent_done,
             model_override=(body.get("model") or None),
             company_id=str(project.get("company_id")) if project.get("company_id") else None,
+            user_id=str(current_user.id),
             conventions=conventions or None,
         )
     except Exception as e:
@@ -9150,7 +9159,12 @@ async def agent_email_draft(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Draft a reply to an email using AI."""
+    from ..services import entitlements_service
     from ..services.gmail_service import GmailService
+
+    # Email fetch/send stay free (non-AI); AI drafting is Lite+.
+    await entitlements_service.require_plan(current_user.id, entitlements_service.PLAN_LITE, "email_ai")
+
     gmail = GmailService(current_user.id)
     await gmail.load_token()
     if not gmail.is_configured:
@@ -9444,6 +9458,7 @@ async def send_message(
         payer_mode_prompt=payer_prompt,
         model_override=body.model,
         company_id=str(company_id) if company_id else "",
+        user_id=str(current_user.id),
         compliance_mode=bool(thread.get("compliance_mode")),
         payer_mode=bool(thread.get("payer_mode")),
         node_mode=bool(thread.get("node_mode")),
@@ -9630,12 +9645,23 @@ async def send_message_stream(
     if current_user.role != "admin":
         await token_budget_service.check_token_budget(company_id)
 
-    # Check token quota
+    # Check token quota. Structured detail so the Werk client can tell a
+    # free-taste exhaustion apart from a generic error and raise the paywall.
     quota = await doc_svc.check_token_quota(current_user.id, company_id)
     if not quota["allowed"]:
+        from ..services import entitlements_service
+
+        plan = await entitlements_service.resolve_plan_for_user(current_user.id)
         raise HTTPException(
             status_code=429,
-            detail=f"Token limit reached ({quota['used']:,}/{quota['limit']:,} tokens used). Resets at {quota['resets_at']}.",
+            detail={
+                "code": "quota_exhausted",
+                "plan": plan,
+                "used": quota["used"],
+                "limit": quota["limit"],
+                "resets_at": quota["resets_at"],
+                "message": f"Token limit reached ({quota['used']:,}/{quota['limit']:,} tokens used). Resets at {quota['resets_at']}.",
+            },
         )
 
     # Normalize & persist attachment URLs on the user message metadata. Client
@@ -9865,6 +9891,7 @@ async def send_message_stream(
                 payer_mode_prompt=stream_payer_prompt,
                 model_override=body.model,
                 company_id=str(company_id),
+                user_id=str(current_user.id),
                 compliance_mode=bool(thread.get("compliance_mode")),
                 payer_mode=bool(thread.get("payer_mode")),
                 node_mode=bool(thread.get("node_mode")),
@@ -10043,6 +10070,24 @@ async def send_message_stream(
             yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.get("/entitlements")
+async def get_entitlements(
+    response: Response,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Werk plan entitlements — the client's single tier read.
+
+    Returns {plan, features, quotas}; plan resolved from role + company +
+    mw_subscriptions + beta flags (see entitlements_service). Replaces the
+    client's separate isPlusActive / beta-flag reads.
+    """
+    from ..services import entitlements_service
+
+    response.headers["Cache-Control"] = "private, max-age=60"
+    company_id = await get_client_company_id(current_user)
+    return await entitlements_service.resolve_entitlements(current_user.id, company_id)
 
 
 @router.get("/usage/summary", response_model=UsageSummaryResponse)

@@ -102,6 +102,7 @@
 		B66274A51FD5BFEC6FC84CDC /* ProjectDetailViewModel+Elements.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CD4A9D11B1B6EBD173C43B5 /* ProjectDetailViewModel+Elements.swift */; };
 		B8EF0BA967250612BA7375C9 /* ScreenplayPaginator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8716FBE42A3D81F48ED44B1 /* ScreenplayPaginator.swift */; };
 		BB01CC22DD33EE44FF550001 /* NewBlogSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC22DD33EE44FF660001 /* NewBlogSheet.swift */; };
+		CC99AA11BB22CC33DD440001 /* PaywallSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC99AA11BB22CC33DD550001 /* PaywallSheet.swift */; };
 		BB01CC22DD33EE44FF550002 /* BlogEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC22DD33EE44FF660002 /* BlogEditorView.swift */; };
 		BB01CC22DD33EE44FF550003 /* MarkdownPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01CC22DD33EE44FF660003 /* MarkdownPreviewView.swift */; };
 		BC01DD22EE33FF445566AA01 /* BroadcastModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF445566BB01 /* BroadcastModels.swift */; };
@@ -264,6 +265,7 @@
 		B13338371A8BC76142D4A946 /* LoadingDots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingDots.swift; sourceTree = "<group>"; };
 		B9E4D71F3C825A064D17F308 /* SkillsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillsView.swift; sourceTree = "<group>"; };
 		BB01CC22DD33EE44FF660001 /* NewBlogSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewBlogSheet.swift; sourceTree = "<group>"; };
+		CC99AA11BB22CC33DD550001 /* PaywallSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaywallSheet.swift; sourceTree = "<group>"; };
 		BB01CC22DD33EE44FF660002 /* BlogEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlogEditorView.swift; sourceTree = "<group>"; };
 		BB01CC22DD33EE44FF660003 /* MarkdownPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownPreviewView.swift; sourceTree = "<group>"; };
 		BC01DD22EE33FF445566BB01 /* BroadcastModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BroadcastModels.swift; sourceTree = "<group>"; };
@@ -451,6 +453,7 @@
 				AA11BB22CC33DD44EE660007 /* ComplianceDecisionTreeView.swift */,
 				EE11FF2233445566BB000001 /* RecruitingPipelineView.swift */,
 				BB01CC22DD33EE44FF660001 /* NewBlogSheet.swift */,
+				CC99AA11BB22CC33DD550001 /* PaywallSheet.swift */,
 				BB01CC22DD33EE44FF660002 /* BlogEditorView.swift */,
 				BB01CC22DD33EE44FF660003 /* MarkdownPreviewView.swift */,
 				AA11BB22CC33DD44EE66000B /* KanbanBoardView.swift */,
@@ -903,6 +906,7 @@
 				BC01DD22EE33FF445566AA03 /* BroadcastPanelView.swift in Sources */,
 				EE11FF2233445566AA000001 /* RecruitingPipelineView.swift in Sources */,
 				BB01CC22DD33EE44FF550001 /* NewBlogSheet.swift in Sources */,
+				CC99AA11BB22CC33DD440001 /* PaywallSheet.swift in Sources */,
 				BB01CC22DD33EE44FF550002 /* BlogEditorView.swift in Sources */,
 				BB01CC22DD33EE44FF550003 /* MarkdownPreviewView.swift in Sources */,
 				FF11223344556677AA000001 /* PeopleView.swift in Sources */,

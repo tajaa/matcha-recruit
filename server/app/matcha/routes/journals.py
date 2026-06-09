@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from ...core.models.auth import CurrentUser
 from ...core.services.storage import get_storage
 from ..dependencies import require_admin_or_client, get_client_company_id
+from ..services import entitlements_service
 from ..services import journal_service
 
 router = APIRouter()
@@ -89,6 +90,9 @@ async def create_journal_endpoint(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated")
+    # Basic kinds (note/todo/journal) are free; novel/screenplay/blog need Lite+.
+    if body.kind in entitlements_service.PREMIUM_JOURNAL_KINDS:
+        await entitlements_service.require_plan(current_user.id, entitlements_service.PLAN_LITE, "journals_full")
     return await journal_service.create_journal(
         current_user.id,
         company_id,

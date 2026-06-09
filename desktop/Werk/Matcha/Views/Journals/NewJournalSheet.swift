@@ -151,20 +151,31 @@ struct NewJournalSheet: View {
         .background(appState.themeBg)
     }
 
+    /// Lite+ journal kinds — basic note/todo/journal stay free. Mirrors the
+    /// server's PREMIUM_JOURNAL_KINDS gate on POST /journals.
+    private func isPremiumKind(_ k: JournalKind) -> Bool {
+        ["novel", "screenplay", "blog"].contains(k.rawValue)
+    }
+
     private func kindChip(_ k: JournalKind) -> some View {
         let selected = kind == k
+        let locked = isPremiumKind(k) && !appState.canFullJournals
         return Button {
+            if locked {
+                appState.presentPaywall(for: "journals_full")
+                return
+            }
             kind = k
             // Default the icon to the type's icon until the user overrides it.
             if !iconTouched { icon = k.icon }
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: k.icon).font(.system(size: 12))
+                Image(systemName: locked ? "lock.fill" : k.icon).font(.system(size: 12))
                 Text(k.label).font(.system(size: 12, weight: selected ? .semibold : .regular))
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .foregroundColor(selected ? appState.themeOnAccent : appState.themeText)
+            .foregroundColor(selected ? appState.themeOnAccent : appState.themeText.opacity(locked ? 0.5 : 1))
             .padding(.horizontal, 10).padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 7)
@@ -177,6 +188,7 @@ struct NewJournalSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(locked ? "This journal type needs Werk Lite" : "")
     }
 
     private func field<Content: View>(label: String, @ViewBuilder content: () -> Content) -> some View {

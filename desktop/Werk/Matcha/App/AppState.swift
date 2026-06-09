@@ -129,6 +129,37 @@ class AppState {
     var notificationsUnreadCount: Int = 0
     var isPlusActive: Bool = false
     var betaFeatures: [String: Bool] = [:]
+
+    // ── Plan entitlements (Free / Lite / Pro / Business) ────────────────
+    /// Server-resolved plan + features + quota — single tier read
+    /// (GET /matcha-work/entitlements). nil until first fetch; treat nil
+    /// as "don't lock anything yet" so a slow fetch never flashes locks.
+    var entitlements: MWEntitlements? = nil
+    /// Raise the upgrade paywall; `paywallFeature` (optional) selects the
+    /// contextual header ("Collab projects need Pro", etc.).
+    var showPaywall: Bool = false
+    var paywallFeature: String? = nil
+
+    var plan: MWPlan { entitlements?.plan ?? .free }
+    /// Gate accessors default OPEN while entitlements are unknown (nil) —
+    /// the server enforces regardless; optimistic UI avoids lock flicker.
+    private func can(_ feature: String) -> Bool {
+        guard let e = entitlements else { return true }
+        return e.has(feature)
+    }
+    var canSoloProjects: Bool { can("projects_solo") }
+    var canCollabProjects: Bool { can("projects_collab") }
+    var canFullJournals: Bool { can("journals_full") }
+    var canEmailAI: Bool { can("email_ai") }
+    var canGoLive: Bool { can("go_live") }
+    var canPaidChannels: Bool { can("paid_channels") }
+    var canProModel: Bool { can("ai_model_pro") }
+
+    /// Raise the paywall for a specific locked feature.
+    func presentPaywall(for feature: String?) {
+        paywallFeature = feature
+        showPaywall = true
+    }
     var isSceneActive: Bool = true
     /// Bumped each time the app regains focus (scene active OR
     /// `NSApplication.didBecomeActiveNotification`). The open channel view
@@ -347,6 +378,7 @@ class AppState {
         startNotificationPolling()
         Task { await refreshProjectUnseenCounts() }
         Task { await refreshSubscription() }
+        Task { await refreshEntitlements() }
         Task { await refreshBetaFeatures() }
         promptForNotificationsIfNeeded()
         ChannelsWebSocket.shared.onMessageGlobal = { [weak self] msg in
@@ -594,6 +626,16 @@ class AppState {
     }
 
     @MainActor
+    func refreshEntitlements() async {
+        do {
+            entitlements = try await MatchaWorkService.shared.getEntitlements()
+        } catch {
+            // Keep the last-known plan on transient failures; never lock the
+            // UI on a fetch error (server gates enforce regardless).
+        }
+    }
+
+    @MainActor
     func didLogout() {
         currentUser = nil
         isAuthenticated = false
@@ -627,6 +669,9 @@ class AppState {
         newNotificationTask?.cancel()
         newNotificationTask = nil
         betaFeatures = [:]
+        entitlements = nil
+        showPaywall = false
+        paywallFeature = nil
         ChannelsWebSocket.shared.onMessageGlobal = nil
         ChannelsWebSocket.shared.onBroadcastStarted = nil
         ChannelsWebSocket.shared.onBroadcastEnded = nil
@@ -663,6 +708,7 @@ class AppState {
         if Date().timeIntervalSince(lastSceneActiveAt) < 10 { return }
         lastSceneActiveAt = Date()
         await refreshSubscription()
+        await refreshEntitlements()
         await refreshBetaFeatures()
         // Best-effort heartbeat so presence flips green immediately.
         Task { try? await MatchaWorkService.shared.sendHeartbeat() }

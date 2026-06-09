@@ -318,6 +318,24 @@ struct ChannelDetailView: View {
                             }
                             .buttonStyle(.plain)
                             .help("End the live broadcast")
+                        } else if !appState.canGoLive {
+                            // Go Live is Pro/Business — locked chip opens the
+                            // paywall (server gates broadcast/start regardless).
+                            Button {
+                                appState.presentPaywall(for: "go_live")
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "lock.fill").font(.system(size: 9))
+                                    Text("Go Live").font(.system(size: 10, weight: .medium))
+                                }
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(appState.themeText.opacity(0.08))
+                                .foregroundColor(appState.themeTextSecondary)
+                                .cornerRadius(4)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Going live needs Werk Pro")
                         } else {
                             // Pick mode at start time. Audio-only skips the
                             // camera grab entirely — useful when bandwidth

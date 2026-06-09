@@ -1318,13 +1318,18 @@ async def log_token_usage_event(
         )
 
 
-# Default quota if no row exists in mw_token_quotas
+# Fallback quota if no mw_token_quotas row exists AND plan resolution fails —
+# normally the per-plan defaults in entitlements_service.PLAN_QUOTAS apply.
 _DEFAULT_TOKEN_LIMIT = 100_000
 _DEFAULT_WINDOW_HOURS = 12
 
 
 async def check_token_quota(user_id: UUID, company_id: Optional[UUID] = None) -> dict:
     """Check if the user is within their token quota.
+
+    Limit resolution: explicit mw_token_quotas row (user > company > global)
+    stays authoritative — admin grants keep working; otherwise the default
+    comes from the user's plan (free taste / lite / pro / business).
 
     Returns dict with: allowed, used, limit, window_hours, resets_at
     """
@@ -1341,9 +1346,23 @@ async def check_token_quota(user_id: UUID, company_id: Optional[UUID] = None) ->
             """,
             user_id, company_id,
         )
-        token_limit = quota_row["token_limit"] if quota_row else _DEFAULT_TOKEN_LIMIT
-        window_hours = quota_row["window_hours"] if quota_row else _DEFAULT_WINDOW_HOURS
 
+    if quota_row:
+        token_limit = quota_row["token_limit"]
+        window_hours = quota_row["window_hours"]
+    else:
+        # Plan-based default (resolved outside the connection block — the
+        # resolver opens its own connection; don't hold two pool slots).
+        token_limit, window_hours = _DEFAULT_TOKEN_LIMIT, _DEFAULT_WINDOW_HOURS
+        try:
+            from . import entitlements_service
+
+            plan = await entitlements_service.resolve_plan_for_user(user_id)
+            token_limit, window_hours = entitlements_service.PLAN_QUOTAS[plan]
+        except Exception:
+            logger.warning("Plan quota resolution failed for user %s", user_id, exc_info=True)
+
+    async with get_connection() as conn:
         # Sum tokens used within the window
         row = await conn.fetchrow(
             """

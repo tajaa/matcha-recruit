@@ -586,6 +586,14 @@ async def create_channel(
             detail="Paid channels are only available for individual (personal) accounts. Create a personal account to become a creator.",
         )
 
+    # …and within individual accounts, creator monetization is a Pro entitlement.
+    if body.paid_config and current_user.role == "individual":
+        from ...matcha.services import entitlements_service
+
+        await entitlements_service.require_plan(
+            current_user.id, entitlements_service.PLAN_PRO, "paid_channels"
+        )
+
     slug = _slugify(name)
 
     async with get_connection() as conn:

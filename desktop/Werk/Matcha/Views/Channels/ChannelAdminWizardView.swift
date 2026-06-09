@@ -211,7 +211,37 @@ struct ChannelAdminWizardView: View {
                     visibilityCard(value: "private", title: "private", body: "invite-only — hidden from sidebar discovery")
                 }
 
-                if canCreatePaid {
+                if canCreatePaid, !appState.canPaidChannels {
+                    // Role-eligible but plan-locked: creator monetization is a
+                    // Pro entitlement — locked row opens the paywall.
+                    Button {
+                        appState.presentPaywall(for: "paid_channels")
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 10))
+                                .foregroundColor(.white.opacity(0.45))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("paid (subscribers only)")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.55))
+                                Text("creator monetization needs werk pro")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.white.opacity(0.4))
+                            }
+                            Spacer()
+                            Text("PRO")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(appState.themeAccent)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(appState.themeAccent.opacity(0.15))
+                                .cornerRadius(4)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                } else if canCreatePaid {
                     Toggle(isOn: $isPaid) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("paid (subscribers only)")

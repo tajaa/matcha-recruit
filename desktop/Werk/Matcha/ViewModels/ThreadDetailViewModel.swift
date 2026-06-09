@@ -14,6 +14,9 @@ class ThreadDetailViewModel {
     var streamingContent = ""
     var tokenUsage: MWTokenUsage?
     var errorMessage: String?
+    /// Set when a send is rejected with 429 (rolling AI quota hit) — the chat
+    /// panel renders an upgrade row instead of a bare error.
+    var quotaExhausted = false
     var selectedSlideIndex: Int?
     var togglingMode: String?
     private var streamingTask: Task<Void, Never>?
@@ -150,6 +153,7 @@ class ThreadDetailViewModel {
             streamingContent = ""
             selectedSlideIndex = nil
             errorMessage = nil
+            quotaExhausted = false
             tokenUsage = nil
             // Clear thread-state image chips optimistically since they are now
             // bound to the outgoing user message. The complete event will also
@@ -250,7 +254,14 @@ class ThreadDetailViewModel {
                 }
             } catch {
                 await MainActor.run {
-                    errorMessage = "Streaming failed: \(error.localizedDescription)"
+                    // 429 on send = the rolling AI quota (the only 429 this
+                    // endpoint returns) — surface the upsell row, not an error.
+                    if case APIError.httpError(429, _) = error {
+                        quotaExhausted = true
+                        errorMessage = "You've reached your AI limit for now."
+                    } else {
+                        errorMessage = "Streaming failed: \(error.localizedDescription)"
+                    }
                 }
             }
 

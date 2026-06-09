@@ -216,14 +216,21 @@ struct ThreadDetailView: View {
 
                 Divider()
 
-                // Model picker
+                // Model picker. The pro model is a Pro/Business entitlement —
+                // locked rows open the paywall (server clamps the override
+                // regardless, so this is purely honest UI).
                 Menu {
                     ForEach(mwModelOptions) { option in
+                        let locked = option.id == "pro" && !appState.canProModel
                         Button {
-                            selectedModelId = option.id
+                            if locked {
+                                appState.presentPaywall(for: "ai_model_pro")
+                            } else {
+                                selectedModelId = option.id
+                            }
                         } label: {
                             HStack {
-                                Text(option.label)
+                                Text(locked ? "\(option.label) 🔒" : option.label)
                                 if selectedModelId == option.id {
                                     Image(systemName: "checkmark")
                                 }

@@ -90,8 +90,11 @@ struct MWModelOption: Identifiable {
     let value: String
 }
 
+// Values must be in the server's SUPPORTED_MODELS (matcha_work_ai.py) or the
+// override silently no-ops — the old flash/pro values had drifted and never
+// took effect. The pro option is plan-clamped server-side (Pro/Business only).
 let mwModelOptions: [MWModelOption] = [
     MWModelOption(id: "flash-lite", label: "Flash Lite 3.1", value: "gemini-3.1-flash-lite"),
-    MWModelOption(id: "flash", label: "Flash 3.5", value: "gemini-3.5-flash"),
-    MWModelOption(id: "pro", label: "Pro 3.1", value: "gemini-2.5-pro-preview-05-06"),
+    MWModelOption(id: "flash", label: "Flash 3", value: "gemini-3-flash-preview"),
+    MWModelOption(id: "pro", label: "Pro 3.1", value: "gemini-3.1-pro-preview"),
 ]

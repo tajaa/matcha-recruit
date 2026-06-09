@@ -7,19 +7,26 @@ extension MatchaWorkService {
         try await client.request(method: "GET", path: "\(basePath)/billing/subscription")
     }
 
-    func startPersonalCheckout(successUrl: String, cancelUrl: String) async throws -> String {
+    /// Server-resolved plan + features + quota — the client's single tier read.
+    func getEntitlements() async throws -> MWEntitlements {
+        try await client.request(method: "GET", path: "\(basePath)/entitlements")
+    }
+
+    func startPersonalCheckout(successUrl: String, cancelUrl: String, plan: String = "pro") async throws -> String {
         struct Body: Codable {
             let successUrl: String
             let cancelUrl: String
+            let plan: String
             enum CodingKeys: String, CodingKey {
                 case successUrl = "success_url"
                 case cancelUrl = "cancel_url"
+                case plan
             }
         }
         let resp: MWCheckoutResponse = try await client.request(
             method: "POST",
             path: "\(basePath)/billing/checkout/personal",
-            body: Body(successUrl: successUrl, cancelUrl: cancelUrl)
+            body: Body(successUrl: successUrl, cancelUrl: cancelUrl, plan: plan)
         )
         return resp.checkoutUrl
     }

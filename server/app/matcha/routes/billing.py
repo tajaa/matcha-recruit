@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -16,6 +16,7 @@ from ...core.services.stripe_service import StripeService, StripeServiceError
 from ...database import get_connection
 from ..dependencies import get_client_company_id, require_admin_or_client, require_feature
 from ..services import billing_service
+from ..services import entitlements_service
 from ..services import token_budget_service
 from ..services.token_budget_service import (
     SUBSCRIPTION_AMOUNT_CENTS,
@@ -65,6 +66,12 @@ class SubscriptionResponse(BaseModel):
 class CheckoutRequest(BaseModel):
     success_url: Optional[str] = Field(default=None, max_length=2000)
     cancel_url: Optional[str] = Field(default=None, max_length=2000)
+
+
+class PersonalCheckoutRequest(CheckoutRequest):
+    # Personal Werk plan ladder. Defaults to "pro" so pre-tier clients that
+    # don't send a plan keep buying the original $20 SKU.
+    plan: Literal["lite", "pro"] = "pro"
 
 
 class CheckoutResponse(BaseModel):
@@ -158,32 +165,57 @@ async def create_checkout_session(
 
 @router.post("/checkout/personal", response_model=CheckoutResponse)
 async def create_personal_checkout_session(
-    body: CheckoutRequest,
+    body: PersonalCheckoutRequest,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Start Matcha Work Plus ($20/mo) checkout for an individual user.
+    """Start a personal Werk plan checkout — Lite ($9/mo) or Pro ($20/mo).
 
-    Plus unlocks the pro AI model; token quota is unchanged from free.
-    Only individual accounts (or admins for testing) can subscribe —
-    business users stay on Pro.
+    Only individual accounts (or admins for testing) can subscribe — business
+    users get Werk through their company. Upgrading Lite→Pro cancels the Lite
+    subscription before opening the Pro checkout (simplest path; revisit with
+    Stripe price objects + proration if churn warrants).
     """
     if current_user.role not in ("individual", "admin"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Plus is available for personal accounts only",
+            detail="Personal plans are available for personal accounts only",
         )
 
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No workspace associated with this account")
 
+    plan_cfg = StripeService.PERSONAL_PLANS[body.plan]
+
+    existing = await billing_service.get_active_subscription(company_id)
+    if existing and existing.get("pack_id") == plan_cfg["pack_id"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You already have this plan",
+        )
+
     stripe_service = StripeService()
+
+    # Lite→Pro upgrade: drop the Lite sub first so the user isn't double-billed.
+    if (
+        body.plan == "pro"
+        and existing
+        and existing.get("pack_id") == entitlements_service.LITE_PACK_ID
+    ):
+        try:
+            await stripe_service.cancel_subscription(existing["stripe_subscription_id"])
+        except StripeServiceError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        await billing_service.cancel_subscription_record(existing["stripe_subscription_id"])
+        entitlements_service.invalidate_plan_cache(current_user.id)
+
     try:
         session = await stripe_service.create_personal_subscription_checkout(
             company_id=company_id,
             user_id=current_user.id,
             success_url=body.success_url,
             cancel_url=body.cancel_url,
+            plan=body.plan,
         )
     except StripeServiceError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
@@ -199,9 +231,9 @@ async def create_personal_checkout_session(
     await billing_service.create_pending_stripe_session(
         company_id=company_id,
         stripe_session_id=stripe_session_id,
-        credit_pack_id="matcha_work_personal",
+        credit_pack_id=plan_cfg["pack_id"],
         credits_to_add=0,
-        amount_cents=2000,
+        amount_cents=plan_cfg["amount_cents"],
     )
 
     return CheckoutResponse(checkout_url=checkout_url, stripe_session_id=stripe_session_id)
@@ -250,6 +282,7 @@ async def cancel_subscription(
 
     await billing_service.cancel_subscription_record(sub["stripe_subscription_id"])
     await token_budget_service.cancel_subscription_budget(company_id)
+    entitlements_service.invalidate_plan_cache(current_user.id)
     return {"canceled": True, "message": "Subscription will not renew at the end of the current period."}
 
 

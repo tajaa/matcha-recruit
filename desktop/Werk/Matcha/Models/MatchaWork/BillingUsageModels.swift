@@ -83,3 +83,57 @@ struct MWCheckoutResponse: Codable {
         case stripeSessionId = "stripe_session_id"
     }
 }
+
+// MARK: - Entitlements (Free / Lite / Pro / Business)
+
+/// Werk plan ladder. Order matters — `>=` comparisons gate features
+/// (business ranks with pro; business additionally unlocks the role-gated
+/// Node/Compliance/Payer modes server-side).
+enum MWPlan: String, Codable, Comparable {
+    case free, lite, pro, business
+
+    private var rank: Int {
+        switch self {
+        case .free: return 0
+        case .lite: return 1
+        case .pro, .business: return 2
+        }
+    }
+
+    static func < (lhs: MWPlan, rhs: MWPlan) -> Bool { lhs.rank < rhs.rank }
+
+    var displayName: String {
+        switch self {
+        case .free: return "Free"
+        case .lite: return "Lite"
+        case .pro: return "Pro"
+        case .business: return "Business"
+        }
+    }
+}
+
+/// Server-resolved plan + feature map + rolling AI quota — the client's single
+/// tier read (GET /matcha-work/entitlements). Replaces the old separate
+/// isPlusActive / beta-flag reads.
+struct MWEntitlements: Codable {
+    let plan: MWPlan
+    let features: [String: Bool]
+    let quotas: MWEntitlementQuotas?
+
+    func has(_ feature: String) -> Bool { features[feature] == true }
+}
+
+struct MWEntitlementQuotas: Codable {
+    let tokenLimit: Int?
+    let windowHours: Int?
+    let used: Int?
+    let remaining: Int?
+    let resetsAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case tokenLimit = "token_limit"
+        case windowHours = "window_hours"
+        case used, remaining
+        case resetsAt = "resets_at"
+    }
+}

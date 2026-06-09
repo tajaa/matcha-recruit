@@ -226,21 +226,46 @@ class StripeService:
         except Exception as exc:
             raise StripeServiceError(f"Failed to create Stripe subscription session: {exc}") from exc
 
+    # Personal Werk plans (Lite $9 / Pro $20). Pro keeps the pre-existing
+    # `matcha_work_personal` pack id so current subscribers grandfather in.
+    # tokens_per_cycle drives the monthly company-budget reset in the webhook;
+    # both plans keep the free-tier 1M — the per-user rolling quota
+    # (entitlements_service.PLAN_QUOTAS) is the real tier differentiator.
+    PERSONAL_PLANS = {
+        "lite": {
+            "pack_id": "matcha_work_lite",
+            "amount_cents": 900,
+            "name": "Werk Lite",
+            "description": "Solo projects, full journals, and email AI drafting",
+        },
+        "pro": {
+            "pack_id": "matcha_work_personal",
+            "amount_cents": 2000,
+            "name": "Werk Pro",
+            "description": "Pro AI model, collab projects, Go Live, and creator tools",
+        },
+    }
+
     async def create_personal_subscription_checkout(
         self,
         company_id: UUID,
         user_id: UUID,
         success_url: Optional[str] = None,
         cancel_url: Optional[str] = None,
+        plan: str = "pro",
     ):
-        """Create the $20/month Matcha Work Personal Plus checkout for an individual user.
+        """Create a personal Werk plan checkout (Lite $9 / Pro $20) for an
+        individual user.
 
-        Plus unlocks the pro Gemini model in matcha-work chat. Token quota stays
-        at the free-tier level (1M/mo) — this is a model-access upgrade, not a
-        token top-up. Reuses the existing subscription webhook path with a
-        distinct pack_id.
+        Entitlements resolve from the recorded pack_id (entitlements_service);
+        this reuses the existing subscription webhook path with a per-plan
+        pack_id.
         """
         self._ensure_secret_key()
+
+        plan_cfg = self.PERSONAL_PLANS.get(plan)
+        if plan_cfg is None:
+            raise StripeServiceError("Invalid plan selected")
 
         resolved_success_url = success_url or self.settings.stripe_success_url
         resolved_cancel_url = cancel_url or self.settings.stripe_cancel_url
@@ -248,9 +273,10 @@ class StripeService:
         metadata = {
             "company_id": str(company_id),
             "user_id": str(user_id),
-            "pack_id": "matcha_work_personal",
+            "pack_id": plan_cfg["pack_id"],
             "billing_type": "token_budget",
             "tokens_per_cycle": "1000000",
+            "amount_cents": str(plan_cfg["amount_cents"]),
             "mode": "subscription",
         }
 
@@ -266,11 +292,11 @@ class StripeService:
                     {
                         "price_data": {
                             "currency": "usd",
-                            "unit_amount": 2000,
+                            "unit_amount": plan_cfg["amount_cents"],
                             "recurring": {"interval": "month"},
                             "product_data": {
-                                "name": "Matcha Work Plus",
-                                "description": "Access to the pro AI model — better reasoning, longer context",
+                                "name": plan_cfg["name"],
+                                "description": plan_cfg["description"],
                             },
                         },
                         "quantity": 1,

@@ -509,7 +509,31 @@ struct CreateChannelSheet: View {
                 Spacer()
             }
 
-            if canCreatePaid {
+            if canCreatePaid, !appState.canPaidChannels {
+                // Role-eligible but plan-locked: creator monetization is Pro.
+                Button {
+                    appState.presentPaywall(for: "paid_channels")
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 9))
+                            .foregroundColor(.white.opacity(0.45))
+                        Text("paid (subscribers only)")
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.5))
+                        Spacer()
+                        Text("PRO")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(appState.themeAccent)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(appState.themeAccent.opacity(0.15))
+                            .cornerRadius(4)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            } else if canCreatePaid {
                 Toggle(isOn: $isPaid) {
                     Text("paid (subscribers only)")
                         .font(.system(size: 11))

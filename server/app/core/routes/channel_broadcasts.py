@@ -217,10 +217,15 @@ async def start_broadcast(
 ):
     """Owner starts a live broadcast. Returns publisher token + LiveKit URL."""
     from ..services.livekit_service import mint_token, _get_lk_config
+    from ...matcha.services import entitlements_service
     try:
         livekit_url, _, _ = _get_lk_config()
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
+
+    # Go Live is a Pro/Business entitlement (LiveKit is the most expensive
+    # infra feature). Watching stays free — only starting is gated.
+    await entitlements_service.require_plan(current_user.id, entitlements_service.PLAN_PRO, "go_live")
 
     async with get_connection() as conn:
         await _assert_owner(conn, channel_id, current_user.id)

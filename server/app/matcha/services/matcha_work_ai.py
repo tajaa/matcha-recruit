@@ -714,28 +714,49 @@ SUPPORTED_MODELS = {
     "gemini-3.1-pro-preview",
 }
 
+PRO_MODEL = "gemini-3.1-pro-preview"
+
+
 async def _get_model(
     settings,
     model_override: str | None = None,
     company_id: str | None = None,
+    user_id: str | None = None,
 ) -> str:
-    if model_override and model_override in SUPPORTED_MODELS:
-        return model_override
-    mode = await get_matcha_work_model_mode()
-    if mode == "heavy":
-        return "gemini-3.1-pro-preview"
+    """Pick the Gemini model for a call, enforcing plan entitlements.
 
-    # Plus tier upgrade: users with an active matcha_work_personal
-    # subscription get the pro model.
-    if company_id:
+    The pro model is a paid entitlement (Pro/Business plans) — a client-sent
+    `model_override` is clamped to the plan, never trusted (previously any
+    user could force the pro model via the header picker).
+    """
+    async def _pro_allowed() -> bool:
         try:
-            from uuid import UUID as _UUID
-            from . import billing_service
-            sub = await billing_service.get_active_subscription(_UUID(company_id))
-            if sub and sub.get("pack_id") == "matcha_work_personal":
-                return "gemini-3.1-pro-preview"
+            from . import entitlements_service
+            if user_id:
+                plan = await entitlements_service.resolve_plan_for_user(user_id)
+                return plan in (entitlements_service.PLAN_PRO, entitlements_service.PLAN_BUSINESS)
+            if company_id:
+                # Legacy call sites without a user: an active personal-pro
+                # subscription on the company unlocks the pro model.
+                from uuid import UUID as _UUID
+                from . import billing_service
+                sub = await billing_service.get_active_subscription(_UUID(company_id))
+                return bool(sub and sub.get("pack_id") == entitlements_service.PRO_PACK_ID)
         except Exception:
             pass
+        return False
+
+    if model_override and model_override in SUPPORTED_MODELS:
+        if model_override != PRO_MODEL or await _pro_allowed():
+            return model_override
+        # Pro override without entitlement — fall through to plan selection.
+
+    mode = await get_matcha_work_model_mode()
+    if mode == "heavy":
+        return PRO_MODEL
+
+    if await _pro_allowed():
+        return PRO_MODEL
 
     return settings.analysis_model
 
@@ -918,6 +939,7 @@ class MatchaWorkAIProvider:
         payer_mode_prompt: Optional[str] = None,
         model_override: Optional[str] = None,
         company_id: str = "",
+        user_id: str = "",
         compliance_mode: bool = False,
         payer_mode: bool = False,
         node_mode: bool = False,
@@ -988,6 +1010,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         payer_mode_prompt: Optional[str] = None,
         model_override: Optional[str] = None,
         company_id: str = "",
+        user_id: str = "",
         compliance_mode: bool = False,
         payer_mode: bool = False,
         node_mode: bool = False,
@@ -1115,7 +1138,7 @@ class GeminiProvider(MatchaWorkAIProvider):
             if context_summary:
                 full_prompt += f"\n\nPrior conversation summary:\n{context_summary}"
 
-            model = await _get_model(self.settings, model_override, company_id=company_id)
+            model = await _get_model(self.settings, model_override, company_id=company_id, user_id=user_id)
             try:
                 response = await asyncio.wait_for(
                     asyncio.to_thread(
@@ -1144,7 +1167,7 @@ class GeminiProvider(MatchaWorkAIProvider):
             messages, current_state, company_context=company_context, slide_index=slide_index,
             context_summary=context_summary, blog_mode_state=blog_mode_state,
         )
-        model = await _get_model(self.settings, model_override, company_id=company_id)
+        model = await _get_model(self.settings, model_override, company_id=company_id, user_id=user_id)
 
         # Auto-pick thinking level based on the latest user message + thread mode.
         latest_user_msg = next(
@@ -1703,6 +1726,7 @@ async def generate_task_draft(
     recent_done: Optional[list[str]] = None,
     model_override: Optional[str] = None,
     company_id: Optional[str] = None,
+    user_id: Optional[str] = None,
     conventions: Optional[str] = None,
 ) -> dict:
     """Turn a natural-language request into a structured kanban-ticket draft via
@@ -1784,8 +1808,8 @@ Request:
 
     provider = get_ai_provider()
     # Honor the header model selector the same way threads do (_get_model picks
-    # the override when valid, else the configured mode/default).
-    model = await _get_model(provider.settings, model_override, company_id=company_id)
+    # the override when valid — clamped to plan — else the mode/plan default).
+    model = await _get_model(provider.settings, model_override, company_id=company_id, user_id=user_id)
 
     def _call() -> str:
         resp = provider.client.models.generate_content(

@@ -238,13 +238,26 @@ struct ChatPanelView: View {
                 messagesArea
                 Divider().opacity(0.3)
                 if let err = viewModel.errorMessage {
-                    Text(err)
-                        .font(.system(size: 12))
-                        .foregroundColor(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 6)
-                        .background(Color.red.opacity(0.1))
+                    HStack(spacing: 8) {
+                        Text(err)
+                            .font(.system(size: 12))
+                            .foregroundColor(viewModel.quotaExhausted ? appState.themeText : .red)
+                        if viewModel.quotaExhausted {
+                            // Rolling AI quota hit — upsell, not an error.
+                            Button("Upgrade for more") {
+                                appState.presentPaywall(for: "ai_quota")
+                            }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(appState.themeAccent)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .background(viewModel.quotaExhausted
+                                ? appState.themeAccent.opacity(0.08)
+                                : Color.red.opacity(0.1))
                 }
                 imageStrip
                 slideBar

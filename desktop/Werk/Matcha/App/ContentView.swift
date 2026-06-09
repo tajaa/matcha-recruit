@@ -5,8 +5,6 @@ struct ContentView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.openWindow) private var openWindow
     @State private var threadListVM = ThreadListViewModel()
-    @State private var isOpeningCheckout = false
-    @State private var upgradeError: String?
     @State private var showProfile = false
     // -v2 keys: sections now default-collapsed (clean sidebar — click a header
     // to reveal its items). Bumping the key resets anyone whose old state was
@@ -77,6 +75,11 @@ struct ContentView: View {
         // Cmd+F find-anything palette (also via the WorkTabBar magnifier).
         .sheet(isPresented: $appState.showFinderPalette) {
             SplitFinderPalette()
+                .environment(appState)
+        }
+        // Upgrade paywall — raised by any locked surface via presentPaywall(for:).
+        .sheet(isPresented: $appState.showPaywall, onDismiss: { appState.paywallFeature = nil }) {
+            PaywallSheet()
                 .environment(appState)
         }
         // Shared file preview — raised by sidebar file pins and the finder
@@ -166,22 +169,17 @@ struct ContentView: View {
                         }
                         .buttonStyle(.plain)
                         .help("Edit profile")
-                        if !appState.isPlusActive {
-                            Button {
-                                startUpgrade()
-                            } label: {
-                                Text(isOpeningCheckout ? "opening…" : "upgrade")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(upgradeError == nil ? Color.matcha500 : .red.opacity(0.8))
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(isOpeningCheckout)
-                            .help(upgradeError ?? "Upgrade to Matcha Plus")
-                        } else {
-                            Text("plus")
-                                .font(.system(size: 11))
-                                .foregroundColor(Color.matcha500.opacity(0.8))
+                        // Plan badge — free/lite open the paywall; pro/business
+                        // open it too (it renders "Current plan" states).
+                        Button {
+                            appState.presentPaywall(for: nil)
+                        } label: {
+                            Text(appState.plan == .free ? "upgrade" : appState.plan.displayName.lowercased())
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(Color.matcha500)
                         }
+                        .buttonStyle(.plain)
+                        .help(appState.plan == .free ? "Upgrade Werk" : "Werk \(appState.plan.displayName) — view plans")
                         Button("logout") {
                             Task {
                                 try? await AuthService.shared.logout()
@@ -342,12 +340,11 @@ struct ContentView: View {
     @ViewBuilder
     private var sidebarOrderedSections: some View {
         let _ = orderStore.generation
-        let visibleSections = orderStore.order.filter { section in
-            switch section {
-            case .projects, .journals: return appState.mwBetaLite
-            default: return true
-            }
-        }
+        // All sections always visible — locked ones (by plan) render a lock
+        // affordance that raises the paywall instead of hiding (conversion).
+        // The old admin-set beta-flag filter is folded into the server-resolved
+        // plan (beta_full → pro-equivalent, beta_lite → lite-equivalent).
+        let visibleSections = orderStore.order
         ForEach(Array(visibleSections.enumerated()), id: \.element) { idx, section in
             sidebarSectionView(for: section)
                 .draggable(section.rawValue) {
@@ -412,11 +409,20 @@ struct ContentView: View {
     @ViewBuilder
     private func sidebarNavRow<Trailing: View>(
         title: String, icon: String, isActive: Bool,
+        // When set, the row renders a lock and opens the paywall (with this
+        // feature key) instead of navigating. nil = unlocked.
+        lockedFeature: String? = nil,
         onOpen: @escaping () -> Void,
         @ViewBuilder trailing: () -> Trailing = { EmptyView() }
     ) -> some View {
         HStack(spacing: 6) {
-            Button(action: onOpen) {
+            Button(action: {
+                if let feature = lockedFeature {
+                    appState.presentPaywall(for: feature)
+                } else {
+                    onOpen()
+                }
+            }) {
                 HStack(spacing: 8) {
                     Image(systemName: icon)
                         .font(.system(size: 12))
@@ -426,6 +432,11 @@ struct ContentView: View {
                         .font(.system(size: 10, weight: .semibold))
                         .tracking(0.5)
                         .foregroundColor(isActive ? appState.themeAccent : appState.themeTextSecondary)
+                    if lockedFeature != nil {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 8))
+                            .foregroundColor(appState.themeTextSecondary.opacity(0.7))
+                    }
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
@@ -473,11 +484,25 @@ struct ContentView: View {
         }
     }
 
+    /// Pro-class project types (multi-user). Mirrors the server's
+    /// COLLAB_PROJECT_TYPES gate in create_project_endpoint.
+    private func isCollabClassType(_ type: String) -> Bool {
+        type == "collab" || type == "recruiting"
+    }
+
     @ViewBuilder
     private var projectsSidebarSection: some View {
         sidebarNavRow(title: "Projects", icon: "folder",
-                      isActive: appState.showProjectsHub, onOpen: openProjectsHub) {
-                Button { showProjectTypePicker = true } label: {
+                      isActive: appState.showProjectsHub,
+                      lockedFeature: appState.canSoloProjects ? nil : "projects_solo",
+                      onOpen: openProjectsHub) {
+                Button {
+                    if appState.canSoloProjects {
+                        showProjectTypePicker = true
+                    } else {
+                        appState.presentPaywall(for: "projects_solo")
+                    }
+                } label: {
                     plusChip
                 }
                 .buttonStyle(.plain)
@@ -488,9 +513,12 @@ struct ContentView: View {
                         Text("New Project").font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
                             .padding(.bottom, 4)
                         ForEach(["general", "presentation", "recruiting", "collab"], id: \.self) { type in
+                            let locked = isCollabClassType(type) && !appState.canCollabProjects
                             Button {
                                 showProjectTypePicker = false
-                                if type == "collab" {
+                                if locked {
+                                    appState.presentPaywall(for: "projects_collab")
+                                } else if type == "collab" {
                                     appState.collabProjectWizardMode = .create
                                     appState.showCollabProjectWizard = true
                                 } else {
@@ -503,12 +531,20 @@ struct ContentView: View {
                                         .frame(width: 16)
                                     Text(labelForProjectType(type))
                                         .font(.system(size: 12))
+                                    if locked {
+                                        Spacer(minLength: 4)
+                                        Image(systemName: "lock.fill")
+                                            .font(.system(size: 9))
+                                            .foregroundColor(.secondary)
+                                    }
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.vertical, 4)
                             }
                             .buttonStyle(.plain)
                             .foregroundColor(.white)
+                            .opacity(locked ? 0.6 : 1)
+                            .help(locked ? "Collab projects need Pro" : "")
                         }
                         Button {
                             showProjectTypePicker = false
@@ -750,7 +786,13 @@ struct ContentView: View {
             } catch {
                 await MainActor.run {
                     isCreatingProject = false
-                    projectCreateError = "Couldn't create project: \(error.localizedDescription)"
+                    // Server plan gate (403 plan_required) → paywall, not an error.
+                    if case APIError.httpError(403, let body) = error, body.contains("plan_required") {
+                        appState.presentPaywall(for: type == "collab" || type == "recruiting"
+                                                ? "projects_collab" : "projects_solo")
+                    } else {
+                        projectCreateError = "Couldn't create project: \(error.localizedDescription)"
+                    }
                 }
             }
         }
@@ -773,30 +815,7 @@ struct ContentView: View {
         }
     }
 
-    @MainActor
-    private func startUpgrade() {
-        guard !isOpeningCheckout else { return }
-        isOpeningCheckout = true
-        upgradeError = nil
-        Task { @MainActor in
-            defer { isOpeningCheckout = false }
-            do {
-                let urlString = try await MatchaWorkService.shared.startPersonalCheckout(
-                    successUrl: "https://hey-matcha.com/work?upgraded=1",
-                    cancelUrl: "https://hey-matcha.com/work?canceled=1"
-                )
-                guard let checkoutURL = URL(string: urlString) else {
-                    upgradeError = "invalid checkout URL from server"
-                    return
-                }
-                SafeURL.open(checkoutURL)
-                // Subscription refresh happens when the user returns to the app
-                // via the scenePhase .active observer in MatchaApp.
-            } catch {
-                upgradeError = error.localizedDescription
-            }
-        }
-    }
+    // Checkout moved into PaywallSheet (per-plan Lite/Pro buttons).
 
     // MARK: - Starred section & theme background helpers
 
