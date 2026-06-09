@@ -1017,7 +1017,12 @@ async def toggle_company_feature(company_id: UUID, request: FeatureToggleRequest
 
 @router.patch("/users/{user_id}/beta-flags", dependencies=[Depends(require_admin)])
 async def patch_user_beta_flags(user_id: UUID, body: Dict[str, Any] = Body(...)):
-    """Set matcha_work_beta_lite / matcha_work_beta_full flags on a user."""
+    """Set matcha_work_beta_lite / matcha_work_beta_full flags on a user.
+
+    These double as no-Stripe COMP GRANTS: the Werk plan resolver
+    (entitlements_service) maps beta_full → Pro and beta_lite → Lite, so
+    checking a box here grants the full paid tier without a subscription.
+    """
     allowed = {"matcha_work_beta_lite", "matcha_work_beta_full"}
     patch = {k: v for k, v in body.items() if k in allowed and isinstance(v, bool)}
     if not patch:
@@ -1035,6 +1040,12 @@ async def patch_user_beta_flags(user_id: UUID, body: Dict[str, Any] = Body(...))
         )
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # Comp grants change the resolved Werk plan — drop the 60s plan cache so
+    # the grant (or revocation) takes effect on the user's next request.
+    from ...matcha.services import entitlements_service
+    entitlements_service.invalidate_plan_cache(user_id)
+
     return {"beta_features": dict(row["beta_features"])}
 
 

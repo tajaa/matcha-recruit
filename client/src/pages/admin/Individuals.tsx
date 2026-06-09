@@ -178,7 +178,7 @@ export default function Individuals() {
         <div>
           <h1 className="text-xl font-semibold text-zinc-100">Individual Users</h1>
           <p className="text-sm text-zinc-500 mt-0.5">
-            Personal account users ({users.length} total)
+            Personal account users ({users.length} total) — the Lite/Pro checkboxes comp the full Werk tier without Stripe
           </p>
         </div>
         <button
@@ -212,8 +212,8 @@ export default function Individuals() {
               <th className="text-left px-4 py-2.5 font-medium text-zinc-400">Subscription</th>
               <th className="text-left px-4 py-2.5 font-medium text-zinc-400">Tokens Used</th>
               <th className="text-left px-4 py-2.5 font-medium text-zinc-400">Remaining</th>
-              <th className="text-center px-4 py-2.5 font-medium text-zinc-400">Beta Lite</th>
-              <th className="text-center px-4 py-2.5 font-medium text-zinc-400">Beta Full</th>
+              <th className="text-center px-4 py-2.5 font-medium text-zinc-400" title="Comp grant — full Werk Lite tier, no Stripe (stored as matcha_work_beta_lite)">Lite (comp)</th>
+              <th className="text-center px-4 py-2.5 font-medium text-zinc-400" title="Comp grant — full Werk Pro tier, no Stripe (stored as matcha_work_beta_full)">Pro (comp)</th>
               <th className="text-left px-4 py-2.5 font-medium text-zinc-400 w-32">Actions</th>
             </tr>
           </thead>
@@ -265,6 +265,14 @@ export default function Individuals() {
                           Stripe →
                         </a>
                       </div>
+                    ) : u.beta_features?.matcha_work_beta_full ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded border border-violet-500/40 bg-violet-500/10 text-violet-300">
+                        Pro · comped
+                      </span>
+                    ) : u.beta_features?.matcha_work_beta_lite ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded border border-sky-500/40 bg-sky-500/10 text-sky-300">
+                        Lite · comped
+                      </span>
                     ) : (
                       <span className="text-zinc-600">—</span>
                     )}
