@@ -427,9 +427,10 @@ async def _perform_oig_screening(
                     async with get_connection() as conn:
                         admins = await conn.fetch(
                             """
-                            SELECT u.email, u.first_name
+                            SELECT u.email, cl.name AS first_name
                             FROM users u
-                            WHERE u.company_id = $1 AND u.role IN ('client', 'admin')
+                            JOIN clients cl ON cl.user_id = u.id
+                            WHERE cl.company_id = $1 AND u.role = 'client'
                             """,
                             org_id,
                         )

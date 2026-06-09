@@ -184,7 +184,8 @@ async def list_token_usage():
                    COALESCE(SUM(e.cost_dollars), 0)::numeric as cost_dollars,
                    MAX(e.created_at) as last_active
             FROM users u
-            LEFT JOIN companies c ON u.company_id = c.id
+            LEFT JOIN clients cl ON cl.user_id = u.id
+            LEFT JOIN companies c ON c.id = cl.company_id
             LEFT JOIN mw_token_usage_events e ON e.user_id = u.id AND e.created_at > NOW() - interval '12 hours'
             WHERE u.is_active = true
             GROUP BY u.id, u.email, c.name

@@ -114,11 +114,11 @@ async def _send_freshness_notification(company_id: str, handbook_id: str, impact
 
         admin_row = await conn.fetchrow(
             """
-            SELECT u.email, u.name
+            SELECT u.email, cl.name AS name
             FROM users u
-            JOIN companies c ON c.id = $1
+            JOIN clients cl ON cl.user_id = u.id
             WHERE u.role = 'client'
-              AND u.company_id = $1
+              AND cl.company_id = $1
             ORDER BY u.created_at ASC
             LIMIT 1
             """,
