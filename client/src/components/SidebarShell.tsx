@@ -29,6 +29,8 @@ export type NavGroup = {
   items: NavItem[]
   /** Optional company feature flag — group is hidden when the flag is false. */
   feature?: string
+  /** Start expanded even without an active child (default false). */
+  defaultOpen?: boolean
 }
 
 type SidebarShellProps = {
@@ -123,7 +125,7 @@ function NavGroupSection({ group, location, collapsed }: { group: NavGroup; loca
     const isExact = item.to === '/app' || item.to === '/admin' || item.to === '/broker'
     return isExact ? location.pathname === item.to : location.pathname.startsWith(item.to)
   })
-  const [open, setOpen] = useState(hasActiveChild)
+  const [open, setOpen] = useState(group.defaultOpen || hasActiveChild)
 
   useEffect(() => {
     if (hasActiveChild) setOpen(true)
