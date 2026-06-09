@@ -7,10 +7,20 @@ import asyncpg
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
+from ..config import get_settings
 from ..database import get_connection, set_is_admin, set_user_id
 
 logger = logging.getLogger(__name__)
 security = HTTPBearer()
+
+
+def _is_master_admin(email: Optional[str]) -> bool:
+    """The single platform/master-admin identity (settings.master_admin_email).
+    Any other role='admin' row is NOT a master admin. Case-insensitive."""
+    if not email:
+        return False
+    allowed = (get_settings().master_admin_email or "").strip().lower()
+    return bool(allowed) and email.strip().lower() == allowed
 
 # Cached once per process: does users.tokens_valid_after exist? Lets the session
 # revocation check degrade to a no-op if the authsess01 migration isn't applied
@@ -144,7 +154,9 @@ async def get_current_user(
         # Propagate identity to contextvars so get_connection() can set
         # the corresponding PostgreSQL session variables for RLS.
         set_user_id(str(user_row["id"]))
-        if user_row["role"] == "admin":
+        # RLS admin bypass is reserved for the single master admin — a stray
+        # role='admin' row gets no elevated DB access.
+        if user_row["role"] == "admin" and _is_master_admin(user_row["email"]):
             set_is_admin(True)
 
         return CurrentUser(
@@ -171,7 +183,16 @@ def require_roles(*roles):
 
 
 # Core role dependencies
-require_admin = require_roles("admin")
+async def require_admin(current_user=Depends(get_current_user)):
+    """Master-admin gate: only the single configured master-admin identity
+    (settings.master_admin_email) may reach platform-admin surfaces. Other
+    role='admin' rows are rejected — there is exactly one master admin."""
+    if current_user.role != "admin" or not _is_master_admin(current_user.email):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Master admin access restricted",
+        )
+    return current_user
 require_candidate = require_roles("candidate")
 require_broker = require_roles("broker")
 

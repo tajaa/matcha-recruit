@@ -160,6 +160,10 @@ class Settings:
     saml_sp_entity_id: str = "https://hey-matcha.com/api/sso/metadata"
     saml_sp_acs_url: str = "https://hey-matcha.com/api/sso/acs"
 
+    # Master admin — the single platform/master-admin identity. Only this account
+    # passes require_admin (and gets the RLS admin flag). Override per-env.
+    master_admin_email: str = "tajatheprince@gmail.com"
+
     # Stripe (Matcha Work billing)
     stripe_secret_key: Optional[str] = None
     stripe_webhook_secret: Optional[str] = None
@@ -292,6 +296,7 @@ def load_settings() -> Settings:
         openstates_api_key=os.getenv("OPENSTATES_API_KEY"),
         saml_sp_entity_id=os.getenv("SAML_SP_ENTITY_ID", "https://hey-matcha.com/api/sso/metadata"),
         saml_sp_acs_url=os.getenv("SAML_SP_ACS_URL", "https://hey-matcha.com/api/sso/acs"),
+        master_admin_email=os.getenv("MASTER_ADMIN_EMAIL", "tajatheprince@gmail.com"),
         stripe_secret_key=os.getenv("STRIPE_SECRET_KEY"),
         stripe_webhook_secret=os.getenv("STRIPE_WEBHOOK_SECRET"),
         stripe_success_url=os.getenv(
