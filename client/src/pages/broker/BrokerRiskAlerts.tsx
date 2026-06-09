@@ -5,24 +5,24 @@ import { fetchBrokerRiskAlerts, markBrokerRiskAlertRead } from '../../api/broker
 import TabHeader from '../../components/broker/action-center/TabHeader'
 import type { BrokerRiskAlert, BrokerRiskMetricKey } from '../../types/broker'
 
-const METRIC_LABEL: Record<BrokerRiskMetricKey, string> = {
+// behavioral_friction intentionally omitted — the Behavioral Friction & Retention
+// Risk section was retired 2026-06-08 (EB-broker feature, low value). Those alerts
+// are filtered out in load() so they never render here.
+const METRIC_LABEL: Partial<Record<BrokerRiskMetricKey, string>> = {
   trir: 'TRIR',
   dart: 'DART rate',
   lost_days: 'Lost workdays',
   claim_free_broken: 'Claim-free streak',
   premium_increase: 'Premium impact',
-  behavioral_friction: 'Behavioral Friction & Retention Risk',
 }
 
-// Risk categories — P&C safety metrics vs the workforce-retention signal.
-// Shown as a subtle tag so EB brokers can spot the new category at a glance.
-const CATEGORY: Record<BrokerRiskMetricKey, string> = {
+// Risk categories — P&C safety metrics. Shown as a subtle tag.
+const CATEGORY: Partial<Record<BrokerRiskMetricKey, string>> = {
   trir: 'Property & Casualty',
   dart: 'Property & Casualty',
   lost_days: 'Property & Casualty',
   claim_free_broken: 'Property & Casualty',
   premium_increase: 'Property & Casualty',
-  behavioral_friction: 'Workforce Retention',
 }
 
 const SEVERITY_TONE: Record<string, { bg: string; text: string; label: string }> = {
@@ -46,7 +46,8 @@ export default function BrokerRiskAlerts() {
     setError(null)
     try {
       const res = await fetchBrokerRiskAlerts(includeResolved)
-      setAlerts(res.alerts)
+      // Behavioral Friction & Retention Risk section retired — drop those alerts.
+      setAlerts(res.alerts.filter((a) => a.metric_key !== 'behavioral_friction'))
     } catch {
       setError('Failed to load risk alerts.')
     } finally {
@@ -87,7 +88,7 @@ export default function BrokerRiskAlerts() {
       <TabHeader
         icon={AlertTriangle}
         title="Risk Alerts"
-        hint="Safety / Workers Comp metrics trending negative, or a spike in behavioral friction & retention risk."
+        hint="Safety / Workers Comp metrics trending negative across your book."
         badge={activeUnread > 0 ? (
           <span className="px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 text-xs font-medium">
             {activeUnread} new

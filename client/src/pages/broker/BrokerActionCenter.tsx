@@ -1,17 +1,16 @@
 import { useSearchParams } from 'react-router-dom'
-import { AlertTriangle, Radar, UserCheck, Award } from 'lucide-react'
+import { AlertTriangle, Award } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import BrokerRiskAlerts from './BrokerRiskAlerts'
-import BrokerRenewalRiskRadar from './BrokerRenewalRiskRadar'
-import BrokerEligibilityExceptions from './BrokerEligibilityExceptions'
 import MilestonesTab from '../../components/broker/action-center/MilestonesTab'
 
-type TabKey = 'alerts' | 'renewals' | 'eligibility' | 'milestones'
+// Renewals + Eligibility tabs paused 2026-06-08 — geared to EB brokers, low value.
+// Page components (BrokerRenewalRiskRadar / BrokerEligibilityExceptions) kept; just
+// unmounted from the tab bar. Legacy ?tab=renewals/eligibility URLs fall back to Alerts.
+type TabKey = 'alerts' | 'milestones'
 
 const TABS: Array<{ key: TabKey; label: string; icon: LucideIcon }> = [
   { key: 'alerts', label: 'Alerts', icon: AlertTriangle },
-  { key: 'renewals', label: 'Renewals', icon: Radar },
-  { key: 'eligibility', label: 'Eligibility', icon: UserCheck },
   { key: 'milestones', label: 'Milestones', icon: Award },
 ]
 
@@ -61,8 +60,6 @@ export default function BrokerActionCenter() {
       {/* Panel — existing pages render unchanged inside their tabs. */}
       <div>
         {active === 'alerts' && <BrokerRiskAlerts />}
-        {active === 'renewals' && <BrokerRenewalRiskRadar />}
-        {active === 'eligibility' && <BrokerEligibilityExceptions />}
         {active === 'milestones' && <MilestonesTab />}
       </div>
     </div>

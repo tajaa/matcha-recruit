@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Users, AlertTriangle, Shield, Building2, Loader2, AlertCircle } from 'lucide-react'
-import { StatCard, SignatureRing } from '../../components/dashboard'
+import { Users, AlertTriangle, Building2, Loader2, AlertCircle } from 'lucide-react'
+import { StatCard } from '../../components/dashboard'
 import { ClientTable, HandbookCoverageList, SetupStatusGrid } from '../../components/broker-dashboard'
 import OutreachDrawer from '../../components/broker/action-center/OutreachDrawer'
 import { fetchBrokerPortfolio, fetchBrokerHandbookCoverage, fetchWcPortfolio } from '../../api/broker'
@@ -75,7 +75,7 @@ export default function BrokerDashboard() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard
           label="Total Clients"
           value={summary?.total_linked_companies ?? 0}
@@ -91,11 +91,6 @@ export default function BrokerDashboard() {
           value={summary?.at_risk_companies ?? 0}
           icon={AlertTriangle}
           urgent={(summary?.at_risk_companies ?? 0) > 0}
-        />
-        <StatCard
-          label="Avg Compliance"
-          value={`${Math.round(summary?.average_policy_compliance_rate ?? 0)}%`}
-          icon={Shield}
         />
       </div>
 
@@ -136,13 +131,6 @@ export default function BrokerDashboard() {
           />
         </div>
         <div className="space-y-4">
-          <SignatureRing
-            rate={summary?.average_policy_compliance_rate ?? 0}
-            hasPolicies={(summary?.total_linked_companies ?? 0) > 0}
-            title="Portfolio Compliance"
-            label="Avg Rate"
-            emptyLabel="No clients"
-          />
           <SetupStatusGrid counts={portfolio?.setup_status_counts ?? {}} />
         </div>
       </div>

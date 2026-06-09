@@ -538,8 +538,6 @@ async def action_center_outreach(
 
         # Gather aggregate inputs while we hold the connection.
         wc = await compute_wc_metrics(conn, company_id)
-        from .ir_incidents import compute_behavioral_friction
-        behavioral = await compute_behavioral_friction(conn, company_id)
         renewal = await conn.fetchrow(
             "SELECT * FROM benefit_renewal_risk WHERE company_id = $1 AND dimension_type = 'company'",
             company_id,
@@ -556,7 +554,6 @@ async def action_center_outreach(
     result = await generate_outreach_prompts(
         company_name=meta["name"],
         wc_metrics=wc,
-        behavioral=behavioral,
         renewal_risk=dict(renewal) if renewal else None,
         milestones=[dict(m) for m in milestone_rows],
     )

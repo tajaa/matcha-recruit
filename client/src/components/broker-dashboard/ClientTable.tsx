@@ -48,11 +48,9 @@ export function ClientTable({ companies, wcByCompany, onOutreach }: ClientTableP
               <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Account</th>
               <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Status</th>
               <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">FTE</th>
-              <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">Compliance</th>
               <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">TRIR</th>
               <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">DART</th>
-              <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">Premium Δ</th>
-              <th className="pb-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">Open</th>
+              <th className="pb-2 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">Premium Δ</th>
             </tr>
           </thead>
           <tbody>
@@ -93,11 +91,6 @@ export function ClientTable({ companies, wcByCompany, onOutreach }: ClientTableP
                   <td className="py-2.5 pr-4 text-right text-zinc-300 tabular-nums">
                     {wc?.headcount ?? c.active_employee_count}
                   </td>
-                  <td className="py-2.5 pr-4 text-right">
-                    <span className={`tabular-nums ${ c.policy_compliance_rate >= 80 ? 'text-zinc-100' : c.policy_compliance_rate >= 50 ? 'text-zinc-400' : 'text-zinc-600' }`}>
-                      {Math.round(c.policy_compliance_rate)}%
-                    </span>
-                  </td>
                   {/* TRIR: value + ×bench + delta */}
                   <td className="py-2.5 pr-4 text-right">
                     {wc?.trir != null ? (
@@ -115,7 +108,7 @@ export function ClientTable({ companies, wcByCompany, onOutreach }: ClientTableP
                     {wc?.dart_rate != null ? wc.dart_rate.toFixed(2) : <span className="text-zinc-700">—</span>}
                   </td>
                   {/* Premium trajectory (directional $) */}
-                  <td className="py-2.5 pr-4 text-right">
+                  <td className="py-2.5 text-right">
                     {wc?.premium_impact ? (
                       <span className={`font-mono text-[12px] ${
                         wc.premium_impact.direction === 'increase' ? 'text-red-400'
@@ -127,9 +120,6 @@ export function ClientTable({ companies, wcByCompany, onOutreach }: ClientTableP
                     ) : (
                       <span className="text-zinc-700">—</span>
                     )}
-                  </td>
-                  <td className={`py-2.5 text-right tabular-nums ${ c.open_action_items > 0 ? 'text-zinc-400' : 'text-zinc-500' }`}>
-                    {c.open_action_items}
                   </td>
                 </tr>
               )

@@ -173,57 +173,11 @@ def evaluate_trends(
                 ),
             })
 
-    # Behavioral friction & retention risk — sudden spike in behavioral
-    # incidents (incl. insubordination / attendance) over the recent window.
-    # Count-based, so population thinness does NOT suppress it.
-    beh = metrics.get("behavioral") or {}
-    cur = beh.get("current_count")
-    prior_cnt = beh.get("prior_count")
-    bdelta = beh.get("delta_pct")
-    if cur is not None and prior_cnt is not None:
-        abs_rise = cur - prior_cnt
-        spiked = (
-            bdelta is not None
-            and bdelta >= th["behavioral_delta_pct"]
-            and abs_rise >= th["behavioral_abs_min_rise"]
-        )
-        cold_start = prior_cnt == 0 and cur >= th["behavioral_abs_min_rise"]
-        if spiked or cold_start:
-            out.append({
-                "metric_key": "behavioral_friction",
-                "severity": _severity_for_delta(bdelta, th["behavioral_delta_pct"]),
-                "current_value": cur, "prior_value": prior_cnt, "delta_pct": bdelta,
-                "premium_direction": None,
-                "message": _behavioral_message(beh, cur, prior_cnt, bdelta),
-            })
+    # Behavioral Friction & Retention Risk alerts retired 2026-06-08 (EB-broker
+    # feature, deemed low value). No longer emitted to the broker Alerts tab or
+    # via email. The P&C safety metrics above remain.
 
     return out
-
-
-def _behavioral_message(beh: dict, cur: int, prior: int, delta_pct: Optional[float]) -> str:
-    """Compose the broker-facing behavioral-friction alert message: trend,
-    hottest location, and insubordination / attendance breakdown."""
-    window = beh.get("window_days", 90)
-    if delta_pct is not None:
-        lead = f"Behavioral incidents up {delta_pct:.0f}% ({prior} → {cur}) over the last {window} days"
-    else:
-        lead = f"{cur} behavioral incident{'s' if cur != 1 else ''} in the last {window} days (none in the prior window)"
-
-    hot = beh.get("hot_location") or {}
-    loc = ""
-    if hot.get("name") and hot.get("count"):
-        loc = f" — concentrated at {hot['name']} ({hot['count']} there)"
-
-    parts = []
-    att = beh.get("attendance_count") or 0
-    insub = beh.get("insubordination_count") or 0
-    if att:
-        parts.append(f"{att} attendance")
-    if insub:
-        parts.append(f"{insub} insubordination")
-    breakdown = f"; {', '.join(parts)}." if parts else "."
-
-    return f"{lead}{loc}{breakdown} Possible workforce retention / burnout risk."
 
 
 def decide_action(existing: Optional[dict], candidate: dict, *, now: datetime) -> str:
@@ -255,7 +209,7 @@ def decide_action(existing: Optional[dict], candidate: dict, *, now: datetime) -
 async def _run_broker_risk_alerts() -> dict:
     from app.core.services.email import EmailService
     from app.config import get_settings
-    from app.matcha.routes.ir_incidents import compute_wc_metrics, compute_behavioral_friction
+    from app.matcha.routes.ir_incidents import compute_wc_metrics
     from app.matcha.dependencies import BROKER_ACTIVE_LINK_STATUSES
 
     conn = await get_db_connection()
@@ -305,9 +259,6 @@ async def _run_broker_risk_alerts() -> dict:
             if company_id not in metrics_cache:
                 try:
                     m = await compute_wc_metrics(conn, company_id)
-                    # Behavioral friction reuses the same per-company cache so
-                    # evaluate_trends sees it under metrics["behavioral"].
-                    m["behavioral"] = await compute_behavioral_friction(conn, company_id)
                     metrics_cache[company_id] = m
                 except Exception as exc:
                     print(f"[Broker Risk Alerts] metrics failed for company {company_id}: {exc}")

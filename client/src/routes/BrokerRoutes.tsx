@@ -38,8 +38,8 @@ export default function BrokerRoutes() {
         {/* Legacy routes → new homes (preserve emailed links + bookmarks) */}
         <Route path="wc-portfolio" element={<Navigate to="/broker" replace />} />
         <Route path="risk-alerts" element={<Navigate to="/broker/action-center?tab=alerts" replace />} />
-        <Route path="benefits/eligibility-exceptions" element={<Navigate to="/broker/action-center?tab=eligibility" replace />} />
-        <Route path="benefits/renewal-risk-radar" element={<Navigate to="/broker/action-center?tab=renewals" replace />} />
+        {/* benefits/* (Renewals + Eligibility) redirects removed 2026-06-08 — those
+            EB-broker tabs were paused; the legacy URLs now fall through. */}
       </Route>
     </Routes>
   )

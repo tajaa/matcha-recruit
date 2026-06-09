@@ -67,7 +67,6 @@ def _coerce_triggers(value) -> list:
 def _anonymize_context(
     *,
     wc_metrics: dict,
-    behavioral: Optional[dict],
     renewal_risk: Optional[dict],
     milestones: Optional[list],
 ) -> dict:
@@ -107,18 +106,6 @@ def _anonymize_context(
         ],
     }
 
-    if behavioral:
-        ctx["behavioral"] = {
-            "current_count": behavioral.get("current_count"),
-            "prior_count": behavioral.get("prior_count"),
-            "delta_pct": behavioral.get("delta_pct"),
-            "window_days": behavioral.get("window_days"),
-            "attendance_count": behavioral.get("attendance_count"),
-            "insubordination_count": behavioral.get("insubordination_count"),
-            # Drop the free-text location name; keep only whether there IS a hot spot.
-            "has_location_concentration": bool((behavioral.get("hot_location") or {}).get("name")),
-        }
-
     if renewal_risk:
         ctx["renewal_risk"] = {
             "risk_band": renewal_risk.get("risk_band"),
@@ -148,7 +135,7 @@ Client trend data (JSON):
 
 Produce up to {max_prompts} short, consultative outreach talking points the broker could use to \
 open a proactive conversation. Favor: celebrating genuine improvement (incident-free streaks, \
-falling TRIR/DART), flagging emerging risk early (rising lost days, turnover, behavioral friction), \
+falling TRIR/DART), flagging emerging risk early (rising lost days, turnover), \
 and suggesting a concrete next step or resource.
 
 Rules:
@@ -198,14 +185,13 @@ async def generate_outreach_prompts(
     *,
     company_name: str,
     wc_metrics: dict,
-    behavioral: Optional[dict] = None,
     renewal_risk: Optional[dict] = None,
     milestones: Optional[list] = None,
 ) -> dict:
     """Return {"prompts": [...], "model": "..."} grounded only in anonymized
     aggregate trends. Never raises on model/parse failure — returns empty prompts."""
     ctx = _anonymize_context(
-        wc_metrics=wc_metrics, behavioral=behavioral,
+        wc_metrics=wc_metrics,
         renewal_risk=renewal_risk, milestones=milestones,
     )
 

@@ -1019,6 +1019,7 @@ async def get_broker_company_detail(
             policy_stats = await conn.fetchrow(
                 """
                 SELECT
+                    COUNT(DISTINCT p.id)::int AS active_policy_count,
                     COUNT(*) FILTER (WHERE ps.status = 'pending')::int AS pending_signatures,
                     CASE WHEN COUNT(*) = 0 THEN 0
                          ELSE ROUND((COUNT(*) FILTER (WHERE ps.status = 'signed')::numeric / COUNT(*)::numeric) * 100, 1)
@@ -1030,9 +1031,11 @@ async def get_broker_company_detail(
                 company_id,
             )
             compliance_rate = float(policy_stats["policy_compliance_rate"] or 0)
+            active_policy_count = int(policy_stats["active_policy_count"] or 0)
             pending_signatures = int(policy_stats["pending_signatures"] or 0)
         except Exception:
             compliance_rate = 0.0
+            active_policy_count = 0
             pending_signatures = 0
 
         try:
@@ -1045,10 +1048,12 @@ async def get_broker_company_detail(
 
         open_action_items = pending_signatures + open_incidents
 
-        # Risk logic — same as portfolio endpoint
-        if compliance_rate >= 90 and open_action_items == 0:
+        # Risk logic — same as portfolio endpoint. No active policies = "no data",
+        # not "at risk"; only let compliance drive the signal when policies exist.
+        has_policy_data = active_policy_count > 0
+        if has_policy_data and compliance_rate >= 90 and open_action_items == 0:
             risk_signal = "healthy"
-        elif compliance_rate < 75 or open_action_items >= 5:
+        elif open_action_items >= 5 or (has_policy_data and compliance_rate < 75):
             risk_signal = "at_risk"
         else:
             risk_signal = "watch"
@@ -1278,6 +1283,7 @@ async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(req
                     c.name AS company_name,
                     l.status AS link_status,
                     COALESCE(s.status, 'none') AS setup_status,
+                    COALESCE(ps.active_policy_count, 0) AS active_policy_count,
                     COALESCE(ps.pending_signatures, 0) AS pending_signatures,
                     COALESCE(ps.policy_compliance_rate, 0)::numeric AS policy_compliance_rate,
                     COALESCE(isum.open_incidents, 0) AS open_incidents,
@@ -1292,6 +1298,7 @@ async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(req
                    AND s.company_id = l.company_id
                 LEFT JOIN LATERAL (
                     SELECT
+                        COUNT(DISTINCT p.id)::int AS active_policy_count,
                         COUNT(*) FILTER (WHERE ps.status = 'pending')::int AS pending_signatures,
                         CASE
                             WHEN COUNT(*) = 0 THEN 0
@@ -1349,6 +1356,7 @@ async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(req
                     c.name as company_name,
                     l.status as link_status,
                     COALESCE(s.status, 'none') as setup_status,
+                    COALESCE(ps.active_policy_count, 0) as active_policy_count,
                     COALESCE(ps.pending_signatures, 0) as pending_signatures,
                     COALESCE(ps.policy_compliance_rate, 0)::numeric as policy_compliance_rate,
                     COALESCE(isum.open_incidents, 0) as open_incidents,
@@ -1360,6 +1368,7 @@ async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(req
                    AND s.company_id = l.company_id
                 LEFT JOIN LATERAL (
                     SELECT
+                        COUNT(DISTINCT p.id)::int AS active_policy_count,
                         COUNT(*) FILTER (WHERE ps.status = 'pending')::int AS pending_signatures,
                         CASE
                             WHEN COUNT(*) = 0 THEN 0
@@ -1399,16 +1408,23 @@ async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(req
     action_item_total = 0
     for row in rows:
         compliance_rate = float(row["policy_compliance_rate"] or 0)
+        active_policy_count = int(row["active_policy_count"] or 0)
         pending_signatures = int(row["pending_signatures"] or 0)
         open_incidents = int(row["open_incidents"] or 0)
         open_action_items = pending_signatures + open_incidents
         action_item_total += open_action_items
         total_compliance_rate += compliance_rate
 
-        if compliance_rate >= 90 and open_action_items == 0:
+        # A company with no active policies has a compliance_rate of 0 only because
+        # there's nothing to measure — that's "no data", not "at risk". Treating it
+        # as at_risk flagged every policy-less client and made the row statuses
+        # disagree with the real risk picture. Only let compliance drag a company to
+        # at_risk / healthy when there are actually policies to assess.
+        has_policy_data = active_policy_count > 0
+        if has_policy_data and compliance_rate >= 90 and open_action_items == 0:
             risk_signal = "healthy"
             healthy_count += 1
-        elif compliance_rate < 75 or open_action_items >= 5:
+        elif open_action_items >= 5 or (has_policy_data and compliance_rate < 75):
             risk_signal = "at_risk"
             at_risk_count += 1
         else:
@@ -1664,6 +1680,10 @@ async def list_broker_risk_alerts(
             JOIN companies c ON c.id = ra.company_id
             WHERE ra.broker_id = $1
               AND ($2::bool OR ra.resolved_at IS NULL)
+              -- Behavioral Friction & Retention Risk retired 2026-06-08 (EB-broker
+              -- feature, low value). Exclude legacy rows so the Alerts tab and the
+              -- sidebar's active_unread badge stay in sync.
+              AND ra.metric_key <> 'behavioral_friction'
             ORDER BY ra.resolved_at IS NOT NULL, ra.last_alerted_at DESC
             """,
             broker_id,
