@@ -28,6 +28,7 @@ STATIC_ROUTES: list[tuple[str, str, float]] = [
     ("/matcha-work", "monthly", 0.8),
     ("/matcha-lite", "monthly", 0.8),
     ("/services", "monthly", 0.7),
+    ("/fractional", "monthly", 0.9),
     ("/blog", "weekly", 0.7),
     ("/resources", "weekly", 0.9),
     ("/resources/glossary", "monthly", 0.8),

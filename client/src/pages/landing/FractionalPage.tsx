@@ -1,5 +1,6 @@
 import { useState } from 'react'
 
+import { useSEO } from '../../hooks/useSEO'
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
 import { ComplianceTicker } from '../../components/landing/ComplianceTicker'
@@ -163,8 +164,35 @@ const MODELS = [
   },
 ]
 
+const FRACTIONAL_JSON_LD = {
+  '@context': 'https://schema.org',
+  '@type': 'ProfessionalService',
+  name: 'Matcha Fractional HR',
+  url: 'https://hey-matcha.com/fractional',
+  description:
+    'Senior HR leadership on a fractional basis — Fractional CHRO, HR Director, function buildouts, and employment audits for Series A–C companies.',
+  hasOfferCatalog: {
+    '@type': 'OfferCatalog',
+    name: 'Fractional HR Services',
+    itemListElement: [
+      { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Fractional CHRO' } },
+      { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Fractional HR Director' } },
+      { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'HR Function Buildout' } },
+      { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'HR Audit & Reset' } },
+    ],
+  },
+}
+
 export default function FractionalPage() {
   const [isPricingOpen, setIsPricingOpen] = useState(false)
+
+  useSEO({
+    title: 'Fractional HR Services | Fractional CHRO & HR Director | Matcha',
+    description:
+      'Senior HR leadership on a fractional basis — Fractional CHRO, HR Director, function buildouts, and employment audits for Series A–C companies. No full-time headcount.',
+    canonical: 'https://hey-matcha.com/fractional',
+    jsonLd: FRACTIONAL_JSON_LD,
+  })
 
   return (
     <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen">
