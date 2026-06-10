@@ -87,8 +87,11 @@ JOURNAL_KIND_SEEDS: dict[str, dict] = {
 
 
 def _normalize_kind(kind: Optional[str]) -> str:
-    k = (kind or "journal").lower().strip()
-    return k if k in JOURNAL_KINDS else "journal"
+    # Default to `note`: every journal is now a single-document note (Evernote
+    # model). The `journal` (diary) kind is no longer minted — it's kept in
+    # JOURNAL_KINDS only so any pre-migration row still validates on update.
+    k = (kind or "note").lower().strip()
+    return k if k in JOURNAL_KINDS else "note"
 
 
 # Fountain title-page key lines to skip when building a note-list preview.
@@ -272,6 +275,30 @@ async def get_journal(journal_id: UUID, viewer_id: UUID) -> Optional[dict]:
         return _parse_journal(row) if row else None
 
 
+async def _ensure_default_folder(conn, company_id: UUID, creator_id: UUID) -> UUID:
+    """Return the company's default root "Notes" notebook, creating it if
+    missing. Evernote model: every note lives in a notebook, so unfiled new
+    notes land here. Idempotent on (company_id, parent_id IS NULL, name)."""
+    existing = await conn.fetchval(
+        """
+        SELECT id FROM mw_journal_folders
+        WHERE company_id = $1 AND parent_id IS NULL AND name = 'Notes'
+        LIMIT 1
+        """,
+        company_id,
+    )
+    if existing is not None:
+        return existing
+    return await conn.fetchval(
+        """
+        INSERT INTO mw_journal_folders (company_id, parent_id, name, created_by)
+        VALUES ($1, NULL, 'Notes', $2)
+        RETURNING id
+        """,
+        company_id, creator_id,
+    )
+
+
 async def create_journal(
     creator_id: UUID,
     company_id: UUID,
@@ -288,7 +315,10 @@ async def create_journal(
     if not icon:
         icon = JOURNAL_KIND_DEFAULTS.get(kind, {}).get("icon")
     async with get_connection() as conn:
-        # A folder, if given, must belong to the same company.
+        # A folder, if given, must belong to the same company; otherwise file
+        # the new note into the default "Notes" notebook (Evernote model — no
+        # truly-unfiled notes from create; the note menu's "Move to → None"
+        # still allows un-filing after the fact).
         if folder_id is not None:
             ok = await conn.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM mw_journal_folders WHERE id = $1 AND company_id = $2)",
@@ -296,6 +326,8 @@ async def create_journal(
             )
             if not ok:
                 folder_id = None
+        if folder_id is None:
+            folder_id = await _ensure_default_folder(conn, company_id, creator_id)
         row = await conn.fetchrow(
             """
             INSERT INTO mw_journals (company_id, created_by, title, description, color, icon, kind, folder_id)

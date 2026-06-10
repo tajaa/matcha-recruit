@@ -38,21 +38,20 @@ final class JournalDetailViewModel {
 
     // MARK: - Single-document model
 
-    /// The journal's kind, derived from the loaded record (diary by default).
+    /// The journal's kind, derived from the loaded record (note by default).
     var kind: JournalKind { JournalKind.from(journal?.kind) }
 
-    /// For a doc-kind journal (everything except the diary), the one entry that
-    /// holds the document body. Diary journals have many dated entries and use
-    /// the timeline instead, so this is only meaningful for doc-kinds.
+    /// Every journal is a single document now, so its body is the one
+    /// `mw_journal_entries` row — `entries.first`.
     var bodyEntry: MWJournalEntry? { entries.first }
 
-    /// Doc-kinds open straight into a single editor. Most kinds seed a starter
+    /// Journals open straight into a single editor. Most kinds seed a starter
     /// entry on the backend at create time, but `note` (and any pre-seed
     /// journals) can be empty — lazily create one body entry so the editor
     /// always has something to bind to.
     func ensureBodyEntry() async {
-        guard let id = loadedId, let j = journal else { return }
-        guard JournalKind.from(j.kind).isDocKind, entries.isEmpty else { return }
+        guard let id = loadedId, journal != nil else { return }
+        guard entries.isEmpty else { return }
         do {
             let entry = try await MatchaWorkService.shared.createJournalEntry(
                 journalId: id, title: nil, content: "", entryDate: nil,

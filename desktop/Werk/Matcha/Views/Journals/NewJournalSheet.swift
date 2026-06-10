@@ -58,7 +58,8 @@ struct NewJournalSheet: View {
                     field(label: "Type") {
                         VStack(alignment: .leading, spacing: 8) {
                             LazyVGrid(columns: kindColumns, spacing: 8) {
-                                ForEach(JournalKind.allCases) { k in
+                                // Diary `.journal` kind retired — single-doc notes only.
+                                ForEach(JournalKind.allCases.filter { $0 != .journal }) { k in
                                     kindChip(k)
                                 }
                             }

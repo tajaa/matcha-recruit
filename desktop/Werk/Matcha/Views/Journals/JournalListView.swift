@@ -103,11 +103,6 @@ struct JournalListView: View {
                         .font(.system(size: 12, weight: selected ? .bold : .regular))
                         .foregroundColor(appState.themeText.opacity(0.9))
                         .lineLimit(1)
-                    if let n = j.entryCount, n > 0 {
-                        Text("\(n) entr\(n == 1 ? "y" : "ies")")
-                            .font(.system(size: 9))
-                            .foregroundColor(appState.themeTextSecondary)
-                    }
                 }
                 Spacer()
             }
@@ -148,7 +143,7 @@ struct JournalListView: View {
             Button("Delete…") {
                 let alert = NSAlert()
                 alert.messageText = "Delete \"\(j.title)\"?"
-                alert.informativeText = "Permanently deletes the journal and all its entries. Cannot be undone."
+                alert.informativeText = "Permanently deletes the note and its contents. Cannot be undone."
                 alert.alertStyle = .critical
                 alert.addButton(withTitle: "Delete Permanently")
                 alert.addButton(withTitle: "Cancel")
@@ -229,13 +224,15 @@ enum JournalKind: String, CaseIterable, Identifiable {
         case .journal: return "Plain dated entries."
         }
     }
-    static func from(_ raw: String?) -> JournalKind { JournalKind(rawValue: raw ?? "journal") ?? .journal }
+    static func from(_ raw: String?) -> JournalKind { JournalKind(rawValue: raw ?? "note") ?? .note }
 
     // MARK: - Workspace behavior
 
-    /// A document opens straight into one editor (single body entry). Only the
-    /// diary `.journal` kind keeps the dated-entries timeline.
-    var isDocKind: Bool { self != .journal }
+    /// Every journal is a single-document note (Evernote model) — opens straight
+    /// into one editor backed by a single body entry. The `.journal` (diary)
+    /// kind is retained only to decode any pre-migration row; its old
+    /// multi-entry timeline is gone, so this is always true.
+    var isDocKind: Bool { true }
 
     /// Screenplays use the dedicated Final-Draft-style element editor + Fountain
     /// storage instead of the shared markdown editor.
@@ -526,7 +523,9 @@ struct JournalsWorkspace: View {
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                     .help("Sort")
                     Menu {
-                        ForEach(JournalKind.allCases) { k in
+                        // Diary `.journal` kind is retired — every new note is a
+                        // single document. Offer only the doc-kind templates.
+                        ForEach(JournalKind.allCases.filter { $0 != .journal }) { k in
                             Button { Task { await createNote(k) } } label: { Label(k.label, systemImage: k.icon) }
                         }
                     } label: {
