@@ -60,7 +60,7 @@ const PILLARS: Pillar[] = [
       'Hiring process design, offer letters, and onboarding',
       'Manager coaching and performance management rollout',
       'Termination risk review and offboarding',
-      'HR compliance calendar and audit readiness',
+      'Employment practices audit readiness across all operating states',
     ],
     highlight:
       'Consistent HR presence — policies, hiring, performance, and compliance — without adding headcount to your org chart.',
@@ -141,7 +141,7 @@ const PROCESS_STEPS = [
 
 const HERO_STATS = [
   { label: 'Companies supported', value: '80+' },
-  { label: 'Avg. employee count', value: '45' },
+  { label: 'Avg. employee count', value: '100' },
   { label: 'Policies written', value: '600+' },
   { label: 'Jurisdictions covered', value: '32' },
 ]
@@ -253,7 +253,7 @@ function Hero({ onBookClick }: { onBookClick: () => void }) {
               className="mt-6 max-w-lg"
               style={{ color: MUTED, fontSize: 'clamp(1rem, 1.15vw, 1.125rem)', lineHeight: 1.55 }}
             >
-              Senior HR and people-ops professionals embedded in your company on a part-time basis — building the function, running the day-to-day, and getting out of the way when you don’t need us.
+              Senior HR and people-ops professionals embedded in your company on a part-time basis — building the function, directing the day-to-day, and getting out of the way when you don’t need us.
             </p>
             <div className="mt-10 flex items-center gap-4 flex-wrap">
               <button
