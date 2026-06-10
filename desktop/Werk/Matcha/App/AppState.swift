@@ -331,6 +331,7 @@ class AppState {
     private var inboxPollTask: Task<Void, Never>?
     private var notificationPollTask: Task<Void, Never>?
     private var newNotificationTask: Task<Void, Never>?
+    private var bannerTapTask: Task<Void, Never>?
 
     init() {
         APIClient.shared.onUnauthorized = { [weak self] in
@@ -459,6 +460,7 @@ class AppState {
                     senderName: msg.senderName,
                     content: bodyText,
                     channelName: channelName,
+                    channelId: msg.channelId,
                 )
             }
         }
@@ -508,6 +510,29 @@ class AppState {
         }
 
         subscribeNewNotificationObserver()
+        subscribeBannerTapObserver()
+    }
+
+    /// macOS banner clicks (relayed by AppDelegate, which can't reach this
+    /// SwiftUI-owned instance directly) → deep-link to the notification's
+    /// target via handleNotificationLink.
+    private func subscribeBannerTapObserver() {
+        bannerTapTask?.cancel()
+        bannerTapTask = Task { @MainActor [weak self] in
+            for await note in NotificationCenter.default.notifications(named: .mwNotificationBannerTapped) {
+                guard let self else { break }
+                let link = note.userInfo?["link"] as? String
+                var metadata: [String: String]? = nil
+                if let raw = note.userInfo?["metadata"] as? [String: Any] {
+                    metadata = raw.reduce(into: [String: String]()) { acc, kv in
+                        if let s = kv.value as? String { acc[kv.key] = s }
+                    }
+                }
+                if link != nil || metadata != nil {
+                    self.handleNotificationLink(link, metadata: metadata)
+                }
+            }
+        }
     }
 
     /// Wire the `.mwNewNotification` push fan-out — fired by ChannelsWebSocket
@@ -601,14 +626,51 @@ class AppState {
                     }
                 }
 
+                // "X started an audio call" → in-app toast when the user is
+                // looking at Werk but not already in that channel (the channel
+                // view shows its own join banner). Clicking lands them in the
+                // channel via the toast's channelId.
+                if type == "call_started", NSApplication.shared.isActive {
+                    let cid = metaString("channel_id") ?? ""
+                    if !cid.isEmpty, cid != self.selectedChannelId {
+                        ChannelNotificationManager.shared.playInAppSound()
+                        ChannelToastCenter.shared.push(
+                            ChannelToastCenter.Toast(
+                                channelId: cid,
+                                channelName: metaString("channel_name") ?? "channel",
+                                senderName: metaString("actor_name") ?? "Someone",
+                                content: "started an audio call — click to join",
+                                isAttachmentOnly: false
+                            )
+                        )
+                    }
+                }
+
                 // OS toast is owned by the starred-channel path in
                 // `onMessageGlobal` for channel_* events — skip those here to
                 // avoid double-toasting on chat. Non-channel events
-                // (task_assigned, mentions, collab_joined, …) get it here.
+                // (task_assigned, mentions, collab_joined, call_started, …)
+                // get it here, carrying link+metadata so a banner click
+                // deep-links to the target.
                 if !self.isSceneActive && !isChannel {
+                    var userInfo: [AnyHashable: Any] = [:]
+                    if let link = n?["link"] as? String, !link.isEmpty {
+                        userInfo["link"] = link
+                    }
+                    if let raw = n?["metadata"] {
+                        var meta: [String: String] = [:]
+                        if let d = raw as? [String: Any] {
+                            for (k, v) in d { if let s = v as? String { meta[k] = s } }
+                        } else if let s = raw as? String, let data = s.data(using: .utf8),
+                                  let d = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                            for (k, v) in d { if let sv = v as? String { meta[k] = sv } }
+                        }
+                        if !meta.isEmpty { userInfo["metadata"] = meta }
+                    }
                     ChannelNotificationManager.shared.postSystem(
                         title: n?["title"] as? String ?? "Notification",
-                        body: n?["body"] as? String
+                        body: n?["body"] as? String,
+                        userInfo: userInfo.isEmpty ? nil : userInfo
                     )
                 }
             }
@@ -688,6 +750,8 @@ class AppState {
         channelUnreadOverrides = [:]
         newNotificationTask?.cancel()
         newNotificationTask = nil
+        bannerTapTask?.cancel()
+        bannerTapTask = nil
         betaFeatures = [:]
         entitlements = nil
         showPaywall = false

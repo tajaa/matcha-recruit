@@ -139,6 +139,61 @@ async def _notify_invitees(channel_id: UUID, call_id: UUID, invited_by: UUID, us
             logger.warning("Failed to push call.invited to %s", uid, exc_info=True)
 
 
+async def _notify_call_started(
+    channel_id: UUID,
+    call_id: UUID,
+    owner_id: UUID,
+    owner_name: str,
+    mode: str,
+) -> None:
+    """Bell + macOS banner for every channel member except the starter.
+
+    Goes through mw_notifications (type 'call_started' — deliberately NOT
+    channel_-prefixed so the desktop's OS-banner path doesn't suppress it as
+    chat). No email — calls are ephemeral.
+    """
+    try:
+        from ...matcha.services import notification_service as notif_svc
+
+        async with get_connection() as conn:
+            ch = await conn.fetchrow(
+                "SELECT name, company_id FROM channels WHERE id = $1", channel_id
+            )
+            rows = await conn.fetch(
+                """
+                SELECT user_id FROM channel_members
+                WHERE channel_id = $1 AND user_id <> $2
+                  AND removed_for_inactivity IS NOT TRUE
+                """,
+                channel_id, owner_id,
+            )
+        if not ch:
+            return
+        channel_name = ch["name"] or "channel"
+        policy = "invite only" if mode == "invite_only" else "open to members"
+        for r in rows:
+            try:
+                await notif_svc.create_notification(
+                    user_id=r["user_id"],
+                    company_id=ch["company_id"],
+                    type="call_started",
+                    title=f"{owner_name} started an audio call in #{channel_name}",
+                    body=f"Click to join ({policy}, up to {CALL_MAX_PARTICIPANTS} people).",
+                    link=f"/work?channel={channel_id}",
+                    metadata={
+                        "channel_id": str(channel_id),
+                        "call_id": str(call_id),
+                        "channel_name": channel_name,
+                        "actor_name": owner_name,
+                        "mode": mode,
+                    },
+                )
+            except Exception:
+                logger.warning("call_started notify failed for %s", r["user_id"], exc_info=True)
+    except Exception:
+        logger.warning("call_started notification fan-out failed", exc_info=True)
+
+
 async def _force_end_call(channel_id: UUID, call_id: UUID, reason: str) -> None:
     """End an active call: mark ended_at, delete LiveKit room, push WS event."""
     from ..services.livekit_service import delete_room
@@ -272,6 +327,7 @@ async def start_call(
             raise HTTPException(status_code=409, detail="A broadcast is active in this channel — end it first")
 
         invitees = await _member_filtered(conn, channel_id, body.invited_user_ids)
+        owner_name = await _display_name(conn, current_user.id)
 
         room_name = _call_room_name(channel_id)
         row = await conn.fetchrow(
@@ -307,7 +363,7 @@ async def start_call(
     try:
         token = mint_token(
             identity=str(current_user.id),
-            name=current_user.email,
+            name=owner_name,
             room=room_name,
             can_publish=True,
             can_subscribe=True,
@@ -330,6 +386,7 @@ async def start_call(
         "max_participants": CALL_MAX_PARTICIPANTS,
     })
     await _notify_invitees(channel_id, call_id, current_user.id, invitees)
+    await _notify_call_started(channel_id, call_id, current_user.id, owner_name, body.mode)
 
     return {
         "call_id": str(call_id),

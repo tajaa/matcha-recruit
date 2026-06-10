@@ -20,6 +20,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     ) {
         completionHandler([.banner, .list, .sound])
     }
+
+    /// Banner click → bring Werk forward and deep-link to the target the
+    /// poster stashed in userInfo ("link" + "metadata" — see
+    /// ChannelNotificationManager). AppState observes the relay because this
+    /// delegate has no handle on the SwiftUI-owned AppState instance.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let userInfo = response.notification.request.content.userInfo
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            NotificationCenter.default.post(
+                name: .mwNotificationBannerTapped,
+                object: nil,
+                userInfo: userInfo
+            )
+        }
+        completionHandler()
+    }
 }
 
 @main

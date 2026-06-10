@@ -89,12 +89,17 @@ COUNTED_UPDATE_EVENTS = (
     'subtask_rejected',
 )
 
-# Email + bell templates for forward-only column transitions. Destinations
-# other than these (e.g. moving back to 'todo') intentionally fire nothing.
+# Email + bell templates per destination column — every board move notifies
+# collaborators (the rework-resume continuation is the one deliberate skip,
+# see update_project_task). The formal review-rejection flow notifies the
+# assignee separately via _notify_task_rejected; 'changes_requested' here
+# covers manual drags into that lane.
 _TRANSITION_TEMPLATES: dict[str, dict[str, str]] = {
-    "in_progress": {"subject": "Task started: {title}",     "verb": "started"},
-    "review":      {"subject": "Ready for review: {title}", "verb": "moved to review"},
-    "done":        {"subject": "Task completed: {title}",   "verb": "completed"},
+    "todo":              {"subject": "Moved back to To-do: {title}",  "verb": "moved back to To-do"},
+    "in_progress":       {"subject": "Task started: {title}",         "verb": "started"},
+    "review":            {"subject": "Ready for review: {title}",     "verb": "moved to review"},
+    "changes_requested": {"subject": "Changes requested: {title}",    "verb": "moved to Changes Requested"},
+    "done":              {"subject": "Task completed: {title}",       "verb": "completed"},
 }
 
 
@@ -495,9 +500,10 @@ async def _notify_task_column_transition(
     new_column: str,
     project_title: Optional[str],
 ) -> None:
-    """Email + bell every active project collaborator (minus the actor) when
-    a task crosses into in_progress / review / done. Transitions back to
-    'todo' (or any other destination) are intentionally silent.
+    """Email + bell every active project collaborator (minus the actor) on
+    any board-column move (per-destination copy in _TRANSITION_TEMPLATES).
+    The rework-resume continuation (changes_requested → in_progress) is
+    skipped by the caller.
     """
     tpl = _TRANSITION_TEMPLATES.get(new_column)
     if tpl is None:

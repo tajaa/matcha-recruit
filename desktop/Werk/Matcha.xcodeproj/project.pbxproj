@@ -82,6 +82,7 @@
 		AA11BB22CC33DD44EE550009 /* InboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660009 /* InboxView.swift */; };
 		AA11BB22CC33DD44EE55000A /* InboxComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66000A /* InboxComposeView.swift */; };
 		AA11BB22CC33DD44EE55000B /* KanbanBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66000B /* KanbanBoardView.swift */; };
+		CA11AB01AB01AB01AB010009 /* KanbanListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA11AB01AB01AB01AB01000A /* KanbanListView.swift */; };
 		AA11BB22CC33DD44EE55000C /* ProjectFilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66000C /* ProjectFilesView.swift */; };
 		AA11BB22CC33DD44EE55000D /* MarkdownTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66000D /* MarkdownTextEditor.swift */; };
 		AA11BB22CC33DD44EE550099 /* CollabProjectWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660099 /* CollabProjectWizardView.swift */; };
@@ -250,6 +251,7 @@
 		AA11BB22CC33DD44EE660009 /* InboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE66000A /* InboxComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxComposeView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE66000B /* KanbanBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanbanBoardView.swift; sourceTree = "<group>"; };
+		CA11AB01AB01AB01AB01000A /* KanbanListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanbanListView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE66000C /* ProjectFilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFilesView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE66000D /* MarkdownTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTextEditor.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660099 /* CollabProjectWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollabProjectWizardView.swift; sourceTree = "<group>"; };
@@ -467,6 +469,7 @@
 				BB01CC22DD33EE44FF660002 /* BlogEditorView.swift */,
 				BB01CC22DD33EE44FF660003 /* MarkdownPreviewView.swift */,
 				AA11BB22CC33DD44EE66000B /* KanbanBoardView.swift */,
+				CA11AB01AB01AB01AB01000A /* KanbanListView.swift */,
 				DEADBEEF000000000000F001 /* AIComposeBar.swift */,
 				DEADBEEF000000000000F002 /* AttachmentRow.swift */,
 				DEADBEEF000000000000F003 /* AIDraftReview.swift */,
@@ -880,6 +883,7 @@
 				AA11BB22CC33DD44EE550009 /* InboxView.swift in Sources */,
 				AA11BB22CC33DD44EE55000A /* InboxComposeView.swift in Sources */,
 				AA11BB22CC33DD44EE55000B /* KanbanBoardView.swift in Sources */,
+				CA11AB01AB01AB01AB010009 /* KanbanListView.swift in Sources */,
 				DEADBEEF000000000000B001 /* AIComposeBar.swift in Sources */,
 				DEADBEEF000000000000B002 /* AttachmentRow.swift in Sources */,
 				DEADBEEF000000000000B003 /* AIDraftReview.swift in Sources */,

@@ -191,30 +191,36 @@ class TestCapacity:
 
 class TestStartCall:
     def _patches(self, conn, active_call=None, active_broadcast=None):
-        return [
-            patch(f"{MOD}.get_connection", _conn_ctx(conn)),
-            patch(f"{MOD}._assert_owner", AsyncMock()),
-            patch(f"{MOD}._active_broadcast", AsyncMock(return_value=active_broadcast)),
-            patch(f"{MOD}._push_call_event", AsyncMock()),
-            patch(f"{MOD}._notify_invitees", AsyncMock()),
-            patch(f"{MOD}._schedule_auto_stop"),
-            patch(f"{LK}._get_lk_config", return_value=("ws://t", "k", "s")),
-            patch(f"{LK}.create_room", AsyncMock()),
-            patch(f"{LK}.mint_token", return_value="jwt"),
-            patch("app.matcha.services.entitlements_service.require_plan", AsyncMock()),
-        ]
+        return {
+            "get_connection": patch(f"{MOD}.get_connection", _conn_ctx(conn)),
+            "assert_owner": patch(f"{MOD}._assert_owner", AsyncMock()),
+            "active_broadcast": patch(f"{MOD}._active_broadcast", AsyncMock(return_value=active_broadcast)),
+            "push": patch(f"{MOD}._push_call_event", AsyncMock()),
+            "notify_invitees": patch(f"{MOD}._notify_invitees", AsyncMock()),
+            "notify_started": patch(f"{MOD}._notify_call_started", AsyncMock()),
+            "display_name": patch(f"{MOD}._display_name", AsyncMock(return_value="Owner")),
+            "auto_stop": patch(f"{MOD}._schedule_auto_stop"),
+            "lk_config": patch(f"{LK}._get_lk_config", return_value=("ws://t", "k", "s")),
+            "create_room": patch(f"{LK}.create_room", AsyncMock()),
+            "mint_token": patch(f"{LK}.mint_token", return_value="jwt"),
+            "require_plan": patch("app.matcha.services.entitlements_service.require_plan", AsyncMock()),
+        }
+
+    @staticmethod
+    def _enter_all(stack, patches):
+        return {name: stack.enter_context(p) for name, p in patches.items()}
 
     @pytest.mark.asyncio
     async def test_409_when_call_active(self):
+        from contextlib import ExitStack
         from app.core.routes.channel_calls import start_call, StartCallBody
         channel_id = uuid4()
         user = _user()
         conn = AsyncMock()
         conn.fetchrow.side_effect = [_call_row(channel_id)]  # _active_call -> fresh row
 
-        patches = self._patches(conn)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], \
-             patches[6], patches[7], patches[8], patches[9]:
+        with ExitStack() as stack:
+            self._enter_all(stack, self._patches(conn))
             with pytest.raises(HTTPException) as exc:
                 await start_call(channel_id, StartCallBody(mode="members"), current_user=user)
         assert exc.value.status_code == 409
@@ -222,15 +228,15 @@ class TestStartCall:
 
     @pytest.mark.asyncio
     async def test_409_when_broadcast_active(self):
+        from contextlib import ExitStack
         from app.core.routes.channel_calls import start_call, StartCallBody
         channel_id = uuid4()
         user = _user()
         conn = AsyncMock()
         conn.fetchrow.side_effect = [None]  # no active call
 
-        patches = self._patches(conn, active_broadcast={"id": uuid4()})
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], \
-             patches[6], patches[7], patches[8], patches[9]:
+        with ExitStack() as stack:
+            self._enter_all(stack, self._patches(conn, active_broadcast={"id": uuid4()}))
             with pytest.raises(HTTPException) as exc:
                 await start_call(channel_id, StartCallBody(mode="members"), current_user=user)
         assert exc.value.status_code == 409
@@ -238,6 +244,7 @@ class TestStartCall:
 
     @pytest.mark.asyncio
     async def test_start_members_mode_happy_path(self):
+        from contextlib import ExitStack
         from app.core.routes.channel_calls import start_call, StartCallBody, CALL_MAX_PARTICIPANTS
         channel_id = uuid4()
         user = _user()
@@ -249,16 +256,18 @@ class TestStartCall:
         ]
         conn.fetch.return_value = []  # _member_filtered (no invitees)
 
-        patches = self._patches(conn)
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], \
-             patches[6], patches[7] as cr, patches[8] as mt, patches[9]:
+        with ExitStack() as stack:
+            mocks = self._enter_all(stack, self._patches(conn))
             resp = await start_call(channel_id, StartCallBody(mode="members"), current_user=user)
 
         assert resp["call_id"] == str(call_id)
         assert resp["mode"] == "members"
         assert resp["max_participants"] == CALL_MAX_PARTICIPANTS
-        assert cr.await_args.kwargs["max_participants"] == CALL_MAX_PARTICIPANTS
-        assert mt.call_args.kwargs["can_publish_sources"] == ["microphone"]
+        assert mocks["create_room"].await_args.kwargs["max_participants"] == CALL_MAX_PARTICIPANTS
+        assert mocks["mint_token"].call_args.kwargs["can_publish_sources"] == ["microphone"]
+        # Collaborator bell/banner fan-out fires once with the starter's name
+        mocks["notify_started"].assert_awaited_once()
+        assert mocks["notify_started"].await_args.args[3] == "Owner"
 
 
 # ============================================================

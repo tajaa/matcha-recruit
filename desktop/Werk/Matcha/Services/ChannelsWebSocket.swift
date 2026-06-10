@@ -548,6 +548,10 @@ extension Notification.Name {
     static let mwNewNotification = Notification.Name("mw-new-notification")
     /// Posted by AppState after a push lands; the popover refetches when visible.
     static let mwNotificationsRefresh = Notification.Name("mw-notifications-refresh")
+    /// Posted by AppDelegate when the user clicks a macOS notification banner.
+    /// userInfo carries "link" (String) and/or "metadata" ([String: String])
+    /// as stashed on the UNNotification by ChannelNotificationManager.
+    static let mwNotificationBannerTapped = Notification.Name("mw-notification-banner-tapped")
 }
 
 extension ChannelsWebSocket: URLSessionWebSocketDelegate {

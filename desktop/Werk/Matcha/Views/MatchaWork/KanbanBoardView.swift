@@ -70,6 +70,9 @@ struct KanbanBoardView: View {
     @State private var agingClock = Date()
     /// Board/Pipeline tab — initialized from project.pipelineMode on appear.
     @State private var viewMode: ViewMode = .board
+    /// Linear list rendering of the same tickets (columns become sections,
+    /// with a Mine filter). Persisted so the preference sticks across mounts.
+    @AppStorage("mw-kanban-list-layout") private var showListView = false
 
     // MARK: - "Replay changes" on open
     // When the board opens, briefly show each ticket where it was the LAST time
@@ -288,7 +291,20 @@ struct KanbanBoardView: View {
                 } else {
                     AIComposeBar(isDrafting: aiDrafting, error: aiError) { submitAIDraft(prompt: $0) }
                 }
-                boardColumns
+                if showListView {
+                    KanbanListView(
+                        viewModel: viewModel,
+                        isPipeline: isPipeline,
+                        searchText: searchText,
+                        myUserId: appState.currentUser?.id ?? "",
+                        onOpen: { task in
+                            acknowledge(task.id)
+                            viewingTask = task
+                        }
+                    )
+                } else {
+                    boardColumns
+                }
             }
         }
         .background(ThemeRadialBackground())
@@ -465,6 +481,18 @@ struct KanbanBoardView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(.secondary)
             Spacer()
+            // Board ⇄ List layout toggle — same tickets, columns vs flat rows.
+            HStack(spacing: 2) {
+                layoutButton(icon: "square.grid.2x2", isActive: !showListView, help: "Board layout") {
+                    showListView = false
+                }
+                layoutButton(icon: "list.bullet", isActive: showListView, help: "List layout — linear view with a Mine filter") {
+                    showListView = true
+                }
+            }
+            .padding(2)
+            .background(appState.themeText.opacity(0.05))
+            .cornerRadius(6)
             Button { Task { await viewModel.loadTasks() } } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 10))
@@ -475,6 +503,20 @@ struct KanbanBoardView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    private func layoutButton(icon: String, isActive: Bool, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .medium))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(isActive ? appState.themeAccent.opacity(0.15) : Color.clear)
+                .foregroundColor(isActive ? appState.themeAccent : .secondary)
+                .cornerRadius(4)
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 
     private var boardPipelinePicker: some View {

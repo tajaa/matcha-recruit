@@ -34,7 +34,10 @@ final class ChannelNotificationManager {
     /// Post a generic system notification — used by the bell-push path for
     /// task assignments, mentions, and anything else routed through
     /// `mw_notifications`. Channel-chat toasts still go through `post(...)`.
-    func postSystem(title: String, body: String?) {
+    /// `userInfo` rides on the OS notification so a banner click can deep-link
+    /// back into the app (AppDelegate didReceive → handleNotificationLink).
+    /// Keys: "link" (String) and/or "metadata" ([String: String]).
+    func postSystem(title: String, body: String?, userInfo: [AnyHashable: Any]? = nil) {
         guard appNotificationsEnabled else { return }
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized else { return }
@@ -42,6 +45,7 @@ final class ChannelNotificationManager {
             note.title = title
             if let body, !body.isEmpty { note.body = body }
             note.sound = .default
+            if let userInfo { note.userInfo = userInfo }
             let req = UNNotificationRequest(
                 identifier: UUID().uuidString,
                 content: note,
@@ -97,7 +101,7 @@ final class ChannelNotificationManager {
         (NSSound(named: "Tink") ?? NSSound(named: "Pop"))?.play()
     }
 
-    func post(senderName: String, content: String, channelName: String?) {
+    func post(senderName: String, content: String, channelName: String?, channelId: String? = nil) {
         guard isEnabled else { return }
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized else { return }
@@ -105,6 +109,10 @@ final class ChannelNotificationManager {
             note.title = channelName.map { "#\($0)" } ?? "Channel message"
             note.body = "\(senderName): \(content)"
             note.sound = .default
+            if let channelId {
+                // Click-to-open: lands the user in this channel.
+                note.userInfo = ["metadata": ["channel_id": channelId]]
+            }
             let req = UNNotificationRequest(
                 identifier: UUID().uuidString,
                 content: note,
