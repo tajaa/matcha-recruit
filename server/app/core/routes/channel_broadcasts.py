@@ -692,6 +692,11 @@ async def livekit_webhook(
     room_info = event.get("room", {})
     room_name: str = room_info.get("name", "")
 
+    # Audio-call rooms share this webhook endpoint; route them by prefix.
+    if room_name.startswith("call-"):
+        from .channel_calls import handle_call_webhook_event
+        return await handle_call_webhook_event(event_type, event, room_name)
+
     if not room_name.startswith("channel-"):
         return {"ok": True}  # not our room
 

@@ -27,6 +27,7 @@ struct MatchaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
     @State private var broadcastService = BroadcastService.shared
+    @State private var callService = CallService.shared
     @Environment(\.scenePhase) private var scenePhase
 
     private var colorScheme: ColorScheme {
@@ -40,6 +41,7 @@ struct MatchaApp: App {
                     ContentView()
                         .environment(appState)
                         .environment(broadcastService)
+                        .environment(callService)
                 } else {
                     LoginView()
                         .environment(appState)
@@ -79,6 +81,7 @@ struct MatchaApp: App {
             AuxWindowRootView(target: target)
                 .environment(appState)
                 .environment(broadcastService)
+                .environment(callService)
                 .preferredColorScheme(colorScheme)
         }
         .windowStyle(.hiddenTitleBar)

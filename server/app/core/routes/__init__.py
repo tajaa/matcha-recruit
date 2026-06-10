@@ -31,6 +31,7 @@ from .channels import router as channels_router
 from .channels_ws import router as channels_ws_router
 from .channel_job_postings import router as channel_job_postings_router
 from .channel_broadcasts import router as channel_broadcasts_router, webhook_router as livekit_webhook_router
+from .channel_calls import router as channel_calls_router
 from .profile_resume import router as profile_resume_router
 from .newsletter import public_router as newsletter_public_router, admin_router as newsletter_admin_router
 from .client_errors import router as client_errors_router
@@ -84,6 +85,7 @@ core_router.include_router(inbox_router, prefix="/inbox", tags=["inbox"])
 core_router.include_router(channels_router, prefix="/channels", tags=["channels"])
 core_router.include_router(channel_job_postings_router, prefix="/channels", tags=["channel-job-postings"])
 core_router.include_router(channel_broadcasts_router, prefix="/channels", tags=["channel-broadcasts"])
+core_router.include_router(channel_calls_router, prefix="/channels", tags=["channel-calls"])
 core_router.include_router(livekit_webhook_router, prefix="/webhooks", tags=["livekit-webhook"])
 core_router.include_router(profile_resume_router, prefix="/users", tags=["profile-resume"])
 core_router.include_router(newsletter_public_router, prefix="/newsletter", tags=["newsletter-public"])

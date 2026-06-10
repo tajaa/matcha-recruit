@@ -62,6 +62,7 @@ struct ChannelDetailView: View {
     }
 
     @Environment(BroadcastService.self) private var broadcast: BroadcastService
+    @Environment(CallService.self) private var call: CallService
 
     private var isAdmin: Bool {
         let role = vm.channel?.myRole ?? ""
@@ -128,6 +129,21 @@ struct ChannelDetailView: View {
                           info.startedBy != appState.currentUser?.id {
                     watchFeedBanner
                     Divider()
+                } else if call.channelId == channelId && call.isConnected {
+                    // Audio call panel — server guarantees a channel never has
+                    // a call and a broadcast active at once.
+                    CallPanelView(
+                        channelId: channelId,
+                        channelName: vm.channel?.name ?? "channel",
+                        isOwner: call.isOwner || vm.channel?.myRole == "owner",
+                        members: vm.channel?.members ?? [],
+                        myUserId: appState.currentUser?.id ?? "",
+                    )
+                        .environment(call)
+                    Divider()
+                } else if call.activeCalls[channelId] != nil {
+                    callJoinBanner
+                    Divider()
                 }
                 messagesList
                 Divider()
@@ -170,6 +186,7 @@ struct ChannelDetailView: View {
             // (or whose WS dropped before the broadcast.started fan-out) still
             // sees the Watch-feed banner without depending on the WS event.
             await broadcast.fetchBroadcastStatus(channelId: channelId)
+            await call.fetchCallStatus(channelId: channelId)
             if !isEmbedded {
                 appState.setActiveContext(WorkTab(kind: .channel, entityId: channelId,
                                                   title: vm.channel?.name ?? "Channel"))
@@ -287,6 +304,17 @@ struct ChannelDetailView: View {
                             Text("LIVE").font(.system(size: 9, weight: .bold)).foregroundColor(.red)
                         }
                     }
+                    // Call pill — active audio call with live occupancy (n/4),
+                    // sourced from CallService.activeCalls (WS + REST poll).
+                    if let callInfo = call.activeCalls[channelId] {
+                        HStack(spacing: 3) {
+                            Image(systemName: "waveform")
+                                .font(.system(size: 8, weight: .bold))
+                            Text("CALL \(callInfo.participantIds.count)/\(call.maxParticipants)")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .foregroundColor(Color.matcha500)
+                    }
                     // Go Live button (owner only). "End" when this client is
                     // actively broadcasting OR when an active broadcast in this
                     // channel was started by the current user from another
@@ -296,7 +324,35 @@ struct ChannelDetailView: View {
                         let isOwnActive = info?.startedBy == appState.currentUser?.id && info != nil
                         let isLiveHere = broadcast.channelId == channelId && broadcast.isConnected
                         let showEnd = isLiveHere || isOwnActive
-                        if showEnd {
+                        let callInfo = call.activeCalls[channelId]
+                        let isCallHere = call.channelId == channelId && call.isConnected
+                        if callInfo != nil || isCallHere {
+                            // Calls are owner-started, so an active call in an
+                            // owned channel is endable from here even when this
+                            // client isn't connected (orphan path — quit the
+                            // app mid-call and came back).
+                            Button {
+                                Task {
+                                    if isCallHere {
+                                        await call.stopCall()
+                                    } else {
+                                        await call.endCallForChannel(channelId: channelId)
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "phone.down.fill").font(.system(size: 10))
+                                    Text("End call").font(.system(size: 10, weight: .medium))
+                                }
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Color.red.opacity(0.2))
+                                .foregroundColor(.red)
+                                .cornerRadius(4)
+                            }
+                            .buttonStyle(.plain)
+                            .help("End the audio call")
+                        } else if showEnd {
                             Button {
                                 Task {
                                     if isLiveHere {
@@ -319,8 +375,9 @@ struct ChannelDetailView: View {
                             .buttonStyle(.plain)
                             .help("End the live broadcast")
                         } else if !appState.canGoLive {
-                            // Go Live is Pro/Business — locked chip opens the
-                            // paywall (server gates broadcast/start regardless).
+                            // Go Live + calls are Pro/Business — locked chip
+                            // opens the paywall (server gates both start
+                            // endpoints regardless).
                             Button {
                                 appState.presentPaywall(for: "go_live")
                             } label: {
@@ -336,6 +393,21 @@ struct ChannelDetailView: View {
                             }
                             .buttonStyle(.plain)
                             .help("Going live needs Werk Pro")
+                            Button {
+                                appState.presentPaywall(for: "go_live")
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "lock.fill").font(.system(size: 9))
+                                    Text("Call").font(.system(size: 10, weight: .medium))
+                                }
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(appState.themeText.opacity(0.08))
+                                .foregroundColor(appState.themeTextSecondary)
+                                .cornerRadius(4)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Audio calls need Werk Pro")
                         } else {
                             // Pick mode at start time. Audio-only skips the
                             // camera grab entirely — useful when bandwidth
@@ -366,6 +438,35 @@ struct ChannelDetailView: View {
                             .menuIndicator(.hidden)
                             .fixedSize()
                             .help("Start a live broadcast — video or audio")
+                            // 4-person audio call. Join policy is picked here
+                            // at start time; invite-only owners add people via
+                            // the panel's Invite button after starting.
+                            Menu {
+                                Button {
+                                    Task { await call.startCall(channelId: channelId, mode: .members) }
+                                } label: {
+                                    Label("All members can join", systemImage: "person.3.fill")
+                                }
+                                Button {
+                                    Task { await call.startCall(channelId: channelId, mode: .inviteOnly) }
+                                } label: {
+                                    Label("Invite only", systemImage: "person.crop.circle.badge.checkmark")
+                                }
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "phone.badge.waveform.fill").font(.system(size: 10))
+                                    Text("Call").font(.system(size: 10, weight: .medium))
+                                }
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(appState.themeAccent.opacity(0.2))
+                                .foregroundColor(appState.themeAccent)
+                                .cornerRadius(4)
+                            }
+                            .menuStyle(.borderlessButton)
+                            .menuIndicator(.hidden)
+                            .fixedSize()
+                            .help("Start a 4-person audio call — open to members or invite-only")
                         }
                     }
                     Button {
@@ -463,6 +564,76 @@ struct ChannelDetailView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(Color.red.opacity(0.12))
+    }
+
+    // MARK: - Call join banner
+    //
+    // Shown above the messages list when an active audio call exists in this
+    // channel and we're not connected to it. Join is gated by the call's
+    // policy: members-mode admits anyone, invite-only needs an invite (the
+    // owner always may). Disabled with a "full" label at 4/4.
+
+    private var callJoinBanner: some View {
+        let info = call.activeCalls[channelId]
+        let myId = appState.currentUser?.id ?? ""
+        let starterName = info.flatMap { i in
+            vm.channel?.members.first(where: { $0.userId == i.startedBy })?.name
+        }
+        let title = starterName.map { "\($0) started an audio call" } ?? "Audio call in progress"
+        let count = info?.participantIds.count ?? 0
+        let isFull = count >= call.maxParticipants
+        let mayJoin: Bool = {
+            guard let i = info else { return false }
+            if i.startedBy == myId { return true }
+            if i.mode == .members { return true }
+            return i.invitedUserIds.contains(myId)
+        }()
+        let hasErr = call.errorMessage != nil
+            && call.channelId == channelId
+            && !call.isConnected
+
+        return HStack(spacing: 10) {
+            Image(systemName: "waveform")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(Color.matcha500)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(title) · \(count)/\(call.maxParticipants)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(appState.themeText.opacity(0.95))
+                if hasErr, let msg = call.errorMessage {
+                    Text("Couldn't connect: \(msg)")
+                        .font(.system(size: 10))
+                        .foregroundColor(.red.opacity(0.85))
+                        .lineLimit(2)
+                } else if !mayJoin {
+                    Text("Invite only — ask the channel owner for an invite")
+                        .font(.system(size: 10))
+                        .foregroundColor(appState.themeText.opacity(0.45))
+                }
+            }
+            Spacer()
+            if mayJoin {
+                Button {
+                    Task { await call.joinCall(channelId: channelId) }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "phone.fill").font(.system(size: 11))
+                        Text(hasErr ? "Retry" : (isFull ? "Full" : "Join"))
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(isFull ? Color.zinc800 : Color.matcha600)
+                    .foregroundColor(.white)
+                    .cornerRadius(5)
+                }
+                .buttonStyle(.plain)
+                .disabled(isFull && !hasErr)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.matcha600.opacity(0.12))
     }
 
     // MARK: - Messages

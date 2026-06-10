@@ -108,6 +108,10 @@
 		BC01DD22EE33FF445566AA01 /* BroadcastModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF445566BB01 /* BroadcastModels.swift */; };
 		BC01DD22EE33FF445566AA02 /* BroadcastService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF445566BB02 /* BroadcastService.swift */; };
 		BC01DD22EE33FF445566AA03 /* BroadcastPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC01DD22EE33FF445566BB03 /* BroadcastPanelView.swift */; };
+		CA11AB01AB01AB01AB010001 /* CallModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA11AB01AB01AB01AB010002 /* CallModels.swift */; };
+		CA11AB01AB01AB01AB010003 /* CallService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA11AB01AB01AB01AB010004 /* CallService.swift */; };
+		CA11AB01AB01AB01AB010005 /* CallPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA11AB01AB01AB01AB010006 /* CallPanelView.swift */; };
+		CA11AB01AB01AB01AB010007 /* InviteToCallSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA11AB01AB01AB01AB010008 /* InviteToCallSheet.swift */; };
 		BC01DD22EE33FF445566CC01 /* LiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = BC01DD22EE33FF445566DD01 /* LiveKit */; };
 		C02BB2F46D45FC99FA9D687C /* ReviewPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FAD57D16922818CB8ECD1BE /* ReviewPreview.swift */; };
 		C0C0C0C0C0C0C0C001010001 /* ProjectWebSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0C0C0C0C0C0C001010002 /* ProjectWebSocket.swift */; };
@@ -271,6 +275,10 @@
 		BC01DD22EE33FF445566BB01 /* BroadcastModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BroadcastModels.swift; sourceTree = "<group>"; };
 		BC01DD22EE33FF445566BB02 /* BroadcastService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BroadcastService.swift; sourceTree = "<group>"; };
 		BC01DD22EE33FF445566BB03 /* BroadcastPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BroadcastPanelView.swift; sourceTree = "<group>"; };
+		CA11AB01AB01AB01AB010002 /* CallModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallModels.swift; sourceTree = "<group>"; };
+		CA11AB01AB01AB01AB010004 /* CallService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallService.swift; sourceTree = "<group>"; };
+		CA11AB01AB01AB01AB010006 /* CallPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallPanelView.swift; sourceTree = "<group>"; };
+		CA11AB01AB01AB01AB010008 /* InviteToCallSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteToCallSheet.swift; sourceTree = "<group>"; };
 		BCB330C91A9BDEA760F9F330 /* PendingChannelAttachment.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PendingChannelAttachment.swift; sourceTree = "<group>"; };
 		BF60D529A9BC9D349728AF27 /* MatchaWorkService+Tasks.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = "MatchaWorkService+Tasks.swift"; sourceTree = "<group>"; };
 		C0C0C0C0C0C0C0C001010002 /* ProjectWebSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectWebSocket.swift; sourceTree = "<group>"; };
@@ -364,6 +372,7 @@
 				210A398CCEA5FA1784C2C92D /* AuthModels.swift */,
 				DD00EE11FF22334455770001 /* ChannelModels.swift */,
 				BC01DD22EE33FF445566BB01 /* BroadcastModels.swift */,
+				CA11AB01AB01AB01AB010002 /* CallModels.swift */,
 				A3C51065FA89EFD016D2D993 /* MatchaWork */,
 			);
 			path = Models;
@@ -409,6 +418,7 @@
 				DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */,
 				DD00EE11FF22334455770099 /* ChannelNotificationManager.swift */,
 				BC01DD22EE33FF445566BB02 /* BroadcastService.swift */,
+				CA11AB01AB01AB01AB010004 /* CallService.swift */,
 				C0C0C0C0C0C0C0C001010002 /* ProjectWebSocket.swift */,
 				FFFF1S1S1S1S1S1S01010002 /* ChannelStarStore.swift */,
 				FFFF1U1U1U1U1U1U01010002 /* TicketUpdatesStore.swift */,
@@ -677,6 +687,8 @@
 				DD00EE11FF22334455770D22 /* ChannelAdminWizardView.swift */,
 				DD00EE11FF22334455770D33 /* DiscoverChannelsSheet.swift */,
 				BC01DD22EE33FF445566BB03 /* BroadcastPanelView.swift */,
+				CA11AB01AB01AB01AB010006 /* CallPanelView.swift */,
+				CA11AB01AB01AB01AB010008 /* InviteToCallSheet.swift */,
 				DDDD0E0E0E0E0E0E01010002 /* ManageMembersSheet.swift */,
 				DDDD0E0E0E0E0E0E01010004 /* InviteToBroadcastSheet.swift */,
 				BCB330C91A9BDEA760F9F330 /* PendingChannelAttachment.swift */,
@@ -904,6 +916,10 @@
 				BC01DD22EE33FF445566AA01 /* BroadcastModels.swift in Sources */,
 				BC01DD22EE33FF445566AA02 /* BroadcastService.swift in Sources */,
 				BC01DD22EE33FF445566AA03 /* BroadcastPanelView.swift in Sources */,
+				CA11AB01AB01AB01AB010001 /* CallModels.swift in Sources */,
+				CA11AB01AB01AB01AB010003 /* CallService.swift in Sources */,
+				CA11AB01AB01AB01AB010005 /* CallPanelView.swift in Sources */,
+				CA11AB01AB01AB01AB010007 /* InviteToCallSheet.swift in Sources */,
 				EE11FF2233445566AA000001 /* RecruitingPipelineView.swift in Sources */,
 				BB01CC22DD33EE44FF550001 /* NewBlogSheet.swift in Sources */,
 				CC99AA11BB22CC33DD440001 /* PaywallSheet.swift in Sources */,

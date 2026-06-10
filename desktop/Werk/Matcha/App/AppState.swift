@@ -368,6 +368,7 @@ class AppState {
     func didLogin(user: UserInfo) {
         currentUser = user
         isAuthenticated = true
+        CallService.shared.currentUserId = user.id
         MatchaWorkService.shared.updateCacheScope(user.id)
         ChannelStarStore.shared.bind(userId: user.id)
         JournalStarStore.shared.bind(userId: user.id)
@@ -485,6 +486,25 @@ class AppState {
                                             liveKitUrl: event.liveKitUrl,
                                             canPublish: event.canPublish)
             }
+        }
+
+        // Global call WS handlers — same persist-across-views rationale as the
+        // broadcast block above.
+        let csvc = CallService.shared
+        csvc.currentUserId = currentUser?.id
+        ChannelsWebSocket.shared.onCallStarted = { event in
+            print("[AppState] WS call.started channel=\(event.channelId)")
+            Task { @MainActor in csvc.handleCallStarted(event) }
+        }
+        ChannelsWebSocket.shared.onCallEnded = { event in
+            print("[AppState] WS call.ended channel=\(event.channelId)")
+            Task { @MainActor in await csvc.handleCallEnded(event) }
+        }
+        ChannelsWebSocket.shared.onCallInvited = { event in
+            Task { @MainActor in csvc.handleCallInvited(event) }
+        }
+        ChannelsWebSocket.shared.onCallParticipantsChanged = { event in
+            Task { @MainActor in csvc.handleParticipantsChanged(event) }
         }
 
         subscribeNewNotificationObserver()
@@ -678,6 +698,11 @@ class AppState {
         ChannelsWebSocket.shared.onBroadcastPublisherChanged = nil
         ChannelsWebSocket.shared.onBroadcastTokenGrant = nil
         Task { await BroadcastService.shared.leave() }
+        ChannelsWebSocket.shared.onCallStarted = nil
+        ChannelsWebSocket.shared.onCallEnded = nil
+        ChannelsWebSocket.shared.onCallInvited = nil
+        ChannelsWebSocket.shared.onCallParticipantsChanged = nil
+        Task { await CallService.shared.leave() }
         MatchaWorkService.shared.updateCacheScope(nil)
         APIClient.shared.accessToken = nil
         KeychainHelper.delete(key: KeychainHelper.Keys.accessToken)

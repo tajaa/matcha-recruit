@@ -76,6 +76,10 @@ final class ChannelsWebSocket: NSObject {
     var onBroadcastEnded: ((WSBroadcastEnded) -> Void)?
     var onBroadcastPublisherChanged: ((WSBroadcastPublisherChanged) -> Void)?
     var onBroadcastTokenGrant: ((WSBroadcastTokenGrant) -> Void)?
+    var onCallStarted: ((WSCallStarted) -> Void)?
+    var onCallEnded: ((WSCallEnded) -> Void)?
+    var onCallInvited: ((WSCallInvited) -> Void)?
+    var onCallParticipantsChanged: ((WSCallParticipantsChanged) -> Void)?
 
     // ── Outbox (durable send queue) ──────────────────────────────────────────
     // Every outbound message is queued here keyed by client_message_id and only
@@ -448,6 +452,36 @@ final class ChannelsWebSocket: NSObject {
                 onBroadcastTokenGrant?(WSBroadcastTokenGrant(
                     channelId: channelId, token: token,
                     liveKitUrl: liveKitUrl, canPublish: canPublish
+                ))
+            }
+        case "call.started":
+            if let channelId = obj["channel_id"] as? String,
+               let callId = obj["call_id"] as? String,
+               let startedBy = obj["started_by"] as? String,
+               let startedAt = obj["started_at"] as? String,
+               let mode = obj["mode"] as? String {
+                onCallStarted?(WSCallStarted(
+                    channelId: channelId, callId: callId,
+                    startedBy: startedBy, startedAt: startedAt, mode: mode
+                ))
+            }
+        case "call.ended":
+            if let channelId = obj["channel_id"] as? String,
+               let callId = obj["call_id"] as? String {
+                onCallEnded?(WSCallEnded(channelId: channelId, callId: callId))
+            }
+        case "call.invited":
+            if let channelId = obj["channel_id"] as? String,
+               let callId = obj["call_id"] as? String,
+               let invitedBy = obj["invited_by"] as? String {
+                onCallInvited?(WSCallInvited(channelId: channelId, callId: callId, invitedBy: invitedBy))
+            }
+        case "call.participants_changed":
+            if let channelId = obj["channel_id"] as? String,
+               let callId = obj["call_id"] as? String,
+               let participantIds = obj["participant_ids"] as? [String] {
+                onCallParticipantsChanged?(WSCallParticipantsChanged(
+                    channelId: channelId, callId: callId, participantIds: participantIds
                 ))
             }
         case "notification":
