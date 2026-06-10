@@ -666,7 +666,32 @@ struct ProjectsLibraryView: View {
                         Button(p.isPinned ?? false ? "Unpin" : "Pin") { Task { await togglePin(p) } }
                         Divider()
                         AuxOpenMenuButtons(target: .project(p.id))
+                        Divider()
+                        Button("Archive") { Task { await archive(p) } }
+                        Button("Delete…") { confirmDelete(p) }
                     }
+            }
+            // Panel nav for the open collab project — replaces the horizontal
+            // tab strip that used to sit above the detail pane. Switching goes
+            // through pendingProjectPanel (the deep-link relay the detail view
+            // already consumes); highlight mirrors activeProjectPanel.
+            if let pid = appState.selectedProjectId,
+               projects.first(where: { $0.id == pid })?.projectType == "collab" {
+                Divider().opacity(0.25).padding(.vertical, 6)
+                Text("PROJECT")
+                    .font(.system(size: 9, weight: .semibold))
+                    .tracking(0.6)
+                    .foregroundColor(appState.themeTextSecondary)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                ForEach(CollabRightPanel.allCases.filter { $0 != .threads }) { panel in
+                    MWHubRailRow(icon: panel.icon,
+                                 title: panel.label,
+                                 selected: appState.activeProjectPanel == panel) {
+                        appState.pendingProjectPanel = panel
+                    }
+                }
             }
         }
     }
@@ -768,6 +793,38 @@ struct ProjectsLibraryView: View {
             Button(p.isPinned ?? false ? "Unpin" : "Pin") { Task { await togglePin(p) } }
             Divider()
             AuxOpenMenuButtons(target: .project(p.id))
+            Divider()
+            Button("Archive") { Task { await archive(p) } }
+            Button("Delete…") { confirmDelete(p) }
+        }
+    }
+
+    private func archive(_ p: MWProject) async {
+        try? await MatchaWorkService.shared.archiveProject(id: p.id)
+        await MainActor.run {
+            if appState.selectedProjectId == p.id { appState.selectedProjectId = nil }
+            appState.projectsListGeneration &+= 1
+        }
+        await load()
+    }
+
+    /// Permanent delete behind an explicit modal confirm — same pattern as the
+    /// sidebar list's Delete… (project + sections + threads, irreversible).
+    private func confirmDelete(_ p: MWProject) {
+        let alert = NSAlert()
+        alert.messageText = "Delete \"\(p.title)\"?"
+        alert.informativeText = "Permanently deletes the project, its sections, and all associated threads and messages. Cannot be undone."
+        alert.alertStyle = .critical
+        alert.addButton(withTitle: "Delete Permanently")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        Task {
+            try? await MatchaWorkService.shared.deleteProject(id: p.id)
+            await MainActor.run {
+                if appState.selectedProjectId == p.id { appState.selectedProjectId = nil }
+                appState.projectsListGeneration &+= 1
+            }
+            await load()
         }
     }
 

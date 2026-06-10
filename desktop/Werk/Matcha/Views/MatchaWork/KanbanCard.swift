@@ -77,7 +77,7 @@ struct KanbanCardView: View {
             .padding(.vertical, 10)
             .background(headerTint)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 9) {
                 if let note = task.progressNote, !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     HStack(spacing: 4) {
                         Image(systemName: "location.north.line")
@@ -307,7 +307,7 @@ struct KanbanCardView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
-            .padding(.top, 6)
+            .padding(.top, 8)
         }
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .elevatedCard(cornerRadius: 8)

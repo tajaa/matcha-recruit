@@ -283,9 +283,7 @@ struct KanbanBoardView: View {
                         .padding(.top, 4)
                         .padding(.bottom, 4)
                 }
-                if viewModel.project?.projectType == "collab" {
-                    boardPipelinePicker
-                }
+                boardPipelinePicker
                 if isPipeline {
                     pipelineSummaryBar
                 } else {
@@ -481,18 +479,6 @@ struct KanbanBoardView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(.secondary)
             Spacer()
-            // Board ⇄ List layout toggle — same tickets, columns vs flat rows.
-            HStack(spacing: 2) {
-                layoutButton(icon: "square.grid.2x2", isActive: !showListView, help: "Board layout") {
-                    showListView = false
-                }
-                layoutButton(icon: "list.bullet", isActive: showListView, help: "List layout — linear view with a Mine filter") {
-                    showListView = true
-                }
-            }
-            .padding(2)
-            .background(appState.themeText.opacity(0.05))
-            .cornerRadius(6)
             Button { Task { await viewModel.loadTasks() } } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 10))
@@ -505,24 +491,14 @@ struct KanbanBoardView: View {
         .padding(.vertical, 8)
     }
 
-    private func layoutButton(icon: String, isActive: Bool, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 10, weight: .medium))
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(isActive ? appState.themeAccent.opacity(0.15) : Color.clear)
-                .foregroundColor(isActive ? appState.themeAccent : .secondary)
-                .cornerRadius(4)
-        }
-        .buttonStyle(.plain)
-        .help(help)
-    }
-
     private var boardPipelinePicker: some View {
         HStack(spacing: 0) {
             viewModeButton("Board", mode: .board, icon: "square.grid.2x2")
-            viewModeButton("Pipeline", mode: .pipeline, icon: "dollarsign.circle")
+            // Pipeline only exists for collab projects; Board/List for all.
+            if viewModel.project?.projectType == "collab" {
+                viewModeButton("Pipeline", mode: .pipeline, icon: "dollarsign.circle")
+            }
+            listModeButton
             Spacer()
         }
         .padding(.horizontal, 12)
@@ -530,8 +506,10 @@ struct KanbanBoardView: View {
     }
 
     private func viewModeButton(_ label: String, mode: ViewMode, icon: String) -> some View {
-        Button {
+        let active = viewMode == mode && !showListView
+        return Button {
             viewMode = mode
+            showListView = false
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: icon).font(.system(size: 10))
@@ -539,8 +517,27 @@ struct KanbanBoardView: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(viewMode == mode ? appState.themeAccent.opacity(0.15) : Color.clear)
-            .foregroundColor(viewMode == mode ? appState.themeAccent : .secondary)
+            .background(active ? appState.themeAccent.opacity(0.15) : Color.clear)
+            .foregroundColor(active ? appState.themeAccent : .secondary)
+            .cornerRadius(5)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Linear layout of the same tickets — columns become sections with a
+    /// Mine filter (KanbanListView).
+    private var listModeButton: some View {
+        Button {
+            showListView = true
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "list.bullet").font(.system(size: 10))
+                Text("List").font(.system(size: 11, weight: .medium))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(showListView ? appState.themeAccent.opacity(0.15) : Color.clear)
+            .foregroundColor(showListView ? appState.themeAccent : .secondary)
             .cornerRadius(5)
         }
         .buttonStyle(.plain)
