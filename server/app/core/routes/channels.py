@@ -226,6 +226,11 @@ class ChannelSummary(BaseModel):
     last_message_preview: Optional[str] = None
     is_member: bool = True
     my_role: Optional[str] = None  # current user's channel_role (owner/moderator/member)
+    # Channel creator — drives the founder chip on hub cards and the
+    # mine/joined/discover grouping (clients compare created_by to self).
+    created_by: Optional[UUID] = None
+    created_by_name: Optional[str] = None
+    created_by_avatar_url: Optional[str] = None
     # Populated when the channel is the auto-created discussion channel for a
     # matcha-work collab project (linked via mw_projects.project_data
     # ->>'discussion_channel_id'). Sidebar surfaces a "collab" badge.
@@ -347,6 +352,16 @@ async def list_channels(
                     ORDER BY msg3.created_at DESC LIMIT 1) AS last_message_preview,
                    cm.user_id IS NOT NULL AS is_member,
                    cm.role AS my_role,
+                   ch.created_by,
+                   -- Scalar subqueries (not joins): a creator with multiple
+                   -- employees rows must not fan the channel list out.
+                   (SELECT {_USER_NAME_EXPR}
+                    FROM users u
+                    LEFT JOIN clients c ON c.user_id = u.id
+                    LEFT JOIN employees e ON e.user_id = u.id
+                    LEFT JOIN admins a ON a.user_id = u.id
+                    WHERE u.id = ch.created_by LIMIT 1) AS created_by_name,
+                   (SELECT u2.avatar_url FROM users u2 WHERE u2.id = ch.created_by) AS created_by_avatar_url,
                    proj.id AS project_id,
                    proj.title AS project_title
             FROM channels ch
@@ -382,6 +397,9 @@ async def list_channels(
                 last_message_preview=r["last_message_preview"],
                 is_member=r["is_member"],
                 my_role=r["my_role"],
+                created_by=r["created_by"],
+                created_by_name=r["created_by_name"],
+                created_by_avatar_url=r["created_by_avatar_url"],
                 project_id=r["project_id"],
                 project_title=r["project_title"],
             )
@@ -451,7 +469,15 @@ async def discover_public_channels(
                     WHERE msg2.channel_id = ch.id) AS last_message_at,
                    NULL::text AS last_message_preview,
                    FALSE AS is_member,
-                   NULL::text AS my_role
+                   NULL::text AS my_role,
+                   ch.created_by,
+                   (SELECT {_USER_NAME_EXPR}
+                    FROM users u
+                    LEFT JOIN clients c ON c.user_id = u.id
+                    LEFT JOIN employees e ON e.user_id = u.id
+                    LEFT JOIN admins a ON a.user_id = u.id
+                    WHERE u.id = ch.created_by LIMIT 1) AS created_by_name,
+                   (SELECT u2.avatar_url FROM users u2 WHERE u2.id = ch.created_by) AS created_by_avatar_url
             FROM channels ch
             JOIN companies comp ON comp.id = ch.company_id
             LEFT JOIN channel_members cm ON cm.channel_id = ch.id AND cm.user_id = $1
@@ -478,6 +504,9 @@ async def discover_public_channels(
                 last_message_preview=r["last_message_preview"],
                 is_member=r["is_member"],
                 my_role=r["my_role"],
+                created_by=r["created_by"],
+                created_by_name=r["created_by_name"],
+                created_by_avatar_url=r["created_by_avatar_url"],
             )
             for r in rows
         ]

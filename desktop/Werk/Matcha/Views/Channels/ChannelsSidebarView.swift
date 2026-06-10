@@ -666,18 +666,17 @@ struct ChannelsLibraryView: View {
     @Environment(AppState.self) private var appState
 
     @State private var channels: [ChannelSummary] = []
+    /// Public channels the user could join (GET /channels/discover —
+    /// already excludes memberships). Third hub section.
+    @State private var discover: [ChannelSummary] = []
     @State private var isLoading = true
     @State private var search = ""
-    @State private var filter: Filter = .mine
     @State private var showCreate = false
     @State private var starGen = 0
     @State private var railSearch = ""
     @State private var railCollapsed = false
-
-    enum Filter: String, CaseIterable, Identifiable {
-        case mine = "Mine", starred = "Starred"
-        var id: String { rawValue }
-    }
+    /// Channel id with a join request in flight (spinner on that card).
+    @State private var joiningId: String?
 
     private let columns = [GridItem(.adaptive(minimum: 220, maximum: 300), spacing: 14)]
 
@@ -747,7 +746,8 @@ struct ChannelsLibraryView: View {
             }
             ForEach(railChannels) { c in
                 let starred = ChannelStarStore.shared.isStarred(c.id)
-                MWHubRailRow(icon: starred ? "star.fill" : "number",
+                // Crown marks channels you run, so yours read at a glance.
+                MWHubRailRow(icon: starred ? "star.fill" : (c.myRole == "owner" ? "crown" : "number"),
                              title: c.name,
                              selected: appState.selectedChannelId == c.id,
                              accent: starred,
@@ -761,13 +761,34 @@ struct ChannelsLibraryView: View {
         }
     }
 
-    private var shown: [ChannelSummary] {
+    // ── Sections — the three kinds of channels ──────────────────────────
+    // "Yours" = channels you own; "Joined" = member but someone else runs it;
+    // "Open to join" = public channels from /discover you're not in yet.
+
+    private func searched(_ list: [ChannelSummary]) -> [ChannelSummary] {
+        guard !search.isEmpty else { return list }
+        return list.filter {
+            $0.name.localizedCaseInsensitiveContains(search)
+                || ($0.description?.localizedCaseInsensitiveContains(search) ?? false)
+        }
+    }
+
+    private func sortedByStar(_ list: [ChannelSummary]) -> [ChannelSummary] {
         _ = starGen
         let stars = ChannelStarStore.shared
-        var out = channels.filter { $0.isMember }
-        if filter == .starred { out = out.filter { stars.isStarred($0.id) } }
-        if !search.isEmpty { out = out.filter { $0.name.localizedCaseInsensitiveContains(search) } }
-        return out.sorted { (stars.isStarred($0.id) ? 1 : 0, $0.lastMessageAt ?? "") > (stars.isStarred($1.id) ? 1 : 0, $1.lastMessageAt ?? "") }
+        return list.sorted { (stars.isStarred($0.id) ? 1 : 0, $0.lastMessageAt ?? "") > (stars.isStarred($1.id) ? 1 : 0, $1.lastMessageAt ?? "") }
+    }
+
+    private var mineChannels: [ChannelSummary] {
+        sortedByStar(searched(channels.filter { $0.isMember && $0.myRole == "owner" }))
+    }
+
+    private var joinedChannels: [ChannelSummary] {
+        sortedByStar(searched(channels.filter { $0.isMember && $0.myRole != "owner" }))
+    }
+
+    private var joinableChannels: [ChannelSummary] {
+        searched(discover)
     }
 
     private var header: some View {
@@ -793,7 +814,6 @@ struct ChannelsLibraryView: View {
                 .buttonStyle(.plain)
             }
             HStack(spacing: 8) {
-                ForEach(Filter.allCases) { f in MWHubPill(label: f.rawValue, selected: filter == f) { filter = f } }
                 Spacer()
                 MWHubSearch(text: $search)
             }
@@ -804,30 +824,77 @@ struct ChannelsLibraryView: View {
     @ViewBuilder private var content: some View {
         if isLoading {
             Spacer(); ProgressView().tint(appState.themeTextSecondary); Spacer()
-        } else if shown.isEmpty {
+        } else if mineChannels.isEmpty && joinedChannels.isEmpty && joinableChannels.isEmpty {
             MWHubEmpty(icon: "number",
-                       title: filter == .starred ? "No starred channels" : "No channels yet",
+                       title: search.isEmpty ? "No channels yet" : "No channels match",
                        cta: "New Channel") { showCreate = true }
         } else {
             ScrollView {
-                LazyVGrid(columns: columns, spacing: 14) {
-                    ForEach(shown) { c in card(c) }
+                VStack(alignment: .leading, spacing: 22) {
+                    section(title: "Started by you", icon: "crown.fill",
+                            subtitle: "Channels you run", items: mineChannels, joinable: false)
+                    section(title: "Joined", icon: "person.2.fill",
+                            subtitle: "Channels run by others", items: joinedChannels, joinable: false)
+                    section(title: "Open to join", icon: "sparkles",
+                            subtitle: "Public channels from the community", items: joinableChannels, joinable: true)
                 }
                 .padding(20)
             }
         }
     }
 
-    private func card(_ c: ChannelSummary) -> some View {
+    @ViewBuilder
+    private func section(title: String, icon: String, subtitle: String,
+                         items: [ChannelSummary], joinable: Bool) -> some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 7) {
+                    Image(systemName: icon)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(appState.themeAccent)
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(appState.themeText)
+                    Text("\(items.count)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(appState.themeTextSecondary)
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(Capsule().fill(appState.themeText.opacity(0.07)))
+                    Text(subtitle)
+                        .font(.system(size: 11))
+                        .foregroundColor(appState.themeTextSecondary)
+                    Spacer()
+                }
+                LazyVGrid(columns: columns, spacing: 14) {
+                    ForEach(items) { c in card(c, joinable: joinable) }
+                }
+            }
+        }
+    }
+
+    private func card(_ c: ChannelSummary, joinable: Bool) -> some View {
         let starred = ChannelStarStore.shared.isStarred(c.id)
-        return Button { open(c.id) } label: {
+        let isMine = c.myRole == "owner"
+        return Button {
+            if joinable { join(c) } else { open(c.id) }
+        } label: {
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: starred ? "star.fill" : "number")
-                        .font(.system(size: 14)).foregroundColor(starred ? appState.themeAccent : appState.themeTextSecondary)
+                // Founder row — who runs this channel.
+                HStack(spacing: 7) {
+                    ChannelAvatarView(senderId: c.createdById ?? c.id,
+                                      payloadURL: c.createdByAvatarUrl,
+                                      name: c.createdByName ?? c.name,
+                                      size: 22)
+                    Text(isMine ? "Run by you" : "by \(c.createdByName ?? "Unknown")")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(isMine ? appState.themeAccent : appState.themeTextSecondary)
+                        .lineLimit(1)
                     Spacer()
                     if c.isPaid {
                         Image(systemName: "dollarsign.circle.fill").font(.system(size: 10)).foregroundColor(appState.themeTextSecondary)
+                    }
+                    if c.visibility == "private" {
+                        Image(systemName: "lock.fill").font(.system(size: 9)).foregroundColor(appState.themeTextSecondary)
                     }
                     if c.unreadCount > 0 {
                         Text("\(min(c.unreadCount, 99))")
@@ -836,22 +903,76 @@ struct ChannelsLibraryView: View {
                             .background(Capsule().fill(appState.themeAccent))
                     }
                 }
-                Text(c.name).font(.system(size: 13, weight: .semibold)).foregroundColor(appState.themeText).lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 5) {
+                    Image(systemName: starred ? "star.fill" : "number")
+                        .font(.system(size: 12)).foregroundColor(starred ? appState.themeAccent : appState.themeTextSecondary)
+                    Text(c.name).font(.system(size: 13, weight: .semibold)).foregroundColor(appState.themeText).lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 if let d = c.description, !d.isEmpty {
                     Text(d).font(.system(size: 11)).foregroundColor(appState.themeTextSecondary).lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Spacer(minLength: 0)
+                // Footer: members · topic · join affordance.
+                HStack(spacing: 8) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "person.2").font(.system(size: 9))
+                        Text("\(c.memberCount)").font(.system(size: 10, weight: .medium))
+                    }
+                    .foregroundColor(appState.themeTextSecondary)
+                    if let cat = c.category, !cat.isEmpty {
+                        Text(cat.capitalized)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(appState.themeTextSecondary)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Capsule().fill(appState.themeText.opacity(0.06)))
+                    }
+                    Spacer()
+                    if joinable {
+                        if joiningId == c.id {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Text(c.isPaid ? "View" : "Join")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(appState.themeOnAccent)
+                                .padding(.horizontal, 10).padding(.vertical, 3)
+                                .background(Capsule().fill(appState.themeAccent))
+                        }
+                    }
+                }
             }
-            .padding(14).frame(height: 108, alignment: .top)
+            .padding(14).frame(height: 132, alignment: .top)
             .background(RoundedRectangle(cornerRadius: 10).fill(appState.themeCard))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(appState.themeBorder, lineWidth: 1))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(isMine ? appState.themeAccent.opacity(0.35) : appState.themeBorder, lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
         .contextMenu {
-            Button(starred ? "Unstar" : "Star") {
-                ChannelStarStore.shared.toggle(c.id); starGen += 1
+            if !joinable {
+                Button(starred ? "Unstar" : "Star") {
+                    ChannelStarStore.shared.toggle(c.id); starGen += 1
+                }
+            }
+        }
+    }
+
+    /// Free public channel → join inline and open it. Paid → route to the
+    /// Browse surface, which owns the subscribe flow.
+    private func join(_ c: ChannelSummary) {
+        if c.isPaid { browse(); return }
+        guard joiningId == nil else { return }
+        joiningId = c.id
+        Task {
+            defer { joiningId = nil }
+            do {
+                try await ChannelsService.shared.joinChannel(id: c.id)
+                await load()
+                open(c.id)
+            } catch {
+                print("[ChannelsHub] join failed: \(error)")
             }
         }
     }
@@ -870,7 +991,10 @@ struct ChannelsLibraryView: View {
     }
 
     private func load() async {
-        let list = (try? await ChannelsService.shared.listChannels()) ?? []
-        await MainActor.run { channels = list; isLoading = false }
+        async let mineTask = ChannelsService.shared.listChannels()
+        async let discoverTask = ChannelsService.shared.discoverChannels()
+        let list = (try? await mineTask) ?? []
+        let open = (try? await discoverTask) ?? []
+        await MainActor.run { channels = list; discover = open; isLoading = false }
     }
 }

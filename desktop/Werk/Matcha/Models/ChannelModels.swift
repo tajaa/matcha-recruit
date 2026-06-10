@@ -223,6 +223,10 @@ struct ChannelSummary: Codable, Identifiable, Hashable {
     let lastMessagePreview: String?
     let isMember: Bool
     let myRole: String?
+    /// Channel creator — founder chip on hub cards + mine/joined grouping.
+    let createdById: String?
+    let createdByName: String?
+    let createdByAvatarUrl: String?
     /// Set when this channel is the auto-created discussion channel for a
     /// matcha-work collab project. Sidebar renders a "collab" badge.
     let projectId: String?
@@ -239,6 +243,9 @@ struct ChannelSummary: Codable, Identifiable, Hashable {
         case lastMessagePreview = "last_message_preview"
         case isMember = "is_member"
         case myRole = "my_role"
+        case createdById = "created_by"
+        case createdByName = "created_by_name"
+        case createdByAvatarUrl = "created_by_avatar_url"
         case projectId = "project_id"
         case projectTitle = "project_title"
     }
