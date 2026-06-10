@@ -252,15 +252,15 @@ enum JournalKind: String, CaseIterable, Identifiable {
     var slashBlocks: [SlashBlock] {
         switch self {
         case .blog:
-            return [.heading, .subheading, .image, .quote, .divider, .bullet, .numbered, .code, .link]
+            return [.heading, .subheading, .image, .quote, .divider, .bullet, .numbered, .code, .math, .diagram, .link]
         case .novel:
             return [.chapter, .sceneBreak, .quote, .image]
         case .note:
-            return [.heading, .bullet, .todo, .quote, .code, .image, .divider, .link]
+            return [.heading, .bullet, .todo, .quote, .code, .math, .diagram, .image, .divider, .link]
         case .todo:
             return [.todo, .heading, .bullet, .divider]
         case .journal:
-            return [.heading, .bullet, .todo, .quote, .image, .divider]
+            return [.heading, .bullet, .todo, .quote, .code, .math, .diagram, .image, .divider]
         case .screenplay:
             return []
         }
@@ -301,6 +301,8 @@ extension SlashBlock {
     static let link       = SlashBlock(id: "link",       title: "Link",           subtitle: "Insert a hyperlink",  icon: "link",                                   keywords: ["url", "href"],          insert: .link)
     static let chapter    = SlashBlock(id: "chapter",    title: "Chapter",        subtitle: "New chapter heading", icon: "book",                                   keywords: ["heading"],              insert: .linePrefix("# Chapter "))
     static let sceneBreak = SlashBlock(id: "sceneBreak", title: "Scene break",    subtitle: "Section divider",     icon: "arrow.left.and.right",                   keywords: ["divider", "hr"],        insert: .snippet("\n---\n"))
+    static let math       = SlashBlock(id: "math",       title: "Math (LaTeX)",   subtitle: "Display equation",    icon: "function",                               keywords: ["latex", "equation", "formula", "tex"], insert: .snippet("\n$$\n\n$$\n"))
+    static let diagram    = SlashBlock(id: "diagram",    title: "Diagram (Mermaid)", subtitle: "Flowchart / graph", icon: "point.3.connected.trianglepath.dotted", keywords: ["mermaid", "graph", "chart", "flow"], insert: .snippet("\n```mermaid\ngraph TD\n  A[Start] --> B[End]\n```\n"))
 }
 
 // MARK: - Journals workspace (macOS Notes / Evernote, three columns)

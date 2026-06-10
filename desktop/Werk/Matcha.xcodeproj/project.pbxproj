@@ -179,6 +179,8 @@
 		G1G2G3000000000000000003 /* JournalEditorToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000004 /* JournalEditorToolbar.swift */; };
 		G1G2G3000000000000000005 /* JournalContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000006 /* JournalContentView.swift */; };
 		G1G2G3000000000000000007 /* JournalStylePopover.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000008 /* JournalStylePopover.swift */; };
+		G1G2G3000000000000000009 /* MarkdownWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = G1G2G300000000000000000A /* MarkdownWebView.swift */; };
+		G1G2G3000000000000000011 /* JournalPreview in Resources */ = {isa = PBXBuildFile; fileRef = G1G2G3000000000000000010 /* JournalPreview */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -354,6 +356,8 @@
 		G1G2G3000000000000000004 /* JournalEditorToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalEditorToolbar.swift; sourceTree = "<group>"; };
 		G1G2G3000000000000000006 /* JournalContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalContentView.swift; sourceTree = "<group>"; };
 		G1G2G3000000000000000008 /* JournalStylePopover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalStylePopover.swift; sourceTree = "<group>"; };
+		G1G2G300000000000000000A /* MarkdownWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownWebView.swift; sourceTree = "<group>"; };
+		G1G2G3000000000000000010 /* JournalPreview */ = {isa = PBXFileReference; lastKnownFileType = folder; path = JournalPreview; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -502,6 +506,7 @@
 			isa = PBXGroup;
 			children = (
 				043A0A515D971904874F82FA /* Assets.xcassets */,
+				G1G2G3000000000000000010 /* JournalPreview */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -720,6 +725,7 @@
 				G1G2G3000000000000000004 /* JournalEditorToolbar.swift */,
 				G1G2G3000000000000000006 /* JournalContentView.swift */,
 				G1G2G3000000000000000008 /* JournalStylePopover.swift */,
+				G1G2G300000000000000000A /* MarkdownWebView.swift */,
 				D495ED9EB731DFE8E7E99AB7 /* Screenplay.swift */,
 				ACAA99DB31B29B0F6B72BB8E /* ScreenplayEditorView.swift */,
 				C8716FBE42A3D81F48ED44B1 /* ScreenplayPaginator.swift */,
@@ -802,6 +808,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				84947A5F80A1EC7B15C1B8E9 /* Assets.xcassets in Resources */,
+				G1G2G3000000000000000011 /* JournalPreview in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -952,6 +959,7 @@
 				G1G2G3000000000000000003 /* JournalEditorToolbar.swift in Sources */,
 				G1G2G3000000000000000005 /* JournalContentView.swift in Sources */,
 				G1G2G3000000000000000007 /* JournalStylePopover.swift in Sources */,
+				G1G2G3000000000000000009 /* MarkdownWebView.swift in Sources */,
 				0F5C621C255ED1D1ED92354A /* CommonModels.swift in Sources */,
 				8E5D6EC70EEDBE08AE76BDEA /* ThreadModels.swift in Sources */,
 				6F4D96E081CDF78AEAF3362F /* ProjectModels.swift in Sources */,

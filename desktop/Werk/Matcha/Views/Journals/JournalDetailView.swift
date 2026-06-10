@@ -110,17 +110,17 @@ struct JournalDetailView: View {
                     textColor: appState.themeText,
                 )
             } else if docReadingMode {
-                ScrollView {
-                    JournalContentView(
-                        content: docContent,
-                        fontFamily: effectiveFontFamily,
-                        fontSize: fontSize,
-                        lineSpacing: lineSpacing,
-                        baseColor: appState.themeText,
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
-                }
+                // Full reading preview: markdown + LaTeX + syntax-highlighted
+                // code + Mermaid diagrams, rendered offline in a WebView.
+                MarkdownWebView(
+                    content: docContent,
+                    textHex: MarkdownWebView.hex(appState.themeText),
+                    secondaryHex: MarkdownWebView.hex(appState.themeTextSecondary),
+                    accentHex: MarkdownWebView.hex(appState.themeAccent),
+                    dark: MarkdownWebView.isDark(text: appState.themeText),
+                    fontSize: fontSize,
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 JournalEditorToolbar(controller: pageController)
                     .padding(.horizontal, 14)

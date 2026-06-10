@@ -37,6 +37,10 @@ struct JournalEditorToolbar: View {
                 divider
                 btn("curlybraces", help: "Inline code") { controller.toggleWrap(prefix: "`") }
                 btn("chevron.left.forwardslash.chevron.right", help: "Code block") { controller.insertCodeBlock() }
+                btn("function", help: "Math (LaTeX)") { controller.insertSnippet("\n$$\n\n$$\n") }
+                btn("point.3.connected.trianglepath.dotted", help: "Diagram (Mermaid)") {
+                    controller.insertSnippet("\n```mermaid\ngraph TD\n  A[Start] --> B[End]\n```\n")
+                }
                 btn("link", help: "Link (⌘K)") { controller.wrapLink() }
                     .keyboardShortcut("k", modifiers: .command)
                 btn("photo", help: "Insert image") { controller.pickImage() }
