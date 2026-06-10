@@ -30,6 +30,7 @@ struct ProductivityCard: Codable, Identifiable, Hashable {
     var notes: String?
     var boardColumn: String
     var position: Int
+    var dueDate: String?              // "yyyy-MM-dd" — calendar placement; nil = board-only
     let sourceJournalId: String?
     let sourceExcerpt: String?
     let completedAt: String?
@@ -38,6 +39,7 @@ struct ProductivityCard: Codable, Identifiable, Hashable {
         case id, title, notes, position
         case boardId = "board_id"
         case boardColumn = "board_column"
+        case dueDate = "due_date"
         case sourceJournalId = "source_journal_id"
         case sourceExcerpt = "source_excerpt"
         case completedAt = "completed_at"

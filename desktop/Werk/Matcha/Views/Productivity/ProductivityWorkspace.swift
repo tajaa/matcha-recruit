@@ -8,6 +8,9 @@ struct ProductivityWorkspace: View {
     @Environment(AppState.self) private var appState
     @State private var vm = ProductivityViewModel()
     @State private var railCollapsed = false
+    @State private var mode: BoardMode = .board
+
+    private enum BoardMode: String, CaseIterable { case board = "Board", calendar = "Calendar" }
 
     var body: some View {
         HSplitView {
@@ -95,27 +98,35 @@ struct ProductivityWorkspace: View {
             VStack(spacing: 0) {
                 boardHeader
                 Divider().opacity(0.2)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 12) {
-                        ForEach(ProductivityColumn.allCases) { column in
-                            ProductivityColumnView(
-                                column: column,
-                                cards: vm.cards(in: column),
-                                accent: appState.themeAccent,
-                                onAdd: { title in Task { await vm.addCard(to: column, title: title) } },
-                                onDrop: { cardId in Task { await vm.moveCard(cardId, to: column) } },
-                                onOpenSource: { jid in openJournal(jid) },
-                                onRename: { id, title in Task { await vm.renameCard(id, title: title) } },
-                                onDelete: { id in Task { await vm.deleteCard(id) } },
-                                onToggleDone: { card in Task { await vm.toggleDone(card) } },
-                            )
-                            .frame(width: 280)
+                if mode == .calendar {
+                    ProductivityCalendarView(
+                        vm: vm,
+                        onOpenSource: { jid in openJournal(jid) },
+                    )
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 12) {
+                            ForEach(ProductivityColumn.allCases) { column in
+                                ProductivityColumnView(
+                                    column: column,
+                                    cards: vm.cards(in: column),
+                                    accent: appState.themeAccent,
+                                    onAdd: { title in Task { await vm.addCard(to: column, title: title) } },
+                                    onDrop: { cardId in Task { await vm.moveCard(cardId, to: column) } },
+                                    onOpenSource: { jid in openJournal(jid) },
+                                    onRename: { id, title in Task { await vm.renameCard(id, title: title) } },
+                                    onDelete: { id in Task { await vm.deleteCard(id) } },
+                                    onToggleDone: { card in Task { await vm.toggleDone(card) } },
+                                    onSetDate: { id, date in Task { await vm.setCardDate(id, to: date) } },
+                                )
+                                .frame(width: 280)
+                            }
                         }
+                        .padding(14)
                     }
-                    .padding(14)
                 }
-                .id(boardId)
             }
+            .id(boardId)
         } else {
             emptyState(icon: "rectangle.3.group", title: "Select a board", sub: "or create one with +.")
         }
@@ -135,6 +146,12 @@ struct ProductivityWorkspace: View {
                     .foregroundColor(appState.themeText)
             }
             Spacer()
+            Picker("", selection: $mode) {
+                ForEach(BoardMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 170)
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
     }
@@ -169,6 +186,7 @@ private struct ProductivityColumnView: View {
     let onRename: (String, String) -> Void
     let onDelete: (String) -> Void
     let onToggleDone: (ProductivityCard) -> Void
+    let onSetDate: (String, Date?) -> Void
 
     @State private var adding = false
     @State private var draftTitle = ""
@@ -200,6 +218,7 @@ private struct ProductivityColumnView: View {
                     onRename: onRename,
                     onDelete: onDelete,
                     onToggleDone: onToggleDone,
+                    onSetDate: onSetDate,
                 )
                 .draggable(card.id)
             }
@@ -259,6 +278,7 @@ private struct ProductivityCardView: View {
     let onRename: (String, String) -> Void
     let onDelete: (String) -> Void
     let onToggleDone: (ProductivityCard) -> Void
+    let onSetDate: (String, Date?) -> Void
 
     @State private var renaming = false
     @State private var editText = ""
@@ -292,16 +312,25 @@ private struct ProductivityCardView: View {
                         .opacity(isDone ? 0.6 : 1)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if let jid = card.sourceJournalId {
-                    Button { onOpenSource(jid) } label: {
+                HStack(spacing: 6) {
+                    if let due = card.dueDate, let label = Self.dueLabel(due) {
                         HStack(spacing: 3) {
-                            Image(systemName: "book.closed").font(.system(size: 8))
-                            Text("From journal").font(.system(size: 9))
+                            Image(systemName: "calendar").font(.system(size: 8))
+                            Text(label).font(.system(size: 9))
                         }
-                        .foregroundColor(appState.themeAccent.opacity(0.85))
+                        .foregroundColor(appState.themeTextSecondary)
                     }
-                    .buttonStyle(.plain)
-                    .help(card.sourceExcerpt ?? "Open the source journal")
+                    if let jid = card.sourceJournalId {
+                        Button { onOpenSource(jid) } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "book.closed").font(.system(size: 8))
+                                Text("From journal").font(.system(size: 9))
+                            }
+                            .foregroundColor(appState.themeAccent.opacity(0.85))
+                        }
+                        .buttonStyle(.plain)
+                        .help(card.sourceExcerpt ?? "Open the source journal")
+                    }
                 }
             }
             Spacer(minLength: 0)
@@ -311,8 +340,20 @@ private struct ProductivityCardView: View {
         .background(RoundedRectangle(cornerRadius: 7).fill(appState.themeBg.opacity(0.65)))
         .contextMenu {
             Button("Rename") { editText = card.title; renaming = true; focused = true }
+            if card.dueDate == nil {
+                Button("Add to calendar (today)") { onSetDate(card.id, Date()) }
+            } else {
+                Button("Remove from calendar") { onSetDate(card.id, nil) }
+            }
             Button("Delete", role: .destructive) { onDelete(card.id) }
         }
+    }
+
+    /// "Jun 12" from a "yyyy-MM-dd" string.
+    static func dueLabel(_ ymd: String) -> String? {
+        guard let d = ProductivityViewModel.ymdFormatter.date(from: ymd) else { return nil }
+        let f = DateFormatter(); f.dateFormat = "MMM d"
+        return f.string(from: d)
     }
 
     private func commit() {
@@ -320,6 +361,160 @@ private struct ProductivityCardView: View {
         renaming = false
         guard !t.isEmpty, t != card.title else { return }
         onRename(card.id, t)
+    }
+}
+
+// MARK: - Calendar
+
+private struct ProductivityCalendarView: View {
+    @Environment(AppState.self) private var appState
+    let vm: ProductivityViewModel
+    let onOpenSource: (String) -> Void
+
+    @State private var monthAnchor = Date()
+    @State private var selectedDay = Date()
+    @State private var draft = ""
+    @FocusState private var addFocused: Bool
+
+    private let cal = Calendar.current
+    private static let monthFmt: DateFormatter = { let f = DateFormatter(); f.dateFormat = "MMMM yyyy"; return f }()
+    private static let longDayFmt: DateFormatter = { let f = DateFormatter(); f.dateFormat = "MMM d"; return f }()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            addBar
+            weekdayHeader
+            Divider().opacity(0.15)
+            grid
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Button { shift(-1) } label: { Image(systemName: "chevron.left") }.buttonStyle(.plain)
+            Text(Self.monthFmt.string(from: monthAnchor))
+                .font(.system(size: 14, weight: .semibold)).foregroundColor(appState.themeText)
+                .frame(minWidth: 130)
+            Button { shift(1) } label: { Image(systemName: "chevron.right") }.buttonStyle(.plain)
+            Spacer()
+            Button("Today") { monthAnchor = Date(); selectedDay = Date() }
+                .buttonStyle(.plain).font(.system(size: 11)).foregroundColor(appState.themeAccent)
+        }
+        .foregroundColor(appState.themeTextSecondary)
+        .padding(.horizontal, 14).padding(.vertical, 10)
+    }
+
+    private var addBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "plus.circle").font(.system(size: 11)).foregroundColor(appState.themeAccent)
+            TextField("Add a card on \(Self.longDayFmt.string(from: selectedDay))…", text: $draft)
+                .textFieldStyle(.plain).font(.system(size: 12)).foregroundColor(appState.themeText)
+                .focused($addFocused)
+                .onSubmit(addCard)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(RoundedRectangle(cornerRadius: 7).fill(appState.themeCard.opacity(0.5)))
+        .padding(.horizontal, 14).padding(.bottom, 8)
+    }
+
+    private var weekdayHeader: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(weekdaySymbols.enumerated()), id: \.offset) { _, s in
+                Text(s).font(.system(size: 10, weight: .semibold)).foregroundColor(appState.themeTextSecondary)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.horizontal, 10).padding(.bottom, 4)
+    }
+
+    private var grid: some View {
+        let cols = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
+        return ScrollView {
+            LazyVGrid(columns: cols, spacing: 4) {
+                ForEach(days, id: \.self) { day in dayCell(day) }
+            }
+            .padding(.horizontal, 10).padding(.bottom, 12)
+        }
+    }
+
+    private func dayCell(_ day: Date) -> some View {
+        let inMonth = cal.isDate(day, equalTo: monthAnchor, toGranularity: .month)
+        let isToday = cal.isDateInToday(day)
+        let isSelected = cal.isDate(day, inSameDayAs: selectedDay)
+        let cards = vm.cardsOn(day)
+        return VStack(alignment: .leading, spacing: 2) {
+            Text("\(cal.component(.day, from: day))")
+                .font(.system(size: 11, weight: isToday ? .bold : .regular))
+                .foregroundColor(isToday ? appState.themeAccent : (inMonth ? appState.themeText : appState.themeTextSecondary.opacity(0.4)))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            ForEach(cards.prefix(4)) { card in calCard(card) }
+            if cards.count > 4 {
+                Text("+\(cards.count - 4) more").font(.system(size: 8)).foregroundColor(appState.themeTextSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(5)
+        .frame(height: 94, alignment: .top)
+        .frame(maxWidth: .infinity)
+        .background(RoundedRectangle(cornerRadius: 6).fill(isSelected ? appState.themeAccent.opacity(0.12) : appState.themeCard.opacity(inMonth ? 0.28 : 0.12)))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(appState.themeAccent.opacity(isSelected ? 0.5 : 0), lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture { selectedDay = day }
+        .dropDestination(for: String.self) { items, _ in
+            guard let id = items.first else { return false }
+            Task { await vm.setCardDate(id, to: day) }
+            return true
+        }
+    }
+
+    private func calCard(_ card: ProductivityCard) -> some View {
+        let done = card.boardColumn == "done"
+        return Text(card.title)
+            .font(.system(size: 9))
+            .foregroundColor(done ? appState.themeTextSecondary : appState.themeText)
+            .strikethrough(done, color: appState.themeTextSecondary)
+            .lineLimit(1)
+            .padding(.horizontal, 4).padding(.vertical, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 3).fill(colorFor(card).opacity(0.22)))
+            .draggable(card.id)
+            .contextMenu {
+                if let jid = card.sourceJournalId { Button("Open source journal") { onOpenSource(jid) } }
+                Button("Remove from calendar") { Task { await vm.setCardDate(card.id, to: nil) } }
+                Button("Delete", role: .destructive) { Task { await vm.deleteCard(card.id) } }
+            }
+    }
+
+    private func colorFor(_ card: ProductivityCard) -> Color {
+        switch card.boardColumn {
+        case "in_progress": return .orange
+        case "done":        return appState.themeTextSecondary
+        default:            return appState.themeAccent
+        }
+    }
+
+    private func shift(_ months: Int) {
+        if let d = cal.date(byAdding: .month, value: months, to: monthAnchor) { monthAnchor = d }
+    }
+    private var weekdaySymbols: [String] {
+        let f = DateFormatter()
+        let syms = f.veryShortStandaloneWeekdaySymbols ?? ["S", "M", "T", "W", "T", "F", "S"]
+        let first = cal.firstWeekday - 1
+        return Array(syms[first...] + syms[..<first])
+    }
+    private var days: [Date] {
+        let comps = cal.dateComponents([.year, .month], from: monthAnchor)
+        guard let first = cal.date(from: comps) else { return [] }
+        let offset = (cal.component(.weekday, from: first) - cal.firstWeekday + 7) % 7
+        guard let start = cal.date(byAdding: .day, value: -offset, to: first) else { return [] }
+        return (0..<42).compactMap { cal.date(byAdding: .day, value: $0, to: start) }
+    }
+    private func addCard() {
+        let t = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft = ""
+        guard !t.isEmpty else { return }
+        Task { await vm.addDatedCard(on: selectedDay, title: t) }
     }
 }
 
@@ -437,5 +632,39 @@ final class ProductivityViewModel {
     /// Cheap board-list refresh so rail counts stay current after card changes.
     private func refreshBoardCounts() async {
         if let updated = try? await MatchaWorkService.shared.listProductivityBoards() { boards = updated }
+    }
+
+    // ── Calendar ────────────────────────────────────────────────────────
+    static let ymdFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX"); return f
+    }()
+    static func ymd(_ date: Date) -> String { ymdFormatter.string(from: date) }
+
+    func cardsOn(_ day: Date) -> [ProductivityCard] {
+        let key = Self.ymd(day)
+        return cardsAll.filter { $0.dueDate == key }.sorted { $0.position < $1.position }
+    }
+
+    /// Set or clear a card's calendar date (drag-to-reschedule, schedule, unschedule).
+    func setCardDate(_ id: String, to date: Date?) async {
+        let iso = date.map { Self.ymd($0) }
+        if let i = cardsAll.firstIndex(where: { $0.id == id }) { cardsAll[i].dueDate = iso }   // optimistic
+        do {
+            let updated = try await MatchaWorkService.shared.setProductivityCardDate(id: id, dueDate: iso)
+            if let i = cardsAll.firstIndex(where: { $0.id == id }) { cardsAll[i] = updated }
+            await refreshBoardCounts()
+        } catch {
+            if let boardId = selectedBoardId { await loadCards(boardId) }
+        }
+    }
+
+    func addDatedCard(on date: Date, title: String) async {
+        guard let boardId = selectedBoardId else { return }
+        do {
+            let card = try await MatchaWorkService.shared.createProductivityCard(
+                boardId: boardId, title: title, column: "todo", dueDate: Self.ymd(date))
+            cardsAll.append(card)
+            await refreshBoardCounts()
+        } catch { self.error = error.localizedDescription }
     }
 }

@@ -92,25 +92,36 @@ struct JournalDetailView: View {
             await vm.uploadImage(data: data, filename: name, mimeType: mime)
         }
         pageController.onCreateTodo = { text in
-            Task { await createTodoFromSelection(text) }
+            Task { await createTodoFromSelection(text, onCalendar: false) }
+        }
+        pageController.onAddToCalendar = { text in
+            Task { await createTodoFromSelection(text, onCalendar: true) }
         }
     }
 
-    /// Right-click "Create to-do from selection" → drops a card on the user's
-    /// default productivity board, back-linked to this journal.
-    private func createTodoFromSelection(_ text: String) async {
+    /// Right-click "Create to-do" / "Add to calendar" → drops a card on the
+    /// user's default productivity board, back-linked to this journal. When
+    /// `onCalendar`, the card is dated today (shows on the calendar too).
+    private func createTodoFromSelection(_ text: String, onCalendar: Bool) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        let dueDate: String? = onCalendar ? JournalDetailView.todayYMD() : nil
         do {
             _ = try await MatchaWorkService.shared.quickTodo(
                 title: String(trimmed.prefix(200)),
+                dueDate: dueDate,
                 sourceJournalId: journalId,
                 sourceExcerpt: String(trimmed.prefix(160)),
             )
-            flashToast("Added to To-Dos ✓")
+            flashToast(onCalendar ? "Added to calendar ✓" : "Added to To-Dos ✓")
         } catch {
             flashToast("Couldn't add to-do")
         }
+    }
+
+    private static func todayYMD() -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.locale = Locale(identifier: "en_US_POSIX")
+        return f.string(from: Date())
     }
 
     private func flashToast(_ msg: String) {

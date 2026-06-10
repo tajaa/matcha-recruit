@@ -5540,6 +5540,8 @@ async def init_db():
             )
         """)
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_prod_cards_board ON mw_productivity_cards(board_id, board_column, position)")
+        await conn.execute("ALTER TABLE mw_productivity_cards ADD COLUMN IF NOT EXISTS due_date DATE")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_prod_cards_due ON mw_productivity_cards(board_id, due_date)")
 
         # Training compliance tables
         await conn.execute("""

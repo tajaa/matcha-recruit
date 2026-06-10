@@ -17,6 +17,8 @@ final class JournalEditorController: ObservableObject {
     /// Closure invoked by the right-click "Create to-do from selection" item,
     /// with the selected text. Wired by the host view to the productivity API.
     var onCreateTodo: ((String) -> Void)?
+    /// Right-click "Add to calendar" — selected text → a dated to-do (today).
+    var onAddToCalendar: ((String) -> Void)?
 
     // MARK: - Inline wraps
 
@@ -695,18 +697,26 @@ struct RichJournalEditor: NSViewRepresentable {
             let sel = textView.selectedRange()
             guard sel.length > 0 else { return menu }
             let text = (textView.string as NSString).substring(with: sel)
-            let item = NSMenuItem(title: "Create to-do from selection",
+            let todo = NSMenuItem(title: "Create to-do from selection",
                                   action: #selector(createTodoFromSelection(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = text
+            todo.target = self; todo.representedObject = text
+            let calendar = NSMenuItem(title: "Add to calendar (today)",
+                                      action: #selector(addToCalendarFromSelection(_:)), keyEquivalent: "")
+            calendar.target = self; calendar.representedObject = text
             menu.insertItem(.separator(), at: 0)
-            menu.insertItem(item, at: 0)
+            menu.insertItem(calendar, at: 0)
+            menu.insertItem(todo, at: 0)
             return menu
         }
 
         @objc private func createTodoFromSelection(_ sender: NSMenuItem) {
             guard let text = sender.representedObject as? String else { return }
             MainActor.assumeIsolated { parent.controller.onCreateTodo?(text) }
+        }
+
+        @objc private func addToCalendarFromSelection(_ sender: NSMenuItem) {
+            guard let text = sender.representedObject as? String else { return }
+            MainActor.assumeIsolated { parent.controller.onAddToCalendar?(text) }
         }
 
         // Drag-drop image handling — NSTextView default would embed an

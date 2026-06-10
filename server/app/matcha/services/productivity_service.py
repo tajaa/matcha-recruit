@@ -7,6 +7,7 @@ column. Cards created from a journal text selection back-link to the source via
 """
 
 import logging
+from datetime import date
 from typing import Optional
 from uuid import UUID
 
@@ -37,6 +38,7 @@ def _parse_board(row) -> dict:
 
 
 def _parse_card(row) -> dict:
+    keys = row.keys()
     return {
         "id": str(row["id"]),
         "board_id": str(row["board_id"]),
@@ -44,6 +46,7 @@ def _parse_card(row) -> dict:
         "notes": row["notes"],
         "board_column": row["board_column"],
         "position": row["position"],
+        "due_date": row["due_date"].isoformat() if ("due_date" in keys and row["due_date"]) else None,
         "source_journal_id": str(row["source_journal_id"]) if row["source_journal_id"] else None,
         "source_excerpt": row["source_excerpt"],
         "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
@@ -166,7 +169,7 @@ async def list_cards(board_id: UUID, user_id: UUID) -> list[dict]:
         rows = await conn.fetch(
             """
             SELECT id, board_id, title, notes, board_column, position,
-                   source_journal_id, source_excerpt, completed_at, created_at, updated_at
+                   due_date, source_journal_id, source_excerpt, completed_at, created_at, updated_at
             FROM mw_productivity_cards
             WHERE board_id = $1
             ORDER BY board_column, position, created_at
@@ -186,6 +189,7 @@ async def _next_position(conn, board_id: UUID, column: str) -> int:
 async def create_card(
     board_id: UUID, user_id: UUID, *,
     title: str, notes: Optional[str] = None, board_column: Optional[str] = None,
+    due_date: Optional[date] = None,
     source_journal_id: Optional[UUID] = None, source_excerpt: Optional[str] = None,
 ) -> Optional[dict]:
     async with get_connection() as conn:
@@ -198,34 +202,36 @@ async def create_card(
             f"""
             INSERT INTO mw_productivity_cards
                 (board_id, user_id, title, notes, board_column, position,
-                 source_journal_id, source_excerpt, completed_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, {completed})
+                 due_date, source_journal_id, source_excerpt, completed_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, {completed})
             RETURNING id, board_id, title, notes, board_column, position,
-                      source_journal_id, source_excerpt, completed_at, created_at, updated_at
+                      due_date, source_journal_id, source_excerpt, completed_at, created_at, updated_at
             """,
-            board_id, user_id, title, notes, column, pos, source_journal_id, source_excerpt,
+            board_id, user_id, title, notes, column, pos, due_date, source_journal_id, source_excerpt,
         )
         return _parse_card(row)
 
 
 async def quick_todo(
     user_id: UUID, company_id: Optional[UUID], *,
-    title: str, source_journal_id: Optional[UUID] = None, source_excerpt: Optional[str] = None,
+    title: str, due_date: Optional[date] = None,
+    source_journal_id: Optional[UUID] = None, source_excerpt: Optional[str] = None,
 ) -> dict:
-    """Ensure the user's default board and drop a new to-do on it — the
-    journal-selection → to-do path."""
+    """Ensure the user's default board and drop a new card on it — the
+    journal-selection → to-do / calendar path. A `due_date` puts it on the
+    calendar too."""
     async with get_connection() as conn:
         board_id = await _ensure_default_board(conn, user_id, company_id)
         pos = await _next_position(conn, board_id, "todo")
         row = await conn.fetchrow(
             """
             INSERT INTO mw_productivity_cards
-                (board_id, user_id, title, board_column, position, source_journal_id, source_excerpt)
-            VALUES ($1, $2, $3, 'todo', $4, $5, $6)
+                (board_id, user_id, title, board_column, position, due_date, source_journal_id, source_excerpt)
+            VALUES ($1, $2, $3, 'todo', $4, $5, $6, $7)
             RETURNING id, board_id, title, notes, board_column, position,
-                      source_journal_id, source_excerpt, completed_at, created_at, updated_at
+                      due_date, source_journal_id, source_excerpt, completed_at, created_at, updated_at
             """,
-            board_id, user_id, title, pos, source_journal_id, source_excerpt,
+            board_id, user_id, title, pos, due_date, source_journal_id, source_excerpt,
         )
         return _parse_card(row)
 
@@ -245,6 +251,10 @@ async def update_card(card_id: UUID, user_id: UUID, patch: dict) -> Optional[dic
         if "notes" in patch:
             params.append(patch["notes"])
             sets.append(f"notes = ${len(params)}")
+        if "due_date" in patch:
+            # Present-but-null clears the date (removes from calendar).
+            params.append(patch["due_date"])
+            sets.append(f"due_date = ${len(params)}")
         if "board_column" in patch and patch["board_column"] is not None:
             column = _col(patch["board_column"])
             params.append(column)
@@ -262,7 +272,7 @@ async def update_card(card_id: UUID, user_id: UUID, patch: dict) -> Optional[dic
             row = await conn.fetchrow(
                 """
                 SELECT id, board_id, title, notes, board_column, position,
-                       source_journal_id, source_excerpt, completed_at, created_at, updated_at
+                       due_date, source_journal_id, source_excerpt, completed_at, created_at, updated_at
                 FROM mw_productivity_cards WHERE id = $1
                 """,
                 card_id,
@@ -275,7 +285,7 @@ async def update_card(card_id: UUID, user_id: UUID, patch: dict) -> Optional[dic
             UPDATE mw_productivity_cards SET {", ".join(sets)}
             WHERE id = ${len(params)}
             RETURNING id, board_id, title, notes, board_column, position,
-                      source_journal_id, source_excerpt, completed_at, created_at, updated_at
+                      due_date, source_journal_id, source_excerpt, completed_at, created_at, updated_at
             """,
             *params,
         )

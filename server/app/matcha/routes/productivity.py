@@ -6,6 +6,7 @@ Everything is user-scoped (the personal productivity hub), so endpoints key off
 (personal Werk users have no company).
 """
 
+from datetime import date
 from typing import Optional
 from uuid import UUID
 
@@ -35,6 +36,7 @@ class CardCreate(BaseModel):
     title: str
     notes: Optional[str] = None
     board_column: Optional[str] = None    # todo | in_progress | done
+    due_date: Optional[date] = None       # calendar placement
     source_journal_id: Optional[UUID] = None
     source_excerpt: Optional[str] = None
 
@@ -44,10 +46,14 @@ class CardPatch(BaseModel):
     notes: Optional[str] = None
     board_column: Optional[str] = None
     position: Optional[int] = None
+    # due_date is sent via model_dump(exclude_unset=True): an explicit null
+    # clears the date (removes from calendar); absent leaves it untouched.
+    due_date: Optional[date] = None
 
 
 class QuickTodo(BaseModel):
     title: str
+    due_date: Optional[date] = None
     source_journal_id: Optional[UUID] = None
     source_excerpt: Optional[str] = None
 
@@ -109,6 +115,7 @@ async def create_card_endpoint(
     card = await productivity_service.create_card(
         board_id, current_user.id,
         title=body.title, notes=body.notes, board_column=body.board_column,
+        due_date=body.due_date,
         source_journal_id=body.source_journal_id, source_excerpt=body.source_excerpt,
     )
     if card is None:
@@ -147,5 +154,6 @@ async def quick_todo_endpoint(
     company_id = await get_client_company_id(current_user)
     return await productivity_service.quick_todo(
         current_user.id, company_id,
-        title=body.title, source_journal_id=body.source_journal_id, source_excerpt=body.source_excerpt,
+        title=body.title, due_date=body.due_date,
+        source_journal_id=body.source_journal_id, source_excerpt=body.source_excerpt,
     )
