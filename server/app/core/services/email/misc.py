@@ -36,11 +36,19 @@ class MiscEmailMixin:
         is_consultation = preferred_date is not None or preferred_time is not None
         subject_prefix = "Consultation Request" if is_consultation else "Contact Form"
 
+        # Escape all caller-supplied values before interpolating into HTML —
+        # these come straight off a public form (matches the escaping the other
+        # email builders in this module already do).
+        company_safe = html.escape(company_name)
+        name_safe = html.escape(sender_name)
+        email_safe = html.escape(sender_email)
+        message_safe = html.escape(message)
+
         schedule_html = ""
         schedule_text = ""
         if is_consultation:
-            date_str = preferred_date or "Not specified"
-            time_str = preferred_time or "Not specified"
+            date_str = html.escape(preferred_date or "Not specified")
+            time_str = html.escape(preferred_time or "Not specified")
             schedule_html = f"""
                 <div style="margin-bottom: 16px;">
                     <div class="label">Requested Date</div>
@@ -80,20 +88,20 @@ class MiscEmailMixin:
             <div class="info-card">
                 <div style="margin-bottom: 16px;">
                     <div class="label">Company</div>
-                    <div class="value">{company_name}</div>
+                    <div class="value">{company_safe}</div>
                 </div>
                 <div style="margin-bottom: 16px;">
                     <div class="label">Contact Name</div>
-                    <div class="value">{sender_name}</div>
+                    <div class="value">{name_safe}</div>
                 </div>
                 <div style="margin-bottom: 16px;">
                     <div class="label">Email</div>
-                    <div class="value"><a href="mailto:{sender_email}">{sender_email}</a></div>
+                    <div class="value"><a href="mailto:{email_safe}">{email_safe}</a></div>
                 </div>{schedule_html}
             </div>
 
             <div class="label">Message</div>
-            <div class="message">{message}</div>
+            <div class="message">{message_safe}</div>
         </div>
         <div class="footer">
             <p>Sent from Matcha Recruit contact form</p>
@@ -117,7 +125,9 @@ Message:
 Sent from Matcha Recruit contact form
 """
 
-        return await self.send_email(
+        # Use the fallback sender (Gmail → MailerSend) so a failing/expired
+        # Gmail token doesn't silently drop a lead when MailerSend is available.
+        return await self.send_email_with_fallback(
             to_email=contact_email,
             to_name="Matcha Team",
             subject=f"{subject_prefix}: {company_name} - {sender_name}",

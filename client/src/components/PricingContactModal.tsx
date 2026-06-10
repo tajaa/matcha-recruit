@@ -57,8 +57,11 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
   const [submitted, setSubmitted] = useState(false);
   const [honeypot, setHoneypot] = useState('');
 
+  const slotMissing = isConsultation && (!selectedDate || !selectedTime);
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (slotMissing) return; // a consultation needs a confirmed date + time
     setIsSubmitting(true);
 
     try {
@@ -312,13 +315,18 @@ export function PricingContactModal({ isOpen, onClose, mode = 'contact' }: Prici
                     <div className="pt-2">
                       <button
                         type="submit"
-                        disabled={isSubmitting}
-                        className="w-full py-4 text-[10px] font-mono uppercase tracking-[0.3em] font-bold overflow-hidden disabled:opacity-50 transition-opacity hover:opacity-90 inline-flex items-center justify-center gap-3"
+                        disabled={isSubmitting || slotMissing}
+                        className="w-full py-4 text-[10px] font-mono uppercase tracking-[0.3em] font-bold overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed transition-opacity hover:opacity-90 inline-flex items-center justify-center gap-3"
                         style={{ backgroundColor: IV_INK, color: IV_BG }}
                       >
                         {isSubmitting ? 'Sending...' : isConsultation ? 'Request Consultation' : 'Submit Request'}
                         {!isSubmitting && <Send size={11} />}
                       </button>
+                      {slotMissing && (
+                        <p className="mt-3 text-[10px] font-mono uppercase tracking-[0.25em] text-center" style={{ color: '#9b958a' }}>
+                          {selectedDate ? 'Pick a time to continue' : 'Pick a date and time to continue'}
+                        </p>
+                      )}
                     </div>
                   </form>
                 </>
