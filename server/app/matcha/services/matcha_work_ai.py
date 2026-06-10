@@ -743,7 +743,12 @@ async def _get_model(
                 sub = await billing_service.get_active_subscription(_UUID(company_id))
                 return bool(sub and sub.get("pack_id") == entitlements_service.PRO_PACK_ID)
         except Exception:
-            pass
+            # Fail closed (deny pro), but log — otherwise a resolver outage
+            # silently drops paid users to the free model with no signal.
+            logger.warning(
+                "pro-entitlement resolution failed (user=%s company=%s); denying pro model",
+                user_id, company_id, exc_info=True,
+            )
         return False
 
     if model_override and model_override in SUPPORTED_MODELS:

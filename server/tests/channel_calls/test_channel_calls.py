@@ -37,6 +37,12 @@ LK = "app.core.services.livekit_service"
 
 def _conn_ctx(conn):
     """get_connection() replacement returning an async CM that yields conn."""
+    # conn.transaction() must behave as a (no-op) async context manager —
+    # start_call/start_broadcast wrap their check-then-insert in one.
+    txn = MagicMock()
+    txn.__aenter__ = AsyncMock(return_value=None)
+    txn.__aexit__ = AsyncMock(return_value=False)
+    conn.transaction = MagicMock(return_value=txn)
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=conn)
     cm.__aexit__ = AsyncMock(return_value=False)

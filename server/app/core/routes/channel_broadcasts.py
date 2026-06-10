@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
+import asyncpg
 from fastapi import APIRouter, Body, Depends, HTTPException, Header, Request
 from pydantic import BaseModel
 
@@ -230,53 +231,66 @@ async def start_broadcast(
     async with get_connection() as conn:
         await _assert_owner(conn, channel_id, current_user.id)
 
-        # Enforce max 1 active broadcast per channel.
-        # Recover orphans: if existing row is past the duration cap (server may
-        # have restarted before the in-process auto-stop fired), close it now.
-        existing = await _active_broadcast(conn, channel_id)
-        if existing:
-            elapsed = (datetime.now(timezone.utc) - existing["started_at"]).total_seconds()
-            if elapsed > BROADCAST_MAX_DURATION_SECONDS + 30:
-                await conn.execute(
-                    "UPDATE channel_broadcasts SET ended_at = NOW() WHERE id = $1",
-                    existing["id"],
-                )
-                # Best-effort: tell members the orphan ended.
-                await _push_broadcast_event(str(channel_id), {
-                    "type": "broadcast.ended",
-                    "channel_id": str(channel_id),
-                    "broadcast_id": str(existing["id"]),
-                    "reason": "orphan_recovered",
-                })
-                existing = None
-
-        if existing:
-            raise HTTPException(status_code=409, detail="A broadcast is already active in this channel")
-
-        # One live audio surface per channel: broadcasts and calls are
-        # mutually exclusive (lazy import — channel_calls imports from
-        # this module at top level).
-        from .channel_calls import _active_call
-        if await _active_call(conn, channel_id):
-            raise HTTPException(status_code=409, detail="An audio call is active in this channel — end it first")
-
-        # Enforce weekly limit
-        weekly = await _weekly_broadcast_count(conn, channel_id)
-        if weekly >= BROADCAST_WEEKLY_LIMIT:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Weekly limit reached ({BROADCAST_WEEKLY_LIMIT} broadcasts per 7 days). Try again later.",
+        # Serialize check-then-insert against concurrent broadcast/call starts
+        # on the SAME channel. Same advisory-lock key as channel_calls.start =
+        # cross-table mutual exclusion; the partial UNIQUE index (one active
+        # broadcast per channel) backstops the same-table race.
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtext($1))",
+                f"channel-audio:{channel_id}",
             )
 
-        room_name = _livekit_room_name(channel_id)
-        row = await conn.fetchrow(
-            """
-            INSERT INTO channel_broadcasts (channel_id, started_by, livekit_room, title)
-            VALUES ($1, $2, $3, $4)
-            RETURNING id, started_at
-            """,
-            channel_id, current_user.id, room_name, body.title,
-        )
+            # Enforce max 1 active broadcast per channel.
+            # Recover orphans: if existing row is past the duration cap (server may
+            # have restarted before the in-process auto-stop fired), close it now.
+            existing = await _active_broadcast(conn, channel_id)
+            if existing:
+                elapsed = (datetime.now(timezone.utc) - existing["started_at"]).total_seconds()
+                if elapsed > BROADCAST_MAX_DURATION_SECONDS + 30:
+                    await conn.execute(
+                        "UPDATE channel_broadcasts SET ended_at = NOW() WHERE id = $1",
+                        existing["id"],
+                    )
+                    # Best-effort: tell members the orphan ended.
+                    await _push_broadcast_event(str(channel_id), {
+                        "type": "broadcast.ended",
+                        "channel_id": str(channel_id),
+                        "broadcast_id": str(existing["id"]),
+                        "reason": "orphan_recovered",
+                    })
+                    existing = None
+
+            if existing:
+                raise HTTPException(status_code=409, detail="A broadcast is already active in this channel")
+
+            # One live audio surface per channel: broadcasts and calls are
+            # mutually exclusive (lazy import — channel_calls imports from
+            # this module at top level).
+            from .channel_calls import _active_call
+            if await _active_call(conn, channel_id):
+                raise HTTPException(status_code=409, detail="An audio call is active in this channel — end it first")
+
+            # Enforce weekly limit
+            weekly = await _weekly_broadcast_count(conn, channel_id)
+            if weekly >= BROADCAST_WEEKLY_LIMIT:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Weekly limit reached ({BROADCAST_WEEKLY_LIMIT} broadcasts per 7 days). Try again later.",
+                )
+
+            room_name = _livekit_room_name(channel_id)
+            try:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO channel_broadcasts (channel_id, started_by, livekit_room, title)
+                    VALUES ($1, $2, $3, $4)
+                    RETURNING id, started_at
+                    """,
+                    channel_id, current_user.id, room_name, body.title,
+                )
+            except asyncpg.UniqueViolationError:
+                raise HTTPException(status_code=409, detail="A broadcast is already active in this channel")
 
     try:
         token = mint_token(

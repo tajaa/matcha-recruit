@@ -1318,9 +1318,12 @@ async def log_token_usage_event(
         )
 
 
-# Fallback quota if no mw_token_quotas row exists AND plan resolution fails —
-# normally the per-plan defaults in entitlements_service.PLAN_QUOTAS apply.
-_DEFAULT_TOKEN_LIMIT = 100_000
+# Last-resort fallback if no mw_token_quotas row exists AND plan resolution
+# (incl. the entitlements_service import) fails — normally the per-plan defaults
+# in entitlements_service.PLAN_QUOTAS apply. Set to the FREE-tier budget so the
+# ultimate failure mode never grants a paid quota (fail closed). Keep in sync
+# with entitlements_service.PLAN_QUOTAS[PLAN_FREE].
+_DEFAULT_TOKEN_LIMIT = 25_000
 _DEFAULT_WINDOW_HOURS = 12
 
 
@@ -1353,14 +1356,24 @@ async def check_token_quota(user_id: UUID, company_id: Optional[UUID] = None) ->
     else:
         # Plan-based default (resolved outside the connection block — the
         # resolver opens its own connection; don't hold two pool slots).
-        token_limit, window_hours = _DEFAULT_TOKEN_LIMIT, _DEFAULT_WINDOW_HOURS
+        # Fail CLOSED: if plan resolution throws, fall back to the FREE-tier
+        # quota, never the higher _DEFAULT_TOKEN_LIMIT — a transient resolver
+        # error must not hand a free user a paid budget.
         try:
             from . import entitlements_service
 
+            token_limit, window_hours = entitlements_service.PLAN_QUOTAS[
+                entitlements_service.PLAN_FREE
+            ]
             plan = await entitlements_service.resolve_plan_for_user(user_id)
             token_limit, window_hours = entitlements_service.PLAN_QUOTAS[plan]
         except Exception:
-            logger.warning("Plan quota resolution failed for user %s", user_id, exc_info=True)
+            token_limit, window_hours = _DEFAULT_TOKEN_LIMIT, _DEFAULT_WINDOW_HOURS
+            logger.warning(
+                "Plan quota resolution failed for user %s; using free-tier quota",
+                user_id,
+                exc_info=True,
+            )
 
     async with get_connection() as conn:
         # Sum tokens used within the window

@@ -1015,8 +1015,12 @@ async def toggle_company_feature(company_id: UUID, request: FeatureToggleRequest
         return {"enabled_features": features}
 
 
-@router.patch("/users/{user_id}/beta-flags", dependencies=[Depends(require_admin)])
-async def patch_user_beta_flags(user_id: UUID, body: Dict[str, Any] = Body(...)):
+@router.patch("/users/{user_id}/beta-flags")
+async def patch_user_beta_flags(
+    user_id: UUID,
+    body: Dict[str, Any] = Body(...),
+    current_user=Depends(require_admin),
+):
     """Set matcha_work_beta_lite / matcha_work_beta_full flags on a user.
 
     These double as no-Stripe COMP GRANTS: the Werk plan resolver
@@ -1027,6 +1031,11 @@ async def patch_user_beta_flags(user_id: UUID, body: Dict[str, Any] = Body(...))
     patch = {k: v for k, v in body.items() if k in allowed and isinstance(v, bool)}
     if not patch:
         raise HTTPException(status_code=400, detail="No valid beta flag keys provided")
+    # Audit: comp grants are money-equivalent — record actor + target + change.
+    logger.warning(
+        "COMP-GRANT beta-flags admin=%s target_user=%s patch=%s",
+        getattr(current_user, "id", "?"), user_id, patch,
+    )
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """

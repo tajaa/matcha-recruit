@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from typing import Literal, Optional
 from uuid import UUID
 
+import asyncpg
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -300,53 +301,67 @@ async def start_call(
     async with get_connection() as conn:
         await _assert_owner(conn, channel_id, current_user.id)
 
-        # Recover orphans past the duration cap (server may have restarted
-        # before the in-process auto-stop fired).
-        existing = await _active_call(conn, channel_id)
-        if existing:
-            elapsed = (datetime.now(timezone.utc) - existing["started_at"]).total_seconds()
-            if elapsed > CALL_MAX_DURATION_SECONDS + 30:
-                await conn.execute(
-                    "UPDATE channel_calls SET ended_at = NOW() WHERE id = $1",
-                    existing["id"],
-                )
-                await _push_call_event(str(channel_id), {
-                    "type": "call.ended",
-                    "channel_id": str(channel_id),
-                    "call_id": str(existing["id"]),
-                    "reason": "orphan_recovered",
-                })
-                existing = None
-
-        if existing:
-            raise HTTPException(status_code=409, detail="A call is already active in this channel")
-
-        # One live audio surface per channel: calls and broadcasts are
-        # mutually exclusive (also one mic device on the client).
-        if await _active_broadcast(conn, channel_id):
-            raise HTTPException(status_code=409, detail="A broadcast is active in this channel — end it first")
-
-        invitees = await _member_filtered(conn, channel_id, body.invited_user_ids)
-        owner_name = await _display_name(conn, current_user.id)
-
-        room_name = _call_room_name(channel_id)
-        row = await conn.fetchrow(
-            """
-            INSERT INTO channel_calls (channel_id, started_by, mode, livekit_room)
-            VALUES ($1, $2, $3, $4)
-            RETURNING id, started_at
-            """,
-            channel_id, current_user.id, body.mode, room_name,
-        )
-        if invitees:
-            await conn.executemany(
-                """
-                INSERT INTO channel_call_invites (call_id, user_id, invited_by)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (call_id, user_id) DO NOTHING
-                """,
-                [(row["id"], uid, current_user.id) for uid in invitees],
+        # Serialize the check-then-insert against concurrent call/broadcast
+        # starts on the SAME channel. The advisory lock (same key in
+        # channel_broadcasts.start) gives cross-table mutual exclusion the
+        # per-table unique index can't; the partial UNIQUE index
+        # (one active call per channel) is the backstop for the same-table race.
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtext($1))",
+                f"channel-audio:{channel_id}",
             )
+
+            # Recover orphans past the duration cap (server may have restarted
+            # before the in-process auto-stop fired).
+            existing = await _active_call(conn, channel_id)
+            if existing:
+                elapsed = (datetime.now(timezone.utc) - existing["started_at"]).total_seconds()
+                if elapsed > CALL_MAX_DURATION_SECONDS + 30:
+                    await conn.execute(
+                        "UPDATE channel_calls SET ended_at = NOW() WHERE id = $1",
+                        existing["id"],
+                    )
+                    await _push_call_event(str(channel_id), {
+                        "type": "call.ended",
+                        "channel_id": str(channel_id),
+                        "call_id": str(existing["id"]),
+                        "reason": "orphan_recovered",
+                    })
+                    existing = None
+
+            if existing:
+                raise HTTPException(status_code=409, detail="A call is already active in this channel")
+
+            # One live audio surface per channel: calls and broadcasts are
+            # mutually exclusive (also one mic device on the client).
+            if await _active_broadcast(conn, channel_id):
+                raise HTTPException(status_code=409, detail="A broadcast is active in this channel — end it first")
+
+            invitees = await _member_filtered(conn, channel_id, body.invited_user_ids)
+            owner_name = await _display_name(conn, current_user.id)
+
+            room_name = _call_room_name(channel_id)
+            try:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO channel_calls (channel_id, started_by, mode, livekit_room)
+                    VALUES ($1, $2, $3, $4)
+                    RETURNING id, started_at
+                    """,
+                    channel_id, current_user.id, body.mode, room_name,
+                )
+            except asyncpg.UniqueViolationError:
+                raise HTTPException(status_code=409, detail="A call is already active in this channel")
+            if invitees:
+                await conn.executemany(
+                    """
+                    INSERT INTO channel_call_invites (call_id, user_id, invited_by)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (call_id, user_id) DO NOTHING
+                    """,
+                    [(row["id"], uid, current_user.id) for uid in invitees],
+                )
 
     # Best-effort: explicit room creation carries the authoritative caps.
     # On failure the room still auto-creates at join — we just lose the
