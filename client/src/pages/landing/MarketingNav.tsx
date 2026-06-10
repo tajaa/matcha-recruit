@@ -12,7 +12,7 @@ const NAV_LINKS = [
   { to: '/matcha-lite', label: 'Matcha Lite' },
   // { to: '/services', label: 'Consulting' }, // muted
   { to: '/resources', label: 'Resources' },
-  // { to: '/fractional', label: 'Fractional' }, // muted — reachable via direct URL only
+  { to: '/fractional', label: 'Fractional' },
   { to: '/blog', label: 'Blog' },
 ]
 
