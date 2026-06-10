@@ -253,6 +253,13 @@ async def start_broadcast(
         if existing:
             raise HTTPException(status_code=409, detail="A broadcast is already active in this channel")
 
+        # One live audio surface per channel: broadcasts and calls are
+        # mutually exclusive (lazy import — channel_calls imports from
+        # this module at top level).
+        from .channel_calls import _active_call
+        if await _active_call(conn, channel_id):
+            raise HTTPException(status_code=409, detail="An audio call is active in this channel — end it first")
+
         # Enforce weekly limit
         weekly = await _weekly_broadcast_count(conn, channel_id)
         if weekly >= BROADCAST_WEEKLY_LIMIT:
