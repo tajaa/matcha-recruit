@@ -143,3 +143,7 @@ scripts/set-master-admin-password.py
 deals/
 
 server/db.sqlite
+
+# Security audit working docs (confidential, not tracked)
+security-audit-6-10.md
+docs/SECURITY_AUDIT_2026-06-10.md
