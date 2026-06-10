@@ -103,10 +103,8 @@ export default function Home() {
       <MarketingNav onDemoClick={() => setIsPricingOpen(true)} />
 
       <Hero onDemoClick={() => setIsPricingOpen(true)} />
-      <Marquee />
       <ProductIndex />
       <Manifesto />
-      <Stats />
       <CTABand onDemoClick={() => setIsPricingOpen(true)} />
 
       <div style={{ backgroundColor: BONE, color: 'var(--color-ivory-ink)' }}>
@@ -150,12 +148,17 @@ function PageStyle() {
         from { transform: translateX(0); }
         to { transform: translateX(-50%); }
       }
+      @keyframes homePulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.45; transform: scale(0.8); }
+      }
       .home-rise > span { display: inline-block; animation: homeRise 0.9s cubic-bezier(0.16,1,0.3,1) both; }
       .home-fade { opacity: 0; animation: homeFadeUp 0.8s ease-out forwards; }
       .home-marquee-track { animation: homeMarquee 32s linear infinite; }
+      .home-pulse { animation: homePulse 2.4s ease-in-out infinite; }
       @media (prefers-reduced-motion: reduce) {
         .home-rise > span, .home-fade { animation: none !important; opacity: 1 !important; transform: none !important; }
-        .home-marquee-track { animation: none !important; }
+        .home-marquee-track, .home-pulse { animation: none !important; }
       }
     `}</style>
   )
@@ -167,48 +170,63 @@ function PageStyle() {
 
 function Hero({ onDemoClick }: { onDemoClick: () => void }) {
   return (
-    <section className="relative w-full min-h-[100svh] flex flex-col justify-between pt-12">
-      {/* Top masthead row */}
-      <div className="max-w-[1600px] mx-auto w-full px-6 sm:px-10 pt-24 sm:pt-28">
+    <section className="relative w-full min-h-[100svh] flex flex-col">
+      {/* Masthead row */}
+      <div className="max-w-[1600px] mx-auto w-full px-6 sm:px-10 pt-20 sm:pt-24">
         <div
-          className="flex items-center justify-between border-b pb-4 home-fade"
+          className="flex items-center justify-between border-b pb-3 home-fade"
           style={{ borderColor: LINE_D, animationDelay: '0.05s' }}
         >
           <span className="text-[11px] tracking-[0.3em] font-mono uppercase" style={{ color: ASH }}>
             Full-service HR
           </span>
+          <span className="hidden sm:inline text-[11px] tracking-[0.3em] font-mono uppercase" style={{ color: ASH }}>
+            Software · Practitioners
+          </span>
           <span className="text-[11px] tracking-[0.3em] font-mono uppercase" style={{ color: ASH }}>
-            Vol. 01 — The Whole Function
+            Vol. 01
           </span>
         </div>
       </div>
 
-      {/* Headline */}
-      <div className="max-w-[1600px] mx-auto w-full px-6 sm:px-10 flex-1 flex flex-col justify-center py-10">
+      {/* Ticker — pulled high so it reads immediately, no scroll required */}
+      <div className="mt-6 sm:mt-7">
+        <Marquee />
+      </div>
+
+      {/* Headline + supporting content */}
+      <div className="max-w-[1600px] mx-auto w-full px-6 sm:px-10 flex-1 flex flex-col justify-center py-8 sm:py-10">
+        <span
+          className="home-fade inline-flex items-center gap-2.5 self-start rounded-full px-3.5 py-1.5 mb-7"
+          style={{ border: `1px solid ${LINE_D}`, animationDelay: '0.1s' }}
+        >
+          <span className="home-pulse w-1.5 h-1.5 rounded-full" style={{ backgroundColor: MATCHA }} />
+          <span className="text-[11px] font-mono uppercase tracking-[0.18em]" style={{ color: BONE }}>
+            New — Fractional &amp; Consulting practices now open
+          </span>
+        </span>
+
         <h1
           className="home-rise tracking-[-0.02em]"
-          style={{
-            fontFamily: DISPLAY,
-            fontWeight: 300,
-            lineHeight: 0.88,
-            fontSize: 'clamp(3.25rem, 13vw, 12rem)',
-          }}
+          style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 0.86, fontSize: 'clamp(2.75rem, 9.5vw, 9rem)' }}
         >
-          <span style={{ animationDelay: '0.1s' }}>We run</span>
+          <span style={{ animationDelay: '0.16s' }}>We run</span>
           <br />
-          <span style={{ animationDelay: '0.22s' }}>the whole</span>
+          <span style={{ animationDelay: '0.26s' }}>the whole</span>
           <br />
-          <span style={{ animationDelay: '0.34s', color: MATCHA, fontStyle: 'italic' }}>people</span>
+          <span style={{ animationDelay: '0.36s', color: MATCHA, fontStyle: 'italic' }}>people</span>
           <span style={{ animationDelay: '0.46s' }}>&nbsp;function.</span>
         </h1>
 
         <div
-          className="mt-10 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-8 home-fade"
-          style={{ animationDelay: '0.7s' }}
+          className="mt-9 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-7 home-fade"
+          style={{ animationDelay: '0.66s' }}
         >
-          <p className="max-w-xl text-lg sm:text-xl" style={{ color: BONE, lineHeight: 1.45 }}>
-            From software to showing up. Four ways to work with Matcha —{' '}
-            <span style={{ color: ASH }}>and one standard of rigor across every one of them.</span>
+          <p className="max-w-2xl text-lg sm:text-xl" style={{ color: BONE, lineHeight: 1.45 }}>
+            From software you run yourself to senior practitioners who run it for you.{' '}
+            <span style={{ color: ASH }}>
+              Workplace safety, compliance, and the human side of the job — one standard of rigor across all four.
+            </span>
           </p>
           <div className="flex items-center gap-5 shrink-0">
             <button
@@ -227,6 +245,26 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
               <span aria-hidden>↓</span>
             </a>
           </div>
+        </div>
+
+        {/* Inline four-vertical index — quick nav + a preview of what's below */}
+        <div
+          className="mt-10 pt-6 border-t grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4 home-fade"
+          style={{ borderColor: LINE_D, animationDelay: '0.8s' }}
+        >
+          {PRODUCTS.map((p) => (
+            <Link key={p.name} to={p.to} className="group flex items-baseline gap-3">
+              <span className="font-mono text-xs" style={{ color: p.accent }}>
+                {p.n}
+              </span>
+              <span
+                className="text-base sm:text-lg tracking-tight transition-colors"
+                style={{ fontFamily: DISPLAY, fontWeight: 400, color: BONE }}
+              >
+                <span className="group-hover:opacity-60 transition-opacity">{p.name}</span>
+              </span>
+            </Link>
+          ))}
         </div>
       </div>
     </section>
@@ -357,38 +395,6 @@ function Manifesto() {
           We don&rsquo;t ship software and walk away. We take responsibility for the hardest,
           most <span style={{ fontStyle: 'italic' }}>human</span> part of your company.
         </p>
-      </div>
-    </section>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Stats — oversized editorial figures
-// ---------------------------------------------------------------------------
-
-const STATS: { figure: string; label: string }[] = [
-  { figure: '80+', label: 'Companies supported' },
-  { figure: '600+', label: 'Policies written' },
-  { figure: '32', label: 'Jurisdictions covered' },
-  { figure: '4', label: 'Ways to work with us' },
-]
-
-function Stats() {
-  return (
-    <section className="py-20 sm:py-28 border-b" style={{ borderColor: LINE_D }}>
-      <div className="max-w-[1600px] mx-auto px-6 sm:px-10 grid grid-cols-2 lg:grid-cols-4 gap-px" style={{ backgroundColor: LINE_D }}>
-        {STATS.map((s) => (
-          <div key={s.label} className="flex flex-col px-2 sm:px-6 py-8" style={{ backgroundColor: NOIR }}>
-            <span
-              style={{ fontFamily: DISPLAY, fontWeight: 300, color: MATCHA, fontSize: 'clamp(3rem, 7vw, 6rem)', lineHeight: 1 }}
-            >
-              {s.figure}
-            </span>
-            <span className="mt-3 font-mono text-[11px] sm:text-xs uppercase tracking-[0.2em]" style={{ color: ASH }}>
-              {s.label}
-            </span>
-          </div>
-        ))}
       </div>
     </section>
   )

@@ -139,11 +139,13 @@ const PROCESS_STEPS = [
   },
 ]
 
+// Offering specs — the engagements themselves (cadence / duration), not
+// traction claims. Fractional is a new vertical; no delivered-count metrics.
 const HERO_STATS = [
-  { label: 'Companies supported', value: '80+' },
-  { label: 'Avg. employee count', value: '100' },
-  { label: 'Policies written', value: '600+' },
-  { label: 'Jurisdictions covered', value: '32' },
+  { label: 'Fractional CHRO', value: '2d/wk' },
+  { label: 'HR Director', value: '1–3d' },
+  { label: 'Function buildout', value: '8 wks' },
+  { label: 'Audit & reset', value: '2–3 wks' },
 ]
 
 const MODELS = [

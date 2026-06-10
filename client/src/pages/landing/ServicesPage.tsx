@@ -139,11 +139,13 @@ const PROCESS_STEPS = [
   },
 ]
 
+// The four practice areas, not traction claims. Consulting is a new vertical;
+// no delivered-count / retention metrics until there are real clients.
 const HERO_STATS = [
-  { label: 'Engagements delivered', value: '140+' },
-  { label: 'Jurisdictions covered', value: '32' },
-  { label: 'Median response', value: '4h' },
-  { label: 'Client retention', value: '94%' },
+  { label: 'People strategy & comp', value: 'HR' },
+  { label: 'Governance, risk & audit', value: 'GRC' },
+  { label: 'Workplace investigations', value: 'ER' },
+  { label: 'Responsible integration', value: 'AI' },
 ]
 
 export default function ServicesPage() {
