@@ -59,12 +59,6 @@ class AppState {
     /// notification taps so a task notification opens the kanban board.
     var pendingProjectPanel: CollabRightPanel? = nil
 
-    /// Mirror of the PRIMARY ProjectDetailView's current panel — read by the
-    /// projects-hub rail to highlight the active row in its panel nav (the
-    /// rail switches panels by setting pendingProjectPanel). Aux/embedded
-    /// project views never write it.
-    var activeProjectPanel: CollabRightPanel = .kanban
-
     /// Set by "Chat about this ticket" on a kanban card. The project chat
     /// composer picks it up, shows a reply-style reference banner, and weaves
     /// the ticket into the next message it sends. Cleared after send or dismiss.

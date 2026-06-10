@@ -40,7 +40,6 @@ struct ContentView: View {
             sidebarColumn
         } detail: {
             VStack(spacing: 0) {
-                WorkTabBar()
                 if let bottom = appState.bottomSplitTarget {
                     VSplitView {
                         topPanes
@@ -72,7 +71,7 @@ struct ContentView: View {
             ProfileSheet()
                 .environment(appState)
         }
-        // Cmd+F find-anything palette (also via the WorkTabBar magnifier).
+        // Cmd+F find-anything palette (tab bar moved into the sidebar; Cmd+F is the entry point).
         .sheet(isPresented: $appState.showFinderPalette) {
             SplitFinderPalette()
                 .environment(appState)
@@ -235,6 +234,7 @@ struct ContentView: View {
                 VStack(spacing: 0) {
                     sidebarHomeButton
                     sidebarSearchBar
+                    WorkTabsSidebarSection()
                     SidebarStarredView()
                     sidebarOrderedSections
                 }

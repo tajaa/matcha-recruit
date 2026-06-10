@@ -181,45 +181,50 @@ extension View {
     }
 }
 
-/// Tab strip above the detail pane. Home is permanent (element 0); up to
-/// `AppState.maxPinnedTabs` pinned items sit beside it. Click a tab to switch,
-/// "×" to close, "+" to pin the currently-open item.
-struct WorkTabBar: View {
+/// Pinned work tabs, rendered as a sidebar section (moved from the old
+/// horizontal strip above the detail pane). Home is permanent in `openTabs`
+/// but the sidebar already has a Home row, so it's filtered here. Click a row
+/// to switch, "×" to close, header "+" to pin the currently-open item.
+struct WorkTabsSidebarSection: View {
     @Environment(AppState.self) private var appState
+    @State private var hoveredTabId: String?
+
+    private var pinnedTabs: [WorkTab] {
+        appState.openTabs.filter { $0.kind != .home }
+    }
 
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(appState.openTabs) { tab in
-                tabChip(tab)
+        // Hidden entirely until there's something to show or pin — keeps the
+        // sidebar quiet for users who never touch tabs.
+        if !pinnedTabs.isEmpty || appState.canPinActiveTab {
+            VStack(spacing: 2) {
+                HStack(spacing: 6) {
+                    Text("TABS")
+                        .font(.system(size: 10, weight: .semibold))
+                        .tracking(0.5)
+                        .foregroundColor(appState.themeTextSecondary)
+                    Spacer(minLength: 0)
+                    Button { appState.pinActiveTab() } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(appState.themeTextSecondary)
+                            .frame(width: 18, height: 18)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!appState.canPinActiveTab)
+                    .opacity(appState.canPinActiveTab ? 1 : 0.3)
+                    .help(pinHelp)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+
+                ForEach(pinnedTabs) { tab in
+                    tabRow(tab)
+                }
             }
-            Button { appState.pinActiveTab() } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(appState.themeTextSecondary)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!appState.canPinActiveTab)
-            .opacity(appState.canPinActiveTab ? 1 : 0.3)
-            .help(pinHelp)
-            Spacer(minLength: 0)
-            // Find-anything palette — same one Cmd+F raises (sheet lives in
-            // ContentView so both entry points share it).
-            Button { appState.showFinderPalette = true } label: {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(appState.themeTextSecondary)
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Find anything — open in a pane or star to the sidebar (⌘F)")
+            .padding(.bottom, 6)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(appState.themeBg)
-        .overlay(alignment: .bottom) { Divider().opacity(0.4) }
     }
 
     private var pinHelp: String {
@@ -229,48 +234,56 @@ struct WorkTabBar: View {
         return "Pin \u{201C}\(appState.activeTab.title)\u{201D} as a tab"
     }
 
-    private func tabChip(_ tab: WorkTab) -> some View {
+    private func tabRow(_ tab: WorkTab) -> some View {
         let active = appState.activeTab.id == tab.id
         let unseen = appState.tabUnread(tab)
-        return HStack(spacing: 6) {
-            Image(systemName: tab.icon).font(.system(size: 10))
-            Text(tab.title)
-                .font(.system(size: 12, weight: active ? .semibold : .regular))
-                .lineLimit(1)
-                .truncationMode(.tail)
-            if unseen > 0 {
-                Text(unseen > 10 ? "10+" : "\(unseen)")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(appState.themeAccent))
-            }
-            if tab.kind != .home {
-                Button { appState.closeTab(tab) } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundColor(appState.themeText.opacity(0.5))
-                        .contentShape(Rectangle())
+        let hovered = hoveredTabId == tab.id
+        return Button { appState.selectTab(tab) } label: {
+            HStack(spacing: 8) {
+                Image(systemName: tab.icon)
+                    .font(.system(size: 11))
+                    .foregroundColor(active ? appState.themeAccent : appState.themeTextSecondary)
+                    .frame(width: 16)
+                Text(tab.title)
+                    .font(.system(size: 12, weight: active ? .semibold : .regular))
+                    .foregroundColor(active ? appState.themeText : appState.themeText.opacity(0.7))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+                if unseen > 0 && !hovered {
+                    Text(unseen > 10 ? "10+" : "\(unseen)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(appState.themeAccent))
                 }
-                .buttonStyle(.plain)
-                .help("Close tab")
+                if hovered {
+                    Button { appState.closeTab(tab) } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundColor(appState.themeText.opacity(0.5))
+                            .frame(width: 16, height: 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Close tab")
+                }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(active ? appState.themeAccent.opacity(0.12) : Color.clear)
+            )
+            .contentShape(Rectangle())
         }
-        .foregroundColor(active ? appState.themeText : appState.themeText.opacity(0.6))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .frame(maxWidth: 170)
-        .background(
-            RoundedRectangle(cornerRadius: 7)
-                .fill(active ? appState.themeAccent.opacity(0.14) : Color.clear)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 7)
-                .stroke(active ? appState.themeAccent.opacity(0.3) : appState.themeBorder.opacity(0.45), lineWidth: 1)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture { appState.selectTab(tab) }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 6)
+        .onHover { hoveredTabId = $0 ? tab.id : (hoveredTabId == tab.id ? nil : hoveredTabId) }
+        .contextMenu {
+            Button("Close tab") { appState.closeTab(tab) }
+        }
     }
 }
 

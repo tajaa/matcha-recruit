@@ -110,8 +110,6 @@ struct ProjectDetailView: View {
                 collabPanel = panel
                 appState.pendingProjectPanel = nil
             }
-            // Keep the hub rail's panel nav in sync with this view's panel.
-            if !isEmbedded { appState.activeProjectPanel = collabPanel }
             presenceVM.start(projectId: projectId, pageKey: collabPanel.rawValue)
             await viewModel.loadProject(id: projectId)
             // An aux window must not write the shared nav/tab context.
@@ -130,7 +128,6 @@ struct ProjectDetailView: View {
         }
         .onChange(of: collabPanel) { _, newPanel in
             presenceVM.setPage(newPanel.rawValue)
-            if !isEmbedded { appState.activeProjectPanel = newPanel }
         }
         .onDisappear {
             presenceVM.stop()
@@ -411,23 +408,13 @@ struct ProjectDetailView: View {
 
     private var collabTabStrip: some View {
         HStack(spacing: 2) {
-            // Panel switching lives in the projects-hub rail for the primary
-            // view; only aux/embedded windows (which have no rail) keep the
-            // horizontal tabs. Primary keeps just the status pill row.
-            if isEmbedded {
-                // Full icon+label row needs ~680pt; in a split pane the project
-                // can get ~360pt, which used to compress every label into a
-                // one-letter-per-line vertical smear. Fall back to icon-only
-                // tabs (tooltips carry the labels) when the row doesn't fit.
-                ViewThatFits(in: .horizontal) {
-                    collabTabButtons(iconOnly: false)
-                    collabTabButtons(iconOnly: true)
-                }
-            } else {
-                Text(collabPanel.label)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(appState.themeText.opacity(0.8))
-                    .padding(.leading, 2)
+            // Full icon+label row needs ~680pt; in a split pane the project can
+            // get ~360pt, which used to compress every label into a one-letter-
+            // per-line vertical smear. Fall back to icon-only tabs (tooltips
+            // carry the labels) when the labeled row doesn't fit.
+            ViewThatFits(in: .horizontal) {
+                collabTabButtons(iconOnly: false)
+                collabTabButtons(iconOnly: true)
             }
             Spacer(minLength: 4)
             collabStatusPill

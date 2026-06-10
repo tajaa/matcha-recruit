@@ -671,28 +671,6 @@ struct ProjectsLibraryView: View {
                         Button("Delete…") { confirmDelete(p) }
                     }
             }
-            // Panel nav for the open collab project — replaces the horizontal
-            // tab strip that used to sit above the detail pane. Switching goes
-            // through pendingProjectPanel (the deep-link relay the detail view
-            // already consumes); highlight mirrors activeProjectPanel.
-            if let pid = appState.selectedProjectId,
-               projects.first(where: { $0.id == pid })?.projectType == "collab" {
-                Divider().opacity(0.25).padding(.vertical, 6)
-                Text("PROJECT")
-                    .font(.system(size: 9, weight: .semibold))
-                    .tracking(0.6)
-                    .foregroundColor(appState.themeTextSecondary)
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                ForEach(CollabRightPanel.allCases.filter { $0 != .threads }) { panel in
-                    MWHubRailRow(icon: panel.icon,
-                                 title: panel.label,
-                                 selected: appState.activeProjectPanel == panel) {
-                        appState.pendingProjectPanel = panel
-                    }
-                }
-            }
         }
     }
 

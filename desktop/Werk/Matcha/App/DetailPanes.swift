@@ -302,7 +302,7 @@ struct AuxOpenMenuButtons: View {
 /// (thread / channel / project / journal) AND every project file. A result can
 /// open into the main pane, the right split, or the bottom split (segmented
 /// destination picker), and every row carries a ☆ that pins it to the
-/// sidebar's Starred strip. Also reachable from the WorkTabBar magnifier.
+/// sidebar's Starred strip. Raised via Cmd+F.
 /// Reuses SplitSwitcherModel to load + title the four surface lists; project
 /// files are fanned-in separately (one cached list call per project).
 struct SplitFinderPalette: View {
