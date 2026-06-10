@@ -340,6 +340,12 @@ struct RichJournalEditor: NSViewRepresentable {
             if selector == #selector(NSResponder.insertNewline(_:)) {
                 return handleListContinuation(tv)
             }
+            if selector == #selector(NSResponder.insertTab(_:)) {
+                return handleListIndent(tv, demote: true)
+            }
+            if selector == #selector(NSResponder.insertBacktab(_:)) {
+                return handleListIndent(tv, demote: false)
+            }
             return false
         }
 
@@ -361,12 +367,17 @@ struct RichJournalEditor: NSViewRepresentable {
                 if Self.group(m, 3, head).isEmpty { return exitList(tv, lineRange.location, sel.location) }
                 return continueList(tv, sel.location, "\n\(indent)\(bullet) [ ] ")
             }
-            // Numbered — increment.
-            if let m = Self.match(#"^([ \t]*)(\d+)\.[ \t]+(.*)$"#, head) {
+            // Ordered — decimal at depth 0, alpha/roman when indented (outline).
+            if let m = Self.match(#"^([ \t]*)([0-9A-Za-z]+)\.[ \t]+(.*)$"#, head) {
                 let indent = Self.group(m, 1, head)
-                let n = Int(Self.group(m, 2, head)) ?? 1
-                if Self.group(m, 3, head).isEmpty { return exitList(tv, lineRange.location, sel.location) }
-                return continueList(tv, sel.location, "\n\(indent)\(n + 1). ")
+                let marker = Self.group(m, 2, head)
+                let depth = indentWidth(indent) / 4
+                // At depth 0 require real digits so prose like "etc. " isn't a list.
+                if depth > 0 || marker.allSatisfy(\.isNumber) {
+                    if Self.group(m, 3, head).isEmpty { return exitList(tv, lineRange.location, sel.location) }
+                    let next = orderedMarker(depth, orderedIndex(marker, depth) + 1)
+                    return continueList(tv, sel.location, "\n\(indent)\(next). ")
+                }
             }
             // Bullet.
             if let m = Self.match(#"^([ \t]*)([-*])[ \t]+(.*)$"#, head) {
@@ -414,6 +425,145 @@ struct RichJournalEditor: NSViewRepresentable {
         private static func group(_ m: NSTextCheckingResult, _ i: Int, _ s: String) -> String {
             let r = m.range(at: i)
             return r.location == NSNotFound ? "" : (s as NSString).substring(with: r)
+        }
+
+        // MARK: List indent / outline nesting (Tab / Shift-Tab)
+
+        private enum ListKind { case ordered, bullet, todo }
+        private struct ListLine { let indent: String; let kind: ListKind; let bullet: String; let checked: Bool; let content: String }
+
+        /// 4 columns per indent level (a tab counts as a full level).
+        private func indentWidth(_ s: String) -> Int {
+            var w = 0
+            for c in s { if c == "\t" { w += 4 } else if c == " " { w += 1 } else { break } }
+            return w
+        }
+
+        /// Outline marker for an ordered item by depth: 0 → 1. , 1 → a. , 2 → i. ,
+        /// then the cycle repeats (decimal / lower-alpha / lower-roman).
+        private func orderedMarker(_ depth: Int, _ index: Int) -> String {
+            switch ((depth % 3) + 3) % 3 {
+            case 1:  return Self.intToAlpha(index)
+            case 2:  return Self.intToRoman(index)
+            default: return String(index)
+            }
+        }
+
+        /// Parse an existing marker back to its 1-based index, per the depth's style.
+        private func orderedIndex(_ marker: String, _ depth: Int) -> Int {
+            switch ((depth % 3) + 3) % 3 {
+            case 1:  return Self.alphaToInt(marker)
+            case 2:  return Self.romanToInt(marker)
+            default: return Int(marker) ?? 1
+            }
+        }
+
+        private func parseListLine(_ line: String) -> ListLine? {
+            if let m = Self.match(#"^([ \t]*)([-*])[ \t]+\[([ xX])\][ \t]+(.*)$"#, line) {
+                return ListLine(indent: Self.group(m, 1, line), kind: .todo, bullet: Self.group(m, 2, line),
+                                checked: Self.group(m, 3, line).lowercased() == "x", content: Self.group(m, 4, line))
+            }
+            if let m = Self.match(#"^([ \t]*)([-*])[ \t]+(?!\[[ xX]\])(.*)$"#, line) {
+                return ListLine(indent: Self.group(m, 1, line), kind: .bullet, bullet: Self.group(m, 2, line),
+                                checked: false, content: Self.group(m, 3, line))
+            }
+            if let m = Self.match(#"^([ \t]*)([0-9A-Za-z]+)\.[ \t]+(.*)$"#, line) {
+                let indent = Self.group(m, 1, line), marker = Self.group(m, 2, line)
+                if indentWidth(indent) / 4 > 0 || marker.allSatisfy(\.isNumber) {
+                    return ListLine(indent: indent, kind: .ordered, bullet: marker, checked: false, content: Self.group(m, 3, line))
+                }
+            }
+            return nil
+        }
+
+        /// Tab / Shift-Tab on a list line: indent or outdent one level. Ordered
+        /// items renumber to the new depth's outline style (continuing siblings);
+        /// bullets/todos just shift indent. Returns false on a non-list line so
+        /// Tab keeps its default behavior.
+        private func handleListIndent(_ tv: NSTextView, demote: Bool) -> Bool {
+            let ns = tv.string as NSString
+            let sel = tv.selectedRange()
+            let lineRange = ns.lineRange(for: NSRange(location: sel.location, length: 0))
+            var len = lineRange.length
+            if len > 0, ns.substring(with: NSRange(location: lineRange.location + len - 1, length: 1)) == "\n" { len -= 1 }
+            let lineNoNL = NSRange(location: lineRange.location, length: len)
+            let line = ns.substring(with: lineNoNL)
+            guard let info = parseListLine(line) else { return false }
+
+            let oldDepth = indentWidth(info.indent) / 4
+            if !demote && oldDepth == 0 { return true }            // already top level — swallow Shift-Tab
+            let newDepth = demote ? oldDepth + 1 : oldDepth - 1
+            let newIndent = String(repeating: " ", count: newDepth * 4)
+
+            let newLine: String
+            switch info.kind {
+            case .ordered:
+                let lines = ns.components(separatedBy: "\n")
+                let lineIdx = ns.substring(to: lineRange.location).components(separatedBy: "\n").count - 1
+                let idx = siblingIndex(lines: lines, lineIdx: lineIdx, depth: newDepth)
+                newLine = "\(newIndent)\(orderedMarker(newDepth, idx)). \(info.content)"
+            case .bullet:
+                newLine = "\(newIndent)\(info.bullet) \(info.content)"
+            case .todo:
+                newLine = "\(newIndent)\(info.bullet) [\(info.checked ? "x" : " ")] \(info.content)"
+            }
+
+            guard tv.shouldChangeText(in: lineNoNL, replacementString: newLine) else { return true }
+            tv.textStorage?.replaceCharacters(in: lineNoNL, with: newLine)
+            tv.didChangeText()
+            let delta = (newLine as NSString).length - lineNoNL.length
+            let caret = min(max(sel.location + delta, lineRange.location), lineRange.location + (newLine as NSString).length)
+            tv.setSelectedRange(NSRange(location: caret, length: 0))
+            parent.text = tv.string
+            parent.applyMarkdownStyling(to: tv)
+            return true
+        }
+
+        /// Count preceding ordered siblings at `depth` (stopping at a shallower
+        /// line or a gap) to give the renumbered item its correct outline index.
+        private func siblingIndex(lines: [String], lineIdx: Int, depth: Int) -> Int {
+            var count = 0, i = lineIdx - 1
+            while i >= 0 {
+                let l = lines[i]
+                if l.trimmingCharacters(in: .whitespaces).isEmpty { break }
+                let d = indentWidth(l) / 4
+                if d < depth { break }
+                if d == depth {
+                    if parseListLine(l)?.kind == .ordered { count += 1 } else { break }
+                }
+                i -= 1
+            }
+            return count + 1
+        }
+
+        // Numeral conversions for outline markers.
+        static func intToAlpha(_ n: Int) -> String {
+            var n = max(1, n), s = ""
+            while n > 0 { let r = (n - 1) % 26; s = String(UnicodeScalar(97 + r)!) + s; n = (n - 1) / 26 }
+            return s
+        }
+        static func alphaToInt(_ s: String) -> Int {
+            var n = 0
+            for u in s.lowercased().unicodeScalars {
+                guard u.value >= 97, u.value <= 122 else { break }
+                n = n * 26 + Int(u.value - 96)
+            }
+            return max(1, n)
+        }
+        static func intToRoman(_ n: Int) -> String {
+            let table: [(Int, String)] = [(1000,"m"),(900,"cm"),(500,"d"),(400,"cd"),(100,"c"),(90,"xc"),(50,"l"),(40,"xl"),(10,"x"),(9,"ix"),(5,"v"),(4,"iv"),(1,"i")]
+            var n = max(1, n), s = ""
+            for (v, sym) in table { while n >= v { s += sym; n -= v } }
+            return s
+        }
+        static func romanToInt(_ s: String) -> Int {
+            let map: [Character: Int] = ["i":1,"v":5,"x":10,"l":50,"c":100,"d":500,"m":1000]
+            let chars = Array(s.lowercased()); var total = 0
+            for (i, ch) in chars.enumerated() {
+                guard let v = map[ch] else { return 1 }
+                if i + 1 < chars.count, let nv = map[chars[i + 1]], v < nv { total -= v } else { total += v }
+            }
+            return max(1, total)
         }
 
         // MARK: Slash menu driving
@@ -673,7 +823,8 @@ enum MarkdownStyler {
     private static let reQuote    = rx(#"^([ \t]*>)([ \t]+)(.*)$"#)
     private static let reTodo     = rx(#"^([ \t]*[-*][ \t]+\[([ xX])\])([ \t]+)(.*)$"#)
     private static let reBullet   = rx(#"^([ \t]*[-*])([ \t]+)(?!\[[ xX]\])(.*)$"#)
-    private static let reNumbered = rx(#"^([ \t]*\d+\.)([ \t]+)(.*)$"#)
+    private static let reNumbered = rx(#"^(\d+\.)([ \t]+)(.*)$"#)
+    private static let reOutline  = rx(#"^([ \t]+[0-9A-Za-z]+\.)([ \t]+)(.*)$"#)  // indented = alpha/roman/decimal sub-items
     private static let reDivider  = rx(#"^[ \t]*(?:---|\*\*\*)[ \t]*$"#)
     // Inline.
     private static let reBold1    = rx(#"\*\*([^*\n]+)\*\*"#)
@@ -722,6 +873,9 @@ enum MarkdownStyler {
             storage.addAttribute(.foregroundColor, value: secondary, range: m.range(at: 1))
         }
         each(reNumbered, ns, full) { m in
+            storage.addAttribute(.foregroundColor, value: secondary, range: m.range(at: 1))
+        }
+        each(reOutline, ns, full) { m in
             storage.addAttribute(.foregroundColor, value: secondary, range: m.range(at: 1))
         }
         each(reDivider, ns, full) { m in
