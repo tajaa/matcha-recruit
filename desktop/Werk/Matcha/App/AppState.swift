@@ -97,6 +97,9 @@ class AppState {
     var showProjectsHub: Bool = false
     var showThreadsHub: Bool = false
     var showChannelsHub: Bool = false
+    /// Full-pane Productivity hub — personal kanban boards (To Do / In Progress
+    /// / Done). Same nav-only model as the other hubs.
+    var showProductivityHub: Bool = false
     /// Full-pane "Browse Channels" surface. Reached from the sidebar Channels
     /// section header. Mutually exclusive with thread/project/channel/journal
     /// selection — toggling on clears those.
@@ -122,6 +125,7 @@ class AppState {
         showProjectsHub = false
         showThreadsHub = false
         showChannelsHub = false
+        showProductivityHub = false
     }
 
     var onlineUsers: [MWOnlineUser] = []

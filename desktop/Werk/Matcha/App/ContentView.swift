@@ -383,6 +383,7 @@ struct ContentView: View {
         case .channels: channelsSidebarSection
         case .projects: projectsSidebarSection
         case .journals: journalsSidebarSection
+        case .productivity: productivitySidebarSection
         case .threads:  threadsSidebarSection
         case .email:    emailSidebarSection
         }
@@ -585,6 +586,7 @@ struct ContentView: View {
     private func openProjectsHub()  { appState.clearPrimaryNav(); appState.showProjectsHub = true }
     private func openThreadsHub()   { appState.clearPrimaryNav(); appState.showThreadsHub = true }
     private func openChannelsHub()  { appState.clearPrimaryNav(); appState.showChannelsHub = true }
+    private func openProductivityHub() { appState.clearPrimaryNav(); appState.showProductivityHub = true }
 
     /// Nav-only row — opens the full-pane Notes-style Journals workspace
     /// (folders · note list · editor). Browsing/organizing lives in the
@@ -596,6 +598,17 @@ struct ContentView: View {
             Button { openJournalsHub() } label: { plusChip }
                 .buttonStyle(.plain)
                 .help("Open Journals")
+        }
+    }
+
+    /// Nav-only row — opens the Productivity hub (personal kanban boards).
+    @ViewBuilder
+    private var productivitySidebarSection: some View {
+        sidebarNavRow(title: "Productivity", icon: "checklist",
+                      isActive: appState.showProductivityHub, onOpen: openProductivityHub) {
+            Button { openProductivityHub() } label: { plusChip }
+                .buttonStyle(.plain)
+                .help("Open Productivity")
         }
     }
 

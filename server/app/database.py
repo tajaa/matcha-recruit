@@ -5505,6 +5505,42 @@ async def init_db():
         await conn.execute("ALTER TABLE mw_journals ADD COLUMN IF NOT EXISTS kind VARCHAR(20) NOT NULL DEFAULT 'journal'")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_journals_folder ON mw_journals(folder_id)")
 
+        # Personal productivity kanban — user-scoped boards + cards (todo /
+        # in_progress / done). Cards may back-link to a journal when created
+        # from a text selection.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_productivity_boards (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+                title VARCHAR(255) NOT NULL DEFAULT 'My To-Dos',
+                is_default BOOLEAN NOT NULL DEFAULT FALSE,
+                status VARCHAR(20) NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active', 'archived')),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_prod_boards_user ON mw_productivity_boards(user_id)")
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_productivity_cards (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                board_id UUID NOT NULL REFERENCES mw_productivity_boards(id) ON DELETE CASCADE,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                notes TEXT,
+                board_column VARCHAR(20) NOT NULL DEFAULT 'todo'
+                    CHECK (board_column IN ('todo', 'in_progress', 'done')),
+                position INTEGER NOT NULL DEFAULT 0,
+                source_journal_id UUID REFERENCES mw_journals(id) ON DELETE SET NULL,
+                source_excerpt TEXT,
+                completed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_prod_cards_board ON mw_productivity_cards(board_id, board_column, position)")
+
         # Training compliance tables
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS training_requirements (

@@ -22,6 +22,7 @@ from .fractional_hr import router as fractional_hr_router
 from .provisioning import router as provisioning_router
 from .matcha_work import router as matcha_work_router, public_router as matcha_work_public_router, presence_router as matcha_work_presence_router
 from .journals import router as journals_router
+from .productivity import router as productivity_router
 from .billing import router as matcha_work_billing_router, admin_router as matcha_work_billing_admin_router
 from .notifications import router as mw_notifications_router
 from .risk_assessment import router as risk_assessment_router
@@ -93,6 +94,12 @@ matcha_router.include_router(
     journals_router,
     prefix="/matcha-work",
     tags=["matcha-work-journals"],
+    dependencies=[Depends(require_feature("matcha_work"))],
+)
+matcha_router.include_router(
+    productivity_router,
+    prefix="/matcha-work",
+    tags=["matcha-work-productivity"],
     dependencies=[Depends(require_feature("matcha_work"))],
 )
 matcha_router.include_router(

@@ -16,6 +16,7 @@ struct JournalDetailView: View {
 
     @State private var showInviteSheet = false
     @State private var showStylePopover = false
+    @State private var todoToast: String?
     @StateObject private var pageController = JournalEditorController()
 
     // Doc-kind (single-document) editing state. A doc-kind journal edits ONE
@@ -58,6 +59,7 @@ struct JournalDetailView: View {
             }
         }
         .background(Color.appBackground)
+        .overlay(alignment: .bottom) { toastOverlay }
         .task(id: journalId) {
             await vm.load(id: journalId)
             await vm.ensureBodyEntry()
@@ -88,6 +90,46 @@ struct JournalDetailView: View {
     private func wireUploadCallbacks() {
         pageController.onUploadImage = { [vm] data, name, mime in
             await vm.uploadImage(data: data, filename: name, mimeType: mime)
+        }
+        pageController.onCreateTodo = { text in
+            Task { await createTodoFromSelection(text) }
+        }
+    }
+
+    /// Right-click "Create to-do from selection" → drops a card on the user's
+    /// default productivity board, back-linked to this journal.
+    private func createTodoFromSelection(_ text: String) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            _ = try await MatchaWorkService.shared.quickTodo(
+                title: String(trimmed.prefix(200)),
+                sourceJournalId: journalId,
+                sourceExcerpt: String(trimmed.prefix(160)),
+            )
+            flashToast("Added to To-Dos ✓")
+        } catch {
+            flashToast("Couldn't add to-do")
+        }
+    }
+
+    private func flashToast(_ msg: String) {
+        todoToast = msg
+        Task {
+            try? await Task.sleep(for: .seconds(1.6))
+            todoToast = nil
+        }
+    }
+
+    @ViewBuilder
+    private var toastOverlay: some View {
+        if let t = todoToast {
+            Text(t)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.white)
+                .padding(.horizontal, 14).padding(.vertical, 8)
+                .background(Capsule().fill(appState.themeAccent))
+                .padding(.bottom, 24)
         }
     }
 

@@ -14,6 +14,9 @@ final class JournalEditorController: ObservableObject {
     /// Implementation should upload the bytes and return a public URL
     /// (or nil on failure — the placeholder token gets cleared).
     var onUploadImage: ((Data, String, String) async -> String?)?
+    /// Closure invoked by the right-click "Create to-do from selection" item,
+    /// with the selected text. Wired by the host view to the productivity API.
+    var onCreateTodo: ((String) -> Void)?
 
     // MARK: - Inline wraps
 
@@ -684,6 +687,26 @@ struct RichJournalEditor: NSViewRepresentable {
             guard slashActive || slashPanel != nil else { return }
             slashActive = false
             slashPanel?.orderOut(nil)
+        }
+
+        // Right-click menu: add "Create to-do from selection" when text is
+        // selected. Routes the selection to the host via the controller closure.
+        func textView(_ textView: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
+            let sel = textView.selectedRange()
+            guard sel.length > 0 else { return menu }
+            let text = (textView.string as NSString).substring(with: sel)
+            let item = NSMenuItem(title: "Create to-do from selection",
+                                  action: #selector(createTodoFromSelection(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = text
+            menu.insertItem(.separator(), at: 0)
+            menu.insertItem(item, at: 0)
+            return menu
+        }
+
+        @objc private func createTodoFromSelection(_ sender: NSMenuItem) {
+            guard let text = sender.representedObject as? String else { return }
+            MainActor.assumeIsolated { parent.controller.onCreateTodo?(text) }
         }
 
         // Drag-drop image handling — NSTextView default would embed an

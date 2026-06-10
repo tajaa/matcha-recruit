@@ -19,6 +19,7 @@ final class SidebarSectionOrderStore {
         case channels
         case projects
         case journals
+        case productivity
         case threads
         case email
 
@@ -30,6 +31,7 @@ final class SidebarSectionOrderStore {
             case .channels: return "number"
             case .projects: return "folder"
             case .journals: return "book.closed"
+            case .productivity: return "checklist"
             case .threads:  return "bubble.left.and.bubble.right"
             case .email:    return "envelope"
             }
@@ -41,6 +43,7 @@ final class SidebarSectionOrderStore {
             case .channels: return "Channels"
             case .projects: return "Projects"
             case .journals: return "Journals"
+            case .productivity: return "Productivity"
             case .threads:  return "Threads"
             case .email:    return "Email"
             }
