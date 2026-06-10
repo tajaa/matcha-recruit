@@ -108,7 +108,7 @@ export default function Home() {
       <CTABand onDemoClick={() => setIsPricingOpen(true)} />
 
       <div style={{ backgroundColor: BONE, color: 'var(--color-ivory-ink)' }}>
-        <MarketingFooter />
+        <MarketingFooter newsletterVariant="matcha" />
       </div>
     </div>
   )
@@ -279,19 +279,19 @@ function Marquee() {
   const row = [...MARQUEE_WORDS, ...MARQUEE_WORDS]
   return (
     <div
-      className="relative overflow-hidden border-y py-5 select-none"
+      className="relative overflow-hidden border-y py-2 select-none"
       style={{ borderColor: LINE_D, backgroundColor: MATCHA }}
     >
       <div className="home-marquee-track flex w-max items-center whitespace-nowrap">
         {row.map((w, i) => (
           <span key={i} className="flex items-center">
             <span
-              className="px-6 text-[clamp(1.25rem,2.6vw,2.25rem)] tracking-tight"
+              className="px-5 text-[clamp(0.7rem,1.4vw,1.15rem)] tracking-tight"
               style={{ fontFamily: DISPLAY, fontWeight: 400, color: NOIR }}
             >
               {w}
             </span>
-            <span style={{ color: NOIR }}>✦</span>
+            <span className="text-[0.7rem]" style={{ color: NOIR }}>✦</span>
           </span>
         ))}
       </div>

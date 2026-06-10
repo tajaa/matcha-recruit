@@ -12,13 +12,15 @@ type FooterLink =
   | { label: string; to: string }
   | { label: string; onClick: () => void }
 
-export default function MarketingFooter() {
+export default function MarketingFooter({
+  newsletterVariant = 'caramel',
+}: { newsletterVariant?: 'caramel' | 'matcha' } = {}) {
   const [consultationOpen, setConsultationOpen] = useState(false)
 
   return (
     <>
       {/* Cool newsletter band — renders on every page that uses the footer. */}
-      <NewsletterHeroSection />
+      <NewsletterHeroSection variant={newsletterVariant} />
     <footer className="border-t py-16" style={{ borderColor: LINE }}>
       <div className="max-w-[1440px] mx-auto px-6 sm:px-10">
         <div className="grid md:grid-cols-5 gap-10">

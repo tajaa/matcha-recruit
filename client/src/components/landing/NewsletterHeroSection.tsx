@@ -3,7 +3,52 @@ import { Check, Loader2 } from 'lucide-react'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
-export function NewsletterHeroSection() {
+type NewsletterVariant = 'caramel' | 'matcha'
+
+// Default 'caramel' = the ivory product-page theme (gold accent). 'matcha' =
+// the dark editorial brand front-door (lime accent), to match Home.
+const PALETTES: Record<NewsletterVariant, {
+  bg: string; accent: string; accentSoft: string; accentFaint: string
+  glow: string; hairline: string; dot: string; badgeText: string
+  gradient: string; btnBg: string; btnText: string; btnShadow: string
+  ring: string; display: boolean
+}> = {
+  caramel: {
+    bg: 'var(--color-ivory-ink)',
+    accent: '#c9b48e',
+    accentSoft: 'rgba(201,180,142,0.28)',
+    accentFaint: 'rgba(201,180,142,0.07)',
+    glow: 'rgba(201,180,142,0.18)',
+    hairline: 'rgba(201,180,142,0.45)',
+    dot: '#c9b48e',
+    badgeText: '#dcc79b',
+    gradient: 'linear-gradient(95deg, #e7d3a8, #c9b48e 60%, #b59a6a)',
+    btnBg: '#c9b48e',
+    btnText: '#1a1814',
+    btnShadow: '0 6px 20px -6px rgba(201,180,142,0.5)',
+    ring: 'rgba(201,180,142,0.18)',
+    display: false,
+  },
+  matcha: {
+    bg: '#0E0E0C',
+    accent: '#C7F04A',
+    accentSoft: 'rgba(199,240,74,0.30)',
+    accentFaint: 'rgba(199,240,74,0.08)',
+    glow: 'rgba(199,240,74,0.16)',
+    hairline: 'rgba(199,240,74,0.45)',
+    dot: '#C7F04A',
+    badgeText: '#C7F04A',
+    gradient: 'linear-gradient(95deg, #E6FF8F, #C7F04A 55%, #A9D63E)',
+    btnBg: '#C7F04A',
+    btnText: '#0E0E0C',
+    btnShadow: '0 6px 20px -6px rgba(199,240,74,0.5)',
+    ring: 'rgba(199,240,74,0.18)',
+    display: true,
+  },
+}
+
+export function NewsletterHeroSection({ variant = 'caramel' }: { variant?: NewsletterVariant } = {}) {
+  const P = PALETTES[variant]
   const [email, setEmail] = useState('')
   const [status, setStatus] = useState<'idle' | 'submitting' | 'done' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -56,13 +101,13 @@ export function NewsletterHeroSection() {
   return (
     <section
       className="relative w-full overflow-hidden py-16 sm:py-20"
-      style={{ backgroundColor: 'var(--color-ivory-ink)' }}
+      style={{ backgroundColor: P.bg }}
     >
-      {/* Caramel radial glow + faint grid for depth */}
+      {/* Accent radial glow + faint grid for depth */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"
-        style={{ background: 'radial-gradient(58% 80% at 50% -10%, rgba(201,180,142,0.18), transparent 65%)' }}
+        style={{ background: `radial-gradient(58% 80% at 50% -10%, ${P.glow}, transparent 65%)` }}
       />
       <div
         aria-hidden
@@ -79,35 +124,41 @@ export function NewsletterHeroSection() {
       <div
         aria-hidden
         className="absolute inset-x-0 top-0 h-px"
-        style={{ background: 'linear-gradient(90deg, transparent, rgba(201,180,142,0.45), transparent)' }}
+        style={{ background: `linear-gradient(90deg, transparent, ${P.hairline}, transparent)` }}
       />
 
       <div className="relative max-w-2xl mx-auto px-6 text-center">
         <span
           className="inline-flex items-center gap-2 rounded-full px-3.5 py-1 text-[11px] uppercase tracking-[0.22em] font-medium mb-4"
           style={{
-            color: '#dcc79b',
-            border: '1px solid rgba(201,180,142,0.28)',
-            backgroundColor: 'rgba(201,180,142,0.07)',
+            color: P.badgeText,
+            border: `1px solid ${P.accentSoft}`,
+            backgroundColor: P.accentFaint,
           }}
         >
-          <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#c9b48e' }} />
+          <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ backgroundColor: P.dot }} />
           Weekly Brief
         </span>
 
         <h2
-          className="text-3xl sm:text-4xl font-semibold tracking-tight mb-3"
-          style={{ color: 'rgba(240,236,228,0.98)', lineHeight: 1.08 }}
+          className="text-3xl sm:text-4xl tracking-tight mb-3"
+          style={{
+            color: 'rgba(240,236,228,0.98)',
+            lineHeight: 1.08,
+            fontFamily: P.display ? 'var(--font-display)' : undefined,
+            fontWeight: P.display ? 400 : 600,
+          }}
         >
           Where HR goes
           <br />
           for{' '}
           <span
             style={{
-              background: 'linear-gradient(95deg, #e7d3a8, #c9b48e 60%, #b59a6a)',
+              background: P.gradient,
               WebkitBackgroundClip: 'text',
               backgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
+              fontStyle: P.display ? 'italic' : undefined,
             }}
           >
             HR problems.
@@ -126,8 +177,8 @@ export function NewsletterHeroSection() {
             className="inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm"
             style={{
               color: 'rgba(240,236,228,0.9)',
-              border: '1px solid rgba(201,180,142,0.25)',
-              backgroundColor: 'rgba(201,180,142,0.06)',
+              border: `1px solid ${P.accentSoft}`,
+              backgroundColor: P.accentFaint,
             }}
           >
             <Check className="w-4 h-4 text-emerald-400" />
@@ -137,11 +188,12 @@ export function NewsletterHeroSection() {
           <>
             <form
               onSubmit={handleSubmit}
-              className="mx-auto flex max-w-md items-center gap-2 rounded-full p-1.5 transition-shadow focus-within:[box-shadow:0_0_0_4px_rgba(201,180,142,0.18)]"
+              className="mx-auto flex max-w-md items-center gap-2 rounded-full p-1.5 transition-shadow focus-within:[box-shadow:0_0_0_4px_var(--nl-ring)]"
               style={{
                 backgroundColor: 'rgba(255,255,255,0.06)',
                 border: '1px solid rgba(255,255,255,0.14)',
-              }}
+                ['--nl-ring' as string]: P.ring,
+              } as React.CSSProperties}
             >
               <input
                 type="text"
@@ -167,9 +219,9 @@ export function NewsletterHeroSection() {
                 disabled={status === 'submitting'}
                 className="shrink-0 inline-flex items-center gap-1.5 rounded-full px-6 py-2.5 text-sm font-semibold transition-transform hover:scale-[1.03] active:scale-95 disabled:opacity-50"
                 style={{
-                  backgroundColor: '#c9b48e',
-                  color: '#1a1814',
-                  boxShadow: '0 6px 20px -6px rgba(201,180,142,0.5)',
+                  backgroundColor: P.btnBg,
+                  color: P.btnText,
+                  boxShadow: P.btnShadow,
                 }}
               >
                 {status === 'submitting' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
