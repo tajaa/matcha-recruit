@@ -140,6 +140,13 @@ struct ScreenplayNSEditor: NSViewRepresentable {
         var lastSerialized = ""
         private var isProgrammatic = false
 
+        // MARK: Slash menu state (same NSPanel pattern as RichJournalEditor)
+        private var slashActive = false
+        private var slashRange = NSRange(location: 0, length: 0)
+        private var slashPanel: NSPanel?
+        private var slashHost: NSHostingView<ScreenplaySlashMenuView>?
+        private var slashModel: ScreenplaySlashModel?
+
         init(parent: ScreenplayNSEditor) { self.parent = parent }
 
         private var size: CGFloat { parent.fontSize }
@@ -267,14 +274,33 @@ struct ScreenplayNSEditor: NSViewRepresentable {
             let element = elementAtCaret(tv)
             if element.isUppercased { uppercaseCurrentParagraph(tv) }
             pushSerialized()
+            updateSlashMenu(tv)
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard !isProgrammatic, let tv = notification.object as? NSTextView else { return }
             updateCurrentElement(tv)
+            if slashActive { updateSlashMenu(tv) }   // caret left the "/query" → dismiss
+        }
+
+        // Editor lost first responder (clicked away, switched view) → don't
+        // leave a detached slash panel floating.
+        func textDidEndEditing(_ notification: Notification) {
+            dismissSlash()
         }
 
         func textView(_ tv: NSTextView, doCommandBy selector: Selector) -> Bool {
+            // While the slash menu is open, arrows/Return/Tab/Escape drive it.
+            if slashActive {
+                switch selector {
+                case #selector(NSResponder.moveDown(_:)):    moveSlashSelection(1);  return true
+                case #selector(NSResponder.moveUp(_:)):      moveSlashSelection(-1); return true
+                case #selector(NSResponder.insertNewline(_:)),
+                     #selector(NSResponder.insertTab(_:)):   commitSlashSelection(); return true
+                case #selector(NSResponder.cancelOperation(_:)): dismissSlash();     return true
+                default: break
+                }
+            }
             switch selector {
             case #selector(NSResponder.insertTab(_:)):
                 let next = elementAtCaret(tv).tabCycle
@@ -286,6 +312,142 @@ struct ScreenplayNSEditor: NSViewRepresentable {
             default:
                 return false
             }
+        }
+
+        // MARK: Slash menu driving — "/scene", "/character", … convert the
+        // current line to that element (Final Draft / Scrivener style); the
+        // existing Return flow then auto-advances (character → dialogue, …).
+
+        /// Note: no `.shot`/`.section`/`.synopsis` — mirrors the element bar
+        /// (Fountain can't round-trip a shot; organizational layers stay
+        /// out of the quick menu).
+        private static let slashItems: [ScreenplaySlashItem] = [
+            .init(element: .sceneHeading, icon: "film",
+                  subtitle: "INT. / EXT. slugline", keywords: ["scene", "heading", "int", "ext", "slug"]),
+            .init(element: .character, icon: "person.fill",
+                  subtitle: "Cue — Return drops into dialogue", keywords: ["character", "cue", "name", "who"]),
+            .init(element: .dialogue, icon: "text.bubble",
+                  subtitle: "What they say", keywords: ["dialogue", "speech", "line", "say"]),
+            .init(element: .parenthetical, icon: "parentheses",
+                  subtitle: "(beat), (wryly)…", keywords: ["parenthetical", "paren", "beat", "wryly"]),
+            .init(element: .action, icon: "text.alignleft",
+                  subtitle: "Description / stage direction", keywords: ["action", "description", "direction"]),
+            .init(element: .transition, icon: "arrow.right.to.line",
+                  subtitle: "CUT TO:, FADE OUT.", keywords: ["transition", "cut", "fade", "dissolve"]),
+            .init(element: .centered, icon: "text.aligncenter",
+                  subtitle: "Centered text", keywords: ["centered", "center", "title"]),
+        ]
+
+        /// Recompute the live "/query" before the caret and show/refresh the
+        /// floating menu, or dismiss when there's no active trigger.
+        private func updateSlashMenu(_ tv: NSTextView) {
+            let sel = tv.selectedRange()
+            guard sel.length == 0 else { dismissSlash(); return }
+            let ns = tv.string as NSString
+            let caret = sel.location
+            var slashIdx = -1
+            var k = caret
+            while k > 0 {
+                let ch = ns.substring(with: NSRange(location: k - 1, length: 1))
+                if ch == "/" { slashIdx = k - 1; break }
+                if ch == " " || ch == "\n" || ch == "\t" { break }
+                k -= 1
+                if caret - k > 24 { break }   // queries don't run this long
+            }
+            guard slashIdx >= 0 else { dismissSlash(); return }
+            // Only trigger at the start of a line — slash mid-sentence is text
+            // (e.g. "24/7" in action), not a command.
+            let boundaryOK: Bool = slashIdx == 0 || {
+                let p = ns.substring(with: NSRange(location: slashIdx - 1, length: 1))
+                return p == "\n"
+            }()
+            guard boundaryOK else { dismissSlash(); return }
+            let query = ns.substring(with: NSRange(location: slashIdx + 1, length: caret - slashIdx - 1))
+            showSlash(tv: tv, query: query, range: NSRange(location: slashIdx, length: caret - slashIdx))
+        }
+
+        private func showSlash(tv: NSTextView, query: String, range: NSRange) {
+            let q = query.lowercased()
+            let filtered = q.isEmpty ? Self.slashItems : Self.slashItems.filter { item in
+                item.title.lowercased().contains(q) || item.keywords.contains { $0.hasPrefix(q) || $0.contains(q) }
+            }
+            guard !filtered.isEmpty else { dismissSlash(); return }
+            slashRange = range
+            let model = ensureSlashMenu()
+            model.items = filtered
+            if model.selection >= filtered.count { model.selection = 0 }
+            positionSlashPanel(tv: tv, at: range.location)
+            slashPanel?.orderFront(nil)
+            slashActive = true
+        }
+
+        private func ensureSlashMenu() -> ScreenplaySlashModel {
+            if let m = slashModel { return m }
+            let m = ScreenplaySlashModel()
+            m.onPick = { [weak self] item in self?.commitSlash(item) }
+            let host = NSHostingView(rootView: ScreenplaySlashMenuView(model: m))
+            let panel = NSPanel(
+                contentRect: NSRect(x: 0, y: 0, width: 264, height: 200),
+                styleMask: [.nonactivatingPanel, .borderless],
+                backing: .buffered, defer: true,
+            )
+            panel.isFloatingPanel = true
+            panel.level = .popUpMenu
+            panel.hasShadow = true
+            panel.isOpaque = false
+            panel.backgroundColor = .clear
+            panel.contentView = host
+            slashModel = m
+            slashHost = host
+            slashPanel = panel
+            return m
+        }
+
+        private func positionSlashPanel(tv: NSTextView, at charIndex: Int) {
+            // firstRect returns the caret rect in SCREEN coordinates (y-up).
+            let caretRect = tv.firstRect(
+                forCharacterRange: NSRange(location: charIndex, length: 0), actualRange: nil,
+            )
+            let h = slashHost?.fittingSize.height ?? 200
+            let gap: CGFloat = 4
+            slashPanel?.setFrame(
+                NSRect(x: caretRect.minX, y: caretRect.minY - gap - h, width: 264, height: max(h, 1)),
+                display: true,
+            )
+        }
+
+        private func moveSlashSelection(_ delta: Int) {
+            guard let m = slashModel, !m.items.isEmpty else { return }
+            let n = m.items.count
+            m.selection = ((m.selection + delta) % n + n) % n
+        }
+
+        private func commitSlashSelection() {
+            guard let m = slashModel, m.selection < m.items.count else { return }
+            commitSlash(m.items[m.selection])
+        }
+
+        private func commitSlash(_ item: ScreenplaySlashItem) {
+            MainActor.assumeIsolated {
+                guard let tv = textView else { dismissSlash(); return }
+                let ns = tv.string as NSString
+                let r = slashRange
+                guard r.location >= 0, r.location + r.length <= ns.length else { dismissSlash(); return }
+                // Strip the "/query", then convert the (now bare) paragraph.
+                if tv.shouldChangeText(in: r, replacementString: "") {
+                    tv.textStorage?.replaceCharacters(in: r, with: "")
+                    tv.didChangeText()
+                }
+                tv.setSelectedRange(NSRange(location: r.location, length: 0))
+                dismissSlash()
+                applyElementToCurrentParagraph(item.element)
+            }
+        }
+
+        private func dismissSlash() {
+            guard slashActive || slashPanel != nil else { return }
+            slashActive = false
+            slashPanel?.orderOut(nil)
         }
 
         private func handleReturn(_ tv: NSTextView) {
@@ -506,5 +668,63 @@ struct ScreenplayPageView: View {
         case .centered:   return .center
         default:          return .leading
         }
+    }
+}
+
+// MARK: - Slash menu (element quick-insert)
+
+/// One row in the screenplay slash menu — "/scene", "/character", ….
+struct ScreenplaySlashItem: Identifiable, Hashable {
+    let element: ScreenplayElement
+    let icon: String
+    let subtitle: String
+    let keywords: [String]
+    var id: String { element.rawValue }
+    var title: String { element.displayName }
+}
+
+final class ScreenplaySlashModel: ObservableObject {
+    @Published var items: [ScreenplaySlashItem] = []
+    @Published var selection: Int = 0
+    var onPick: ((ScreenplaySlashItem) -> Void)?
+}
+
+/// Floating completion list. System materials/labels so it reads correctly in
+/// both appearances without app-theme access (same as the journal slash menu).
+struct ScreenplaySlashMenuView: View {
+    @ObservedObject var model: ScreenplaySlashModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            if model.items.isEmpty {
+                Text("No matching elements")
+                    .font(.system(size: 11)).foregroundColor(.secondary)
+                    .padding(.horizontal, 8).padding(.vertical, 6)
+            } else {
+                ForEach(Array(model.items.enumerated()), id: \.element.id) { idx, item in
+                    HStack(spacing: 8) {
+                        Image(systemName: item.icon)
+                            .font(.system(size: 12)).frame(width: 18)
+                            .foregroundColor(idx == model.selection ? .accentColor : .secondary)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(item.title).font(.system(size: 12, weight: .medium)).foregroundColor(.primary)
+                            Text(item.subtitle).font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
+                        }
+                        Spacer(minLength: 12)
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(RoundedRectangle(cornerRadius: 5)
+                        .fill(idx == model.selection ? Color.accentColor.opacity(0.18) : Color.clear))
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.onPick?(item) }
+                    .onHover { if $0 { model.selection = idx } }
+                }
+            }
+        }
+        .padding(5)
+        .frame(width: 264, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.primary.opacity(0.10)))
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
