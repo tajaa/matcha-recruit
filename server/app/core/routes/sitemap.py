@@ -25,6 +25,7 @@ CANONICAL_HOST = "hey-matcha.com"
 STATIC_ROUTES: list[tuple[str, str, float]] = [
     # path, changefreq, priority
     ("/", "weekly", 1.0),
+    ("/platform", "monthly", 0.9),
     ("/matcha-work", "monthly", 0.8),
     ("/matcha-lite", "monthly", 0.8),
     ("/services", "monthly", 0.7),

@@ -1,6 +1,6 @@
 import { Routes, Route } from 'react-router-dom'
 import { lazy, Suspense } from 'react'
-import Landing from './pages/Landing'
+import Home from './pages/Home'
 import Login from './pages/Login'
 import RequireBusinessAccount from './components/auth/RequireBusinessAccount'
 
@@ -13,7 +13,8 @@ const WerkRoutes = lazy(() => import('./routes/WerkRoutes'))
 const PortalRoutes = lazy(() => import('./routes/PortalRoutes'))
 
 // Public / marketing / auth-funnel pages — lazy so marketing visitors only
-// pull what they land on (Landing + Login stay eager: first paint + funnel).
+// pull what they land on (Home + Login stay eager: first paint + funnel).
+const Landing = lazy(() => import('./pages/Landing')) // the Platform page, now at /platform
 const MatchaWorkPage = lazy(() => import('./pages/landing/MatchaWorkPage'))
 const MatchaLitePage = lazy(() => import('./pages/landing/MatchaLitePage'))
 const ServicesPage = lazy(() => import('./pages/landing/ServicesPage'))
@@ -67,7 +68,8 @@ export default function App() {
   return (
     <Suspense fallback={<RouteFallback />}>
       <Routes>
-        <Route path="/" element={<Landing />} />
+        <Route path="/" element={<Home />} />
+        <Route path="/platform" element={<Landing />} />
         <Route path="/matcha-work" element={<MatchaWorkPage />} />
         <Route path="/matcha-lite" element={<MatchaLitePage />} />
         <Route path="/services" element={<ServicesPage />} />
