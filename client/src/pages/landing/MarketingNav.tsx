@@ -10,7 +10,7 @@ const NAV_LINKS = [
   { to: '/', label: 'Platform' },
   // { to: '/matcha-work', label: 'Matcha Work' }, // beta — hidden until launch
   { to: '/matcha-lite', label: 'Matcha Lite' },
-  // { to: '/services', label: 'Consulting' }, // muted
+  { to: '/services', label: 'Consulting' },
   { to: '/resources', label: 'Resources' },
   { to: '/fractional', label: 'Fractional' },
   { to: '/blog', label: 'Blog' },

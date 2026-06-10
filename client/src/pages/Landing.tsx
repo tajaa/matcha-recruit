@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import MarketingNav from './landing/MarketingNav'
 import MarketingFooter from './landing/MarketingFooter'
 import { LazyMount } from './landing/LazyMount'
+import { useSEO } from '../hooks/useSEO'
 // import LandingIntro from '../components/landing/LandingIntro' // muted — WIP, revisit
 
 const AgentReasoningAnimation = lazy(() => import('./landing/AgentReasoningAnimation'))
@@ -28,9 +29,24 @@ const MUTED = 'var(--color-ivory-muted)'
 const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 
-const HERO_HEADLINE = 'The Platform: Agentic Risk Management'
+const HERO_HEADLINE = 'Full-service HR, end to end.'
 const HERO_SUBCOPY =
-  'EHS, governance & compliance, and employee relations — usually three siloed systems. Matcha runs them on one platform, where every signal talks to the others.'
+  'Software and senior practitioners under one roof — an agentic risk-and-compliance platform, embedded fractional leaders, and bespoke advisory. The whole people function, one standard of rigor.'
+
+const HOME_JSON_LD = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: 'Matcha',
+  url: 'https://hey-matcha.com/',
+  description:
+    'Full-service HR — an agentic risk & compliance platform, Matcha Lite for small teams, embedded fractional HR leadership, and senior advisory.',
+  makesOffer: [
+    { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'HR Risk & Compliance Platform' } },
+    { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Matcha Lite — Incident Reporting & HR Records' } },
+    { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Fractional HR Leadership' } },
+    { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'HR & Compliance Consulting' } },
+  ],
+}
 
 const DEFAULT_SIZZLES: LandingSizzleVideo[] = [
   {
@@ -68,6 +84,14 @@ export default function Landing() {
   const { data } = useLandingMedia()
   const focus = useScrollFocus()
 
+  useSEO({
+    title: 'Matcha — Full-Service HR: Platform, Fractional & Consulting',
+    description:
+      'Full-service HR for modern companies — an agentic risk & compliance platform, Matcha Lite for small teams, embedded fractional HR leaders, and senior advisory. One standard of rigor across software and people.',
+    canonical: 'https://hey-matcha.com/',
+    jsonLd: HOME_JSON_LD,
+  })
+
   const sizzles = data.sizzle_videos.length > 0 ? data.sizzle_videos : DEFAULT_SIZZLES
 
   const sectionNodes = [
@@ -86,7 +110,9 @@ export default function Landing() {
 
       <Hero data={data} onContactClick={() => setIsPricingOpen(true)} />
 
-      <main>
+      <FullServiceHub />
+
+      <main id="platform" className="scroll-mt-24">
         {sectionNodes.map((node, i) => (
           <FocusSection key={i} idx={i} focus={focus}>{node}</FocusSection>
         ))}
@@ -146,12 +172,12 @@ function VideoHero({ data, onContactClick }: { data: LandingMedia; onContactClic
               >
                 Book a Consultation
               </button>
-              <Link
-                to="/services"
+              <a
+                href="#offerings"
                 className="inline-flex items-center h-12 text-[15px] text-white/80 hover:text-white transition-colors"
               >
-                Explore services →
-              </Link>
+                See all four offerings →
+              </a>
             </div>
           </div>
         </div>
@@ -209,13 +235,13 @@ function AnimationHero({ data, onContactClick }: { data: LandingMedia; onContact
             >
               Book a Consultation
             </button>
-            <Link
-              to="/services"
+            <a
+              href="#offerings"
               className="inline-flex items-center h-12 text-[15px] transition-opacity hover:opacity-60"
               style={{ color: INK }}
             >
-              Explore services →
-            </Link>
+              See all four offerings →
+            </a>
           </div>
 
           {/* Wide animation card — hidden on mobile, 5-column tree unreadable below 640px */}
@@ -418,6 +444,126 @@ function SizzleVisual({ sizzle }: { sizzle: LandingSizzleVideo }) {
         )}
       </div>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Full-service hub — the four ways to work with Matcha
+// ---------------------------------------------------------------------------
+
+type Offering = {
+  n: string
+  kind: string
+  title: string
+  to: string
+  cta: string
+  desc: string
+}
+
+const OFFERINGS: Offering[] = [
+  {
+    n: '01',
+    kind: 'Software · Bespoke',
+    title: 'The Platform',
+    to: '#platform',
+    cta: 'Explore the platform',
+    desc: 'Agentic risk management — EHS, governance & compliance, and employee relations on one data model, built bespoke for your jurisdiction and stage.',
+  },
+  {
+    n: '02',
+    kind: 'Software · Self-serve',
+    title: 'Matcha Lite',
+    to: '/matcha-lite',
+    cta: 'See Matcha Lite',
+    desc: 'Incident reporting, AI analysis, and OSHA 300 logs plus a full HR library — bundled for small teams that don’t need a bespoke build.',
+  },
+  {
+    n: '03',
+    kind: 'People · Embedded',
+    title: 'Fractional HR',
+    to: '/fractional',
+    cta: 'Meet our fractional leaders',
+    desc: 'Senior HR and people-ops leaders embedded part-time — Fractional CHRO, HR Director, function buildouts, and audits. Executive HR without the full-time cost.',
+  },
+  {
+    n: '04',
+    kind: 'People · Advisory',
+    title: 'Consulting',
+    to: '/services',
+    cta: 'View consulting',
+    desc: 'Bespoke HR, governance, employee relations, and AI-integration consulting — led by senior practitioners who’ve been in the room when it mattered.',
+  },
+]
+
+function OfferingCard({ o }: { o: Offering }) {
+  const cls =
+    'group flex flex-col rounded-2xl border p-7 sm:p-8 transition-all duration-200 border-[var(--color-ivory-line)] hover:border-[var(--color-ivory-ink)] hover:-translate-y-1 hover:shadow-xl'
+  const inner = (
+    <>
+      <div className="flex items-start justify-between">
+        <span className="text-[11px] uppercase tracking-wider font-medium" style={{ color: MUTED }}>
+          {o.kind}
+        </span>
+        <span className="text-[11px] font-mono" style={{ color: MUTED }}>
+          {o.n}
+        </span>
+      </div>
+      <h3
+        className="mt-5 tracking-tight"
+        style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(1.5rem, 2.4vw, 2rem)', lineHeight: 1.1 }}
+      >
+        {o.title}
+      </h3>
+      <p className="mt-3 text-[15px] flex-1" style={{ color: MUTED, lineHeight: 1.6 }}>
+        {o.desc}
+      </p>
+      <span className="mt-6 inline-flex items-center gap-1.5 text-[14px] font-medium" style={{ color: INK }}>
+        {o.cta}
+        <span className="transition-transform group-hover:translate-x-1">→</span>
+      </span>
+    </>
+  )
+  if (o.to.startsWith('#')) {
+    return (
+      <a href={o.to} className={cls} style={{ backgroundColor: BG }}>
+        {inner}
+      </a>
+    )
+  }
+  return (
+    <Link to={o.to} className={cls} style={{ backgroundColor: BG }}>
+      {inner}
+    </Link>
+  )
+}
+
+function FullServiceHub() {
+  return (
+    <section id="offerings" className="scroll-mt-24 py-20 sm:py-28 border-t" style={{ borderColor: LINE }}>
+      <div className="max-w-[1440px] mx-auto px-5 sm:px-10">
+        <div className="max-w-3xl">
+          <div className="text-[11px] uppercase tracking-wider font-medium mb-3" style={{ color: MUTED }}>
+            Full-service HR
+          </div>
+          <h2
+            className="tracking-tight"
+            style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(1.875rem, 4vw, 3rem)', lineHeight: 1.05 }}
+          >
+            Four ways to work with Matcha.
+          </h2>
+          <p className="mt-5 text-lg" style={{ color: MUTED, lineHeight: 1.6 }}>
+            Software when you want to run it yourself, senior practitioners when you want it run for you — or any
+            blend of the two. Every engagement holds the same standard of rigor.
+          </p>
+        </div>
+
+        <div className="mt-10 sm:mt-14 grid sm:grid-cols-2 gap-5">
+          {OFFERINGS.map((o) => (
+            <OfferingCard key={o.title} o={o} />
+          ))}
+        </div>
+      </div>
+    </section>
   )
 }
 
