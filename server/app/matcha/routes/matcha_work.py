@@ -4434,6 +4434,18 @@ async def list_recent_activity_endpoint(
                 LEFT JOIN mw_journal_entries e ON e.journal_id = j.id
                 WHERE j.company_id = $1
                   AND j.status = 'active'
+                  -- Journals are PERSONAL (unlike projects/tasks/threads which
+                  -- are company-shared). Scope to the caller's own journals +
+                  -- ones explicitly shared with them, or coworker notes leak
+                  -- into the dashboard feed.
+                  AND (
+                    j.created_by = $2
+                    OR EXISTS(
+                        SELECT 1 FROM mw_journal_collaborators jc
+                        WHERE jc.journal_id = j.id AND jc.user_id = $2
+                          AND jc.status = 'active'
+                    )
+                  )
                   AND (
                     j.updated_at > NOW() - INTERVAL '14 days'
                     OR e.updated_at > NOW() - INTERVAL '14 days'
@@ -4450,6 +4462,7 @@ async def list_recent_activity_endpoint(
             LIMIT 25
             """,
             company_id,
+            current_user.id,
         )
     out = []
     for r in rows:

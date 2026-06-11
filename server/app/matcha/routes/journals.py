@@ -174,7 +174,7 @@ async def list_journal_folders_endpoint(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return []
-    return await journal_service.list_journal_folders(company_id)
+    return await journal_service.list_journal_folders(company_id, current_user.id)
 
 
 @router.post("/journal-folders", status_code=201)
@@ -205,7 +205,7 @@ async def update_journal_folder_endpoint(
         raise HTTPException(status_code=400, detail="No company associated")
     try:
         return await journal_service.update_journal_folder(
-            folder_id, company_id, body.model_dump(exclude_unset=True),
+            folder_id, company_id, current_user.id, body.model_dump(exclude_unset=True),
         )
     except PermissionError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -220,7 +220,7 @@ async def delete_journal_folder_endpoint(
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated")
     try:
-        await journal_service.delete_journal_folder(folder_id, company_id)
+        await journal_service.delete_journal_folder(folder_id, company_id, current_user.id)
     except PermissionError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

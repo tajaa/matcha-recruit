@@ -276,16 +276,19 @@ async def get_journal(journal_id: UUID, viewer_id: UUID) -> Optional[dict]:
 
 
 async def _ensure_default_folder(conn, company_id: UUID, creator_id: UUID) -> UUID:
-    """Return the company's default root "Notes" notebook, creating it if
+    """Return the caller's default root "Notes" notebook, creating it if
     missing. Evernote model: every note lives in a notebook, so unfiled new
-    notes land here. Idempotent on (company_id, parent_id IS NULL, name)."""
+    notes land here. Notebooks are per-user (co-workers share a company), so
+    this is idempotent on (company_id, created_by, parent_id IS NULL, name) —
+    each user gets their OWN "Notes" notebook."""
     existing = await conn.fetchval(
         """
         SELECT id FROM mw_journal_folders
-        WHERE company_id = $1 AND parent_id IS NULL AND name = 'Notes'
+        WHERE company_id = $1 AND created_by = $2
+          AND parent_id IS NULL AND name = 'Notes'
         LIMIT 1
         """,
-        company_id,
+        company_id, creator_id,
     )
     if existing is not None:
         return existing
@@ -321,8 +324,9 @@ async def create_journal(
         # still allows un-filing after the fact).
         if folder_id is not None:
             ok = await conn.fetchval(
-                "SELECT EXISTS(SELECT 1 FROM mw_journal_folders WHERE id = $1 AND company_id = $2)",
-                folder_id, company_id,
+                "SELECT EXISTS(SELECT 1 FROM mw_journal_folders "
+                "WHERE id = $1 AND company_id = $2 AND created_by = $3)",
+                folder_id, company_id, creator_id,
             )
             if not ok:
                 folder_id = None
@@ -382,9 +386,10 @@ async def update_journal(journal_id: UUID, viewer_id: UUID, patch: dict) -> dict
                         SELECT 1 FROM mw_journal_folders f
                         JOIN mw_journals j ON j.id = $2
                         WHERE f.id = $1 AND f.company_id = j.company_id
+                          AND f.created_by = $3
                     )
                     """,
-                    fid, journal_id,
+                    fid, journal_id, viewer_id,
                 )
                 if not ok:
                     raise PermissionError("Folder not found in this workspace")
@@ -676,18 +681,22 @@ def _parse_folder(row) -> dict:
     }
 
 
-async def list_journal_folders(company_id: UUID) -> list[dict]:
-    """The full folder tree for the company (flat list; client builds the
-    hierarchy from parent_id)."""
+async def list_journal_folders(company_id: UUID, user_id: UUID) -> list[dict]:
+    """The caller's own folder tree (flat list; client builds the hierarchy
+    from parent_id).
+
+    Notebooks are PERSONAL: business co-workers share a `company_id`, so
+    scoping by company alone leaks every coworker's notebooks into the
+    sidebar. Filter by `created_by` so each user only sees their own."""
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
             SELECT id, name, parent_id, created_by, created_at, color
             FROM mw_journal_folders
-            WHERE company_id = $1
+            WHERE company_id = $1 AND created_by = $2
             ORDER BY name ASC
             """,
-            company_id,
+            company_id, user_id,
         )
         return [_parse_folder(r) for r in rows]
 
@@ -699,8 +708,9 @@ async def create_journal_folder(
     async with get_connection() as conn:
         if parent_id is not None:
             ok = await conn.fetchval(
-                "SELECT EXISTS(SELECT 1 FROM mw_journal_folders WHERE id = $1 AND company_id = $2)",
-                parent_id, company_id,
+                "SELECT EXISTS(SELECT 1 FROM mw_journal_folders "
+                "WHERE id = $1 AND company_id = $2 AND created_by = $3)",
+                parent_id, company_id, creator_id,
             )
             if not ok:
                 raise PermissionError("Parent folder not found in this workspace")
@@ -732,14 +742,15 @@ async def _is_descendant(conn, folder_id: UUID, maybe_ancestor: UUID) -> bool:
 
 
 async def update_journal_folder(
-    folder_id: UUID, company_id: UUID, patch: dict
+    folder_id: UUID, company_id: UUID, user_id: UUID, patch: dict
 ) -> dict:
-    """Rename and/or reparent a folder (company-scoped). Guards against moving a
+    """Rename and/or reparent a folder (per-user). Guards against moving a
     folder into its own subtree."""
     async with get_connection() as conn:
         owned = await conn.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM mw_journal_folders WHERE id = $1 AND company_id = $2)",
-            folder_id, company_id,
+            "SELECT EXISTS(SELECT 1 FROM mw_journal_folders "
+            "WHERE id = $1 AND company_id = $2 AND created_by = $3)",
+            folder_id, company_id, user_id,
         )
         if not owned:
             raise PermissionError("Folder not found in this workspace")
@@ -755,8 +766,9 @@ async def update_journal_folder(
             if target is not None:
                 pid = target if isinstance(target, UUID) else UUID(str(target))
                 ok = await conn.fetchval(
-                    "SELECT EXISTS(SELECT 1 FROM mw_journal_folders WHERE id = $1 AND company_id = $2)",
-                    pid, company_id,
+                    "SELECT EXISTS(SELECT 1 FROM mw_journal_folders "
+                    "WHERE id = $1 AND company_id = $2 AND created_by = $3)",
+                    pid, company_id, user_id,
                 )
                 if not ok:
                     raise PermissionError("Parent folder not found in this workspace")
@@ -784,13 +796,14 @@ async def update_journal_folder(
         return _parse_folder(row)
 
 
-async def delete_journal_folder(folder_id: UUID, company_id: UUID) -> None:
-    """Delete a folder. Child folders cascade; journals filed here SET NULL
-    back to the hub root (FK on mw_journals.folder_id)."""
+async def delete_journal_folder(folder_id: UUID, company_id: UUID, user_id: UUID) -> None:
+    """Delete a folder (per-user). Child folders cascade; journals filed here
+    SET NULL back to the hub root (FK on mw_journals.folder_id)."""
     async with get_connection() as conn:
         owned = await conn.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM mw_journal_folders WHERE id = $1 AND company_id = $2)",
-            folder_id, company_id,
+            "SELECT EXISTS(SELECT 1 FROM mw_journal_folders "
+            "WHERE id = $1 AND company_id = $2 AND created_by = $3)",
+            folder_id, company_id, user_id,
         )
         if not owned:
             raise PermissionError("Folder not found in this workspace")
