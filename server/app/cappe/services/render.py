@@ -55,6 +55,38 @@ def _esc(v: Any) -> str:
     return html.escape(str(v if v is not None else ""))
 
 
+def _safe_href(href: Any) -> str:
+    """Scheme-allowlist a user-supplied URL before it goes into an href.
+
+    HTML-escaping alone doesn't stop `javascript:`/`data:` (no escapable chars),
+    so reject anything that isn't an absolute http(s)/mailto/tel URL or a
+    same-site path/fragment.
+    """
+    if not href:
+        return "#"
+    s = str(href).strip()
+    if s.startswith(("/", "#")):
+        return s
+    if s.lower().startswith(("http://", "https://", "mailto:", "tel:")):
+        return s
+    return "#"
+
+
+def _safe_image(url: Any) -> str | None:
+    """Validate a URL for use inside a CSS `url('…')` (style attribute).
+
+    HTML-escaping is the wrong layer for CSS: an escaped quote is decoded before
+    the CSS parser runs and can break out of url(). Reject any char that could
+    escape the literal or the attribute, and allow only http(s) or site-root.
+    """
+    if not url:
+        return None
+    s = str(url).strip()
+    if any(c in s for c in ("'", '"', ")", "(", ";", "<", ">", "\\", "\n", "\r")):
+        return None
+    return s if s.lower().startswith(("http://", "https://", "/")) else None
+
+
 def _font_stack(name: str) -> str:
     generic = "serif" if (name or "").strip().lower() in _SERIF else "sans-serif"
     return f"'{name}', {'ui-serif, Georgia,' if generic == 'serif' else 'ui-sans-serif, system-ui,'} {generic}"
@@ -118,7 +150,7 @@ def _btn(label: str, href: str, t: dict, *, solid: bool = True) -> str:
     else:
         cls = "border border-line text-ink hover:bg-surface"
     return (
-        f'<a href="{_esc(href or "#")}" class="inline-flex items-center justify-center '
+        f'<a href="{_esc(_safe_href(href))}" class="inline-flex items-center justify-center '
         f'rounded-theme px-6 py-3 text-sm font-semibold transition {cls}">{_esc(label)}</a>'
     )
 
@@ -143,9 +175,10 @@ def _hero(b: dict, t: dict) -> str:
     )
 
     if style == "image":
+        safe_img = _safe_image(image)
         bg = (
-            f"background-image:linear-gradient(rgba(0,0,0,.55),rgba(0,0,0,.55)),url('{_esc(image)}');"
-            if image else "background:linear-gradient(135deg,var(--brand),color-mix(in srgb,var(--brand) 55%, #000));"
+            f"background-image:linear-gradient(rgba(0,0,0,.55),rgba(0,0,0,.55)),url('{safe_img}');"
+            if safe_img else "background:linear-gradient(135deg,var(--brand),color-mix(in srgb,var(--brand) 55%, #000));"
         )
         return f"""
         <section class="relative isolate flex min-h-[70vh] items-center justify-center bg-cover bg-center px-6 text-center text-white" style="{bg}">
@@ -296,7 +329,7 @@ def _cta(b: dict, t: dict) -> str:
         <h2 class="font-heading text-3xl font-bold sm:text-4xl">{_esc(b.get("heading"))}</h2>
         {f'<p class="mx-auto mt-3 max-w-xl opacity-90">{_esc(b.get("subheading"))}</p>' if b.get("subheading") else ""}
         <div class="mt-8 flex justify-center">
-          <a href="{_esc(b.get("ctaHref") or "#")}" class="inline-flex items-center rounded-theme bg-white/15 px-6 py-3 text-sm font-semibold backdrop-blur transition hover:bg-white/25">{_esc(b.get("cta") or "Get started")}</a>
+          <a href="{_esc(_safe_href(b.get("ctaHref")))}" class="inline-flex items-center rounded-theme bg-white/15 px-6 py-3 text-sm font-semibold backdrop-blur transition hover:bg-white/25">{_esc(b.get("cta") or "Get started")}</a>
         </div>
       </div>
     </section>"""
@@ -335,7 +368,7 @@ def _posts(b: dict, t: dict) -> str:
         f"""
         <article class="group border-b border-line py-8">
           {f'<p class="mb-2 text-xs font-medium uppercase tracking-wider text-muted">{_esc(i.get("date"))}</p>' if i.get("date") else ""}
-          <h3 class="font-heading text-2xl font-semibold text-ink transition group-hover:text-brand"><a href="{_esc("/p/" + i.get("slug")) if i.get("slug") else "#"}">{_esc(i.get("title"))}</a></h3>
+          <h3 class="font-heading text-2xl font-semibold text-ink transition group-hover:text-brand"><a href="{_esc(_safe_href("/p/" + i.get("slug"))) if i.get("slug") else "#"}">{_esc(i.get("title"))}</a></h3>
           <p class="mt-2 max-w-2xl leading-relaxed text-muted">{_esc(i.get("excerpt"))}</p>
         </article>"""
         for i in items
