@@ -564,7 +564,7 @@ build_agent() {
         cp -r "$ui_dir/dist" "${AGENT_DIR}/static"
         log_success "Agent UI built and copied to static/"
     else
-        log_warn "agent-ui/ not found, skipping UI build"
+        log_warning "agent-ui/ not found, skipping UI build"
     fi
 
     build_image \
@@ -713,7 +713,7 @@ main() {
     if [ "$TRIGGER_DEPLOY" = true ]; then
         log_section "Deployment Trigger"
         log_info "Deploy flag set - GitHub Actions will handle EC2 deployment"
-        echo "DEPLOY=true" >> "$GITHUB_OUTPUT" 2>/dev/null || true
+        echo "DEPLOY=true" >> "${GITHUB_OUTPUT:-/dev/null}" 2>/dev/null || true
     fi
 
     log_section "Build Complete"
