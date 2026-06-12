@@ -18,7 +18,14 @@ from ..models.cappe import (
 )
 from ..services.render import render_site_html
 from .render import invalidate_render_cache, tenant_security_headers
-from ._shared import get_owned_site, loads, site_row_to_dict, slugify, unique_slug
+from ._shared import (
+    get_owned_site,
+    loads,
+    safe_subdomain_base,
+    site_row_to_dict,
+    slugify,
+    unique_slug,
+)
 
 router = APIRouter()
 
@@ -47,7 +54,8 @@ async def list_sites(account: CappeAccount = Depends(require_cappe_account)):
 async def create_site(body: CappeSiteCreate, account: CappeAccount = Depends(require_cappe_account)):
     """Create a blank or bring-your-own site."""
     async with get_connection() as conn:
-        slug = await unique_slug(conn, slugify(body.name), "cappe_sites")
+        # slug doubles as the tenant subdomain — keep it off reserved labels.
+        slug = await unique_slug(conn, safe_subdomain_base(body.name), "cappe_sites")
         row = await conn.fetchrow(
             f"""INSERT INTO cappe_sites (account_id, name, slug, subdomain, custom_domain, source_type)
                 VALUES ($1, $2, $3, $3, $4, $5)
@@ -80,7 +88,7 @@ async def create_site_from_template(
         pages = structure.get("pages") or []
 
         name = body.name or template["name"]
-        slug = await unique_slug(conn, slugify(name), "cappe_sites")
+        slug = await unique_slug(conn, safe_subdomain_base(name), "cappe_sites")
 
         async with conn.transaction():
             site = await conn.fetchrow(

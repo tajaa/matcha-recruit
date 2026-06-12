@@ -2,10 +2,11 @@
 a connected custom domain).
 
 Mounted at root (no /api prefix). Every handler is gated on the request Host
-resolving to a Cappe site — `<sub>.cappe.hey-matcha.com` in prod (base domain
-configurable via CAPPE_BASE_DOMAIN), `<sub>.cappe.localhost` / `<sub>.localhost`
-for local testing, or a site's `custom_domain`. Non-Cappe hosts get a 404 so
-normal API/root routes are unaffected.
+resolving to a Cappe site — `<sub>.hey-matcha.com` in prod (MVP reuses the main
+apex; base domain configurable via CAPPE_BASE_DOMAIN), `<sub>.cappe.localhost` /
+`<sub>.localhost` for local testing, or a site's `custom_domain`. The main app
+keeps the apex + `www` (and other reserved labels — see RESERVED_SUBDOMAINS);
+non-Cappe hosts get a 404 so normal API/root routes are unaffected.
 
 Rendered HTML is cached in Redis per (site, page) and invalidated by the owner
 CRUD routes via `invalidate_render_cache` — page views cost one indexed site
@@ -25,12 +26,14 @@ from ...core.services.redis_cache import (
 )
 from ...database import get_connection
 from ..services.render import render_site_html
-from ._shared import loads
+from ._shared import RESERVED_SUBDOMAINS, loads
 
 router = APIRouter()
 
-# Labels that are never a tenant subdomain.
-_RESERVED_SUBS = {"www", "app", "api", "admin", "cappe", "mail", "ftp"}
+# Labels that are never a tenant subdomain (brand / infra / auth hostnames on
+# the shared apex). Centralized in _shared so site creation steers slugs away
+# from the same set.
+_RESERVED_SUBS = RESERVED_SUBDOMAINS
 
 # Hosts that always belong to the main app — never looked up as custom domains.
 _APP_HOSTS = {"hey-matcha.com", "www.hey-matcha.com", "localhost", "127.0.0.1", "matcha-backend"}
@@ -63,7 +66,7 @@ def tenant_security_headers() -> dict[str, str]:
 
 # Read from env directly (mirrors settings.cappe_base_domain): this module is
 # imported before load_settings() runs in the app lifespan.
-_PROD_SUFFIX = "." + os.getenv("CAPPE_BASE_DOMAIN", "cappe.hey-matcha.com")
+_PROD_SUFFIX = "." + os.getenv("CAPPE_BASE_DOMAIN", "hey-matcha.com")
 
 
 def _prod_suffix() -> str:

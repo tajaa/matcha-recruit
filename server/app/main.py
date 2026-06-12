@@ -229,7 +229,9 @@ _ALLOWED_HOSTS = [
     "matcha-backend",
     # Cappe tenant subdomains (public sites served by the host-routed renderer).
     # Read from env directly: settings aren't loaded until lifespan startup.
-    f"*.{os.getenv('CAPPE_BASE_DOMAIN', 'cappe.hey-matcha.com')}",
+    # Default base = main apex (site-x.hey-matcha.com) for MVP; the explicit
+    # hey-matcha.com / www entries above keep the main app on exact-match.
+    f"*.{os.getenv('CAPPE_BASE_DOMAIN', 'hey-matcha.com')}",
     "*.cappe.localhost",
     "*.localhost",
     # Dev-only extra hosts (e.g. a webhook tunnel like *.trycloudflare.com).

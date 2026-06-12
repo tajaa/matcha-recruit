@@ -20,23 +20,51 @@ from app.cappe.models.cappe import (  # noqa: E402
     CappeSiteUpdate,
     normalize_custom_domain,
 )
+from app.cappe.routes._shared import (  # noqa: E402
+    RESERVED_SUBDOMAINS,
+    safe_subdomain_base,
+)
 from app.cappe.routes.render import (  # noqa: E402
     _custom_domain_candidates,
     subdomain_from_host,
 )
 
 
+# --- safe_subdomain_base (creation-side reserved guard) -----------------------
+
+@pytest.mark.parametrize("name,expected", [
+    ("Avery Lane Photography", "avery-lane-photography"),
+    ("Shop", "shop-site"),          # reserved → suffixed
+    ("admin", "admin-site"),        # reserved → suffixed
+    ("WWW", "www-site"),            # reserved (case-folded) → suffixed
+    ("Mara's Coffee", "mara-s-coffee"),
+])
+def test_safe_subdomain_base(name, expected):
+    assert safe_subdomain_base(name) == expected
+
+
+def test_safe_subdomain_base_never_returns_reserved():
+    for label in RESERVED_SUBDOMAINS:
+        assert safe_subdomain_base(label) not in RESERVED_SUBDOMAINS
+
+
 # --- subdomain_from_host ------------------------------------------------------
 
 @pytest.mark.parametrize("host,expected", [
-    ("avery.cappe.hey-matcha.com", "avery"),
-    ("avery.cappe.hey-matcha.com:443", "avery"),
-    ("AVERY.Cappe.Hey-Matcha.com", "avery"),
-    ("avery.cappe.localhost:8001", "avery"),
+    # MVP: tenant sites live directly on the apex (site-x.hey-matcha.com).
+    ("avery.hey-matcha.com", "avery"),
+    ("avery.hey-matcha.com:443", "avery"),
+    ("Avery-Lane.Hey-Matcha.com", "avery-lane"),
+    ("avery.cappe.localhost:8001", "avery"),  # dev convenience
     ("avery.localhost", "avery"),
+    # main app + reserved labels must NOT resolve to a tenant
     ("hey-matcha.com", None),
-    ("www.cappe.hey-matcha.com", None),       # reserved label
-    ("api.cappe.hey-matcha.com", None),       # reserved label
+    ("www.hey-matcha.com", None),
+    ("app.hey-matcha.com", None),
+    ("api.hey-matcha.com", None),
+    ("login.hey-matcha.com", None),
+    ("mail.hey-matcha.com", None),
+    ("admin.hey-matcha.com", None),
     ("localhost", None),
     ("localhost:8001", None),
     ("studio-petals.com", None),              # custom domain, not a subdomain
@@ -67,7 +95,8 @@ def test_custom_domain_candidates_strips_port_and_case():
 @pytest.mark.parametrize("host", [
     "hey-matcha.com",                 # app host
     "www.hey-matcha.com",             # app host
-    "avery.cappe.hey-matcha.com",     # tenant subdomain — handled by subdomain path
+    "avery.hey-matcha.com",           # tenant subdomain — handled by subdomain path
+    "app.hey-matcha.com",             # reserved label on the apex
     "avery.cappe.localhost",          # dev subdomain
     "avery.localhost",                # dev subdomain
     "localhost",
