@@ -2,12 +2,15 @@
 // Cappe is a separate product from matcha; these types are independent of the
 // matcha MeResponse / dashboard types.
 
+export type CappeAccountType = 'business' | 'personal'
+
 export type CappeAccount = {
   id: string
   email: string
   name: string | null
   plan: 'free' | 'hosting' | 'pro' | 'business' | string
   status: 'active' | 'suspended' | 'deleted' | string
+  account_type: CappeAccountType | string
 }
 
 export type CappeTokenResponse = {

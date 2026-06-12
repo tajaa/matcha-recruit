@@ -45,6 +45,9 @@ class CappeSignup(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=200)
     name: Optional[str] = Field(default=None, max_length=255)
+    # business = an organization's storefront; personal = a solo professional
+    # ("business of one") who gets hired/booked. Same engine, different framing.
+    account_type: Literal["business", "personal"] = "business"
 
 
 class CappeLogin(BaseModel):
@@ -63,6 +66,7 @@ class CappeAccount(BaseModel):
     name: Optional[str] = None
     plan: str = "free"
     status: str = "active"
+    account_type: str = "business"
 
 
 class CappeTokenResponse(BaseModel):

@@ -23,6 +23,7 @@ type CappeAccount = {
   name: string | null
   plan: string
   status: string
+  account_type: string
   created_at: string | null
   site_count: number
   published_count: number
@@ -214,6 +215,7 @@ export default function Cappe() {
               <thead className="bg-zinc-900/50 text-zinc-400">
                 <tr>
                   <th className="px-4 py-3 font-medium">Account</th>
+                  <th className="px-4 py-3 font-medium">Type</th>
                   <th className="px-4 py-3 font-medium">Plan</th>
                   <th className="px-4 py-3 font-medium">Status</th>
                   <th className="px-4 py-3 font-medium text-right">Sites</th>
@@ -247,6 +249,15 @@ export default function Cappe() {
                               {a.name && <p className="text-xs text-zinc-500">{a.email}</p>}
                             </div>
                           </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-block text-[10px] px-1.5 py-0.5 rounded border ${
+                            a.account_type === 'personal'
+                              ? 'border-sky-500/40 bg-sky-500/10 text-sky-300'
+                              : 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+                          }`}>
+                            {a.account_type === 'personal' ? 'Solo' : 'Business'}
+                          </span>
                         </td>
                         <td className="px-4 py-3"><PlanBadge plan={a.plan} /></td>
                         <td className="px-4 py-3"><StatusBadge status={a.status} /></td>
@@ -284,7 +295,7 @@ export default function Cappe() {
                               </div>
                               <p className="text-xs text-zinc-600">/{s.slug} · {s.page_count} pages</p>
                             </td>
-                            <td className="px-4 py-2.5" colSpan={2}><StatusBadge status={s.status} /></td>
+                            <td className="px-4 py-2.5" colSpan={3}><StatusBadge status={s.status} /></td>
                             <td className="px-4 py-2.5" />
                             <td className="px-4 py-2.5 text-right tabular-nums">{s.order_count}</td>
                             <td className="px-4 py-2.5 text-right tabular-nums">

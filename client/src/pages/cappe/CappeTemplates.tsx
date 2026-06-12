@@ -1,8 +1,16 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, Check } from 'lucide-react'
+import { Loader2, Check, Sparkles } from 'lucide-react'
 import { cappeApi } from '../../api/cappeClient'
+import { useCappeMe } from '../../hooks/useCappeMe'
 import type { CappeSite, CappeTemplateSummary } from '../../types/cappe'
+
+// Which template categories fit each account type best — recommended ones
+// sort first and get a badge. Same catalog for everyone; just emphasis.
+const RECOMMENDED_CATEGORIES: Record<string, Set<string>> = {
+  business: new Set(['business', 'food']),
+  personal: new Set(['portfolio', 'blog']),
+}
 
 const API_BASE = `${import.meta.env.VITE_API_URL ?? '/api'}/cappe`
 // Live preview is rendered at this design width, then scaled to fit the card.
@@ -58,6 +66,7 @@ function PreviewFrame({ slug, name }: { slug: string; name: string }) {
 
 export default function CappeTemplates() {
   const navigate = useNavigate()
+  const { account } = useCappeMe()
   const [templates, setTemplates] = useState<CappeTemplateSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [usingId, setUsingId] = useState<string | null>(null)
@@ -68,6 +77,15 @@ export default function CappeTemplates() {
       .then(setTemplates)
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load templates'))
   }, [])
+
+  const recommended = RECOMMENDED_CATEGORIES[account?.account_type ?? ''] ?? null
+  const ordered = useMemo(() => {
+    if (!templates) return null
+    if (!recommended) return templates
+    return [...templates].sort(
+      (a, b) => Number(recommended.has(b.category)) - Number(recommended.has(a.category))
+    )
+  }, [templates, recommended])
 
   async function useTemplate(t: CappeTemplateSummary) {
     setUsingId(t.id)
@@ -93,20 +111,28 @@ export default function CappeTemplates() {
 
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
 
-      {templates === null ? (
+      {ordered === null ? (
         <div className="flex justify-center py-20">
           <Loader2 className="h-6 w-6 animate-spin text-zinc-600" />
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-          {templates.map((t) => (
+          {ordered.map((t) => (
             <div key={t.id} className="group flex flex-col overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900 transition hover:border-zinc-700">
               <PreviewFrame slug={t.slug} name={t.name} />
               <div className="flex flex-1 flex-col p-5">
                 <div className="mb-1 flex items-center justify-between">
                   <h3 className="font-medium text-zinc-100">{t.name}</h3>
-                  <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium uppercase text-zinc-400">
-                    {t.category}
+                  <span className="flex items-center gap-2">
+                    {recommended?.has(t.category) && (
+                      <span className="flex items-center gap-1 rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-300">
+                        <Sparkles className="h-3 w-3" />
+                        For you
+                      </span>
+                    )}
+                    <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium uppercase text-zinc-400">
+                      {t.category}
+                    </span>
                   </span>
                 </div>
                 <p className="mb-4 flex-1 text-sm text-zinc-400">{t.description}</p>

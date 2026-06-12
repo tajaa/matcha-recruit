@@ -39,7 +39,7 @@ async def require_cappe_account(
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT id, email, name, plan, status, tokens_valid_after "
+            "SELECT id, email, name, plan, status, account_type, tokens_valid_after "
             "FROM cappe_accounts WHERE id = $1",
             account_id,
         )
@@ -64,4 +64,5 @@ async def require_cappe_account(
         name=row["name"],
         plan=row["plan"],
         status=row["status"],
+        account_type=row["account_type"],
     )

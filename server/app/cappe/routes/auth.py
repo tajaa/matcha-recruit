@@ -52,12 +52,13 @@ async def signup(body: CappeSignup, request: Request, background: BackgroundTask
     async with get_connection() as conn:
         try:
             row = await conn.fetchrow(
-                """INSERT INTO cappe_accounts (email, password_hash, name)
-                   VALUES ($1, $2, $3)
-                   RETURNING id, email, name, plan, status""",
+                """INSERT INTO cappe_accounts (email, password_hash, name, account_type)
+                   VALUES ($1, $2, $3, $4)
+                   RETURNING id, email, name, plan, status, account_type""",
                 email,
                 password_hash,
                 body.name,
+                body.account_type,
             )
         except asyncpg.UniqueViolationError:
             raise HTTPException(
@@ -83,7 +84,7 @@ async def login(body: CappeLogin, request: Request):
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            """SELECT id, email, name, plan, status, password_hash
+            """SELECT id, email, name, plan, status, account_type, password_hash
                FROM cappe_accounts WHERE lower(email) = $1""",
             email,
         )
@@ -99,7 +100,8 @@ async def login(body: CappeLogin, request: Request):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is not active")
 
     account = CappeAccount(
-        id=row["id"], email=row["email"], name=row["name"], plan=row["plan"], status=row["status"]
+        id=row["id"], email=row["email"], name=row["name"], plan=row["plan"],
+        status=row["status"], account_type=row["account_type"],
     )
     return _token_response(account)
 
@@ -119,7 +121,7 @@ async def refresh(body: CappeRefreshRequest, request: Request):
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT id, email, name, plan, status, tokens_valid_after "
+            "SELECT id, email, name, plan, status, account_type, tokens_valid_after "
             "FROM cappe_accounts WHERE id = $1",
             account_id,
         )
@@ -132,7 +134,8 @@ async def refresh(body: CappeRefreshRequest, request: Request):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session has been revoked")
 
     account = CappeAccount(
-        id=row["id"], email=row["email"], name=row["name"], plan=row["plan"], status=row["status"]
+        id=row["id"], email=row["email"], name=row["name"], plan=row["plan"],
+        status=row["status"], account_type=row["account_type"],
     )
     return _token_response(account)
 

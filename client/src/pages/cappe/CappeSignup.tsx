@@ -1,13 +1,34 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Store, User } from 'lucide-react'
 import { cappePublicPost, setCappeTokens } from '../../api/cappeClient'
 import { invalidateCappeMeCache } from '../../hooks/useCappeMe'
-import type { CappeTokenResponse } from '../../types/cappe'
+import type { CappeAccountType, CappeTokenResponse } from '../../types/cappe'
+
+const ACCOUNT_TYPES: {
+  value: CappeAccountType
+  icon: typeof Store
+  title: string
+  blurb: string
+}[] = [
+  {
+    value: 'business',
+    icon: Store,
+    title: 'A business',
+    blurb: 'A shop, studio or restaurant — sell products and take orders.',
+  },
+  {
+    value: 'personal',
+    icon: User,
+    title: 'Just me',
+    blurb: 'A solo pro — get booked, sell sessions, services and downloads.',
+  },
+]
 
 // Cappe account signup — the functional entry at /cappe/website-setup.
 export default function CappeSignup() {
   const navigate = useNavigate()
+  const [accountType, setAccountType] = useState<CappeAccountType>('business')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -27,6 +48,7 @@ export default function CappeSignup() {
         name: name || null,
         email,
         password,
+        account_type: accountType,
       })
       setCappeTokens(res.access_token, res.refresh_token)
       invalidateCappeMeCache()
@@ -50,6 +72,30 @@ export default function CappeSignup() {
         </div>
 
         <form onSubmit={onSubmit} className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-xl shadow-black/40">
+          <div>
+            <label className="mb-2 block text-sm font-medium text-zinc-300">I'm building a site for…</label>
+            <div className="grid grid-cols-2 gap-2">
+              {ACCOUNT_TYPES.map(({ value, icon: Icon, title, blurb }) => {
+                const active = accountType === value
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setAccountType(value)}
+                    className={`rounded-xl border p-3 text-left transition-colors ${
+                      active
+                        ? 'border-emerald-500 bg-emerald-500/10'
+                        : 'border-zinc-700 bg-zinc-950 hover:border-zinc-500'
+                    }`}
+                  >
+                    <Icon className={`mb-1.5 h-4 w-4 ${active ? 'text-emerald-400' : 'text-zinc-500'}`} />
+                    <p className={`text-sm font-medium ${active ? 'text-emerald-300' : 'text-zinc-200'}`}>{title}</p>
+                    <p className="mt-0.5 text-[11px] leading-snug text-zinc-500">{blurb}</p>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-zinc-300">Name</label>
             <input

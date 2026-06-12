@@ -10423,7 +10423,7 @@ async def admin_list_cappe_accounts():
     async with get_connection() as conn:
         accounts = await conn.fetch(
             """
-            SELECT id, email, name, plan, status, created_at
+            SELECT id, email, name, plan, status, account_type, created_at
             FROM cappe_accounts
             ORDER BY created_at DESC
             """
@@ -10473,6 +10473,7 @@ async def admin_list_cappe_accounts():
             "name": a["name"],
             "plan": plan,
             "status": a["status"],
+            "account_type": a["account_type"],
             "created_at": a["created_at"].isoformat() if a["created_at"] else None,
             "site_count": len(acct_sites),
             "published_count": published,
