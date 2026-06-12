@@ -121,7 +121,7 @@ export default function CappeSiteEditor() {
     if (!siteId || !confirm('Delete this site and all its pages? This cannot be undone.')) return
     try {
       await cappeApi.delete(`/sites/${siteId}`)
-      navigate('/cappe')
+      navigate('/cappe/sites')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to delete site')
     }
@@ -139,7 +139,7 @@ export default function CappeSiteEditor() {
     return (
       <div className="mx-auto max-w-3xl px-8 py-10">
         <p className="text-sm text-red-400">{error || 'Site not found.'}</p>
-        <Link to="/cappe" className="mt-4 inline-flex items-center gap-1 text-sm text-emerald-400 hover:text-emerald-300">
+        <Link to="/cappe/sites" className="mt-4 inline-flex items-center gap-1 text-sm text-emerald-400 hover:text-emerald-300">
           <ArrowLeft className="h-4 w-4" /> Back to sites
         </Link>
       </div>
@@ -150,7 +150,7 @@ export default function CappeSiteEditor() {
 
   return (
     <div className="mx-auto max-w-5xl px-8 py-8">
-      <Link to="/cappe" className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-200">
+      <Link to="/cappe/sites" className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-200">
         <ArrowLeft className="h-4 w-4" /> My Sites
       </Link>
 

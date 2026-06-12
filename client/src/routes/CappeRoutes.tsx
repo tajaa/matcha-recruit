@@ -1,5 +1,6 @@
 import { Routes, Route } from 'react-router-dom'
 import CappeLayout from '../layouts/CappeLayout'
+import CappeLanding from '../pages/cappe/CappeLanding'
 import CappeSignup from '../pages/cappe/CappeSignup'
 import CappeLogin from '../pages/cappe/CappeLogin'
 import CappeSites from '../pages/cappe/CappeSites'
@@ -21,10 +22,12 @@ import Blog from '../pages/cappe/site/Blog'
 export default function CappeRoutes() {
   return (
     <Routes>
+      {/* Public marketing landing — unlinked from any nav (hidden) for now. */}
+      <Route index element={<CappeLanding />} />
       <Route path="website-setup" element={<CappeSignup />} />
       <Route path="login" element={<CappeLogin />} />
       <Route element={<CappeLayout />}>
-        <Route index element={<CappeSites />} />
+        <Route path="sites" element={<CappeSites />} />
         <Route path="templates" element={<CappeTemplates />} />
         <Route path="sites/:siteId" element={<CappeSiteEditor />} />
         <Route path="sites/:siteId/pages/:pageId" element={<PageEditor />} />

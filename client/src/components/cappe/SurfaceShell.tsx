@@ -23,7 +23,7 @@ export default function SurfaceShell({
 }) {
   return (
     <div className="mx-auto max-w-5xl px-8 py-8">
-      <Link to="/cappe" className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-200">
+      <Link to="/cappe/sites" className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-200">
         <ArrowLeft className="h-4 w-4" /> My Sites
       </Link>
       <SiteTabs />

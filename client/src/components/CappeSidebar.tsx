@@ -43,7 +43,7 @@ export default function CappeSidebar({ account }: { account: CappeAccount | null
       </div>
 
       <nav className="flex flex-1 flex-col gap-1 px-3">
-        <Item to="/cappe" icon={LayoutGrid} label="My Sites" end />
+        <Item to="/cappe/sites" icon={LayoutGrid} label="My Sites" end />
         <Item to="/cappe/templates" icon={LayoutTemplate} label="Templates" />
       </nav>
 

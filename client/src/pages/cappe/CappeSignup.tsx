@@ -30,7 +30,7 @@ export default function CappeSignup() {
       })
       setCappeTokens(res.access_token, res.refresh_token)
       invalidateCappeMeCache()
-      navigate('/cappe', { replace: true })
+      navigate('/cappe/sites', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.')
     } finally {
