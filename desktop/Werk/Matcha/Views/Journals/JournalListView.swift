@@ -315,7 +315,7 @@ extension SlashBlock {
 struct JournalsWorkspace: View {
     @Environment(AppState.self) private var appState
 
-    enum FolderMode: Equatable { case all, starred, folder(String) }
+    enum FolderMode: Equatable { case all, starred, shared, folder(String) }
     enum SortKey: String, CaseIterable { case modified = "Date Modified", created = "Date Created", title = "Title" }
 
     @State private var folders: [MWJournalFolder] = []
@@ -392,6 +392,10 @@ struct JournalsWorkspace: View {
                 LazyVStack(alignment: .leading, spacing: 1) {
                     fixedRow(title: "All Notes", icon: "tray.full", selected: mode == .all) { mode = .all }
                     fixedRow(title: "Starred", icon: "star", selected: mode == .starred) { mode = .starred }
+                    if hasSharedNotes {
+                        fixedRow(title: "Shared with me", icon: "person.2",
+                                 selected: mode == .shared) { mode = .shared }
+                    }
                     if !folders.isEmpty {
                         Divider().padding(.horizontal, 8).padding(.vertical, 4)
                     }
@@ -599,6 +603,18 @@ struct JournalsWorkspace: View {
                     }
                     Text(modifiedLabel(j.updatedAt))
                         .font(.system(size: 10)).foregroundColor(appState.themeTextSecondary.opacity(0.8))
+                    if j.isSharedWithMe {
+                        HStack(spacing: 3) {
+                            Image(systemName: "person.2.fill").font(.system(size: 8))
+                            Text(j.ownerName.map { "Shared by \($0)" } ?? "Shared")
+                                .font(.system(size: 9, weight: .medium))
+                                .lineLimit(1)
+                        }
+                        .foregroundColor(appState.themeAccent)
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(Capsule().fill(appState.themeAccent.opacity(0.12)))
+                        .padding(.top, 1)
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -675,9 +691,13 @@ struct JournalsWorkspace: View {
         switch mode {
         case .all: return "All Notes"
         case .starred: return "Starred"
+        case .shared: return "Shared with me"
         case .folder(let id): return folders.first { $0.id == id }?.name ?? "Folder"
         }
     }
+
+    /// Any journals shared with me (I'm a collaborator, not the owner)?
+    private var hasSharedNotes: Bool { journals.contains { $0.isSharedWithMe } }
 
     private var currentFolderId: String? {
         if case .folder(let id) = mode { return id }
@@ -688,9 +708,13 @@ struct JournalsWorkspace: View {
         _ = JournalStarStore.shared.generation
         var base: [MWJournal]
         switch mode {
-        case .all: base = journals
+        // "All Notes" + folders are PERSONAL (my own). Notes shared with me by
+        // a collaborator live only under "Shared with me" so they don't blend
+        // into my own notebooks.
+        case .all: base = journals.filter { !$0.isSharedWithMe }
         case .starred: base = journals.filter { JournalStarStore.shared.isStarred($0.id) }
-        case .folder(let id): base = journals.filter { $0.folderId == id }
+        case .shared: base = journals.filter { $0.isSharedWithMe }
+        case .folder(let id): base = journals.filter { $0.folderId == id && !$0.isSharedWithMe }
         }
         if !search.isEmpty {
             base = base.filter {
@@ -735,6 +759,9 @@ struct JournalsWorkspace: View {
 
     private func ensureModeFor(_ jid: String) {
         guard let j = journals.first(where: { $0.id == jid }) else { return }
+        // A note shared with me carries the OWNER's folder_id (not in my tree),
+        // so route it to the "Shared with me" view, not a phantom folder.
+        if j.isSharedWithMe { mode = .shared; return }
         if let fid = j.folderId { mode = .folder(fid); collapsed.remove(fid) }
     }
 

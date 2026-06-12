@@ -145,6 +145,7 @@ def _parse_journal(row) -> dict:
             str(row["folder_id"]) if "folder_id" in keys and row["folder_id"] else None
         ),
         "created_by": str(row["created_by"]),
+        "owner_name": row["owner_name"] if "owner_name" in row.keys() else None,
         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
         "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
         "entry_count": row["entry_count"] if "entry_count" in row.keys() else None,
@@ -219,6 +220,13 @@ async def list_journals(user_id: UUID, company_id: Optional[UUID], status: str =
                        WHERE journal_id = j.id AND status = 'active') AS collaborator_count,
                    (SELECT role FROM mw_journal_collaborators
                        WHERE journal_id = j.id AND user_id = $1 AND status = 'active') AS collaborator_role,
+                   (SELECT COALESCE(c.name, NULLIF(TRIM(CONCAT(e.first_name, ' ', e.last_name)), ''),
+                                    a.name, u.email)
+                       FROM users u
+                       LEFT JOIN clients c ON c.user_id = u.id
+                       LEFT JOIN employees e ON e.user_id = u.id
+                       LEFT JOIN admins a ON a.user_id = u.id
+                       WHERE u.id = j.created_by) AS owner_name,
                    (SELECT e.content FROM mw_journal_entries e
                        WHERE e.journal_id = j.id
                        ORDER BY e.updated_at DESC, e.created_at DESC
