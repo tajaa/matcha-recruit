@@ -18,6 +18,7 @@ import MatchaLiteAdmin from '../pages/admin/MatchaLiteAdmin'
 import ComplianceManagement from '../pages/admin/ComplianceManagement'
 import MatchaWork from '../pages/admin/MatchaWork'
 import Customers from '../pages/admin/Customers'
+import Cappe from '../pages/admin/Cappe'
 import GapAnalysisHome from '../pages/admin/GapAnalysisHome'
 import AdminOnboardingWizard from '../pages/admin/AdminOnboardingWizard'
 import GapDashboard from '../pages/admin/GapDashboard'
@@ -46,6 +47,7 @@ export default function AdminRoutes() {
         <Route path="companies" element={<Companies />} />
         <Route path="companies/:companyId" element={<AdminCompanyDetail />} />
         <Route path="matcha-work" element={<MatchaWork />} />
+        <Route path="cappe" element={<Cappe />} />
         <Route path="individuals" element={<Navigate to="/admin/matcha-work" replace />} />
         <Route path="client-errors" element={<ClientErrors />} />
         <Route path="server-errors" element={<ServerErrors />} />

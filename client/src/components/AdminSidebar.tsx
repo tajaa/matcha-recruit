@@ -1,4 +1,4 @@
-import { Building2, ToggleRight, Settings, MapPin, Globe, ClipboardList, Microscope, FileText, Briefcase, ShieldCheck, Mail, Image as ImageIcon, AlertOctagon, AlertTriangle, BookOpen, Users, Sparkles, Leaf, Calculator, HeartHandshake } from 'lucide-react'
+import { Building2, ToggleRight, Settings, MapPin, Globe, ClipboardList, Microscope, FileText, Briefcase, ShieldCheck, Mail, Image as ImageIcon, AlertOctagon, AlertTriangle, BookOpen, Users, Sparkles, Leaf, Calculator, HeartHandshake, LayoutTemplate } from 'lucide-react'
 import SidebarShell, { type NavGroup } from './SidebarShell'
 
 // Grouped master-admin nav. SidebarShell renders each group as a collapsible
@@ -12,6 +12,7 @@ const nav: NavGroup[] = [
       { to: '/admin/customers', icon: Users, label: 'Customers' },
       { to: '/admin/companies', icon: Building2, label: 'Companies' },
       { to: '/admin/matcha-work', icon: Sparkles, label: 'Matcha-Work' },
+      { to: '/admin/cappe', icon: LayoutTemplate, label: 'Cappe' },
       { to: '/admin/brokers', icon: Briefcase, label: 'Brokers' },
       { to: '/admin/fractional-hr', icon: HeartHandshake, label: 'Fractional HR' },
     ],

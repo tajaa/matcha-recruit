@@ -10387,3 +10387,108 @@ async def deal_flow_save_template(
             key, json.dumps(payload), updated_by,
         )
     return _deal_template_row(key, row)
+
+
+# ---------------------------------------------------------------------------
+# Cappe (website-builder product) — master-admin oversight
+# ---------------------------------------------------------------------------
+# Cappe is a separate product with its own identity tables (cappe_accounts /
+# cappe_sites / cappe_* commerce). This endpoint gives the master admin a
+# read-only roster: who signed up, their plan, and per-account site / order /
+# revenue rollups. Revenue counts only paid|fulfilled orders (payments are
+# still stubbed — see cappe migrations).
+
+_CAPPE_PAID_STATUSES = ("paid", "fulfilled")
+
+
+def _cappe_site_row(row) -> dict:
+    return {
+        "id": str(row["id"]),
+        "name": row["name"],
+        "slug": row["slug"],
+        "subdomain": row["subdomain"],
+        "custom_domain": row["custom_domain"],
+        "status": row["status"],
+        "page_count": row["page_count"],
+        "order_count": row["order_count"],
+        "revenue_cents": row["revenue_cents"],
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "published_at": row["published_at"].isoformat() if row["published_at"] else None,
+    }
+
+
+@router.get("/cappe/accounts", dependencies=[Depends(require_admin)])
+async def admin_list_cappe_accounts():
+    """Roster of Cappe signups with plan + per-account site/order/revenue rollups."""
+    async with get_connection() as conn:
+        accounts = await conn.fetch(
+            """
+            SELECT id, email, name, plan, status, created_at
+            FROM cappe_accounts
+            ORDER BY created_at DESC
+            """
+        )
+        sites = await conn.fetch(
+            """
+            SELECT s.id, s.account_id, s.name, s.slug, s.subdomain, s.custom_domain,
+                   s.status, s.created_at, s.published_at,
+                   COUNT(DISTINCT p.id) AS page_count,
+                   COUNT(DISTINCT o.id) AS order_count,
+                   COALESCE(SUM(o.subtotal_cents)
+                       FILTER (WHERE o.status = ANY($1::text[])), 0) AS revenue_cents
+            FROM cappe_sites s
+            LEFT JOIN cappe_pages p ON p.site_id = s.id
+            LEFT JOIN cappe_orders o ON o.site_id = s.id
+            GROUP BY s.id
+            ORDER BY s.created_at DESC
+            """,
+            list(_CAPPE_PAID_STATUSES),
+        )
+
+    sites_by_account: Dict[str, list] = {}
+    for row in sites:
+        sites_by_account.setdefault(str(row["account_id"]), []).append(_cappe_site_row(row))
+
+    out_accounts = []
+    plan_counts: Dict[str, int] = {}
+    total_sites = 0
+    total_published = 0
+    total_orders = 0
+    total_revenue = 0
+    for a in accounts:
+        acct_id = str(a["id"])
+        acct_sites = sites_by_account.get(acct_id, [])
+        published = sum(1 for s in acct_sites if s["status"] == "published")
+        orders = sum(s["order_count"] for s in acct_sites)
+        revenue = sum(s["revenue_cents"] for s in acct_sites)
+        plan = a["plan"] or "free"
+        plan_counts[plan] = plan_counts.get(plan, 0) + 1
+        total_sites += len(acct_sites)
+        total_published += published
+        total_orders += orders
+        total_revenue += revenue
+        out_accounts.append({
+            "id": acct_id,
+            "email": a["email"],
+            "name": a["name"],
+            "plan": plan,
+            "status": a["status"],
+            "created_at": a["created_at"].isoformat() if a["created_at"] else None,
+            "site_count": len(acct_sites),
+            "published_count": published,
+            "order_count": orders,
+            "revenue_cents": revenue,
+            "sites": acct_sites,
+        })
+
+    return {
+        "accounts": out_accounts,
+        "totals": {
+            "account_count": len(out_accounts),
+            "plan_counts": plan_counts,
+            "site_count": total_sites,
+            "published_count": total_published,
+            "order_count": total_orders,
+            "revenue_cents": total_revenue,
+        },
+    }
