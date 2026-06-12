@@ -11,7 +11,68 @@ from ...core.services.email.client import get_email_service
 
 logger = logging.getLogger(__name__)
 
-_DASHBOARD_URL = f"https://{os.getenv('CAPPE_BASE_DOMAIN', 'hey-matcha.com')}/cappe"
+
+def _base_url() -> str:
+    return f"https://{os.getenv('CAPPE_BASE_DOMAIN', 'hey-matcha.com')}"
+
+
+_DASHBOARD_URL = f"{_base_url()}/cappe"
+
+
+async def send_cappe_verification_email(to_email: str, to_name: str | None, token: str) -> None:
+    """Send the email-confirmation link. This is the anti-spam gate — the
+    account can't be used until the recipient clicks through, so a bogus or
+    unreachable address never becomes a live account. Best-effort: logs and
+    swallows failures (the user can request a resend)."""
+    verify_url = f"{_base_url()}/cappe/verify?token={token}"
+    greeting = f"Hi {to_name}," if to_name else "Welcome!"
+    html = f"""\
+<!doctype html>
+<html>
+<body style="margin:0;background:#0b0b0d;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+  <div style="max-width:480px;margin:0 auto;padding:40px 24px;">
+    <div style="text-align:center;margin-bottom:28px;">
+      <span style="display:inline-block;width:44px;height:44px;line-height:44px;border-radius:12px;
+                   background:linear-gradient(135deg,#bef264,#84cc16);color:#10120a;font-size:20px;
+                   font-weight:700;text-align:center;">G</span>
+    </div>
+    <div style="background:#18181b;border:1px solid #27272a;border-radius:16px;padding:32px;color:#e4e4e7;">
+      <h1 style="margin:0 0 12px;font-size:22px;color:#fafafa;">Confirm your email</h1>
+      <p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:#a1a1aa;">{greeting}</p>
+      <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#a1a1aa;">
+        One click and your Gummfit account is live — then you can build your site, add what you
+        sell, and publish.
+      </p>
+      <a href="{verify_url}" style="display:inline-block;background:#c6f16b;color:#10120a;
+         text-decoration:none;font-weight:600;font-size:14px;padding:12px 22px;border-radius:10px;">
+        Confirm my email
+      </a>
+      <p style="margin:20px 0 0;font-size:12px;line-height:1.6;color:#71717a;">
+        Or paste this link into your browser:<br>
+        <span style="color:#a1a1aa;word-break:break-all;">{verify_url}</span>
+      </p>
+      <p style="margin:16px 0 0;font-size:12px;line-height:1.6;color:#71717a;">
+        This link expires in 24 hours. If you didn't sign up, ignore this email.
+      </p>
+    </div>
+    <p style="text-align:center;margin:20px 0 0;font-size:12px;color:#52525b;">Gummfit</p>
+  </div>
+</body>
+</html>"""
+    text = (
+        f"{greeting}\n\nConfirm your email to activate your Gummfit account:\n{verify_url}\n\n"
+        "This link expires in 24 hours. If you didn't sign up, ignore this email."
+    )
+    try:
+        await get_email_service().send_email_with_fallback(
+            to_email=to_email,
+            to_name=to_name,
+            subject="Confirm your email for Gummfit",
+            html_content=html,
+            text_content=text,
+        )
+    except Exception:  # never let email failure surface to signup
+        logger.exception("Cappe verification email failed for %s", to_email)
 
 
 async def send_cappe_welcome_email(to_email: str, to_name: str | None) -> None:

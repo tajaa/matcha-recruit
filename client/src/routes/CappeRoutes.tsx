@@ -3,6 +3,7 @@ import CappeLayout from '../layouts/CappeLayout'
 import CappeLanding from '../pages/cappe/CappeLanding'
 import CappeSignup from '../pages/cappe/CappeSignup'
 import CappeLogin from '../pages/cappe/CappeLogin'
+import CappeVerify from '../pages/cappe/CappeVerify'
 import CappeSites from '../pages/cappe/CappeSites'
 import CappeTemplates from '../pages/cappe/CappeTemplates'
 import CappeSiteEditor from '../pages/cappe/CappeSiteEditor'
@@ -26,6 +27,7 @@ export default function CappeRoutes() {
       <Route index element={<CappeLanding />} />
       <Route path="website-setup" element={<CappeSignup />} />
       <Route path="login" element={<CappeLogin />} />
+      <Route path="verify" element={<CappeVerify />} />
       <Route element={<CappeLayout />}>
         <Route path="sites" element={<CappeSites />} />
         <Route path="templates" element={<CappeTemplates />} />

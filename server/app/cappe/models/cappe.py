@@ -76,6 +76,27 @@ class CappeTokenResponse(BaseModel):
     account: CappeAccount
 
 
+class CappeSignupResponse(BaseModel):
+    """Signup result. Real signups must confirm their email first
+    (`verification_required=True`, no tokens). Reserved test-domain signups
+    (which the email guard won't deliver to) auto-verify and get tokens inline
+    so dev/seed flows still work."""
+    verification_required: bool
+    email: str
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
+    expires_in: Optional[int] = None
+    account: Optional[CappeAccount] = None
+
+
+class CappeVerifyRequest(BaseModel):
+    token: str
+
+
+class CappeResendRequest(BaseModel):
+    email: EmailStr
+
+
 # --- Sites ------------------------------------------------------------------
 
 class CappeSiteCreate(BaseModel):

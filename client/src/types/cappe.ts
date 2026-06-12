@@ -20,6 +20,18 @@ export type CappeTokenResponse = {
   account: CappeAccount
 }
 
+// Signup result. Real signups must confirm their email first
+// (verification_required=true, no tokens); reserved test-domain signups
+// auto-verify and carry tokens inline.
+export type CappeSignupResponse = {
+  verification_required: boolean
+  email: string
+  access_token?: string
+  refresh_token?: string
+  expires_in?: number
+  account?: CappeAccount
+}
+
 export type CappeSiteStatus = 'draft' | 'published' | 'archived'
 
 export type CappeSite = {

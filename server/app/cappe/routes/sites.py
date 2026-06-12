@@ -34,6 +34,25 @@ _SITE_COLS = (
     "template_id, status, theme_config, meta_config, timezone, published_at, created_at, updated_at"
 )
 
+# Sites allowed per plan. Free is capped at one; paid plans are uncapped (None).
+_PLAN_SITE_LIMIT = {"free": 1}
+
+
+async def _enforce_site_limit(conn, account: CappeAccount) -> None:
+    """Raise 403 if the account is at its plan's site cap. Free = 1 site."""
+    limit = _PLAN_SITE_LIMIT.get(account.plan)
+    if limit is None:
+        return
+    count = await conn.fetchval("SELECT COUNT(*) FROM cappe_sites WHERE account_id = $1", account.id)
+    if count >= limit:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"Your plan includes {limit} site{'s' if limit != 1 else ''}. "
+                "Upgrade to create more."
+            ),
+        )
+
 
 @router.get("/sites", response_model=list[CappeSite])
 async def list_sites(account: CappeAccount = Depends(require_cappe_account)):
@@ -54,6 +73,7 @@ async def list_sites(account: CappeAccount = Depends(require_cappe_account)):
 async def create_site(body: CappeSiteCreate, account: CappeAccount = Depends(require_cappe_account)):
     """Create a blank or bring-your-own site."""
     async with get_connection() as conn:
+        await _enforce_site_limit(conn, account)
         # slug doubles as the tenant subdomain — keep it off reserved labels.
         slug = await unique_slug(conn, safe_subdomain_base(body.name), "cappe_sites")
         row = await conn.fetchrow(
@@ -76,6 +96,7 @@ async def create_site_from_template(
     """Clone a template into a new site: copy its theme and pages in one
     transaction."""
     async with get_connection() as conn:
+        await _enforce_site_limit(conn, account)
         template = await conn.fetchrow(
             "SELECT id, name, structure, is_active FROM cappe_templates WHERE id = $1",
             body.template_id,

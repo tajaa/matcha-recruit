@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Loader2, Store, User } from 'lucide-react'
+import { Loader2, Store, User, MailCheck } from 'lucide-react'
 import { cappePublicPost, setCappeTokens } from '../../api/cappeClient'
 import { invalidateCappeMeCache } from '../../hooks/useCappeMe'
-import type { CappeAccountType, CappeTokenResponse } from '../../types/cappe'
+import type { CappeAccountType, CappeSignupResponse } from '../../types/cappe'
 
 const ACCOUNT_TYPES: {
   value: CappeAccountType
@@ -34,6 +34,8 @@ export default function CappeSignup() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [sentTo, setSentTo] = useState<string | null>(null)
+  const [resent, setResent] = useState(false)
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -44,15 +46,23 @@ export default function CappeSignup() {
     }
     setSubmitting(true)
     try {
-      const res = await cappePublicPost<CappeTokenResponse>('/auth/signup', {
+      const res = await cappePublicPost<CappeSignupResponse>('/auth/signup', {
         name: name || null,
         email,
         password,
         account_type: accountType,
       })
-      setCappeTokens(res.access_token, res.refresh_token)
-      invalidateCappeMeCache()
-      navigate('/cappe/sites', { replace: true })
+      if (res.verification_required) {
+        // No tokens yet — account is live only after the email link is clicked.
+        setSentTo(res.email)
+        return
+      }
+      // Reserved test-domain (dev) signups auto-verify and come back with tokens.
+      if (res.access_token && res.refresh_token) {
+        setCappeTokens(res.access_token, res.refresh_token)
+        invalidateCappeMeCache()
+        navigate('/cappe/sites', { replace: true })
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.')
     } finally {
@@ -60,14 +70,51 @@ export default function CappeSignup() {
     }
   }
 
+  async function resend() {
+    if (!sentTo) return
+    setResent(true)
+    try {
+      await cappePublicPost('/auth/resend-verification', { email: sentTo })
+    } catch {
+      // 202 regardless; ignore.
+    }
+  }
+
+  if (sentTo) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-950 bg-[radial-gradient(60rem_40rem_at_50%_-10%,rgba(198,241,107,0.08),transparent)] px-4">
+        <div className="w-full max-w-sm text-center">
+          <span className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-lime-300/15 text-lime-300">
+            <MailCheck className="h-6 w-6" />
+          </span>
+          <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">Confirm your email</h1>
+          <p className="mt-2 text-sm leading-relaxed text-zinc-400">
+            We sent a confirmation link to <span className="text-zinc-200">{sentTo}</span>. Click it to
+            activate your account, then you can sign in and start building.
+          </p>
+          <div className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900 p-4 text-left text-xs leading-relaxed text-zinc-500">
+            Didn't get it? Check spam, or{' '}
+            <button onClick={resend} disabled={resent} className="font-medium text-lime-400 hover:text-lime-300 disabled:opacity-60">
+              {resent ? 'sent again ✓' : 'resend the email'}
+            </button>
+            .
+          </div>
+          <Link to="/cappe/login" className="mt-6 inline-block text-sm font-medium text-lime-400 hover:text-lime-300">
+            Back to sign in
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-950 bg-[radial-gradient(60rem_40rem_at_50%_-10%,rgba(16,185,129,0.08),transparent)] px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 text-lg font-bold text-zinc-950 shadow-lg shadow-emerald-500/20">
-            C
+          <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-lime-300 to-lime-500 text-lg font-bold text-zinc-950 shadow-lg shadow-lime-500/20">
+            G
           </span>
-          <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">Create your Cappe account</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">Create your Gummfit account</h1>
           <p className="mt-1 text-sm text-zinc-400">Build and launch your website in minutes.</p>
         </div>
 
