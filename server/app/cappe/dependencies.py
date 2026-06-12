@@ -11,7 +11,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from ..database import get_connection
 from .models.cappe import CappeAccount
-from .services.auth import decode_cappe_token
+from .services.auth import decode_cappe_token, is_cappe_token_revoked
 
 security = HTTPBearer()
 
@@ -39,7 +39,8 @@ async def require_cappe_account(
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT id, email, name, plan, status FROM cappe_accounts WHERE id = $1",
+            "SELECT id, email, name, plan, status, tokens_valid_after "
+            "FROM cappe_accounts WHERE id = $1",
             account_id,
         )
 
@@ -47,6 +48,14 @@ async def require_cappe_account(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Account not found or inactive",
+        )
+
+    # Session revocation: reject access tokens issued before logout / password change.
+    if is_cappe_token_revoked(payload.get("iat"), row["tokens_valid_after"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has been revoked. Please sign in again.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     return CappeAccount(

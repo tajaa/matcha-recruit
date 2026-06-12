@@ -32,6 +32,9 @@ def upgrade() -> None:
                 CHECK (plan IN ('free', 'hosting', 'pro', 'business')),
             status VARCHAR(20) NOT NULL DEFAULT 'active'
                 CHECK (status IN ('active', 'suspended', 'deleted')),
+            -- Session-revocation watermark: tokens whose iat predates this are
+            -- rejected (real logout + password-change invalidation).
+            tokens_valid_after TIMESTAMPTZ,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )

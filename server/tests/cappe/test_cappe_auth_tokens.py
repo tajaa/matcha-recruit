@@ -5,7 +5,7 @@ Cappe but NOT under matcha, and a matcha token is rejected by Cappe. Run from
 server/ so `app` is importable.
 """
 import os
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 # Minimal env so app.config.load_settings() succeeds (no DB connection happens).
@@ -21,6 +21,7 @@ from app.cappe.services.auth import (  # noqa: E402
     create_cappe_access_token,
     create_cappe_refresh_token,
     decode_cappe_token,
+    is_cappe_token_revoked,
 )
 from app.cappe.routes._shared import loads, slugify  # noqa: E402
 from app.core.services.auth import create_access_token, decode_token  # noqa: E402
@@ -81,6 +82,21 @@ def test_slugify():
     assert slugify("") == "site"
     assert slugify("---") == "site"
     assert slugify("Café & Co") == "caf-co"
+
+
+def test_token_revocation_watermark():
+    now = datetime.now(timezone.utc)
+    watermark = now
+    # iat 60s before the watermark → revoked.
+    assert is_cappe_token_revoked(int((now - timedelta(seconds=60)).timestamp()), watermark) is True
+    # iat 60s after the watermark → still valid.
+    assert is_cappe_token_revoked(int((now + timedelta(seconds=60)).timestamp()), watermark) is False
+    # No watermark (never logged out) → never revoked.
+    assert is_cappe_token_revoked(int(now.timestamp()), None) is False
+    # No iat on the token → not revoked.
+    assert is_cappe_token_revoked(None, watermark) is False
+    # Garbage iat → safe (not revoked, no crash).
+    assert is_cappe_token_revoked("nope", watermark) is False
 
 
 def test_loads_normalizes_jsonb_reads():

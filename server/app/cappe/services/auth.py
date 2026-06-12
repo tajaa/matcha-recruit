@@ -59,6 +59,18 @@ def create_cappe_refresh_token(account_id: UUID, email: str) -> str:
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
+def is_cappe_token_revoked(iat, tokens_valid_after) -> bool:
+    """True if a token (by its `iat` epoch) predates the account's revocation
+    watermark. Tokens minted before the feature shipped (no iat) or accounts
+    that never revoked (NULL watermark) are never revoked."""
+    if tokens_valid_after is None or iat is None:
+        return False
+    try:
+        return float(iat) < tokens_valid_after.timestamp()
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
 def decode_cappe_token(token: str, expected_type: Optional[str] = None) -> Optional[dict]:
     """Decode and validate a Cappe token.
 

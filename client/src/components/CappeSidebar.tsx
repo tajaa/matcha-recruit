@@ -1,6 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { LayoutGrid, LayoutTemplate, LogOut, Globe } from 'lucide-react'
-import { cappeLogout } from '../api/cappeClient'
+import { cappeApi, clearCappeTokens } from '../api/cappeClient'
+import { invalidateCappeMeCache } from '../hooks/useCappeMe'
 import type { CappeAccount } from '../types/cappe'
 
 const linkBase =
@@ -24,8 +25,11 @@ function Item({ to, icon: Icon, label, end }: { to: string; icon: typeof Globe; 
 export default function CappeSidebar({ account }: { account: CappeAccount | null }) {
   const navigate = useNavigate()
 
-  function signOut() {
-    cappeLogout()
+  async function signOut() {
+    // Best-effort server-side revocation, then clear local session regardless.
+    await cappeApi.post('/auth/logout').catch(() => {})
+    clearCappeTokens()
+    invalidateCappeMeCache()
     navigate('/cappe/login')
   }
 

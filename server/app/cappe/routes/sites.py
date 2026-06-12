@@ -51,7 +51,7 @@ async def create_site(body: CappeSiteCreate, account: CappeAccount = Depends(req
             account.id,
             body.name,
             slug,
-            body.custom_domain,
+            body.custom_domain or None,  # '' → NULL: empty strings would collide on the UNIQUE
             body.source_type,
         )
     return site_row_to_dict(row, page_count=0)
