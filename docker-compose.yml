@@ -7,18 +7,23 @@ services:
     env_file:
       - .env.backend
     ports:
-      - "6379:6379"
+      # localhost-only: containers reach redis via the compose network; the
+      # host publish exists only for on-box debugging. Never expose 0.0.0.0.
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
+    # maxmemory + volatile-lru: render-cache keys (TTL'd) evict under pressure,
+    # celery broker keys (no TTL) never do. Without this the container cap
+    # OOM-kills redis instead of evicting cache.
     command: >
-      sh -c 'redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"'
+      sh -c 'redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD" --maxmemory 96mb --maxmemory-policy volatile-lru'
     restart: unless-stopped
     networks:
       - matcha-network
     deploy:
       resources:
         limits:
-          memory: 48M
+          memory: 128M
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping"]
       interval: 5s

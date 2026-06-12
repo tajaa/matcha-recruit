@@ -33,14 +33,18 @@ Usage: $0 [OPTIONS]
 Update EC2 deployments by pulling latest images and restarting containers.
 
 OPTIONS:
-    --matcha         Update Matcha-Recruit (ports 8002/8082)
+    --matcha         Update Matcha-Recruit backend + frontend + worker (ports 8002/8082)
+    --frontend       Update only matcha-frontend (no DB backup, no worker stop)
+    --backend        Update only matcha-backend + matcha-worker
     --agent          Deploy/update agent (Gemini API)
     --all            Update matcha + agent
     --status         Show status of all containers
     -h, --help       Show this help message
 
 EXAMPLES:
-    $0 --matcha          # Update only Matcha
+    $0 --matcha          # Update only Matcha (all services)
+    $0 --frontend        # Frontend-only rollout (fast, no backup)
+    $0 --backend         # Backend + worker only
     $0 --all             # Update matcha + agent
     $0 --agent           # Deploy/restart agent
     $0 --status          # Check container status
@@ -65,10 +69,12 @@ backup_database() {
 
 pre_cleanup() {
     log_info "Freeing up disk space before pull..."
-    # Gracefully stop workers with 60s timeout to let them finish current job
-    log_info "Stopping workers gracefully (60s timeout)..."
-    ssh_cmd "docker stop -t 60 matcha-worker 2>/dev/null || true"
-    ssh_cmd "docker rm matcha-worker 2>/dev/null || true"
+    if [ "$UPDATE_BACKEND" = true ]; then
+        # Gracefully stop workers with 60s timeout to let them finish current job
+        log_info "Stopping workers gracefully (60s timeout)..."
+        ssh_cmd "docker stop -t 60 matcha-worker 2>/dev/null || true"
+        ssh_cmd "docker rm matcha-worker 2>/dev/null || true"
+    fi
     # Remove all stopped containers
     ssh_cmd "docker container prune -f" || true
     # Remove ALL unused images (not just dangling) - running containers keep their images
@@ -80,7 +86,10 @@ pre_cleanup() {
 }
 
 update_matcha() {
-    log_info "Updating Matcha-Recruit..."
+    local services=()
+    [ "$UPDATE_BACKEND" = true ] && services+=(matcha-backend matcha-worker)
+    [ "$UPDATE_FRONTEND" = true ] && services+=(matcha-frontend)
+    log_info "Updating Matcha-Recruit (${services[*]})..."
 
     # Sync docker-compose.yml from repo so live host config can't drift from
     # source (memory limits, env vars, profiles). Without this, hand-edits to
@@ -93,7 +102,7 @@ update_matcha() {
 
     # Only restart app containers, not shared infrastructure (postgres, redis)
     # Use --profile worker so the Celery worker container is also created/started
-    ssh_cmd "cd ~/matcha && docker-compose --profile worker pull && docker-compose --profile worker up -d --no-deps matcha-backend matcha-frontend matcha-worker"
+    ssh_cmd "cd ~/matcha && docker-compose --profile worker pull ${services[*]} && docker-compose --profile worker up -d --no-deps ${services[*]}"
 
     log_success "Matcha-Recruit updated!"
 }
@@ -119,7 +128,8 @@ cleanup() {
 }
 
 # Parse arguments
-UPDATE_MATCHA=false
+UPDATE_BACKEND=false
+UPDATE_FRONTEND=false
 UPDATE_AGENT=false
 SHOW_STATUS=false
 
@@ -131,7 +141,16 @@ fi
 while [[ $# -gt 0 ]]; do
     case $1 in
         --matcha)
-            UPDATE_MATCHA=true
+            UPDATE_BACKEND=true
+            UPDATE_FRONTEND=true
+            shift
+            ;;
+        --frontend)
+            UPDATE_FRONTEND=true
+            shift
+            ;;
+        --backend)
+            UPDATE_BACKEND=true
             shift
             ;;
         --agent)
@@ -139,7 +158,8 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --all)
-            UPDATE_MATCHA=true
+            UPDATE_BACKEND=true
+            UPDATE_FRONTEND=true
             UPDATE_AGENT=true
             shift
             ;;
@@ -160,6 +180,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Execute
+UPDATE_MATCHA=false
+if [ "$UPDATE_BACKEND" = true ] || [ "$UPDATE_FRONTEND" = true ]; then
+    UPDATE_MATCHA=true
+fi
+
 if [ "$SHOW_STATUS" = true ]; then
     show_status
     exit 0
@@ -174,12 +199,15 @@ if [ "$UPDATE_AGENT" = true ] && [ "$UPDATE_MATCHA" = false ]; then
 fi
 
 if [ "$UPDATE_MATCHA" = false ] && [ "$UPDATE_AGENT" = false ]; then
-    log_error "No app specified. Use --matcha, --agent, or --all"
+    log_error "No app specified. Use --matcha, --frontend, --backend, --agent, or --all"
     exit 1
 fi
 
 ecr_login
-backup_database
+# Frontend-only rollouts don't touch the DB — skip the backup for speed.
+if [ "$UPDATE_BACKEND" = true ]; then
+    backup_database
+fi
 pre_cleanup
 
 if [ "$UPDATE_MATCHA" = true ]; then
