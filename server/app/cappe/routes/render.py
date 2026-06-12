@@ -43,7 +43,7 @@ def subdomain_from_host(host: str | None) -> str | None:
 
 async def _load_published_site(conn, subdomain: str):
     site = await conn.fetchrow(
-        "SELECT id, name, theme_config, meta_config FROM cappe_sites "
+        "SELECT id, name, slug, theme_config, meta_config FROM cappe_sites "
         "WHERE subdomain = $1 AND status = 'published'",
         subdomain,
     )
@@ -60,6 +60,7 @@ async def _load_published_site(conn, subdomain: str):
 def _site_dict(site) -> dict:
     return {
         "name": site["name"],
+        "slug": site["slug"],
         "theme_config": loads(site["theme_config"]),
         "meta_config": loads(site["meta_config"]),
     }

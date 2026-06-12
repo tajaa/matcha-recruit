@@ -128,6 +128,7 @@ async def preview_site_page(
         )
     site_dict = {
         "name": site["name"],
+        "slug": site["slug"],
         "theme_config": loads(site["theme_config"]),
         "meta_config": loads(site["meta_config"]),
     }

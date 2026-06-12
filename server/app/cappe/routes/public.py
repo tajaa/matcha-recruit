@@ -7,7 +7,9 @@ client-supplied money/time — prices, order totals, and booking end-times are a
 recomputed server-side. A site must be `published` to expose any public surface.
 """
 import json
+from datetime import timezone
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request, status
 
@@ -20,12 +22,21 @@ from ..models.cappe import (
     CappeBookingType,
     CappeCheckoutRequest,
     CappeForm,
+    CappeOrderReceipt,
     CappePost,
     CappeProduct,
     CappePublicSite,
     CappeSubscribeRequest,
 )
-from ._shared import loads, page_row_to_dict
+from ._shared import loads, loads_list, page_row_to_dict
+
+# Public product listing exposes everything EXCEPT digital_file_url (the gated
+# deliverable — released only via the order receipt once paid/fulfilled).
+_PUBLIC_PRODUCT_COLS = (
+    "id, site_id, name, description, price_cents, currency, image_url, sku, "
+    "inventory, status, sort_order, fulfillment, booking_type_id, intake_fields, "
+    "created_at, updated_at"
+)
 
 router = APIRouter()
 
@@ -77,39 +88,107 @@ async def public_products(slug: str):
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         rows = await conn.fetch(
-            "SELECT id, site_id, name, description, price_cents, currency, image_url, sku, "
-            "inventory, status, sort_order, created_at, updated_at "
-            "FROM cappe_products WHERE site_id = $1 AND status = 'active' ORDER BY sort_order, created_at",
+            f"SELECT {_PUBLIC_PRODUCT_COLS} FROM cappe_products "
+            "WHERE site_id = $1 AND status = 'active' ORDER BY sort_order, created_at",
             site["id"],
         )
-    return [dict(r) for r in rows]
+    return [{**dict(r), "intake_fields": loads_list(r["intake_fields"])} for r in rows]
+
+
+def _validate_intake(intake_fields: list, answers: dict) -> None:
+    """Reject a service/booking purchase whose required intake answers are
+    missing. Answers are anonymous client input — keep it bounded + don't trust."""
+    if len(json.dumps(answers)) > 8000:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Intake answers too large")
+    for field in intake_fields or []:
+        if isinstance(field, dict) and field.get("required"):
+            key = field.get("key")
+            val = answers.get(key) if isinstance(answers, dict) else None
+            if val is None or (isinstance(val, str) and not val.strip()):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Missing required answer: {field.get('label') or key}",
+                )
+
+
+async def _create_booking_in_tx(conn, site, btype, starts_at, customer_name, customer_email, note):
+    """Validate availability + overlap and insert a booking. MUST run inside a
+    transaction. Shared by the public booking intake and booking-fulfillment
+    order lines so the timezone/overlap logic lives in one place."""
+    # A naive time from the widget is the visitor's pick in the SITE's timezone
+    # (the seller's availability is site-local) — anchor it there before math.
+    if starts_at.tzinfo is None:
+        try:
+            starts_at = starts_at.replace(tzinfo=ZoneInfo(site["timezone"] or "UTC"))
+        except Exception:
+            starts_at = starts_at.replace(tzinfo=timezone.utc)
+    bt = booking_times(starts_at, btype["duration_minutes"], site["timezone"])
+    s_utc, e_utc = bt["start_utc"], bt["end_utc"]
+
+    now_utc = await conn.fetchval("SELECT NOW()")
+    if s_utc <= now_utc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose a future time")
+    if bt["spans_midnight"]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Booking can't span midnight")
+
+    window = await conn.fetchval(
+        """SELECT 1 FROM cappe_availability
+           WHERE site_id = $1 AND weekday = $2
+             AND start_time <= $3 AND end_time >= $4
+             AND (booking_type_id IS NULL OR booking_type_id = $5)
+           LIMIT 1""",
+        site["id"], bt["weekday"], bt["local_start"].time(), bt["local_end"].time(), btype["id"],
+    )
+    if not window:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Time is outside availability")
+
+    overlap = await conn.fetchval(
+        """SELECT 1 FROM cappe_bookings
+           WHERE site_id = $1 AND booking_type_id = $2 AND status IN ('pending', 'confirmed')
+             AND tstzrange(starts_at, ends_at) && tstzrange($3, $4) LIMIT 1""",
+        site["id"], btype["id"], s_utc, e_utc,
+    )
+    if overlap:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That slot is taken")
+    try:
+        return await conn.fetchrow(
+            """INSERT INTO cappe_bookings
+                   (site_id, booking_type_id, customer_name, customer_email, starts_at, ends_at, note)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)
+               RETURNING id, status, starts_at, ends_at""",
+            site["id"], btype["id"], customer_name, customer_email, s_utc, e_utc, note,
+        )
+    except Exception as exc:
+        if "idx_cappe_bookings_no_doublebook" in str(exc):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That slot is taken")
+        raise
 
 
 @router.post("/public/sites/{slug}/orders", status_code=status.HTTP_201_CREATED)
 async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Request):
-    """Create a pending order. Prices + totals are recomputed server-side from
-    the live product rows; the client only supplies product ids + quantities.
-    Payment is stubbed — the order lands `pending`."""
+    """Create a pending order for a mixed cart (physical / digital / service /
+    booking). Prices + totals are recomputed server-side from the live product
+    rows; payment is stubbed (order lands `pending`). Inventory is decremented
+    only for physical lines; booking lines create a scheduled booking; service
+    lines validate intake answers. All in one transaction."""
     ip = client_ip(request)
     await check_rate_limit(ip, "cappe_order", 10, 60)
     await check_rate_limit(ip, "cappe_order_hr", 50, 3600)
-    _reject_reserved(str(body.customer_email))
-
-    # Collapse duplicate product ids into summed quantities.
-    wanted: dict[UUID, int] = {}
-    for item in body.items:
-        wanted[item.product_id] = wanted.get(item.product_id, 0) + item.quantity
+    email = str(body.customer_email).strip().lower()
+    _reject_reserved(email)
 
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         async with conn.transaction():
             order_currency = None
+            # (product_id, title, unit_price, qty, fulfillment, intake_answers, booking_id)
             line_rows = []
-            for product_id, qty in wanted.items():
+            for item in body.items:
                 product = await conn.fetchrow(
-                    "SELECT id, name, price_cents, currency, inventory, status "
+                    "SELECT id, name, price_cents, currency, inventory, status, fulfillment, "
+                    "booking_type_id, intake_fields "
                     "FROM cappe_products WHERE id = $1 AND site_id = $2 FOR UPDATE",
-                    product_id, site["id"],
+                    item.product_id, site["id"],
                 )
                 if product is None or product["status"] != "active":
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Product unavailable")
@@ -117,43 +196,124 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
                     order_currency = product["currency"]
                 elif product["currency"] != order_currency:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mixed currencies not supported")
-                if product["inventory"] is not None:
-                    # Atomic decrement; rowcount guard prevents overselling under concurrency.
-                    res = await conn.execute(
-                        "UPDATE cappe_products SET inventory = inventory - $1, updated_at = NOW() "
-                        "WHERE id = $2 AND inventory >= $1",
-                        qty, product_id,
-                    )
-                    if res.endswith(" 0"):
-                        raise HTTPException(
-                            status_code=status.HTTP_409_CONFLICT,
-                            detail=f"Insufficient stock for {product['name']}",
-                        )
-                line_rows.append((product_id, product["name"], product["price_cents"], qty))
 
-            subtotal = order_subtotal((unit, qty) for (_, _, unit, qty) in line_rows)
+                f = product["fulfillment"]
+                qty = item.quantity
+                booking_id = None
+                intake = item.intake_answers or {}
+
+                if f == "physical":
+                    if product["inventory"] is not None:
+                        res = await conn.execute(
+                            "UPDATE cappe_products SET inventory = inventory - $1, updated_at = NOW() "
+                            "WHERE id = $2 AND inventory >= $1",
+                            qty, item.product_id,
+                        )
+                        if res.endswith(" 0"):
+                            raise HTTPException(
+                                status_code=status.HTTP_409_CONFLICT,
+                                detail=f"Insufficient stock for {product['name']}",
+                            )
+                elif f == "service":
+                    _validate_intake(loads_list(product["intake_fields"]), intake)
+                elif f == "digital":
+                    pass  # delivered via the receipt download once paid/fulfilled
+                elif f == "booking":
+                    if product["booking_type_id"] is None:
+                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Booking not configured")
+                    if item.starts_at is None:
+                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pick a time for the booking")
+                    btype = await conn.fetchrow(
+                        "SELECT id, duration_minutes, status FROM cappe_booking_types WHERE id = $1 AND site_id = $2",
+                        product["booking_type_id"], site["id"],
+                    )
+                    if btype is None or btype["status"] != "active":
+                        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Booking unavailable")
+                    _validate_intake(loads_list(product["intake_fields"]), intake)
+                    booking = await _create_booking_in_tx(
+                        conn, site, btype, item.starts_at, body.customer_name, email, body.note
+                    )
+                    booking_id = booking["id"]
+
+                line_rows.append(
+                    (item.product_id, product["name"], product["price_cents"], qty, f, intake, booking_id)
+                )
+
+            subtotal = order_subtotal((unit, qty) for (_, _, unit, qty, *_rest) in line_rows)
             order = await conn.fetchrow(
                 """INSERT INTO cappe_orders
-                       (site_id, customer_email, customer_name, status, subtotal_cents, currency)
-                   VALUES ($1, $2, $3, 'pending', $4, $5)
-                   RETURNING id, status, subtotal_cents, currency""",
-                site["id"], str(body.customer_email).strip().lower(), body.customer_name,
-                subtotal, order_currency or "USD",
+                       (site_id, customer_email, customer_name, status, subtotal_cents, currency, note)
+                   VALUES ($1, $2, $3, 'pending', $4, $5, $6)
+                   RETURNING id, status, subtotal_cents, currency, access_token""",
+                site["id"], email, body.customer_name, subtotal, order_currency or "USD", body.note,
             )
-            for product_id, title, unit_price, qty in line_rows:
+            for product_id, title, unit_price, qty, f, intake, booking_id in line_rows:
                 await conn.execute(
                     """INSERT INTO cappe_order_items
-                           (order_id, site_id, product_id, title, unit_price_cents, quantity)
-                       VALUES ($1, $2, $3, $4, $5, $6)""",
+                           (order_id, site_id, product_id, title, unit_price_cents, quantity,
+                            fulfillment, intake_answers, booking_id)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)""",
                     order["id"], site["id"], product_id, title, unit_price, qty,
+                    f, json.dumps(intake), booking_id,
                 )
 
     return {
         "order_id": str(order["id"]),
+        "order_token": order["access_token"],
         "status": order["status"],
         "subtotal_cents": order["subtotal_cents"],
         "currency": order["currency"],
     }
+
+
+@router.get("/public/orders/{token}", response_model=CappeOrderReceipt)
+async def public_order_receipt(token: str, request: Request):
+    """Buyer receipt + deliverables, resolved by the order's unguessable token.
+    Digital downloads / service deliverables are released only once the seller
+    marks the order paid or fulfilled (payment is stubbed)."""
+    await check_rate_limit(client_ip(request), "cappe_receipt", 30, 60)
+    async with get_connection() as conn:
+        order = await conn.fetchrow(
+            "SELECT id, status, customer_email, customer_name, subtotal_cents, currency, created_at "
+            "FROM cappe_orders WHERE access_token = $1",
+            token,
+        )
+        if order is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+        items = await conn.fetch(
+            """SELECT oi.title, oi.quantity, oi.fulfillment, oi.unit_price_cents,
+                      oi.deliverable_url, p.digital_file_url,
+                      b.starts_at AS b_start, b.ends_at AS b_end, b.status AS b_status
+               FROM cappe_order_items oi
+               LEFT JOIN cappe_products p ON p.id = oi.product_id
+               LEFT JOIN cappe_bookings b ON b.id = oi.booking_id
+               WHERE oi.order_id = $1 ORDER BY oi.created_at""",
+            order["id"],
+        )
+    released = order["status"] in ("paid", "fulfilled")
+    return CappeOrderReceipt(
+        order_id=order["id"],
+        status=order["status"],
+        customer_email=order["customer_email"],
+        customer_name=order["customer_name"],
+        subtotal_cents=order["subtotal_cents"],
+        currency=order["currency"],
+        created_at=order["created_at"],
+        items=[
+            {
+                "title": it["title"],
+                "quantity": it["quantity"],
+                "fulfillment": it["fulfillment"],
+                "unit_price_cents": it["unit_price_cents"],
+                "download_url": it["digital_file_url"] if (it["fulfillment"] == "digital" and released) else None,
+                "deliverable_url": it["deliverable_url"] if released else None,
+                "booking_starts_at": it["b_start"],
+                "booking_ends_at": it["b_end"],
+                "booking_status": it["b_status"],
+            }
+            for it in items
+        ],
+    )
 
 
 # --- Newsletter -------------------------------------------------------------
@@ -284,51 +444,11 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
         if btype is None or btype["status"] != "active":
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking type not found")
 
-        bt = booking_times(body.starts_at, btype["duration_minutes"], site["timezone"])
-        starts_at, ends_at = bt["start_utc"], bt["end_utc"]
-
-        # Reject past slots.
-        now_utc = await conn.fetchval("SELECT NOW()")
-        if starts_at <= now_utc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Choose a future time")
-
-        # Availability is wall-clock in the site's timezone; the simple TIME
-        # check can't represent a window that crosses midnight.
-        if bt["spans_midnight"]:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Booking can't span midnight")
-        window = await conn.fetchval(
-            """SELECT 1 FROM cappe_availability
-               WHERE site_id = $1 AND weekday = $2
-                 AND start_time <= $3 AND end_time >= $4
-                 AND (booking_type_id IS NULL OR booking_type_id = $5)
-               LIMIT 1""",
-            site["id"], bt["weekday"], bt["local_start"].time(), bt["local_end"].time(), btype["id"],
-        )
-        if not window:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Time is outside availability")
-
         async with conn.transaction():
-            overlap = await conn.fetchval(
-                """SELECT 1 FROM cappe_bookings
-                   WHERE site_id = $1 AND booking_type_id = $2 AND status IN ('pending', 'confirmed')
-                     AND tstzrange(starts_at, ends_at) && tstzrange($3, $4) LIMIT 1""",
-                site["id"], btype["id"], starts_at, ends_at,
+            booking = await _create_booking_in_tx(
+                conn, site, btype, body.starts_at, body.customer_name,
+                str(body.customer_email).strip().lower(), body.note,
             )
-            if overlap:
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That slot is taken")
-            try:
-                booking = await conn.fetchrow(
-                    """INSERT INTO cappe_bookings
-                           (site_id, booking_type_id, customer_name, customer_email, starts_at, ends_at, note)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7)
-                       RETURNING id, status, starts_at, ends_at""",
-                    site["id"], btype["id"], body.customer_name,
-                    str(body.customer_email).strip().lower(), starts_at, ends_at, body.note,
-                )
-            except Exception as exc:
-                if "idx_cappe_bookings_no_doublebook" in str(exc):
-                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That slot is taken")
-                raise
     return {
         "booking_id": str(booking["id"]),
         "status": booking["status"],

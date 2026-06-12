@@ -1,21 +1,28 @@
 import { useRef, useState } from 'react'
-import { ImagePlus, Loader2, X } from 'lucide-react'
+import { FileText, ImagePlus, Loader2, X } from 'lucide-react'
 import { cappeApi } from '../../api/cappeClient'
 
 /** URL input + S3 upload button + thumbnail. Used for logos, product images,
- *  post covers — anywhere a site owner brings in an image. */
+ *  post covers (images via /upload) and digital deliverables (files via
+ *  /upload-file). */
 export default function ImageUpload({
   siteId,
   value,
   onChange,
   placeholder = 'Image URL',
   className = '',
+  endpoint = '/upload',
+  accept = 'image/*',
+  kind = 'image',
 }: {
   siteId: string
   value: string
   onChange: (url: string) => void
   placeholder?: string
   className?: string
+  endpoint?: string
+  accept?: string
+  kind?: 'image' | 'file'
 }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -27,7 +34,7 @@ export default function ImageUpload({
     try {
       const fd = new FormData()
       fd.append('file', file)
-      const res = await cappeApi.upload<{ url: string }>(`/sites/${siteId}/upload`, fd)
+      const res = await cappeApi.upload<{ url: string }>(`/sites/${siteId}${endpoint}`, fd)
       onChange(res.url)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Upload failed')
@@ -39,11 +46,11 @@ export default function ImageUpload({
   return (
     <div className={className}>
       <div className="flex items-center gap-2">
-        {value ? (
+        {kind === 'image' && value ? (
           <img src={value} alt="" className="h-9 w-9 shrink-0 rounded-lg border border-zinc-700 object-cover" />
         ) : (
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-dashed border-zinc-700 text-zinc-600">
-            <ImagePlus className="h-4 w-4" />
+          <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border ${value ? 'border-emerald-600 text-emerald-400' : 'border-dashed border-zinc-700 text-zinc-600'}`}>
+            {kind === 'file' ? <FileText className="h-4 w-4" /> : <ImagePlus className="h-4 w-4" />}
           </span>
         )}
         <input
@@ -71,7 +78,7 @@ export default function ImageUpload({
       <input
         ref={fileRef}
         type="file"
-        accept="image/*"
+        accept={accept}
         className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = '' }}
       />

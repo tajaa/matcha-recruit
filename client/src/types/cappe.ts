@@ -71,6 +71,10 @@ export type CappeTemplateDetail = CappeTemplateSummary & {
 
 // --- Shop -------------------------------------------------------------------
 
+// How an offering is delivered. physical=shipped good (inventory); digital=file
+// download; service=seller delivers a result; booking=scheduled session.
+export type CappeFulfillment = 'physical' | 'digital' | 'service' | 'booking'
+
 export type CappeProduct = {
   id: string
   site_id: string
@@ -83,6 +87,10 @@ export type CappeProduct = {
   inventory: number | null
   status: 'active' | 'draft' | 'archived'
   sort_order: number
+  fulfillment: CappeFulfillment
+  digital_file_url: string | null
+  booking_type_id: string | null
+  intake_fields: CappeFormField[]
   created_at: string
   updated_at: string
 }
@@ -97,6 +105,10 @@ export type CappeProductInput = {
   inventory?: number | null
   status?: 'active' | 'draft' | 'archived'
   sort_order?: number
+  fulfillment?: CappeFulfillment
+  digital_file_url?: string | null
+  booking_type_id?: string | null
+  intake_fields?: CappeFormField[]
 }
 
 export type CappeOrderItem = {
@@ -105,6 +117,10 @@ export type CappeOrderItem = {
   title: string
   unit_price_cents: number
   quantity: number
+  fulfillment: CappeFulfillment
+  intake_answers: Record<string, unknown>
+  deliverable_url: string | null
+  booking_id: string | null
 }
 
 export type CappeOrder = {

@@ -1,11 +1,20 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Loader2, Receipt, ChevronDown, ChevronRight } from 'lucide-react'
+import { Loader2, Receipt, ChevronDown, ChevronRight, Calendar } from 'lucide-react'
 import { cappeApi } from '../../../api/cappeClient'
 import SurfaceShell, { centsToMoney } from '../../../components/cappe/SurfaceShell'
-import type { CappeOrder } from '../../../types/cappe'
+import ImageUpload from '../../../components/cappe/ImageUpload'
+import type { CappeOrder, CappeOrderItem } from '../../../types/cappe'
 
 const STATUSES = ['pending', 'paid', 'fulfilled', 'cancelled', 'refunded'] as const
+const DELIVERABLE_ACCEPT = '.pdf,.zip,.doc,.docx,.xls,.xlsx,.csv,.txt,image/*'
+
+const fulfillBadge: Record<string, string> = {
+  physical: 'bg-zinc-800 text-zinc-400',
+  digital: 'bg-sky-500/15 text-sky-400',
+  service: 'bg-violet-500/15 text-violet-400',
+  booking: 'bg-amber-500/15 text-amber-400',
+}
 
 const statusStyle: Record<string, string> = {
   pending: 'bg-amber-500/15 text-amber-400',
@@ -42,6 +51,15 @@ export default function Orders() {
     setOrders((o) => (o || []).map((x) => (x.id === order.id ? { ...updated, items: x.items } : x)))
   }
 
+  async function attachDeliverable(order: CappeOrder, item: CappeOrderItem, url: string) {
+    const updated = await cappeApi.patch<CappeOrderItem>(
+      `/sites/${siteId}/orders/${order.id}/items/${item.id}`, { deliverable_url: url },
+    )
+    setOrders((o) => (o || []).map((x) =>
+      x.id === order.id ? { ...x, items: x.items.map((i) => (i.id === item.id ? updated : i)) } : x,
+    ))
+  }
+
   return (
     <SurfaceShell title="Orders" subtitle="Orders placed through your storefront.">
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
@@ -74,18 +92,51 @@ export default function Orders() {
                 </select>
               </div>
               {openId === o.id && (
-                <div className="bg-zinc-950 px-12 py-3">
+                <div className="space-y-2 bg-zinc-950 px-12 py-3">
                   {o.items.length === 0 ? (
                     <Loader2 className="h-4 w-4 animate-spin text-zinc-400" />
                   ) : (
-                    <ul className="space-y-1 text-sm">
-                      {o.items.map((it) => (
-                        <li key={it.id} className="flex justify-between text-zinc-400">
-                          <span>{it.quantity} × {it.title}</span>
-                          <span>{centsToMoney(it.unit_price_cents * it.quantity, o.currency)}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    o.items.map((it) => {
+                      const answers = Object.entries(it.intake_answers || {}).filter(([, v]) => v != null && v !== '')
+                      const needsDeliverable = it.fulfillment === 'service' || it.fulfillment === 'digital'
+                      return (
+                        <div key={it.id} className="rounded-lg border border-zinc-800 bg-zinc-900 p-3 text-sm">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="text-zinc-200">{it.quantity} × {it.title}</span>
+                              <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${fulfillBadge[it.fulfillment] || fulfillBadge.physical}`}>{it.fulfillment}</span>
+                            </div>
+                            <span className="text-zinc-300">{centsToMoney(it.unit_price_cents * it.quantity, o.currency)}</span>
+                          </div>
+                          {it.booking_id && (
+                            <div className="mt-1 flex items-center gap-1 text-xs text-amber-400">
+                              <Calendar className="h-3.5 w-3.5" /> Scheduled session — see the Bookings tab
+                            </div>
+                          )}
+                          {answers.length > 0 && (
+                            <div className="mt-2 space-y-0.5 border-t border-zinc-800 pt-2 text-xs">
+                              {answers.map(([k, v]) => (
+                                <div key={k}><span className="text-zinc-500">{k}:</span> <span className="text-zinc-300">{String(v)}</span></div>
+                              ))}
+                            </div>
+                          )}
+                          {needsDeliverable && (
+                            <div className="mt-2 border-t border-zinc-800 pt-2">
+                              <label className="mb-1 block text-xs font-medium text-zinc-400">Deliverable (released to buyer once paid/fulfilled)</label>
+                              <ImageUpload
+                                siteId={siteId || ''}
+                                value={it.deliverable_url || ''}
+                                onChange={(url) => attachDeliverable(o, it, url)}
+                                placeholder="Deliverable file URL"
+                                endpoint="/upload-file"
+                                accept={DELIVERABLE_ACCEPT}
+                                kind="file"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })
                   )}
                 </div>
               )}

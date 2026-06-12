@@ -148,6 +148,14 @@ class CappePublicSite(BaseModel):
 # Shop
 # ===========================================================================
 
+# A product is a general "offering"; `fulfillment` decides how it's delivered.
+#   physical - shipped good (uses inventory)
+#   digital  - buyer downloads `digital_file_url`
+#   service  - seller delivers a result; buyer answers `intake_fields`
+#   booking  - buying schedules a session against `booking_type_id`
+Fulfillment = Literal["physical", "digital", "service", "booking"]
+
+
 class CappeProductCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: Optional[str] = None
@@ -158,6 +166,12 @@ class CappeProductCreate(BaseModel):
     inventory: Optional[int] = Field(default=None, ge=0)
     status: Literal["active", "draft", "archived"] = "draft"
     sort_order: int = 0
+    fulfillment: Fulfillment = "physical"
+    digital_file_url: Optional[str] = None
+    booking_type_id: Optional[UUID] = None
+    # Intake questions for service/booking offerings; same shape as form fields:
+    # [{key,label,type,required,options?}].
+    intake_fields: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CappeProductUpdate(BaseModel):
@@ -170,6 +184,10 @@ class CappeProductUpdate(BaseModel):
     inventory: Optional[int] = Field(default=None, ge=0)
     status: Optional[Literal["active", "draft", "archived"]] = None
     sort_order: Optional[int] = None
+    fulfillment: Optional[Fulfillment] = None
+    digital_file_url: Optional[str] = None
+    booking_type_id: Optional[UUID] = None
+    intake_fields: Optional[list[dict[str, Any]]] = None
 
 
 class CappeProduct(BaseModel):
@@ -184,6 +202,10 @@ class CappeProduct(BaseModel):
     inventory: Optional[int] = None
     status: str
     sort_order: int
+    fulfillment: str = "physical"
+    digital_file_url: Optional[str] = None
+    booking_type_id: Optional[UUID] = None
+    intake_fields: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -194,6 +216,10 @@ class CappeOrderItem(BaseModel):
     title: str
     unit_price_cents: int
     quantity: int
+    fulfillment: str = "physical"
+    intake_answers: dict[str, Any] = Field(default_factory=dict)
+    deliverable_url: Optional[str] = None
+    booking_id: Optional[UUID] = None
 
 
 class CappeOrder(BaseModel):
@@ -216,11 +242,19 @@ class CappeOrderStatusUpdate(BaseModel):
     status: Literal["pending", "paid", "fulfilled", "cancelled", "refunded"]
 
 
+class CappeDeliverableUpdate(BaseModel):
+    """Owner attaches a delivered result (file URL) to a service/digital line."""
+    deliverable_url: str = Field(min_length=1)
+
+
 # Public checkout — client sends product ids + quantities ONLY (price is
-# recomputed server-side from the live product rows).
+# recomputed server-side from the live product rows). Service/booking lines may
+# carry per-line intake answers; booking lines carry the chosen start time.
 class CappeCartItem(BaseModel):
     product_id: UUID
     quantity: int = Field(ge=1, le=10000)
+    intake_answers: dict[str, Any] = Field(default_factory=dict)
+    starts_at: Optional[datetime] = None  # required for booking-fulfillment items
 
 
 class CappeCheckoutRequest(BaseModel):
@@ -228,6 +262,30 @@ class CappeCheckoutRequest(BaseModel):
     customer_name: Optional[str] = Field(default=None, max_length=255)
     items: list[CappeCartItem] = Field(min_length=1)
     note: Optional[str] = None
+
+
+# Buyer-facing receipt (resolved by the order's unguessable access_token).
+class CappeReceiptItem(BaseModel):
+    title: str
+    quantity: int
+    fulfillment: str
+    unit_price_cents: int
+    download_url: Optional[str] = None       # digital — only when paid/fulfilled
+    deliverable_url: Optional[str] = None    # service — only when paid/fulfilled
+    booking_starts_at: Optional[datetime] = None
+    booking_ends_at: Optional[datetime] = None
+    booking_status: Optional[str] = None
+
+
+class CappeOrderReceipt(BaseModel):
+    order_id: UUID
+    status: str
+    customer_email: Optional[str] = None
+    customer_name: Optional[str] = None
+    subtotal_cents: int
+    currency: str
+    created_at: datetime
+    items: list[CappeReceiptItem] = Field(default_factory=list)
 
 
 # ===========================================================================

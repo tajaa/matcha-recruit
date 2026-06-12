@@ -18,6 +18,20 @@ router = APIRouter()
 _MAX_BYTES = 5 * 1024 * 1024  # 5 MB
 _ALLOWED = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"}
 
+# Deliverables (digital products / service results) — larger, more types.
+_MAX_DELIVERABLE_BYTES = 25 * 1024 * 1024  # 25 MB
+_ALLOWED_DELIVERABLE = _ALLOWED | {
+    "application/pdf",
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/plain",
+    "text/csv",
+}
+
 
 @router.post("/sites/{site_id}/upload", response_model=CappeUploadResponse)
 async def upload_image(
@@ -41,6 +55,35 @@ async def upload_image(
     url = await get_storage().upload_file(
         file_bytes=data,
         filename=file.filename or "upload",
+        prefix="cappe",
+        content_type=file.content_type,
+    )
+    return CappeUploadResponse(url=url)
+
+
+@router.post("/sites/{site_id}/upload-file", response_model=CappeUploadResponse)
+async def upload_deliverable(
+    site_id: UUID,
+    file: UploadFile = File(...),
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """Upload a deliverable (digital product file / service result). Allows
+    documents + archives up to 25 MB, scoped to an owned site."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+
+    if file.content_type not in _ALLOWED_DELIVERABLE:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported file type")
+
+    data = await file.read()
+    if len(data) > _MAX_DELIVERABLE_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large (max 25 MB)")
+    if not data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+
+    url = await get_storage().upload_file(
+        file_bytes=data,
+        filename=file.filename or "deliverable",
         prefix="cappe",
         content_type=file.content_type,
     )

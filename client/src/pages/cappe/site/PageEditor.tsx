@@ -154,11 +154,33 @@ const BLOCK_SCHEMAS: Record<string, BlockSchema> = {
     fields: [
       F('heading', 'Heading'), F('subheading', 'Subheading', 'textarea'),
       F('fields', 'Form fields', 'strlist'),
+      F('formSlug', 'Submit to form (slug)', 'text', { placeholder: 'contact — create it in the Forms tab' }),
+    ],
+  },
+  store: {
+    label: 'Store (products)',
+    make: () => ({ type: 'store', heading: 'Shop' }),
+    fields: [
+      F('heading', 'Section heading'), F('subheading', 'Section subheading', 'textarea'),
+    ],
+  },
+  booking: {
+    label: 'Booking widget',
+    make: () => ({ type: 'booking', heading: 'Book a session' }),
+    fields: [
+      F('heading', 'Section heading'), F('subheading', 'Section subheading', 'textarea'),
+    ],
+  },
+  newsletter: {
+    label: 'Newsletter signup',
+    make: () => ({ type: 'newsletter', heading: 'Subscribe' }),
+    fields: [
+      F('heading', 'Section heading'), F('subheading', 'Section subheading', 'textarea'),
     ],
   },
 }
 
-const BLOCK_ORDER = ['hero', 'features', 'gallery', 'pricing', 'testimonial', 'cta', 'menu', 'posts', 'text', 'contact']
+const BLOCK_ORDER = ['hero', 'features', 'gallery', 'pricing', 'testimonial', 'cta', 'store', 'booking', 'menu', 'posts', 'text', 'contact', 'newsletter']
 
 // ── upload context (only ImageInput needs the siteId) ───────────────────────
 const SiteCtx = createContext<string>('')
