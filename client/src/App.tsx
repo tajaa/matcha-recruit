@@ -57,6 +57,14 @@ const MatchaXOnboardingWizard = lazy(() => import('./features/matcha-x-onboardin
 const AnonymousReport = lazy(() => import('./pages/shared/AnonymousReport'))
 const LocationIntake = lazy(() => import('./pages/shared/LocationIntake'))
 
+// Dedicated Cappe marketing/builder domain (VITE_CAPPE_HOST, default
+// gummfit.com). On this host the Cappe route tree also mounts at "/" so the
+// bare apex shows the Cappe landing instead of the Matcha landing.
+const CAPPE_HOST = (import.meta.env.VITE_CAPPE_HOST as string | undefined) || 'gummfit.com'
+const isCappeHost =
+  typeof window !== 'undefined' &&
+  (window.location.hostname === CAPPE_HOST || window.location.hostname === `www.${CAPPE_HOST}`)
+
 function RouteFallback() {
   return (
     <div className="min-h-screen flex items-center justify-center">
@@ -113,6 +121,10 @@ export default function App() {
         <Route path="/report/:token" element={<AnonymousReport />} />
         <Route path="/intake/:token" element={<LocationIntake />} />
         <Route path="/cappe/*" element={<CappeRoutes />} />
+        {/* Dedicated Cappe domain: bare apex serves the Cappe tree at root.
+            /cappe/* links inside the pages still resolve via the mount above,
+            so both URL spaces work on this host. */}
+        {isCappeHost && <Route path="/*" element={<CappeRoutes />} />}
         <Route path="/work/*" element={<WorkRoutes />} />
         <Route path="/werk/*" element={<WerkRoutes />} />
         <Route path="/admin/*" element={<AdminRoutes />} />
