@@ -11,6 +11,7 @@ const BrokerRoutes = lazy(() => import('./routes/BrokerRoutes'))
 const WorkRoutes = lazy(() => import('./routes/WorkRoutes'))
 const WerkRoutes = lazy(() => import('./routes/WerkRoutes'))
 const PortalRoutes = lazy(() => import('./routes/PortalRoutes'))
+const CappeRoutes = lazy(() => import('./routes/CappeRoutes')) // Cappe — website builder (separate product)
 
 // Public / marketing / auth-funnel pages — lazy so marketing visitors only
 // pull what they land on (Home + Login stay eager: first paint + funnel).
@@ -111,6 +112,7 @@ export default function App() {
         <Route path="/matcha-x/onboarding" element={<MatchaXOnboardingWizard />} />
         <Route path="/report/:token" element={<AnonymousReport />} />
         <Route path="/intake/:token" element={<LocationIntake />} />
+        <Route path="/cappe/*" element={<CappeRoutes />} />
         <Route path="/work/*" element={<WorkRoutes />} />
         <Route path="/werk/*" element={<WerkRoutes />} />
         <Route path="/admin/*" element={<AdminRoutes />} />

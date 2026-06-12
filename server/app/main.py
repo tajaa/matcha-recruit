@@ -386,10 +386,15 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 from .core.routes import core_router, chat_ws_router, channels_ws_router
 from .core.routes.stripe_webhook import router as stripe_webhook_router
 from .matcha.routes import matcha_router
+from .cappe.routes import cappe_router
 
 # Mount domain routers
 app.include_router(core_router, prefix="/api")
 app.include_router(matcha_router, prefix="/api")
+# Cappe (website builder) — a separate product. Mounted standalone, NOT under
+# matcha_router, so it bypasses the require_feature/company gate chain. Its own
+# Cappe-scoped JWT auth gates per-endpoint.
+app.include_router(cappe_router, prefix="/api/cappe")
 # Webhook router under /api so prod nginx proxy_pass /api/ → backend works.
 # Stripe dashboard endpoint must be https://hey-matcha.com/api/webhooks/stripe.
 app.include_router(stripe_webhook_router, prefix="/api")
