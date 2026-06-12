@@ -77,7 +77,10 @@ export default function App() {
   return (
     <Suspense fallback={<RouteFallback />}>
       <Routes>
-        <Route path="/" element={<Home />} />
+        {/* Exact "/" outranks the isCappeHost "/*" splat below, so the apex
+            swap has to happen here: on the Cappe domain "/" renders the
+            Gummfit landing (CappeRoutes index), everywhere else Matcha Home. */}
+        <Route path="/" element={isCappeHost ? <CappeRoutes /> : <Home />} />
         <Route path="/platform" element={<Landing />} />
         <Route path="/matcha-work" element={<MatchaWorkPage />} />
         <Route path="/matcha-lite" element={<MatchaLitePage />} />
