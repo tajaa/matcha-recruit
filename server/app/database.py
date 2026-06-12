@@ -5505,6 +5505,44 @@ async def init_db():
         await conn.execute("ALTER TABLE mw_journals ADD COLUMN IF NOT EXISTS kind VARCHAR(20) NOT NULL DEFAULT 'journal'")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_journals_folder ON mw_journals(folder_id)")
 
+        # ── Per-user RLS on journal tables (dormant under superuser) ──────
+        # Journals are PERSONAL: visible to created_by or an active
+        # collaborator; folders are strictly per-user. These policies are
+        # bypassed while the app connects as the `matcha` SUPERUSER and only
+        # enforce once DATABASE_URL is switched to `matcha_app` (NOBYPASSRLS,
+        # c9cfac81407a). FORCE is required because matcha_app owns the tables.
+        # Mirrors the handbook RLS block above; idempotent. Keep in sync with
+        # migration mwjrnlrls01. `mw_journal_collaborators` stays un-RLS'd —
+        # the mw_journals policy reads it as the membership oracle.
+        _rls_journal_specs = [
+            ("mw_journals", "journal_user_isolation",
+             "created_by::text = current_setting('app.current_user_id', true) "
+             "OR current_setting('app.is_admin', true) = 'true' "
+             "OR EXISTS (SELECT 1 FROM mw_journal_collaborators jc "
+             "WHERE jc.journal_id = mw_journals.id "
+             "AND jc.user_id::text = current_setting('app.current_user_id', true) "
+             "AND jc.status = 'active')"),
+            ("mw_journal_entries", "entry_user_isolation",
+             "current_setting('app.is_admin', true) = 'true' "
+             "OR EXISTS (SELECT 1 FROM mw_journals j "
+             "WHERE j.id = mw_journal_entries.journal_id)"),
+            ("mw_journal_folders", "folder_user_isolation",
+             "created_by::text = current_setting('app.current_user_id', true) "
+             "OR current_setting('app.is_admin', true) = 'true'"),
+        ]
+        for _tbl, _policy, _pred in _rls_journal_specs:
+            await conn.execute(f"ALTER TABLE IF EXISTS {_tbl} ENABLE ROW LEVEL SECURITY")
+            await conn.execute(f"ALTER TABLE IF EXISTS {_tbl} FORCE ROW LEVEL SECURITY")
+            await conn.execute(f"""
+                DO $$ BEGIN
+                    CREATE POLICY {_policy} ON {_tbl}
+                        USING ({_pred})
+                        WITH CHECK ({_pred});
+                EXCEPTION WHEN duplicate_object THEN NULL;
+                          WHEN undefined_table THEN NULL;
+                END $$
+            """)
+
         # Personal productivity kanban — user-scoped boards + cards (todo /
         # in_progress / done). Cards may back-link to a journal when created
         # from a text selection.
