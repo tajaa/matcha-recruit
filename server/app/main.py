@@ -242,20 +242,45 @@ app.add_middleware(
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; "
-        "script-src 'self'; "
-        "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: https:; "
-        "connect-src 'self' wss: https:; "
-        "font-src 'self' https:; "
-        "frame-src 'self' https://*.cloudfront.net blob:; "
-        "frame-ancestors 'none'"
-    )
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+    # Cappe published sites + their previews are self-contained HTML documents
+    # that legitimately ship inline scripts (the storefront/booking widgets), load
+    # Google Fonts, and are embedded in same-origin editor/gallery iframes. They
+    # need a tailored CSP — the app's strict 'script-src self' blocks the widgets
+    # outright. All user content in these pages is HTML-escaped + URL-sanitized by
+    # the renderer (see services/render.py).
+    from .cappe.routes.render import subdomain_from_host
+    path = request.url.path
+    is_cappe_site = (
+        subdomain_from_host(request.headers.get("host")) is not None
+        or (path.startswith("/api/cappe/") and path.endswith("/preview"))
+    )
+    if is_cappe_site:
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com data:; "
+            "img-src 'self' data: https:; "
+            "connect-src 'self'; "
+            "frame-ancestors 'self'"
+        )
+    else:
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https:; "
+            "connect-src 'self' wss: https:; "
+            "font-src 'self' https:; "
+            "frame-src 'self' https://*.cloudfront.net blob:; "
+            "frame-ancestors 'none'"
+        )
     return response
 
 
