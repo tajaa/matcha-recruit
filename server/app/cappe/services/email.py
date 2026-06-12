@@ -5,12 +5,13 @@ reserved-domain guard, so sends to @example.com / *.test are skipped). Called
 as a FastAPI background task so account creation never blocks on SMTP.
 """
 import logging
+import os
 
 from ...core.services.email.client import get_email_service
 
 logger = logging.getLogger(__name__)
 
-_DASHBOARD_URL = "https://hey-matcha.com/cappe"
+_DASHBOARD_URL = f"https://{os.getenv('CAPPE_BASE_DOMAIN', 'hey-matcha.com')}/cappe"
 
 
 async def send_cappe_welcome_email(to_email: str, to_name: str | None) -> None:

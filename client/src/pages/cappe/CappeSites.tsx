@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Loader2, Plus, Globe, FileText, ExternalLink } from 'lucide-react'
 import { cappeApi } from '../../api/cappeClient'
+import { cappeSiteHost } from '../../utils/cappeHost'
 import type { CappeSite } from '../../types/cappe'
 
 const statusStyle: Record<string, string> = {
@@ -96,7 +97,7 @@ export default function CappeSites() {
               <h3 className="truncate font-medium text-zinc-100">{site.name}</h3>
               <div className="mt-1 flex items-center gap-1 text-xs text-zinc-500">
                 <ExternalLink className="h-3 w-3" />
-                <span className="truncate">{site.custom_domain || `${site.subdomain || site.slug}.cappe.hey-matcha.com`}</span>
+                <span className="truncate">{cappeSiteHost(site)}</span>
               </div>
               <div className="mt-3 flex items-center gap-1 text-xs text-zinc-500">
                 <FileText className="h-3 w-3" />

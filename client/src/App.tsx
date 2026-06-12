@@ -57,13 +57,9 @@ const MatchaXOnboardingWizard = lazy(() => import('./features/matcha-x-onboardin
 const AnonymousReport = lazy(() => import('./pages/shared/AnonymousReport'))
 const LocationIntake = lazy(() => import('./pages/shared/LocationIntake'))
 
-// Dedicated Cappe marketing/builder domain (VITE_CAPPE_HOST, default
-// gummfit.com). On this host the Cappe route tree also mounts at "/" so the
-// bare apex shows the Cappe landing instead of the Matcha landing.
-const CAPPE_HOST = (import.meta.env.VITE_CAPPE_HOST as string | undefined) || 'gummfit.com'
-const isCappeHost =
-  typeof window !== 'undefined' &&
-  (window.location.hostname === CAPPE_HOST || window.location.hostname === `www.${CAPPE_HOST}`)
+// On the dedicated Cappe domain the Cappe route tree also mounts at "/" so
+// the bare apex shows the Gummfit landing instead of the Matcha landing.
+import { isCappeHost } from './utils/cappeHost'
 
 function RouteFallback() {
   return (

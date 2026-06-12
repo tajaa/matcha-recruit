@@ -4,6 +4,9 @@ import { Loader2, ArrowLeft, Plus, Trash2, Rocket, Save, Globe, Pencil } from 'l
 import { cappeApi } from '../../api/cappeClient'
 import SiteTabs from '../../components/cappe/SiteTabs'
 import ImageUpload from '../../components/cappe/ImageUpload'
+import SetupGuide from '../../components/cappe/SetupGuide'
+import { useCappeMe } from '../../hooks/useCappeMe'
+import { cappeSiteHost } from '../../utils/cappeHost'
 import type { CappePage, CappeSite } from '../../types/cappe'
 
 const statusStyle: Record<string, string> = {
@@ -15,6 +18,7 @@ const statusStyle: Record<string, string> = {
 export default function CappeSiteEditor() {
   const { siteId } = useParams<{ siteId: string }>()
   const navigate = useNavigate()
+  const { account } = useCappeMe()
   const [site, setSite] = useState<CappeSite | null>(null)
   const [pages, setPages] = useState<CappePage[]>([])
   const [loading, setLoading] = useState(true)
@@ -146,7 +150,7 @@ export default function CappeSiteEditor() {
     )
   }
 
-  const publicUrl = site.custom_domain || `${site.subdomain || site.slug}.cappe.hey-matcha.com`
+  const publicUrl = cappeSiteHost(site)
 
   return (
     <div className="mx-auto max-w-5xl px-8 py-8">
@@ -165,7 +169,14 @@ export default function CappeSiteEditor() {
             </span>
           </div>
           <div className="mt-1 flex items-center gap-1 text-sm text-zinc-500">
-            <Globe className="h-3.5 w-3.5" /> {publicUrl}
+            <Globe className="h-3.5 w-3.5" />
+            {site.status === 'published' ? (
+              <a href={`https://${publicUrl}`} target="_blank" rel="noreferrer" className="hover:text-emerald-400">
+                {publicUrl}
+              </a>
+            ) : (
+              publicUrl
+            )}
           </div>
         </div>
         <button
@@ -180,6 +191,8 @@ export default function CappeSiteEditor() {
 
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
       {notice && <p className="mb-4 text-sm text-emerald-400">{notice}</p>}
+
+      <SetupGuide site={site} accountType={account?.account_type} publishing={publishing} onPublish={publish} />
 
       {/* Settings */}
       <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
