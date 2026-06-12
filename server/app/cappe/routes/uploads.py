@@ -1,0 +1,47 @@
+"""Cappe shared image upload — product images, post covers, etc.
+
+Reuses the platform storage service (S3/CloudFront-transparent). Scoped to an
+owned site; images go under the `cappe` prefix.
+"""
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+
+from ...core.services.storage import get_storage
+from ...database import get_connection
+from ..dependencies import require_cappe_account
+from ..models.cappe import CappeAccount, CappeUploadResponse
+from ._shared import get_owned_site
+
+router = APIRouter()
+
+_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+_ALLOWED = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"}
+
+
+@router.post("/sites/{site_id}/upload", response_model=CappeUploadResponse)
+async def upload_image(
+    site_id: UUID,
+    file: UploadFile = File(...),
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """Upload an image for use on the site. Returns a public URL."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+
+    if file.content_type not in _ALLOWED:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported image type")
+
+    data = await file.read()
+    if len(data) > _MAX_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Image too large (max 5 MB)")
+    if not data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+
+    url = await get_storage().upload_file(
+        file_bytes=data,
+        filename=file.filename or "upload",
+        prefix="cappe",
+        content_type=file.content_type,
+    )
+    return CappeUploadResponse(url=url)

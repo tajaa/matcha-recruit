@@ -84,6 +84,9 @@ def upgrade() -> None:
                 CHECK (status IN ('draft', 'published', 'archived')),
             theme_config JSONB NOT NULL DEFAULT '{}'::jsonb,
             meta_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+            -- IANA tz of the site owner; booking availability windows are wall-clock
+            -- in this zone, compared against TIMESTAMPTZ booking times.
+            timezone VARCHAR(64) NOT NULL DEFAULT 'UTC',
             published_at TIMESTAMPTZ,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

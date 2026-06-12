@@ -20,7 +20,7 @@ router = APIRouter()
 
 _SITE_COLS = (
     "id, account_id, name, slug, subdomain, custom_domain, source_type, "
-    "template_id, status, theme_config, meta_config, published_at, created_at, updated_at"
+    "template_id, status, theme_config, meta_config, timezone, published_at, created_at, updated_at"
 )
 
 
@@ -144,6 +144,8 @@ async def update_site(
             add("theme_config", json.dumps(body.theme_config))
         if body.meta_config is not None:
             add("meta_config", json.dumps(body.meta_config))
+        if body.timezone is not None:
+            add("timezone", body.timezone)
         if body.status is not None:
             add("status", body.status)
             if body.status == "published":

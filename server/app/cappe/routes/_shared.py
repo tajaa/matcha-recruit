@@ -49,6 +49,32 @@ def loads(value: Any) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def loads_list(value: Any) -> list:
+    """Normalize a JSONB array read (str | list | None) into a list."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (ValueError, TypeError):
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return value if isinstance(value, list) else []
+
+
+async def unique_site_slug(conn, table: str, site_id, base: str, column: str = "slug") -> str:
+    """Per-site slug uniqueness for tables with UNIQUE(site_id, slug). `table`
+    and `column` are caller literals (never user input)."""
+    candidate = base
+    n = 1
+    while await conn.fetchval(
+        f"SELECT 1 FROM {table} WHERE site_id = $1 AND {column} = $2", site_id, candidate
+    ):
+        n += 1
+        candidate = f"{base}-{n}"
+    return candidate
+
+
 async def get_owned_site(conn, site_id: UUID, account_id: UUID):
     """Fetch a site row, 404ing if it doesn't exist or isn't this account's.
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { Loader2, ArrowLeft, Plus, Trash2, Rocket, Save, Globe } from 'lucide-react'
 import { cappeApi } from '../../api/cappeClient'
+import SiteTabs from '../../components/cappe/SiteTabs'
 import type { CappePage, CappeSite } from '../../types/cappe'
 
 const statusStyle: Record<string, string> = {
@@ -144,10 +145,12 @@ export default function CappeSiteEditor() {
   const publicUrl = site.custom_domain || `${site.subdomain || site.slug}.cappe.hey-matcha.com`
 
   return (
-    <div className="mx-auto max-w-3xl px-8 py-10">
-      <Link to="/cappe" className="mb-6 inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800">
+    <div className="mx-auto max-w-5xl px-8 py-8">
+      <Link to="/cappe" className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800">
         <ArrowLeft className="h-4 w-4" /> My Sites
       </Link>
+
+      <SiteTabs />
 
       <div className="mb-6 flex items-start justify-between">
         <div>
