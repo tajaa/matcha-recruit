@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
-import { Loader2, ArrowLeft, Plus, Trash2, Rocket, Save, Globe } from 'lucide-react'
+import { Loader2, ArrowLeft, Plus, Trash2, Rocket, Save, Globe, Pencil } from 'lucide-react'
 import { cappeApi } from '../../api/cappeClient'
 import SiteTabs from '../../components/cappe/SiteTabs'
+import ImageUpload from '../../components/cappe/ImageUpload'
 import type { CappePage, CappeSite } from '../../types/cappe'
 
 const statusStyle: Record<string, string> = {
-  published: 'bg-emerald-100 text-emerald-700',
-  draft: 'bg-zinc-100 text-zinc-600',
-  archived: 'bg-amber-100 text-amber-700',
+  published: 'bg-emerald-500/15 text-emerald-400',
+  draft: 'bg-zinc-800 text-zinc-400',
+  archived: 'bg-amber-500/15 text-amber-400',
 }
 
 export default function CappeSiteEditor() {
@@ -22,6 +23,7 @@ export default function CappeSiteEditor() {
 
   const [name, setName] = useState('')
   const [domain, setDomain] = useState('')
+  const [logo, setLogo] = useState('')
   const [saving, setSaving] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [newPageTitle, setNewPageTitle] = useState('')
@@ -38,6 +40,7 @@ export default function CappeSiteEditor() {
         setPages(p)
         setName(s.name)
         setDomain(s.custom_domain || '')
+        setLogo((s.meta_config?.logo_url as string) || '')
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load site'))
       .finally(() => setLoading(false))
@@ -51,6 +54,7 @@ export default function CappeSiteEditor() {
       const updated = await cappeApi.put<CappeSite>(`/sites/${siteId}`, {
         name,
         custom_domain: domain || null,
+        meta_config: { ...(site?.meta_config || {}), logo_url: logo.trim() || null },
       })
       setSite(updated)
       setNotice('Saved.')
@@ -134,8 +138,8 @@ export default function CappeSiteEditor() {
   if (!site) {
     return (
       <div className="mx-auto max-w-3xl px-8 py-10">
-        <p className="text-sm text-red-600">{error || 'Site not found.'}</p>
-        <Link to="/cappe" className="mt-4 inline-flex items-center gap-1 text-sm text-emerald-700 hover:underline">
+        <p className="text-sm text-red-400">{error || 'Site not found.'}</p>
+        <Link to="/cappe" className="mt-4 inline-flex items-center gap-1 text-sm text-emerald-400 hover:text-emerald-300">
           <ArrowLeft className="h-4 w-4" /> Back to sites
         </Link>
       </div>
@@ -146,7 +150,7 @@ export default function CappeSiteEditor() {
 
   return (
     <div className="mx-auto max-w-5xl px-8 py-8">
-      <Link to="/cappe" className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800">
+      <Link to="/cappe" className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-200">
         <ArrowLeft className="h-4 w-4" /> My Sites
       </Link>
 
@@ -155,7 +159,7 @@ export default function CappeSiteEditor() {
       <div className="mb-6 flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">{site.name}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-zinc-50">{site.name}</h1>
             <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${statusStyle[site.status] || statusStyle.draft}`}>
               {site.status}
             </span>
@@ -167,43 +171,48 @@ export default function CappeSiteEditor() {
         <button
           onClick={publish}
           disabled={publishing}
-          className="flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+          className="flex items-center gap-2 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-60"
         >
           {publishing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
           {site.status === 'published' ? 'Re-publish' : 'Publish'}
         </button>
       </div>
 
-      {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
-      {notice && <p className="mb-4 text-sm text-emerald-700">{notice}</p>}
+      {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
+      {notice && <p className="mb-4 text-sm text-emerald-400">{notice}</p>}
 
       {/* Settings */}
-      <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h2 className="mb-4 text-sm font-semibold text-zinc-900">Site settings</h2>
+      <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <h2 className="mb-4 text-sm font-semibold text-zinc-100">Site settings</h2>
         <div className="space-y-4">
           <div>
-            <label className="mb-1 block text-sm font-medium text-zinc-700">Name</label>
+            <label className="mb-1 block text-sm font-medium text-zinc-300">Name</label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-zinc-700">Custom domain (bring your own)</label>
+            <label className="mb-1 block text-sm font-medium text-zinc-300">Logo</label>
+            <ImageUpload siteId={siteId || ''} value={logo} onChange={setLogo} placeholder="Logo image URL" />
+            <p className="mt-1 text-xs text-zinc-500">Shown in your published site's header. Save to apply.</p>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-zinc-300">Custom domain (bring your own)</label>
             <input
               value={domain}
               onChange={(e) => setDomain(e.target.value)}
               placeholder="www.yourdomain.com"
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
             />
-            <p className="mt-1 text-xs text-zinc-400">
+            <p className="mt-1 text-xs text-zinc-500">
               Don't have one?{' '}
-              <button onClick={() => buy('domain')} className="font-medium text-emerald-700 hover:underline">
+              <button onClick={() => buy('domain')} className="font-medium text-emerald-400 hover:text-emerald-300">
                 Buy a domain
               </button>{' '}
               or{' '}
-              <button onClick={() => buy('hosting')} className="font-medium text-emerald-700 hover:underline">
+              <button onClick={() => buy('hosting')} className="font-medium text-emerald-400 hover:text-emerald-300">
                 get a hosting plan
               </button>
               .
@@ -212,7 +221,7 @@ export default function CappeSiteEditor() {
           <button
             onClick={save}
             disabled={saving}
-            className="flex items-center gap-2 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-60"
+            className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-60"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             Save changes
@@ -221,21 +230,27 @@ export default function CappeSiteEditor() {
       </section>
 
       {/* Pages */}
-      <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-        <h2 className="mb-4 text-sm font-semibold text-zinc-900">Pages</h2>
-        <ul className="mb-4 divide-y divide-zinc-100">
-          {pages.length === 0 && <li className="py-3 text-sm text-zinc-400">No pages yet.</li>}
+      <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <h2 className="mb-4 text-sm font-semibold text-zinc-100">Pages</h2>
+        <ul className="mb-4 divide-y divide-zinc-800">
+          {pages.length === 0 && <li className="py-3 text-sm text-zinc-500">No pages yet.</li>}
           {pages.map((p) => (
             <li key={p.id} className="flex items-center justify-between py-3">
-              <div>
-                <div className="text-sm font-medium text-zinc-800">{p.title}</div>
-                <div className="text-xs text-zinc-400">/{p.slug}</div>
-              </div>
+              <Link to={`/cappe/sites/${siteId}/pages/${p.id}`} className="group flex-1">
+                <div className="text-sm font-medium text-zinc-200 group-hover:text-emerald-400">{p.title}</div>
+                <div className="text-xs text-zinc-500">/{p.slug}</div>
+              </Link>
               <div className="flex items-center gap-3">
                 <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${statusStyle[p.status] || statusStyle.draft}`}>
                   {p.status}
                 </span>
-                <button onClick={() => deletePage(p.id)} className="text-zinc-400 hover:text-red-600">
+                <Link
+                  to={`/cappe/sites/${siteId}/pages/${p.id}`}
+                  className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
+                >
+                  <Pencil className="h-3.5 w-3.5" /> Edit
+                </Link>
+                <button onClick={() => deletePage(p.id)} className="text-zinc-500 hover:text-red-400">
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>
@@ -247,12 +262,12 @@ export default function CappeSiteEditor() {
             value={newPageTitle}
             onChange={(e) => setNewPageTitle(e.target.value)}
             placeholder="New page title"
-            className="flex-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+            className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
           />
           <button
             type="submit"
             disabled={addingPage || !newPageTitle.trim()}
-            className="flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+            className="flex items-center gap-2 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-60"
           >
             {addingPage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             Add
@@ -260,7 +275,7 @@ export default function CappeSiteEditor() {
         </form>
       </section>
 
-      <button onClick={deleteSite} className="text-sm text-red-600 hover:underline">
+      <button onClick={deleteSite} className="text-sm text-red-400 hover:text-red-300">
         Delete site
       </button>
     </div>

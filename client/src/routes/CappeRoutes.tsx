@@ -5,6 +5,7 @@ import CappeLogin from '../pages/cappe/CappeLogin'
 import CappeSites from '../pages/cappe/CappeSites'
 import CappeTemplates from '../pages/cappe/CappeTemplates'
 import CappeSiteEditor from '../pages/cappe/CappeSiteEditor'
+import PageEditor from '../pages/cappe/site/PageEditor'
 import Shop from '../pages/cappe/site/Shop'
 import Orders from '../pages/cappe/site/Orders'
 import Subscribers from '../pages/cappe/site/Subscribers'
@@ -26,6 +27,7 @@ export default function CappeRoutes() {
         <Route index element={<CappeSites />} />
         <Route path="templates" element={<CappeTemplates />} />
         <Route path="sites/:siteId" element={<CappeSiteEditor />} />
+        <Route path="sites/:siteId/pages/:pageId" element={<PageEditor />} />
         <Route path="sites/:siteId/shop" element={<Shop />} />
         <Route path="sites/:siteId/orders" element={<Orders />} />
         <Route path="sites/:siteId/subscribers" element={<Subscribers />} />

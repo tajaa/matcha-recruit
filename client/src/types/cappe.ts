@@ -50,6 +50,10 @@ export type CappePage = {
   updated_at: string
 }
 
+// A content block in a page. Shape varies by `type`; the editor reads/writes
+// fields generically against a per-type schema.
+export type CappeBlock = { type: string; [key: string]: unknown }
+
 export type CappeTemplateSummary = {
   id: string
   name: string

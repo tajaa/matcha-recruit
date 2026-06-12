@@ -6,12 +6,13 @@ Backed by `cappe_accounts`; issues Cappe-scoped tokens.
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 
 from ...config import get_settings
 from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...database import get_connection
 from ..dependencies import require_cappe_account
+from ..services.email import send_cappe_welcome_email
 from ..models.cappe import (
     CappeAccount,
     CappeLogin,
@@ -42,7 +43,7 @@ def _token_response(account: CappeAccount) -> CappeTokenResponse:
 
 
 @router.post("/auth/signup", response_model=CappeTokenResponse, status_code=status.HTTP_201_CREATED)
-async def signup(body: CappeSignup, request: Request):
+async def signup(body: CappeSignup, request: Request, background: BackgroundTasks):
     """Create a new Cappe account and return tokens."""
     await check_rate_limit(client_ip(request), "cappe_signup", 5, 3600)
     email = body.email.strip().lower()
@@ -65,6 +66,9 @@ async def signup(body: CappeSignup, request: Request):
             )
 
     account = CappeAccount(**dict(row))
+    # Confirmation email, after the response is sent. Reserved test domains are
+    # skipped by the email service's guard, so seed accounts won't bounce.
+    background.add_task(send_cappe_welcome_email, account.email, account.name)
     return _token_response(account)
 
 

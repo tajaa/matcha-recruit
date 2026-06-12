@@ -8,10 +8,10 @@ import type { CappeBooking, CappeBookingType, CappeAvailabilitySlot } from '../.
 const hhmm = (t: string) => t.slice(0, 5)
 
 const statusStyle: Record<string, string> = {
-  pending: 'bg-amber-100 text-amber-700',
-  confirmed: 'bg-emerald-100 text-emerald-700',
-  cancelled: 'bg-zinc-100 text-zinc-500',
-  completed: 'bg-blue-100 text-blue-700',
+  pending: 'bg-amber-500/15 text-amber-400',
+  confirmed: 'bg-emerald-500/15 text-emerald-400',
+  cancelled: 'bg-zinc-800 text-zinc-500',
+  completed: 'bg-sky-500/15 text-sky-400',
 }
 
 export default function Bookings() {
@@ -83,24 +83,24 @@ export default function Bookings() {
 
   return (
     <SurfaceShell title="Bookings" subtitle="Appointment types, availability, and requests.">
-      {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+      {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
 
       {/* Booking types */}
-      <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold text-zinc-900">Appointment types</h2>
+      <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
+        <h2 className="mb-3 text-sm font-semibold text-zinc-100">Appointment types</h2>
         <form onSubmit={addType} className="mb-3 flex flex-wrap gap-2">
-          <input value={typeForm.name} onChange={(e) => setTypeForm({ ...typeForm, name: e.target.value })} placeholder="e.g. 30-min consult" className="flex-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
-          <input value={typeForm.duration_minutes} onChange={(e) => setTypeForm({ ...typeForm, duration_minutes: e.target.value })} type="number" min="1" placeholder="min" className="w-24 rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
-          <button type="submit" className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"><Plus className="h-4 w-4" /> Add</button>
+          <input value={typeForm.name} onChange={(e) => setTypeForm({ ...typeForm, name: e.target.value })} placeholder="e.g. 30-min consult" className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 text-zinc-100 placeholder:text-zinc-500 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+          <input value={typeForm.duration_minutes} onChange={(e) => setTypeForm({ ...typeForm, duration_minutes: e.target.value })} type="number" min="1" placeholder="min" className="w-24 rounded-lg border border-zinc-700 bg-zinc-950 text-zinc-100 placeholder:text-zinc-500 px-3 py-2 text-sm outline-none focus:border-emerald-500" />
+          <button type="submit" className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-zinc-950 hover:bg-emerald-400"><Plus className="h-4 w-4" /> Add</button>
         </form>
         {types.length === 0 ? (
           <p className="text-sm text-zinc-400">No appointment types yet.</p>
         ) : (
-          <ul className="divide-y divide-zinc-100">
+          <ul className="divide-y divide-zinc-800">
             {types.map((t) => (
               <li key={t.id} className="flex items-center justify-between py-2 text-sm">
-                <span className="text-zinc-800">{t.name} <span className="text-zinc-400">· {t.duration_minutes} min</span></span>
-                <button onClick={() => removeType(t.id)} className="text-zinc-400 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                <span className="text-zinc-200">{t.name} <span className="text-zinc-400">· {t.duration_minutes} min</span></span>
+                <button onClick={() => removeType(t.id)} className="text-zinc-400 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
               </li>
             ))}
           </ul>
@@ -108,48 +108,48 @@ export default function Bookings() {
       </section>
 
       {/* Availability */}
-      <section className="mb-6 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold text-zinc-900">Weekly availability</h2>
+      <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
+        <h2 className="mb-3 text-sm font-semibold text-zinc-100">Weekly availability</h2>
         <div className="space-y-2">
           {slots.map((s, i) => (
             <div key={i} className="flex flex-wrap items-center gap-2">
-              <select value={s.weekday} onChange={(e) => setSlot(i, { weekday: parseInt(e.target.value, 10) })} className="rounded-lg border border-zinc-300 px-2 py-1.5 text-sm">
+              <select value={s.weekday} onChange={(e) => setSlot(i, { weekday: parseInt(e.target.value, 10) })} className="rounded-lg border border-zinc-700 bg-zinc-950 text-zinc-100 placeholder:text-zinc-500 px-2 py-1.5 text-sm">
                 {WEEKDAYS.map((d, idx) => <option key={idx} value={idx}>{d}</option>)}
               </select>
-              <input type="time" value={hhmm(s.start_time)} onChange={(e) => setSlot(i, { start_time: e.target.value })} className="rounded-lg border border-zinc-300 px-2 py-1.5 text-sm" />
+              <input type="time" value={hhmm(s.start_time)} onChange={(e) => setSlot(i, { start_time: e.target.value })} className="rounded-lg border border-zinc-700 bg-zinc-950 text-zinc-100 placeholder:text-zinc-500 px-2 py-1.5 text-sm" />
               <span className="text-zinc-400">to</span>
-              <input type="time" value={hhmm(s.end_time)} onChange={(e) => setSlot(i, { end_time: e.target.value })} className="rounded-lg border border-zinc-300 px-2 py-1.5 text-sm" />
-              <select value={s.booking_type_id ?? ''} onChange={(e) => setSlot(i, { booking_type_id: e.target.value || null })} className="rounded-lg border border-zinc-300 px-2 py-1.5 text-sm">
+              <input type="time" value={hhmm(s.end_time)} onChange={(e) => setSlot(i, { end_time: e.target.value })} className="rounded-lg border border-zinc-700 bg-zinc-950 text-zinc-100 placeholder:text-zinc-500 px-2 py-1.5 text-sm" />
+              <select value={s.booking_type_id ?? ''} onChange={(e) => setSlot(i, { booking_type_id: e.target.value || null })} className="rounded-lg border border-zinc-700 bg-zinc-950 text-zinc-100 placeholder:text-zinc-500 px-2 py-1.5 text-sm">
                 <option value="">All types</option>
                 {types.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
-              <button type="button" onClick={() => setSlots((sl) => sl.filter((_, idx) => idx !== i))} className="text-zinc-400 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+              <button type="button" onClick={() => setSlots((sl) => sl.filter((_, idx) => idx !== i))} className="text-zinc-400 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
             </div>
           ))}
         </div>
         <div className="mt-3 flex gap-2">
-          <button onClick={addSlot} className="text-xs font-medium text-emerald-700 hover:underline">+ Add window</button>
-          <button onClick={saveAvailability} disabled={savingAvail} className="ml-auto flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-60">
+          <button onClick={addSlot} className="text-xs font-medium text-emerald-400 hover:underline">+ Add window</button>
+          <button onClick={saveAvailability} disabled={savingAvail} className="ml-auto flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-950 text-zinc-100 placeholder:text-zinc-500 px-3 py-1.5 text-sm font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-60">
             {savingAvail ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save availability
           </button>
         </div>
       </section>
 
       {/* Bookings */}
-      <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold text-zinc-900">Requests</h2>
+      <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
+        <h2 className="mb-3 text-sm font-semibold text-zinc-100">Requests</h2>
         {bookings.length === 0 ? (
           <p className="flex items-center gap-2 text-sm text-zinc-400"><Calendar className="h-4 w-4" /> No bookings yet.</p>
         ) : (
-          <ul className="divide-y divide-zinc-100">
+          <ul className="divide-y divide-zinc-800">
             {bookings.map((b) => (
               <li key={b.id} className="flex items-center gap-3 py-2 text-sm">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-zinc-800">{b.customer_email || 'No email'}</div>
+                  <div className="truncate text-zinc-200">{b.customer_email || 'No email'}</div>
                   <div className="text-xs text-zinc-400">{new Date(b.starts_at).toLocaleString()}</div>
                 </div>
                 <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${statusStyle[b.status]}`}>{b.status}</span>
-                <select value={b.status} onChange={(e) => setBookingStatus(b, e.target.value)} className="rounded-lg border border-zinc-300 px-2 py-1 text-xs">
+                <select value={b.status} onChange={(e) => setBookingStatus(b, e.target.value)} className="rounded-lg border border-zinc-700 bg-zinc-950 text-zinc-100 placeholder:text-zinc-500 px-2 py-1 text-xs">
                   {['pending', 'confirmed', 'cancelled', 'completed'].map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </li>

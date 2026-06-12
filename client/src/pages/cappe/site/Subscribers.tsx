@@ -6,10 +6,10 @@ import SurfaceShell from '../../../components/cappe/SurfaceShell'
 import type { CappeSubscriber } from '../../../types/cappe'
 
 const statusStyle: Record<string, string> = {
-  subscribed: 'bg-emerald-100 text-emerald-700',
-  unsubscribed: 'bg-zinc-100 text-zinc-500',
-  bounced: 'bg-red-100 text-red-700',
-  pending: 'bg-amber-100 text-amber-700',
+  subscribed: 'bg-emerald-500/15 text-emerald-400',
+  unsubscribed: 'bg-zinc-800 text-zinc-500',
+  bounced: 'bg-red-500/15 text-red-400',
+  pending: 'bg-amber-500/15 text-amber-400',
 }
 
 export default function Subscribers() {
@@ -55,26 +55,26 @@ export default function Subscribers() {
 
   return (
     <SurfaceShell title="Subscribers" subtitle={subs ? `${activeCount} active of ${subs.length}` : 'Newsletter list.'}>
-      {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
+      {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
 
-      <form onSubmit={add} className="mb-6 flex flex-wrap gap-2 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+      <form onSubmit={add} className="mb-6 flex flex-wrap gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-4 shadow-sm">
         <input
           value={form.email}
           onChange={(e) => setForm({ ...form, email: e.target.value })}
           placeholder="email@example.com"
           type="email"
-          className="flex-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+          className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 text-zinc-100 placeholder:text-zinc-500 px-3 py-2 text-sm outline-none focus:border-emerald-500"
         />
         <input
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
           placeholder="Name (optional)"
-          className="flex-1 rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+          className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 text-zinc-100 placeholder:text-zinc-500 px-3 py-2 text-sm outline-none focus:border-emerald-500"
         />
         <button
           type="submit"
           disabled={adding}
-          className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+          className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-60"
         >
           {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add
         </button>
@@ -83,19 +83,19 @@ export default function Subscribers() {
       {subs === null ? (
         <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-zinc-400" /></div>
       ) : subs.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-zinc-300 py-12 text-center text-sm text-zinc-500">
+        <div className="rounded-2xl border border-dashed border-zinc-700 py-12 text-center text-sm text-zinc-500">
           <Users className="mx-auto mb-2 h-7 w-7 text-zinc-300" /> No subscribers yet.
         </div>
       ) : (
-        <div className="divide-y divide-zinc-100 rounded-2xl border border-zinc-200 bg-white">
+        <div className="divide-y divide-zinc-800 rounded-2xl border border-zinc-800 bg-zinc-900">
           {subs.map((s) => (
             <div key={s.id} className="flex items-center gap-4 px-5 py-3">
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium text-zinc-900">{s.email}</div>
+                <div className="truncate text-sm font-medium text-zinc-100">{s.email}</div>
                 {s.name && <div className="text-xs text-zinc-400">{s.name}</div>}
               </div>
               <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${statusStyle[s.status]}`}>{s.status}</span>
-              <button onClick={() => remove(s.id)} className="text-zinc-400 hover:text-red-600">
+              <button onClick={() => remove(s.id)} className="text-zinc-400 hover:text-red-400">
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>

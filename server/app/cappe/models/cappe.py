@@ -98,6 +98,13 @@ class CappePageUpdate(BaseModel):
     status: Optional[Literal["draft", "published", "archived"]] = None
 
 
+class CappePagePreview(BaseModel):
+    """Unsaved page content to render for the live editor preview."""
+    title: Optional[str] = Field(default=None, max_length=255)
+    slug: Optional[str] = Field(default=None, max_length=160)
+    content: dict[str, Any] = Field(default_factory=dict)
+
+
 class CappePage(BaseModel):
     id: UUID
     site_id: UUID

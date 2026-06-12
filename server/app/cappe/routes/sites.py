@@ -4,16 +4,19 @@ import json
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import HTMLResponse
 
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import (
     CappeAccount,
+    CappePagePreview,
     CappeSite,
     CappeSiteCreate,
     CappeSiteFromTemplate,
     CappeSiteUpdate,
 )
+from ..services.render import render_site_html
 from ._shared import get_owned_site, loads, site_row_to_dict, slugify, unique_slug
 
 router = APIRouter()
@@ -107,6 +110,30 @@ async def create_site_from_template(
                 )
 
     return site_row_to_dict(site, page_count=len(pages))
+
+
+@router.post("/sites/{site_id}/preview", response_class=HTMLResponse)
+async def preview_site_page(
+    site_id: UUID,
+    body: CappePagePreview,
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """Render unsaved page content with the owned site's theme — drives the
+    block editor's live preview iframe. No persistence."""
+    async with get_connection() as conn:
+        site = await get_owned_site(conn, site_id, account.id)
+        nav_rows = await conn.fetch(
+            "SELECT title, slug FROM cappe_pages WHERE site_id = $1 ORDER BY sort_order, created_at",
+            site_id,
+        )
+    site_dict = {
+        "name": site["name"],
+        "theme_config": loads(site["theme_config"]),
+        "meta_config": loads(site["meta_config"]),
+    }
+    nav = [{"slug": r["slug"], "title": r["title"]} for r in nav_rows] or [{"slug": "home", "title": "Home"}]
+    page = {"title": body.title or "Page", "slug": body.slug or "home", "content": body.content or {}}
+    return HTMLResponse(render_site_html(site_dict, page, nav))
 
 
 @router.get("/sites/{site_id}", response_model=CappeSite)

@@ -128,6 +128,17 @@ export const cappeApi = {
   // FormData body: _buildHeaders omits Content-Type so the browser sets the boundary.
   upload: <T>(path: string, formData: FormData) =>
     request<T>(path, { method: 'POST', body: formData }),
+  // POST returning raw text (e.g. rendered HTML for the live preview iframe).
+  postHtml: async (path: string, body?: unknown): Promise<string> => {
+    const token = localStorage.getItem(ACCESS_KEY)
+    const res = await fetch(`${BASE}${path}`, {
+      method: 'POST',
+      headers: _buildHeaders({ body: body ? JSON.stringify(body) : undefined }, token),
+      body: body ? JSON.stringify(body) : undefined,
+    })
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText || 'Preview failed'}`)
+    return res.text()
+  },
 }
 
 export { _logout as cappeLogout }

@@ -18,7 +18,7 @@ export default function SiteTabs() {
   const { siteId } = useParams<{ siteId: string }>()
   const base = `/cappe/sites/${siteId}`
   return (
-    <nav className="mb-6 flex flex-wrap gap-1 border-b border-zinc-200">
+    <nav className="mb-6 flex flex-wrap gap-1 border-b border-zinc-800">
       {TABS.map(({ to, label, icon: Icon, end }) => (
         <NavLink
           key={to}
@@ -27,8 +27,8 @@ export default function SiteTabs() {
           className={({ isActive }) =>
             `flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
               isActive
-                ? 'border-emerald-600 text-emerald-700'
-                : 'border-transparent text-zinc-500 hover:text-zinc-800'
+                ? 'border-emerald-500 text-emerald-400'
+                : 'border-transparent text-zinc-500 hover:text-zinc-200'
             }`
           }
         >

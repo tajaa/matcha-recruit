@@ -23,14 +23,14 @@ export default function SurfaceShell({
 }) {
   return (
     <div className="mx-auto max-w-5xl px-8 py-8">
-      <Link to="/cappe" className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800">
+      <Link to="/cappe" className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-200">
         <ArrowLeft className="h-4 w-4" /> My Sites
       </Link>
       <SiteTabs />
       <div className="mb-6 flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-zinc-900">{title}</h1>
-          {subtitle && <p className="mt-0.5 text-sm text-zinc-500">{subtitle}</p>}
+          <h1 className="text-xl font-semibold tracking-tight text-zinc-50">{title}</h1>
+          {subtitle && <p className="mt-0.5 text-sm text-zinc-400">{subtitle}</p>}
         </div>
         {actions}
       </div>

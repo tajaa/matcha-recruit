@@ -23,8 +23,8 @@ export default function CappeLayout() {
 
   if (loading || (!account && getCappeToken())) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-50">
-        <Loader2 className="h-6 w-6 animate-spin text-zinc-400" />
+      <div className="flex min-h-screen items-center justify-center bg-zinc-950">
+        <Loader2 className="h-6 w-6 animate-spin text-zinc-600" />
       </div>
     )
   }
@@ -32,7 +32,7 @@ export default function CappeLayout() {
   if (!account) return null
 
   return (
-    <div className="flex min-h-screen bg-zinc-50">
+    <div className="flex min-h-screen bg-zinc-950 text-zinc-100">
       <CappeSidebar account={account} />
       <main className="flex-1 overflow-y-auto">
         <Outlet />
