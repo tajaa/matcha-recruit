@@ -1,9 +1,42 @@
 """Pydantic request/response shapes for Cappe."""
+import re
 from datetime import datetime, time
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
+
+# Apex-domain shape (labels 1-63 chars, alnum/hyphen, real-looking TLD).
+_DOMAIN_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$")
+
+
+def normalize_custom_domain(value: Optional[str]) -> Optional[str]:
+    """Normalize an owner-entered custom domain to a bare apex hostname.
+
+    Accepts copy-pasted URLs (scheme/path/port stripped), lowercases, and
+    stores the apex (`www.` stripped — the renderer matches both at request
+    time). Empty string passes through unchanged: the update route uses
+    `'' → NULL` to clear the domain. Rejects domains on our own infrastructure.
+    """
+    if value is None:
+        return None
+    v = value.strip().lower()
+    if not v:
+        return v
+    v = re.sub(r"^https?://", "", v)
+    v = v.split("/", 1)[0].split(":", 1)[0].rstrip(".")
+    if v.startswith("www."):
+        v = v[4:]
+    if not _DOMAIN_RE.match(v) or len(v) > 255:
+        raise ValueError("Enter a valid domain, like example.com")
+    if (
+        v == "hey-matcha.com"
+        or v.endswith(".hey-matcha.com")
+        or v == "localhost"
+        or v.endswith(".localhost")
+    ):
+        raise ValueError("That domain can't be connected")
+    return v
 
 
 # --- Auth -------------------------------------------------------------------
@@ -46,6 +79,8 @@ class CappeSiteCreate(BaseModel):
     source_type: Literal["blank", "byo"] = "blank"
     custom_domain: Optional[str] = Field(default=None, max_length=255)
 
+    _norm_domain = field_validator("custom_domain")(normalize_custom_domain)
+
 
 class CappeSiteFromTemplate(BaseModel):
     template_id: UUID
@@ -55,6 +90,8 @@ class CappeSiteFromTemplate(BaseModel):
 class CappeSiteUpdate(BaseModel):
     name: Optional[str] = Field(default=None, max_length=255)
     custom_domain: Optional[str] = Field(default=None, max_length=255)
+
+    _norm_domain = field_validator("custom_domain")(normalize_custom_domain)
     status: Optional[Literal["draft", "published", "archived"]] = None
     theme_config: Optional[dict[str, Any]] = None
     meta_config: Optional[dict[str, Any]] = None

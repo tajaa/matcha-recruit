@@ -30,7 +30,6 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -218,24 +217,66 @@ if _debug:
 
 app.add_middleware(CORSMiddleware, **_cors_kwargs)
 
-# Trusted hosts — reject requests with spoofed Host headers
-app.add_middleware(
-    TrustedHostMiddleware,
-    allowed_hosts=[
-        "hey-matcha.com",
-        "www.hey-matcha.com",
-        "localhost",
-        "127.0.0.1",
-        "matcha-backend",
-        # Cappe tenant subdomains (public sites served by the host-routed renderer).
-        "*.cappe.hey-matcha.com",
-        "*.cappe.localhost",
-        "*.localhost",
-        # Dev-only extra hosts (e.g. a webhook tunnel like *.trycloudflare.com).
-        # Comma-separated env; unset in prod so the allowlist is unchanged.
-        *[h.strip() for h in os.getenv("EXTRA_ALLOWED_HOSTS", "").split(",") if h.strip()],
-    ],
-)
+# Trusted hosts — reject requests with spoofed Host headers. Static allowlist
+# plus a dynamic fallback for Cappe custom domains (owners connect arbitrary
+# domains that can't be enumerated here; the check hits a short-TTL cache over
+# cappe_sites.custom_domain — see cappe/routes/render.py).
+_ALLOWED_HOSTS = [
+    "hey-matcha.com",
+    "www.hey-matcha.com",
+    "localhost",
+    "127.0.0.1",
+    "matcha-backend",
+    # Cappe tenant subdomains (public sites served by the host-routed renderer).
+    # Read from env directly: settings aren't loaded until lifespan startup.
+    f"*.{os.getenv('CAPPE_BASE_DOMAIN', 'cappe.hey-matcha.com')}",
+    "*.cappe.localhost",
+    "*.localhost",
+    # Dev-only extra hosts (e.g. a webhook tunnel like *.trycloudflare.com).
+    # Comma-separated env; unset in prod so the allowlist is unchanged.
+    *[h.strip() for h in os.getenv("EXTRA_ALLOWED_HOSTS", "").split(",") if h.strip()],
+]
+
+
+def _host_in_allowlist(host: str) -> bool:
+    for pattern in _ALLOWED_HOSTS:
+        if host == pattern:
+            return True
+        if pattern.startswith("*") and host.endswith(pattern[1:]):
+            return True
+    return False
+
+
+class DynamicTrustedHostMiddleware:
+    """TrustedHostMiddleware semantics + an async DB-backed fallback for Cappe
+    custom domains. Covers both HTTP and WebSocket scopes."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            return await self.app(scope, receive, send)
+        host = ""
+        for name, value in scope.get("headers") or []:
+            if name == b"host":
+                host = value.decode("latin-1").split(":", 1)[0].strip().lower().rstrip(".")
+                break
+        allowed = _host_in_allowlist(host)
+        if not allowed and scope["type"] == "http":
+            from .cappe.routes.render import is_registered_custom_domain
+            allowed = await is_registered_custom_domain(host)
+        if allowed:
+            return await self.app(scope, receive, send)
+        if scope["type"] == "websocket":
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        from fastapi.responses import PlainTextResponse
+        response = PlainTextResponse("Invalid host header", status_code=400)
+        await response(scope, receive, send)
+
+
+app.add_middleware(DynamicTrustedHostMiddleware)
 
 
 @app.middleware("http")
@@ -246,30 +287,12 @@ async def add_security_headers(request: Request, call_next):
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
-    # Cappe published sites + their previews are self-contained HTML documents
-    # that legitimately ship inline scripts (the storefront/booking widgets), load
-    # Google Fonts, and are embedded in same-origin editor/gallery iframes. They
-    # need a tailored CSP — the app's strict 'script-src self' blocks the widgets
-    # outright. All user content in these pages is HTML-escaped + URL-sanitized by
-    # the renderer (see services/render.py).
-    from .cappe.routes.render import subdomain_from_host
-    path = request.url.path
-    is_cappe_site = (
-        subdomain_from_host(request.headers.get("host")) is not None
-        or (path.startswith("/api/cappe/") and path.endswith("/preview"))
-    )
-    if is_cappe_site:
-        response.headers["X-Frame-Options"] = "SAMEORIGIN"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline'; "
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-            "font-src 'self' https://fonts.gstatic.com data:; "
-            "img-src 'self' data: https:; "
-            "connect-src 'self'; "
-            "frame-ancestors 'self'"
-        )
-    else:
+    # Cappe published sites + their previews set their own tailored CSP at the
+    # handler (cappe/routes/render.py:tenant_security_headers — they ship inline
+    # widget scripts + Google Fonts, with all user content escaped/sanitized by
+    # the renderer). Respect a handler-set policy; apply the strict app-wide
+    # default everywhere else.
+    if "Content-Security-Policy" not in response.headers:
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "

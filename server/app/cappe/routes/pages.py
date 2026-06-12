@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount, CappePage, CappePageCreate, CappePageUpdate
+from .render import invalidate_render_cache
 from ._shared import get_owned_site, page_row_to_dict, slugify, unique_slug
 
 router = APIRouter()
@@ -57,6 +58,7 @@ async def create_page(
             body.sort_order,
             body.status,
         )
+    await invalidate_render_cache(site_id)
     return page_row_to_dict(row)
 
 
@@ -115,6 +117,7 @@ async def update_page(
                     status_code=status.HTTP_409_CONFLICT, detail="A page with that slug already exists"
                 )
             raise
+    await invalidate_render_cache(site_id)
     return page_row_to_dict(row)
 
 
@@ -130,3 +133,4 @@ async def delete_page(
         )
         if result.endswith("0"):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Page not found")
+    await invalidate_render_cache(site_id)

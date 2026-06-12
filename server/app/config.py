@@ -118,6 +118,10 @@ class Settings:
     aws_secret_access_key: Optional[str] = None
     cloudfront_domain: Optional[str] = None
 
+    # Cappe (website builder) — base domain for tenant subdomains
+    # (<sub>.<cappe_base_domain> serves the published site).
+    cappe_base_domain: str = "cappe.hey-matcha.com"
+
     # Email (Gmail API via OAuth2)
     gmail_token_path: str = "agent/workspace/token.json"
     gmail_from_email: str = ""
@@ -273,6 +277,7 @@ def load_settings() -> Settings:
         aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         cloudfront_domain=os.getenv("CLOUDFRONT_DOMAIN"),
+        cappe_base_domain=os.getenv("CAPPE_BASE_DOMAIN", "cappe.hey-matcha.com"),
         gmail_token_path=os.getenv("GMAIL_TOKEN_PATH", "agent/workspace/token.json"),
         gmail_from_email=os.getenv("GMAIL_FROM_EMAIL", ""),
         gmail_from_name=os.getenv("GMAIL_FROM_NAME", "Matcha Recruit"),

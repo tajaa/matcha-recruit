@@ -63,8 +63,15 @@ def _reject_reserved(email: str | None):
 
 # --- Site render data -------------------------------------------------------
 
+async def _read_rate_limit(request: Request) -> None:
+    """Shared per-IP budget for anonymous read endpoints. Generous — a page
+    load fires 2-3 widget fetches — but stops scripted scraping/enumeration."""
+    await check_rate_limit(client_ip(request), "cappe_pub_read", 120, 60)
+
+
 @router.get("/public/sites/{slug}", response_model=CappePublicSite)
-async def get_public_site(slug: str):
+async def get_public_site(slug: str, request: Request):
+    await _read_rate_limit(request)
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         pages = await conn.fetch(
@@ -84,7 +91,8 @@ async def get_public_site(slug: str):
 # --- Shop -------------------------------------------------------------------
 
 @router.get("/public/sites/{slug}/products", response_model=list[CappeProduct])
-async def public_products(slug: str):
+async def public_products(slug: str, request: Request):
+    await _read_rate_limit(request)
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         rows = await conn.fetch(
@@ -343,7 +351,8 @@ async def public_subscribe(slug: str, body: CappeSubscribeRequest, request: Requ
 
 
 @router.get("/public/sites/{slug}/unsubscribe/{token}")
-async def public_unsubscribe(slug: str, token: str):
+async def public_unsubscribe(slug: str, token: str, request: Request):
+    await _read_rate_limit(request)
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         res = await conn.execute(
@@ -391,7 +400,8 @@ async def public_submit_form(slug: str, form_slug: str, body: dict, request: Req
 # --- Bookings ---------------------------------------------------------------
 
 @router.get("/public/sites/{slug}/booking-types", response_model=list[CappeBookingType])
-async def public_booking_types(slug: str):
+async def public_booking_types(slug: str, request: Request):
+    await _read_rate_limit(request)
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         rows = await conn.fetch(
@@ -403,7 +413,8 @@ async def public_booking_types(slug: str):
 
 
 @router.get("/public/sites/{slug}/availability")
-async def public_availability(slug: str):
+async def public_availability(slug: str, request: Request):
+    await _read_rate_limit(request)
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         rows = await conn.fetch(
@@ -460,7 +471,8 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
 # --- Blog -------------------------------------------------------------------
 
 @router.get("/public/sites/{slug}/posts", response_model=list[CappePost])
-async def public_posts(slug: str):
+async def public_posts(slug: str, request: Request):
+    await _read_rate_limit(request)
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         rows = await conn.fetch(
@@ -474,7 +486,8 @@ async def public_posts(slug: str):
 
 
 @router.get("/public/sites/{slug}/posts/{post_slug}", response_model=CappePost)
-async def public_post(slug: str, post_slug: str):
+async def public_post(slug: str, post_slug: str, request: Request):
+    await _read_rate_limit(request)
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         row = await conn.fetchrow(

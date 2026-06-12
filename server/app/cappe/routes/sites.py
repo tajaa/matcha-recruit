@@ -17,6 +17,7 @@ from ..models.cappe import (
     CappeSiteUpdate,
 )
 from ..services.render import render_site_html
+from .render import invalidate_render_cache, tenant_security_headers
 from ._shared import get_owned_site, loads, site_row_to_dict, slugify, unique_slug
 
 router = APIRouter()
@@ -134,7 +135,12 @@ async def preview_site_page(
     }
     nav = [{"slug": r["slug"], "title": r["title"]} for r in nav_rows] or [{"slug": "home", "title": "Home"}]
     page = {"title": body.title or "Page", "slug": body.slug or "home", "content": body.content or {}}
-    return HTMLResponse(render_site_html(site_dict, page, nav))
+    # Tenant CSP (inline widget scripts + fonts) — the app-wide middleware only
+    # applies the strict default when no policy is set here.
+    return HTMLResponse(
+        render_site_html(site_dict, page, nav),
+        headers={**tenant_security_headers(), "Cache-Control": "no-store"},
+    )
 
 
 @router.get("/sites/{site_id}", response_model=CappeSite)
@@ -196,6 +202,7 @@ async def update_site(
             if "cappe_sites_custom_domain_key" in str(exc):
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Domain already in use")
             raise
+    await invalidate_render_cache(site_id)
     return site_row_to_dict(row)
 
 
@@ -207,6 +214,7 @@ async def delete_site(site_id: UUID, account: CappeAccount = Depends(require_cap
         await conn.execute(
             "DELETE FROM cappe_sites WHERE id = $1 AND account_id = $2", site_id, account.id
         )
+    await invalidate_render_cache(site_id)
 
 
 @router.post("/sites/{site_id}/publish", response_model=CappeSite)
@@ -228,6 +236,7 @@ async def publish_site(site_id: UUID, account: CappeAccount = Depends(require_ca
                 "WHERE site_id = $1 AND status = 'draft'",
                 site_id,
             )
+    await invalidate_render_cache(site_id)
     return site_row_to_dict(row)
 
 
