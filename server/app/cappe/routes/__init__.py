@@ -14,6 +14,7 @@ from .forms import router as forms_router
 from .newsletter import router as newsletter_router
 from .pages import router as pages_router
 from .public import router as public_router
+from .rider import router as rider_router
 from .shop import router as shop_router
 from .sites import router as sites_router
 from .templates import router as templates_router
@@ -33,6 +34,7 @@ cappe_router.include_router(shop_router)
 cappe_router.include_router(newsletter_router)
 cappe_router.include_router(forms_router)
 cappe_router.include_router(bookings_router)
+cappe_router.include_router(rider_router)
 cappe_router.include_router(blog_router)
 cappe_router.include_router(uploads_router)
 

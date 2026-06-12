@@ -231,6 +231,7 @@ class CappeProductCreate(BaseModel):
     fulfillment: Fulfillment = "physical"
     digital_file_url: Optional[str] = None
     booking_type_id: Optional[UUID] = None
+    requires_approval: bool = False
     # Intake questions for service/booking offerings; same shape as form fields:
     # [{key,label,type,required,options?}].
     intake_fields: list[dict[str, Any]] = Field(default_factory=list)
@@ -249,6 +250,7 @@ class CappeProductUpdate(BaseModel):
     fulfillment: Optional[Fulfillment] = None
     digital_file_url: Optional[str] = None
     booking_type_id: Optional[UUID] = None
+    requires_approval: Optional[bool] = None
     intake_fields: Optional[list[dict[str, Any]]] = None
 
 
@@ -267,6 +269,7 @@ class CappeProduct(BaseModel):
     fulfillment: str = "physical"
     digital_file_url: Optional[str] = None
     booking_type_id: Optional[UUID] = None
+    requires_approval: bool = False
     intake_fields: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
@@ -294,10 +297,30 @@ class CappeOrder(BaseModel):
     currency: str
     payment_ref: Optional[str] = None
     note: Optional[str] = None
+    requires_approval: bool = False
+    approved_at: Optional[datetime] = None
+    decline_reason: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
     items: list[CappeOrderItem] = Field(default_factory=list)
+
+
+# --- Approval queue (unified bookings + orders awaiting the creator) ---------
+
+class CappeRequestSummary(BaseModel):
+    """One row in the creator's accept/decline queue."""
+    kind: Literal["booking", "order"]
+    id: UUID
+    customer_name: Optional[str] = None
+    customer_email: Optional[str] = None
+    title: str                         # booking type name / order summary
+    amount_cents: Optional[int] = None
+    currency: str = "USD"
+    starts_at: Optional[datetime] = None
+    note: Optional[str] = None
+    rider_acknowledged: Optional[bool] = None
+    created_at: datetime
 
 
 class CappeOrderStatusUpdate(BaseModel):
@@ -461,12 +484,19 @@ class CappeFormSubmitRequest(BaseModel):
 # Bookings
 # ===========================================================================
 
+# pricing_mode: flat = price_cents is the whole-booking price; hourly =
+# price_cents is the base rate per hour, scaled by matching rate rules.
+BookingPricingMode = Literal["flat", "hourly"]
+
+
 class CappeBookingTypeCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: Optional[str] = None
     duration_minutes: int = Field(default=30, gt=0, le=1440)
     price_cents: Optional[int] = Field(default=None, ge=0)
     status: Literal["active", "draft", "archived"] = "active"
+    requires_approval: bool = False
+    pricing_mode: BookingPricingMode = "flat"
 
 
 class CappeBookingTypeUpdate(BaseModel):
@@ -475,6 +505,8 @@ class CappeBookingTypeUpdate(BaseModel):
     duration_minutes: Optional[int] = Field(default=None, gt=0, le=1440)
     price_cents: Optional[int] = Field(default=None, ge=0)
     status: Optional[Literal["active", "draft", "archived"]] = None
+    requires_approval: Optional[bool] = None
+    pricing_mode: Optional[BookingPricingMode] = None
 
 
 class CappeBookingType(BaseModel):
@@ -485,8 +517,60 @@ class CappeBookingType(BaseModel):
     duration_minutes: int
     price_cents: Optional[int] = None
     status: str
+    requires_approval: bool = False
+    pricing_mode: str = "flat"
     created_at: datetime
     updated_at: datetime
+
+
+# --- Rate rules (dynamic time-of-day pricing) -------------------------------
+
+class CappeRateRuleInput(BaseModel):
+    label: str = Field(min_length=1, max_length=120)
+    booking_type_id: Optional[UUID] = None  # None = applies to every booking type
+    weekday: Optional[int] = Field(default=None, ge=0, le=6)  # None = every day (Mon=0..Sun=6)
+    start_time: time
+    end_time: time
+    multiplier: float = Field(default=1.0, ge=0, le=100)
+
+
+class CappeRateRulesReplace(BaseModel):
+    rules: list[CappeRateRuleInput] = Field(default_factory=list)
+
+
+class CappeRateRule(BaseModel):
+    id: UUID
+    site_id: UUID
+    booking_type_id: Optional[UUID] = None
+    label: str
+    weekday: Optional[int] = None
+    start_time: time
+    end_time: time
+    multiplier: float
+    created_at: datetime
+
+
+# --- Rider (Pro, personal creators) -----------------------------------------
+
+class CappeRiderItemInput(BaseModel):
+    label: str = Field(min_length=1, max_length=200)
+    detail: Optional[str] = None
+    is_required: bool = True
+    sort_order: int = 0
+
+
+class CappeRiderReplace(BaseModel):
+    items: list[CappeRiderItemInput] = Field(default_factory=list)
+
+
+class CappeRiderItem(BaseModel):
+    id: UUID
+    site_id: UUID
+    label: str
+    detail: Optional[str] = None
+    is_required: bool
+    sort_order: int
+    created_at: datetime
 
 
 class CappeAvailabilitySlot(BaseModel):
@@ -518,6 +602,12 @@ class CappeBooking(BaseModel):
     ends_at: datetime
     status: str
     note: Optional[str] = None
+    requires_approval: bool = False
+    quoted_price_cents: Optional[int] = None
+    approved_at: Optional[datetime] = None
+    decline_reason: Optional[str] = None
+    rider_acknowledged: bool = False
+    rider_snapshot: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -525,13 +615,38 @@ class CappeBookingStatusUpdate(BaseModel):
     status: Literal["pending", "confirmed", "cancelled", "completed"]
 
 
+class CappeApprovalDecline(BaseModel):
+    """Creator declines a pending booking/order, with an optional reason that's
+    surfaced on the buyer's receipt."""
+    reason: Optional[str] = Field(default=None, max_length=1000)
+
+
 class CappeBookingRequest(BaseModel):
-    """Public booking request — ends_at is computed server-side from the type."""
+    """Public booking request. For hourly-priced types the buyer may pick an
+    `ends_at` (variable length); otherwise the type's duration is used.
+    `rider_acknowledged` must be true when the site has required rider items."""
     booking_type_id: UUID
     starts_at: datetime
+    ends_at: Optional[datetime] = None
     customer_email: EmailStr
     customer_name: Optional[str] = Field(default=None, max_length=255)
     note: Optional[str] = None
+    rider_acknowledged: bool = False
+
+
+class CappeBookingQuoteRequest(BaseModel):
+    """Public price quote for a prospective booking (no write)."""
+    booking_type_id: UUID
+    starts_at: datetime
+    ends_at: Optional[datetime] = None
+
+
+class CappeBookingQuote(BaseModel):
+    price_cents: int
+    currency: str = "USD"
+    pricing_mode: str
+    requires_approval: bool
+    duration_minutes: int
 
 
 # ===========================================================================

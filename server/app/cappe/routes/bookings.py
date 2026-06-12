@@ -11,6 +11,7 @@ from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import (
     CappeAccount,
+    CappeApprovalDecline,
     CappeAvailability,
     CappeAvailabilityReplace,
     CappeBooking,
@@ -18,17 +19,31 @@ from ..models.cappe import (
     CappeBookingType,
     CappeBookingTypeCreate,
     CappeBookingTypeUpdate,
+    CappeRateRule,
+    CappeRateRulesReplace,
+    CappeRequestSummary,
 )
-from ._shared import get_owned_site
+from ._shared import get_owned_site, loads
 
 router = APIRouter()
 
-_TYPE_COLS = "id, site_id, name, description, duration_minutes, price_cents, status, created_at, updated_at"
+_TYPE_COLS = (
+    "id, site_id, name, description, duration_minutes, price_cents, status, "
+    "requires_approval, pricing_mode, created_at, updated_at"
+)
 _AVAIL_COLS = "id, weekday, start_time, end_time, booking_type_id"
+_RULE_COLS = "id, site_id, booking_type_id, label, weekday, start_time, end_time, multiplier, created_at"
 _BOOKING_COLS = (
     "id, site_id, booking_type_id, customer_name, customer_email, starts_at, "
-    "ends_at, status, note, created_at"
+    "ends_at, status, note, requires_approval, quoted_price_cents, approved_at, "
+    "decline_reason, rider_acknowledged, rider_snapshot, created_at"
 )
+
+
+def _booking_row(r) -> dict:
+    d = dict(r)
+    d["rider_snapshot"] = loads(d.get("rider_snapshot")) if d.get("rider_snapshot") else []
+    return d
 
 
 # --- Booking types ----------------------------------------------------------
@@ -51,9 +66,12 @@ async def create_booking_type(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         row = await conn.fetchrow(
-            f"""INSERT INTO cappe_booking_types (site_id, name, description, duration_minutes, price_cents, status)
-                VALUES ($1, $2, $3, $4, $5, $6) RETURNING {_TYPE_COLS}""",
+            f"""INSERT INTO cappe_booking_types
+                    (site_id, name, description, duration_minutes, price_cents, status,
+                     requires_approval, pricing_mode)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING {_TYPE_COLS}""",
             site_id, body.name, body.description, body.duration_minutes, body.price_cents, body.status,
+            body.requires_approval, body.pricing_mode,
         )
     return dict(row)
 
@@ -66,7 +84,8 @@ async def update_booking_type(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         sets, args = [], []
-        for col in ("name", "description", "duration_minutes", "price_cents", "status"):
+        for col in ("name", "description", "duration_minutes", "price_cents", "status",
+                    "requires_approval", "pricing_mode"):
             val = getattr(body, col)
             if val is not None:
                 args.append(val)
@@ -164,7 +183,7 @@ async def list_bookings(site_id: UUID, account: CappeAccount = Depends(require_c
             f"SELECT {_BOOKING_COLS} FROM cappe_bookings WHERE site_id = $1 ORDER BY starts_at DESC",
             site_id,
         )
-    return [dict(r) for r in rows]
+    return [_booking_row(r) for r in rows]
 
 
 @router.patch("/sites/{site_id}/bookings/{booking_id}", response_model=CappeBooking)
@@ -181,4 +200,142 @@ async def update_booking_status(
         )
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
-    return dict(row)
+    return _booking_row(row)
+
+
+# --- Approval queue ---------------------------------------------------------
+
+@router.post("/sites/{site_id}/bookings/{booking_id}/accept", response_model=CappeBooking)
+async def accept_booking(
+    site_id: UUID, booking_id: UUID, account: CappeAccount = Depends(require_cappe_account)
+):
+    """Creator approves a pending (awaiting-approval) booking → confirmed."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        row = await conn.fetchrow(
+            f"""UPDATE cappe_bookings
+                SET status = 'confirmed', approved_at = NOW(), updated_at = NOW()
+                WHERE id = $1 AND site_id = $2 AND status = 'pending'
+                RETURNING {_BOOKING_COLS}""",
+            booking_id, site_id,
+        )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending booking to accept")
+    return _booking_row(row)
+
+
+@router.post("/sites/{site_id}/bookings/{booking_id}/decline", response_model=CappeBooking)
+async def decline_booking(
+    site_id: UUID, booking_id: UUID, body: CappeApprovalDecline,
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """Creator declines a pending booking → declined (frees the slot)."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        row = await conn.fetchrow(
+            f"""UPDATE cappe_bookings
+                SET status = 'declined', decline_reason = $3, updated_at = NOW()
+                WHERE id = $1 AND site_id = $2 AND status = 'pending'
+                RETURNING {_BOOKING_COLS}""",
+            booking_id, site_id, body.reason,
+        )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending booking to decline")
+    return _booking_row(row)
+
+
+@router.get("/sites/{site_id}/requests", response_model=list[CappeRequestSummary])
+async def list_requests(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    """Unified accept/decline queue: bookings needing approval (pending +
+    requires_approval) and orders needing approval (pending + requires_approval),
+    newest first."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        currency = "USD"
+        booking_rows = await conn.fetch(
+            """SELECT b.id, b.customer_name, b.customer_email, b.starts_at, b.note,
+                      b.quoted_price_cents, b.rider_acknowledged, b.created_at,
+                      bt.name AS type_name
+               FROM cappe_bookings b
+               LEFT JOIN cappe_booking_types bt ON bt.id = b.booking_type_id
+               WHERE b.site_id = $1 AND b.status = 'pending' AND b.requires_approval = true
+               ORDER BY b.created_at DESC""",
+            site_id,
+        )
+        order_rows = await conn.fetch(
+            """SELECT id, customer_name, customer_email, subtotal_cents, currency, note, created_at
+               FROM cappe_orders
+               WHERE site_id = $1 AND status = 'pending' AND requires_approval = true
+               ORDER BY created_at DESC""",
+            site_id,
+        )
+    out: list[dict] = []
+    for r in booking_rows:
+        out.append({
+            "kind": "booking", "id": r["id"], "customer_name": r["customer_name"],
+            "customer_email": r["customer_email"], "title": r["type_name"] or "Booking",
+            "amount_cents": r["quoted_price_cents"], "currency": currency,
+            "starts_at": r["starts_at"], "note": r["note"],
+            "rider_acknowledged": r["rider_acknowledged"], "created_at": r["created_at"],
+        })
+    for r in order_rows:
+        out.append({
+            "kind": "order", "id": r["id"], "customer_name": r["customer_name"],
+            "customer_email": r["customer_email"], "title": "Order",
+            "amount_cents": r["subtotal_cents"], "currency": r["currency"],
+            "starts_at": None, "note": r["note"], "rider_acknowledged": None,
+            "created_at": r["created_at"],
+        })
+    out.sort(key=lambda x: x["created_at"], reverse=True)
+    return out
+
+
+# --- Rate rules (dynamic time pricing) --------------------------------------
+
+@router.get("/sites/{site_id}/rate-rules", response_model=list[CappeRateRule])
+async def list_rate_rules(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        rows = await conn.fetch(
+            f"SELECT {_RULE_COLS} FROM cappe_rate_rules WHERE site_id = $1 "
+            "ORDER BY weekday NULLS FIRST, start_time",
+            site_id,
+        )
+    return [dict(r) for r in rows]
+
+
+@router.put("/sites/{site_id}/rate-rules", response_model=list[CappeRateRule])
+async def replace_rate_rules(
+    site_id: UUID, body: CappeRateRulesReplace, account: CappeAccount = Depends(require_cappe_account)
+):
+    """Replace the whole rate-rule set in one transaction (mirrors availability)."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        type_ids = {r.booking_type_id for r in body.rules if r.booking_type_id}
+        if type_ids:
+            valid = await conn.fetchval(
+                "SELECT COUNT(*) FROM cappe_booking_types WHERE site_id = $1 AND id = ANY($2::uuid[])",
+                site_id, list(type_ids),
+            )
+            if valid != len(type_ids):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown booking type")
+        async with conn.transaction():
+            await conn.execute("DELETE FROM cappe_rate_rules WHERE site_id = $1", site_id)
+            for r in body.rules:
+                if r.end_time <= r.start_time:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Rule end_time must be after start_time",
+                    )
+                await conn.execute(
+                    """INSERT INTO cappe_rate_rules
+                           (site_id, booking_type_id, label, weekday, start_time, end_time, multiplier)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7)""",
+                    site_id, r.booking_type_id, r.label, r.weekday, r.start_time, r.end_time, r.multiplier,
+                )
+            rows = await conn.fetch(
+                f"SELECT {_RULE_COLS} FROM cappe_rate_rules WHERE site_id = $1 "
+                "ORDER BY weekday NULLS FIRST, start_time",
+                site_id,
+            )
+    return [dict(r) for r in rows]

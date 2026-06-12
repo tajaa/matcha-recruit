@@ -16,8 +16,10 @@ from fastapi import APIRouter, HTTPException, Request, status
 from ...core.services.email._shared import _is_reserved_test_domain
 from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...database import get_connection
-from ..services.commerce import booking_times, order_subtotal
+from ..services.commerce import booking_quote_cents, booking_times, order_subtotal
 from ..models.cappe import (
+    CappeBookingQuote,
+    CappeBookingQuoteRequest,
     CappeBookingRequest,
     CappeBookingType,
     CappeCheckoutRequest,
@@ -34,11 +36,30 @@ from ._shared import loads, loads_list, page_row_to_dict
 # deliverable — released only via the order receipt once paid/fulfilled).
 _PUBLIC_PRODUCT_COLS = (
     "id, site_id, name, description, price_cents, currency, image_url, sku, "
-    "inventory, status, sort_order, fulfillment, booking_type_id, intake_fields, "
-    "created_at, updated_at"
+    "inventory, status, sort_order, fulfillment, booking_type_id, requires_approval, "
+    "intake_fields, created_at, updated_at"
 )
 
 router = APIRouter()
+
+
+async def _site_rate_rules(conn, site_id, booking_type_id) -> list[dict]:
+    """Rate rules in effect for a booking type (its own + site-wide NULL ones)."""
+    rows = await conn.fetch(
+        """SELECT weekday, start_time, end_time, multiplier FROM cappe_rate_rules
+           WHERE site_id = $1 AND (booking_type_id IS NULL OR booking_type_id = $2)""",
+        site_id, booking_type_id,
+    )
+    return [dict(r) for r in rows]
+
+
+async def _site_rider(conn, site_id) -> list[dict]:
+    rows = await conn.fetch(
+        "SELECT label, detail, is_required FROM cappe_rider_items WHERE site_id = $1 "
+        "ORDER BY sort_order, created_at",
+        site_id,
+    )
+    return [dict(r) for r in rows]
 
 
 async def _published_site(conn, slug: str):
@@ -119,18 +140,44 @@ def _validate_intake(intake_fields: list, answers: dict) -> None:
                 )
 
 
-async def _create_booking_in_tx(conn, site, btype, starts_at, customer_name, customer_email, note):
-    """Validate availability + overlap and insert a booking. MUST run inside a
-    transaction. Shared by the public booking intake and booking-fulfillment
-    order lines so the timezone/overlap logic lives in one place."""
-    # A naive time from the widget is the visitor's pick in the SITE's timezone
-    # (the seller's availability is site-local) — anchor it there before math.
-    if starts_at.tzinfo is None:
-        try:
-            starts_at = starts_at.replace(tzinfo=ZoneInfo(site["timezone"] or "UTC"))
-        except Exception:
-            starts_at = starts_at.replace(tzinfo=timezone.utc)
-    bt = booking_times(starts_at, btype["duration_minutes"], site["timezone"])
+def _anchor_local(dt, tz_name):
+    """A naive datetime from the widget is the visitor's pick in the SITE's
+    timezone (availability is site-local) — anchor it there."""
+    if dt.tzinfo is not None:
+        return dt
+    try:
+        return dt.replace(tzinfo=ZoneInfo(tz_name or "UTC"))
+    except Exception:
+        return dt.replace(tzinfo=timezone.utc)
+
+
+async def _create_booking_in_tx(
+    conn, site, btype, starts_at, customer_name, customer_email, note,
+    ends_at_override=None, rider_acknowledged=False, rider_snapshot=None,
+):
+    """Validate availability + overlap, price the slot, and insert a booking.
+    MUST run inside a transaction. Shared by the public booking intake and
+    booking-fulfillment order lines.
+
+    `btype` must carry duration_minutes, price_cents, pricing_mode,
+    requires_approval. For an hourly type the buyer may pass `ends_at_override`
+    to book a variable-length window; otherwise the type's duration is used."""
+    starts_at = _anchor_local(starts_at, site["timezone"])
+    pricing_mode = btype.get("pricing_mode", "flat")
+
+    # Resolve duration: hourly types honor a buyer-chosen end; everyone else
+    # uses the fixed type duration.
+    if ends_at_override is not None and pricing_mode == "hourly":
+        ends_at_override = _anchor_local(ends_at_override, site["timezone"])
+        duration_min = (ends_at_override - starts_at).total_seconds() / 60
+        if duration_min <= 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="End time must be after start")
+        if duration_min > 1440:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Booking is too long")
+    else:
+        duration_min = btype["duration_minutes"]
+
+    bt = booking_times(starts_at, duration_min, site["timezone"])
     s_utc, e_utc = bt["start_utc"], bt["end_utc"]
 
     now_utc = await conn.fetchval("SELECT NOW()")
@@ -158,13 +205,29 @@ async def _create_booking_in_tx(conn, site, btype, starts_at, customer_name, cus
     )
     if overlap:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That slot is taken")
+
+    # Price the booked window (flat → base; hourly → per-minute × rate rules).
+    rules = await _site_rate_rules(conn, site["id"], btype["id"])
+    quote_cents = booking_quote_cents(
+        btype.get("price_cents") or 0, pricing_mode, bt["local_start"], bt["local_end"], rules
+    )
+
+    # Approval-required types land 'pending' (the creator's queue); others
+    # auto-confirm so an open calendar books straight through.
+    requires_approval = bool(btype.get("requires_approval"))
+    booking_status = "pending" if requires_approval else "confirmed"
+
     try:
         return await conn.fetchrow(
             """INSERT INTO cappe_bookings
-                   (site_id, booking_type_id, customer_name, customer_email, starts_at, ends_at, note)
-               VALUES ($1, $2, $3, $4, $5, $6, $7)
-               RETURNING id, status, starts_at, ends_at""",
+                   (site_id, booking_type_id, customer_name, customer_email, starts_at, ends_at,
+                    note, status, requires_approval, quoted_price_cents,
+                    rider_acknowledged, rider_snapshot)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+               RETURNING id, status, starts_at, ends_at, quoted_price_cents, requires_approval""",
             site["id"], btype["id"], customer_name, customer_email, s_utc, e_utc, note,
+            booking_status, requires_approval, quote_cents,
+            bool(rider_acknowledged), json.dumps(rider_snapshot or []),
         )
     except Exception as exc:
         if "idx_cappe_bookings_no_doublebook" in str(exc):
@@ -189,12 +252,13 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
         site = await _published_site(conn, slug)
         async with conn.transaction():
             order_currency = None
+            order_requires_approval = False  # any line needing creator review holds the whole order
             # (product_id, title, unit_price, qty, fulfillment, intake_answers, booking_id)
             line_rows = []
             for item in body.items:
                 product = await conn.fetchrow(
                     "SELECT id, name, price_cents, currency, inventory, status, fulfillment, "
-                    "booking_type_id, intake_fields "
+                    "booking_type_id, requires_approval, intake_fields "
                     "FROM cappe_products WHERE id = $1 AND site_id = $2 FOR UPDATE",
                     item.product_id, site["id"],
                 )
@@ -204,6 +268,8 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
                     order_currency = product["currency"]
                 elif product["currency"] != order_currency:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Mixed currencies not supported")
+                if product["requires_approval"]:
+                    order_requires_approval = True
 
                 f = product["fulfillment"]
                 qty = item.quantity
@@ -232,14 +298,17 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
                     if item.starts_at is None:
                         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pick a time for the booking")
                     btype = await conn.fetchrow(
-                        "SELECT id, duration_minutes, status FROM cappe_booking_types WHERE id = $1 AND site_id = $2",
+                        "SELECT id, duration_minutes, status, price_cents, pricing_mode, requires_approval "
+                        "FROM cappe_booking_types WHERE id = $1 AND site_id = $2",
                         product["booking_type_id"], site["id"],
                     )
                     if btype is None or btype["status"] != "active":
                         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Booking unavailable")
+                    if btype["requires_approval"]:
+                        order_requires_approval = True
                     _validate_intake(loads_list(product["intake_fields"]), intake)
                     booking = await _create_booking_in_tx(
-                        conn, site, btype, item.starts_at, body.customer_name, email, body.note
+                        conn, site, btype, item.starts_at, body.customer_name, email, body.note,
                     )
                     booking_id = booking["id"]
 
@@ -250,10 +319,12 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
             subtotal = order_subtotal((unit, qty) for (_, _, unit, qty, *_rest) in line_rows)
             order = await conn.fetchrow(
                 """INSERT INTO cappe_orders
-                       (site_id, customer_email, customer_name, status, subtotal_cents, currency, note)
-                   VALUES ($1, $2, $3, 'pending', $4, $5, $6)
-                   RETURNING id, status, subtotal_cents, currency, access_token""",
+                       (site_id, customer_email, customer_name, status, subtotal_cents, currency,
+                        note, requires_approval)
+                   VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7)
+                   RETURNING id, status, subtotal_cents, currency, access_token, requires_approval""",
                 site["id"], email, body.customer_name, subtotal, order_currency or "USD", body.note,
+                order_requires_approval,
             )
             for product_id, title, unit_price, qty, f, intake, booking_id in line_rows:
                 await conn.execute(
@@ -271,6 +342,7 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
         "status": order["status"],
         "subtotal_cents": order["subtotal_cents"],
         "currency": order["currency"],
+        "requires_approval": order["requires_approval"],
     }
 
 
@@ -405,11 +477,22 @@ async def public_booking_types(slug: str, request: Request):
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         rows = await conn.fetch(
-            "SELECT id, site_id, name, description, duration_minutes, price_cents, status, created_at, updated_at "
+            "SELECT id, site_id, name, description, duration_minutes, price_cents, status, "
+            "requires_approval, pricing_mode, created_at, updated_at "
             "FROM cappe_booking_types WHERE site_id = $1 AND status = 'active' ORDER BY created_at",
             site["id"],
         )
     return [dict(r) for r in rows]
+
+
+@router.get("/public/sites/{slug}/rider")
+async def public_rider(slug: str, request: Request):
+    """The site's rider items (booking requirements the buyer agrees to)."""
+    await _read_rate_limit(request)
+    async with get_connection() as conn:
+        site = await _published_site(conn, slug)
+        items = await _site_rider(conn, site["id"])
+    return {"items": items}
 
 
 @router.get("/public/sites/{slug}/availability")
@@ -449,23 +532,71 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         btype = await conn.fetchrow(
-            "SELECT id, duration_minutes, status FROM cappe_booking_types WHERE id = $1 AND site_id = $2",
+            "SELECT id, duration_minutes, status, price_cents, pricing_mode, requires_approval "
+            "FROM cappe_booking_types WHERE id = $1 AND site_id = $2",
             body.booking_type_id, site["id"],
         )
         if btype is None or btype["status"] != "active":
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking type not found")
 
+        # Rider: if the creator requires any item, the buyer must acknowledge.
+        rider = await _site_rider(conn, site["id"])
+        if any(r["is_required"] for r in rider) and not body.rider_acknowledged:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Please review and agree to the booking requirements.",
+            )
+
         async with conn.transaction():
             booking = await _create_booking_in_tx(
                 conn, site, btype, body.starts_at, body.customer_name,
                 str(body.customer_email).strip().lower(), body.note,
+                ends_at_override=body.ends_at,
+                rider_acknowledged=body.rider_acknowledged,
+                rider_snapshot=rider,
             )
     return {
         "booking_id": str(booking["id"]),
         "status": booking["status"],
         "starts_at": booking["starts_at"].isoformat(),
         "ends_at": booking["ends_at"].isoformat(),
+        "quoted_price_cents": booking["quoted_price_cents"],
+        "requires_approval": booking["requires_approval"],
     }
+
+
+@router.post("/public/sites/{slug}/booking-quote", response_model=CappeBookingQuote)
+async def public_booking_quote(slug: str, body: CappeBookingQuoteRequest, request: Request):
+    """Price a prospective booking without creating it (live quote in the
+    widget). No availability/overlap checks — purely the money math."""
+    await _read_rate_limit(request)
+    async with get_connection() as conn:
+        site = await _published_site(conn, slug)
+        btype = await conn.fetchrow(
+            "SELECT id, duration_minutes, status, price_cents, pricing_mode, requires_approval "
+            "FROM cappe_booking_types WHERE id = $1 AND site_id = $2",
+            body.booking_type_id, site["id"],
+        )
+        if btype is None or btype["status"] != "active":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking type not found")
+        starts_at = _anchor_local(body.starts_at, site["timezone"])
+        pricing_mode = btype["pricing_mode"]
+        if body.ends_at is not None and pricing_mode == "hourly":
+            ends_at = _anchor_local(body.ends_at, site["timezone"])
+            duration_min = (ends_at - starts_at).total_seconds() / 60
+            if duration_min <= 0:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="End time must be after start")
+        else:
+            duration_min = btype["duration_minutes"]
+        bt = booking_times(starts_at, duration_min, site["timezone"])
+        rules = await _site_rate_rules(conn, site["id"], btype["id"])
+        quote = booking_quote_cents(
+            btype["price_cents"] or 0, pricing_mode, bt["local_start"], bt["local_end"], rules
+        )
+    return CappeBookingQuote(
+        price_cents=quote, currency="USD", pricing_mode=pricing_mode,
+        requires_approval=bool(btype["requires_approval"]), duration_minutes=int(duration_min),
+    )
 
 
 # --- Blog -------------------------------------------------------------------

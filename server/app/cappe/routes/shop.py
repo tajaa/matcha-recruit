@@ -12,6 +12,7 @@ from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import (
     CappeAccount,
+    CappeApprovalDecline,
     CappeDeliverableUpdate,
     CappeOrder,
     CappeOrderItem,
@@ -27,11 +28,12 @@ router = APIRouter()
 _PRODUCT_COLS = (
     "id, site_id, name, description, price_cents, currency, image_url, sku, "
     "inventory, status, sort_order, fulfillment, digital_file_url, booking_type_id, "
-    "intake_fields, created_at, updated_at"
+    "requires_approval, intake_fields, created_at, updated_at"
 )
 _ORDER_COLS = (
     "id, site_id, customer_email, customer_name, status, subtotal_cents, "
-    "currency, payment_ref, note, metadata, created_at, updated_at"
+    "currency, payment_ref, note, requires_approval, approved_at, decline_reason, "
+    "metadata, created_at, updated_at"
 )
 _ITEM_COLS = (
     "id, product_id, title, unit_price_cents, quantity, fulfillment, "
@@ -93,13 +95,14 @@ async def create_product(
         row = await conn.fetchrow(
             f"""INSERT INTO cappe_products
                     (site_id, name, description, price_cents, currency, image_url, sku, inventory,
-                     status, sort_order, fulfillment, digital_file_url, booking_type_id, intake_fields)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                     status, sort_order, fulfillment, digital_file_url, booking_type_id,
+                     requires_approval, intake_fields)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                 RETURNING {_PRODUCT_COLS}""",
             site_id, body.name, body.description, body.price_cents, body.currency,
             body.image_url, body.sku, body.inventory, body.status, body.sort_order,
             body.fulfillment, body.digital_file_url, body.booking_type_id,
-            json.dumps(body.intake_fields),
+            body.requires_approval, json.dumps(body.intake_fields),
         )
     return _product_row(row)
 
@@ -130,7 +133,7 @@ async def update_product(
         sets, args = [], []
         for col in ("name", "description", "price_cents", "currency", "image_url",
                     "sku", "inventory", "status", "sort_order", "fulfillment",
-                    "digital_file_url", "booking_type_id"):
+                    "digital_file_url", "booking_type_id", "requires_approval"):
             val = getattr(body, col)
             if val is not None:
                 args.append(val)
@@ -221,6 +224,72 @@ async def update_order_status(
             f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
             order_id,
         )
+    return _order_row(order, [_item_row(i) for i in items])
+
+
+@router.post("/sites/{site_id}/orders/{order_id}/accept", response_model=CappeOrder)
+async def accept_order(
+    site_id: UUID, order_id: UUID, account: CappeAccount = Depends(require_cappe_account)
+):
+    """Approve an order that was held for review. Stays 'pending' (payment is
+    stubbed) but is stamped approved and leaves the requests queue."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        order = await conn.fetchrow(
+            f"""UPDATE cappe_orders
+                SET requires_approval = false, approved_at = NOW(), updated_at = NOW()
+                WHERE id = $1 AND site_id = $2 AND status = 'pending' AND requires_approval = true
+                RETURNING {_ORDER_COLS}""",
+            order_id, site_id,
+        )
+        if order is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending order to accept")
+        items = await conn.fetch(
+            f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
+            order_id,
+        )
+    return _order_row(order, [_item_row(i) for i in items])
+
+
+@router.post("/sites/{site_id}/orders/{order_id}/decline", response_model=CappeOrder)
+async def decline_order(
+    site_id: UUID, order_id: UUID, body: CappeApprovalDecline,
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """Decline an order held for review → 'declined' with an optional reason.
+    Restocks any physical inventory the pending order had decremented."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        async with conn.transaction():
+            order = await conn.fetchrow(
+                f"""UPDATE cappe_orders
+                    SET status = 'declined', decline_reason = $3, updated_at = NOW()
+                    WHERE id = $1 AND site_id = $2 AND status = 'pending'
+                    RETURNING {_ORDER_COLS}""",
+                order_id, site_id, body.reason,
+            )
+            if order is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending order to decline")
+            # Restock physical lines + free any held booking slots.
+            await conn.execute(
+                """UPDATE cappe_products p
+                   SET inventory = p.inventory + oi.quantity, updated_at = NOW()
+                   FROM cappe_order_items oi
+                   WHERE oi.order_id = $1 AND oi.product_id = p.id
+                     AND oi.fulfillment = 'physical' AND p.inventory IS NOT NULL""",
+                order_id,
+            )
+            await conn.execute(
+                """UPDATE cappe_bookings SET status = 'declined', updated_at = NOW()
+                   WHERE id IN (SELECT booking_id FROM cappe_order_items
+                                WHERE order_id = $1 AND booking_id IS NOT NULL)
+                     AND status = 'pending'""",
+                order_id,
+            )
+            items = await conn.fetch(
+                f"SELECT {_ITEM_COLS} FROM cappe_order_items WHERE order_id = $1 ORDER BY created_at",
+                order_id,
+            )
     return _order_row(order, [_item_row(i) for i in items])
 
 
