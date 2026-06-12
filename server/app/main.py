@@ -227,6 +227,10 @@ app.add_middleware(
         "localhost",
         "127.0.0.1",
         "matcha-backend",
+        # Cappe tenant subdomains (public sites served by the host-routed renderer).
+        "*.cappe.hey-matcha.com",
+        "*.cappe.localhost",
+        "*.localhost",
         # Dev-only extra hosts (e.g. a webhook tunnel like *.trycloudflare.com).
         # Comma-separated env; unset in prod so the allowlist is unchanged.
         *[h.strip() for h in os.getenv("EXTRA_ALLOWED_HOSTS", "").split(",") if h.strip()],
@@ -412,6 +416,12 @@ app.include_router(project_ws_router, prefix="/ws/projects", tags=["projects-web
 # SEO routes — served at root, no /api prefix (crawlers expect /sitemap.xml + /robots.txt)
 from .core.routes.sitemap import router as sitemap_router
 app.include_router(sitemap_router, tags=["seo"])
+
+# Cappe public-site renderer — served at root, host-gated to tenant subdomains
+# (<sub>.cappe.hey-matcha.com / <sub>.cappe.localhost). Non-tenant hosts 404 here
+# so /health, /sitemap.xml, /api/* etc. are unaffected.
+from .cappe.routes.render import router as cappe_render_router
+app.include_router(cappe_render_router, tags=["cappe-render"])
 
 
 # Serve locally-uploaded files (logos, resumes, etc.) when S3 is not configured
