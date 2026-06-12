@@ -105,6 +105,7 @@ export type CappeProduct = {
   fulfillment: CappeFulfillment
   digital_file_url: string | null
   booking_type_id: string | null
+  requires_approval: boolean
   intake_fields: CappeFormField[]
   created_at: string
   updated_at: string
@@ -123,6 +124,7 @@ export type CappeProductInput = {
   fulfillment?: CappeFulfillment
   digital_file_url?: string | null
   booking_type_id?: string | null
+  requires_approval?: boolean
   intake_fields?: CappeFormField[]
 }
 
@@ -143,11 +145,14 @@ export type CappeOrder = {
   site_id: string
   customer_email: string | null
   customer_name: string | null
-  status: 'pending' | 'paid' | 'fulfilled' | 'cancelled' | 'refunded'
+  status: 'pending' | 'paid' | 'fulfilled' | 'cancelled' | 'refunded' | 'declined'
   subtotal_cents: number
   currency: string
   payment_ref: string | null
   note: string | null
+  requires_approval: boolean
+  approved_at: string | null
+  decline_reason: string | null
   metadata: Record<string, unknown>
   created_at: string
   updated_at: string
@@ -213,6 +218,8 @@ export type CappeFormSubmission = {
 
 // --- Bookings ---------------------------------------------------------------
 
+export type CappePricingMode = 'flat' | 'hourly'
+
 export type CappeBookingType = {
   id: string
   site_id: string
@@ -221,6 +228,8 @@ export type CappeBookingType = {
   duration_minutes: number
   price_cents: number | null
   status: 'active' | 'draft' | 'archived'
+  requires_approval: boolean
+  pricing_mode: CappePricingMode
   created_at: string
   updated_at: string
 }
@@ -232,6 +241,45 @@ export type CappeAvailabilitySlot = {
   booking_type_id: string | null
 }
 
+// Time-window rate multiplier (e.g. after 8pm = 2x). weekday null = every day.
+export type CappeRateRule = {
+  id: string
+  site_id: string
+  booking_type_id: string | null
+  label: string
+  weekday: number | null
+  start_time: string
+  end_time: string
+  multiplier: number
+  created_at: string
+}
+
+export type CappeRateRuleInput = {
+  label: string
+  booking_type_id: string | null
+  weekday: number | null
+  start_time: string
+  end_time: string
+  multiplier: number
+}
+
+export type CappeRiderItem = {
+  id: string
+  site_id: string
+  label: string
+  detail: string | null
+  is_required: boolean
+  sort_order: number
+  created_at: string
+}
+
+export type CappeRiderItemInput = {
+  label: string
+  detail: string | null
+  is_required: boolean
+  sort_order: number
+}
+
 export type CappeBooking = {
   id: string
   site_id: string
@@ -240,8 +288,29 @@ export type CappeBooking = {
   customer_email: string | null
   starts_at: string
   ends_at: string
-  status: 'pending' | 'confirmed' | 'cancelled' | 'completed'
+  status: 'pending' | 'confirmed' | 'declined' | 'cancelled' | 'completed'
   note: string | null
+  requires_approval: boolean
+  quoted_price_cents: number | null
+  approved_at: string | null
+  decline_reason: string | null
+  rider_acknowledged: boolean
+  rider_snapshot: Array<{ label: string; detail?: string | null; is_required: boolean }>
+  created_at: string
+}
+
+// One row in the creator's accept/decline queue (booking or order).
+export type CappeRequestSummary = {
+  kind: 'booking' | 'order'
+  id: string
+  customer_name: string | null
+  customer_email: string | null
+  title: string
+  amount_cents: number | null
+  currency: string
+  starts_at: string | null
+  note: string | null
+  rider_acknowledged: boolean | null
   created_at: string
 }
 

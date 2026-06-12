@@ -40,6 +40,7 @@ export default function Shop() {
   const [error, setError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [fulfillment, setFulfillment] = useState<CappeFulfillment>('physical')
+  const [requireApproval, setRequireApproval] = useState(false)
   const [form, setForm] = useState(EMPTY)
   const [intake, setIntake] = useState<IntakeRow[]>([])
 
@@ -67,6 +68,7 @@ export default function Shop() {
         image_url: form.image_url.trim() || null,
         digital_file_url: fulfillment === 'digital' ? form.digital_file_url.trim() || null : null,
         booking_type_id: fulfillment === 'booking' ? form.booking_type_id || null : null,
+        requires_approval: requireApproval,
         intake_fields: wantsIntake
           ? intake.filter((f) => f.label.trim()).map((f) => ({
               key: keyFromLabel(f.label), label: f.label.trim(), type: f.type, required: f.required,
@@ -74,7 +76,7 @@ export default function Shop() {
           : [],
       })
       setProducts((p) => [...(p || []), created])
-      setForm(EMPTY); setIntake([]); setFulfillment('physical')
+      setForm(EMPTY); setIntake([]); setFulfillment('physical'); setRequireApproval(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to add product')
     } finally {
@@ -179,6 +181,11 @@ export default function Shop() {
         )}
 
         <ImageUpload siteId={siteId || ''} value={form.image_url} onChange={(url) => setForm({ ...form, image_url: url })} placeholder="Cover image URL (optional)" />
+
+        <label className="flex items-center gap-2 text-sm text-zinc-300">
+          <input type="checkbox" checked={requireApproval} onChange={(e) => setRequireApproval(e.target.checked)} className="h-4 w-4 rounded border-zinc-600 bg-zinc-950 text-emerald-500" />
+          Review &amp; approve each order before it's confirmed
+        </label>
 
         <button type="submit" disabled={adding} className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-60">
           {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Add product

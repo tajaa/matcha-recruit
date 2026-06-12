@@ -470,19 +470,43 @@ c.querySelector('button').addEventListener('click',function(){form(p,c.querySele
 
 _BOOKING_JS = r"""(function(){
 var box=document.getElementById('__ID__'),RT=window.__CAPPE_RT__;if(!box||!RT)return;
-Promise.all([RT.get('/booking-types'),RT.get('/availability')]).then(function(r){var types=r[0],av=r[1];
+Promise.all([RT.get('/booking-types'),RT.get('/availability'),RT.get('/rider').catch(function(){return {items:[]};})]).then(function(r){
+var types=r[0],av=r[1],rider=(r[2]&&r[2].items)||[];
 if(!types.length){box.innerHTML='<p style="color:var(--muted)">No appointments available.</p>';return;}
-var tz=av.timezone||'UTC';
-box.innerHTML='<select class="cz-field" data-bt>'+types.map(function(t){return '<option value="'+RT.esc(t.id)+'">'+RT.esc(t.name)+' ('+t.duration_minutes+' min)</option>';}).join('')+'</select>'+
-'<input class="cz-field" type="datetime-local" data-when /><p class="cz-label">Times in '+RT.esc(tz)+'</p>'+
+var tz=av.timezone||'UTC';var byId={};types.forEach(function(t){byId[t.id]=t;});
+function priceLabel(t){if(!t.price_cents)return 'Free';var m=RT.money(t.price_cents,'USD');return t.pricing_mode==='hourly'?m+'/hr':m;}
+var reqRider=rider.filter(function(i){return i.is_required;});
+var riderHtml='';
+if(rider.length){riderHtml='<div class="cz-rider" style="border:1px solid var(--line);border-radius:var(--radius);padding:.85rem 1rem;margin:.5rem 0;font-size:.9rem">'+
+'<div style="font-weight:600;margin-bottom:.4rem">Booking requirements</div><ul style="margin:0 0 .5rem;padding-left:1.1rem;color:var(--muted)">'+
+rider.map(function(i){return '<li>'+RT.esc(i.label)+(i.detail?' — '+RT.esc(i.detail):'')+(i.is_required?'':' (optional)')+'</li>';}).join('')+'</ul>'+
+(reqRider.length?'<label style="display:flex;gap:.5rem;align-items:flex-start"><input type="checkbox" data-ack /> <span>I have read and agree to these requirements.</span></label>':'')+'</div>';}
+box.innerHTML='<select class="cz-field" data-bt>'+types.map(function(t){return '<option value="'+RT.esc(t.id)+'">'+RT.esc(t.name)+' ('+t.duration_minutes+' min) · '+priceLabel(t)+'</option>';}).join('')+'</select>'+
+'<label class="cz-label">Start</label><input class="cz-field" type="datetime-local" data-when />'+
+'<div data-endwrap style="display:none"><label class="cz-label">End</label><input class="cz-field" type="datetime-local" data-end /></div>'+
+'<p class="cz-label" data-quote></p><p class="cz-label">Times in '+RT.esc(tz)+'</p>'+
 '<input class="cz-field" type="email" data-email placeholder="Your email" /><input class="cz-field" type="text" data-name placeholder="Your name" />'+
+riderHtml+
 '<button class="cz-btn cz-btn--solid cz-btn--block">Request booking</button><p class="cz-msg"></p>';
-var sb=box.querySelector('button'),msg=box.querySelector('.cz-msg');
-sb.addEventListener('click',function(){var email=box.querySelector('[data-email]').value.trim(),w=box.querySelector('[data-when]').value;
+var sb=box.querySelector('button'),msg=box.querySelector('.cz-msg'),btSel=box.querySelector('[data-bt]'),
+whenEl=box.querySelector('[data-when]'),endWrap=box.querySelector('[data-endwrap]'),endEl=box.querySelector('[data-end]'),quoteEl=box.querySelector('[data-quote]');
+function cur(){return byId[btSel.value];}
+function syncMode(){var t=cur();endWrap.style.display=(t&&t.pricing_mode==='hourly')?'block':'none';refreshQuote();}
+function refreshQuote(){var t=cur();if(!t){quoteEl.textContent='';return;}
+if(t.pricing_mode!=='hourly'){quoteEl.textContent=t.price_cents?('Price: '+RT.money(t.price_cents,'USD')):'';return;}
+if(!whenEl.value){quoteEl.textContent='Pick a start and end time for a quote.';return;}
+var body={booking_type_id:t.id,starts_at:whenEl.value};if(endEl.value)body.ends_at=endEl.value;
+RT.post('/booking-quote',body).then(function(q){quoteEl.textContent='Quote: '+RT.money(q.price_cents,'USD')+(q.requires_approval?' · subject to approval':'');}).catch(function(){quoteEl.textContent='';});}
+btSel.addEventListener('change',syncMode);whenEl.addEventListener('change',refreshQuote);endEl.addEventListener('change',refreshQuote);syncMode();
+sb.addEventListener('click',function(){var t=cur();var email=box.querySelector('[data-email]').value.trim(),w=whenEl.value;
 if(!email||!w){msg.textContent='Email and time required';msg.className='cz-msg err';return;}
+var ackEl=box.querySelector('[data-ack]');if(ackEl&&!ackEl.checked){msg.textContent='Please agree to the requirements';msg.className='cz-msg err';return;}
+var body={booking_type_id:t.id,starts_at:w,customer_email:email,customer_name:box.querySelector('[data-name]').value.trim(),rider_acknowledged:ackEl?ackEl.checked:false};
+if(t.pricing_mode==='hourly'&&endEl.value)body.ends_at=endEl.value;
 sb.disabled=true;msg.textContent='Requesting...';msg.className='cz-msg';
-RT.post('/bookings',{booking_type_id:box.querySelector('[data-bt]').value,starts_at:w,customer_email:email,customer_name:box.querySelector('[data-name]').value.trim()}).then(function(res){
-box.innerHTML='<p class="cz-msg ok">Requested for '+RT.esc(new Date(res.starts_at).toLocaleString())+'. We will confirm by email.</p>';
+RT.post('/bookings',body).then(function(res){var price=res.quoted_price_cents?(' — '+RT.money(res.quoted_price_cents,'USD')):'';
+var note=res.requires_approval?'Request sent for '+RT.esc(new Date(res.starts_at).toLocaleString())+price+'. The host will review and confirm by email.':'Booked for '+RT.esc(new Date(res.starts_at).toLocaleString())+price+'. A confirmation is on its way.';
+box.innerHTML='<p class="cz-msg ok">'+note+'</p>';
 }).catch(function(e){sb.disabled=false;msg.textContent=e.message;msg.className='cz-msg err';});});
 }).catch(function(){box.innerHTML='<p style="color:var(--muted)">Unable to load.</p>';});})();"""
 

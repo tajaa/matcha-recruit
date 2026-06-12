@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Loader2, Receipt, ChevronDown, ChevronRight, Calendar } from 'lucide-react'
+import { Loader2, Receipt, ChevronDown, ChevronRight, Calendar, Check, X, Clock } from 'lucide-react'
 import { cappeApi } from '../../../api/cappeClient'
 import SurfaceShell, { centsToMoney } from '../../../components/cappe/SurfaceShell'
 import ImageUpload from '../../../components/cappe/ImageUpload'
@@ -22,6 +22,7 @@ const statusStyle: Record<string, string> = {
   fulfilled: 'bg-emerald-500/15 text-emerald-400',
   cancelled: 'bg-zinc-800 text-zinc-500',
   refunded: 'bg-red-500/15 text-red-400',
+  declined: 'bg-red-500/15 text-red-400',
 }
 
 export default function Orders() {
@@ -48,6 +49,16 @@ export default function Orders() {
 
   async function setStatus(order: CappeOrder, status: string) {
     const updated = await cappeApi.patch<CappeOrder>(`/sites/${siteId}/orders/${order.id}`, { status })
+    setOrders((o) => (o || []).map((x) => (x.id === order.id ? { ...updated, items: x.items } : x)))
+  }
+
+  async function acceptOrder(order: CappeOrder) {
+    const updated = await cappeApi.post<CappeOrder>(`/sites/${siteId}/orders/${order.id}/accept`)
+    setOrders((o) => (o || []).map((x) => (x.id === order.id ? { ...updated, items: x.items } : x)))
+  }
+  async function declineOrder(order: CappeOrder) {
+    const reason = window.prompt('Reason for declining (optional, shown to the customer):') ?? undefined
+    const updated = await cappeApi.post<CappeOrder>(`/sites/${siteId}/orders/${order.id}/decline`, { reason })
     setOrders((o) => (o || []).map((x) => (x.id === order.id ? { ...updated, items: x.items } : x)))
   }
 
@@ -82,14 +93,24 @@ export default function Orders() {
                   <div className="text-xs text-zinc-400">{new Date(o.created_at).toLocaleString()}</div>
                 </div>
                 <div className="text-sm font-medium text-zinc-300">{centsToMoney(o.subtotal_cents, o.currency)}</div>
+                {o.requires_approval && o.status === 'pending' && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-400"><Clock className="h-3 w-3" /> needs approval</span>
+                )}
                 <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${statusStyle[o.status]}`}>{o.status}</span>
-                <select
-                  value={o.status}
-                  onChange={(e) => setStatus(o, e.target.value)}
-                  className="rounded-lg border border-zinc-700 bg-zinc-950 text-zinc-100 placeholder:text-zinc-500 px-2 py-1 text-xs"
-                >
-                  {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
+                {o.requires_approval && o.status === 'pending' ? (
+                  <>
+                    <button onClick={() => acceptOrder(o)} className="flex items-center gap-1 rounded-lg bg-emerald-500 px-2.5 py-1 text-xs font-semibold text-zinc-950 hover:bg-emerald-400"><Check className="h-3.5 w-3.5" /> Accept</button>
+                    <button onClick={() => declineOrder(o)} className="flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800"><X className="h-3.5 w-3.5" /> Decline</button>
+                  </>
+                ) : (
+                  <select
+                    value={o.status}
+                    onChange={(e) => setStatus(o, e.target.value)}
+                    className="rounded-lg border border-zinc-700 bg-zinc-950 text-zinc-100 placeholder:text-zinc-500 px-2 py-1 text-xs"
+                  >
+                    {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                )}
               </div>
               {openId === o.id && (
                 <div className="space-y-2 bg-zinc-950 px-12 py-3">
