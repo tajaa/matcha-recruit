@@ -58,6 +58,15 @@ const BLOCK_SCHEMAS: Record<string, BlockSchema> = {
         { value: 'image', label: 'Full image background' }, { value: 'minimal', label: 'Minimal' },
       ] }),
       F('image', 'Image (for split / image layout)', 'image'),
+      F('align', 'Text align (image layout)', 'select', { options: [
+        { value: 'center', label: 'Center' }, { value: 'left', label: 'Left' },
+      ] }),
+      F('overlay', 'Photo overlay (image layout)', 'select', { options: [
+        { value: 'light', label: 'Light' }, { value: 'medium', label: 'Medium' }, { value: 'dark', label: 'Dark' },
+      ] }),
+      F('height', 'Height (image layout)', 'select', { options: [
+        { value: 'tall', label: 'Tall' }, { value: 'full', label: 'Full screen' },
+      ] }),
       F('cta', 'Button label'),
       F('ctaHref', 'Button link', 'text', { placeholder: '/p/contact or https://…' }),
       F('cta2', 'Second button label'),
@@ -230,6 +239,23 @@ const BLOCK_SCHEMAS: Record<string, BlockSchema> = {
       F('reverse', 'Image on right', 'bool'),
     ],
   },
+  credentials: {
+    label: 'Certifications',
+    make: () => ({ type: 'credentials', heading: 'Certifications & qualifications', items: [
+      { title: 'Certified Personal Trainer', issuer: 'NASM', year: '2021' },
+      { title: 'CPR & First Aid', issuer: 'Red Cross', year: '2024' },
+    ] }),
+    fields: [
+      F('heading', 'Section heading'), F('subheading', 'Section subheading', 'textarea'),
+      F('items', 'Credentials', 'list', {
+        addLabel: 'Add credential', newItem: () => ({ title: '', issuer: '', year: '' }),
+        item: [
+          F('title', 'Title / certification'), F('issuer', 'Issuing body'),
+          F('year', 'Year'), F('detail', 'Detail (optional)', 'textarea'),
+        ],
+      }),
+    ],
+  },
   text: {
     label: 'Text',
     make: () => ({ type: 'text', body: 'Write something here.' }),
@@ -267,7 +293,7 @@ const BLOCK_SCHEMAS: Record<string, BlockSchema> = {
   },
 }
 
-const BLOCK_ORDER = ['hero', 'features', 'split', 'bento', 'stats', 'logos', 'gallery', 'pricing', 'testimonial', 'faq', 'cta', 'store', 'booking', 'menu', 'posts', 'text', 'contact', 'newsletter']
+const BLOCK_ORDER = ['hero', 'features', 'split', 'bento', 'stats', 'credentials', 'logos', 'gallery', 'pricing', 'testimonial', 'faq', 'cta', 'store', 'booking', 'menu', 'posts', 'text', 'contact', 'newsletter']
 
 // ── upload context (only ImageInput needs the siteId) ───────────────────────
 const SiteCtx = createContext<string>('')

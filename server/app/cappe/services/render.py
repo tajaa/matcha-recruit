@@ -12,7 +12,8 @@ JS runtime that talks to the same-origin public API. All user content is escaped
 URLs are scheme-checked.
 
 Block types: hero, features, gallery, pricing, testimonial, cta, menu, posts,
-stats, logos, faq, bento, split, text, contact, store, booking, newsletter.
+stats, logos, faq, bento, split, credentials, text, contact, store, booking,
+newsletter.
 """
 import html
 import itertools
@@ -171,11 +172,18 @@ section{position:relative}
 .cz-hero--minimal .cz-hero__title{max-width:20ch}
 .cz-hero--image{min-height:74vh;display:flex;align-items:center;text-align:center;color:#fff;
   background-size:cover;background-position:center;position:relative}
-.cz-hero--image::before{content:"";position:absolute;inset:0;background:rgba(0,0,0,.55)}
+.cz-hero--image::before{content:"";position:absolute;inset:0;
+  background:linear-gradient(180deg,rgba(0,0,0,.28),rgba(0,0,0,.5) 55%,rgba(0,0,0,.72))}
+.cz-ov-light::before{background:linear-gradient(180deg,rgba(0,0,0,.1),rgba(0,0,0,.3) 60%,rgba(0,0,0,.5))}
+.cz-ov-dark::before{background:linear-gradient(180deg,rgba(0,0,0,.46),rgba(0,0,0,.62) 55%,rgba(0,0,0,.78))}
+.cz-hero--full{min-height:100vh}
 .cz-hero--image .cz-wrap{position:relative;z-index:1}
-.cz-hero--image .cz-hero__title{margin:0 auto;max-width:20ch}
-.cz-hero--image .cz-hero__lead{color:rgba(255,255,255,.86);margin:1.25rem auto 0}
-.cz-hero--image .cz-eyebrow{color:rgba(255,255,255,.8)}
+.cz-hero--image .cz-hero__title{margin:0 auto;max-width:20ch;text-shadow:0 2px 24px rgba(0,0,0,.35)}
+.cz-hero--image .cz-hero__lead{color:rgba(255,255,255,.88);margin:1.25rem auto 0}
+.cz-hero--image .cz-eyebrow{color:rgba(255,255,255,.85)}
+.cz-hero--left{text-align:left}
+.cz-hero--left .cz-hero__title,.cz-hero--left .cz-hero__lead{margin-left:0;margin-right:0}
+.cz-hero--left .cz-cta-row{justify-content:flex-start}
 
 /* features */
 .cz-features{padding:clamp(3rem,7vw,5rem) 0}
@@ -336,6 +344,31 @@ section{position:relative}
 .cz-split__bullets li::before{content:"✓";color:var(--brand);font-weight:700}
 .cz-split .cz-btn{margin-top:1.6rem}
 
+/* credentials / qualifications */
+.cz-creds{padding:clamp(3rem,7vw,5rem) 0}
+.cz-creds-grid{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));max-width:62rem;margin:0 auto}
+.cz-cred{display:flex;gap:.95rem;align-items:flex-start;border:1px solid var(--line);background:var(--surface);
+  border-radius:var(--radius);padding:1.25rem 1.4rem}
+.cz-cred__badge{flex:0 0 auto;width:34px;height:34px;display:flex;align-items:center;justify-content:center;
+  border-radius:999px;background:color-mix(in srgb,var(--brand) 16%,transparent);color:var(--brand);font-weight:700}
+.cz-cred h3{font-size:1.08rem;line-height:1.3}
+.cz-cred__meta{color:var(--brand);font-size:.84rem;font-weight:600;margin-top:.2rem}
+.cz-cred__detail{color:var(--muted);font-size:.9rem;margin-top:.45rem;line-height:1.55}
+
+/* booking slot picker */
+.cz-daystrip{display:flex;gap:.5rem;overflow-x:auto;padding:.1rem 0 .55rem;margin-bottom:.7rem}
+.cz-day{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:.1rem;border:1px solid var(--line);
+  background:var(--surface);color:var(--ink);border-radius:var(--radius);padding:.5rem .8rem;font:inherit;
+  font-size:.9rem;font-weight:600;cursor:pointer;transition:border-color .15s,background .15s}
+.cz-day span{font-size:.71rem;font-weight:500;color:var(--muted)}
+.cz-day--on{border-color:var(--brand);background:color-mix(in srgb,var(--brand) 12%,var(--surface))}
+.cz-day--on span{color:var(--brand)}
+.cz-times{display:flex;flex-wrap:wrap;gap:.45rem}
+.cz-slot{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:var(--radius);
+  padding:.5rem .8rem;font:inherit;font-size:.88rem;cursor:pointer;transition:border-color .15s,background .15s}
+.cz-slot:hover{border-color:var(--brand)}
+.cz-slot--on{background:var(--brand);color:var(--brand-fg);border-color:var(--brand)}
+
 @media(min-width:768px){
   .cz-hero--split .cz-grid{grid-template-columns:1.1fr .9fr}
   .cz-hero--split{padding:clamp(4rem,8vw,7rem) 0}
@@ -375,8 +408,18 @@ def _hero(b, t):
     img = _safe_image(b.get("image"))
 
     if style == "image":
-        bgstyle = f'background-image:linear-gradient(rgba(0,0,0,.1),rgba(0,0,0,.1)),url(\'{img}\')' if img else ''
-        return (f'<section class="cz-hero cz-hero--image" style="{bgstyle}"><div class="cz-wrap">'
+        overlay = (b.get("overlay") or "medium").lower()
+        overlay = overlay if overlay in ("light", "medium", "dark") else "medium"
+        cls = f"cz-hero--image cz-ov-{overlay}"
+        if (b.get("align") or "center").lower() == "left":
+            cls += " cz-hero--left"
+        if (b.get("height") or "tall").lower() == "full":
+            cls += " cz-hero--full"
+        # _safe_image already rejects quotes/parens; re-encode so the url() is
+        # self-evidently un-breakoutable without trusting the sibling sanitizer.
+        safe_u = _esc(img).replace("'", "%27").replace("(", "%28").replace(")", "%29") if img else ""
+        bgstyle = f"background-image:url('{safe_u}')" if safe_u else ""
+        return (f'<section class="cz-hero {cls}" style="{bgstyle}"><div class="cz-wrap">'
                 f'{eyebrow}{title}{lead}{cta}</div></section>')
     if style == "split":
         art = (f'<img src="{_esc(img)}" alt="" />' if img else "")
@@ -547,6 +590,19 @@ def _text(b, t):
     return f'<section class="cz-text"><div class="cz-narrow">{head}{inner}</div></section>'
 
 
+def _credentials(b, t):
+    cards = ""
+    for i in (b.get("items") or []):
+        if not isinstance(i, dict):
+            continue
+        meta = " · ".join(x for x in (_esc(i.get("issuer")), _esc(i.get("year"))) if x)
+        meta_html = f'<div class="cz-cred__meta">{meta}</div>' if meta else ""
+        detail = f'<p class="cz-cred__detail">{_esc(i.get("detail"))}</p>' if i.get("detail") else ""
+        cards += (f'<div class="cz-cred"><div class="cz-cred__badge">✓</div>'
+                  f'<div><h3>{_esc(i.get("title"))}</h3>{meta_html}{detail}</div></div>')
+    return f'<section class="cz-creds"><div class="cz-wrap">{_head(b)}<div class="cz-creds-grid">{cards}</div></div></section>'
+
+
 # ── interactive widgets (same-origin /api/cappe/public, no styling deps) ─────
 
 def _widget_runtime():
@@ -628,16 +684,24 @@ var t=cur();if(!t)return;
 RT.get('/booking-types/'+encodeURIComponent(t.id)+'/slots').then(function(d){var slots=(d&&d.slots)||[];
 if(!slots.length){slotWrap.innerHTML='<p style="color:var(--muted)">No open times in the next few weeks. Please check back soon.</p>';return;}
 var days=[],byDay={};slots.forEach(function(s){if(!byDay[s.date]){byDay[s.date]=[];days.push(s.date);}byDay[s.date].push(s);});
-slotWrap.innerHTML='<p class="cz-label">Pick a time ('+RT.esc(d.timezone||'')+')'+(d.discount_percent?' · <span style="color:var(--brand)">'+d.discount_percent+'% off</span>':'')+'</p>'+days.map(function(dt){
-return '<div style="margin:.5rem 0"><div style="font-size:.82rem;color:var(--muted);margin-bottom:.3rem">'+RT.esc(byDay[dt][0].day_label)+'</div>'+
-'<div style="display:flex;flex-wrap:wrap;gap:.4rem">'+byDay[dt].map(function(s){var pl=s.price_cents?(' · '+RT.money(s.price_cents,'USD')):'';
-return '<button type="button" class="cz-slot" data-start="'+RT.esc(s.start)+'" data-end="'+RT.esc(s.end)+'" style="border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:var(--radius);padding:.4rem .7rem;font-size:.85rem;cursor:pointer">'+RT.esc(s.time_label)+pl+'</button>';
-}).join('')+'</div></div>';
-}).join('');
-slotWrap.querySelectorAll('.cz-slot').forEach(function(btn){btn.addEventListener('click',function(){
-slotWrap.querySelectorAll('.cz-slot').forEach(function(b){b.style.background='var(--surface)';b.style.color='var(--ink)';b.style.borderColor='var(--line)';});
-btn.style.background='var(--brand)';btn.style.color='var(--brand-fg)';btn.style.borderColor='var(--brand)';
-sel={start:btn.getAttribute('data-start'),end:btn.getAttribute('data-end')};sb.disabled=false;sb.textContent='Request booking';});});
+// One price line when every slot costs the same; otherwise show price per time.
+var uniform=slots.every(function(s){return s.price_cents===slots[0].price_cents;});
+var priceNote=(uniform&&slots[0].price_cents)?(' · '+RT.money(slots[0].price_cents,'USD')+(t.pricing_mode==='hourly'?'/hr':'')):'';
+var tzNote=d.timezone?(' · times in '+RT.esc(d.timezone)):'';
+var discNote=d.discount_percent?(' · <span style="color:var(--brand)">'+d.discount_percent+'% off</span>'):'';
+slotWrap.innerHTML='<p class="cz-label">Pick a day'+tzNote+priceNote+discNote+'</p>'+
+'<div class="cz-daystrip">'+days.map(function(dt,i){return '<button type="button" class="cz-day" data-day="'+i+'">'+RT.esc(byDay[dt][0].day_label)+'<span>'+byDay[dt].length+' open</span></button>';}).join('')+'</div>'+
+'<div class="cz-times" data-times></div>';
+var timesWrap=slotWrap.querySelector('[data-times]'),dayBtns=slotWrap.querySelectorAll('.cz-day');
+function showDay(i){sel=null;sb.disabled=true;sb.textContent='Select a time';
+dayBtns.forEach(function(b,j){b.classList.toggle('cz-day--on',j===i);});
+timesWrap.innerHTML=byDay[days[i]].map(function(s){var pl=(!uniform&&s.price_cents)?(' · '+RT.money(s.price_cents,'USD')):'';
+return '<button type="button" class="cz-slot" data-start="'+RT.esc(s.start)+'" data-end="'+RT.esc(s.end)+'">'+RT.esc(s.time_label)+pl+'</button>';}).join('');
+timesWrap.querySelectorAll('.cz-slot').forEach(function(btn){btn.addEventListener('click',function(){
+timesWrap.querySelectorAll('.cz-slot').forEach(function(b){b.classList.remove('cz-slot--on');});
+btn.classList.add('cz-slot--on');
+sel={start:btn.getAttribute('data-start'),end:btn.getAttribute('data-end')};sb.disabled=false;sb.textContent='Request booking';});});}
+dayBtns.forEach(function(b,i){b.addEventListener('click',function(){showDay(i);});});showDay(0);
 }).catch(function(){slotWrap.innerHTML='<p style="color:var(--muted)">Could not load times.</p>';});}
 btSel.addEventListener('change',loadSlots);loadSlots();
 sb.addEventListener('click',function(){var t=cur(),email=box.querySelector('[data-email]').value.trim();
@@ -719,6 +783,7 @@ _RENDERERS = {
     "hero": _hero, "features": _features, "gallery": _gallery, "pricing": _pricing,
     "testimonial": _testimonial, "cta": _cta, "menu": _menu, "posts": _posts,
     "stats": _stats, "logos": _logos, "faq": _faq, "bento": _bento, "split": _split,
+    "credentials": _credentials,
     "text": _text, "contact": _contact, "store": _store, "booking": _booking, "newsletter": _newsletter,
 }
 
