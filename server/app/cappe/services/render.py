@@ -287,6 +287,12 @@ section{position:relative}
 .cz-footer{border-top:1px solid var(--line);text-align:center;color:var(--muted);
   font-size:.85rem;padding:2.5rem 0}
 .cz-footer .small{font-size:.75rem;opacity:.7;margin-top:.35rem}
+.cz-foot-social{display:flex;flex-wrap:wrap;justify-content:center;gap:1.1rem;margin-bottom:1rem}
+.cz-foot-social a{color:var(--ink);text-decoration:none;font-size:.82rem;font-weight:600;letter-spacing:.02em}
+.cz-foot-social a:hover{color:var(--brand)}
+.cz-foot-contact{display:flex;flex-wrap:wrap;justify-content:center;gap:.4rem 1.2rem;margin-bottom:1rem}
+.cz-foot-contact a,.cz-foot-contact span{color:var(--muted);text-decoration:none;font-size:.9rem}
+.cz-foot-contact a:hover{color:var(--brand)}
 
 /* stats band */
 .cz-stats{padding:clamp(3rem,7vw,5rem) 0}
@@ -798,6 +804,70 @@ def _render_block(block, t):
     return _text({"body": body}, t) if body else ""
 
 
+# ── head / footer (business identity + SEO from meta_config) ────────────────
+
+# Footer social links — text labels (no icon-font dep on the published site).
+_SOCIAL_LABELS = [
+    ("instagram", "Instagram"), ("x", "X"), ("tiktok", "TikTok"),
+    ("youtube", "YouTube"), ("facebook", "Facebook"), ("linkedin", "LinkedIn"),
+    ("website", "Website"),
+]
+
+
+def _head_seo(site: dict, page: dict, meta: dict) -> tuple[str, str]:
+    """Return (title_text, extra_head_html) from meta_config.seo + favicon_url.
+    Falls back to "{site} — {page}" when no SEO title is set."""
+    seo = meta.get("seo") if isinstance(meta.get("seo"), dict) else {}
+    title = (seo.get("title") or "").strip() or f"{site.get('name')} — {page.get('title')}"
+    desc = (seo.get("description") or "").strip()
+    og_img = _safe_image(seo.get("og_image"))
+    favicon = _safe_image(meta.get("favicon_url"))
+    parts = []
+    if desc:
+        parts.append(f'<meta name="description" content="{_esc(desc)}" />')
+    parts.append(f'<meta property="og:title" content="{_esc((seo.get("title") or site.get("name")))}" />')
+    if desc:
+        parts.append(f'<meta property="og:description" content="{_esc(desc)}" />')
+    if og_img:
+        parts.append(f'<meta property="og:image" content="{_esc(og_img)}" />')
+    parts.append('<meta property="og:type" content="website" />')
+    if favicon:
+        parts.append(f'<link rel="icon" href="{_esc(favicon)}" />')
+    return _esc(title), "".join(parts)
+
+
+def _footer(site: dict, meta: dict) -> str:
+    """Footer with optional business contact info + social links from meta_config."""
+    name = _esc(site.get("name"))
+    contact = []
+    ce = (meta.get("contact_email") or "").strip()
+    cp = (meta.get("contact_phone") or "").strip()
+    ca = (meta.get("contact_address") or "").strip()
+    ch = (meta.get("business_hours") or "").strip()
+    if ce:
+        contact.append(f'<a href="mailto:{_esc(ce)}">{_esc(ce)}</a>')
+    if cp:
+        contact.append(f'<a href="tel:{_esc(cp.replace(" ", ""))}">{_esc(cp)}</a>')
+    if ca:
+        contact.append(f"<span>{_esc(ca)}</span>")
+    if ch:
+        contact.append(f"<span>{_esc(ch)}</span>")
+    contact_html = f'<div class="cz-foot-contact">{"".join(contact)}</div>' if contact else ""
+
+    social = meta.get("social") if isinstance(meta.get("social"), dict) else {}
+    links = []
+    for key, label in _SOCIAL_LABELS:
+        u = (social.get(key) or "").strip() if isinstance(social, dict) else ""
+        if u:
+            links.append(
+                f'<a href="{_esc(_safe_href(u))}" target="_blank" rel="noopener noreferrer nofollow">{label}</a>'
+            )
+    social_html = f'<div class="cz-foot-social">{"".join(links)}</div>' if links else ""
+
+    return (f'<footer class="cz-footer"><div class="cz-wrap">{social_html}{contact_html}'
+            f'<p>© {name}</p><p class="small">Built with Cappe</p></div></footer>')
+
+
 # ── document ──────────────────────────────────────────────────────────────
 
 def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: bool = False) -> str:
@@ -830,12 +900,16 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
         f"--radius:{_clean_css(t['radius'])};--font-h:{_font_stack(t['heading'])};--font-b:{_font_stack(t['body'])}}}"
     )
 
+    meta_dict = meta if isinstance(meta, dict) else {}
+    head_title, head_seo = _head_seo(site, page, meta_dict)
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{_esc(site.get('name'))} — {_esc(page.get('title'))}</title>
+  <title>{head_title}</title>
+  {head_seo}
   {_gfonts_link(t['heading'], t['body'])}
   <style>{theme_vars}{_BASE_CSS}</style>
   <script>window.__CAPPE__={cappe_ctx};</script>
@@ -847,7 +921,6 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
     <nav class="cz-nav">{nav_links}</nav>
   </div></header>
   <main>{body_html}</main>
-  <footer class="cz-footer"><div class="cz-wrap"><p>© {_esc(site.get('name'))}</p>
-    <p class="small">Built with Cappe</p></div></footer>
+  {_footer(site, meta_dict)}
 </body>
 </html>"""

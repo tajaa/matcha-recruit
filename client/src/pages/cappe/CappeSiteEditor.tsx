@@ -6,12 +6,59 @@ import ImageUpload from '../../components/cappe/ImageUpload'
 import SetupGuide from '../../components/cappe/SetupGuide'
 import { cappeSiteHost, CAPPE_HOST } from '../../utils/cappeHost'
 import { CAPPE_THEMES, type CappeThemePreset } from '../../data/cappeThemes'
+import { CAPPE_TIMEZONES } from '../../data/timezones'
 import type { CappePage, CappeSite } from '../../types/cappe'
 
 const statusStyle: Record<string, string> = {
   published: 'bg-emerald-500/15 text-emerald-400',
   draft: 'bg-zinc-800 text-zinc-400',
   archived: 'bg-amber-500/15 text-amber-400',
+}
+
+const inputCls =
+  'w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500'
+
+// ── business info + SEO, stored as meta_config keys ──────────────────────────
+type Social = { instagram: string; x: string; tiktok: string; youtube: string; facebook: string; linkedin: string; website: string }
+type BizMeta = {
+  contact_email: string; contact_phone: string; contact_address: string; business_hours: string
+  favicon_url: string; social: Social; seo: { title: string; description: string; og_image: string }
+}
+const SOCIAL_FIELDS: { key: keyof Social; label: string; ph: string }[] = [
+  { key: 'instagram', label: 'Instagram', ph: 'https://instagram.com/you' },
+  { key: 'x', label: 'X', ph: 'https://x.com/you' },
+  { key: 'tiktok', label: 'TikTok', ph: 'https://tiktok.com/@you' },
+  { key: 'youtube', label: 'YouTube', ph: 'https://youtube.com/@you' },
+  { key: 'facebook', label: 'Facebook', ph: 'https://facebook.com/you' },
+  { key: 'linkedin', label: 'LinkedIn', ph: 'https://linkedin.com/in/you' },
+  { key: 'website', label: 'Other website', ph: 'https://yoursite.com' },
+]
+const gstr = (o: Record<string, unknown> | undefined, k: string): string =>
+  (o && typeof o[k] === 'string' ? (o[k] as string) : '')
+function bizFromMeta(m: Record<string, unknown> | undefined): BizMeta {
+  const s = (m?.social ?? {}) as Record<string, unknown>
+  const seo = (m?.seo ?? {}) as Record<string, unknown>
+  return {
+    contact_email: gstr(m, 'contact_email'), contact_phone: gstr(m, 'contact_phone'),
+    contact_address: gstr(m, 'contact_address'), business_hours: gstr(m, 'business_hours'),
+    favicon_url: gstr(m, 'favicon_url'),
+    social: {
+      instagram: gstr(s, 'instagram'), x: gstr(s, 'x'), tiktok: gstr(s, 'tiktok'), youtube: gstr(s, 'youtube'),
+      facebook: gstr(s, 'facebook'), linkedin: gstr(s, 'linkedin'), website: gstr(s, 'website'),
+    },
+    seo: { title: gstr(seo, 'title'), description: gstr(seo, 'description'), og_image: gstr(seo, 'og_image') },
+  }
+}
+const orNull = (v: string) => v.trim() || null
+function bizToMeta(b: BizMeta): Record<string, unknown> {
+  const social: Record<string, string> = {}
+  SOCIAL_FIELDS.forEach(({ key }) => { if (b.social[key].trim()) social[key] = b.social[key].trim() })
+  return {
+    contact_email: orNull(b.contact_email), contact_phone: orNull(b.contact_phone),
+    contact_address: orNull(b.contact_address), business_hours: orNull(b.business_hours),
+    favicon_url: orNull(b.favicon_url), social,
+    seo: { title: orNull(b.seo.title), description: orNull(b.seo.description), og_image: orNull(b.seo.og_image) },
+  }
 }
 
 export default function CappeSiteEditor() {
@@ -27,6 +74,8 @@ export default function CappeSiteEditor() {
   const [subdomain, setSubdomain] = useState('')
   const [domain, setDomain] = useState('')
   const [logo, setLogo] = useState('')
+  const [timezone, setTimezone] = useState('UTC')
+  const [biz, setBiz] = useState<BizMeta>(bizFromMeta(undefined))
   const [saving, setSaving] = useState(false)
   const [themeBusy, setThemeBusy] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
@@ -47,6 +96,8 @@ export default function CappeSiteEditor() {
         setSubdomain(s.subdomain || s.slug)
         setDomain(s.custom_domain || '')
         setLogo((s.meta_config?.logo_url as string) || '')
+        setTimezone(s.timezone || 'UTC')
+        setBiz(bizFromMeta(s.meta_config))
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load site'))
       .finally(() => setLoading(false))
@@ -60,7 +111,12 @@ export default function CappeSiteEditor() {
       const body: Record<string, unknown> = {
         name,
         custom_domain: domain || null,
-        meta_config: { ...(site?.meta_config || {}), logo_url: logo.trim() || null },
+        timezone,
+        meta_config: {
+          ...(site?.meta_config || {}),
+          logo_url: logo.trim() || null,
+          ...bizToMeta(biz),
+        },
       }
       // Only send subdomain when it actually changed (avoids a needless slug
       // churn + uniqueness check on every save).
@@ -240,6 +296,13 @@ export default function CappeSiteEditor() {
             <p className="mt-1 text-xs text-zinc-500">This is your site's public URL. Save to apply.</p>
           </div>
           <div>
+            <label className="mb-1 block text-sm font-medium text-zinc-300">Timezone</label>
+            <select value={timezone} onChange={(e) => setTimezone(e.target.value)} className={inputCls}>
+              {CAPPE_TIMEZONES.map((tz) => <option key={tz.value} value={tz.value}>{tz.label}</option>)}
+            </select>
+            <p className="mt-1 text-xs text-zinc-500">Booking times show in this zone. Set it so customers see the right hours.</p>
+          </div>
+          <div>
             <label className="mb-1 block text-sm font-medium text-zinc-300">Logo</label>
             <ImageUpload siteId={siteId || ''} value={logo} onChange={setLogo} placeholder="Logo image URL" />
             <p className="mt-1 text-xs text-zinc-500">Shown in your published site's header. Save to apply.</p>
@@ -264,6 +327,79 @@ export default function CappeSiteEditor() {
               .
             </p>
           </div>
+          <button
+            onClick={save}
+            disabled={saving}
+            className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-60"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Save changes
+          </button>
+        </div>
+      </section>
+
+      {/* Business info, social, SEO */}
+      <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+        <h2 className="mb-1 text-sm font-semibold text-zinc-100">Business info &amp; SEO</h2>
+        <p className="mb-4 text-xs text-zinc-500">Shown in your site footer and used for search/social previews. All optional.</p>
+        <div className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-zinc-300">Contact email</label>
+              <input value={biz.contact_email} onChange={(e) => setBiz((b) => ({ ...b, contact_email: e.target.value }))} placeholder="hello@yourbusiness.com" className={inputCls} />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-zinc-300">Contact phone</label>
+              <input value={biz.contact_phone} onChange={(e) => setBiz((b) => ({ ...b, contact_phone: e.target.value }))} placeholder="+1 555 123 4567" className={inputCls} />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-zinc-300">Address</label>
+            <input value={biz.contact_address} onChange={(e) => setBiz((b) => ({ ...b, contact_address: e.target.value }))} placeholder="123 Main St, City, ST" className={inputCls} />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-zinc-300">Business hours</label>
+            <input value={biz.business_hours} onChange={(e) => setBiz((b) => ({ ...b, business_hours: e.target.value }))} placeholder="Mon–Fri 9am–5pm" className={inputCls} />
+          </div>
+
+          <div className="border-t border-zinc-800 pt-4">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Social links</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {SOCIAL_FIELDS.map(({ key, label, ph }) => (
+                <div key={key}>
+                  <label className="mb-1 block text-xs font-medium text-zinc-400">{label}</label>
+                  <input
+                    value={biz.social[key]}
+                    onChange={(e) => setBiz((b) => ({ ...b, social: { ...b.social, [key]: e.target.value } }))}
+                    placeholder={ph}
+                    className={inputCls}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="border-t border-zinc-800 pt-4 space-y-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Search &amp; social preview (SEO)</p>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-zinc-300">Page title</label>
+              <input value={biz.seo.title} onChange={(e) => setBiz((b) => ({ ...b, seo: { ...b.seo, title: e.target.value } }))} placeholder={site.name} className={inputCls} />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-zinc-300">Description</label>
+              <textarea value={biz.seo.description} onChange={(e) => setBiz((b) => ({ ...b, seo: { ...b.seo, description: e.target.value } }))} rows={2} placeholder="One or two sentences describing your business." className={inputCls} />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-zinc-300">Share image</label>
+              <ImageUpload siteId={siteId || ''} value={biz.seo.og_image} onChange={(v) => setBiz((b) => ({ ...b, seo: { ...b.seo, og_image: v } }))} placeholder="Image shown when shared (1200×630)" />
+            </div>
+          </div>
+
+          <div className="border-t border-zinc-800 pt-4">
+            <label className="mb-1 block text-sm font-medium text-zinc-300">Favicon</label>
+            <ImageUpload siteId={siteId || ''} value={biz.favicon_url} onChange={(v) => setBiz((b) => ({ ...b, favicon_url: v }))} placeholder="Browser-tab icon (square)" />
+          </div>
+
           <button
             onClick={save}
             disabled={saving}
