@@ -4,6 +4,7 @@ import CappeLanding from '../pages/cappe/CappeLanding'
 import CappeSignup from '../pages/cappe/CappeSignup'
 import CappeLogin from '../pages/cappe/CappeLogin'
 import CappeVerify from '../pages/cappe/CappeVerify'
+import ClientThread from '../pages/cappe/ClientThread'
 import CappeSites from '../pages/cappe/CappeSites'
 import CappeTemplates from '../pages/cappe/CappeTemplates'
 import CappeSiteEditor from '../pages/cappe/CappeSiteEditor'
@@ -15,6 +16,8 @@ import Campaigns from '../pages/cappe/site/Campaigns'
 import Forms from '../pages/cappe/site/Forms'
 import Bookings from '../pages/cappe/site/Bookings'
 import Blog from '../pages/cappe/site/Blog'
+import Messages from '../pages/cappe/site/Messages'
+import Clients from '../pages/cappe/site/Clients'
 
 // Cappe — website-builder product, served at /cappe. Self-contained route tree
 // with its own auth (cappe_* tokens, useCappeMe). Public signup/login live
@@ -28,6 +31,8 @@ export default function CappeRoutes() {
       <Route path="website-setup" element={<CappeSignup />} />
       <Route path="login" element={<CappeLogin />} />
       <Route path="verify" element={<CappeVerify />} />
+      {/* Public, token-gated client conversation (emailed link). */}
+      <Route path="thread/:token" element={<ClientThread />} />
       <Route element={<CappeLayout />}>
         <Route path="sites" element={<CappeSites />} />
         <Route path="templates" element={<CappeTemplates />} />
@@ -39,6 +44,8 @@ export default function CappeRoutes() {
         <Route path="sites/:siteId/campaigns" element={<Campaigns />} />
         <Route path="sites/:siteId/forms" element={<Forms />} />
         <Route path="sites/:siteId/bookings" element={<Bookings />} />
+        <Route path="sites/:siteId/messages" element={<Messages />} />
+        <Route path="sites/:siteId/clients" element={<Clients />} />
         <Route path="sites/:siteId/blog" element={<Blog />} />
       </Route>
     </Routes>

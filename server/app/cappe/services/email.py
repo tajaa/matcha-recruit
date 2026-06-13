@@ -6,6 +6,7 @@ as a FastAPI background task so account creation never blocks on SMTP.
 """
 import logging
 import os
+from html import escape
 
 from ...core.services.email.client import get_email_service
 
@@ -25,7 +26,8 @@ async def send_cappe_verification_email(to_email: str, to_name: str | None, toke
     unreachable address never becomes a live account. Best-effort: logs and
     swallows failures (the user can request a resend)."""
     verify_url = f"{_base_url()}/cappe/verify?token={token}"
-    greeting = f"Hi {to_name}," if to_name else "Welcome!"
+    greeting = f"Hi {to_name}," if to_name else "Welcome!"  # plaintext
+    greeting_html = f"Hi {escape(to_name)}," if to_name else "Welcome!"  # name is user-controlled
     html = f"""\
 <!doctype html>
 <html>
@@ -38,7 +40,7 @@ async def send_cappe_verification_email(to_email: str, to_name: str | None, toke
     </div>
     <div style="background:#18181b;border:1px solid #27272a;border-radius:16px;padding:32px;color:#e4e4e7;">
       <h1 style="margin:0 0 12px;font-size:22px;color:#fafafa;">Confirm your email</h1>
-      <p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:#a1a1aa;">{greeting}</p>
+      <p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:#a1a1aa;">{greeting_html}</p>
       <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#a1a1aa;">
         One click and your Gummfit account is live — then you can build your site, add what you
         sell, and publish.
@@ -80,21 +82,27 @@ async def send_cappe_message_email(
 ) -> None:
     """Notify a recipient (client or creator) of a new message in a thread, with
     a link to read + reply. Best-effort."""
-    safe = (snippet or "").strip()
-    if len(safe) > 240:
-        safe = safe[:240] + "…"
+    raw = (snippet or "").strip()
+    if len(raw) > 240:
+        raw = raw[:240] + "…"
+    # All four values are user-controlled (message body, site/sender names, and
+    # a DB-derived link) → escape before embedding in the HTML email body.
+    safe = escape(raw)
+    e_from = escape(from_label or "")
+    e_site = escape(site_name or "")
+    e_link = escape(link or "", quote=True)  # sits inside a double-quoted href
     html = f"""\
 <!doctype html>
 <html>
 <body style="margin:0;background:#0b0b0d;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
   <div style="max-width:480px;margin:0 auto;padding:40px 24px;">
     <div style="background:#18181b;border:1px solid #27272a;border-radius:16px;padding:32px;color:#e4e4e7;">
-      <p style="margin:0 0 6px;font-size:13px;color:#a1a1aa;">New message from {from_label}</p>
-      <h1 style="margin:0 0 16px;font-size:20px;color:#fafafa;">{site_name}</h1>
+      <p style="margin:0 0 6px;font-size:13px;color:#a1a1aa;">New message from {e_from}</p>
+      <h1 style="margin:0 0 16px;font-size:20px;color:#fafafa;">{e_site}</h1>
       <div style="border-left:3px solid #c6f16b;padding:8px 0 8px 14px;margin:0 0 20px;color:#d4d4d8;font-size:15px;line-height:1.6;">
         {safe}
       </div>
-      <a href="{link}" style="display:inline-block;background:#c6f16b;color:#10120a;
+      <a href="{e_link}" style="display:inline-block;background:#c6f16b;color:#10120a;
          text-decoration:none;font-weight:600;font-size:14px;padding:12px 22px;border-radius:10px;">
         Read &amp; reply
       </a>
@@ -103,7 +111,7 @@ async def send_cappe_message_email(
   </div>
 </body>
 </html>"""
-    text = f"New message from {from_label} ({site_name}):\n\n{safe}\n\nRead & reply: {link}"
+    text = f"New message from {from_label} ({site_name}):\n\n{raw}\n\nRead & reply: {link}"
     try:
         await get_email_service().send_email_with_fallback(
             to_email=to_email,
@@ -119,7 +127,8 @@ async def send_cappe_message_email(
 async def send_cappe_welcome_email(to_email: str, to_name: str | None) -> None:
     """Send the signup confirmation / welcome email. Best-effort: logs and
     swallows failures so it's safe to fire from a background task."""
-    greeting = f"Hi {to_name}," if to_name else "Welcome!"
+    greeting = f"Hi {to_name}," if to_name else "Welcome!"  # plaintext
+    greeting_html = f"Hi {escape(to_name)}," if to_name else "Welcome!"  # name is user-controlled
     html = f"""\
 <!doctype html>
 <html>
@@ -132,7 +141,7 @@ async def send_cappe_welcome_email(to_email: str, to_name: str | None) -> None:
     </div>
     <div style="background:#18181b;border:1px solid #27272a;border-radius:16px;padding:32px;color:#e4e4e7;">
       <h1 style="margin:0 0 12px;font-size:22px;color:#fafafa;">Your Cappe account is ready</h1>
-      <p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:#a1a1aa;">{greeting}</p>
+      <p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:#a1a1aa;">{greeting_html}</p>
       <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#a1a1aa;">
         Thanks for signing up for Cappe — the simplest way to build, design, and launch your website.
         Pick a template, customize it in the editor, and publish when you're ready.

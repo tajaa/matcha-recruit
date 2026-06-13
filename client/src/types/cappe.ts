@@ -314,6 +314,53 @@ export type CappeRequestSummary = {
   created_at: string
 }
 
+// --- Messages + clients -----------------------------------------------------
+
+export type CappeMessage = {
+  id: string
+  thread_id: string
+  sender: 'owner' | 'client'
+  body: string
+  created_at: string
+}
+
+export type CappeThread = {
+  id: string
+  site_id: string
+  client_email: string
+  client_name: string | null
+  subject: string | null
+  status: 'open' | 'closed'
+  booking_id: string | null
+  order_id: string | null
+  owner_unread: number
+  last_message_at: string
+  created_at: string
+  last_snippet?: string | null
+}
+
+export type CappeThreadDetail = CappeThread & {
+  access_token: string
+  messages: CappeMessage[]
+}
+
+export type CappePublicThread = {
+  site_name: string
+  subject: string | null
+  messages: CappeMessage[]
+}
+
+export type CappeClient = {
+  email: string
+  name: string | null
+  orders_count: number
+  bookings_count: number
+  is_subscriber: boolean
+  has_thread: boolean
+  total_spent_cents: number
+  last_activity: string | null
+}
+
 // --- Blog -------------------------------------------------------------------
 
 export type CappePost = {

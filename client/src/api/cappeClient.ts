@@ -98,6 +98,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json()
 }
 
+// Unauthenticated GET (token-resolved public resources, e.g. a client thread).
+export async function cappePublicGet<T>(path: string): Promise<T> {
+  const res = await fetch(`${BASE}${path}`)
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => null)
+    throw new Error(errBody?.detail || `${res.status} ${res.statusText || 'Request failed'}`)
+  }
+  return res.json()
+}
+
 // Unauthenticated POST (signup/login) — never attaches/refreshes a token.
 export async function cappePublicPost<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {

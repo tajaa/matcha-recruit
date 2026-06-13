@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import { Loader2, ArrowLeft, Plus, Trash2, Rocket, Save, Globe, Pencil } from 'lucide-react'
 import { cappeApi } from '../../api/cappeClient'
-import SiteTabs from '../../components/cappe/SiteTabs'
 import ImageUpload from '../../components/cappe/ImageUpload'
 import SetupGuide from '../../components/cappe/SetupGuide'
 import { useCappeMe } from '../../hooks/useCappeMe'
@@ -154,12 +153,6 @@ export default function CappeSiteEditor() {
 
   return (
     <div className="mx-auto max-w-5xl px-8 py-8">
-      <Link to="/cappe/sites" className="mb-4 inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-200">
-        <ArrowLeft className="h-4 w-4" /> My Sites
-      </Link>
-
-      <SiteTabs />
-
       <div className="mb-6 flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2">
