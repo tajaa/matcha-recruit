@@ -12,12 +12,13 @@ from datetime import timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
 
 from ...core.services.email._shared import _is_reserved_test_domain
 from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...database import get_connection
 from ..services.commerce import booking_quote_cents, booking_times, order_subtotal
+from ..services.slots import generate_slots
 from ..models.cappe import (
     CappeBookingQuote,
     CappeBookingQuoteRequest,
@@ -520,6 +521,62 @@ async def public_availability(slug: str, request: Request):
             }
             for r in rows
         ],
+    }
+
+
+@router.get("/public/sites/{slug}/booking-types/{type_id}/slots")
+async def public_booking_slots(
+    slug: str, type_id: UUID, request: Request,
+    days: int = Query(default=21, ge=1, le=60),
+):
+    """Concrete, openable slots for a booking type — the widget renders these as
+    one-tap chips so a visitor never has to guess a valid time. Already-booked
+    ranges are subtracted; each slot is pre-priced (dynamic rate rules applied)."""
+    await _read_rate_limit(request)
+    async with get_connection() as conn:
+        site = await _published_site(conn, slug)
+        btype = await conn.fetchrow(
+            "SELECT id, duration_minutes, price_cents, pricing_mode, requires_approval, status "
+            "FROM cappe_booking_types WHERE id = $1 AND site_id = $2",
+            type_id, site["id"],
+        )
+        if btype is None or btype["status"] != "active":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking type not found")
+        avail = await conn.fetch(
+            "SELECT weekday, start_time, end_time, booking_type_id "
+            "FROM cappe_availability WHERE site_id = $1", site["id"],
+        )
+        booked = await conn.fetch(
+            "SELECT starts_at, ends_at FROM cappe_bookings "
+            "WHERE site_id = $1 AND booking_type_id = $2 AND status IN ('pending', 'confirmed')",
+            site["id"], type_id,
+        )
+        rules = await _site_rate_rules(conn, site["id"], type_id)
+        now_utc = await conn.fetchval("SELECT NOW()")
+
+    availability = [
+        {
+            "weekday": r["weekday"],
+            "start_time": r["start_time"],
+            "end_time": r["end_time"],
+            "booking_type_id": str(r["booking_type_id"]) if r["booking_type_id"] else None,
+        }
+        for r in avail
+    ]
+    btype_d = {
+        "id": str(btype["id"]),
+        "duration_minutes": btype["duration_minutes"],
+        "price_cents": btype["price_cents"],
+        "pricing_mode": btype["pricing_mode"],
+    }
+    busy = [(b["starts_at"], b["ends_at"]) for b in booked]
+    slots = generate_slots(availability, btype_d, busy, site["timezone"], now_utc, rules, days_ahead=days)
+    return {
+        "timezone": site["timezone"],
+        "duration_minutes": btype["duration_minutes"],
+        "pricing_mode": btype["pricing_mode"],
+        "requires_approval": bool(btype["requires_approval"]),
+        "slots": slots,
     }
 
 

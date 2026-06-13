@@ -430,12 +430,13 @@ def _widget_runtime():
         "function post(p,b){return fetch(C.api+p,{method:'POST',headers:{'Content-Type':'application/json'},"
         "body:JSON.stringify(b)}).then(function(r){return r.json().catch(function(){return null;})"
         ".then(function(d){if(!r.ok)throw new Error((d&&d.detail)||'Request failed');return d;});});}"
-        "return {api:C.api,slug:C.slug,esc:esc,url:url,money:money,get:get,post:post};})();</script>"
+        "return {api:C.api,slug:C.slug,preview:!!C.preview,esc:esc,url:url,money:money,get:get,post:post};})();</script>"
     )
 
 
 _STORE_JS = r"""(function(){
 var box=document.getElementById('__ID__'),RT=window.__CAPPE_RT__;if(!box||!RT)return;
+if(RT.preview){box.innerHTML='<p style="color:var(--muted)">Your products appear here once your site is live.</p>';return;}
 function field(f){var req=f.required?' required':'';var l='<label class="cz-label">'+RT.esc(f.label||f.key)+'</label>';
 if(f.type==='textarea')return '<div>'+l+'<textarea class="cz-field" data-k="'+RT.esc(f.key)+'"'+req+'></textarea></div>';
 if(f.type==='select'){var o=(f.options||[]).map(function(x){return '<option>'+RT.esc(x)+'</option>';}).join('');return '<div>'+l+'<select class="cz-field" data-k="'+RT.esc(f.key)+'"'+req+'>'+o+'</select></div>';}
@@ -470,10 +471,11 @@ c.querySelector('button').addEventListener('click',function(){form(p,c.querySele
 
 _BOOKING_JS = r"""(function(){
 var box=document.getElementById('__ID__'),RT=window.__CAPPE_RT__;if(!box||!RT)return;
-Promise.all([RT.get('/booking-types'),RT.get('/availability'),RT.get('/rider').catch(function(){return {items:[]};})]).then(function(r){
-var types=r[0],av=r[1],rider=(r[2]&&r[2].items)||[];
+if(RT.preview){box.innerHTML='<p style="color:var(--muted)">Visitors pick from your open times here once your site is live.</p>';return;}
+Promise.all([RT.get('/booking-types'),RT.get('/rider').catch(function(){return {items:[]};})]).then(function(r){
+var types=r[0],rider=(r[1]&&r[1].items)||[];
 if(!types.length){box.innerHTML='<p style="color:var(--muted)">No appointments available.</p>';return;}
-var tz=av.timezone||'UTC';var byId={};types.forEach(function(t){byId[t.id]=t;});
+var byId={};types.forEach(function(t){byId[t.id]=t;});
 function priceLabel(t){if(!t.price_cents)return 'Free';var m=RT.money(t.price_cents,'USD');return t.pricing_mode==='hourly'?m+'/hr':m;}
 var reqRider=rider.filter(function(i){return i.is_required;});
 var riderHtml='';
@@ -482,32 +484,40 @@ if(rider.length){riderHtml='<div class="cz-rider" style="border:1px solid var(--
 rider.map(function(i){return '<li>'+RT.esc(i.label)+(i.detail?' — '+RT.esc(i.detail):'')+(i.is_required?'':' (optional)')+'</li>';}).join('')+'</ul>'+
 (reqRider.length?'<label style="display:flex;gap:.5rem;align-items:flex-start"><input type="checkbox" data-ack /> <span>I have read and agree to these requirements.</span></label>':'')+'</div>';}
 box.innerHTML='<select class="cz-field" data-bt>'+types.map(function(t){return '<option value="'+RT.esc(t.id)+'">'+RT.esc(t.name)+' ('+t.duration_minutes+' min) · '+priceLabel(t)+'</option>';}).join('')+'</select>'+
-'<label class="cz-label">Start</label><input class="cz-field" type="datetime-local" data-when />'+
-'<div data-endwrap style="display:none"><label class="cz-label">End</label><input class="cz-field" type="datetime-local" data-end /></div>'+
-'<p class="cz-label" data-quote></p><p class="cz-label">Times in '+RT.esc(tz)+'</p>'+
+'<div data-slots style="margin:.5rem 0"><p style="color:var(--muted)">Loading times…</p></div>'+
 '<input class="cz-field" type="email" data-email placeholder="Your email" /><input class="cz-field" type="text" data-name placeholder="Your name" />'+
 riderHtml+
-'<button class="cz-btn cz-btn--solid cz-btn--block">Request booking</button><p class="cz-msg"></p>';
-var sb=box.querySelector('button'),msg=box.querySelector('.cz-msg'),btSel=box.querySelector('[data-bt]'),
-whenEl=box.querySelector('[data-when]'),endWrap=box.querySelector('[data-endwrap]'),endEl=box.querySelector('[data-end]'),quoteEl=box.querySelector('[data-quote]');
+'<button class="cz-btn cz-btn--solid cz-btn--block" data-go disabled>Select a time</button><p class="cz-msg"></p>';
+var sb=box.querySelector('[data-go]'),msg=box.querySelector('.cz-msg'),btSel=box.querySelector('[data-bt]'),slotWrap=box.querySelector('[data-slots]'),sel=null;
 function cur(){return byId[btSel.value];}
-function syncMode(){var t=cur();endWrap.style.display=(t&&t.pricing_mode==='hourly')?'block':'none';refreshQuote();}
-function refreshQuote(){var t=cur();if(!t){quoteEl.textContent='';return;}
-if(t.pricing_mode!=='hourly'){quoteEl.textContent=t.price_cents?('Price: '+RT.money(t.price_cents,'USD')):'';return;}
-if(!whenEl.value){quoteEl.textContent='Pick a start and end time for a quote.';return;}
-var body={booking_type_id:t.id,starts_at:whenEl.value};if(endEl.value)body.ends_at=endEl.value;
-RT.post('/booking-quote',body).then(function(q){quoteEl.textContent='Quote: '+RT.money(q.price_cents,'USD')+(q.requires_approval?' · subject to approval':'');}).catch(function(){quoteEl.textContent='';});}
-btSel.addEventListener('change',syncMode);whenEl.addEventListener('change',refreshQuote);endEl.addEventListener('change',refreshQuote);syncMode();
-sb.addEventListener('click',function(){var t=cur();var email=box.querySelector('[data-email]').value.trim(),w=whenEl.value;
-if(!email||!w){msg.textContent='Email and time required';msg.className='cz-msg err';return;}
+function loadSlots(){sel=null;sb.disabled=true;sb.textContent='Select a time';slotWrap.innerHTML='<p style="color:var(--muted)">Loading times…</p>';
+var t=cur();if(!t)return;
+RT.get('/booking-types/'+encodeURIComponent(t.id)+'/slots').then(function(d){var slots=(d&&d.slots)||[];
+if(!slots.length){slotWrap.innerHTML='<p style="color:var(--muted)">No open times in the next few weeks. Please check back soon.</p>';return;}
+var days=[],byDay={};slots.forEach(function(s){if(!byDay[s.date]){byDay[s.date]=[];days.push(s.date);}byDay[s.date].push(s);});
+slotWrap.innerHTML='<p class="cz-label">Pick a time ('+RT.esc(d.timezone||'')+')</p>'+days.map(function(dt){
+return '<div style="margin:.5rem 0"><div style="font-size:.82rem;color:var(--muted);margin-bottom:.3rem">'+RT.esc(byDay[dt][0].day_label)+'</div>'+
+'<div style="display:flex;flex-wrap:wrap;gap:.4rem">'+byDay[dt].map(function(s){var pl=s.price_cents?(' · '+RT.money(s.price_cents,'USD')):'';
+return '<button type="button" class="cz-slot" data-start="'+RT.esc(s.start)+'" data-end="'+RT.esc(s.end)+'" style="border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:var(--radius);padding:.4rem .7rem;font-size:.85rem;cursor:pointer">'+RT.esc(s.time_label)+pl+'</button>';
+}).join('')+'</div></div>';
+}).join('');
+slotWrap.querySelectorAll('.cz-slot').forEach(function(btn){btn.addEventListener('click',function(){
+slotWrap.querySelectorAll('.cz-slot').forEach(function(b){b.style.background='var(--surface)';b.style.color='var(--ink)';b.style.borderColor='var(--line)';});
+btn.style.background='var(--brand)';btn.style.color='var(--brand-fg)';btn.style.borderColor='var(--brand)';
+sel={start:btn.getAttribute('data-start'),end:btn.getAttribute('data-end')};sb.disabled=false;sb.textContent='Request booking';});});
+}).catch(function(){slotWrap.innerHTML='<p style="color:var(--muted)">Could not load times.</p>';});}
+btSel.addEventListener('change',loadSlots);loadSlots();
+sb.addEventListener('click',function(){var t=cur(),email=box.querySelector('[data-email]').value.trim();
+if(!sel){msg.textContent='Pick a time';msg.className='cz-msg err';return;}
+if(!email){msg.textContent='Email required';msg.className='cz-msg err';return;}
 var ackEl=box.querySelector('[data-ack]');if(ackEl&&!ackEl.checked){msg.textContent='Please agree to the requirements';msg.className='cz-msg err';return;}
-var body={booking_type_id:t.id,starts_at:w,customer_email:email,customer_name:box.querySelector('[data-name]').value.trim(),rider_acknowledged:ackEl?ackEl.checked:false};
-if(t.pricing_mode==='hourly'&&endEl.value)body.ends_at=endEl.value;
-sb.disabled=true;msg.textContent='Requesting...';msg.className='cz-msg';
+var body={booking_type_id:t.id,starts_at:sel.start,customer_email:email,customer_name:box.querySelector('[data-name]').value.trim(),rider_acknowledged:ackEl?ackEl.checked:false};
+if(t.pricing_mode==='hourly'&&sel.end)body.ends_at=sel.end;
+sb.disabled=true;msg.textContent='Requesting…';msg.className='cz-msg';
 RT.post('/bookings',body).then(function(res){var price=res.quoted_price_cents?(' — '+RT.money(res.quoted_price_cents,'USD')):'';
 var note=res.requires_approval?'Request sent for '+RT.esc(new Date(res.starts_at).toLocaleString())+price+'. The host will review and confirm by email.':'Booked for '+RT.esc(new Date(res.starts_at).toLocaleString())+price+'. A confirmation is on its way.';
 box.innerHTML='<p class="cz-msg ok">'+note+'</p>';
-}).catch(function(e){sb.disabled=false;msg.textContent=e.message;msg.className='cz-msg err';});});
+}).catch(function(e){sb.disabled=false;sb.textContent='Request booking';msg.textContent=e.message;msg.className='cz-msg err';});});
 }).catch(function(){box.innerHTML='<p style="color:var(--muted)">Unable to load.</p>';});})();"""
 
 
@@ -591,12 +601,14 @@ def _render_block(block, t):
 
 # ── document ──────────────────────────────────────────────────────────────
 
-def render_site_html(site: dict, page: dict, nav_pages: list[dict]) -> str:
+def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: bool = False) -> str:
     t = _tokens(site.get("theme_config"))
     c = t["colors"]
     slug = site.get("slug") or ""
     home_slug = nav_pages[0]["slug"] if nav_pages else "home"
-    cappe_ctx = _js_obj({"slug": slug, "api": f"/api/cappe/public/sites/{slug}"})
+    # `preview` flags the editor's sandboxed iframe (no same-origin = no live API
+    # fetch). Widgets read it to show a static placeholder instead of failing.
+    cappe_ctx = _js_obj({"slug": slug, "api": f"/api/cappe/public/sites/{slug}", "preview": bool(preview)})
 
     meta = site.get("meta_config") or {}
     logo = _safe_image(meta.get("logo_url")) if isinstance(meta, dict) else None
