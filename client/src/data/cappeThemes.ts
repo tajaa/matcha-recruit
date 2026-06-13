@@ -16,6 +16,33 @@ export type CappeThemePreset = {
   config: Record<string, unknown>
 }
 
+// Curated heading/body font pairings for the quick theme tweaks.
+export const FONT_PAIRINGS: { id: string; label: string; heading: string; body: string }[] = [
+  { id: 'inter', label: 'Inter / Inter', heading: 'Inter', body: 'Inter' },
+  { id: 'fraunces', label: 'Fraunces / Inter', heading: 'Fraunces', body: 'Inter' },
+  { id: 'playfair', label: 'Playfair / Inter', heading: 'Playfair Display', body: 'Inter' },
+  { id: 'sora', label: 'Sora / Inter', heading: 'Sora', body: 'Inter' },
+  { id: 'space', label: 'Space Grotesk / Inter', heading: 'Space Grotesk', body: 'Inter' },
+  { id: 'lora', label: 'Lora / Lora', heading: 'Lora', body: 'Lora' },
+]
+
+export const RADII: { value: string; label: string }[] = [
+  { value: 'none', label: 'Sharp' }, { value: 'sm', label: 'Small' },
+  { value: 'md', label: 'Medium' }, { value: 'lg', label: 'Large' },
+  { value: 'xl', label: 'XL' }, { value: '2xl', label: 'Rounded' },
+]
+
+/** Readable text color (black/white) for a given hex background. */
+export function contrastText(hex: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec((hex || '').trim())
+  if (!m) return '#ffffff'
+  const n = parseInt(m[1], 16)
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255
+  // Relative luminance (sRGB approximation).
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+  return lum > 0.6 ? '#10120a' : '#ffffff'
+}
+
 export const CAPPE_THEMES: CappeThemePreset[] = [
   {
     id: 'clean',

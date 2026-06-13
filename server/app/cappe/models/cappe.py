@@ -180,10 +180,14 @@ class CappePageUpdate(BaseModel):
 
 
 class CappePagePreview(BaseModel):
-    """Unsaved page content to render for the live editor preview."""
+    """Unsaved page content to render for the live editor preview.
+
+    `theme_config` lets the editor preview an unsaved theme (live theme
+    switching) — when omitted, the site's saved theme is used."""
     title: Optional[str] = Field(default=None, max_length=255)
     slug: Optional[str] = Field(default=None, max_length=160)
     content: dict[str, Any] = Field(default_factory=dict)
+    theme_config: Optional[dict[str, Any]] = None
 
 
 class CappePage(BaseModel):

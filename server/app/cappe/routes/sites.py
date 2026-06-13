@@ -161,7 +161,8 @@ async def preview_site_page(
     site_dict = {
         "name": site["name"],
         "slug": site["slug"],
-        "theme_config": loads(site["theme_config"]),
+        # Unsaved theme override (live theme switcher) wins over the saved theme.
+        "theme_config": body.theme_config if body.theme_config is not None else loads(site["theme_config"]),
         "meta_config": loads(site["meta_config"]),
     }
     nav = [{"slug": r["slug"], "title": r["title"]} for r in nav_rows] or [{"slug": "home", "title": "Home"}]
