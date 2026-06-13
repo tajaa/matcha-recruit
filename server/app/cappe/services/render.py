@@ -12,7 +12,7 @@ JS runtime that talks to the same-origin public API. All user content is escaped
 URLs are scheme-checked.
 
 Block types: hero, features, gallery, pricing, testimonial, cta, menu, posts,
-text, contact, store, booking, newsletter.
+stats, logos, faq, bento, split, text, contact, store, booking, newsletter.
 """
 import html
 import itertools
@@ -280,9 +280,71 @@ section{position:relative}
   font-size:.85rem;padding:2.5rem 0}
 .cz-footer .small{font-size:.75rem;opacity:.7;margin-top:.35rem}
 
+/* stats band */
+.cz-stats{padding:clamp(3rem,7vw,5rem) 0}
+.cz-stats-grid{display:grid;gap:1.5rem;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));max-width:62rem;margin:0 auto;text-align:center}
+.cz-stat{padding:1rem .5rem;position:relative}
+.cz-stat+.cz-stat::before{content:"";position:absolute;left:0;top:18%;bottom:18%;width:1px;background:var(--line)}
+.cz-stat__num{font-family:var(--font-h);font-weight:700;font-size:clamp(2.4rem,5vw,3.4rem);line-height:1;
+  background:linear-gradient(135deg,var(--brand),var(--accent));-webkit-background-clip:text;background-clip:text;color:transparent}
+.cz-stat__label{margin-top:.55rem;color:var(--muted);font-size:.92rem;letter-spacing:.01em}
+
+/* logo cloud */
+.cz-logos{padding:clamp(2.25rem,5vw,3.5rem) 0}
+.cz-logos__title{text-align:center;color:var(--muted);font-size:.74rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;margin:0 0 1.75rem}
+.cz-logos__row{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:1.5rem 3rem}
+.cz-logos__row img{height:28px;width:auto;filter:grayscale(1);opacity:.65;transition:opacity .2s,filter .2s}
+.cz-logos__row img:hover{filter:grayscale(0);opacity:1}
+.cz-logos__name{font-family:var(--font-h);font-weight:700;font-size:1.15rem;color:var(--muted);opacity:.8}
+
+/* faq (native accordion) */
+.cz-faq{padding:clamp(3rem,7vw,5rem) 0}
+.cz-faq__list{max-width:46rem;margin:0 auto;border-top:1px solid var(--line)}
+.cz-faq__item{border-bottom:1px solid var(--line)}
+.cz-faq__item summary{display:flex;justify-content:space-between;align-items:center;gap:1rem;cursor:pointer;
+  padding:1.3rem .25rem;font-family:var(--font-h);font-weight:600;font-size:1.12rem;color:var(--ink);list-style:none}
+.cz-faq__item summary::-webkit-details-marker{display:none}
+.cz-faq__item summary::after{content:"+";color:var(--brand);font-size:1.5rem;font-weight:300;line-height:1;transition:transform .25s}
+.cz-faq__item[open] summary::after{transform:rotate(45deg)}
+.cz-faq__item p{color:var(--muted);font-size:1.02rem;line-height:1.75;margin:0;padding:0 .25rem 1.4rem;max-width:42rem}
+
+/* bento grid */
+.cz-bento{padding:clamp(3rem,7vw,5rem) 0}
+.cz-bento-grid{display:grid;gap:1.1rem;grid-template-columns:repeat(2,1fr)}
+.cz-bento-cell{border:1px solid var(--line);background:var(--surface);border-radius:var(--radius);padding:1.7rem;
+  display:flex;flex-direction:column;justify-content:flex-end;min-height:190px;position:relative;overflow:hidden;
+  transition:transform .2s,border-color .2s}
+.cz-bento-cell:hover{transform:translateY(-3px);border-color:color-mix(in srgb,var(--brand) 40%,var(--line))}
+.cz-bento-cell--img{color:#fff;background-size:cover;background-position:center}
+.cz-bento-cell--img::before{content:"";position:absolute;inset:0;background:linear-gradient(transparent 30%,rgba(0,0,0,.72))}
+.cz-bento-cell--img>*{position:relative;z-index:1}
+.cz-bento-cell__icon{font-size:1.5rem;margin-bottom:auto}
+.cz-bento-cell h3{font-size:1.22rem;margin-bottom:.4rem}
+.cz-bento-cell p{color:var(--muted);font-size:.94rem;line-height:1.55}
+.cz-bento-cell--img p{color:rgba(255,255,255,.86)}
+
+/* split feature */
+.cz-split{padding:clamp(3rem,7vw,5rem) 0}
+.cz-split__grid{display:grid;gap:2.5rem;align-items:center}
+.cz-split__art{aspect-ratio:4/3;border-radius:var(--radius);overflow:hidden;background:linear-gradient(135deg,var(--brand),var(--accent))}
+.cz-split__art img{width:100%;height:100%;object-fit:cover}
+.cz-split__body h2{font-size:clamp(1.6rem,3.5vw,2.4rem);margin-bottom:1rem}
+.cz-split__body>.cz-eyebrow{margin-bottom:.9rem}
+.cz-split__body p{color:var(--muted);font-size:1.08rem;line-height:1.7}
+.cz-split__bullets{list-style:none;padding:0;margin:1.25rem 0 0;display:flex;flex-direction:column;gap:.7rem}
+.cz-split__bullets li{display:flex;gap:.6rem;color:var(--ink);font-size:1rem}
+.cz-split__bullets li::before{content:"✓";color:var(--brand);font-weight:700}
+.cz-split .cz-btn{margin-top:1.6rem}
+
 @media(min-width:768px){
   .cz-hero--split .cz-grid{grid-template-columns:1.1fr .9fr}
   .cz-hero--split{padding:clamp(4rem,8vw,7rem) 0}
+  .cz-bento-grid{grid-template-columns:repeat(4,1fr);grid-auto-rows:11rem}
+  .cz-bento-cell{grid-column:span 2}
+  .cz-bento-cell--wide{grid-column:span 4}
+  .cz-bento-cell--tall{grid-row:span 2}
+  .cz-split__grid{grid-template-columns:1fr 1fr}
+  .cz-split--reverse .cz-split__art{order:2}
 }
 @media(max-width:560px){.cz-nav{display:none}}
 """
@@ -404,6 +466,73 @@ def _posts(b, t):
         rows += (f'<article class="cz-post">{date}<h3><a href="{_esc(href)}">{_esc(i.get("title"))}</a></h3>'
                  f'<p>{_esc(i.get("excerpt"))}</p></article>')
     return f'<section class="cz-posts"><div class="cz-narrow">{_head(b)}{rows}</div></section>'
+
+
+def _stats(b, t):
+    cells = "".join(
+        f'<div class="cz-stat"><div class="cz-stat__num">{_esc(i.get("value"))}</div>'
+        f'<div class="cz-stat__label">{_esc(i.get("label"))}</div></div>'
+        for i in (b.get("items") or []) if isinstance(i, dict))
+    return f'<section class="cz-stats"><div class="cz-wrap">{_head(b)}<div class="cz-stats-grid">{cells}</div></div></section>'
+
+
+def _logos(b, t):
+    title = f'<p class="cz-logos__title">{_esc(b.get("heading") or "Trusted by")}</p>'
+    items = ""
+    for i in (b.get("items") or []):
+        if not isinstance(i, dict):
+            continue
+        u = _safe_image(i.get("image"))
+        if u:
+            items += f'<img src="{_esc(u)}" alt="{_esc(i.get("name"))}" />'
+        elif i.get("name"):
+            items += f'<span class="cz-logos__name">{_esc(i.get("name"))}</span>'
+    return f'<section class="cz-logos"><div class="cz-wrap">{title}<div class="cz-logos__row">{items}</div></div></section>'
+
+
+def _faq(b, t):
+    rows = ""
+    for i in (b.get("items") or []):
+        if not isinstance(i, dict) or not i.get("q"):
+            continue
+        rows += (f'<details class="cz-faq__item"><summary>{_esc(i.get("q"))}</summary>'
+                 f'<p>{_esc(i.get("a"))}</p></details>')
+    return f'<section class="cz-faq"><div class="cz-wrap">{_head(b)}<div class="cz-faq__list">{rows}</div></div></section>'
+
+
+def _bento(b, t):
+    cells = ""
+    for i in (b.get("items") or []):
+        if not isinstance(i, dict):
+            continue
+        span = str(i.get("span") or "").lower()
+        mod = " cz-bento-cell--wide" if span == "wide" else (" cz-bento-cell--tall" if span == "tall" else "")
+        icon = f'<div class="cz-bento-cell__icon">{_esc(i.get("icon"))}</div>' if i.get("icon") else ""
+        head = f'<h3>{_esc(i.get("title"))}</h3>' if i.get("title") else ""
+        body = f'<p>{_esc(i.get("body"))}</p>' if i.get("body") else ""
+        u = _safe_image(i.get("image"))
+        if u:
+            cells += (f'<div class="cz-bento-cell cz-bento-cell--img{mod}" '
+                      f'style="background-image:url(\'{u}\')">{icon}{head}{body}</div>')
+        else:
+            cells += f'<div class="cz-bento-cell{mod}">{icon}{head}{body}</div>'
+    return f'<section class="cz-bento"><div class="cz-wrap">{_head(b)}<div class="cz-bento-grid">{cells}</div></div></section>'
+
+
+def _split(b, t):
+    img = _safe_image(b.get("image"))
+    art = f'<img src="{_esc(img)}" alt="" />' if img else ""
+    eyebrow = f'<p class="cz-eyebrow">{_esc(b.get("eyebrow"))}</p>' if b.get("eyebrow") else ""
+    head = f'<h2>{_esc(b.get("heading"))}</h2>' if b.get("heading") else ""
+    body = f'<p>{_esc(b.get("body"))}</p>' if b.get("body") else ""
+    bl = [x for x in (b.get("bullets") or []) if x]
+    bullets = ('<ul class="cz-split__bullets">' + "".join(f'<li>{_esc(x)}</li>' for x in bl) + "</ul>") if bl else ""
+    cta = _btn(b.get("cta"), b.get("ctaHref")) if b.get("cta") else ""
+    mod = " cz-split--reverse" if b.get("reverse") else ""
+    return (f'<section class="cz-split{mod}"><div class="cz-wrap"><div class="cz-split__grid">'
+            f'<div class="cz-split__art">{art}</div>'
+            f'<div class="cz-split__body">{eyebrow}{head}{body}{bullets}{cta}</div>'
+            f'</div></div></section>')
 
 
 def _text(b, t):
@@ -585,6 +714,7 @@ def _contact(b, t):
 _RENDERERS = {
     "hero": _hero, "features": _features, "gallery": _gallery, "pricing": _pricing,
     "testimonial": _testimonial, "cta": _cta, "menu": _menu, "posts": _posts,
+    "stats": _stats, "logos": _logos, "faq": _faq, "bento": _bento, "split": _split,
     "text": _text, "contact": _contact, "store": _store, "booking": _booking, "newsletter": _newsletter,
 }
 

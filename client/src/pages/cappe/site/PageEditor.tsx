@@ -143,6 +143,79 @@ const BLOCK_SCHEMAS: Record<string, BlockSchema> = {
       }),
     ],
   },
+  stats: {
+    label: 'Stats band',
+    make: () => ({ type: 'stats', items: [
+      { value: '500+', label: 'Happy clients' },
+      { value: '10 yrs', label: 'Experience' },
+      { value: '98%', label: 'Would recommend' },
+    ] }),
+    fields: [
+      F('heading', 'Section heading'), F('subheading', 'Section subheading', 'textarea'),
+      F('items', 'Stats', 'list', {
+        addLabel: 'Add stat', newItem: () => ({ value: '', label: '' }),
+        item: [F('value', 'Number', 'text', { placeholder: '500+' }), F('label', 'Label')],
+      }),
+    ],
+  },
+  logos: {
+    label: 'Logo cloud',
+    make: () => ({ type: 'logos', heading: 'Trusted by', items: [{ name: 'Acme' }, { name: 'Globex' }, { name: 'Initech' }] }),
+    fields: [
+      F('heading', 'Eyebrow label', 'text', { placeholder: 'Trusted by' }),
+      F('items', 'Logos', 'list', {
+        addLabel: 'Add logo', newItem: () => ({ name: '' }),
+        item: [F('name', 'Name (used if no image)'), F('image', 'Logo image', 'image')],
+      }),
+    ],
+  },
+  faq: {
+    label: 'FAQ',
+    make: () => ({ type: 'faq', heading: 'Frequently asked', items: [
+      { q: 'How does it work?', a: 'Explain it here in a sentence or two.' },
+    ] }),
+    fields: [
+      F('heading', 'Section heading'), F('subheading', 'Section subheading', 'textarea'),
+      F('items', 'Questions', 'list', {
+        addLabel: 'Add question', newItem: () => ({ q: '', a: '' }),
+        item: [F('q', 'Question'), F('a', 'Answer', 'textarea')],
+      }),
+    ],
+  },
+  bento: {
+    label: 'Bento grid',
+    make: () => ({ type: 'bento', heading: 'Highlights', items: [
+      { title: 'Big idea', body: 'Your standout point.', span: 'wide' },
+      { title: 'Detail one', body: 'Supporting detail.' },
+      { title: 'Detail two', body: 'Supporting detail.' },
+    ] }),
+    fields: [
+      F('heading', 'Section heading'), F('subheading', 'Section subheading', 'textarea'),
+      F('items', 'Cells', 'list', {
+        addLabel: 'Add cell', newItem: () => ({ title: '', body: '' }),
+        item: [
+          F('icon', 'Icon / emoji'), F('title', 'Title'), F('body', 'Body', 'textarea'),
+          F('image', 'Background image', 'image'),
+          F('span', 'Size', 'select', { options: [
+            { value: 'normal', label: 'Normal' }, { value: 'wide', label: 'Wide (full row)' },
+            { value: 'tall', label: 'Tall' },
+          ] }),
+        ],
+      }),
+    ],
+  },
+  split: {
+    label: 'Split feature',
+    make: () => ({ type: 'split', heading: 'A focused feature', body: 'Describe one thing in depth, with an image alongside.', bullets: ['Benefit one', 'Benefit two'] }),
+    fields: [
+      F('eyebrow', 'Eyebrow (small label)'),
+      F('heading', 'Heading'), F('body', 'Body', 'textarea'),
+      F('image', 'Image', 'image'),
+      F('bullets', 'Bullet points', 'strlist'),
+      F('cta', 'Button label'), F('ctaHref', 'Button link'),
+      F('reverse', 'Image on right', 'bool'),
+    ],
+  },
   text: {
     label: 'Text',
     make: () => ({ type: 'text', body: 'Write something here.' }),
@@ -180,7 +253,7 @@ const BLOCK_SCHEMAS: Record<string, BlockSchema> = {
   },
 }
 
-const BLOCK_ORDER = ['hero', 'features', 'gallery', 'pricing', 'testimonial', 'cta', 'store', 'booking', 'menu', 'posts', 'text', 'contact', 'newsletter']
+const BLOCK_ORDER = ['hero', 'features', 'split', 'bento', 'stats', 'logos', 'gallery', 'pricing', 'testimonial', 'faq', 'cta', 'store', 'booking', 'menu', 'posts', 'text', 'contact', 'newsletter']
 
 // ── upload context (only ImageInput needs the siteId) ───────────────────────
 const SiteCtx = createContext<string>('')
