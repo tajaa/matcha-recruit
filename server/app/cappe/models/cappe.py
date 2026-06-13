@@ -114,6 +114,9 @@ class CappeSiteFromTemplate(BaseModel):
 
 class CappeSiteUpdate(BaseModel):
     name: Optional[str] = Field(default=None, max_length=255)
+    # The tenant subdomain (<sub>.gummfit.com). Editable after creation; the
+    # route slugifies + checks reserved/uniqueness before applying.
+    subdomain: Optional[str] = Field(default=None, max_length=140)
     custom_domain: Optional[str] = Field(default=None, max_length=255)
 
     _norm_domain = field_validator("custom_domain")(normalize_custom_domain)

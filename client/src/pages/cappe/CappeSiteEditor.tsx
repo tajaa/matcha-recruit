@@ -5,7 +5,7 @@ import { cappeApi } from '../../api/cappeClient'
 import ImageUpload from '../../components/cappe/ImageUpload'
 import SetupGuide from '../../components/cappe/SetupGuide'
 import { useCappeMe } from '../../hooks/useCappeMe'
-import { cappeSiteHost } from '../../utils/cappeHost'
+import { cappeSiteHost, CAPPE_HOST } from '../../utils/cappeHost'
 import type { CappePage, CappeSite } from '../../types/cappe'
 
 const statusStyle: Record<string, string> = {
@@ -25,6 +25,7 @@ export default function CappeSiteEditor() {
   const [notice, setNotice] = useState<string | null>(null)
 
   const [name, setName] = useState('')
+  const [subdomain, setSubdomain] = useState('')
   const [domain, setDomain] = useState('')
   const [logo, setLogo] = useState('')
   const [saving, setSaving] = useState(false)
@@ -42,6 +43,7 @@ export default function CappeSiteEditor() {
         setSite(s)
         setPages(p)
         setName(s.name)
+        setSubdomain(s.subdomain || s.slug)
         setDomain(s.custom_domain || '')
         setLogo((s.meta_config?.logo_url as string) || '')
       })
@@ -54,12 +56,17 @@ export default function CappeSiteEditor() {
     setSaving(true)
     setError(null)
     try {
-      const updated = await cappeApi.put<CappeSite>(`/sites/${siteId}`, {
+      const body: Record<string, unknown> = {
         name,
         custom_domain: domain || null,
         meta_config: { ...(site?.meta_config || {}), logo_url: logo.trim() || null },
-      })
+      }
+      // Only send subdomain when it actually changed (avoids a needless slug
+      // churn + uniqueness check on every save).
+      if (subdomain && subdomain !== (site?.subdomain || site?.slug)) body.subdomain = subdomain
+      const updated = await cappeApi.put<CappeSite>(`/sites/${siteId}`, body)
       setSite(updated)
+      setSubdomain(updated.subdomain || updated.slug)
       setNotice('Saved.')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save')
@@ -198,6 +205,19 @@ export default function CappeSiteEditor() {
               onChange={(e) => setName(e.target.value)}
               className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
             />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-zinc-300">Web address</label>
+            <div className="flex items-center rounded-lg border border-zinc-700 bg-zinc-950 focus-within:border-emerald-500">
+              <input
+                value={subdomain}
+                onChange={(e) => setSubdomain(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))}
+                placeholder="your-name"
+                className="min-w-0 flex-1 rounded-l-lg bg-transparent px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none"
+              />
+              <span className="shrink-0 px-3 text-sm text-zinc-500">.{CAPPE_HOST}</span>
+            </div>
+            <p className="mt-1 text-xs text-zinc-500">This is your site's public URL. Save to apply.</p>
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-zinc-300">Logo</label>

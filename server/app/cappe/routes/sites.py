@@ -201,6 +201,22 @@ async def update_site(
 
         if body.name is not None:
             add("name", body.name)
+        if body.subdomain is not None:
+            # Slugify + keep off reserved labels, then ensure it's free across
+            # OTHER sites. slug doubles as the tenant subdomain — set both.
+            base = safe_subdomain_base(body.subdomain)
+            if not base:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Enter a valid subdomain")
+            taken = await conn.fetchval(
+                "SELECT 1 FROM cappe_sites WHERE slug = $1 AND id <> $2", base, site_id,
+            )
+            if taken:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"“{base}” is taken — pick another subdomain.",
+                )
+            add("slug", base)
+            add("subdomain", base)
         if body.custom_domain is not None:
             add("custom_domain", body.custom_domain or None)
         if body.theme_config is not None:
@@ -227,9 +243,12 @@ async def update_site(
                     RETURNING {_SITE_COLS}""",
                 *args,
             )
-        except Exception as exc:  # unique custom_domain collision, etc.
-            if "cappe_sites_custom_domain_key" in str(exc):
+        except Exception as exc:  # unique custom_domain / slug collision, etc.
+            s = str(exc)
+            if "cappe_sites_custom_domain_key" in s:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Domain already in use")
+            if "slug" in s and "unique" in s.lower():
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That subdomain is taken")
             raise
     await invalidate_render_cache(site_id)
     return site_row_to_dict(row)
