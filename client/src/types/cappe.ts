@@ -32,6 +32,20 @@ export type CappeSignupResponse = {
   account?: CappeAccount
 }
 
+export type CappeReadinessItem = {
+  key: string
+  label: string
+  hint: string
+  done: boolean
+  required: boolean
+  action: string | null
+}
+
+export type CappeReadiness = {
+  ready: boolean
+  items: CappeReadinessItem[]
+}
+
 export type CappeSiteStatus = 'draft' | 'published' | 'archived'
 
 export type CappeSite = {

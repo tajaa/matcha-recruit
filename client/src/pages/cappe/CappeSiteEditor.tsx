@@ -4,7 +4,6 @@ import { Loader2, ArrowLeft, Plus, Trash2, Rocket, Save, Globe, Pencil } from 'l
 import { cappeApi } from '../../api/cappeClient'
 import ImageUpload from '../../components/cappe/ImageUpload'
 import SetupGuide from '../../components/cappe/SetupGuide'
-import { useCappeMe } from '../../hooks/useCappeMe'
 import { cappeSiteHost, CAPPE_HOST } from '../../utils/cappeHost'
 import type { CappePage, CappeSite } from '../../types/cappe'
 
@@ -17,7 +16,6 @@ const statusStyle: Record<string, string> = {
 export default function CappeSiteEditor() {
   const { siteId } = useParams<{ siteId: string }>()
   const navigate = useNavigate()
-  const { account } = useCappeMe()
   const [site, setSite] = useState<CappeSite | null>(null)
   const [pages, setPages] = useState<CappePage[]>([])
   const [loading, setLoading] = useState(true)
@@ -30,6 +28,7 @@ export default function CappeSiteEditor() {
   const [logo, setLogo] = useState('')
   const [saving, setSaving] = useState(false)
   const [publishing, setPublishing] = useState(false)
+  const [setupRefresh, setSetupRefresh] = useState(0)
   const [newPageTitle, setNewPageTitle] = useState('')
   const [addingPage, setAddingPage] = useState(false)
 
@@ -67,6 +66,7 @@ export default function CappeSiteEditor() {
       const updated = await cappeApi.put<CappeSite>(`/sites/${siteId}`, body)
       setSite(updated)
       setSubdomain(updated.subdomain || updated.slug)
+      setSetupRefresh((n) => n + 1) // re-check the launch checklist after edits
       setNotice('Saved.')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save')
@@ -192,7 +192,7 @@ export default function CappeSiteEditor() {
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
       {notice && <p className="mb-4 text-sm text-emerald-400">{notice}</p>}
 
-      <SetupGuide site={site} accountType={account?.account_type} publishing={publishing} onPublish={publish} />
+      <SetupGuide site={site} pages={pages} publishing={publishing} onPublish={publish} refreshKey={setupRefresh} />
 
       {/* Settings */}
       <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-6">

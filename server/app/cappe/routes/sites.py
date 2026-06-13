@@ -11,11 +11,13 @@ from ..dependencies import require_cappe_account
 from ..models.cappe import (
     CappeAccount,
     CappePagePreview,
+    CappeReadiness,
     CappeSite,
     CappeSiteCreate,
     CappeSiteFromTemplate,
     CappeSiteUpdate,
 )
+from ..services.readiness import compute_readiness
 from ..services.render import render_site_html
 from .render import invalidate_render_cache, tenant_security_headers
 from ._shared import (
@@ -265,11 +267,30 @@ async def delete_site(site_id: UUID, account: CappeAccount = Depends(require_cap
     await invalidate_render_cache(site_id)
 
 
+@router.get("/sites/{site_id}/readiness", response_model=CappeReadiness)
+async def site_readiness(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    """The launch checklist — what's done and what still blocks publishing."""
+    async with get_connection() as conn:
+        site = await get_owned_site(conn, site_id, account.id)
+        return await compute_readiness(conn, site_id, site)
+
+
 @router.post("/sites/{site_id}/publish", response_model=CappeSite)
 async def publish_site(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
-    """Mark a site (and its pages) published."""
+    """Mark a site (and its pages) published — gated on the launch checklist."""
     async with get_connection() as conn:
-        await get_owned_site(conn, site_id, account.id)
+        site = await get_owned_site(conn, site_id, account.id)
+        # Publish gate: every REQUIRED checklist item must be done first.
+        readiness = await compute_readiness(conn, site_id, site)
+        if not readiness["ready"]:
+            missing = [i["label"] for i in readiness["items"] if i["required"] and not i["done"]]
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "message": "Finish these before publishing: " + "; ".join(missing),
+                    "missing": missing,
+                },
+            )
         async with conn.transaction():
             row = await conn.fetchrow(
                 f"""UPDATE cappe_sites

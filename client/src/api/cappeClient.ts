@@ -86,7 +86,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const errBody = await res.json().catch(() => null)
     let msg: string
     if (errBody?.detail) {
-      msg = typeof errBody.detail === 'string' ? errBody.detail : JSON.stringify(errBody.detail)
+      const d = errBody.detail
+      // detail may be a string, or an object like {message, missing} (publish gate).
+      msg = typeof d === 'string' ? d : (d?.message || JSON.stringify(d))
     } else if (res.status >= 500) {
       msg = 'Server error — try again in a moment.'
     } else {

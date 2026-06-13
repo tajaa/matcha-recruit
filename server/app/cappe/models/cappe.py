@@ -126,6 +126,22 @@ class CappeSiteUpdate(BaseModel):
     timezone: Optional[str] = Field(default=None, max_length=64)
 
 
+class CappeReadinessItem(BaseModel):
+    """One launch-checklist row. `action` is a relative hint the UI turns into
+    a deep link (e.g. 'shop', 'pages', 'settings')."""
+    key: str
+    label: str
+    hint: str
+    done: bool
+    required: bool
+    action: Optional[str] = None
+
+
+class CappeReadiness(BaseModel):
+    ready: bool                       # all REQUIRED items done → publishable
+    items: list[CappeReadinessItem] = Field(default_factory=list)
+
+
 class CappeSite(BaseModel):
     id: UUID
     account_id: UUID
