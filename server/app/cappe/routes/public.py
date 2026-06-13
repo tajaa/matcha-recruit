@@ -8,7 +8,7 @@ recomputed server-side. A site must be `published` to expose any public surface.
 """
 import json
 import os
-from datetime import timezone
+from datetime import date, timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -18,6 +18,7 @@ from ...core.services.email._shared import _is_reserved_test_domain
 from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...database import get_connection
 from ..services.commerce import booking_quote_cents, booking_times, order_subtotal
+from ..services.discounts import apply_discount_cents, best_discount_percent
 from ..services.slots import generate_slots
 from ..models.cappe import (
     CappeBookingQuote,
@@ -65,6 +66,32 @@ async def _site_rider(conn, site_id) -> list[dict]:
         site_id,
     )
     return [dict(r) for r in rows]
+
+
+async def _active_discounts(conn, site_id) -> list[dict]:
+    """Active discounts for a site, shaped for services.discounts."""
+    rows = await conn.fetch(
+        "SELECT percent_off, scope, target_id, active, starts_on, ends_on "
+        "FROM cappe_discounts WHERE site_id = $1 AND active = true",
+        site_id,
+    )
+    return [
+        {
+            "percent_off": r["percent_off"], "scope": r["scope"],
+            "target_id": str(r["target_id"]) if r["target_id"] else None,
+            "active": r["active"], "starts_on": r["starts_on"], "ends_on": r["ends_on"],
+        }
+        for r in rows
+    ]
+
+
+def _site_today(now_utc, tz_name) -> date:
+    """Today's date in the site's timezone — discount eligibility is judged on
+    when the booking/order is *made*, not the appointment date."""
+    try:
+        return now_utc.astimezone(ZoneInfo(tz_name or "UTC")).date()
+    except Exception:
+        return now_utc.astimezone(timezone.utc).date()
 
 
 async def _published_site(conn, slug: str):
@@ -126,7 +153,19 @@ async def public_products(slug: str, request: Request):
             "WHERE site_id = $1 AND status = 'active' ORDER BY sort_order, created_at",
             site["id"],
         )
-    return [{**dict(r), "intake_fields": loads_list(r["intake_fields"])} for r in rows]
+        discounts = await _active_discounts(conn, site["id"])
+        now_utc = await conn.fetchval("SELECT NOW()")
+    today = _site_today(now_utc, site["timezone"])
+    out = []
+    for r in rows:
+        pct = best_discount_percent(discounts, kind="product", target_id=str(r["id"]), on_date=today)
+        out.append({
+            **dict(r),
+            "intake_fields": loads_list(r["intake_fields"]),
+            "discount_percent": pct,
+            "discounted_price_cents": apply_discount_cents(r["price_cents"], pct) if pct else None,
+        })
+    return out
 
 
 def _validate_intake(intake_fields: list, answers: dict) -> None:
@@ -216,6 +255,14 @@ async def _create_booking_in_tx(
     quote_cents = booking_quote_cents(
         btype.get("price_cents") or 0, pricing_mode, bt["local_start"], bt["local_end"], rules
     )
+    # Apply the best active discount (scope 'all' or this booking type), judged
+    # on the booking-made date in the site's timezone.
+    discounts = await _active_discounts(conn, site["id"])
+    pct = best_discount_percent(
+        discounts, kind="booking_type", target_id=str(btype["id"]),
+        on_date=_site_today(now_utc, site["timezone"]),
+    )
+    quote_cents = apply_discount_cents(quote_cents, pct)
 
     # Approval-required types land 'pending' (the creator's queue); others
     # auto-confirm so an open calendar books straight through.
@@ -255,6 +302,8 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
 
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
+        discounts = await _active_discounts(conn, site["id"])
+        today = _site_today(await conn.fetchval("SELECT NOW()"), site["timezone"])
         async with conn.transaction():
             order_currency = None
             order_requires_approval = False  # any line needing creator review holds the whole order
@@ -317,8 +366,13 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
                     )
                     booking_id = booking["id"]
 
+                # Best active product discount → charged unit price (authoritative).
+                dpct = best_discount_percent(
+                    discounts, kind="product", target_id=str(item.product_id), on_date=today,
+                )
+                unit_price = apply_discount_cents(product["price_cents"], dpct)
                 line_rows.append(
-                    (item.product_id, product["name"], product["price_cents"], qty, f, intake, booking_id)
+                    (item.product_id, product["name"], unit_price, qty, f, intake, booking_id)
                 )
 
             subtotal = order_subtotal((unit, qty) for (_, _, unit, qty, *_rest) in line_rows)
@@ -552,6 +606,7 @@ async def public_booking_slots(
             site["id"], type_id,
         )
         rules = await _site_rate_rules(conn, site["id"], type_id)
+        discounts = await _active_discounts(conn, site["id"])
         now_utc = await conn.fetchval("SELECT NOW()")
 
     availability = [
@@ -571,11 +626,21 @@ async def public_booking_slots(
     }
     busy = [(b["starts_at"], b["ends_at"]) for b in booked]
     slots = generate_slots(availability, btype_d, busy, site["timezone"], now_utc, rules, days_ahead=days)
+    # Apply the best active discount so each chip already shows the sale price.
+    pct = best_discount_percent(
+        discounts, kind="booking_type", target_id=str(type_id),
+        on_date=_site_today(now_utc, site["timezone"]),
+    )
+    if pct:
+        for s in slots:
+            s["original_price_cents"] = s["price_cents"]
+            s["price_cents"] = apply_discount_cents(s["price_cents"], pct)
     return {
         "timezone": site["timezone"],
         "duration_minutes": btype["duration_minutes"],
         "pricing_mode": btype["pricing_mode"],
         "requires_approval": bool(btype["requires_approval"]),
+        "discount_percent": pct,
         "slots": slots,
     }
 
@@ -654,9 +719,17 @@ async def public_booking_quote(slug: str, body: CappeBookingQuoteRequest, reques
         quote = booking_quote_cents(
             btype["price_cents"] or 0, pricing_mode, bt["local_start"], bt["local_end"], rules
         )
+        discounts = await _active_discounts(conn, site["id"])
+        now_utc = await conn.fetchval("SELECT NOW()")
+    pct = best_discount_percent(
+        discounts, kind="booking_type", target_id=str(btype["id"]),
+        on_date=_site_today(now_utc, site["timezone"]),
+    )
+    final = apply_discount_cents(quote, pct)
     return CappeBookingQuote(
-        price_cents=quote, currency="USD", pricing_mode=pricing_mode,
+        price_cents=final, currency="USD", pricing_mode=pricing_mode,
         requires_approval=bool(btype["requires_approval"]), duration_minutes=int(duration_min),
+        original_price_cents=quote if pct else None, discount_percent=pct,
     )
 
 

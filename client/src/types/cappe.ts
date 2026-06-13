@@ -123,6 +123,8 @@ export type CappeProduct = {
   intake_fields: CappeFormField[]
   created_at: string
   updated_at: string
+  discount_percent?: number
+  discounted_price_cents?: number | null
 }
 
 export type CappeProductInput = {
@@ -285,6 +287,31 @@ export type CappeRiderItem = {
   is_required: boolean
   sort_order: number
   created_at: string
+}
+
+export type CappeDiscountScope = 'all' | 'booking_type' | 'product'
+
+export type CappeDiscount = {
+  id: string
+  site_id: string
+  label: string
+  percent_off: number
+  scope: CappeDiscountScope
+  target_id: string | null
+  active: boolean
+  starts_on: string | null
+  ends_on: string | null
+  created_at: string
+}
+
+export type CappeDiscountInput = {
+  label: string
+  percent_off: number
+  scope: CappeDiscountScope
+  target_id: string | null
+  active: boolean
+  starts_on: string | null
+  ends_on: string | null
 }
 
 export type CappeRiderItemInput = {

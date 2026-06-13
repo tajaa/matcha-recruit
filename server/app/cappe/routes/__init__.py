@@ -11,6 +11,7 @@ from .auth import router as auth_router
 from .blog import router as blog_router
 from .bookings import router as bookings_router
 from .clients import router as clients_router
+from .discounts import router as discounts_router
 from .forms import router as forms_router
 from .messages import router as messages_router
 from .newsletter import router as newsletter_router
@@ -36,6 +37,7 @@ cappe_router.include_router(shop_router)
 cappe_router.include_router(newsletter_router)
 cappe_router.include_router(forms_router)
 cappe_router.include_router(bookings_router)
+cappe_router.include_router(discounts_router)
 cappe_router.include_router(rider_router)
 cappe_router.include_router(messages_router)
 cappe_router.include_router(clients_router)

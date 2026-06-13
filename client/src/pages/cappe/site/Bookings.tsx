@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Loader2, Plus, Trash2, Calendar, Save, Check, X, Lock, Clock, ShieldCheck } from 'lucide-react'
+import { Loader2, Plus, Trash2, Calendar, Save, Check, X, Lock, Clock, ShieldCheck, List, Percent } from 'lucide-react'
 import { cappeApi } from '../../../api/cappeClient'
 import { useCappeMe } from '../../../hooks/useCappeMe'
 import SurfaceShell, { WEEKDAYS } from '../../../components/cappe/SurfaceShell'
+import BookingsCalendar from '../../../components/cappe/BookingsCalendar'
 import type {
   CappeBooking, CappeBookingType, CappeAvailabilitySlot,
   CappeRateRule, CappeRiderItem, CappePricingMode,
+  CappeDiscount, CappeProduct,
 } from '../../../types/cappe'
 
 const hhmm = (t: string) => t.slice(0, 5)
@@ -29,15 +31,19 @@ export default function Bookings() {
   const [bookings, setBookings] = useState<CappeBooking[]>([])
   const [rules, setRules] = useState<CappeRateRule[]>([])
   const [rider, setRider] = useState<CappeRiderItem[]>([])
+  const [products, setProducts] = useState<CappeProduct[]>([])
+  const [discounts, setDiscounts] = useState<CappeDiscount[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [view, setView] = useState<'calendar' | 'list'>('calendar')
   const [typeForm, setTypeForm] = useState({
-    name: '', duration_minutes: '30', pricing_mode: 'flat' as CappePricingMode,
+    name: '', description: '', duration_minutes: '30', pricing_mode: 'flat' as CappePricingMode,
     price: '', requires_approval: false,
   })
   const [savingAvail, setSavingAvail] = useState(false)
   const [savingRules, setSavingRules] = useState(false)
   const [savingRider, setSavingRider] = useState(false)
+  const [savingDiscounts, setSavingDiscounts] = useState(false)
 
   const isCreator = account?.account_type === 'personal'
   const riderUnlocked = isCreator && account?.plan === 'pro'
@@ -49,8 +55,12 @@ export default function Bookings() {
       cappeApi.get<CappeBooking[]>(`/sites/${siteId}/bookings`),
       cappeApi.get<CappeRateRule[]>(`/sites/${siteId}/rate-rules`).catch(() => []),
       cappeApi.get<CappeRiderItem[]>(`/sites/${siteId}/rider`).catch(() => []),
+      cappeApi.get<CappeProduct[]>(`/sites/${siteId}/products`).catch(() => []),
+      cappeApi.get<CappeDiscount[]>(`/sites/${siteId}/discounts`).catch(() => []),
     ])
-      .then(([t, a, b, r, rd]) => { setTypes(t); setSlots(a); setBookings(b); setRules(r); setRider(rd) })
+      .then(([t, a, b, r, rd, p, d]) => {
+        setTypes(t); setSlots(a); setBookings(b); setRules(r); setRider(rd); setProducts(p); setDiscounts(d)
+      })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false))
   }, [siteId])
@@ -60,13 +70,14 @@ export default function Bookings() {
     if (!typeForm.name.trim()) return
     const created = await cappeApi.post<CappeBookingType>(`/sites/${siteId}/booking-types`, {
       name: typeForm.name.trim(),
+      description: typeForm.description.trim() || null,
       duration_minutes: parseInt(typeForm.duration_minutes, 10) || 30,
       pricing_mode: typeForm.pricing_mode,
       price_cents: Math.round((parseFloat(typeForm.price) || 0) * 100),
       requires_approval: typeForm.requires_approval,
     })
     setTypes((t) => [...t, created])
-    setTypeForm({ name: '', duration_minutes: '30', pricing_mode: 'flat', price: '', requires_approval: false })
+    setTypeForm({ name: '', description: '', duration_minutes: '30', pricing_mode: 'flat', price: '', requires_approval: false })
   }
 
   async function patchType(id: string, patch: Partial<CappeBookingType>) {
@@ -158,6 +169,41 @@ export default function Bookings() {
     }
   }
 
+  // --- Discounts ---
+  function addDiscount() {
+    setDiscounts((d) => [...d, {
+      id: `tmp-${d.length}`, site_id: siteId!, label: 'Slow-week special',
+      percent_off: 15, scope: 'all', target_id: null, active: true,
+      starts_on: null, ends_on: null, created_at: '',
+    }])
+  }
+  function setDiscount(i: number, patch: Partial<CappeDiscount>) {
+    setDiscounts((d) => d.map((x, idx) => (idx === i ? { ...x, ...patch } : x)))
+  }
+  async function saveDiscounts() {
+    setSavingDiscounts(true)
+    setError(null)
+    try {
+      const payload = {
+        discounts: discounts.map((d) => ({
+          label: d.label || 'Discount',
+          percent_off: Math.max(1, Math.min(90, Math.round(d.percent_off) || 1)),
+          scope: d.scope,
+          target_id: d.scope === 'all' ? null : d.target_id,
+          active: d.active,
+          starts_on: d.starts_on || null,
+          ends_on: d.ends_on || null,
+        })),
+      }
+      const saved = await cappeApi.put<CappeDiscount[]>(`/sites/${siteId}/discounts`, payload)
+      setDiscounts(saved)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save discounts')
+    } finally {
+      setSavingDiscounts(false)
+    }
+  }
+
   // --- Booking actions ---
   async function acceptBooking(b: CappeBooking) {
     const updated = await cappeApi.post<CappeBooking>(`/sites/${siteId}/bookings/${b.id}/accept`)
@@ -212,11 +258,43 @@ export default function Bookings() {
         </section>
       )}
 
+      {/* Schedule — calendar / list of all bookings */}
+      <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-zinc-100">Your schedule</h2>
+          <div className="flex items-center gap-0.5 rounded-lg border border-zinc-700 p-0.5">
+            <button onClick={() => setView('calendar')} className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium ${view === 'calendar' ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}><Calendar className="h-3.5 w-3.5" /> Calendar</button>
+            <button onClick={() => setView('list')} className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium ${view === 'list' ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}><List className="h-3.5 w-3.5" /> List</button>
+          </div>
+        </div>
+        {view === 'calendar' ? (
+          <BookingsCalendar bookings={bookings} availability={slots} types={types} onAccept={acceptBooking} onDecline={declineBooking} onStatus={setBookingStatus} />
+        ) : bookings.length === 0 ? (
+          <p className="flex items-center gap-2 text-sm text-zinc-400"><Calendar className="h-4 w-4" /> No bookings yet.</p>
+        ) : (
+          <ul className="divide-y divide-zinc-800">
+            {bookings.map((b) => (
+              <li key={b.id} className="flex items-center gap-3 py-2 text-sm">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-zinc-200">{b.customer_email || 'No email'} <span className="text-zinc-500">{money(b.quoted_price_cents)}</span></div>
+                  <div className="text-xs text-zinc-400">{new Date(b.starts_at).toLocaleString()}</div>
+                </div>
+                <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${statusStyle[b.status]}`}>{b.status}</span>
+                <select value={b.status} onChange={(e) => setBookingStatus(b, e.target.value)} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100">
+                  {['pending', 'confirmed', 'cancelled', 'completed'].map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       {/* Booking types */}
       <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
         <h2 className="mb-3 text-sm font-semibold text-zinc-100">Appointment types</h2>
         <form onSubmit={addType} className="mb-4 grid gap-2 sm:grid-cols-2">
-          <input value={typeForm.name} onChange={(e) => setTypeForm({ ...typeForm, name: e.target.value })} placeholder="e.g. Wedding shoot" className={inputCls} />
+          <input value={typeForm.name} onChange={(e) => setTypeForm({ ...typeForm, name: e.target.value })} placeholder="Name — e.g. Wedding shoot" className={inputCls} />
+          <input value={typeForm.description} onChange={(e) => setTypeForm({ ...typeForm, description: e.target.value })} placeholder="Short description (optional)" className={`sm:col-span-2 ${inputCls}`} />
           <div className="flex gap-2">
             <input value={typeForm.duration_minutes} onChange={(e) => setTypeForm({ ...typeForm, duration_minutes: e.target.value })} type="number" min="1" placeholder="min" className={`w-24 ${inputCls}`} />
             <select value={typeForm.pricing_mode} onChange={(e) => setTypeForm({ ...typeForm, pricing_mode: e.target.value as CappePricingMode })} className={inputCls}>
@@ -240,6 +318,7 @@ export default function Bookings() {
                 <div className="min-w-0 flex-1">
                   <span className="text-zinc-200">{t.name}</span>
                   <span className="text-zinc-400"> · {t.duration_minutes} min · {t.pricing_mode === 'hourly' ? `${money(t.price_cents)}/hr` : money(t.price_cents)}</span>
+                  {t.description && <div className="truncate text-xs text-zinc-500">{t.description}</div>}
                 </div>
                 <label className="flex items-center gap-1.5 text-xs text-zinc-400">
                   <input type="checkbox" checked={t.requires_approval} onChange={(e) => patchType(t.id, { requires_approval: e.target.checked })} className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-950 text-emerald-500" />
@@ -318,6 +397,71 @@ export default function Bookings() {
         </div>
       </section>
 
+      {/* Discounts — promotional markdowns */}
+      <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100"><Percent className="h-4 w-4 text-emerald-400" /> Discounts</h2>
+        <p className="mb-3 mt-1 text-xs text-zinc-500">
+          Quiet week? Drop a discount across <span className="text-zinc-300">all offerings</span> or a single service/product.
+          Leave dates blank to run until you turn it off. The best single discount applies — they don't stack.
+        </p>
+        <div className="space-y-2">
+          {discounts.map((d, i) => {
+            const targetValue = d.scope === 'all' ? 'all' : `${d.scope === 'booking_type' ? 'bt' : 'pr'}:${d.target_id ?? ''}`
+            return (
+              <div key={d.id} className="flex flex-wrap items-center gap-2">
+                <input value={d.label} onChange={(e) => setDiscount(i, { label: e.target.value })} placeholder="Label (e.g. Slow-week special)" className={`w-44 ${inputCls}`} />
+                <div className="flex items-center gap-1">
+                  <input type="number" min="1" max="90" value={d.percent_off} onChange={(e) => setDiscount(i, { percent_off: parseInt(e.target.value, 10) || 0 })} className={`w-16 ${inputCls}`} />
+                  <span className="text-sm text-zinc-400">% off</span>
+                </div>
+                <select
+                  value={targetValue}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    if (v === 'all') setDiscount(i, { scope: 'all', target_id: null })
+                    else if (v.startsWith('bt:')) setDiscount(i, { scope: 'booking_type', target_id: v.slice(3) })
+                    else setDiscount(i, { scope: 'product', target_id: v.slice(3) })
+                  }}
+                  className={inputCls}
+                >
+                  <option value="all">All offerings</option>
+                  {types.length > 0 && (
+                    <optgroup label="Services">
+                      {types.map((t) => <option key={t.id} value={`bt:${t.id}`}>{t.name}</option>)}
+                    </optgroup>
+                  )}
+                  {products.length > 0 && (
+                    <optgroup label="Products">
+                      {products.map((p) => <option key={p.id} value={`pr:${p.id}`}>{p.name}</option>)}
+                    </optgroup>
+                  )}
+                </select>
+                <label className="flex items-center gap-1 text-xs text-zinc-400" title="Start date (optional)">
+                  <span className="text-zinc-500">from</span>
+                  <input type="date" value={d.starts_on ?? ''} onChange={(e) => setDiscount(i, { starts_on: e.target.value || null })} className={inputCls} />
+                </label>
+                <label className="flex items-center gap-1 text-xs text-zinc-400" title="End date (optional)">
+                  <span className="text-zinc-500">to</span>
+                  <input type="date" value={d.ends_on ?? ''} onChange={(e) => setDiscount(i, { ends_on: e.target.value || null })} className={inputCls} />
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-zinc-400">
+                  <input type="checkbox" checked={d.active} onChange={(e) => setDiscount(i, { active: e.target.checked })} className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-950 text-emerald-500" />
+                  Active
+                </label>
+                <button type="button" onClick={() => setDiscounts((ds) => ds.filter((_, idx) => idx !== i))} className="text-zinc-400 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
+              </div>
+            )
+          })}
+          {discounts.length === 0 && <p className="text-sm text-zinc-400">No discounts running.</p>}
+        </div>
+        <div className="mt-3 flex gap-2">
+          <button onClick={addDiscount} className="text-xs font-medium text-emerald-400 hover:underline">+ Add discount</button>
+          <button onClick={saveDiscounts} disabled={savingDiscounts} className="ml-auto flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-60">
+            {savingDiscounts ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save discounts
+          </button>
+        </div>
+      </section>
+
       {/* Rider — Pro creators only */}
       {isCreator && (
         <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
@@ -357,28 +501,6 @@ export default function Bookings() {
         </section>
       )}
 
-      {/* All bookings */}
-      <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
-        <h2 className="mb-3 text-sm font-semibold text-zinc-100">All bookings</h2>
-        {bookings.length === 0 ? (
-          <p className="flex items-center gap-2 text-sm text-zinc-400"><Calendar className="h-4 w-4" /> No bookings yet.</p>
-        ) : (
-          <ul className="divide-y divide-zinc-800">
-            {bookings.map((b) => (
-              <li key={b.id} className="flex items-center gap-3 py-2 text-sm">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-zinc-200">{b.customer_email || 'No email'} <span className="text-zinc-500">{money(b.quoted_price_cents)}</span></div>
-                  <div className="text-xs text-zinc-400">{new Date(b.starts_at).toLocaleString()}</div>
-                </div>
-                <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${statusStyle[b.status]}`}>{b.status}</span>
-                <select value={b.status} onChange={(e) => setBookingStatus(b, e.target.value)} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100">
-                  {['pending', 'confirmed', 'cancelled', 'completed'].map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
     </SurfaceShell>
   )
 }

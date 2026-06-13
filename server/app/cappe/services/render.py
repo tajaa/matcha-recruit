@@ -593,7 +593,7 @@ host.innerHTML='<p class="cz-msg ok">Order placed. We will email you'+(p.fulfill
 RT.get('/products').then(function(items){if(!items.length){box.innerHTML='<p style="color:var(--muted)">No products yet.</p>';return;}box.innerHTML='';
 items.forEach(function(p){var c=document.createElement('div');c.className='cz-product';
 var iu=RT.url(p.image_url);var img=iu?'<img class="cz-product__img" src="'+RT.esc(iu)+'" alt="" />':'';
-var price=p.price_cents?RT.money(p.price_cents,p.currency):'Free';var lbl=p.fulfillment==='booking'?'Book':'Buy';
+var price;if(p.discount_percent&&p.discounted_price_cents!=null){price='<span style="text-decoration:line-through;opacity:.5;margin-right:.35rem">'+RT.money(p.price_cents,p.currency)+'</span>'+RT.money(p.discounted_price_cents,p.currency)+' <span style="color:var(--brand);font-size:.8em">'+p.discount_percent+'% off</span>';}else{price=p.price_cents?RT.money(p.price_cents,p.currency):'Free';}var lbl=p.fulfillment==='booking'?'Book':'Buy';
 c.innerHTML=img+'<div class="cz-product__body"><h3>'+RT.esc(p.name)+'</h3>'+
 '<p class="desc">'+RT.esc(p.description||'')+'</p>'+
 '<div class="cz-product__foot"><span class="cz-price">'+price+'</span>'+
@@ -628,7 +628,7 @@ var t=cur();if(!t)return;
 RT.get('/booking-types/'+encodeURIComponent(t.id)+'/slots').then(function(d){var slots=(d&&d.slots)||[];
 if(!slots.length){slotWrap.innerHTML='<p style="color:var(--muted)">No open times in the next few weeks. Please check back soon.</p>';return;}
 var days=[],byDay={};slots.forEach(function(s){if(!byDay[s.date]){byDay[s.date]=[];days.push(s.date);}byDay[s.date].push(s);});
-slotWrap.innerHTML='<p class="cz-label">Pick a time ('+RT.esc(d.timezone||'')+')</p>'+days.map(function(dt){
+slotWrap.innerHTML='<p class="cz-label">Pick a time ('+RT.esc(d.timezone||'')+')'+(d.discount_percent?' · <span style="color:var(--brand)">'+d.discount_percent+'% off</span>':'')+'</p>'+days.map(function(dt){
 return '<div style="margin:.5rem 0"><div style="font-size:.82rem;color:var(--muted);margin-bottom:.3rem">'+RT.esc(byDay[dt][0].day_label)+'</div>'+
 '<div style="display:flex;flex-wrap:wrap;gap:.4rem">'+byDay[dt].map(function(s){var pl=s.price_cents?(' · '+RT.money(s.price_cents,'USD')):'';
 return '<button type="button" class="cz-slot" data-start="'+RT.esc(s.start)+'" data-end="'+RT.esc(s.end)+'" style="border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:var(--radius);padding:.4rem .7rem;font-size:.85rem;cursor:pointer">'+RT.esc(s.time_label)+pl+'</button>';

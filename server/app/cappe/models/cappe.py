@@ -1,6 +1,6 @@
 """Pydantic request/response shapes for Cappe."""
 import re
-from datetime import datetime, time
+from datetime import date, datetime, time
 from typing import Any, Literal, Optional
 from uuid import UUID
 
@@ -292,6 +292,10 @@ class CappeProduct(BaseModel):
     intake_fields: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+    # Storefront display only — best active discount for this product (0 if none).
+    # Order pricing is still recomputed server-side at checkout.
+    discount_percent: int = 0
+    discounted_price_cents: Optional[int] = None
 
 
 class CappeOrderItem(BaseModel):
@@ -661,11 +665,45 @@ class CappeBookingQuoteRequest(BaseModel):
 
 
 class CappeBookingQuote(BaseModel):
-    price_cents: int
+    price_cents: int                                  # final, after any discount
     currency: str = "USD"
     pricing_mode: str
     requires_approval: bool
     duration_minutes: int
+    original_price_cents: Optional[int] = None        # pre-discount (None if no discount)
+    discount_percent: int = 0
+
+
+# --- Discounts (creator-set promotions) -------------------------------------
+
+DiscountScope = Literal["all", "booking_type", "product"]
+
+
+class CappeDiscountInput(BaseModel):
+    label: str = Field(default="Discount", min_length=1, max_length=120)
+    percent_off: int = Field(ge=1, le=90)
+    scope: DiscountScope = "all"
+    target_id: Optional[UUID] = None          # required when scope != 'all'
+    active: bool = True
+    starts_on: Optional[date] = None
+    ends_on: Optional[date] = None
+
+
+class CappeDiscountReplace(BaseModel):
+    discounts: list[CappeDiscountInput] = Field(default_factory=list)
+
+
+class CappeDiscount(BaseModel):
+    id: UUID
+    site_id: UUID
+    label: str
+    percent_off: int
+    scope: str
+    target_id: Optional[UUID] = None
+    active: bool
+    starts_on: Optional[date] = None
+    ends_on: Optional[date] = None
+    created_at: datetime
 
 
 # ===========================================================================
