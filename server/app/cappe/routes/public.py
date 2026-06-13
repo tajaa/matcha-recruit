@@ -35,8 +35,18 @@ from ..models.cappe import (
     CappePublicThread,
     CappeSubscribeRequest,
 )
-from ..services.email import send_cappe_message_email
-from ._shared import loads, loads_list, page_row_to_dict
+from ..services.email import (
+    build_order_items_summary,
+    dashboard_url,
+    format_when,
+    send_cappe_booking_alert_email,
+    send_cappe_booking_received_email,
+    send_cappe_form_alert_email,
+    send_cappe_message_email,
+    send_cappe_order_alert_email,
+    send_cappe_order_receipt_email,
+)
+from ._shared import _site_owner, loads, loads_list, page_row_to_dict
 
 # Public product listing exposes everything EXCEPT digital_file_url (the gated
 # deliverable — released only via the order receipt once paid/fulfilled).
@@ -288,7 +298,7 @@ async def _create_booking_in_tx(
 
 
 @router.post("/public/sites/{slug}/orders", status_code=status.HTTP_201_CREATED)
-async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Request):
+async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Request, background: BackgroundTasks):
     """Create a pending order for a mixed cart (physical / digital / service /
     booking). Prices + totals are recomputed server-side from the live product
     rows; payment is stubbed (order lands `pending`). Inventory is decremented
@@ -394,6 +404,23 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
                     order["id"], site["id"], product_id, title, unit_price, qty,
                     f, json.dumps(intake), booking_id,
                 )
+        owner = await _site_owner(conn, site["id"])
+
+    # Notifications (best-effort, after response): receipt → customer, alert → creator.
+    items_summary = build_order_items_summary(
+        [{"title": t, "quantity": q} for (_pid, t, _u, q, *_r) in line_rows]
+    )
+    if email:
+        background.add_task(
+            send_cappe_order_receipt_email, email, body.customer_name, site["name"],
+            items_summary, order["subtotal_cents"], order["currency"], order["requires_approval"],
+        )
+    if owner and owner["email"]:
+        background.add_task(
+            send_cappe_order_alert_email, owner["email"], owner["name"], site["name"],
+            body.customer_name, order["subtotal_cents"], order["currency"],
+            dashboard_url(f"/sites/{site['id']}/orders"),
+        )
 
     return {
         "order_id": str(order["id"]),
@@ -498,7 +525,7 @@ async def public_unsubscribe(slug: str, token: str, request: Request):
 # --- Forms ------------------------------------------------------------------
 
 @router.post("/public/sites/{slug}/forms/{form_slug}", status_code=status.HTTP_201_CREATED)
-async def public_submit_form(slug: str, form_slug: str, body: dict, request: Request):
+async def public_submit_form(slug: str, form_slug: str, body: dict, request: Request, background: BackgroundTasks):
     """Store a submission. `body` shape: {data: {...}, submitter_email?: str}."""
     ip = client_ip(request)
     await check_rate_limit(ip, "cappe_form", 5, 60)
@@ -516,7 +543,7 @@ async def public_submit_form(slug: str, form_slug: str, body: dict, request: Req
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         form = await conn.fetchrow(
-            "SELECT id, status FROM cappe_forms WHERE site_id = $1 AND slug = $2", site["id"], form_slug
+            "SELECT id, name, status FROM cappe_forms WHERE site_id = $1 AND slug = $2", site["id"], form_slug
         )
         if form is None or form["status"] != "active":
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
@@ -524,6 +551,14 @@ async def public_submit_form(slug: str, form_slug: str, body: dict, request: Req
             "INSERT INTO cappe_form_submissions (form_id, site_id, data, submitter_email) "
             "VALUES ($1, $2, $3, $4)",
             form["id"], site["id"], json.dumps(data), submitter_email,
+        )
+        owner = await _site_owner(conn, site["id"])
+
+    # Best-effort alert to the creator (submission content is not echoed).
+    if owner and owner["email"]:
+        background.add_task(
+            send_cappe_form_alert_email, owner["email"], owner["name"], site["name"],
+            form["name"], dashboard_url(f"/sites/{site['id']}/forms"),
         )
     return {"ok": True}
 
@@ -646,19 +681,20 @@ async def public_booking_slots(
 
 
 @router.post("/public/sites/{slug}/bookings", status_code=status.HTTP_201_CREATED)
-async def public_create_booking(slug: str, body: CappeBookingRequest, request: Request):
+async def public_create_booking(slug: str, body: CappeBookingRequest, request: Request, background: BackgroundTasks):
     """Request a booking. `ends_at` is computed from the type's duration; the
     slot must fall inside an availability window (in the site's timezone) and not
     overlap an existing booking."""
     ip = client_ip(request)
     await check_rate_limit(ip, "cappe_booking", 5, 60)
     await check_rate_limit(ip, "cappe_booking_hr", 20, 3600)
-    _reject_reserved(str(body.customer_email))
+    cust_email = str(body.customer_email).strip().lower()
+    _reject_reserved(cust_email)
 
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         btype = await conn.fetchrow(
-            "SELECT id, duration_minutes, status, price_cents, pricing_mode, requires_approval "
+            "SELECT id, name, duration_minutes, status, price_cents, pricing_mode, requires_approval "
             "FROM cappe_booking_types WHERE id = $1 AND site_id = $2",
             body.booking_type_id, site["id"],
         )
@@ -676,11 +712,27 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
         async with conn.transaction():
             booking = await _create_booking_in_tx(
                 conn, site, btype, body.starts_at, body.customer_name,
-                str(body.customer_email).strip().lower(), body.note,
+                cust_email, body.note,
                 ends_at_override=body.ends_at,
                 rider_acknowledged=body.rider_acknowledged,
                 rider_snapshot=rider,
             )
+        owner = await _site_owner(conn, site["id"])
+
+    # Notifications (best-effort): confirmation → customer, alert → creator.
+    when_label = format_when(booking["starts_at"], site["timezone"])
+    needs_approval = bool(booking["requires_approval"])
+    if cust_email:
+        background.add_task(
+            send_cappe_booking_received_email, cust_email, body.customer_name, site["name"],
+            btype["name"], when_label, needs_approval,
+        )
+    if owner and owner["email"]:
+        background.add_task(
+            send_cappe_booking_alert_email, owner["email"], owner["name"], site["name"],
+            body.customer_name, btype["name"], when_label, needs_approval,
+            dashboard_url(f"/sites/{site['id']}/bookings"),
+        )
     return {
         "booking_id": str(booking["id"]),
         "status": booking["status"],

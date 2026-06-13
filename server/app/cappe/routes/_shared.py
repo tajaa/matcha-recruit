@@ -136,6 +136,16 @@ async def get_owned_site(conn, site_id: UUID, account_id: UUID):
     return row
 
 
+async def _site_owner(conn, site_id: UUID):
+    """The site owner's account email/name, for creator notifications. Returns
+    None if the site (or its account) is gone."""
+    return await conn.fetchrow(
+        "SELECT a.email, a.name FROM cappe_accounts a "
+        "JOIN cappe_sites s ON s.account_id = a.id WHERE s.id = $1",
+        site_id,
+    )
+
+
 def site_row_to_dict(row, page_count: Optional[int] = None) -> dict:
     """Map a cappe_sites row to the CappeSite response shape."""
     d = dict(row)

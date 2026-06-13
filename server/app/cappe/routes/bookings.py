@@ -5,10 +5,11 @@ public.py.
 """
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from ...database import get_connection
 from ..dependencies import require_cappe_account
+from ..services.email import format_when, send_cappe_booking_decision_email
 from ..models.cappe import (
     CappeAccount,
     CappeApprovalDecline,
@@ -205,13 +206,28 @@ async def update_booking_status(
 
 # --- Approval queue ---------------------------------------------------------
 
+async def _notify_booking_decision(conn, background, site, row, *, approved, reason=None):
+    """Email the customer that their pending booking was approved/declined."""
+    email = row["customer_email"]
+    if not email:
+        return
+    type_name = await conn.fetchval(
+        "SELECT name FROM cappe_booking_types WHERE id = $1", row["booking_type_id"]
+    )
+    background.add_task(
+        send_cappe_booking_decision_email, email, row["customer_name"], site["name"],
+        approved, format_when(row["starts_at"], site["timezone"]), type_name or "Booking", reason,
+    )
+
+
 @router.post("/sites/{site_id}/bookings/{booking_id}/accept", response_model=CappeBooking)
 async def accept_booking(
-    site_id: UUID, booking_id: UUID, account: CappeAccount = Depends(require_cappe_account)
+    site_id: UUID, booking_id: UUID, background: BackgroundTasks,
+    account: CappeAccount = Depends(require_cappe_account),
 ):
     """Creator approves a pending (awaiting-approval) booking → confirmed."""
     async with get_connection() as conn:
-        await get_owned_site(conn, site_id, account.id)
+        site = await get_owned_site(conn, site_id, account.id)
         row = await conn.fetchrow(
             f"""UPDATE cappe_bookings
                 SET status = 'confirmed', approved_at = NOW(), updated_at = NOW()
@@ -219,19 +235,20 @@ async def accept_booking(
                 RETURNING {_BOOKING_COLS}""",
             booking_id, site_id,
         )
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending booking to accept")
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending booking to accept")
+        await _notify_booking_decision(conn, background, site, row, approved=True)
     return _booking_row(row)
 
 
 @router.post("/sites/{site_id}/bookings/{booking_id}/decline", response_model=CappeBooking)
 async def decline_booking(
-    site_id: UUID, booking_id: UUID, body: CappeApprovalDecline,
+    site_id: UUID, booking_id: UUID, body: CappeApprovalDecline, background: BackgroundTasks,
     account: CappeAccount = Depends(require_cappe_account),
 ):
     """Creator declines a pending booking → declined (frees the slot)."""
     async with get_connection() as conn:
-        await get_owned_site(conn, site_id, account.id)
+        site = await get_owned_site(conn, site_id, account.id)
         row = await conn.fetchrow(
             f"""UPDATE cappe_bookings
                 SET status = 'declined', decline_reason = $3, updated_at = NOW()
@@ -239,8 +256,9 @@ async def decline_booking(
                 RETURNING {_BOOKING_COLS}""",
             booking_id, site_id, body.reason,
         )
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending booking to decline")
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending booking to decline")
+        await _notify_booking_decision(conn, background, site, row, approved=False, reason=body.reason)
     return _booking_row(row)
 
 
