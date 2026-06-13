@@ -420,6 +420,16 @@ export type CappeSlotsResponse = {
   slots: CappeSlot[]
 }
 
+export type CappeReview = {
+  id: string
+  site_id: string
+  author_name: string
+  rating: number | null
+  body: string
+  status: 'pending' | 'approved' | 'hidden'
+  created_at: string
+}
+
 export type CappeClient = {
   email: string
   name: string | null

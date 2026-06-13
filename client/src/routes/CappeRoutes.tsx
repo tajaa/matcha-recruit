@@ -19,6 +19,7 @@ import Bookings from '../pages/cappe/site/Bookings'
 import Blog from '../pages/cappe/site/Blog'
 import Messages from '../pages/cappe/site/Messages'
 import Clients from '../pages/cappe/site/Clients'
+import Reviews from '../pages/cappe/site/Reviews'
 
 // Cappe — website-builder product, served at /cappe. Self-contained route tree
 // with its own auth (cappe_* tokens, useCappeMe). Public signup/login live
@@ -49,6 +50,7 @@ export default function CappeRoutes() {
         <Route path="sites/:siteId/bookings" element={<Bookings />} />
         <Route path="sites/:siteId/messages" element={<Messages />} />
         <Route path="sites/:siteId/clients" element={<Clients />} />
+        <Route path="sites/:siteId/reviews" element={<Reviews />} />
         <Route path="sites/:siteId/blog" element={<Blog />} />
       </Route>
     </Routes>

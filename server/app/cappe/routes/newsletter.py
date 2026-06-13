@@ -176,9 +176,9 @@ async def delete_campaign(
 async def send_campaign(
     site_id: UUID, campaign_id: UUID, account: CappeAccount = Depends(require_cappe_account)
 ):
-    """STUB send. Marks the campaign 'sent' and records how many deliverable
-    (subscribed, non-reserved-domain) recipients it would reach. No real send —
-    wiring get_email_service().send_email_with_fallback is a later phase."""
+    """Stage the campaign for sending and dispatch the background blast. The
+    Celery task (cappe_campaign_send) does the throttled per-recipient send and
+    flips status 'sending' → 'sent' with the real recipient count."""
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         campaign = await conn.fetchrow(
@@ -189,16 +189,26 @@ async def send_campaign(
         if campaign["status"] in ("sent", "sending"):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Campaign already sent")
 
-        emails = await conn.fetch(
-            "SELECT email FROM cappe_subscribers WHERE site_id = $1 AND status = 'subscribed'", site_id
-        )
-        deliverable = sum(1 for r in emails if not _is_reserved_test_domain(r["email"]))
-
         row = await conn.fetchrow(
-            f"""UPDATE cappe_campaigns
-                SET status = 'sent', sent_at = NOW(), recipient_count = $1, updated_at = NOW()
-                WHERE id = $2 AND site_id = $3
-                RETURNING {_CAMPAIGN_COLS}""",
-            deliverable, campaign_id, site_id,
+            f"""UPDATE cappe_campaigns SET status = 'sending', updated_at = NOW()
+                WHERE id = $1 AND site_id = $2 RETURNING {_CAMPAIGN_COLS}""",
+            campaign_id, site_id,
+        )
+
+    # Hand off to the worker; revert to draft so the creator can retry if the
+    # broker is unreachable.
+    try:
+        from app.workers.tasks.cappe_campaign_send import run_cappe_campaign_send
+        run_cappe_campaign_send.delay(str(campaign_id))
+    except Exception:
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                f"""UPDATE cappe_campaigns SET status = 'draft', updated_at = NOW()
+                    WHERE id = $1 AND site_id = $2 RETURNING {_CAMPAIGN_COLS}""",
+                campaign_id, site_id,
+            )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Sending is temporarily unavailable — please try again shortly.",
         )
     return dict(row)

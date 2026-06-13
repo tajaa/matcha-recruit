@@ -835,6 +835,40 @@ class CappePost(BaseModel):
 
 
 # ===========================================================================
+# Reviews
+# ===========================================================================
+
+class CappeReviewCreate(BaseModel):
+    """Public review submission from a published site."""
+    author_name: str = Field(min_length=1, max_length=120)
+    rating: int = Field(ge=1, le=5)
+    body: str = Field(min_length=1, max_length=2000)
+
+
+class CappeReviewModerate(BaseModel):
+    """Creator moderation action."""
+    status: Literal["approved", "hidden", "pending"]
+
+
+class CappeReview(BaseModel):
+    id: UUID
+    site_id: UUID
+    author_name: str
+    rating: Optional[int] = None
+    body: str
+    status: str
+    created_at: datetime
+
+
+class CappePublicReview(BaseModel):
+    """Approved review as shown on the public site."""
+    author_name: str
+    rating: Optional[int] = None
+    body: str
+    created_at: datetime
+
+
+# ===========================================================================
 # Shared
 # ===========================================================================
 

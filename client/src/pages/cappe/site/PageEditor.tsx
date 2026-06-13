@@ -256,6 +256,14 @@ const BLOCK_SCHEMAS: Record<string, BlockSchema> = {
       }),
     ],
   },
+  reviews: {
+    label: 'Reviews',
+    make: () => ({ type: 'reviews', heading: 'What clients say', allowSubmissions: true }),
+    fields: [
+      F('heading', 'Section heading'), F('subheading', 'Section subheading', 'textarea'),
+      F('allowSubmissions', 'Let visitors leave a review', 'bool'),
+    ],
+  },
   text: {
     label: 'Text',
     make: () => ({ type: 'text', body: 'Write something here.' }),
@@ -293,7 +301,7 @@ const BLOCK_SCHEMAS: Record<string, BlockSchema> = {
   },
 }
 
-const BLOCK_ORDER = ['hero', 'features', 'split', 'bento', 'stats', 'credentials', 'logos', 'gallery', 'pricing', 'testimonial', 'faq', 'cta', 'store', 'booking', 'menu', 'posts', 'text', 'contact', 'newsletter']
+const BLOCK_ORDER = ['hero', 'features', 'split', 'bento', 'stats', 'credentials', 'logos', 'gallery', 'pricing', 'testimonial', 'reviews', 'faq', 'cta', 'store', 'booking', 'menu', 'posts', 'text', 'contact', 'newsletter']
 
 // ── upload context (only ImageInput needs the siteId) ───────────────────────
 const SiteCtx = createContext<string>('')

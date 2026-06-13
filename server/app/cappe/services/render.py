@@ -12,8 +12,8 @@ JS runtime that talks to the same-origin public API. All user content is escaped
 URLs are scheme-checked.
 
 Block types: hero, features, gallery, pricing, testimonial, cta, menu, posts,
-stats, logos, faq, bento, split, credentials, text, contact, store, booking,
-newsletter.
+stats, logos, faq, bento, split, credentials, reviews, text, contact, store,
+booking, newsletter.
 """
 import html
 import itertools
@@ -374,6 +374,17 @@ section{position:relative}
   padding:.5rem .8rem;font:inherit;font-size:.88rem;cursor:pointer;transition:border-color .15s,background .15s}
 .cz-slot:hover{border-color:var(--brand)}
 .cz-slot--on{background:var(--brand);color:var(--brand-fg);border-color:var(--brand)}
+
+/* reviews */
+.cz-reviews{padding:clamp(3rem,7vw,5rem) 0}
+.cz-reviews-grid{display:grid;gap:1.25rem;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));max-width:60rem;margin:0 auto}
+.cz-review{border:1px solid var(--line);background:var(--surface);border-radius:var(--radius);padding:1.6rem}
+.cz-review__stars{color:#f5b301;letter-spacing:2px;margin-bottom:.55rem}
+.cz-review blockquote{margin:0;font-size:1.02rem;line-height:1.6;color:var(--ink)}
+.cz-review figcaption{margin-top:.9rem;font-weight:600;color:var(--muted);font-size:.9rem}
+.cz-rv-form{max-width:34rem;margin:2rem auto 0;display:flex;flex-direction:column;gap:.6rem;
+  border-top:1px solid var(--line);padding-top:1.6rem}
+.cz-rv-form__t{font-weight:700;font-family:var(--font-h);text-align:center}
 
 @media(min-width:768px){
   .cz-hero--split .cz-grid{grid-template-columns:1.1fr .9fr}
@@ -745,6 +756,39 @@ box.innerHTML='<p class="cz-msg ok" style="text-align:center">Thanks - your mess
 }).catch(function(e){sb.disabled=false;msg.textContent=e.message;msg.className='cz-msg err';});});})();"""
 
 
+_REVIEWS_JS = r"""(function(){
+var box=document.getElementById('__ID__'),RT=window.__CAPPE_RT__;if(!box||!RT)return;
+var wantForm=box.getAttribute('data-form')==='1';
+function stars(n){n=n||0;var s='';for(var i=1;i<=5;i++){s+=i<=n?'★':'☆';}return s;}
+function formHtml(){return wantForm?'<div class="cz-rv-form"><div class="cz-rv-form__t">Leave a review</div>'+
+'<input class="cz-field" data-name placeholder="Your name" />'+
+'<select class="cz-field" data-rating><option value="5">★★★★★</option><option value="4">★★★★</option><option value="3">★★★</option><option value="2">★★</option><option value="1">★</option></select>'+
+'<textarea class="cz-field" data-body rows="3" placeholder="Share your experience"></textarea>'+
+'<button class="cz-btn cz-btn--solid cz-btn--block" data-go>Submit review</button><p class="cz-msg"></p></div>':'';}
+function render(list){
+var grid=list.length?('<div class="cz-reviews-grid">'+list.map(function(r){return '<figure class="cz-review"><div class="cz-review__stars">'+stars(r.rating)+'</div><blockquote>'+RT.esc(r.body)+'</blockquote><figcaption>'+RT.esc(r.author_name)+'</figcaption></figure>';}).join('')+'</div>'):(wantForm?'':'<p style="color:var(--muted)">No reviews yet.</p>');
+box.innerHTML=grid+formHtml();
+if(!wantForm)return;
+var go=box.querySelector('[data-go]'),msg=box.querySelector('.cz-msg');
+go.addEventListener('click',function(){var name=box.querySelector('[data-name]').value.trim(),body=box.querySelector('[data-body]').value.trim(),rating=parseInt(box.querySelector('[data-rating]').value,10);
+if(!name||!body){msg.textContent='Name and review are required';msg.className='cz-msg err';return;}
+go.disabled=true;msg.textContent='Submitting…';msg.className='cz-msg';
+RT.post('/reviews',{author_name:name,rating:rating,body:body}).then(function(){box.querySelector('.cz-rv-form').innerHTML='<p class="cz-msg ok" style="text-align:center">Thanks! Your review will appear once approved.</p>';
+}).catch(function(e){go.disabled=false;msg.textContent=e.message;msg.className='cz-msg err';});});}
+if(RT.preview){render([{author_name:'Sample Customer',rating:5,body:'Approved reviews from your customers show here.'}]);return;}
+RT.get('/reviews').then(function(list){render(list||[]);}).catch(function(){box.innerHTML='<p style="color:var(--muted)">Unable to load reviews.</p>';});
+})();"""
+
+
+def _reviews(b, t):
+    wid = "rv" + str(_uid())
+    show_form = b.get("allowSubmissions") is not False  # default on
+    return (f'<section class="cz-reviews"><div class="cz-wrap">{_head(b)}'
+            f'<div id="{wid}" class="cz-reviews-box" data-form="{"1" if show_form else "0"}">'
+            f'<p style="color:var(--muted)">Loading reviews…</p></div></div></section>'
+            f'<script>{_REVIEWS_JS.replace("__ID__", wid)}</script>')
+
+
 def _store(b, t):
     # `id="shop"` is a stable anchor any CTA/nav can link to (#shop) regardless
     # of the seller's vocation — the generalizable "go buy" destination.
@@ -789,7 +833,7 @@ _RENDERERS = {
     "hero": _hero, "features": _features, "gallery": _gallery, "pricing": _pricing,
     "testimonial": _testimonial, "cta": _cta, "menu": _menu, "posts": _posts,
     "stats": _stats, "logos": _logos, "faq": _faq, "bento": _bento, "split": _split,
-    "credentials": _credentials,
+    "credentials": _credentials, "reviews": _reviews,
     "text": _text, "contact": _contact, "store": _store, "booking": _booking, "newsletter": _newsletter,
 }
 

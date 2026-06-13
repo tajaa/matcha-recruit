@@ -68,6 +68,19 @@ def test_credentials_block_escapes_html():
 
 # --- booking two-step picker -------------------------------------------------
 
+def test_reviews_block_renders_widget_with_form():
+    html = _render({"type": "reviews", "heading": "What clients say", "allowSubmissions": True})
+    assert "cz-reviews" in html
+    assert 'data-form="1"' in html
+    assert "RT.get('/reviews')" in html       # widget hydrates approved reviews
+    assert "What clients say" in html
+
+
+def test_reviews_block_can_disable_submissions():
+    html = _render({"type": "reviews", "allowSubmissions": False})
+    assert 'data-form="0"' in html
+
+
 def test_booking_picker_is_two_step_day_then_time():
     html = _render({"type": "booking", "heading": "Book a session"})
     # Day strip + times container classes ship in the base CSS.

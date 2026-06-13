@@ -50,11 +50,11 @@ export default function Campaigns() {
   }
 
   async function send(c: CappeCampaign) {
-    if (!confirm(`Send "${c.subject}" now? (Sending is stubbed — no email actually goes out yet.)`)) return
+    if (!confirm(`Send "${c.subject}" to your subscribers now? This can't be undone.`)) return
     try {
       const updated = await cappeApi.post<CappeCampaign>(`/sites/${siteId}/campaigns/${c.id}/send`)
       setCampaigns((list) => (list || []).map((x) => (x.id === c.id ? updated : x)))
-      setNotice(`Marked sent — ${updated.recipient_count} deliverable recipient(s). (No email sent: sending is stubbed.)`)
+      setNotice('Sending… your campaign is going out to subscribers now.')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to send')
     }

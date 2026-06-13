@@ -44,6 +44,7 @@ celery_app = Celery(
         "app.workers.tasks.broker_milestones",
         "app.workers.tasks.benefit_eligibility_sync",
         "app.workers.tasks.cappe_booking_reminders",
+        "app.workers.tasks.cappe_campaign_send",
     ],
 )
 
