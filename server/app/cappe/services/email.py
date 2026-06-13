@@ -26,6 +26,11 @@ def dashboard_url(path: str = "") -> str:
     """Absolute creator-dashboard URL, e.g. dashboard_url(f"/sites/{id}/orders")."""
     return f"{_DASHBOARD_URL}{path}"
 
+
+def booking_manage_url(token: str) -> str:
+    """Customer-facing self-serve link for a booking (view/cancel/reschedule)."""
+    return f"{_base_url()}/cappe/booking/{token}"
+
 _CCY_SYMBOL = {"USD": "$", "CAD": "$", "AUD": "$", "EUR": "€", "GBP": "£"}
 
 
@@ -385,3 +390,36 @@ async def send_cappe_form_alert_email(
     html = _email_shell(f"New submission — {e_site}", body, cta_label="View submission", cta_url=dashboard_url)
     text = f"New submission to {form_name} on {site_name}.\n\nView it: {dashboard_url}"
     await _send(to_email, to_name, f"New form submission — {site_name}", html, text, label="form alert")
+
+
+async def send_cappe_booking_reminder_email(
+    to_email: str, to_name: str | None, site_name: str, type_name: str,
+    when_label: str, manage_url: str | None = None,
+) -> None:
+    """24h-ahead reminder to the customer. Best-effort (fired from the worker)."""
+    e_site, e_type, e_when = escape(site_name or ""), escape(type_name or "Booking"), escape(when_label or "")
+    body = (
+        f'<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#d4d4d8;">A quick reminder of your upcoming booking with {e_site}.</p>'
+        f'<div style="border-left:3px solid #c6f16b;padding:8px 0 8px 14px;color:#fafafa;font-size:15px;">'
+        f'<b>{e_type}</b><br><span style="color:#a1a1aa;">{e_when}</span></div>'
+    )
+    html = _email_shell(f"Reminder — {e_site}", body, cta_label="Manage booking" if manage_url else None, cta_url=manage_url)
+    text = f"Reminder: your booking with {site_name} — {type_name}, {when_label}." + (f"\nManage: {manage_url}" if manage_url else "")
+    await _send(to_email, to_name, f"Reminder: your booking with {site_name}", html, text, label="booking reminder")
+
+
+async def send_cappe_booking_cancelled_email(
+    to_email: str, to_name: str | None, site_name: str, customer_name: str | None,
+    type_name: str, when_label: str, dashboard_url: str,
+) -> None:
+    """Alert the creator that a customer cancelled. Best-effort."""
+    e_site, who = escape(site_name or ""), escape((customer_name or "A customer").strip() or "A customer")
+    body = (
+        f'<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#d4d4d8;">'
+        f'<b style="color:#fafafa;">{who}</b> cancelled their booking on {e_site}.</p>'
+        f'<div style="border-left:3px solid #71717a;padding:8px 0 8px 14px;color:#fafafa;font-size:15px;">'
+        f'<b>{escape(type_name or "Booking")}</b><br><span style="color:#a1a1aa;">{escape(when_label or "")}</span></div>'
+    )
+    html = _email_shell(f"Booking cancelled — {e_site}", body, cta_label="View bookings", cta_url=dashboard_url)
+    text = f"{customer_name or 'A customer'} cancelled {type_name} — {when_label} on {site_name}.\n\n{dashboard_url}"
+    await _send(to_email, to_name, f"Booking cancelled — {site_name}", html, text, label="booking cancelled")

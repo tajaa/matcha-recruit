@@ -5,6 +5,7 @@ import CappeSignup from '../pages/cappe/CappeSignup'
 import CappeLogin from '../pages/cappe/CappeLogin'
 import CappeVerify from '../pages/cappe/CappeVerify'
 import ClientThread from '../pages/cappe/ClientThread'
+import CappeBookingManage from '../pages/cappe/CappeBookingManage'
 import CappeSites from '../pages/cappe/CappeSites'
 import CappeTemplates from '../pages/cappe/CappeTemplates'
 import CappeSiteEditor from '../pages/cappe/CappeSiteEditor'
@@ -33,6 +34,8 @@ export default function CappeRoutes() {
       <Route path="verify" element={<CappeVerify />} />
       {/* Public, token-gated client conversation (emailed link). */}
       <Route path="thread/:token" element={<ClientThread />} />
+      {/* Public, token-gated booking self-serve (view / cancel / reschedule). */}
+      <Route path="booking/:token" element={<CappeBookingManage />} />
       <Route element={<CappeLayout />}>
         <Route path="sites" element={<CappeSites />} />
         <Route path="templates" element={<CappeTemplates />} />

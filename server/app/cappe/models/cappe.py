@@ -668,6 +668,26 @@ class CappeBookingQuoteRequest(BaseModel):
     ends_at: Optional[datetime] = None
 
 
+class CappeBookingReschedule(BaseModel):
+    """Customer self-serve reschedule — a new start (and end for hourly types)."""
+    starts_at: datetime
+    ends_at: Optional[datetime] = None
+
+
+class CappePublicBooking(BaseModel):
+    """Customer-facing booking view, resolved by the unguessable access token."""
+    status: str
+    type_name: str
+    site_name: str
+    slug: str                              # for fetching reschedule slots
+    booking_type_id: Optional[UUID] = None
+    starts_at: datetime
+    ends_at: datetime
+    quoted_price_cents: Optional[int] = None
+    timezone: str
+    can_modify: bool      # cancel/reschedule allowed (future + pending/confirmed)
+
+
 class CappeBookingQuote(BaseModel):
     price_cents: int                                  # final, after any discount
     currency: str = "USD"

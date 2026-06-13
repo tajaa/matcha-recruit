@@ -391,6 +391,35 @@ export type CappePublicThread = {
   messages: CappeMessage[]
 }
 
+// Customer-facing booking view (token-gated self-serve page).
+export type CappePublicBooking = {
+  status: string
+  type_name: string
+  site_name: string
+  slug: string
+  booking_type_id: string | null
+  starts_at: string
+  ends_at: string
+  quoted_price_cents: number | null
+  timezone: string
+  can_modify: boolean
+}
+
+export type CappeSlot = {
+  start: string
+  end: string
+  date: string
+  day_label: string
+  time_label: string
+  price_cents: number | null
+}
+
+export type CappeSlotsResponse = {
+  timezone: string
+  discount_percent: number
+  slots: CappeSlot[]
+}
+
 export type CappeClient = {
   email: string
   name: string | null

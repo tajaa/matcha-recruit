@@ -43,6 +43,7 @@ celery_app = Celery(
         "app.workers.tasks.broker_risk_alerts",
         "app.workers.tasks.broker_milestones",
         "app.workers.tasks.benefit_eligibility_sync",
+        "app.workers.tasks.cappe_booking_reminders",
     ],
 )
 
@@ -237,6 +238,13 @@ def on_worker_ready(**kwargs):
         run_benefit_eligibility_sync.delay()
     else:
         print("[Worker] Benefit eligibility sync scheduler is disabled, skipping.")
+
+    from app.workers.tasks.cappe_booking_reminders import run_cappe_booking_reminders
+
+    if _is_scheduler_enabled("cappe_booking_reminders"):
+        run_cappe_booking_reminders.delay()
+    else:
+        print("[Worker] Cappe booking reminders scheduler is disabled, skipping.")
 
 
 # ── Server error reporter integration ───────────────────────────────────────
