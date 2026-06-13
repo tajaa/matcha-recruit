@@ -512,8 +512,12 @@ def _bento(b, t):
         body = f'<p>{_esc(i.get("body"))}</p>' if i.get("body") else ""
         u = _safe_image(i.get("image"))
         if u:
+            # Defense-in-depth: _safe_image already rejects quotes/parens, but
+            # encode locally too so the CSS url() literal can't be closed even
+            # if that guard ever changes (HTML-attr escape + CSS-quote encode).
+            safe_u = _esc(u).replace("'", "%27").replace("(", "%28").replace(")", "%29")
             cells += (f'<div class="cz-bento-cell cz-bento-cell--img{mod}" '
-                      f'style="background-image:url(\'{u}\')">{icon}{head}{body}</div>')
+                      f'style="background-image:url(\'{safe_u}\')">{icon}{head}{body}</div>')
         else:
             cells += f'<div class="cz-bento-cell{mod}">{icon}{head}{body}</div>'
     return f'<section class="cz-bento"><div class="cz-wrap">{_head(b)}<div class="cz-bento-grid">{cells}</div></div></section>'
