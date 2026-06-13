@@ -7,11 +7,12 @@ client-supplied money/time — prices, order totals, and booking end-times are a
 recomputed server-side. A site must be `published` to expose any public surface.
 """
 import json
+import os
 from datetime import timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 
 from ...core.services.email._shared import _is_reserved_test_domain
 from ...core.services.redis_cache import check_rate_limit, client_ip
@@ -24,12 +25,15 @@ from ..models.cappe import (
     CappeBookingType,
     CappeCheckoutRequest,
     CappeForm,
+    CappeMessageCreate,
     CappeOrderReceipt,
     CappePost,
     CappeProduct,
     CappePublicSite,
+    CappePublicThread,
     CappeSubscribeRequest,
 )
+from ..services.email import send_cappe_message_email
 from ._shared import loads, loads_list, page_row_to_dict
 
 # Public product listing exposes everything EXCEPT digital_file_url (the gated
@@ -597,6 +601,73 @@ async def public_booking_quote(slug: str, body: CappeBookingQuoteRequest, reques
         price_cents=quote, currency="USD", pricing_mode=pricing_mode,
         requires_approval=bool(btype["requires_approval"]), duration_minutes=int(duration_min),
     )
+
+
+# --- Messages (client side, token-gated) ------------------------------------
+
+@router.get("/public/threads/{token}", response_model=CappePublicThread)
+async def public_thread(token: str, request: Request):
+    """A client reads their conversation via the unguessable thread token."""
+    await check_rate_limit(client_ip(request), "cappe_thread", 30, 60)
+    try:
+        tok = UUID(token)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    async with get_connection() as conn:
+        thread = await conn.fetchrow(
+            """SELECT t.id, t.subject, s.name AS site_name
+               FROM cappe_threads t JOIN cappe_sites s ON s.id = t.site_id
+               WHERE t.access_token = $1""",
+            tok,
+        )
+        if thread is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+        await conn.execute("UPDATE cappe_threads SET client_unread = 0 WHERE id = $1", thread["id"])
+        msgs = await conn.fetch(
+            "SELECT id, thread_id, sender, body, created_at FROM cappe_messages "
+            "WHERE thread_id = $1 ORDER BY created_at",
+            thread["id"],
+        )
+    return {"site_name": thread["site_name"], "subject": thread["subject"], "messages": [dict(m) for m in msgs]}
+
+
+@router.post("/public/threads/{token}/messages", status_code=status.HTTP_201_CREATED)
+async def public_thread_reply(token: str, body: CappeMessageCreate, request: Request, background: BackgroundTasks):
+    """A client replies to their conversation."""
+    ip = client_ip(request)
+    await check_rate_limit(ip, "cappe_thread_reply", 5, 60)
+    await check_rate_limit(ip, "cappe_thread_reply_hr", 30, 3600)
+    try:
+        tok = UUID(token)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+    async with get_connection() as conn:
+        thread = await conn.fetchrow(
+            """SELECT t.id, t.site_id, t.client_name, s.name AS site_name, a.email AS owner_email,
+                      a.name AS owner_name
+               FROM cappe_threads t
+               JOIN cappe_sites s ON s.id = t.site_id
+               JOIN cappe_accounts a ON a.id = s.account_id
+               WHERE t.access_token = $1""",
+            tok,
+        )
+        if thread is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+        async with conn.transaction():
+            await conn.execute(
+                "INSERT INTO cappe_messages (thread_id, site_id, sender, body) VALUES ($1, $2, 'client', $3)",
+                thread["id"], thread["site_id"], body.body,
+            )
+            await conn.execute(
+                "UPDATE cappe_threads SET owner_unread = owner_unread + 1, status = 'open', "
+                "last_message_at = NOW() WHERE id = $1", thread["id"],
+            )
+    dash = f"https://{os.getenv('CAPPE_BASE_DOMAIN', 'hey-matcha.com')}/cappe/sites/{thread['site_id']}/messages"
+    background.add_task(
+        send_cappe_message_email, thread["owner_email"], thread["owner_name"], thread["site_name"],
+        body.body, dash, thread["client_name"] or "a client",
+    )
+    return {"status": "ok"}
 
 
 # --- Blog -------------------------------------------------------------------

@@ -650,6 +650,74 @@ class CappeBookingQuote(BaseModel):
 
 
 # ===========================================================================
+# Messages (creator ↔ client inbox)
+# ===========================================================================
+
+class CappeMessage(BaseModel):
+    id: UUID
+    thread_id: UUID
+    sender: Literal["owner", "client"]
+    body: str
+    created_at: datetime
+
+
+class CappeThread(BaseModel):
+    id: UUID
+    site_id: UUID
+    client_email: str
+    client_name: Optional[str] = None
+    subject: Optional[str] = None
+    status: str
+    booking_id: Optional[UUID] = None
+    order_id: Optional[UUID] = None
+    owner_unread: int = 0
+    last_message_at: datetime
+    created_at: datetime
+    last_snippet: Optional[str] = None  # populated in list view
+
+
+class CappeThreadDetail(CappeThread):
+    access_token: UUID
+    messages: list[CappeMessage] = Field(default_factory=list)
+
+
+class CappeThreadCreate(BaseModel):
+    """Owner starts a conversation with a client."""
+    client_email: EmailStr
+    client_name: Optional[str] = Field(default=None, max_length=255)
+    subject: Optional[str] = Field(default=None, max_length=300)
+    body: str = Field(min_length=1, max_length=10000)
+    booking_id: Optional[UUID] = None
+    order_id: Optional[UUID] = None
+
+
+class CappeMessageCreate(BaseModel):
+    body: str = Field(min_length=1, max_length=10000)
+
+
+# Public (token-resolved) thread view for the client.
+class CappePublicThread(BaseModel):
+    site_name: str
+    subject: Optional[str] = None
+    messages: list[CappeMessage] = Field(default_factory=list)
+
+
+# ===========================================================================
+# Clients (derived directory of people who've interacted with a site)
+# ===========================================================================
+
+class CappeClient(BaseModel):
+    email: str
+    name: Optional[str] = None
+    orders_count: int = 0
+    bookings_count: int = 0
+    is_subscriber: bool = False
+    has_thread: bool = False
+    total_spent_cents: int = 0
+    last_activity: Optional[datetime] = None
+
+
+# ===========================================================================
 # Blog
 # ===========================================================================
 

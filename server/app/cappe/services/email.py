@@ -75,6 +75,47 @@ async def send_cappe_verification_email(to_email: str, to_name: str | None, toke
         logger.exception("Cappe verification email failed for %s", to_email)
 
 
+async def send_cappe_message_email(
+    to_email: str, to_name: str | None, site_name: str, snippet: str, link: str, from_label: str
+) -> None:
+    """Notify a recipient (client or creator) of a new message in a thread, with
+    a link to read + reply. Best-effort."""
+    safe = (snippet or "").strip()
+    if len(safe) > 240:
+        safe = safe[:240] + "…"
+    html = f"""\
+<!doctype html>
+<html>
+<body style="margin:0;background:#0b0b0d;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+  <div style="max-width:480px;margin:0 auto;padding:40px 24px;">
+    <div style="background:#18181b;border:1px solid #27272a;border-radius:16px;padding:32px;color:#e4e4e7;">
+      <p style="margin:0 0 6px;font-size:13px;color:#a1a1aa;">New message from {from_label}</p>
+      <h1 style="margin:0 0 16px;font-size:20px;color:#fafafa;">{site_name}</h1>
+      <div style="border-left:3px solid #c6f16b;padding:8px 0 8px 14px;margin:0 0 20px;color:#d4d4d8;font-size:15px;line-height:1.6;">
+        {safe}
+      </div>
+      <a href="{link}" style="display:inline-block;background:#c6f16b;color:#10120a;
+         text-decoration:none;font-weight:600;font-size:14px;padding:12px 22px;border-radius:10px;">
+        Read &amp; reply
+      </a>
+    </div>
+    <p style="text-align:center;margin:20px 0 0;font-size:12px;color:#52525b;">Gummfit</p>
+  </div>
+</body>
+</html>"""
+    text = f"New message from {from_label} ({site_name}):\n\n{safe}\n\nRead & reply: {link}"
+    try:
+        await get_email_service().send_email_with_fallback(
+            to_email=to_email,
+            to_name=to_name,
+            subject=f"New message — {site_name}",
+            html_content=html,
+            text_content=text,
+        )
+    except Exception:
+        logger.exception("Cappe message email failed for %s", to_email)
+
+
 async def send_cappe_welcome_email(to_email: str, to_name: str | None) -> None:
     """Send the signup confirmation / welcome email. Best-effort: logs and
     swallows failures so it's safe to fire from a background task."""
