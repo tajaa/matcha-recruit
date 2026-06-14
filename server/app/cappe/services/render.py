@@ -424,6 +424,11 @@ def _hero(b, t):
            f'{_btn(b.get("cta2"), b.get("cta2Href"), solid=False)}</div>') if (b.get("cta") or b.get("cta2")) else ""
     img = _safe_image(b.get("image"))
 
+    # A centered hero that has a photo becomes a photo-overlay hero — the
+    # intuitive result of "add a hero image". split/minimal stay explicit.
+    if img and style == "centered":
+        style = "image"
+
     if style == "image":
         overlay = (b.get("overlay") or "medium").lower()
         overlay = overlay if overlay in ("light", "medium", "dark") else "medium"

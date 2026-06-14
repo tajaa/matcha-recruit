@@ -30,6 +30,24 @@ def test_hero_image_overlay_align_height_classes():
     assert "background-image:url('https://cdn.example.com/a.jpg')" in html
 
 
+def test_centered_hero_with_photo_becomes_image_hero():
+    # The intuitive "add a hero image" path: a default (centered) hero that gets
+    # a photo auto-promotes to the full-bleed image hero.
+    html = _render({"type": "hero", "style": "centered", "heading": "Studio", "image": "https://cdn.example.com/p.jpg"})
+    assert "cz-hero--image" in html
+    assert "background-image:url('https://cdn.example.com/p.jpg')" in html
+
+
+def test_centered_hero_without_photo_stays_centered():
+    html = _render({"type": "hero", "style": "centered", "heading": "Studio"})
+    assert '<section class="cz-hero cz-hero--centered"' in html
+
+
+def test_split_hero_with_photo_stays_split():
+    html = _render({"type": "hero", "style": "split", "heading": "Studio", "image": "https://cdn.example.com/p.jpg"})
+    assert "cz-hero--split" in html
+
+
 def test_hero_image_defaults_to_medium_centered_tall():
     html = _render({"type": "hero", "style": "image", "heading": "h", "image": "https://cdn.example.com/a.jpg"})
     # Assert on the rendered section's class list (the classes also exist in CSS).

@@ -57,7 +57,7 @@ const BLOCK_SCHEMAS: Record<string, BlockSchema> = {
         { value: 'centered', label: 'Centered' }, { value: 'split', label: 'Split (with image)' },
         { value: 'image', label: 'Full image background' }, { value: 'minimal', label: 'Minimal' },
       ] }),
-      F('image', 'Image (for split / image layout)', 'image'),
+      F('image', 'Hero photo — adds a full-bleed background', 'image'),
       F('align', 'Text align (image layout)', 'select', { options: [
         { value: 'center', label: 'Center' }, { value: 'left', label: 'Left' },
       ] }),
