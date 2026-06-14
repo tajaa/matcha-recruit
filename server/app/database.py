@@ -6059,6 +6059,14 @@ async def init_db():
             ON newsletter_subscribers(status, subscribed_at DESC)
         """)
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS newsletter_suppressions (
+                email VARCHAR(255) PRIMARY KEY,
+                reason VARCHAR(50) DEFAULT 'admin_delete',
+                suppressed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                suppressed_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS newsletters (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 title VARCHAR(500) NOT NULL,

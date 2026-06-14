@@ -157,6 +157,12 @@ async def subscribe(
     initial_status = "active" if auto_confirm else "pending"
 
     async with get_connection() as conn:
+        # Explicit opt-in (website sign-up or admin import) clears any prior
+        # admin removal — otherwise a genuine re-subscribe would be silently
+        # dropped by sync_platform_users' suppression filter.
+        await conn.execute(
+            "DELETE FROM newsletter_suppressions WHERE email = $1", email
+        )
         existing = await conn.fetchrow(
             "SELECT id, status FROM newsletter_subscribers WHERE email = $1", email
         )
@@ -440,6 +446,14 @@ async def delete_subscriber(subscriber_id: UUID, actor_id: Optional[UUID]) -> bo
             "DELETE FROM newsletter_subscribers WHERE id = $1",
             subscriber_id,
         )
+        # Suppress the email so sync_platform_users() doesn't re-add it on the
+        # next list fetch (platform users are re-synced from the users table).
+        await conn.execute(
+            """INSERT INTO newsletter_suppressions (email, reason, suppressed_by)
+               VALUES (LOWER($1), 'admin_delete', $2)
+               ON CONFLICT (email) DO NOTHING""",
+            row["email"], actor_id,
+        )
     # Best-effort audit — failure here is logged but doesn't fail the request.
     try:
         await log_admin_action(
@@ -536,6 +550,10 @@ async def sync_platform_users() -> int:
                LEFT JOIN clients c ON c.user_id = u.id
                LEFT JOIN employees e ON e.user_id = u.id
                WHERE u.is_active = true AND u.email IS NOT NULL
+                 AND NOT EXISTS (
+                     SELECT 1 FROM newsletter_suppressions s
+                     WHERE s.email = LOWER(u.email)
+                 )
                ON CONFLICT (email) DO NOTHING"""
         )
         count = int(result.split()[-1]) if result else 0
