@@ -129,6 +129,9 @@ export default function Orders() {
                             </div>
                             <span className="text-zinc-300">{centsToMoney(it.unit_price_cents * it.quantity, o.currency)}</span>
                           </div>
+                          {it.selected_options?.length > 0 && (
+                            <div className="mt-1 text-xs text-zinc-400">{it.selected_options.map((s) => s.name).filter(Boolean).join(', ')}</div>
+                          )}
                           {it.booking_id && (
                             <div className="mt-1 flex items-center gap-1 text-xs text-amber-400">
                               <Calendar className="h-3.5 w-3.5" /> Scheduled session — see the Bookings tab

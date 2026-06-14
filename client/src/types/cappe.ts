@@ -104,6 +104,30 @@ export type CappeTemplateDetail = CappeTemplateSummary & {
 // download; service=seller delivers a result; booking=scheduled session.
 export type CappeFulfillment = 'physical' | 'digital' | 'service' | 'booking'
 
+export type CappeProductOption = {
+  id: string
+  name: string
+  price_delta_cents: number
+  sort_order: number
+}
+export type CappeProductOptionGroup = {
+  id: string
+  name: string
+  select_type: 'single' | 'multi'
+  required: boolean
+  sort_order: number
+  options: CappeProductOption[]
+}
+// Input shapes for the product editor (whole-set replace).
+export type CappeProductOptionInput = { name: string; price_delta_cents: number; sort_order?: number }
+export type CappeProductOptionGroupInput = {
+  name: string
+  select_type: 'single' | 'multi'
+  required: boolean
+  sort_order?: number
+  options: CappeProductOptionInput[]
+}
+
 export type CappeProduct = {
   id: string
   site_id: string
@@ -121,6 +145,8 @@ export type CappeProduct = {
   booking_type_id: string | null
   requires_approval: boolean
   intake_fields: CappeFormField[]
+  category: string | null
+  option_groups: CappeProductOptionGroup[]
   created_at: string
   updated_at: string
   discount_percent?: number
@@ -142,6 +168,8 @@ export type CappeProductInput = {
   booking_type_id?: string | null
   requires_approval?: boolean
   intake_fields?: CappeFormField[]
+  category?: string | null
+  option_groups?: CappeProductOptionGroupInput[]
 }
 
 export type CappeOrderItem = {
@@ -152,6 +180,7 @@ export type CappeOrderItem = {
   quantity: number
   fulfillment: CappeFulfillment
   intake_answers: Record<string, unknown>
+  selected_options: { group?: string; name?: string; price_delta_cents?: number }[]
   deliverable_url: string | null
   booking_id: string | null
 }

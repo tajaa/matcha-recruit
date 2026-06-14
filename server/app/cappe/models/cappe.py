@@ -241,6 +241,39 @@ class CappePublicSite(BaseModel):
 Fulfillment = Literal["physical", "digital", "service", "booking"]
 
 
+# Option groups (Size, Milk, Add-ons). `single` = pick ≤1 (a radio); `multi` =
+# pick any (checkboxes). Each option carries a SIGNED price delta. The whole set
+# is replaced on product create/update (mirrors availability/rate-rule replace).
+class CappeProductOptionInput(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    price_delta_cents: int = 0
+    sort_order: int = 0
+
+
+class CappeProductOptionGroupInput(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    select_type: Literal["single", "multi"] = "single"
+    required: bool = False
+    sort_order: int = 0
+    options: list[CappeProductOptionInput] = Field(default_factory=list)
+
+
+class CappeProductOption(BaseModel):
+    id: UUID
+    name: str
+    price_delta_cents: int = 0
+    sort_order: int = 0
+
+
+class CappeProductOptionGroup(BaseModel):
+    id: UUID
+    name: str
+    select_type: str = "single"
+    required: bool = False
+    sort_order: int = 0
+    options: list[CappeProductOption] = Field(default_factory=list)
+
+
 class CappeProductCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: Optional[str] = None
@@ -258,6 +291,9 @@ class CappeProductCreate(BaseModel):
     # Intake questions for service/booking offerings; same shape as form fields:
     # [{key,label,type,required,options?}].
     intake_fields: list[dict[str, Any]] = Field(default_factory=list)
+    category: Optional[str] = Field(default=None, max_length=120)
+    # None = leave option groups untouched; [] = clear them.
+    option_groups: Optional[list[CappeProductOptionGroupInput]] = None
 
 
 class CappeProductUpdate(BaseModel):
@@ -275,6 +311,8 @@ class CappeProductUpdate(BaseModel):
     booking_type_id: Optional[UUID] = None
     requires_approval: Optional[bool] = None
     intake_fields: Optional[list[dict[str, Any]]] = None
+    category: Optional[str] = Field(default=None, max_length=120)
+    option_groups: Optional[list[CappeProductOptionGroupInput]] = None
 
 
 class CappeProduct(BaseModel):
@@ -294,6 +332,8 @@ class CappeProduct(BaseModel):
     booking_type_id: Optional[UUID] = None
     requires_approval: bool = False
     intake_fields: list[dict[str, Any]] = Field(default_factory=list)
+    category: Optional[str] = None
+    option_groups: list[CappeProductOptionGroup] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
     # Storefront display only — best active discount for this product (0 if none).
@@ -310,6 +350,8 @@ class CappeOrderItem(BaseModel):
     quantity: int
     fulfillment: str = "physical"
     intake_answers: dict[str, Any] = Field(default_factory=dict)
+    # Snapshot of chosen options at purchase: [{group, name, price_delta_cents}].
+    selected_options: list[dict[str, Any]] = Field(default_factory=list)
     deliverable_url: Optional[str] = None
     booking_id: Optional[UUID] = None
 
@@ -367,6 +409,8 @@ class CappeCartItem(BaseModel):
     quantity: int = Field(ge=1, le=10000)
     intake_answers: dict[str, Any] = Field(default_factory=dict)
     starts_at: Optional[datetime] = None  # required for booking-fulfillment items
+    # Chosen option ids; the server validates + prices them (never trusts deltas).
+    selected_option_ids: list[UUID] = Field(default_factory=list)
 
 
 class CappeCheckoutRequest(BaseModel):
@@ -382,6 +426,7 @@ class CappeReceiptItem(BaseModel):
     quantity: int
     fulfillment: str
     unit_price_cents: int
+    selected_options: list[dict[str, Any]] = Field(default_factory=list)
     download_url: Optional[str] = None       # digital — only when paid/fulfilled
     deliverable_url: Optional[str] = None    # service — only when paid/fulfilled
     booking_starts_at: Optional[datetime] = None

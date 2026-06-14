@@ -31,7 +31,9 @@ function keyFromLabel(label: string): string {
 }
 
 type IntakeRow = { label: string; type: string; required: boolean }
-const EMPTY = { name: '', description: '', price: '', inventory: '', image_url: '', digital_file_url: '', booking_type_id: '' }
+type OptRow = { name: string; price: string }
+type OptGroupRow = { name: string; select_type: 'single' | 'multi'; required: boolean; options: OptRow[] }
+const EMPTY = { name: '', description: '', price: '', inventory: '', image_url: '', digital_file_url: '', booking_type_id: '', category: '' }
 
 export default function Shop() {
   const { siteId } = useParams<{ siteId: string }>()
@@ -43,6 +45,13 @@ export default function Shop() {
   const [requireApproval, setRequireApproval] = useState(false)
   const [form, setForm] = useState(EMPTY)
   const [intake, setIntake] = useState<IntakeRow[]>([])
+  const [optionGroups, setOptionGroups] = useState<OptGroupRow[]>([])
+
+  // option-group editors
+  const setGroup = (gi: number, patch: Partial<OptGroupRow>) =>
+    setOptionGroups((gs) => gs.map((g, j) => (j === gi ? { ...g, ...patch } : g)))
+  const setOpt = (gi: number, oi: number, patch: Partial<OptRow>) =>
+    setOptionGroups((gs) => gs.map((g, j) => (j === gi ? { ...g, options: g.options.map((o, k) => (k === oi ? { ...o, ...patch } : o)) } : g)))
 
   useEffect(() => {
     cappeApi.get<CappeProduct[]>(`/sites/${siteId}/products`).then(setProducts)
@@ -74,9 +83,18 @@ export default function Shop() {
               key: keyFromLabel(f.label), label: f.label.trim(), type: f.type, required: f.required,
             }))
           : [],
+        category: form.category.trim() || null,
+        option_groups: optionGroups
+          .filter((g) => g.name.trim())
+          .map((g) => ({
+            name: g.name.trim(), select_type: g.select_type, required: g.required,
+            options: g.options.filter((o) => o.name.trim()).map((o) => ({
+              name: o.name.trim(), price_delta_cents: Math.round(parseFloat(o.price || '0') * 100),
+            })),
+          })),
       })
       setProducts((p) => [...(p || []), created])
-      setForm(EMPTY); setIntake([]); setFulfillment('physical'); setRequireApproval(false)
+      setForm(EMPTY); setIntake([]); setOptionGroups([]); setFulfillment('physical'); setRequireApproval(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to add product')
     } finally {
@@ -111,6 +129,7 @@ export default function Shop() {
           <input value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="Price (USD)" type="number" step="0.01" min="0" className={input} />
         </div>
         <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Description (optional)" rows={2} className={input} />
+        <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Category — e.g. Drinks, Pastries (optional, groups your storefront)" className={input} />
 
         {/* fulfillment */}
         <div>
@@ -180,6 +199,39 @@ export default function Shop() {
           </div>
         )}
 
+        {/* options (size, milk, add-ons) */}
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
+          <div className="mb-2 text-xs font-medium text-zinc-400">Options — size, milk, add-ons (each can change the price)</div>
+          <div className="space-y-3">
+            {optionGroups.map((g, gi) => (
+              <div key={gi} className="rounded-lg border border-zinc-800 p-2.5">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <input value={g.name} onChange={(e) => setGroup(gi, { name: e.target.value })} placeholder="Group (e.g. Size)" className={`min-w-0 flex-1 ${input}`} />
+                  <select value={g.select_type} onChange={(e) => setGroup(gi, { select_type: e.target.value as 'single' | 'multi' })} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100">
+                    <option value="single">Pick one</option>
+                    <option value="multi">Pick many</option>
+                  </select>
+                  <label className="flex items-center gap-1 text-xs text-zinc-500">
+                    <input type="checkbox" checked={g.required} onChange={(e) => setGroup(gi, { required: e.target.checked })} className="h-4 w-4 rounded border-zinc-600 bg-zinc-900 text-emerald-500" /> req
+                  </label>
+                  <button type="button" onClick={() => setOptionGroups((gs) => gs.filter((_, j) => j !== gi))} className="text-zinc-500 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
+                </div>
+                <div className="space-y-1.5 pl-1">
+                  {g.options.map((o, oi) => (
+                    <div key={oi} className="flex items-center gap-2">
+                      <input value={o.name} onChange={(e) => setOpt(gi, oi, { name: e.target.value })} placeholder="Option (e.g. Large)" className={`flex-1 ${input}`} />
+                      <input value={o.price} onChange={(e) => setOpt(gi, oi, { price: e.target.value })} placeholder="+$0.00" type="number" step="0.01" className={`w-24 ${input}`} />
+                      <button type="button" onClick={() => setGroup(gi, { options: g.options.filter((_, k) => k !== oi) })} className="text-zinc-500 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => setGroup(gi, { options: [...g.options, { name: '', price: '' }] })} className="text-xs font-medium text-emerald-400 hover:text-emerald-300">+ Add option</button>
+                </div>
+              </div>
+            ))}
+            <button type="button" onClick={() => setOptionGroups((gs) => [...gs, { name: '', select_type: 'single', required: false, options: [{ name: '', price: '' }] }])} className="text-xs font-medium text-emerald-400 hover:text-emerald-300">+ Add option group</button>
+          </div>
+        </div>
+
         <ImageUpload siteId={siteId || ''} value={form.image_url} onChange={(url) => setForm({ ...form, image_url: url })} placeholder="Cover image URL (optional)" />
 
         <label className="flex items-center gap-2 text-sm text-zinc-300">
@@ -210,7 +262,10 @@ export default function Shop() {
                   <span className="truncate font-medium text-zinc-100">{p.name}</span>
                   <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${fulfillBadge[p.fulfillment] || fulfillBadge.physical}`}>{p.fulfillment}</span>
                 </div>
-                <div className="text-xs text-zinc-500">{centsToMoney(p.price_cents, p.currency)} · {meta(p)}</div>
+                <div className="text-xs text-zinc-500">
+                  {p.category ? `${p.category} · ` : ''}{centsToMoney(p.price_cents, p.currency)} · {meta(p)}
+                  {p.option_groups?.length ? ` · ${p.option_groups.length} option${p.option_groups.length > 1 ? 's' : ''}` : ''}
+                </div>
               </div>
               <select value={p.status} onChange={(e) => setStatus(p, e.target.value)} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100">
                 {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}

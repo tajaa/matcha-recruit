@@ -21,14 +21,14 @@ from ..models.cappe import (
     CappeProductCreate,
     CappeProductUpdate,
 )
-from ._shared import get_owned_site, loads, loads_list
+from ._shared import fetch_option_groups, get_owned_site, loads, loads_list
 
 router = APIRouter()
 
 _PRODUCT_COLS = (
     "id, site_id, name, description, price_cents, currency, image_url, sku, "
     "inventory, status, sort_order, fulfillment, digital_file_url, booking_type_id, "
-    "requires_approval, intake_fields, created_at, updated_at"
+    "requires_approval, intake_fields, category, created_at, updated_at"
 )
 _ORDER_COLS = (
     "id, site_id, customer_email, customer_name, status, subtotal_cents, "
@@ -37,20 +37,47 @@ _ORDER_COLS = (
 )
 _ITEM_COLS = (
     "id, product_id, title, unit_price_cents, quantity, fulfillment, "
-    "intake_answers, deliverable_url, booking_id"
+    "intake_answers, selected_options, deliverable_url, booking_id"
 )
 
 
-def _product_row(row) -> dict:
+def _product_row(row, groups=None) -> dict:
     d = dict(row)
     d["intake_fields"] = loads_list(row["intake_fields"])
+    d["option_groups"] = groups or []
     return d
 
 
 def _item_row(row) -> dict:
     d = dict(row)
     d["intake_answers"] = loads(row["intake_answers"])
+    d["selected_options"] = loads_list(row["selected_options"])
     return d
+
+
+async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
+    """Replace a product's option groups+options in one shot (None = leave as-is,
+    [] = clear). Mirrors the availability/rate-rule replace pattern."""
+    if groups is None:
+        return
+    await conn.execute(
+        "DELETE FROM cappe_product_option_groups WHERE product_id = $1 AND site_id = $2",
+        product_id, site_id,
+    )
+    for gi, g in enumerate(groups):
+        gid = await conn.fetchval(
+            """INSERT INTO cappe_product_option_groups
+                   (site_id, product_id, name, select_type, required, sort_order)
+               VALUES ($1, $2, $3, $4, $5, $6) RETURNING id""",
+            site_id, product_id, g.name, g.select_type, g.required, g.sort_order or gi,
+        )
+        for oi, o in enumerate(g.options or []):
+            await conn.execute(
+                """INSERT INTO cappe_product_options
+                       (site_id, group_id, name, price_delta_cents, sort_order)
+                   VALUES ($1, $2, $3, $4, $5)""",
+                site_id, gid, o.name, o.price_delta_cents, o.sort_order or oi,
+            )
 
 
 def _order_row(row, items=None) -> dict:
@@ -82,7 +109,8 @@ async def list_products(site_id: UUID, account: CappeAccount = Depends(require_c
             f"SELECT {_PRODUCT_COLS} FROM cappe_products WHERE site_id = $1 ORDER BY sort_order, created_at",
             site_id,
         )
-    return [_product_row(r) for r in rows]
+        groups = await fetch_option_groups(conn, [r["id"] for r in rows])
+    return [_product_row(r, groups.get(r["id"])) for r in rows]
 
 
 @router.post("/sites/{site_id}/products", response_model=CappeProduct, status_code=status.HTTP_201_CREATED)
@@ -92,19 +120,22 @@ async def create_product(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         await _validate_booking_type(conn, site_id, body.booking_type_id)
-        row = await conn.fetchrow(
-            f"""INSERT INTO cappe_products
-                    (site_id, name, description, price_cents, currency, image_url, sku, inventory,
-                     status, sort_order, fulfillment, digital_file_url, booking_type_id,
-                     requires_approval, intake_fields)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-                RETURNING {_PRODUCT_COLS}""",
-            site_id, body.name, body.description, body.price_cents, body.currency,
-            body.image_url, body.sku, body.inventory, body.status, body.sort_order,
-            body.fulfillment, body.digital_file_url, body.booking_type_id,
-            body.requires_approval, json.dumps(body.intake_fields),
-        )
-    return _product_row(row)
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                f"""INSERT INTO cappe_products
+                        (site_id, name, description, price_cents, currency, image_url, sku, inventory,
+                         status, sort_order, fulfillment, digital_file_url, booking_type_id,
+                         requires_approval, intake_fields, category)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                    RETURNING {_PRODUCT_COLS}""",
+                site_id, body.name, body.description, body.price_cents, body.currency,
+                body.image_url, body.sku, body.inventory, body.status, body.sort_order,
+                body.fulfillment, body.digital_file_url, body.booking_type_id,
+                body.requires_approval, json.dumps(body.intake_fields), body.category,
+            )
+            await _replace_option_groups(conn, site_id, row["id"], body.option_groups)
+        groups = await fetch_option_groups(conn, [row["id"]])
+    return _product_row(row, groups.get(row["id"]))
 
 
 @router.get("/sites/{site_id}/products/{product_id}", response_model=CappeProduct)
@@ -117,9 +148,10 @@ async def get_product(
             f"SELECT {_PRODUCT_COLS} FROM cappe_products WHERE id = $1 AND site_id = $2",
             product_id, site_id,
         )
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
-    return _product_row(row)
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+        groups = await fetch_option_groups(conn, [product_id])
+    return _product_row(row, groups.get(product_id))
 
 
 @router.put("/sites/{site_id}/products/{product_id}", response_model=CappeProduct)
@@ -130,35 +162,36 @@ async def update_product(
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         await _validate_booking_type(conn, site_id, body.booking_type_id)
-        sets, args = [], []
-        for col in ("name", "description", "price_cents", "currency", "image_url",
-                    "sku", "inventory", "status", "sort_order", "fulfillment",
-                    "digital_file_url", "booking_type_id", "requires_approval"):
-            val = getattr(body, col)
-            if val is not None:
-                args.append(val)
-                sets.append(f"{col} = ${len(args)}")
-        if body.intake_fields is not None:  # JSONB column needs explicit serialization
-            args.append(json.dumps(body.intake_fields))
-            sets.append(f"intake_fields = ${len(args)}")
-        if not sets:
-            row = await conn.fetchrow(
-                f"SELECT {_PRODUCT_COLS} FROM cappe_products WHERE id = $1 AND site_id = $2",
-                product_id, site_id,
-            )
+        async with conn.transaction():
+            sets, args = [], []
+            for col in ("name", "description", "price_cents", "currency", "image_url",
+                        "sku", "inventory", "status", "sort_order", "fulfillment",
+                        "digital_file_url", "booking_type_id", "requires_approval", "category"):
+                val = getattr(body, col)
+                if val is not None:
+                    args.append(val)
+                    sets.append(f"{col} = ${len(args)}")
+            if body.intake_fields is not None:  # JSONB column needs explicit serialization
+                args.append(json.dumps(body.intake_fields))
+                sets.append(f"intake_fields = ${len(args)}")
+            if sets:
+                sets.append("updated_at = NOW()")
+                args.extend([product_id, site_id])
+                row = await conn.fetchrow(
+                    f"UPDATE cappe_products SET {', '.join(sets)} "
+                    f"WHERE id = ${len(args) - 1} AND site_id = ${len(args)} RETURNING {_PRODUCT_COLS}",
+                    *args,
+                )
+            else:
+                row = await conn.fetchrow(
+                    f"SELECT {_PRODUCT_COLS} FROM cappe_products WHERE id = $1 AND site_id = $2",
+                    product_id, site_id,
+                )
             if row is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
-            return _product_row(row)
-        sets.append("updated_at = NOW()")
-        args.extend([product_id, site_id])
-        row = await conn.fetchrow(
-            f"UPDATE cappe_products SET {', '.join(sets)} "
-            f"WHERE id = ${len(args) - 1} AND site_id = ${len(args)} RETURNING {_PRODUCT_COLS}",
-            *args,
-        )
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
-    return _product_row(row)
+            await _replace_option_groups(conn, site_id, product_id, body.option_groups)
+        groups = await fetch_option_groups(conn, [product_id])
+    return _product_row(row, groups.get(product_id))
 
 
 @router.delete("/sites/{site_id}/products/{product_id}", status_code=status.HTTP_204_NO_CONTENT)

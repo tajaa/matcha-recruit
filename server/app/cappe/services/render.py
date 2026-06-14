@@ -285,6 +285,14 @@ section{position:relative}
 .cz-product__foot{display:flex;align-items:center;justify-content:space-between;margin-top:.6rem}
 .cz-price{font-weight:700;font-family:var(--font-h)}
 .cz-buyform{margin-top:.8rem;display:flex;flex-direction:column;gap:.5rem}
+.cz-store-cat{font-family:var(--font-h);font-size:1.35rem;margin:1.75rem 0 1rem}
+.cz-store-cat:first-child{margin-top:0}
+.cz-opt-group{margin:.1rem 0 .5rem}
+.cz-opts{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.35rem}
+.cz-opt{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:var(--radius);
+  padding:.4rem .7rem;font:inherit;font-size:.85rem;cursor:pointer;transition:border-color .15s,background .15s}
+.cz-opt:hover{border-color:var(--brand)}
+.cz-opt--on{background:var(--brand);color:var(--brand-fg);border-color:var(--brand)}
 
 /* footer */
 .cz-footer{border-top:1px solid var(--line);text-align:center;color:var(--muted);
@@ -712,31 +720,50 @@ function field(f){var req=f.required?' required':'';var l='<label class="cz-labe
 if(f.type==='textarea')return '<div>'+l+'<textarea class="cz-field" data-k="'+RT.esc(f.key)+'"'+req+'></textarea></div>';
 if(f.type==='select'){var o=(f.options||[]).map(function(x){return '<option>'+RT.esc(x)+'</option>';}).join('');return '<div>'+l+'<select class="cz-field" data-k="'+RT.esc(f.key)+'"'+req+'>'+o+'</select></div>';}
 var ty=(['email','number','tel','date'].indexOf(f.type)>=0)?f.type:'text';return '<div>'+l+'<input class="cz-field" type="'+ty+'" data-k="'+RT.esc(f.key)+'"'+req+' /></div>';}
+function optsHtml(p){return (p.option_groups||[]).map(function(g){
+return '<div class="cz-opt-group" data-group="'+RT.esc(g.id)+'" data-single="'+(g.select_type==='single'?'1':'')+'" data-required="'+(g.required?'1':'')+'"><label class="cz-label">'+RT.esc(g.name)+(g.required?' *':'')+'</label><div class="cz-opts">'+
+(g.options||[]).map(function(o){var dc=o.price_delta_cents||0;var d=dc?(' '+(dc>0?'+':'−')+RT.money(Math.abs(dc),p.currency)):'';
+return '<button type="button" class="cz-opt" data-opt="'+RT.esc(o.id)+'" data-delta="'+dc+'">'+RT.esc(o.name)+d+'</button>';}).join('')+'</div></div>';}).join('');}
 function form(p,host,btn){if(host.dataset.open){host.dataset.open='';host.innerHTML='';return;}host.dataset.open='1';
 var intake=(p.intake_fields||[]).map(field).join('');
 var when=p.fulfillment==='booking'?'<div><label class="cz-label">Preferred time</label><input class="cz-field" type="datetime-local" data-when /></div>':'';
-host.innerHTML='<input class="cz-field" type="email" data-email placeholder="Your email" />'+
+host.innerHTML=optsHtml(p)+'<input class="cz-field" type="email" data-email placeholder="Your email" />'+
 '<input class="cz-field" type="text" data-name placeholder="Your name" />'+when+intake+
-'<button class="cz-btn cz-btn--solid cz-btn--block">Place order</button><p class="cz-msg"></p>';
-var sb=host.querySelector('button'),msg=host.querySelector('.cz-msg');
+'<button class="cz-btn cz-btn--solid cz-btn--block" data-go>Place order</button><p class="cz-msg"></p>';
+var sb=host.querySelector('[data-go]'),msg=host.querySelector('.cz-msg');
+function price(){var sum=p.price_cents||0;host.querySelectorAll('.cz-opt--on').forEach(function(b){sum+=parseInt(b.getAttribute('data-delta'),10)||0;});
+sum=Math.max(0,sum);if(p.discount_percent)sum=Math.round(sum*(100-p.discount_percent)/100);return sum;}
+function refresh(){sb.textContent=(p.fulfillment==='booking'?'Request — ':'Place order — ')+RT.money(price(),p.currency);}
+host.querySelectorAll('.cz-opt-group').forEach(function(g){var single=g.getAttribute('data-single')==='1';
+g.querySelectorAll('.cz-opt').forEach(function(o){o.addEventListener('click',function(){
+if(single){g.querySelectorAll('.cz-opt').forEach(function(x){x.classList.remove('cz-opt--on');});o.classList.add('cz-opt--on');}
+else{o.classList.toggle('cz-opt--on');}refresh();});});});
+refresh();
 sb.addEventListener('click',function(){var email=host.querySelector('[data-email]').value.trim();
 if(!email){msg.textContent='Email required';msg.className='cz-msg err';return;}
+var ok=true;host.querySelectorAll('.cz-opt-group').forEach(function(g){if(g.getAttribute('data-required')==='1'&&!g.querySelector('.cz-opt--on'))ok=false;});
+if(!ok){msg.textContent='Please choose the required options';msg.className='cz-msg err';return;}
+var optIds=[];host.querySelectorAll('.cz-opt--on').forEach(function(b){optIds.push(b.getAttribute('data-opt'));});
 var ans={};(p.intake_fields||[]).forEach(function(f){var el=host.querySelector('[data-k="'+f.key+'"]');if(el)ans[f.key]=el.value;});
-var item={product_id:p.id,quantity:1,intake_answers:ans};
+var item={product_id:p.id,quantity:1,intake_answers:ans,selected_option_ids:optIds};
 if(p.fulfillment==='booking'){var w=host.querySelector('[data-when]').value;if(!w){msg.textContent='Pick a time';msg.className='cz-msg err';return;}item.starts_at=w;}
 sb.disabled=true;msg.textContent='Placing order...';msg.className='cz-msg';
 RT.post('/orders',{customer_email:email,customer_name:host.querySelector('[data-name]').value.trim(),items:[item]}).then(function(){
 host.innerHTML='<p class="cz-msg ok">Order placed. We will email you'+(p.fulfillment==='digital'?' your download once confirmed':'')+'.</p>';
-}).catch(function(e){sb.disabled=false;msg.textContent=e.message;msg.className='cz-msg err';});});}
-RT.get('/products').then(function(items){if(!items.length){box.innerHTML='<p style="color:var(--muted)">No products yet.</p>';return;}box.innerHTML='';
-items.forEach(function(p){var c=document.createElement('div');c.className='cz-product';
+}).catch(function(e){sb.disabled=false;refresh();msg.textContent=e.message;msg.className='cz-msg err';});});}
+function card(p){var c=document.createElement('div');c.className='cz-product';
 var iu=RT.url(p.image_url);var img=iu?'<img class="cz-product__img" src="'+RT.esc(iu)+'" alt="" />':'';
-var price;if(p.discount_percent&&p.discounted_price_cents!=null){price='<span style="text-decoration:line-through;opacity:.5;margin-right:.35rem">'+RT.money(p.price_cents,p.currency)+'</span>'+RT.money(p.discounted_price_cents,p.currency)+' <span style="color:var(--brand);font-size:.8em">'+p.discount_percent+'% off</span>';}else{price=p.price_cents?RT.money(p.price_cents,p.currency):'Free';}var lbl=p.fulfillment==='booking'?'Book':'Buy';
-c.innerHTML=img+'<div class="cz-product__body"><h3>'+RT.esc(p.name)+'</h3>'+
-'<p class="desc">'+RT.esc(p.description||'')+'</p>'+
-'<div class="cz-product__foot"><span class="cz-price">'+price+'</span>'+
-'<button class="cz-btn cz-btn--solid">'+lbl+'</button></div><div class="cz-buyform"></div></div>';
-c.querySelector('button').addEventListener('click',function(){form(p,c.querySelector('.cz-buyform'),this);});box.appendChild(c);});
+var price;if(p.discount_percent&&p.discounted_price_cents!=null){price='<span style="text-decoration:line-through;opacity:.5;margin-right:.35rem">'+RT.money(p.price_cents,p.currency)+'</span>'+RT.money(p.discounted_price_cents,p.currency)+' <span style="color:var(--brand);font-size:.8em">'+p.discount_percent+'% off</span>';}else{price=p.price_cents?RT.money(p.price_cents,p.currency):'Free';}
+var lbl=(p.option_groups||[]).length?(p.fulfillment==='booking'?'Book':'Choose'):(p.fulfillment==='booking'?'Book':'Buy');
+c.innerHTML=img+'<div class="cz-product__body"><h3>'+RT.esc(p.name)+'</h3><p class="desc">'+RT.esc(p.description||'')+'</p>'+
+'<div class="cz-product__foot"><span class="cz-price">'+price+'</span><button class="cz-btn cz-btn--solid">'+lbl+'</button></div><div class="cz-buyform"></div></div>';
+c.querySelector('button').addEventListener('click',function(){form(p,c.querySelector('.cz-buyform'),this);});return c;}
+RT.get('/products').then(function(items){if(!items.length){box.innerHTML='<p style="color:var(--muted)">No products yet.</p>';return;}box.innerHTML='';
+var cats=[],byCat={};items.forEach(function(p){var k=(p.category||'').trim();if(!(k in byCat)){byCat[k]=[];cats.push(k);}byCat[k].push(p);});
+if(cats.filter(function(k){return k;}).length===0){var g=document.createElement('div');g.className='cz-store-grid';items.forEach(function(p){g.appendChild(card(p));});box.appendChild(g);return;}
+cats.sort(function(a,b){if(!a)return 1;if(!b)return -1;return 0;});
+cats.forEach(function(k){if(k){var h=document.createElement('h3');h.className='cz-store-cat';h.textContent=k;box.appendChild(h);}
+var g=document.createElement('div');g.className='cz-store-grid';byCat[k].forEach(function(p){g.appendChild(card(p));});box.appendChild(g);});
 }).catch(function(){box.innerHTML='<p style="color:var(--muted)">Unable to load products.</p>';});})();"""
 
 
@@ -859,7 +886,7 @@ def _store(b, t):
     # of the seller's vocation — the generalizable "go buy" destination.
     wid = "st" + str(_uid())
     return (f'<section id="shop" class="cz-store"><div class="cz-wrap">{_head(b)}'
-            f'<div id="{wid}" class="cz-store-grid"><p style="color:var(--muted)">Loading products...</p></div></div></section>'
+            f'<div id="{wid}" class="cz-store-box"><p style="color:var(--muted)">Loading products...</p></div></div></section>'
             f'<script>{_STORE_JS.replace("__ID__", wid)}</script>')
 
 

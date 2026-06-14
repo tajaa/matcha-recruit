@@ -136,6 +136,40 @@ async def get_owned_site(conn, site_id: UUID, account_id: UUID):
     return row
 
 
+async def fetch_option_groups(conn, product_ids: list) -> dict:
+    """{product_id: [group dicts with nested options]} for the given products.
+    Read-only; shared by the owner shop routes and the public storefront."""
+    if not product_ids:
+        return {}
+    grows = await conn.fetch(
+        "SELECT id, product_id, name, select_type, required, sort_order "
+        "FROM cappe_product_option_groups WHERE product_id = ANY($1::uuid[]) "
+        "ORDER BY sort_order, created_at",
+        product_ids,
+    )
+    orows = await conn.fetch(
+        "SELECT o.id, o.group_id, o.name, o.price_delta_cents, o.sort_order "
+        "FROM cappe_product_options o "
+        "JOIN cappe_product_option_groups g ON g.id = o.group_id "
+        "WHERE g.product_id = ANY($1::uuid[]) ORDER BY o.sort_order, o.created_at",
+        product_ids,
+    )
+    opts_by_group: dict = {}
+    for o in orows:
+        opts_by_group.setdefault(o["group_id"], []).append({
+            "id": o["id"], "name": o["name"],
+            "price_delta_cents": o["price_delta_cents"], "sort_order": o["sort_order"],
+        })
+    by_product: dict = {}
+    for g in grows:
+        by_product.setdefault(g["product_id"], []).append({
+            "id": g["id"], "name": g["name"], "select_type": g["select_type"],
+            "required": g["required"], "sort_order": g["sort_order"],
+            "options": opts_by_group.get(g["id"], []),
+        })
+    return by_product
+
+
 async def _site_owner(conn, site_id: UUID):
     """The site owner's account email/name, for creator notifications. Returns
     None if the site (or its account) is gone."""

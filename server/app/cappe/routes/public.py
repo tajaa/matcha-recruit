@@ -19,6 +19,7 @@ from ...core.services.redis_cache import check_rate_limit, client_ip
 from ...database import get_connection
 from ..services.commerce import booking_quote_cents, booking_times, order_subtotal
 from ..services.discounts import apply_discount_cents, best_discount_percent
+from ..services.options import validate_and_price_options
 from ..services.slots import generate_slots
 from ..models.cappe import (
     CappeBookingQuote,
@@ -52,14 +53,14 @@ from ..services.email import (
     send_cappe_order_alert_email,
     send_cappe_order_receipt_email,
 )
-from ._shared import _site_owner, loads, loads_list, page_row_to_dict
+from ._shared import _site_owner, fetch_option_groups, loads, loads_list, page_row_to_dict
 
 # Public product listing exposes everything EXCEPT digital_file_url (the gated
 # deliverable — released only via the order receipt once paid/fulfilled).
 _PUBLIC_PRODUCT_COLS = (
     "id, site_id, name, description, price_cents, currency, image_url, sku, "
     "inventory, status, sort_order, fulfillment, booking_type_id, requires_approval, "
-    "intake_fields, created_at, updated_at"
+    "intake_fields, category, created_at, updated_at"
 )
 
 router = APIRouter()
@@ -171,6 +172,7 @@ async def public_products(slug: str, request: Request):
         )
         discounts = await _active_discounts(conn, site["id"])
         now_utc = await conn.fetchval("SELECT NOW()")
+        groups = await fetch_option_groups(conn, [r["id"] for r in rows])
     today = _site_today(now_utc, site["timezone"])
     out = []
     for r in rows:
@@ -178,6 +180,7 @@ async def public_products(slug: str, request: Request):
         out.append({
             **dict(r),
             "intake_fields": loads_list(r["intake_fields"]),
+            "option_groups": groups.get(r["id"], []),
             "discount_percent": pct,
             "discounted_price_cents": apply_discount_cents(r["price_cents"], pct) if pct else None,
         })
@@ -392,13 +395,23 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
                     )
                     booking_id = booking["id"]
 
-                # Best active product discount → charged unit price (authoritative).
+                # Server-authoritative option pricing: validate the selected
+                # option ids against this product's live groups, fold the signed
+                # deltas into the unit price BEFORE the discount, snapshot the
+                # choice for the order line.
+                pgroups = await fetch_option_groups(conn, [item.product_id])
+                try:
+                    opt_delta, opt_snapshot = validate_and_price_options(
+                        pgroups.get(item.product_id, []), item.selected_option_ids,
+                    )
+                except ValueError as exc:
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
                 dpct = best_discount_percent(
                     discounts, kind="product", target_id=str(item.product_id), on_date=today,
                 )
-                unit_price = apply_discount_cents(product["price_cents"], dpct)
+                unit_price = apply_discount_cents(max(0, product["price_cents"] + opt_delta), dpct)
                 line_rows.append(
-                    (item.product_id, product["name"], unit_price, qty, f, intake, booking_id)
+                    (item.product_id, product["name"], unit_price, qty, f, intake, booking_id, opt_snapshot)
                 )
 
             subtotal = order_subtotal((unit, qty) for (_, _, unit, qty, *_rest) in line_rows)
@@ -411,14 +424,14 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
                 site["id"], email, body.customer_name, subtotal, order_currency or "USD", body.note,
                 order_requires_approval,
             )
-            for product_id, title, unit_price, qty, f, intake, booking_id in line_rows:
+            for product_id, title, unit_price, qty, f, intake, booking_id, opt_snapshot in line_rows:
                 await conn.execute(
                     """INSERT INTO cappe_order_items
                            (order_id, site_id, product_id, title, unit_price_cents, quantity,
-                            fulfillment, intake_answers, booking_id)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)""",
+                            fulfillment, intake_answers, selected_options, booking_id)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)""",
                     order["id"], site["id"], product_id, title, unit_price, qty,
-                    f, json.dumps(intake), booking_id,
+                    f, json.dumps(intake), json.dumps(opt_snapshot), booking_id,
                 )
         owner = await _site_owner(conn, site["id"])
 
@@ -464,7 +477,7 @@ async def public_order_receipt(token: str, request: Request):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
         items = await conn.fetch(
             """SELECT oi.title, oi.quantity, oi.fulfillment, oi.unit_price_cents,
-                      oi.deliverable_url, p.digital_file_url,
+                      oi.selected_options, oi.deliverable_url, p.digital_file_url,
                       b.starts_at AS b_start, b.ends_at AS b_end, b.status AS b_status
                FROM cappe_order_items oi
                LEFT JOIN cappe_products p ON p.id = oi.product_id
@@ -487,6 +500,7 @@ async def public_order_receipt(token: str, request: Request):
                 "quantity": it["quantity"],
                 "fulfillment": it["fulfillment"],
                 "unit_price_cents": it["unit_price_cents"],
+                "selected_options": loads_list(it["selected_options"]),
                 "download_url": it["digital_file_url"] if (it["fulfillment"] == "digital" and released) else None,
                 "deliverable_url": it["deliverable_url"] if released else None,
                 "booking_starts_at": it["b_start"],
