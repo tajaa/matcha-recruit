@@ -84,7 +84,7 @@ export const CAPPE_THEMES: CappeThemePreset[] = [
     font: 'Fraunces',
     config: {
       mode: 'light', fonts: { heading: 'Fraunces', body: 'Inter' }, radius: 'md',
-      heroStyle: 'split', navStyle: 'simple',
+      heroStyle: 'split', navStyle: 'simple', premium: true,
       colors: { bg: '#fdfbf7', surface: '#f3eee4', text: '#1c1a17', muted: '#6b5f50', border: '#e6ddcd', brand: '#b4532a', brandText: '#ffffff', accent: '#b4532a' },
     },
   },
@@ -97,7 +97,7 @@ export const CAPPE_THEMES: CappeThemePreset[] = [
     font: 'Playfair Display',
     config: {
       mode: 'dark', fonts: { heading: 'Playfair Display', body: 'Inter' }, radius: 'md',
-      heroStyle: 'centered', navStyle: 'centered',
+      heroStyle: 'centered', navStyle: 'centered', premium: true,
       colors: { bg: '#111014', surface: '#1c1a22', text: '#f7f5f0', muted: '#a89f93', border: '#2c2933', brand: '#d4af37', brandText: '#111014', accent: '#d4af37' },
     },
   },
@@ -110,7 +110,7 @@ export const CAPPE_THEMES: CappeThemePreset[] = [
     font: 'Sora',
     config: {
       mode: 'light', fonts: { heading: 'Sora', body: 'Inter' }, radius: '2xl',
-      heroStyle: 'centered', navStyle: 'simple',
+      heroStyle: 'centered', navStyle: 'simple', premium: true,
       colors: { bg: '#fff8f3', surface: '#ffeee3', text: '#2a1d18', muted: '#7a6258', border: '#f6ddcd', brand: '#f0603a', brandText: '#ffffff', accent: '#f0603a' },
     },
   },

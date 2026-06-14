@@ -566,6 +566,7 @@ export default function PageEditor() {
   }
   const setRadius = (v: string) => { setTheme((t) => ({ ...t, radius: v })); setThemeDirty(true) }
   const setMode = (m: 'light' | 'dark') => { setTheme((t) => ({ ...t, mode: m })); setThemeDirty(true) }
+  const setPremium = (on: boolean) => { setTheme((t) => ({ ...t, premium: on })); setThemeDirty(true) }
 
   const updateBlock = (i: number, b: CappeBlock) => setBlocks((bs) => bs.map((x, j) => (j === i ? b : x)))
   const removeBlock = (i: number) => setBlocks((bs) => bs.filter((_, j) => j !== i))
@@ -708,6 +709,15 @@ export default function PageEditor() {
                         <div className="flex rounded-lg border border-zinc-700 p-0.5">
                           {(['light', 'dark'] as const).map((m) => (
                             <button key={m} onClick={() => setMode(m)} className={`rounded-md px-2.5 py-0.5 text-xs font-medium capitalize ${((theme.mode as string) || 'light') === m ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}>{m}</button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-1 text-xs text-zinc-400"><Sparkles className="h-3 w-3 text-amber-400" /> Premium effects</span>
+                        <div className="flex rounded-lg border border-zinc-700 p-0.5">
+                          {([['On', true], ['Off', false]] as const).map(([label, on]) => (
+                            <button key={label} onClick={() => setPremium(on)} className={`rounded-md px-2.5 py-0.5 text-xs font-medium ${!!theme.premium === on ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}>{label}</button>
                           ))}
                         </div>
                       </div>

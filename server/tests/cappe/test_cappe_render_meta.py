@@ -54,6 +54,30 @@ def test_footer_escapes_contact_html():
     assert "&lt;script&gt;" in h
 
 
+def _render_theme(theme: dict) -> str:
+    site = {"slug": "d", "name": "Studio", "theme_config": theme, "meta_config": {}, "timezone": "UTC"}
+    page = {"title": "Home", "content": {"blocks": [{"type": "hero", "heading": "Hi", "eyebrow": "Studio"}]}}
+    return render_site_html(site, page, [{"slug": "home", "title": "Home"}])
+
+
+def test_premium_theme_adds_layer():
+    h = _render_theme({"mode": "dark", "premium": True, "colors": {"brand": "#C6F16B"}})
+    assert '<body class="cz-premium">' in h
+    assert "czGlow" in h                         # glow keyframes present
+    assert "classList.add('cz-js')" in h         # scroll-reveal script injected
+
+
+def test_non_premium_theme_has_no_layer():
+    h = _render_theme({"mode": "dark"})
+    assert '<body class="">' in h
+    assert "classList.add('cz-js')" not in h     # reveal script only for premium
+
+
+def test_fancy_alias_enables_premium():
+    h = _render_theme({"fancy": True})
+    assert '<body class="cz-premium">' in h
+
+
 def test_empty_meta_renders_minimal_footer():
     h = _render({})
     assert "© Studio" in h

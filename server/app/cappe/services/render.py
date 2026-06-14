@@ -99,6 +99,9 @@ def _tokens(theme: dict | None) -> dict:
         "heroStyle": (theme.get("heroStyle") or "centered").lower(),
         "navStyle": (theme.get("navStyle") or "simple").lower(),
         "dark": mode == "dark",
+        # Premium effects layer (mesh + glow, big display type, hover-lift glass
+        # cards, scroll-reveal) — opt-in via theme_config.
+        "premium": bool(theme.get("premium") or theme.get("fancy")),
     }
 
 
@@ -397,6 +400,50 @@ section{position:relative}
   .cz-split--reverse .cz-split__art{order:2}
 }
 @media(max-width:560px){.cz-nav{display:none}}
+
+/* ── premium effects layer (body.cz-premium) ─────────────────────────────── */
+/* fixed grid mesh + a soft brand-tinted glow behind the top of the page */
+.cz-premium::before{content:"";position:fixed;inset:0;z-index:-2;pointer-events:none;
+  background-image:linear-gradient(color-mix(in srgb,var(--ink) 5%,transparent) 1px,transparent 1px),
+    linear-gradient(90deg,color-mix(in srgb,var(--ink) 5%,transparent) 1px,transparent 1px);
+  background-size:60px 60px;
+  -webkit-mask-image:radial-gradient(ellipse 75% 55% at 50% 0%,#000,transparent);
+          mask-image:radial-gradient(ellipse 75% 55% at 50% 0%,#000,transparent)}
+.cz-premium::after{content:"";position:fixed;left:50%;top:-20%;z-index:-1;pointer-events:none;
+  width:64rem;height:44rem;max-width:120vw;transform:translateX(-50%);border-radius:50%;
+  filter:blur(150px);opacity:.5;animation:czGlow 9s ease-in-out infinite;
+  background:radial-gradient(closest-side,color-mix(in srgb,var(--brand) 36%,transparent),transparent)}
+@keyframes czGlow{0%,100%{opacity:.42;transform:translateX(-50%) scale(1)}50%{opacity:.66;transform:translateX(-50%) scale(1.07)}}
+
+/* display type + eyebrow pill */
+.cz-premium .cz-hero__title{font-size:clamp(2.8rem,7.2vw,6rem);line-height:.98;letter-spacing:-.02em}
+.cz-premium .cz-hero__lead{font-size:1.26rem}
+.cz-premium .cz-hero--centered{background:transparent}
+.cz-premium .cz-head h2,.cz-premium .cz-split__body h2,.cz-premium .cz-band h2,
+.cz-premium .cz-stat__num{letter-spacing:-.015em}
+.cz-premium .cz-head h2,.cz-premium .cz-split__body h2{font-size:clamp(2rem,4.8vw,3.6rem);line-height:1.02}
+.cz-premium .cz-eyebrow{display:inline-block;padding:.42rem .95rem;border-radius:999px;
+  border:1px solid color-mix(in srgb,var(--brand) 35%,transparent);
+  background:color-mix(in srgb,var(--brand) 8%,transparent);letter-spacing:.24em;font-size:.66rem}
+
+/* glass cards with hover-lift + brand glow */
+.cz-premium .cz-card,.cz-premium .cz-plan,.cz-premium .cz-quote,.cz-premium .cz-cred,
+.cz-premium .cz-review,.cz-premium .cz-product,.cz-premium .cz-tile{
+  transition:transform .5s cubic-bezier(.2,.7,.2,1),border-color .5s,box-shadow .5s,background .5s}
+.cz-premium .cz-card:hover,.cz-premium .cz-plan:hover,.cz-premium .cz-quote:hover,
+.cz-premium .cz-cred:hover,.cz-premium .cz-review:hover,.cz-premium .cz-product:hover{
+  transform:translateY(-5px);border-color:color-mix(in srgb,var(--brand) 45%,var(--line));
+  box-shadow:0 30px 60px -34px color-mix(in srgb,var(--brand) 55%,transparent)}
+.cz-premium .cz-feat__icon{background:linear-gradient(135deg,var(--brand),var(--accent));color:var(--brand-fg)}
+.cz-premium .cz-tile:hover{box-shadow:0 30px 60px -34px color-mix(in srgb,var(--brand) 50%,transparent)}
+
+/* scroll-reveal — only active once JS adds .cz-js (no-JS shows everything) */
+.cz-premium.cz-js main>section{opacity:0;transform:translateY(26px);
+  transition:opacity .9s cubic-bezier(.2,.7,.2,1),transform .9s cubic-bezier(.2,.7,.2,1)}
+.cz-premium.cz-js main>section.cz-in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){
+  .cz-premium.cz-js main>section{opacity:1;transform:none;transition:none}
+  .cz-premium::after{animation:none}}
 """
 
 
@@ -643,6 +690,19 @@ def _widget_runtime():
         ".then(function(d){if(!r.ok)throw new Error((d&&d.detail)||'Request failed');return d;});});}"
         "return {api:C.api,slug:C.slug,preview:!!C.preview,esc:esc,url:url,money:money,get:get,post:post};})();</script>"
     )
+
+
+# Scroll-reveal for premium sites. Adds `cz-js` (so the hide-state CSS only
+# applies when JS is available — no-JS shows everything), then reveals each
+# <section> as it scrolls in. No-op if IntersectionObserver is unsupported.
+_PREMIUM_JS = (
+    "<script>(function(){var b=document.body;"
+    "if(!b||b.className.indexOf('cz-premium')<0||!('IntersectionObserver' in window))return;"
+    "b.classList.add('cz-js');"
+    "var io=new IntersectionObserver(function(es){es.forEach(function(e){"
+    "if(e.isIntersecting){e.target.classList.add('cz-in');io.unobserve(e.target);}});},{threshold:.12});"
+    "document.querySelectorAll('main>section').forEach(function(s){io.observe(s);});})();</script>"
+)
 
 
 _STORE_JS = r"""(function(){
@@ -951,6 +1011,8 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
 
     meta_dict = meta if isinstance(meta, dict) else {}
     head_title, head_seo = _head_seo(site, page, meta_dict)
+    body_cls = "cz-premium" if t["premium"] else ""
+    premium_js = _PREMIUM_JS if t["premium"] else ""
 
     return f"""<!doctype html>
 <html lang="en">
@@ -964,12 +1026,13 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
   <script>window.__CAPPE__={cappe_ctx};</script>
   {_widget_runtime()}
 </head>
-<body>
+<body class="{body_cls}">
   <header class="{header_cls}"><div class="cz-wrap cz-bar">
     <a class="cz-brand" href="/">{brand_inner}</a>
     <nav class="cz-nav">{nav_links}</nav>
   </div></header>
   <main>{body_html}</main>
   {_footer(site, meta_dict)}
+  {premium_js}
 </body>
 </html>"""

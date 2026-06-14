@@ -302,7 +302,7 @@ TEMPLATES = {
                     "border": "#e6ddcd", "brand": "#b4532a", "brandText": "#ffffff", "accent": "#d97706",
                 },
                 "fonts": {"heading": "Fraunces", "body": "Inter"},
-                "radius": "md", "heroStyle": "split", "navStyle": "simple",
+                "radius": "md", "heroStyle": "split", "navStyle": "simple", "premium": True,
             },
             "pages": [
                 _page("Home", "home", 0, [
@@ -382,7 +382,7 @@ TEMPLATES = {
                     "border": "#2c2933", "brand": "#d4af37", "brandText": "#111014", "accent": "#d4af37",
                 },
                 "fonts": {"heading": "Playfair Display", "body": "Inter"},
-                "radius": "md", "heroStyle": "image", "navStyle": "centered",
+                "radius": "md", "heroStyle": "image", "navStyle": "centered", "premium": True,
             },
             "pages": [
                 _page("Home", "home", 0, [
@@ -441,7 +441,7 @@ TEMPLATES = {
                     "border": "#1d2a23", "brand": "#22c55e", "brandText": "#062012", "accent": "#a3e635",
                 },
                 "fonts": {"heading": "Sora", "body": "Inter"},
-                "radius": "xl", "heroStyle": "centered", "navStyle": "simple",
+                "radius": "xl", "heroStyle": "centered", "navStyle": "simple", "premium": True,
             },
             "pages": [
                 _page("Home", "home", 0, [
@@ -506,7 +506,7 @@ TEMPLATES = {
                     "border": "#2e2820", "brand": "#c9a24b", "brandText": "#141210", "accent": "#e0b85e",
                 },
                 "fonts": {"heading": "Playfair Display", "body": "Lora"},
-                "radius": "sm", "heroStyle": "image", "navStyle": "centered",
+                "radius": "sm", "heroStyle": "image", "navStyle": "centered", "premium": True,
             },
             "pages": [
                 _page("Home", "home", 0, [
@@ -570,7 +570,7 @@ TEMPLATES = {
                     "border": "#1f2a44", "brand": "#6366f1", "brandText": "#ffffff", "accent": "#818cf8",
                 },
                 "fonts": {"heading": "Sora", "body": "Inter"},
-                "radius": "lg", "heroStyle": "split", "navStyle": "simple",
+                "radius": "lg", "heroStyle": "split", "navStyle": "simple", "premium": True,
             },
             "pages": [
                 _page("Home", "home", 0, [
@@ -641,7 +641,7 @@ TEMPLATES = {
                     "border": "#f6ddcd", "brand": "#f0603a", "brandText": "#ffffff", "accent": "#fb923c",
                 },
                 "fonts": {"heading": "Sora", "body": "Inter"},
-                "radius": "2xl", "heroStyle": "centered", "navStyle": "simple",
+                "radius": "2xl", "heroStyle": "centered", "navStyle": "simple", "premium": True,
             },
             "pages": [
                 _page("Home", "home", 0, [
