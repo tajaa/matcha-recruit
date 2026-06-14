@@ -12,8 +12,8 @@ JS runtime that talks to the same-origin public API. All user content is escaped
 URLs are scheme-checked.
 
 Block types: hero, features, gallery, pricing, testimonial, cta, menu, posts,
-stats, logos, faq, bento, split, credentials, reviews, text, contact, store,
-booking, newsletter.
+stats, logos, faq, bento, split, credentials, reviews, map, hours, text,
+contact, store, booking, newsletter.
 """
 import html
 import itertools
@@ -403,6 +403,20 @@ section{position:relative}
 .cz-rv-form{max-width:34rem;margin:2rem auto 0;display:flex;flex-direction:column;gap:.6rem;
   border-top:1px solid var(--line);padding-top:1.6rem}
 .cz-rv-form__t{font-weight:700;font-family:var(--font-h);text-align:center}
+
+/* map + hours */
+.cz-map{padding:clamp(3rem,7vw,5rem) 0}
+.cz-map__embed{border-radius:var(--radius);overflow:hidden;border:1px solid var(--line);aspect-ratio:16/9;margin-bottom:1.25rem}
+.cz-map__embed iframe{width:100%;height:100%;border:0;display:block}
+.cz-map__addr{font-size:1.05rem;margin-bottom:.9rem}
+.cz-map__actions{display:flex;flex-wrap:wrap;gap:.6rem}
+.cz-hours{padding:clamp(2.5rem,6vw,4rem) 0}
+.cz-hours__list{max-width:30rem;margin:1.1rem auto 0;border-top:1px solid var(--line)}
+.cz-hours__row{display:flex;justify-content:space-between;gap:1rem;padding:.7rem .2rem;border-bottom:1px solid var(--line);font-size:.98rem}
+.cz-hours__closed{color:var(--muted)}
+.cz-badge{display:inline-block;padding:.35rem .85rem;border-radius:999px;font-size:.82rem;font-weight:700}
+.cz-badge--open{background:color-mix(in srgb,#22c55e 20%,transparent);color:#15803d}
+.cz-badge--closed{background:color-mix(in srgb,var(--ink) 9%,transparent);color:var(--muted)}
 
 @media(min-width:768px){
   .cz-hero--split .cz-grid{grid-template-columns:1.1fr .9fr}
@@ -937,11 +951,91 @@ def _contact(b, t):
             f'<script>{_CONTACT_JS.replace("__ID__", wid)}</script>')
 
 
+# --- local presence: map + hours --------------------------------------------
+
+def _num(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _map(b, t):
+    """A "find us" block: address + directions deep links (no API key), plus an
+    OpenStreetMap embed when the owner supplied lat/lng."""
+    meta = t.get("meta") or {}
+    geo = meta.get("geo") if isinstance(meta.get("geo"), dict) else {}
+    addr = (b.get("address") or meta.get("contact_address") or "").strip()
+    lat = _num(b.get("lat") if b.get("lat") not in (None, "") else geo.get("lat"))
+    lng = _num(b.get("lng") if b.get("lng") not in (None, "") else geo.get("lng"))
+    if not addr and lat is None:
+        return ""
+
+    embed = ""
+    if lat is not None and lng is not None:
+        d = 0.012
+        src = (f"https://www.openstreetmap.org/export/embed.html?"
+               f"bbox={lng - d},{lat - d},{lng + d},{lat + d}&layer=mapnik&marker={lat},{lng}")
+        embed = f'<div class="cz-map__embed"><iframe loading="lazy" title="Map" src="{_esc(src)}"></iframe></div>'
+
+    query = quote(addr) if addr else (f"{lat},{lng}" if lat is not None else "")
+    actions = ""
+    if query:
+        g = f"https://www.google.com/maps/search/?api=1&query={query}"
+        addr_html = f'<p class="cz-map__addr">{_esc(addr)}</p>' if addr else ""
+        apple = (f'<a class="cz-btn cz-btn--ghost" href="https://maps.apple.com/?q={query}" '
+                 f'target="_blank" rel="noopener noreferrer">Apple Maps</a>') if addr else ""
+        actions = (f'{addr_html}<div class="cz-map__actions">'
+                   f'<a class="cz-btn cz-btn--solid" href="{_esc(g)}" target="_blank" rel="noopener noreferrer">Get directions</a>'
+                   f'{apple}</div>')
+    return f'<section class="cz-map"><div class="cz-wrap">{_head(b)}{embed}{actions}</div></section>'
+
+
+_OPENNOW_JS = (
+    "<script>(function(){var C=window.__CAPPE__||{};var hours=C.hours||[];"
+    "var el=document.querySelector('[data-opennow]');if(!el||!hours.length)return;"
+    "function hm(s){var p=(s||'').split(':');return p.length===2?(parseInt(p[0],10)*60+parseInt(p[1],10)):null;}"
+    "function localNow(tz){try{var f=new Intl.DateTimeFormat('en-US',{timeZone:tz||'UTC',hour12:false,weekday:'short',hour:'2-digit',minute:'2-digit'});"
+    "var parts={};f.formatToParts(new Date()).forEach(function(p){parts[p.type]=p.value;});"
+    "var wm={Mon:0,Tue:1,Wed:2,Thu:3,Fri:4,Sat:5,Sun:6};"
+    "return {wd:wm[parts.weekday],mins:(parseInt(parts.hour,10)%24)*60+parseInt(parts.minute,10)};}catch(e){return null;}}"
+    "var n=localNow(C.tz);if(!n||n.wd==null)return;"
+    "function entry(d){for(var i=0;i<hours.length;i++){if(parseInt(hours[i].day,10)===d)return hours[i];}return null;}"
+    "function openIn(e,mins){if(!e||e.closed)return false;var o=hm(e.open),c=hm(e.close);if(o==null||c==null)return false;return c>o?(o<=mins&&mins<c):(mins>=o);}"
+    "var open=openIn(entry(n.wd),n.mins);"
+    "if(!open){var y=entry((n.wd+6)%7);if(y&&!y.closed){var o=hm(y.open),c=hm(y.close);if(o!=null&&c!=null&&c<=o&&n.mins<c)open=true;}}"
+    "el.textContent=open?'Open now':'Closed';el.className='cz-badge '+(open?'cz-badge--open':'cz-badge--closed');})();</script>"
+)
+
+_DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def _hours(b, t):
+    """Structured weekly hours table + a client-computed "Open now" badge (the
+    badge is computed in-browser from injected hours+tz, so it's cache-safe)."""
+    meta = t.get("meta") or {}
+    hours = meta.get("hours") if isinstance(meta.get("hours"), list) else []
+    if not hours:
+        return ""
+    rows = ""
+    for i, name in enumerate(_DAY_NAMES):
+        e = next((h for h in hours if isinstance(h, dict) and int(h.get("day", -1)) == i), None)
+        if e and not e.get("closed") and e.get("open") and e.get("close"):
+            val = f'{_esc(e["open"])} – {_esc(e["close"])}'
+        else:
+            val = '<span class="cz-hours__closed">Closed</span>'
+        rows += f'<div class="cz-hours__row"><span>{name}</span><span>{val}</span></div>'
+    return (f'<section class="cz-hours"><div class="cz-narrow" style="text-align:center">{_head(b)}'
+            f'<span class="cz-badge" data-opennow></span>'
+            f'<div class="cz-hours__list">{rows}</div></div></section>'
+            f'{_OPENNOW_JS}')
+
+
 _RENDERERS = {
     "hero": _hero, "features": _features, "gallery": _gallery, "pricing": _pricing,
     "testimonial": _testimonial, "cta": _cta, "menu": _menu, "posts": _posts,
     "stats": _stats, "logos": _logos, "faq": _faq, "bento": _bento, "split": _split,
-    "credentials": _credentials, "reviews": _reviews,
+    "credentials": _credentials, "reviews": _reviews, "map": _map, "hours": _hours,
     "text": _text, "contact": _contact, "store": _store, "booking": _booking, "newsletter": _newsletter,
 }
 
@@ -985,7 +1079,51 @@ def _head_seo(site: dict, page: dict, meta: dict) -> tuple[str, str]:
     parts.append('<meta property="og:type" content="website" />')
     if favicon:
         parts.append(f'<link rel="icon" href="{_esc(favicon)}" />')
+
+    ld = _local_business_ld(site, meta)
+    if ld:
+        parts.append(ld)
     return _esc(title), "".join(parts)
+
+
+_SCHEMA_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def _local_business_ld(site: dict, meta: dict) -> str:
+    """schema.org LocalBusiness JSON-LD for local SEO (static — crawler metadata,
+    not a live 'open now')."""
+    addr = (meta.get("contact_address") or "").strip()
+    phone = (meta.get("contact_phone") or "").strip()
+    hours = meta.get("hours") if isinstance(meta.get("hours"), list) else []
+    geo = meta.get("geo") if isinstance(meta.get("geo"), dict) else {}
+    if not (addr or phone or hours):
+        return ""
+    data: dict = {"@context": "https://schema.org", "@type": "LocalBusiness", "name": site.get("name") or ""}
+    if addr:
+        data["address"] = addr
+    if phone:
+        data["telephone"] = phone
+    logo = _safe_image(meta.get("logo_url"))
+    if logo:
+        data["image"] = logo
+    lat, lng = _num(geo.get("lat")), _num(geo.get("lng"))
+    if lat is not None and lng is not None:
+        data["geo"] = {"@type": "GeoCoordinates", "latitude": lat, "longitude": lng}
+    spec = []
+    for h in hours:
+        if not isinstance(h, dict) or h.get("closed") or not (h.get("open") and h.get("close")):
+            continue
+        try:
+            day = _SCHEMA_DAYS[int(h["day"])]
+        except (KeyError, ValueError, IndexError):
+            continue
+        spec.append({"@type": "OpeningHoursSpecification", "dayOfWeek": f"https://schema.org/{day}",
+                     "opens": h["open"], "closes": h["close"]})
+    if spec:
+        data["openingHoursSpecification"] = spec
+    # Neutralize any "</script>" inside owner-controlled strings.
+    payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+    return f'<script type="application/ld+json">{payload}</script>'
 
 
 def _footer(site: dict, meta: dict) -> str:
@@ -1029,11 +1167,20 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
     home_slug = nav_pages[0]["slug"] if nav_pages else "home"
     # `preview` flags the editor's sandboxed iframe (no same-origin = no live API
     # fetch). Widgets read it to show a static placeholder instead of failing.
-    cappe_ctx = _js_obj({"slug": slug, "api": f"/api/cappe/public/sites/{slug}", "preview": bool(preview)})
+    _meta_ctx = site.get("meta_config") if isinstance(site.get("meta_config"), dict) else {}
+    cappe_ctx = _js_obj({
+        "slug": slug, "api": f"/api/cappe/public/sites/{slug}", "preview": bool(preview),
+        "tz": site.get("timezone") or "UTC",
+        "hours": _meta_ctx.get("hours") if isinstance(_meta_ctx.get("hours"), list) else [],
+    })
 
     meta = site.get("meta_config") or {}
     logo = _safe_image(meta.get("logo_url")) if isinstance(meta, dict) else None
     brand_inner = f'<img src="{_esc(logo)}" alt="{_esc(site.get("name"))}" />' if logo else _esc(site.get("name"))
+
+    # Give block renderers access to site context (used by map/hours blocks).
+    t["meta"] = meta if isinstance(meta, dict) else {}
+    t["site_name"] = site.get("name") or ""
 
     content = page.get("content") or {}
     blocks = content.get("blocks") if isinstance(content, dict) else None

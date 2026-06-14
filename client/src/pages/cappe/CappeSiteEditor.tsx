@@ -20,10 +20,15 @@ const inputCls =
 
 // ── business info + SEO, stored as meta_config keys ──────────────────────────
 type Social = { instagram: string; x: string; tiktok: string; youtube: string; facebook: string; linkedin: string; website: string }
+type DayHours = { day: number; open: string; close: string; closed: boolean }
 type BizMeta = {
   contact_email: string; contact_phone: string; contact_address: string; business_hours: string
   favicon_url: string; social: Social; seo: { title: string; description: string; og_image: string }
+  hours: DayHours[]; lat: string; lng: string
 }
+const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const defaultHours = (): DayHours[] =>
+  DAY_LABELS.map((_, day) => ({ day, open: '09:00', close: '17:00', closed: day >= 5 }))
 const SOCIAL_FIELDS: { key: keyof Social; label: string; ph: string }[] = [
   { key: 'instagram', label: 'Instagram', ph: 'https://instagram.com/you' },
   { key: 'x', label: 'X', ph: 'https://x.com/you' },
@@ -38,6 +43,13 @@ const gstr = (o: Record<string, unknown> | undefined, k: string): string =>
 function bizFromMeta(m: Record<string, unknown> | undefined): BizMeta {
   const s = (m?.social ?? {}) as Record<string, unknown>
   const seo = (m?.seo ?? {}) as Record<string, unknown>
+  const geo = (m?.geo ?? {}) as Record<string, unknown>
+  const rawHours = Array.isArray(m?.hours) ? (m!.hours as DayHours[]) : []
+  const hours = defaultHours().map((d) => {
+    const found = rawHours.find((h) => Number(h?.day) === d.day)
+    return found ? { day: d.day, open: found.open || '09:00', close: found.close || '17:00', closed: !!found.closed } : d
+  })
+  const numStr = (v: unknown) => (typeof v === 'number' ? String(v) : typeof v === 'string' ? v : '')
   return {
     contact_email: gstr(m, 'contact_email'), contact_phone: gstr(m, 'contact_phone'),
     contact_address: gstr(m, 'contact_address'), business_hours: gstr(m, 'business_hours'),
@@ -47,17 +59,24 @@ function bizFromMeta(m: Record<string, unknown> | undefined): BizMeta {
       facebook: gstr(s, 'facebook'), linkedin: gstr(s, 'linkedin'), website: gstr(s, 'website'),
     },
     seo: { title: gstr(seo, 'title'), description: gstr(seo, 'description'), og_image: gstr(seo, 'og_image') },
+    hours, lat: numStr(geo.lat), lng: numStr(geo.lng),
   }
 }
 const orNull = (v: string) => v.trim() || null
 function bizToMeta(b: BizMeta): Record<string, unknown> {
   const social: Record<string, string> = {}
   SOCIAL_FIELDS.forEach(({ key }) => { if (b.social[key].trim()) social[key] = b.social[key].trim() })
+  // Persist hours only if at least one day is open; geo only if both numbers parse.
+  const anyOpen = b.hours.some((h) => !h.closed)
+  const lat = parseFloat(b.lat), lng = parseFloat(b.lng)
+  const geo = !Number.isNaN(lat) && !Number.isNaN(lng) ? { lat, lng } : null
   return {
     contact_email: orNull(b.contact_email), contact_phone: orNull(b.contact_phone),
     contact_address: orNull(b.contact_address), business_hours: orNull(b.business_hours),
     favicon_url: orNull(b.favicon_url), social,
     seo: { title: orNull(b.seo.title), description: orNull(b.seo.description), og_image: orNull(b.seo.og_image) },
+    hours: anyOpen ? b.hours.map((h) => ({ day: h.day, open: h.open, close: h.close, closed: h.closed })) : [],
+    geo,
   }
 }
 
@@ -356,9 +375,42 @@ export default function CappeSiteEditor() {
           <div>
             <label className="mb-1 block text-sm font-medium text-zinc-300">Address</label>
             <input value={biz.contact_address} onChange={(e) => setBiz((b) => ({ ...b, contact_address: e.target.value }))} placeholder="123 Main St, City, ST" className={inputCls} />
+            <p className="mt-1 text-xs text-zinc-500">Used by the Map / “Find us” block (with a Get-directions button).</p>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-zinc-300">Latitude <span className="text-zinc-500">(optional — adds a map)</span></label>
+              <input value={biz.lat} onChange={(e) => setBiz((b) => ({ ...b, lat: e.target.value }))} placeholder="37.7749" className={inputCls} />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-zinc-300">Longitude</label>
+              <input value={biz.lng} onChange={(e) => setBiz((b) => ({ ...b, lng: e.target.value }))} placeholder="-122.4194" className={inputCls} />
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-zinc-300">Opening hours</label>
+            <p className="mb-2 text-xs text-zinc-500">Powers the Hours block + a live “Open now” badge + search engines. (The free-text line below is a fallback.)</p>
+            <div className="space-y-1.5">
+              {biz.hours.map((h, i) => (
+                <div key={h.day} className="flex items-center gap-2">
+                  <span className="w-10 text-xs text-zinc-400">{DAY_LABELS[h.day]}</span>
+                  <label className="flex items-center gap-1 text-xs text-zinc-500">
+                    <input type="checkbox" checked={!h.closed} onChange={(e) => setBiz((b) => ({ ...b, hours: b.hours.map((x, j) => (j === i ? { ...x, closed: !e.target.checked } : x)) }))} className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-900 text-emerald-500" /> Open
+                  </label>
+                  {!h.closed ? (
+                    <>
+                      <input type="time" value={h.open} onChange={(e) => setBiz((b) => ({ ...b, hours: b.hours.map((x, j) => (j === i ? { ...x, open: e.target.value } : x)) }))} className={`${inputCls} w-32`} />
+                      <span className="text-zinc-500">–</span>
+                      <input type="time" value={h.close} onChange={(e) => setBiz((b) => ({ ...b, hours: b.hours.map((x, j) => (j === i ? { ...x, close: e.target.value } : x)) }))} className={`${inputCls} w-32`} />
+                    </>
+                  ) : <span className="text-xs text-zinc-600">Closed</span>}
+                </div>
+              ))}
+            </div>
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-zinc-300">Business hours</label>
+            <label className="mb-1 block text-sm font-medium text-zinc-300">Hours (free text — fallback)</label>
             <input value={biz.business_hours} onChange={(e) => setBiz((b) => ({ ...b, business_hours: e.target.value }))} placeholder="Mon–Fri 9am–5pm" className={inputCls} />
           </div>
 

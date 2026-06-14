@@ -60,6 +60,29 @@ def _render_theme(theme: dict) -> str:
     return render_site_html(site, page, [{"slug": "home", "title": "Home"}])
 
 
+def test_localbusiness_jsonld_from_hours_and_address():
+    site = {"slug": "c", "name": "Bean There", "theme_config": None, "timezone": "America/Los_Angeles",
+            "meta_config": {"contact_address": "1 Main St", "contact_phone": "+1 555 0100",
+                            "geo": {"lat": 37.77, "lng": -122.41},
+                            "hours": [{"day": 0, "open": "09:00", "close": "17:00", "closed": False}]}}
+    h = render_site_html(site, {"title": "Home", "content": {"blocks": []}}, [{"slug": "home", "title": "Home"}])
+    assert 'application/ld+json' in h and '"LocalBusiness"' in h
+    assert '"openingHoursSpecification"' in h and 'schema.org/Monday' in h
+    assert '"GeoCoordinates"' in h
+
+
+def test_map_and_hours_blocks_render():
+    site = {"slug": "c", "name": "Cafe", "theme_config": None, "timezone": "UTC",
+            "meta_config": {"contact_address": "1 Main St, SF", "geo": {"lat": 1.0, "lng": 2.0},
+                            "hours": [{"day": 0, "open": "08:00", "close": "16:00", "closed": False}]}}
+    page = {"title": "Home", "content": {"blocks": [{"type": "map", "heading": "Find us"}, {"type": "hours"}]}}
+    h = render_site_html(site, page, [{"slug": "home", "title": "Home"}])
+    assert "cz-map" in h and "maps/search/?api=1" in h and "openstreetmap.org/export/embed.html" in h
+    # "Open now" is computed client-side (cache-safe), so the badge ships as JS, not a baked value.
+    assert "data-opennow" in h and "Intl.DateTimeFormat" in h
+    assert "cz-hours__row" in h and "Monday" in h
+
+
 def test_premium_theme_adds_layer():
     h = _render_theme({"mode": "dark", "premium": True, "colors": {"brand": "#C6F16B"}})
     assert '<body class="cz-premium">' in h

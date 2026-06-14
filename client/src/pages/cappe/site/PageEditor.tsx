@@ -264,6 +264,21 @@ const BLOCK_SCHEMAS: Record<string, BlockSchema> = {
       F('allowSubmissions', 'Let visitors leave a review', 'bool'),
     ],
   },
+  map: {
+    label: 'Map / Find us',
+    make: () => ({ type: 'map', heading: 'Find us' }),
+    fields: [
+      F('heading', 'Section heading'),
+      F('address', 'Address', 'text', { placeholder: 'Defaults to your business address in Settings' }),
+      F('lat', 'Latitude (optional — adds a map)', 'text', { placeholder: 'e.g. 37.7749' }),
+      F('lng', 'Longitude (optional)', 'text', { placeholder: 'e.g. -122.4194' }),
+    ],
+  },
+  hours: {
+    label: 'Opening hours',
+    make: () => ({ type: 'hours', heading: 'Hours' }),
+    fields: [F('heading', 'Section heading'), F('subheading', 'Subheading', 'textarea')],
+  },
   text: {
     label: 'Text',
     make: () => ({ type: 'text', body: 'Write something here.' }),
@@ -301,7 +316,7 @@ const BLOCK_SCHEMAS: Record<string, BlockSchema> = {
   },
 }
 
-const BLOCK_ORDER = ['hero', 'features', 'split', 'bento', 'stats', 'credentials', 'logos', 'gallery', 'pricing', 'testimonial', 'reviews', 'faq', 'cta', 'store', 'booking', 'menu', 'posts', 'text', 'contact', 'newsletter']
+const BLOCK_ORDER = ['hero', 'features', 'split', 'bento', 'stats', 'credentials', 'logos', 'gallery', 'pricing', 'testimonial', 'reviews', 'faq', 'cta', 'store', 'booking', 'menu', 'hours', 'map', 'posts', 'text', 'contact', 'newsletter']
 
 // ── upload context (only ImageInput needs the siteId) ───────────────────────
 const SiteCtx = createContext<string>('')
