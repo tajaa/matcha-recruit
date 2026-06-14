@@ -24,7 +24,7 @@ from ..models.cappe import (
     CappeRateRulesReplace,
     CappeRequestSummary,
 )
-from ._shared import get_owned_site, loads
+from ._shared import get_owned_site, loads_list
 
 router = APIRouter()
 
@@ -83,7 +83,9 @@ _BOOKING_COLS_Q = ", ".join("b." + c.strip() for c in _BOOKING_COLS.split(","))
 
 def _booking_row(r) -> dict:
     d = dict(r)
-    d["rider_snapshot"] = loads(d.get("rider_snapshot")) if d.get("rider_snapshot") else []
+    # rider_snapshot is a JSON ARRAY — use the list normalizer (loads() coerces to
+    # a dict, which fails CappeBooking validation and 500s the bookings list).
+    d["rider_snapshot"] = loads_list(d.get("rider_snapshot"))
     return d
 
 
