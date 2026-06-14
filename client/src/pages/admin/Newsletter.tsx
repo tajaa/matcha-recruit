@@ -186,25 +186,27 @@ export default function NewsletterAdmin() {
     const timer = window.setTimeout(async () => {
       try {
         if (!editingId) {
-          const nl = await api.post<Newsletter>('/admin/newsletter/newsletters', {
+          const created = await api.post<Newsletter>('/admin/newsletter/newsletters', {
             title: composeTitle.trim(), subject: composeSubject.trim(),
           })
-          setEditingId(nl.id)
-          setNewsletters((prev) => prev.some(n => n.id === nl.id) ? prev : [nl, ...prev])
+          setEditingId(created.id)
+          let saved = created
           if (composeHtml || composePreheader) {
-            await api.put(`/admin/newsletter/newsletters/${nl.id}`, {
+            saved = await api.put<Newsletter>(`/admin/newsletter/newsletters/${created.id}`, {
               title: composeTitle.trim(), subject: composeSubject.trim(),
               preheader: composePreheader || undefined,
               content_html: composeHtml || undefined,
             })
           }
+          upsertNewsletter(saved)
         } else {
-          await api.put(`/admin/newsletter/newsletters/${editingId}`, {
+          const saved = await api.put<Newsletter>(`/admin/newsletter/newsletters/${editingId}`, {
             title: composeTitle.trim() || undefined,
             subject: composeSubject.trim() || undefined,
             preheader: composePreheader || undefined,
             content_html: composeHtml || undefined,
           })
+          upsertNewsletter(saved)
         }
         setIsDirty(false)
         setSaveStatus('saved')
@@ -222,6 +224,18 @@ export default function NewsletterAdmin() {
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
   }, [isDirty])
+
+  // Merge a freshly-saved row back into the list. startEdit() reopens a draft
+  // from `newsletters` state, so without this the list keeps the POST-create
+  // row (content_html=null) and reopening shows a blank body. Spread-merge so
+  // list-only aggregates (total_sends/total_opened) survive.
+  function upsertNewsletter(saved: Newsletter) {
+    setNewsletters((prev) =>
+      prev.some(n => n.id === saved.id)
+        ? prev.map(n => (n.id === saved.id ? { ...n, ...saved } : n))
+        : [saved, ...prev]
+    )
+  }
 
   async function handleCreate() {
     if (!composeTitle.trim() || !composeSubject.trim()) return
@@ -241,12 +255,13 @@ export default function NewsletterAdmin() {
     if (!editingId) return
     setSaving(true)
     try {
-      await api.put(`/admin/newsletter/newsletters/${editingId}`, {
+      const saved = await api.put<Newsletter>(`/admin/newsletter/newsletters/${editingId}`, {
         title: composeTitle.trim() || undefined,
         subject: composeSubject.trim() || undefined,
         preheader: composePreheader || undefined,
         content_html: composeHtml || undefined,
       })
+      upsertNewsletter(saved)
       setIsDirty(false); setSaveStatus('saved')
     } catch {}
     setSaving(false)
