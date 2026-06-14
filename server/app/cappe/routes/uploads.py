@@ -32,6 +32,12 @@ _ALLOWED_DELIVERABLE = _ALLOWED | {
     "text/csv",
 }
 
+# Hero background video — premium-only, short loops. Read fully into memory like
+# the other uploads, so keep the cap modest (compressed hero loops are small).
+_MAX_VIDEO_BYTES = 50 * 1024 * 1024  # 50 MB
+_ALLOWED_VIDEO = {"video/mp4", "video/webm", "video/quicktime"}
+_VIDEO_PLANS = {"pro", "business"}  # premium build tiers
+
 
 @router.post("/sites/{site_id}/upload", response_model=CappeUploadResponse)
 async def upload_image(
@@ -84,6 +90,44 @@ async def upload_deliverable(
     url = await get_storage().upload_file(
         file_bytes=data,
         filename=file.filename or "deliverable",
+        prefix="cappe",
+        content_type=file.content_type,
+    )
+    return CappeUploadResponse(url=url)
+
+
+@router.post("/sites/{site_id}/upload-video", response_model=CappeUploadResponse)
+async def upload_video(
+    site_id: UUID,
+    file: UploadFile = File(...),
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """Upload a hero background video (premium plans only). Returns a public URL.
+
+    Premium build tiers (Pro / Business) get the full-bleed autoplay hero video;
+    free / hosting plans hit a 403 upsell. Mirrors the image upload otherwise.
+    """
+    if account.plan not in _VIDEO_PLANS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hero video is a premium feature. Upgrade to Pro to add a background video.",
+        )
+
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+
+    if file.content_type not in _ALLOWED_VIDEO:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported video type (use MP4, WebM, or MOV)")
+
+    data = await file.read()
+    if len(data) > _MAX_VIDEO_BYTES:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Video too large (max 50 MB)")
+    if not data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+
+    url = await get_storage().upload_file(
+        file_bytes=data,
+        filename=file.filename or "hero-video",
         prefix="cappe",
         content_type=file.content_type,
     )

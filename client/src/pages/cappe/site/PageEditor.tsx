@@ -1,9 +1,10 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  ArrowLeft, Check, ChevronDown, ChevronUp, GripVertical, ImagePlus, Loader2, Palette, Plus, Save, Sparkles, Trash2,
+  ArrowLeft, Check, ChevronDown, ChevronUp, Film, GripVertical, ImagePlus, Loader2, Palette, Plus, Save, Sparkles, Trash2,
 } from 'lucide-react'
 import { cappeApi } from '../../../api/cappeClient'
+import { useCappeMe } from '../../../hooks/useCappeMe'
 import { CAPPE_THEMES, FONT_PAIRINGS, RADII, contrastText } from '../../../data/cappeThemes'
 import type { CappeBlock, CappePage, CappeSite } from '../../../types/cappe'
 
@@ -28,7 +29,7 @@ const obj = (v: unknown): Record<string, unknown> =>
 const isOn = (v: unknown): boolean => v === true
 
 // ── field schema ────────────────────────────────────────────────────────────
-type FieldKind = 'text' | 'textarea' | 'select' | 'bool' | 'image' | 'strlist' | 'list'
+type FieldKind = 'text' | 'textarea' | 'select' | 'bool' | 'image' | 'video' | 'strlist' | 'list'
 type Field = {
   key: string
   label: string
@@ -58,6 +59,7 @@ const BLOCK_SCHEMAS: Record<string, BlockSchema> = {
         { value: 'image', label: 'Full image background' }, { value: 'minimal', label: 'Minimal' },
       ] }),
       F('image', 'Hero photo — adds a full-bleed background', 'image'),
+      F('video', 'Hero video — premium, autoplay full-bleed background', 'video'),
       F('align', 'Text align (image layout)', 'select', { options: [
         { value: 'center', label: 'Center' }, { value: 'left', label: 'Left' },
       ] }),
@@ -368,6 +370,70 @@ function ImageInput({ value, onChange }: { value: unknown; onChange: (v: string)
   )
 }
 
+function VideoInput({ value, onChange }: { value: unknown; onChange: (v: string) => void }) {
+  const siteId = useContext(SiteCtx)
+  const { account } = useCappeMe()
+  const premium = account?.plan === 'pro' || account?.plan === 'business'
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const url = str(value)
+
+  async function upload(file: File) {
+    setBusy(true)
+    setErr(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await cappeApi.upload<{ url: string }>(`/sites/${siteId}/upload-video`, fd)
+      onChange(res.url)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Upload failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!premium) {
+    return (
+      <div className="rounded-lg border border-dashed border-amber-700/40 bg-amber-500/[0.06] px-3 py-2.5 text-xs text-amber-300/90">
+        <span className="font-medium">Premium feature.</span> Upgrade to Pro to add an autoplay background video to your hero.
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div className="flex items-center gap-2">
+        <input value={url} onChange={(e) => onChange(e.target.value)} placeholder="Video URL (MP4 / WebM)" className={inputCls} />
+        {url && <video src={url} muted playsInline className="h-9 w-14 shrink-0 rounded object-cover" />}
+        {url && (
+          <button type="button" onClick={() => onChange('')} className="shrink-0 text-zinc-500 hover:text-red-400" title="Clear">
+            <Trash2 className="h-4 w-4" />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={busy}
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-2 text-xs font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
+        >
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Film className="h-3.5 w-3.5" />}
+        </button>
+      </div>
+      {err && <p className="mt-1 text-xs text-red-400">{err}</p>}
+      <p className="mt-1 text-[11px] text-zinc-500">Short, muted loop works best (MP4/WebM, max 50 MB). Set a Hero photo above to use as the poster.</p>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="video/mp4,video/webm,video/quicktime"
+        className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = '' }}
+      />
+    </div>
+  )
+}
+
 function StringList({ value, onChange }: { value: unknown; onChange: (v: string[]) => void }) {
   const items = arr(value).map(str)
   const set = (i: number, v: string) => onChange(items.map((x, j) => (j === i ? v : x)))
@@ -445,6 +511,9 @@ function FieldInput({ field, value, onChange }: { field: Field; value: unknown; 
   }
   if (field.kind === 'image') {
     return <div>{label}<ImageInput value={value} onChange={onChange} /></div>
+  }
+  if (field.kind === 'video') {
+    return <div>{label}<VideoInput value={value} onChange={onChange} /></div>
   }
   if (field.kind === 'bool') {
     return (

@@ -180,6 +180,10 @@ section{position:relative}
 .cz-ov-light::before{background:linear-gradient(180deg,rgba(0,0,0,.1),rgba(0,0,0,.3) 60%,rgba(0,0,0,.5))}
 .cz-ov-dark::before{background:linear-gradient(180deg,rgba(0,0,0,.46),rgba(0,0,0,.62) 55%,rgba(0,0,0,.78))}
 .cz-hero--full{min-height:100vh}
+.cz-hero--video{overflow:hidden}
+.cz-hero--video .cz-hero__video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;border:0}
+.cz-hero--video::before{z-index:1}
+.cz-hero--video .cz-wrap{z-index:2}
 .cz-hero--image .cz-wrap{position:relative;z-index:1}
 .cz-hero--image .cz-hero__title{margin:0 auto;max-width:20ch;text-shadow:0 2px 24px rgba(0,0,0,.35)}
 .cz-hero--image .cz-hero__lead{color:rgba(255,255,255,.88);margin:1.25rem auto 0}
@@ -537,13 +541,15 @@ def _hero(b, t):
     cta = (f'<div class="cz-cta-row">{_btn(b.get("cta"), b.get("ctaHref"))}'
            f'{_btn(b.get("cta2"), b.get("cta2Href"), solid=False)}</div>') if (b.get("cta") or b.get("cta2")) else ""
     img = _safe_image(b.get("image"))
+    vid = _safe_image(b.get("video"))  # same URL sanitizer (scheme + breakout chars)
 
-    # A centered hero that has a photo becomes a photo-overlay hero — the
-    # intuitive result of "add a hero image". split/minimal stay explicit.
-    if img and style == "centered":
+    # A centered hero that has media (photo/video) becomes a full-bleed overlay
+    # hero — the intuitive result of "add a hero image/video". split/minimal stay
+    # explicit. A video always forces the full-bleed treatment.
+    if (img or vid) and style == "centered":
         style = "image"
 
-    if style == "image":
+    if vid or style == "image":
         overlay = (b.get("overlay") or "medium").lower()
         overlay = overlay if overlay in ("light", "medium", "dark") else "medium"
         cls = f"cz-hero--image cz-ov-{overlay}"
@@ -551,6 +557,15 @@ def _hero(b, t):
             cls += " cz-hero--left"
         if (b.get("height") or "tall").lower() == "full":
             cls += " cz-hero--full"
+        if vid:
+            # Full-bleed autoplay background video (premium). The still image,
+            # when present, serves as the poster while the video buffers.
+            cls += " cz-hero--video"
+            poster = f' poster="{_esc(img)}"' if img else ""
+            media = (f'<video class="cz-hero__video" autoplay muted loop playsinline preload="auto"{poster}>'
+                     f'<source src="{_esc(vid)}"></video>')
+            return (f'<section class="cz-hero {cls}">{media}<div class="cz-wrap">'
+                    f'{eyebrow}{title}{lead}{cta}</div></section>')
         # _safe_image already rejects quotes/parens; re-encode so the url() is
         # self-evidently un-breakoutable without trusting the sibling sanitizer.
         safe_u = _esc(img).replace("'", "%27").replace("(", "%28").replace(")", "%29") if img else ""
