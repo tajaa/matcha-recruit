@@ -174,6 +174,7 @@ export default function BookingsCalendar({ bookings, availability, types, onAcce
                         {new Date(b.starts_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                         –{new Date(b.ends_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                         {b.booking_type_id && typeName[b.booking_type_id] ? ` · ${typeName[b.booking_type_id]}` : ''}
+                        {b.staff_name ? ` · ${b.staff_name}` : ''}
                         {' · '}<span className="text-emerald-400">{money(b.quoted_price_cents)}</span>
                       </div>
                       {b.rider_acknowledged && <div className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-zinc-500"><ShieldCheck className="h-3 w-3" /> agreed to rider</div>}

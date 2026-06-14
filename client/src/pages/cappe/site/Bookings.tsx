@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Loader2, Plus, Trash2, Calendar, Save, Check, X, Lock, Clock, ShieldCheck, List, Percent } from 'lucide-react'
+import { Loader2, Plus, Trash2, Calendar, Save, Check, X, Lock, Clock, ShieldCheck, List, Percent, Users } from 'lucide-react'
 import { cappeApi } from '../../../api/cappeClient'
 import { useCappeMe } from '../../../hooks/useCappeMe'
 import SurfaceShell, { WEEKDAYS } from '../../../components/cappe/SurfaceShell'
 import BookingsCalendar from '../../../components/cappe/BookingsCalendar'
+import ImageUpload from '../../../components/cappe/ImageUpload'
 import type {
   CappeBooking, CappeBookingType, CappeAvailabilitySlot,
   CappeRateRule, CappeRiderItem, CappePricingMode,
-  CappeDiscount, CappeProduct,
+  CappeDiscount, CappeProduct, CappeStaff,
 } from '../../../types/cappe'
 
 const hhmm = (t: string) => t.slice(0, 5)
@@ -33,13 +34,15 @@ export default function Bookings() {
   const [rider, setRider] = useState<CappeRiderItem[]>([])
   const [products, setProducts] = useState<CappeProduct[]>([])
   const [discounts, setDiscounts] = useState<CappeDiscount[]>([])
+  const [staff, setStaff] = useState<CappeStaff[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<'calendar' | 'list'>('calendar')
   const [typeForm, setTypeForm] = useState({
     name: '', description: '', duration_minutes: '30', pricing_mode: 'flat' as CappePricingMode,
-    price: '', requires_approval: false,
+    price: '', requires_approval: false, category: '', buffer: '0', staffIds: [] as string[],
   })
+  const [staffForm, setStaffForm] = useState({ name: '', bio: '', image_url: '' })
   const [savingAvail, setSavingAvail] = useState(false)
   const [savingRules, setSavingRules] = useState(false)
   const [savingRider, setSavingRider] = useState(false)
@@ -57,9 +60,10 @@ export default function Bookings() {
       cappeApi.get<CappeRiderItem[]>(`/sites/${siteId}/rider`).catch(() => []),
       cappeApi.get<CappeProduct[]>(`/sites/${siteId}/products`).catch(() => []),
       cappeApi.get<CappeDiscount[]>(`/sites/${siteId}/discounts`).catch(() => []),
+      cappeApi.get<CappeStaff[]>(`/sites/${siteId}/staff`).catch(() => []),
     ])
-      .then(([t, a, b, r, rd, p, d]) => {
-        setTypes(t); setSlots(a); setBookings(b); setRules(r); setRider(rd); setProducts(p); setDiscounts(d)
+      .then(([t, a, b, r, rd, p, d, st]) => {
+        setTypes(t); setSlots(a); setBookings(b); setRules(r); setRider(rd); setProducts(p); setDiscounts(d); setStaff(st)
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false))
@@ -75,9 +79,34 @@ export default function Bookings() {
       pricing_mode: typeForm.pricing_mode,
       price_cents: Math.round((parseFloat(typeForm.price) || 0) * 100),
       requires_approval: typeForm.requires_approval,
+      category: typeForm.category.trim() || null,
+      buffer_minutes: parseInt(typeForm.buffer, 10) || 0,
+      staff_ids: typeForm.staffIds,
     })
     setTypes((t) => [...t, created])
-    setTypeForm({ name: '', description: '', duration_minutes: '30', pricing_mode: 'flat', price: '', requires_approval: false })
+    setTypeForm({ name: '', description: '', duration_minutes: '30', pricing_mode: 'flat', price: '', requires_approval: false, category: '', buffer: '0', staffIds: [] })
+  }
+
+  // --- Staff ---
+  async function addStaff(e: React.FormEvent) {
+    e.preventDefault()
+    if (!staffForm.name.trim()) return
+    const created = await cappeApi.post<CappeStaff>(`/sites/${siteId}/staff`, {
+      name: staffForm.name.trim(), bio: staffForm.bio.trim() || null, image_url: staffForm.image_url.trim() || null,
+    })
+    setStaff((s) => [...s, created])
+    setStaffForm({ name: '', bio: '', image_url: '' })
+  }
+  async function removeStaff(id: string) {
+    await cappeApi.delete(`/sites/${siteId}/staff/${id}`)
+    setStaff((s) => s.filter((x) => x.id !== id))
+    // Drop the removed staff from any service mapping in local state.
+    setTypes((ts) => ts.map((t) => ({ ...t, staff_ids: (t.staff_ids || []).filter((sid) => sid !== id) })))
+  }
+  function toggleTypeStaff(t: CappeBookingType, staffId: string) {
+    const has = (t.staff_ids || []).includes(staffId)
+    const next = has ? t.staff_ids.filter((s) => s !== staffId) : [...(t.staff_ids || []), staffId]
+    patchType(t.id, { staff_ids: next })
   }
 
   async function patchType(id: string, patch: Partial<CappeBookingType>) {
@@ -289,6 +318,33 @@ export default function Bookings() {
         )}
       </section>
 
+      {/* Staff / stylists */}
+      <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
+        <h2 className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100"><Users className="h-4 w-4 text-emerald-400" /> Staff</h2>
+        <p className="mb-3 mt-1 text-xs text-zinc-500">Add the people customers book with. Then choose who performs each service below — customers can pick a specific person or “any available”. Leave a service with no staff to keep one shared calendar.</p>
+        <form onSubmit={addStaff} className="mb-4 flex flex-wrap items-end gap-2">
+          <input value={staffForm.name} onChange={(e) => setStaffForm({ ...staffForm, name: e.target.value })} placeholder="Name — e.g. Maria" className={`w-44 ${inputCls}`} />
+          <input value={staffForm.bio} onChange={(e) => setStaffForm({ ...staffForm, bio: e.target.value })} placeholder="Title / bio (optional)" className={`flex-1 ${inputCls}`} />
+          <div className="w-56"><ImageUpload siteId={siteId || ''} value={staffForm.image_url} onChange={(url) => setStaffForm({ ...staffForm, image_url: url })} placeholder="Photo (optional)" /></div>
+          <button type="submit" className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-zinc-950 hover:bg-emerald-400"><Plus className="h-4 w-4" /> Add</button>
+        </form>
+        {staff.length === 0 ? (
+          <p className="text-sm text-zinc-400">No staff yet — your bookings use one shared calendar.</p>
+        ) : (
+          <ul className="flex flex-wrap gap-2">
+            {staff.map((s) => (
+              <li key={s.id} className="flex items-center gap-2 rounded-full border border-zinc-700 bg-zinc-950 py-1 pl-1 pr-3 text-sm">
+                <span className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full bg-zinc-800 text-xs font-semibold uppercase text-zinc-300">
+                  {s.image_url ? <img src={s.image_url} alt="" className="h-full w-full object-cover" /> : (s.name || '?').slice(0, 1)}
+                </span>
+                <span className="text-zinc-200">{s.name}</span>
+                <button onClick={() => removeStaff(s.id)} className="text-zinc-500 hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       {/* Booking types */}
       <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
         <h2 className="mb-3 text-sm font-semibold text-zinc-100">Appointment types</h2>
@@ -303,6 +359,26 @@ export default function Bookings() {
             </select>
             <input value={typeForm.price} onChange={(e) => setTypeForm({ ...typeForm, price: e.target.value })} type="number" min="0" step="0.01" placeholder={typeForm.pricing_mode === 'hourly' ? '$/hr' : '$'} className={`w-24 ${inputCls}`} />
           </div>
+          <div className="flex gap-2">
+            <input value={typeForm.category} onChange={(e) => setTypeForm({ ...typeForm, category: e.target.value })} placeholder="Category — e.g. Color (optional)" className={`flex-1 ${inputCls}`} />
+            <input value={typeForm.buffer} onChange={(e) => setTypeForm({ ...typeForm, buffer: e.target.value })} type="number" min="0" step="5" title="Buffer minutes between appointments" placeholder="buffer min" className={`w-28 ${inputCls}`} />
+          </div>
+          {staff.length > 0 && (
+            <div className="sm:col-span-2">
+              <div className="mb-1 text-xs text-zinc-400">Who performs it (none = shared calendar)</div>
+              <div className="flex flex-wrap gap-1.5">
+                {staff.map((s) => {
+                  const on = typeForm.staffIds.includes(s.id)
+                  return (
+                    <button key={s.id} type="button" onClick={() => setTypeForm((f) => ({ ...f, staffIds: on ? f.staffIds.filter((x) => x !== s.id) : [...f.staffIds, s.id] }))}
+                      className={`rounded-full border px-2.5 py-1 text-xs ${on ? 'border-emerald-500 bg-emerald-500/15 text-emerald-300' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}>
+                      {s.name}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
           <label className="flex items-center gap-2 text-sm text-zinc-300">
             <input type="checkbox" checked={typeForm.requires_approval} onChange={(e) => setTypeForm({ ...typeForm, requires_approval: e.target.checked })} className="h-4 w-4 rounded border-zinc-600 bg-zinc-950 text-emerald-500" />
             Require my approval before it books
@@ -317,8 +393,24 @@ export default function Bookings() {
               <li key={t.id} className="flex flex-wrap items-center gap-3 py-2.5 text-sm">
                 <div className="min-w-0 flex-1">
                   <span className="text-zinc-200">{t.name}</span>
-                  <span className="text-zinc-400"> · {t.duration_minutes} min · {t.pricing_mode === 'hourly' ? `${money(t.price_cents)}/hr` : money(t.price_cents)}</span>
+                  {t.category && <span className="ml-1.5 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">{t.category}</span>}
+                  <span className="text-zinc-400"> · {t.duration_minutes} min · {t.pricing_mode === 'hourly' ? `${money(t.price_cents)}/hr` : money(t.price_cents)}{t.buffer_minutes ? ` · ${t.buffer_minutes}m buffer` : ''}</span>
                   {t.description && <div className="truncate text-xs text-zinc-500">{t.description}</div>}
+                  {staff.length > 0 && (
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      <span className="text-[11px] text-zinc-500">Staff:</span>
+                      {staff.map((s) => {
+                        const on = (t.staff_ids || []).includes(s.id)
+                        return (
+                          <button key={s.id} type="button" onClick={() => toggleTypeStaff(t, s.id)}
+                            className={`rounded-full border px-2 py-0.5 text-[11px] ${on ? 'border-emerald-500 bg-emerald-500/15 text-emerald-300' : 'border-zinc-700 text-zinc-500 hover:bg-zinc-800'}`}>
+                            {s.name}
+                          </button>
+                        )
+                      })}
+                      {(t.staff_ids || []).length === 0 && <span className="text-[11px] text-zinc-600">shared calendar</span>}
+                    </div>
+                  )}
                 </div>
                 <label className="flex items-center gap-1.5 text-xs text-zinc-400">
                   <input type="checkbox" checked={t.requires_approval} onChange={(e) => patchType(t.id, { requires_approval: e.target.checked })} className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-950 text-emerald-500" />
@@ -347,6 +439,12 @@ export default function Bookings() {
                 <option value="">All types</option>
                 {types.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
+              {staff.length > 0 && (
+                <select value={s.staff_id ?? ''} onChange={(e) => setSlot(i, { staff_id: e.target.value || null })} className={inputCls}>
+                  <option value="">Any staff</option>
+                  {staff.map((st) => <option key={st.id} value={st.id}>{st.name}</option>)}
+                </select>
+              )}
               <button type="button" onClick={() => setSlots((sl) => sl.filter((_, idx) => idx !== i))} className="text-zinc-400 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
             </div>
           ))}

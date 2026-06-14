@@ -31,13 +31,19 @@ def generate_slots(
     rules: Optional[Sequence[dict]] = None,
     days_ahead: int = 21,
     max_slots: int = 60,
+    staff_id: Optional[str] = None,
 ) -> list[dict]:
     """Expand availability windows into concrete open slots for one booking type.
 
     - `availability`: rows with keys weekday(int 0=Mon), start_time(time),
-      end_time(time), booking_type_id(str|None). NULL type = applies to all.
-    - `btype`: dict with id, duration_minutes, price_cents, pricing_mode.
-    - `bookings`: existing (start_utc, end_utc) aware ranges to subtract.
+      end_time(time), booking_type_id(str|None), staff_id(str|None). NULL type =
+      applies to all types; NULL staff = a site-wide window any staff can use.
+    - `btype`: dict with id, duration_minutes, price_cents, pricing_mode, and
+      optional buffer_minutes (a gap enforced on both sides of each booking).
+    - `bookings`: existing (start_utc, end_utc) aware ranges to subtract — pass
+      only the relevant staff's bookings when generating for a concrete staff.
+    - `staff_id`: when set, only windows for that staff (or NULL/site-wide) are
+      used; when None (legacy / unstaffed), only NULL-staff windows are used.
     - Slots are fixed `duration_minutes` windows stepped through each window;
       hourly types still get per-minute rate-rule pricing within the slot.
     """
@@ -52,9 +58,16 @@ def generate_slots(
     mode = btype.get("pricing_mode") or "flat"
     bt_id = btype.get("id")
     step = timedelta(minutes=duration)
+    buf = timedelta(minutes=int(btype.get("buffer_minutes") or 0))
 
-    # Windows that apply to this type (its own + site-wide NULL windows).
-    windows = [w for w in availability if w.get("booking_type_id") in (None, bt_id)]
+    # Windows that apply to this type (its own + site-wide NULL windows) and to
+    # this staff (their own + site-wide NULL-staff windows).
+    sid = str(staff_id) if staff_id is not None else None
+    windows = [
+        w for w in availability
+        if w.get("booking_type_id") in (None, bt_id)
+        and (w.get("staff_id") in (None, sid))
+    ]
     if not windows:
         return []
 
@@ -81,8 +94,9 @@ def generate_slots(
                     continue
                 s_utc = local_start.astimezone(timezone.utc)
                 e_utc = local_end.astimezone(timezone.utc)
-                if any(s_utc < be and bs < e_utc for bs, be in busy):
-                    continue  # overlaps an existing pending/confirmed booking
+                # Buffer enforces a gap on both sides of each existing booking.
+                if any(s_utc < be + buf and bs < e_utc + buf for bs, be in busy):
+                    continue  # overlaps an existing booking (or its buffer)
                 price = booking_quote_cents(base, mode, local_start, local_end, rules)
                 out.append({
                     "start": local_start.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -95,3 +109,27 @@ def generate_slots(
                 if len(out) >= max_slots:
                     return out
     return out
+
+
+def merge_any_staff_slots(per_staff: Sequence[tuple]) -> list[dict]:
+    """Union per-staff slot lists for an "any available" booking.
+
+    `per_staff`: [(staff_id, [slot dicts]), …]. A slot time appears once with an
+    `available_staff_ids` list of the staff free then (so the booking step can
+    assign a concrete one), keeping the lowest price among them. Sorted by start.
+    """
+    by_start: dict[str, dict] = {}
+    for staff_id, slots in per_staff:
+        for s in slots:
+            key = s["start"]
+            m = by_start.get(key)
+            if m is None:
+                m = dict(s)
+                m["available_staff_ids"] = []
+                by_start[key] = m
+            m["available_staff_ids"].append(str(staff_id))
+            sp = s.get("price_cents")
+            if sp is not None and (m.get("price_cents") is None or sp < m["price_cents"]):
+                m["price_cents"] = sp
+    return [by_start[k] for k in sorted(by_start)]
+

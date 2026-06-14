@@ -30,15 +30,55 @@ router = APIRouter()
 
 _TYPE_COLS = (
     "id, site_id, name, description, duration_minutes, price_cents, status, "
-    "requires_approval, pricing_mode, created_at, updated_at"
+    "requires_approval, pricing_mode, category, buffer_minutes, created_at, updated_at"
 )
-_AVAIL_COLS = "id, weekday, start_time, end_time, booking_type_id"
+_AVAIL_COLS = "id, weekday, start_time, end_time, booking_type_id, staff_id"
+
+
+async def _staff_ids_for_types(conn, type_ids: list) -> dict:
+    """{booking_type_id: [staff_id, …]} for the given services (read-only)."""
+    if not type_ids:
+        return {}
+    rows = await conn.fetch(
+        "SELECT booking_type_id, staff_id FROM cappe_staff_services WHERE booking_type_id = ANY($1::uuid[])",
+        type_ids,
+    )
+    out: dict = {}
+    for r in rows:
+        out.setdefault(r["booking_type_id"], []).append(r["staff_id"])
+    return out
+
+
+async def _replace_type_staff(conn, site_id, type_id, staff_ids) -> None:
+    """Replace which staff perform a service (None = leave as-is, [] = unstaffed).
+    Validates the staff belong to this site."""
+    if staff_ids is None:
+        return
+    ids = list({s for s in staff_ids})
+    if ids:
+        valid = await conn.fetchval(
+            "SELECT COUNT(*) FROM cappe_staff WHERE site_id = $1 AND id = ANY($2::uuid[])",
+            site_id, ids,
+        )
+        if valid != len(ids):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown staff member")
+    await conn.execute("DELETE FROM cappe_staff_services WHERE booking_type_id = $1 AND site_id = $2", type_id, site_id)
+    for sid in ids:
+        await conn.execute(
+            "INSERT INTO cappe_staff_services (staff_id, booking_type_id, site_id) VALUES ($1, $2, $3)",
+            sid, type_id, site_id,
+        )
 _RULE_COLS = "id, site_id, booking_type_id, label, weekday, start_time, end_time, multiplier, created_at"
 _BOOKING_COLS = (
-    "id, site_id, booking_type_id, customer_name, customer_email, starts_at, "
+    "id, site_id, booking_type_id, staff_id, customer_name, customer_email, starts_at, "
     "ends_at, status, note, requires_approval, quoted_price_cents, approved_at, "
     "decline_reason, rider_acknowledged, rider_snapshot, created_at"
 )
+
+
+# `b.`-qualified column list for joins against cappe_staff (id/site_id/created_at
+# are ambiguous otherwise).
+_BOOKING_COLS_Q = ", ".join("b." + c.strip() for c in _BOOKING_COLS.split(","))
 
 
 def _booking_row(r) -> dict:
@@ -57,7 +97,8 @@ async def list_booking_types(site_id: UUID, account: CappeAccount = Depends(requ
             f"SELECT {_TYPE_COLS} FROM cappe_booking_types WHERE site_id = $1 ORDER BY created_at",
             site_id,
         )
-    return [dict(r) for r in rows]
+        staff = await _staff_ids_for_types(conn, [r["id"] for r in rows])
+    return [{**dict(r), "staff_ids": staff.get(r["id"], [])} for r in rows]
 
 
 @router.post("/sites/{site_id}/booking-types", response_model=CappeBookingType, status_code=status.HTTP_201_CREATED)
@@ -66,15 +107,18 @@ async def create_booking_type(
 ):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
-        row = await conn.fetchrow(
-            f"""INSERT INTO cappe_booking_types
-                    (site_id, name, description, duration_minutes, price_cents, status,
-                     requires_approval, pricing_mode)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING {_TYPE_COLS}""",
-            site_id, body.name, body.description, body.duration_minutes, body.price_cents, body.status,
-            body.requires_approval, body.pricing_mode,
-        )
-    return dict(row)
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                f"""INSERT INTO cappe_booking_types
+                        (site_id, name, description, duration_minutes, price_cents, status,
+                         requires_approval, pricing_mode, category, buffer_minutes)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING {_TYPE_COLS}""",
+                site_id, body.name, body.description, body.duration_minutes, body.price_cents, body.status,
+                body.requires_approval, body.pricing_mode, body.category, body.buffer_minutes,
+            )
+            await _replace_type_staff(conn, site_id, row["id"], body.staff_ids)
+        staff = await _staff_ids_for_types(conn, [row["id"]])
+    return {**dict(row), "staff_ids": staff.get(row["id"], [])}
 
 
 @router.put("/sites/{site_id}/booking-types/{type_id}", response_model=CappeBookingType)
@@ -84,31 +128,32 @@ async def update_booking_type(
 ):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
-        sets, args = [], []
-        for col in ("name", "description", "duration_minutes", "price_cents", "status",
-                    "requires_approval", "pricing_mode"):
-            val = getattr(body, col)
-            if val is not None:
-                args.append(val)
-                sets.append(f"{col} = ${len(args)}")
-        if not sets:
-            row = await conn.fetchrow(
-                f"SELECT {_TYPE_COLS} FROM cappe_booking_types WHERE id = $1 AND site_id = $2",
-                type_id, site_id,
-            )
+        async with conn.transaction():
+            sets, args = [], []
+            for col in ("name", "description", "duration_minutes", "price_cents", "status",
+                        "requires_approval", "pricing_mode", "category", "buffer_minutes"):
+                val = getattr(body, col)
+                if val is not None:
+                    args.append(val)
+                    sets.append(f"{col} = ${len(args)}")
+            if sets:
+                sets.append("updated_at = NOW()")
+                args.extend([type_id, site_id])
+                row = await conn.fetchrow(
+                    f"UPDATE cappe_booking_types SET {', '.join(sets)} "
+                    f"WHERE id = ${len(args) - 1} AND site_id = ${len(args)} RETURNING {_TYPE_COLS}",
+                    *args,
+                )
+            else:
+                row = await conn.fetchrow(
+                    f"SELECT {_TYPE_COLS} FROM cappe_booking_types WHERE id = $1 AND site_id = $2",
+                    type_id, site_id,
+                )
             if row is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking type not found")
-            return dict(row)
-        sets.append("updated_at = NOW()")
-        args.extend([type_id, site_id])
-        row = await conn.fetchrow(
-            f"UPDATE cappe_booking_types SET {', '.join(sets)} "
-            f"WHERE id = ${len(args) - 1} AND site_id = ${len(args)} RETURNING {_TYPE_COLS}",
-            *args,
-        )
-    if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking type not found")
-    return dict(row)
+            await _replace_type_staff(conn, site_id, type_id, body.staff_ids)
+        staff = await _staff_ids_for_types(conn, [type_id])
+    return {**dict(row), "staff_ids": staff.get(type_id, [])}
 
 
 @router.delete("/sites/{site_id}/booking-types/{type_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -153,19 +198,31 @@ async def replace_availability(
             )
             if valid != len(type_ids):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown booking type")
+        staff_ids = {s.staff_id for s in body.slots if s.staff_id}
+        if staff_ids:
+            valid = await conn.fetchval(
+                "SELECT COUNT(*) FROM cappe_staff WHERE site_id = $1 AND id = ANY($2::uuid[])",
+                site_id, list(staff_ids),
+            )
+            if valid != len(staff_ids):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown staff member")
         async with conn.transaction():
             await conn.execute("DELETE FROM cappe_availability WHERE site_id = $1", site_id)
+            seen = set()
             for s in body.slots:
                 if s.end_time <= s.start_time:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="end_time must be after start_time",
                     )
+                key = (s.weekday, s.start_time, s.end_time, s.booking_type_id, s.staff_id)
+                if key in seen:
+                    continue  # de-dupe (whole-set replace, so this is the only dup source)
+                seen.add(key)
                 await conn.execute(
-                    """INSERT INTO cappe_availability (site_id, weekday, start_time, end_time, booking_type_id)
-                       VALUES ($1, $2, $3, $4, $5)
-                       ON CONFLICT (site_id, weekday, start_time, end_time, booking_type_id) DO NOTHING""",
-                    site_id, s.weekday, s.start_time, s.end_time, s.booking_type_id,
+                    """INSERT INTO cappe_availability (site_id, weekday, start_time, end_time, booking_type_id, staff_id)
+                       VALUES ($1, $2, $3, $4, $5, $6)""",
+                    site_id, s.weekday, s.start_time, s.end_time, s.booking_type_id, s.staff_id,
                 )
             rows = await conn.fetch(
                 f"SELECT {_AVAIL_COLS} FROM cappe_availability WHERE site_id = $1 ORDER BY weekday, start_time",
@@ -181,7 +238,9 @@ async def list_bookings(site_id: UUID, account: CappeAccount = Depends(require_c
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
         rows = await conn.fetch(
-            f"SELECT {_BOOKING_COLS} FROM cappe_bookings WHERE site_id = $1 ORDER BY starts_at DESC",
+            f"""SELECT {_BOOKING_COLS_Q}, st.name AS staff_name
+                FROM cappe_bookings b LEFT JOIN cappe_staff st ON st.id = b.staff_id
+                WHERE b.site_id = $1 ORDER BY b.starts_at DESC""",
             site_id,
         )
     return [_booking_row(r) for r in rows]

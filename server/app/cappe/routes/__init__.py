@@ -19,6 +19,7 @@ from .pages import router as pages_router
 from .public import router as public_router
 from .reviews import router as reviews_router
 from .rider import router as rider_router
+from .staff import router as staff_router
 from .shop import router as shop_router
 from .sites import router as sites_router
 from .templates import router as templates_router
@@ -38,6 +39,7 @@ cappe_router.include_router(shop_router)
 cappe_router.include_router(newsletter_router)
 cappe_router.include_router(forms_router)
 cappe_router.include_router(bookings_router)
+cappe_router.include_router(staff_router)
 cappe_router.include_router(discounts_router)
 cappe_router.include_router(reviews_router)
 cappe_router.include_router(rider_router)

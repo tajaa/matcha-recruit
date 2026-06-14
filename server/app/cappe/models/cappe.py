@@ -561,6 +561,44 @@ class CappeFormSubmitRequest(BaseModel):
 BookingPricingMode = Literal["flat", "hourly"]
 
 
+# --- Staff / stylists -------------------------------------------------------
+
+class CappeStaffCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    bio: Optional[str] = None
+    image_url: Optional[str] = None
+    active: bool = True
+    sort_order: int = 0
+
+
+class CappeStaffUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, max_length=255)
+    bio: Optional[str] = None
+    image_url: Optional[str] = None
+    active: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+
+class CappeStaff(BaseModel):
+    id: UUID
+    site_id: UUID
+    name: str
+    bio: Optional[str] = None
+    image_url: Optional[str] = None
+    active: bool = True
+    sort_order: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+
+class CappePublicStaff(BaseModel):
+    """A bookable staff member as shown in the public booking widget."""
+    id: UUID
+    name: str
+    bio: Optional[str] = None
+    image_url: Optional[str] = None
+
+
 class CappeBookingTypeCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: Optional[str] = None
@@ -569,6 +607,11 @@ class CappeBookingTypeCreate(BaseModel):
     status: Literal["active", "draft", "archived"] = "active"
     requires_approval: bool = False
     pricing_mode: BookingPricingMode = "flat"
+    category: Optional[str] = Field(default=None, max_length=120)
+    buffer_minutes: int = Field(default=0, ge=0, le=240)
+    # Staff who perform this service; None = leave as-is, [] = unstaffed (shared
+    # calendar). A staffed service is only bookable with one of these staff.
+    staff_ids: Optional[list[UUID]] = None
 
 
 class CappeBookingTypeUpdate(BaseModel):
@@ -579,6 +622,9 @@ class CappeBookingTypeUpdate(BaseModel):
     status: Optional[Literal["active", "draft", "archived"]] = None
     requires_approval: Optional[bool] = None
     pricing_mode: Optional[BookingPricingMode] = None
+    category: Optional[str] = Field(default=None, max_length=120)
+    buffer_minutes: Optional[int] = Field(default=None, ge=0, le=240)
+    staff_ids: Optional[list[UUID]] = None
 
 
 class CappeBookingType(BaseModel):
@@ -591,6 +637,9 @@ class CappeBookingType(BaseModel):
     status: str
     requires_approval: bool = False
     pricing_mode: str = "flat"
+    category: Optional[str] = None
+    buffer_minutes: int = 0
+    staff_ids: list[UUID] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -650,6 +699,7 @@ class CappeAvailabilitySlot(BaseModel):
     start_time: time
     end_time: time
     booking_type_id: Optional[UUID] = None
+    staff_id: Optional[UUID] = None  # None = a site-wide window any staff can use
 
 
 class CappeAvailabilityReplace(BaseModel):
@@ -662,12 +712,15 @@ class CappeAvailability(BaseModel):
     start_time: time
     end_time: time
     booking_type_id: Optional[UUID] = None
+    staff_id: Optional[UUID] = None
 
 
 class CappeBooking(BaseModel):
     id: UUID
     site_id: UUID
     booking_type_id: Optional[UUID] = None
+    staff_id: Optional[UUID] = None
+    staff_name: Optional[str] = None
     customer_name: Optional[str] = None
     customer_email: Optional[str] = None
     starts_at: datetime
@@ -704,6 +757,7 @@ class CappeBookingRequest(BaseModel):
     customer_name: Optional[str] = Field(default=None, max_length=255)
     note: Optional[str] = None
     rider_acknowledged: bool = False
+    staff_id: Optional[UUID] = None  # None = "any available" (auto-assigned)
 
 
 class CappeBookingQuoteRequest(BaseModel):

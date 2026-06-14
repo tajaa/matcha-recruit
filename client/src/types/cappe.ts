@@ -265,6 +265,18 @@ export type CappeFormSubmission = {
 
 export type CappePricingMode = 'flat' | 'hourly'
 
+export type CappeStaff = {
+  id: string
+  site_id: string
+  name: string
+  bio: string | null
+  image_url: string | null
+  active: boolean
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
 export type CappeBookingType = {
   id: string
   site_id: string
@@ -275,6 +287,9 @@ export type CappeBookingType = {
   status: 'active' | 'draft' | 'archived'
   requires_approval: boolean
   pricing_mode: CappePricingMode
+  category: string | null
+  buffer_minutes: number
+  staff_ids: string[]
   created_at: string
   updated_at: string
 }
@@ -284,6 +299,7 @@ export type CappeAvailabilitySlot = {
   start_time: string
   end_time: string
   booking_type_id: string | null
+  staff_id?: string | null
 }
 
 // Time-window rate multiplier (e.g. after 8pm = 2x). weekday null = every day.
@@ -354,6 +370,8 @@ export type CappeBooking = {
   id: string
   site_id: string
   booking_type_id: string | null
+  staff_id?: string | null
+  staff_name?: string | null
   customer_name: string | null
   customer_email: string | null
   starts_at: string
