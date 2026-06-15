@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
 import { Input } from '../../components/ui'
 import { api } from '../../api/client'
+import { cappeSiteHost } from '../../utils/cappeHost'
 
 type CappeSite = {
   id: string
@@ -94,9 +95,8 @@ const fmtDate = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
 
 function siteUrl(s: CappeSite): string | null {
-  if (s.custom_domain) return `https://${s.custom_domain}`
-  if (s.subdomain) return `https://${s.subdomain}.cappe.hey-matcha.com`
-  return null
+  if (!s.custom_domain && !s.subdomain && !s.slug) return null
+  return `https://${cappeSiteHost(s)}`
 }
 
 function Stat({ label, value }: { label: string; value: string | number }) {
