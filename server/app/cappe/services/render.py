@@ -124,115 +124,125 @@ def _safe_url_css(url: Any) -> str:
     return _esc(u).replace("'", "%27").replace("(", "%28").replace(")", "%29")
 
 
-def _apply_design(html_str: str, design: Any) -> str:
+def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editable: bool = False) -> str:
     """Post-process a block's HTML: merge designer classes/attrs/style into its
-    first <section> tag and inject background media layers. No-op when absent."""
-    if not isinstance(design, dict) or not design:
+    first <section> tag and inject background media layers. When `editable`, also
+    tag the section with `data-cz-block` for the canvas selection runtime. No-op
+    on published output (no design + not editable)."""
+    has_design = isinstance(design, dict) and bool(design)
+    tag_block = editable and block_index is not None
+    if not has_design and not tag_block:
         return html_str
     m = _SECTION_RE.search(html_str)
     if not m:
         return html_str
 
-    motion = design.get("motion") if isinstance(design.get("motion"), dict) else {}
-    bg = design.get("bg") if isinstance(design.get("bg"), dict) else {}
-    layout = design.get("layout") if isinstance(design.get("layout"), dict) else {}
-    colors = design.get("colors") if isinstance(design.get("colors"), dict) else {}
-
-    classes: list[str] = ["cz-design"]
+    classes: list[str] = []
     attrs: list[str] = []
     cssvars: list[str] = []
-
-    # ── motion ──────────────────────────────────────────────────────────────
-    effect = motion.get("effect")
-    if effect in _MOTION_FX:
-        classes += ["cz-rv", f"cz-rv--{effect}"]
-        attrs.append(f'data-cz-delay="{_clampi(motion.get("delay"), 0, 2000)}"')
-        attrs.append(f'data-cz-dur="{_clampi(motion.get("duration"), 100, 2000, 700)}"')
-        if motion.get("stagger"):
-            classes.append("cz-rv--stagger")
-    if motion.get("parallax"):
-        classes.append("cz-parallax")
-        attrs.append(f'data-cz-parallax="{_clampi(motion.get("parallaxStrength"), 0, 80, 20)}"')
-    if motion.get("kenburns"):
-        classes.append("cz-kenburns")
-
-    # ── background ──────────────────────────────────────────────────────────
-    bg_type = bg.get("type")
     bg_media = ""
-    if bg_type == "color":
-        col = _hexonly(bg.get("color"))
-        if col:
-            classes.append("cz-bg--color")
-            cssvars.append(f"--cz-bg-color:{col}")
-    elif bg_type == "gradient":
-        grad = _design_gradient(bg.get("gradient"))
-        if grad:
-            classes.append("cz-bg--gradient")
-            cssvars.append(f"--cz-grad:{grad}")
-    elif bg_type == "image":
-        u = _safe_url_css(bg.get("image"))
-        if u:
-            classes += ["cz-bg", "cz-bg--image"]
-            bg_media = f"<div class=\"cz-bg-media\" style=\"background-image:url('{u}')\"></div>"
-    elif bg_type == "video":
-        u = _safe_image(bg.get("video"))
-        if u:
-            classes += ["cz-bg", "cz-bg--video"]
-            bg_media = ('<div class="cz-bg-media"><video autoplay muted loop playsinline '
-                        f'preload="metadata"><source src="{_esc(u)}"></video></div>')
-    if bg_media:
-        overlay = bg.get("overlay")
-        ov_cls = f"cz-ov-{overlay}" if overlay in _OVERLAYS else ""
-        op = bg.get("overlayOpacity")
-        ov_style = ""
-        if op is not None and str(op) != "":
-            ov_style = f' style="background:rgba(0,0,0,{_clampi(op, 0, 100) / 100})"'
-        bg_media += f'<div class="cz-bg-ov {ov_cls}"{ov_style}></div>'
-        blur = _clampi(bg.get("blur"), 0, 40)
-        if blur:
-            cssvars.append(f"--cz-blur:{blur}px")
-            classes.append("cz-bg--blur")
 
-    # ── layout ──────────────────────────────────────────────────────────────
-    pt = _PAD_SCALE.get(layout.get("padTop"))
-    if pt is not None:
-        cssvars.append(f"--cz-pad-t:{pt}")
-        classes.append("cz-has-pt")
-    pb = _PAD_SCALE.get(layout.get("padBottom"))
-    if pb is not None:
-        cssvars.append(f"--cz-pad-b:{pb}")
-        classes.append("cz-has-pb")
-    mw = _MAXW.get(layout.get("maxWidth"))
-    if mw:
-        cssvars.append(f"--cz-maxw:{mw}")
-        classes.append("cz-has-maxw")
-    mh = _MINH.get(layout.get("minHeight"))
-    if mh:
-        cssvars.append(f"--cz-minh:{mh}")
-        classes.append("cz-has-minh")
-    align = layout.get("align")
-    if align in ("left", "center"):
-        classes.append(f"cz-al-{align}")
+    if has_design:
+        motion = design.get("motion") if isinstance(design.get("motion"), dict) else {}
+        bg = design.get("bg") if isinstance(design.get("bg"), dict) else {}
+        layout = design.get("layout") if isinstance(design.get("layout"), dict) else {}
+        colors = design.get("colors") if isinstance(design.get("colors"), dict) else {}
+        classes.append("cz-design")
 
-    # ── per-section color overrides ─────────────────────────────────────────
-    ctext, chead, cacc = _hexonly(colors.get("text")), _hexonly(colors.get("heading")), _hexonly(colors.get("accent"))
-    if ctext:
-        cssvars.append(f"--cz-text:{ctext}")
-    if chead:
-        cssvars.append(f"--cz-heading:{chead}")
-    if cacc:
-        cssvars += [f"--cz-brand:{cacc}", f"--cz-accent:{cacc}"]
-        classes.append("cz-acc")
+        # ── motion ──────────────────────────────────────────────────────────
+        effect = motion.get("effect")
+        if effect in _MOTION_FX:
+            classes += ["cz-rv", f"cz-rv--{effect}"]
+            attrs.append(f'data-cz-delay="{_clampi(motion.get("delay"), 0, 2000)}"')
+            attrs.append(f'data-cz-dur="{_clampi(motion.get("duration"), 100, 2000, 700)}"')
+            if motion.get("stagger"):
+                classes.append("cz-rv--stagger")
+        if motion.get("parallax"):
+            classes.append("cz-parallax")
+            attrs.append(f'data-cz-parallax="{_clampi(motion.get("parallaxStrength"), 0, 80, 20)}"')
+        if motion.get("kenburns"):
+            classes.append("cz-kenburns")
+
+        # ── background ──────────────────────────────────────────────────────
+        bg_type = bg.get("type")
+        if bg_type == "color":
+            col = _hexonly(bg.get("color"))
+            if col:
+                classes.append("cz-bg--color")
+                cssvars.append(f"--cz-bg-color:{col}")
+        elif bg_type == "gradient":
+            grad = _design_gradient(bg.get("gradient"))
+            if grad:
+                classes.append("cz-bg--gradient")
+                cssvars.append(f"--cz-grad:{grad}")
+        elif bg_type == "image":
+            u = _safe_url_css(bg.get("image"))
+            if u:
+                classes += ["cz-bg", "cz-bg--image"]
+                bg_media = f"<div class=\"cz-bg-media\" style=\"background-image:url('{u}')\"></div>"
+        elif bg_type == "video":
+            u = _safe_image(bg.get("video"))
+            if u:
+                classes += ["cz-bg", "cz-bg--video"]
+                bg_media = ('<div class="cz-bg-media"><video autoplay muted loop playsinline '
+                            f'preload="metadata"><source src="{_esc(u)}"></video></div>')
+        if bg_media:
+            overlay = bg.get("overlay")
+            ov_cls = f"cz-ov-{overlay}" if overlay in _OVERLAYS else ""
+            op = bg.get("overlayOpacity")
+            ov_style = ""
+            if op is not None and str(op) != "":
+                ov_style = f' style="background:rgba(0,0,0,{_clampi(op, 0, 100) / 100})"'
+            bg_media += f'<div class="cz-bg-ov {ov_cls}"{ov_style}></div>'
+            blur = _clampi(bg.get("blur"), 0, 40)
+            if blur:
+                cssvars.append(f"--cz-blur:{blur}px")
+                classes.append("cz-bg--blur")
+
+        # ── layout ──────────────────────────────────────────────────────────
+        pt = _PAD_SCALE.get(layout.get("padTop"))
+        if pt is not None:
+            cssvars.append(f"--cz-pad-t:{pt}")
+            classes.append("cz-has-pt")
+        pb = _PAD_SCALE.get(layout.get("padBottom"))
+        if pb is not None:
+            cssvars.append(f"--cz-pad-b:{pb}")
+            classes.append("cz-has-pb")
+        mw = _MAXW.get(layout.get("maxWidth"))
+        if mw:
+            cssvars.append(f"--cz-maxw:{mw}")
+            classes.append("cz-has-maxw")
+        mh = _MINH.get(layout.get("minHeight"))
+        if mh:
+            cssvars.append(f"--cz-minh:{mh}")
+            classes.append("cz-has-minh")
+        align = layout.get("align")
+        if align in ("left", "center"):
+            classes.append(f"cz-al-{align}")
+
+        # ── per-section color overrides ─────────────────────────────────────
+        ctext, chead, cacc = _hexonly(colors.get("text")), _hexonly(colors.get("heading")), _hexonly(colors.get("accent"))
+        if ctext:
+            cssvars.append(f"--cz-text:{ctext}")
+        if chead:
+            cssvars.append(f"--cz-heading:{chead}")
+        if cacc:
+            cssvars += [f"--cz-brand:{cacc}", f"--cz-accent:{cacc}"]
+            classes.append("cz-acc")
+
+    if tag_block:
+        attrs.append(f'data-cz-block="{int(block_index)}"')
 
     # ── merge into the existing <section ...> tag ───────────────────────────
     existing = m.group(1)  # attributes already on the tag (may include class/style)
     new_attrs = existing
-    cls_str = " ".join(classes)
-    cm = re.search(r'\sclass="([^"]*)"', new_attrs)
-    if cm:
-        new_attrs = new_attrs.replace(cm.group(0), f' class="{cm.group(1)} {cls_str}"', 1)
-    else:
-        new_attrs += f' class="{cls_str}"'
+    if classes:
+        cls_str = " ".join(classes)
+        cm = re.search(r'\sclass="([^"]*)"', new_attrs)
+        if cm:
+            new_attrs = new_attrs.replace(cm.group(0), f' class="{cm.group(1)} {cls_str}"', 1)
+        else:
+            new_attrs += f' class="{cls_str}"'
     if cssvars:
         style_str = _clean_css(";".join(cssvars))
         sm = re.search(r'\sstyle="([^"]*)"', new_attrs)
@@ -784,17 +794,22 @@ def _btn(label, href, *, solid=True):
     return f'<a class="cz-btn {cls}" href="{_esc(_safe_href(href))}">{_esc(label)}</a>'
 
 
-def _head(b):
-    h = f'<h2>{_esc(b.get("heading"))}</h2>' if b.get("heading") else ""
-    s = f'<p>{_esc(b.get("subheading"))}</p>' if b.get("subheading") else ""
+def _fattr(field: str, editable: bool) -> str:
+    """`data-cz-field` tag for canvas inline-text editing — only in editor mode."""
+    return f' data-cz-field="{field}"' if editable else ""
+
+
+def _head(b, editable=False):
+    h = f'<h2{_fattr("heading", editable)}>{_esc(b.get("heading"))}</h2>' if b.get("heading") else ""
+    s = f'<p{_fattr("subheading", editable)}>{_esc(b.get("subheading"))}</p>' if b.get("subheading") else ""
     return f'<div class="cz-head">{h}{s}</div>' if (h or s) else ""
 
 
-def _hero(b, t):
+def _hero(b, t, editable=False):
     style = (b.get("style") or t["heroStyle"]).lower()
-    eyebrow = f'<p class="cz-eyebrow cz-hero__eyebrow">{_esc(b.get("eyebrow"))}</p>' if b.get("eyebrow") else ""
-    title = f'<h1 class="cz-hero__title">{_esc(b.get("heading"))}</h1>'
-    lead = f'<p class="cz-hero__lead">{_esc(b.get("subheading"))}</p>' if b.get("subheading") else ""
+    eyebrow = f'<p class="cz-eyebrow cz-hero__eyebrow"{_fattr("eyebrow", editable)}>{_esc(b.get("eyebrow"))}</p>' if b.get("eyebrow") else ""
+    title = f'<h1 class="cz-hero__title"{_fattr("heading", editable)}>{_esc(b.get("heading"))}</h1>'
+    lead = f'<p class="cz-hero__lead"{_fattr("subheading", editable)}>{_esc(b.get("subheading"))}</p>' if b.get("subheading") else ""
     cta = (f'<div class="cz-cta-row">{_btn(b.get("cta"), b.get("ctaHref"))}'
            f'{_btn(b.get("cta2"), b.get("cta2Href"), solid=False)}</div>') if (b.get("cta") or b.get("cta2")) else ""
     img = _safe_image(b.get("image"))
@@ -837,12 +852,12 @@ def _hero(b, t):
     return f'<section class="cz-hero {mod}"><div class="cz-wrap">{eyebrow}{title}{lead}{cta}</div></section>'
 
 
-def _features(b, t):
+def _features(b, t, editable=False):
     cards = "".join(
         f'<div class="cz-card"><div class="cz-feat__icon">{_esc(i.get("icon") or (i.get("title") or "•")[:1])}</div>'
         f'<h3>{_esc(i.get("title"))}</h3><p>{_esc(i.get("body"))}</p></div>'
         for i in (b.get("items") or []) if isinstance(i, dict))
-    return f'<section class="cz-features"><div class="cz-wrap">{_head(b)}<div class="cz-cards">{cards}</div></div></section>'
+    return f'<section class="cz-features"><div class="cz-wrap">{_head(b, editable)}<div class="cz-cards">{cards}</div></div></section>'
 
 
 def _gallery(b, t):
@@ -884,9 +899,9 @@ def _testimonial(b, t):
     return f'<section class="cz-quotes"><div class="cz-wrap">{_head(b)}<div class="cz-quote-grid">{cards}</div></div></section>'
 
 
-def _cta(b, t):
-    sub = f'<p>{_esc(b.get("subheading"))}</p>' if b.get("subheading") else ""
-    return (f'<section class="cz-band"><div class="cz-wrap"><h2>{_esc(b.get("heading"))}</h2>{sub}'
+def _cta(b, t, editable=False):
+    sub = f'<p{_fattr("subheading", editable)}>{_esc(b.get("subheading"))}</p>' if b.get("subheading") else ""
+    return (f'<section class="cz-band"><div class="cz-wrap"><h2{_fattr("heading", editable)}>{_esc(b.get("heading"))}</h2>{sub}'
             f'<a class="cz-btn" href="{_esc(_safe_href(b.get("ctaHref")))}">{_esc(b.get("cta") or "Get started")}</a></div></section>')
 
 
@@ -974,12 +989,12 @@ def _bento(b, t):
     return f'<section class="cz-bento"><div class="cz-wrap">{_head(b)}<div class="cz-bento-grid">{cells}</div></div></section>'
 
 
-def _split(b, t):
+def _split(b, t, editable=False):
     img = _safe_image(b.get("image"))
     art = f'<img src="{_esc(img)}" alt="" />' if img else ""
-    eyebrow = f'<p class="cz-eyebrow">{_esc(b.get("eyebrow"))}</p>' if b.get("eyebrow") else ""
-    head = f'<h2>{_esc(b.get("heading"))}</h2>' if b.get("heading") else ""
-    body = f'<p>{_esc(b.get("body"))}</p>' if b.get("body") else ""
+    eyebrow = f'<p class="cz-eyebrow"{_fattr("eyebrow", editable)}>{_esc(b.get("eyebrow"))}</p>' if b.get("eyebrow") else ""
+    head = f'<h2{_fattr("heading", editable)}>{_esc(b.get("heading"))}</h2>' if b.get("heading") else ""
+    body = f'<p{_fattr("body", editable)}>{_esc(b.get("body"))}</p>' if b.get("body") else ""
     bl = [x for x in (b.get("bullets") or []) if x]
     bullets = ('<ul class="cz-split__bullets">' + "".join(f'<li>{_esc(x)}</li>' for x in bl) + "</ul>") if bl else ""
     cta = _btn(b.get("cta"), b.get("ctaHref")) if b.get("cta") else ""
@@ -990,11 +1005,15 @@ def _split(b, t):
             f'</div></div></section>')
 
 
-def _text(b, t):
+def _text(b, t, editable=False):
     body = b.get("body")
-    paras = body if isinstance(body, list) else [body]
-    inner = "".join(f"<p>{_esc(p)}</p>" for p in paras if p)
-    head = f'<h2>{_esc(b.get("heading"))}</h2>' if b.get("heading") else ""
+    # Single-paragraph (scalar) body is inline-editable as `body`; a list of
+    # paragraphs stays panel-only (no dotted-path inline edit in v1).
+    if isinstance(body, list):
+        inner = "".join(f"<p>{_esc(p)}</p>" for p in body if p)
+    else:
+        inner = f'<p{_fattr("body", editable)}>{_esc(body)}</p>' if body else ""
+    head = f'<h2{_fattr("heading", editable)}>{_esc(b.get("heading"))}</h2>' if b.get("heading") else ""
     return f'<section class="cz-text"><div class="cz-narrow">{head}{inner}</div></section>'
 
 
@@ -1060,6 +1079,92 @@ _MOTION_JS = (
     "window.addEventListener('scroll',function(){if(!tk){tk=true;requestAnimationFrame(upd);}},{passive:true});"
     "upd();}}})();</script>"
 )
+
+
+# Canvas editor runtime — emitted ONLY when `editable` (editor preview), never on
+# published pages. Lets the parent app click-select sections, inline-edit tagged
+# text, and drag-reorder, via postMessage. Vanilla, inline, no user strings.
+_CANVAS_JS = """<style>
+.cz-editable [data-cz-block]{cursor:pointer}
+.cz-editable [data-cz-block].cz-hover{outline:2px dashed rgba(16,185,129,.55);outline-offset:-2px}
+.cz-editable [data-cz-block].cz-selected{outline:2px solid #10b981;outline-offset:-2px}
+.cz-editable [data-cz-field]{cursor:text}
+.cz-editable [data-cz-field].cz-editing{outline:2px solid #10b981;outline-offset:3px;background:rgba(16,185,129,.07);border-radius:3px}
+.cz-editable .cz-drop{height:0;border-top:3px solid #10b981;position:relative;z-index:9999}
+.cz-editable.cz-dragging *{cursor:grabbing !important;user-select:none !important}
+</style>
+<script>(function(){
+var editing=null,origText='',cancelEdit=false,dragging=false,dragFrom=-1,downY=0,downIdx=-1,moved=false,dropLine=null;
+function post(m){try{window.parent.postMessage(m,'*');}catch(e){}}
+function blocks(){return [].slice.call(document.querySelectorAll('main>[data-cz-block]'));}
+function blockEl(i){return document.querySelector('[data-cz-block="'+i+'"]');}
+function idxOf(el){var b=el&&el.closest?el.closest('[data-cz-block]'):null;return b?parseInt(b.getAttribute('data-cz-block'),10):-1;}
+function clearSel(){var s=document.querySelectorAll('.cz-selected');for(var i=0;i<s.length;i++)s[i].classList.remove('cz-selected');}
+function highlight(i){clearSel();var el=blockEl(i);if(el)el.classList.add('cz-selected');}
+document.addEventListener('mouseover',function(e){if(editing||dragging)return;var b=e.target.closest&&e.target.closest('[data-cz-block]');if(b)b.classList.add('cz-hover');});
+document.addEventListener('mouseout',function(e){var b=e.target.closest&&e.target.closest('[data-cz-block]');if(b)b.classList.remove('cz-hover');});
+document.addEventListener('click',function(e){
+  var a=e.target.closest&&e.target.closest('a');if(a)e.preventDefault();
+  if(editing&&editing.contains(e.target))return;
+  if(moved){moved=false;return;}
+  var b=e.target.closest&&e.target.closest('[data-cz-block]');if(!b)return;
+  var i=parseInt(b.getAttribute('data-cz-block'),10);
+  var f=e.target.closest&&e.target.closest('[data-cz-field]');
+  var r=b.getBoundingClientRect();
+  highlight(i);
+  post({type:'cz-select',block:i,field:f?f.getAttribute('data-cz-field'):undefined,rect:{top:r.top,left:r.left,width:r.width,height:r.height}});
+},true);
+document.addEventListener('dblclick',function(e){
+  var f=e.target.closest&&e.target.closest('[data-cz-field]');if(!f)return;
+  e.preventDefault();
+  if(editing&&editing!==f)editing.blur();
+  editing=f;origText=f.innerText;cancelEdit=false;
+  f.setAttribute('contenteditable','true');f.classList.add('cz-editing');
+  post({type:'cz-editing-start'});f.focus();
+});
+document.addEventListener('keydown',function(e){
+  if(!editing)return;
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();editing.blur();}
+  else if(e.key==='Escape'){cancelEdit=true;editing.blur();}
+});
+document.addEventListener('blur',function(e){
+  if(!editing||e.target!==editing)return;
+  var f=editing;editing=null;
+  f.removeAttribute('contenteditable');f.classList.remove('cz-editing');
+  var i=idxOf(f),field=f.getAttribute('data-cz-field');
+  if(cancelEdit){f.innerText=origText;cancelEdit=false;}
+  else{var v=f.innerText.replace(/\\s+$/,'');if(v!==origText)post({type:'cz-edit',block:i,field:field,value:v});}
+  post({type:'cz-editing-end'});
+},true);
+document.addEventListener('pointerdown',function(e){
+  if(editing)return;
+  var b=e.target.closest&&e.target.closest('[data-cz-block]');if(!b)return;
+  downIdx=parseInt(b.getAttribute('data-cz-block'),10);downY=e.clientY;moved=false;dragFrom=downIdx;dragging=false;
+});
+function targetIdx(y){var bs=blocks(),to=bs.length;for(var k=0;k<bs.length;k++){var r=bs[k].getBoundingClientRect();if(y<r.top+r.height/2){to=k;break;}}return to;}
+function showDrop(to){removeDrop();var bs=blocks();dropLine=document.createElement('div');dropLine.className='cz-drop';var main=document.querySelector('main');if(to>=bs.length)main.appendChild(dropLine);else main.insertBefore(dropLine,bs[to]);}
+function removeDrop(){if(dropLine&&dropLine.parentNode)dropLine.parentNode.removeChild(dropLine);dropLine=null;}
+document.addEventListener('pointermove',function(e){
+  if(downIdx<0||editing)return;
+  if(!dragging){if(Math.abs(e.clientY-downY)<6)return;dragging=true;moved=true;document.body.classList.add('cz-dragging');post({type:'cz-editing-start'});}
+  showDrop(targetIdx(e.clientY));e.preventDefault();
+},{passive:false});
+document.addEventListener('pointerup',function(e){
+  if(dragging){
+    var to=targetIdx(e.clientY);removeDrop();document.body.classList.remove('cz-dragging');
+    var dest=to>dragFrom?to-1:to;
+    if(dest!==dragFrom)post({type:'cz-reorder',from:dragFrom,to:dest});
+    post({type:'cz-editing-end'});dragging=false;setTimeout(function(){moved=false;},0);
+  }
+  downIdx=-1;
+});
+window.addEventListener('message',function(e){
+  var d=e.data||{};
+  if(d.type==='cz-highlight')highlight(d.block);
+  else if(d.type==='cz-clear')clearSel();
+});
+post({type:'cz-ready'});
+})();</script>"""
 
 
 _STORE_JS = r"""(function(){
@@ -1392,17 +1497,23 @@ _RENDERERS = {
     "text": _text, "contact": _contact, "store": _store, "booking": _booking, "newsletter": _newsletter,
 }
 
+# Renderers that accept a 3rd `editable` arg to emit `data-cz-field` tags for the
+# canvas inline-text editor. Populated when those renderers are made editable-aware.
+_EDITABLE_AWARE: frozenset[str] = frozenset({"hero", "cta", "text", "split", "features"})
 
-def _render_block(block, t):
+
+def _render_block(block, t, index=None, editable=False):
     if not isinstance(block, dict):
         return ""
     fn = _RENDERERS.get(block.get("type"))
     if fn:
-        raw = fn(block, t)
+        raw = fn(block, t, editable) if block.get("type") in _EDITABLE_AWARE else fn(block, t)
     else:
         body = block.get("body") or block.get("heading")
         raw = _text({"body": body}, t) if body else ""
-    return _apply_design(raw, block.get("_design")) if raw else raw
+    if not raw:
+        return raw
+    return _apply_design(raw, block.get("_design"), block_index=index, editable=editable)
 
 
 # ── head / footer (business identity + SEO from meta_config) ────────────────
@@ -1515,7 +1626,7 @@ def _footer(site: dict, meta: dict) -> str:
 
 # ── document ──────────────────────────────────────────────────────────────
 
-def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: bool = False) -> str:
+def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: bool = False, editable: bool = False) -> str:
     t = _tokens(site.get("theme_config"))
     c = t["colors"]
     slug = site.get("slug") or ""
@@ -1540,7 +1651,7 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
     content = page.get("content") or {}
     blocks = content.get("blocks") if isinstance(content, dict) else None
     blocks = blocks if isinstance(blocks, list) else []
-    body_html = "".join(_render_block(b, t) for b in blocks) or _text({"body": page.get("title")}, t)
+    body_html = "".join(_render_block(b, t, i, editable) for i, b in enumerate(blocks)) or _text({"body": page.get("title")}, t)
 
     nav_links = "".join(
         f'<a href="{"/" if p["slug"] in ("home", home_slug) else "/p/" + _esc(p["slug"])}">{_esc(p["title"])}</a>'
@@ -1580,8 +1691,10 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
         "cz-motion" if needs_motion else "",
         "cz-typw" if _hw else "",
         _anim_cls,
+        "cz-editable" if editable else "",
     ]))
     premium_js = _MOTION_JS if needs_motion else ""
+    canvas_js = _CANVAS_JS if editable else ""
 
     return f"""<!doctype html>
 <html lang="en">
@@ -1603,5 +1716,6 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
   <main>{body_html}</main>
   {_footer(site, meta_dict)}
   {premium_js}
+  {canvas_js}
 </body>
 </html>"""

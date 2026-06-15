@@ -188,6 +188,8 @@ class CappePagePreview(BaseModel):
     slug: Optional[str] = Field(default=None, max_length=160)
     content: dict[str, Any] = Field(default_factory=dict)
     theme_config: Optional[dict[str, Any]] = None
+    # When true, render with the canvas selection/edit runtime (Business editor).
+    editable: bool = False
 
 
 class CappePage(BaseModel):

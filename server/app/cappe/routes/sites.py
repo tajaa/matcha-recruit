@@ -170,7 +170,7 @@ async def preview_site_page(
     # Tenant CSP (inline widget scripts + fonts) — the app-wide middleware only
     # applies the strict default when no policy is set here.
     return HTMLResponse(
-        render_site_html(site_dict, page, nav, preview=True),
+        render_site_html(site_dict, page, nav, preview=True, editable=body.editable),
         headers={**tenant_security_headers(), "Cache-Control": "no-store"},
     )
 

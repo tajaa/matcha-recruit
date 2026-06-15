@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  ArrowLeft, Check, ChevronDown, ChevronUp, Film, GripVertical, ImagePlus, Loader2, Palette, Plus, Save, Sparkles, Trash2, Wand2,
+  ArrowLeft, Check, ChevronDown, ChevronUp, Copy, Film, GripVertical, ImagePlus, Loader2, MousePointerClick, Palette, Pencil, Plus, Save, Sparkles, Trash2, Wand2,
 } from 'lucide-react'
 import { cappeApi } from '../../../api/cappeClient'
 import { useCappeMe } from '../../../hooks/useCappeMe'
@@ -544,6 +544,12 @@ function usePremium(): boolean {
   return account?.plan === 'pro' || account?.plan === 'business'
 }
 
+// Canvas (click-on-page) mode is the top-tier flagship — Business only.
+function useBusinessTier(): boolean {
+  const { account } = useCappeMe()
+  return account?.plan === 'business'
+}
+
 function PremiumLock({ children }: { children: ReactNode }) {
   return (
     <div className="rounded-lg border border-dashed border-amber-700/40 bg-amber-500/[0.06] px-3 py-2.5 text-xs text-amber-300/90">
@@ -740,6 +746,82 @@ function BlockCard({
   )
 }
 
+// ── canvas mode: block-type palette + contextual panel ───────────────────────
+function AddPalette({ onPick }: { onPick: (type: string) => void }) {
+  return (
+    <div className="absolute z-20 mt-1 grid w-full grid-cols-2 gap-1 rounded-xl border border-zinc-700 bg-zinc-900 p-2 shadow-xl shadow-black/40">
+      {BLOCK_ORDER.map((t) => (
+        <button key={t} onClick={() => onPick(t)} className="rounded-lg px-3 py-2 text-left text-sm text-zinc-300 hover:bg-emerald-500/10 hover:text-emerald-400">
+          {BLOCK_SCHEMAS[t].label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** Contextual editor for the block selected on the canvas. Same controls as the
+ *  form editor (schema fields + DesignInspector), driven by selection. */
+function CanvasPanel({ blocks, sel, onChange, onMove, onRemove, onDuplicate, onAddAt, onAdd }: {
+  blocks: CappeBlock[]
+  sel: number | null
+  onChange: (i: number, b: CappeBlock) => void
+  onMove: (i: number, dir: -1 | 1) => void
+  onRemove: (i: number) => void
+  onDuplicate: (i: number) => void
+  onAddAt: (type: string, i: number) => void
+  onAdd: (type: string) => void
+}) {
+  const [addOpen, setAddOpen] = useState(false)
+  // Close the palette whenever the selection changes.
+  useEffect(() => { setAddOpen(false) }, [sel])
+
+  if (sel == null || !blocks[sel]) {
+    return (
+      <div className="p-4">
+        <p className="rounded-lg border border-dashed border-zinc-700 p-4 text-center text-xs text-zinc-500">
+          Click any section on the canvas to edit it. Double-click text to type in place.
+        </p>
+        <div className="relative mt-3">
+          <button onClick={() => setAddOpen((o) => !o)} className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-700 py-3 text-sm font-semibold text-zinc-400 hover:border-emerald-500 hover:text-emerald-400">
+            <Plus className="h-4 w-4" /> Add block
+          </button>
+          {addOpen && <AddPalette onPick={(t) => { onAdd(t); setAddOpen(false) }} />}
+        </div>
+      </div>
+    )
+  }
+
+  const block = blocks[sel]
+  const schema = BLOCK_SCHEMAS[block.type]
+  return (
+    <div className="space-y-3 p-4">
+      <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
+        <span className="text-sm font-semibold text-zinc-100">{schema?.label || block.type}</span>
+        <div className="flex items-center gap-1.5 text-zinc-500">
+          <button title="Move up" onClick={() => onMove(sel, -1)} disabled={sel === 0} className="hover:text-zinc-200 disabled:opacity-30"><ChevronUp className="h-4 w-4" /></button>
+          <button title="Move down" onClick={() => onMove(sel, 1)} disabled={sel === blocks.length - 1} className="hover:text-zinc-200 disabled:opacity-30"><ChevronDown className="h-4 w-4" /></button>
+          <button title="Duplicate" onClick={() => onDuplicate(sel)} className="hover:text-zinc-200"><Copy className="h-4 w-4" /></button>
+          <button title="Delete" onClick={() => onRemove(sel)} className="hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
+        </div>
+      </div>
+      {schema ? (
+        <>
+          {schema.fields.map((f) => (
+            <FieldInput key={f.key} field={f} value={block[f.key]} onChange={(v) => onChange(sel, { ...block, [f.key]: v })} />
+          ))}
+          <DesignInspector design={block._design} onChange={(dz) => onChange(sel, { ...block, _design: dz })} />
+        </>
+      ) : <p className="text-xs text-zinc-500">Unknown block “{block.type}”.</p>}
+      <div className="relative pt-1">
+        <button onClick={() => setAddOpen((o) => !o)} className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-zinc-700 py-2 text-xs font-medium text-zinc-400 hover:border-emerald-500 hover:text-emerald-400">
+          <Plus className="h-3.5 w-3.5" /> Add block below
+        </button>
+        {addOpen && <AddPalette onPick={(t) => { onAddAt(t, sel); setAddOpen(false) }} />}
+      </div>
+    </div>
+  )
+}
+
 // ── page editor ──────────────────────────────────────────────────────────────
 export default function PageEditor() {
   const { siteId, pageId } = useParams<{ siteId: string; pageId: string }>()
@@ -758,6 +840,21 @@ export default function PageEditor() {
 
   const [preview, setPreview] = useState('')
   const previewSeq = useRef(0)
+
+  // ── Canvas mode (Business only): click-on-page editing via the preview iframe.
+  const canvasUnlocked = useBusinessTier()
+  const [editMode, setEditMode] = useState<'form' | 'canvas'>('form')
+  useEffect(() => { if (canvasUnlocked) setEditMode('canvas') }, [canvasUnlocked])
+  const [selBlock, setSelBlock] = useState<number | null>(null)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const suspendPreview = useRef(false)
+  const [refreshTick, setRefreshTick] = useState(0)
+  // Refs mirror state for the (mount-once) postMessage handler — avoid stale closures.
+  const selBlockRef = useRef<number | null>(null)
+  const blocksRef = useRef<CappeBlock[]>([])
+  selBlockRef.current = selBlock
+  blocksRef.current = blocks
+  const postToCanvas = (msg: unknown) => iframeRef.current?.contentWindow?.postMessage(msg, '*')
 
   // Live theme switching — edited locally, previewed instantly, saved on demand.
   const [theme, setTheme] = useState<Record<string, unknown>>({})
@@ -784,18 +881,66 @@ export default function PageEditor() {
       .finally(() => setLoading(false))
   }, [siteId, pageId])
 
-  // Debounced live preview of the current (unsaved) blocks + theme.
+  // Debounced live preview of the current (unsaved) blocks + theme. In Canvas
+  // mode it renders with the selection/edit runtime (`editable`). While an inline
+  // edit or drag is in progress (`suspendPreview`), skip the refetch so the
+  // iframe — and the user's caret — survive; it resumes on `cz-editing-end`.
   useEffect(() => {
     if (!siteId || !page) return
     const seq = ++previewSeq.current
     const t = setTimeout(() => {
+      if (suspendPreview.current) return
       cappeApi
-        .postHtml(`/sites/${siteId}/preview`, { title, slug: page.slug, content: { blocks }, theme_config: theme })
+        .postHtml(`/sites/${siteId}/preview`, {
+          title, slug: page.slug, content: { blocks }, theme_config: theme, editable: editMode === 'canvas',
+        })
         .then((html) => { if (seq === previewSeq.current) setPreview(html) })
         .catch(() => { /* keep last good preview */ })
     }, 400)
     return () => clearTimeout(t)
-  }, [siteId, page, title, blocks, theme])
+  }, [siteId, page, title, blocks, theme, editMode, refreshTick])
+
+  // Canvas bridge: the framed runtime posts selection/edit/reorder events; we
+  // validate by source identity (the iframe is opaque-origin, so `e.origin` is
+  // "null" — never check it). Mounted once; reads live state via refs.
+  useEffect(() => {
+    function onMsg(e: MessageEvent) {
+      if (e.source !== iframeRef.current?.contentWindow) return
+      const d = e.data || {}
+      switch (d.type) {
+        case 'cz-ready':
+          if (selBlockRef.current != null) postToCanvas({ type: 'cz-highlight', block: selBlockRef.current })
+          break
+        case 'cz-select':
+          setSelBlock(d.block)
+          postToCanvas({ type: 'cz-highlight', block: d.block })
+          break
+        case 'cz-edit': {
+          const b = blocksRef.current[d.block]
+          if (b) setBlocks((bs) => bs.map((x, j) => (j === d.block ? { ...x, [d.field]: d.value } : x)))
+          break
+        }
+        case 'cz-reorder':
+          setBlocks((bs) => {
+            const next = [...bs]
+            const [moved] = next.splice(d.from, 1)
+            next.splice(d.to, 0, moved)
+            return next
+          })
+          setSelBlock(d.to)
+          break
+        case 'cz-editing-start':
+          suspendPreview.current = true
+          break
+        case 'cz-editing-end':
+          suspendPreview.current = false
+          setRefreshTick((n) => n + 1)
+          break
+      }
+    }
+    window.addEventListener('message', onMsg)
+    return () => window.removeEventListener('message', onMsg)
+  }, [])
 
   // ── theme mutators ─────────────────────────────────────────────────────────
   const applyPreset = (id: string) => {
@@ -834,7 +979,7 @@ export default function PageEditor() {
   }
 
   const updateBlock = (i: number, b: CappeBlock) => setBlocks((bs) => bs.map((x, j) => (j === i ? b : x)))
-  const removeBlock = (i: number) => setBlocks((bs) => bs.filter((_, j) => j !== i))
+  const removeBlock = (i: number) => { setBlocks((bs) => bs.filter((_, j) => j !== i)); setSelBlock(null) }
   const moveBlock = (i: number, dir: -1 | 1) =>
     setBlocks((bs) => {
       const j = i + dir
@@ -846,6 +991,19 @@ export default function PageEditor() {
   const addBlock = (type: string) => {
     setBlocks((bs) => [...bs, BLOCK_SCHEMAS[type].make()])
     setAdding(false)
+  }
+  // Insert a new block right after index `i` (canvas "add below").
+  const addBlockAt = (type: string, i: number) => {
+    setBlocks((bs) => { const next = [...bs]; next.splice(i + 1, 0, BLOCK_SCHEMAS[type].make()); return next })
+    setSelBlock(i + 1)
+  }
+  // Deep-copy a block (incl. _design + list items) and insert after it.
+  const duplicateBlock = (i: number) => {
+    setBlocks((bs) => {
+      const clone = JSON.parse(JSON.stringify(bs[i])) as CappeBlock
+      const next = [...bs]; next.splice(i + 1, 0, clone); return next
+    })
+    setSelBlock(i + 1)
   }
 
   async function save() {
@@ -1038,6 +1196,16 @@ export default function PageEditor() {
               )}
             </div>
 
+            {canvasUnlocked && (
+              <div className="flex rounded-lg border border-zinc-700 p-0.5">
+                {([['canvas', 'Canvas', MousePointerClick], ['form', 'Form', Pencil]] as const).map(([m, label, Icon]) => (
+                  <button key={m} onClick={() => setEditMode(m)} className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium ${editMode === m ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}>
+                    <Icon className="h-3.5 w-3.5" /> {label}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <select value={status} onChange={(e) => setStatus(e.target.value as 'draft' | 'published')} className="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-100">
               <option value="draft">Draft</option>
               <option value="published">Published</option>
@@ -1048,57 +1216,85 @@ export default function PageEditor() {
           </div>
         </div>
 
-        {/* split: editor | live preview */}
-        <div className="flex min-h-0 flex-1">
-          <div className="w-full overflow-y-auto border-r border-zinc-800 bg-zinc-950 p-5 lg:w-[46%]">
-            <div className="space-y-3">
-              {blocks.map((b, i) => (
-                <BlockCard
-                  key={i}
-                  block={b}
-                  index={i}
-                  total={blocks.length}
-                  onChange={(nb) => updateBlock(i, nb)}
-                  onRemove={() => removeBlock(i)}
-                  onMove={(dir) => moveBlock(i, dir)}
-                />
-              ))}
-              {blocks.length === 0 && (
-                <p className="rounded-xl border border-dashed border-zinc-700 p-6 text-center text-sm text-zinc-500">
-                  No blocks yet. Add one below to start building this page.
-                </p>
+        {editMode === 'canvas' ? (
+          /* canvas: click-on-page preview + contextual panel (Business) */
+          <div className="flex min-h-0 flex-1">
+            <div className="hidden flex-1 bg-zinc-900 lg:block">
+              {preview ? (
+                <iframe ref={iframeRef} title="Canvas" srcDoc={preview} sandbox="allow-scripts" className="h-full w-full border-0" />
+              ) : (
+                <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-600" /></div>
               )}
-
-              {/* add block */}
-              <div className="relative">
-                <button
-                  onClick={() => setAdding((a) => !a)}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-700 py-3 text-sm font-semibold text-zinc-400 hover:border-emerald-500 hover:text-emerald-400"
-                >
-                  <Plus className="h-4 w-4" /> Add block
-                </button>
-                {adding && (
-                  <div className="absolute z-10 mt-1 grid w-full grid-cols-2 gap-1 rounded-xl border border-zinc-700 bg-zinc-900 p-2 shadow-xl shadow-black/40">
-                    {BLOCK_ORDER.map((t) => (
-                      <button key={t} onClick={() => addBlock(t)} className="rounded-lg px-3 py-2 text-left text-sm text-zinc-300 hover:bg-emerald-500/10 hover:text-emerald-400">
-                        {BLOCK_SCHEMAS[t].label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+            </div>
+            <aside className="hidden w-[360px] shrink-0 overflow-y-auto border-l border-zinc-800 bg-zinc-950 lg:block">
+              <CanvasPanel
+                blocks={blocks}
+                sel={selBlock}
+                onChange={updateBlock}
+                onMove={moveBlock}
+                onRemove={removeBlock}
+                onDuplicate={duplicateBlock}
+                onAddAt={addBlockAt}
+                onAdd={addBlock}
+              />
+            </aside>
+            <div className="flex w-full items-center justify-center p-8 text-center text-sm text-zinc-500 lg:hidden">
+              Canvas editing needs a wider screen — switch to Form mode or use a desktop.
             </div>
           </div>
+        ) : (
+          /* split: form editor | live preview */
+          <div className="flex min-h-0 flex-1">
+            <div className="w-full overflow-y-auto border-r border-zinc-800 bg-zinc-950 p-5 lg:w-[46%]">
+              <div className="space-y-3">
+                {blocks.map((b, i) => (
+                  <BlockCard
+                    key={i}
+                    block={b}
+                    index={i}
+                    total={blocks.length}
+                    onChange={(nb) => updateBlock(i, nb)}
+                    onRemove={() => removeBlock(i)}
+                    onMove={(dir) => moveBlock(i, dir)}
+                  />
+                ))}
+                {blocks.length === 0 && (
+                  <p className="rounded-xl border border-dashed border-zinc-700 p-6 text-center text-sm text-zinc-500">
+                    No blocks yet. Add one below to start building this page.
+                  </p>
+                )}
 
-          {/* preview */}
-          <div className="hidden flex-1 bg-zinc-900 lg:block">
-            {preview ? (
-              <iframe title="Live preview" srcDoc={preview} sandbox="allow-scripts" className="h-full w-full border-0" />
-            ) : (
-              <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-600" /></div>
-            )}
+                {/* add block */}
+                <div className="relative">
+                  <button
+                    onClick={() => setAdding((a) => !a)}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-700 py-3 text-sm font-semibold text-zinc-400 hover:border-emerald-500 hover:text-emerald-400"
+                  >
+                    <Plus className="h-4 w-4" /> Add block
+                  </button>
+                  {adding && (
+                    <div className="absolute z-10 mt-1 grid w-full grid-cols-2 gap-1 rounded-xl border border-zinc-700 bg-zinc-900 p-2 shadow-xl shadow-black/40">
+                      {BLOCK_ORDER.map((t) => (
+                        <button key={t} onClick={() => addBlock(t)} className="rounded-lg px-3 py-2 text-left text-sm text-zinc-300 hover:bg-emerald-500/10 hover:text-emerald-400">
+                          {BLOCK_SCHEMAS[t].label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* preview */}
+            <div className="hidden flex-1 bg-zinc-900 lg:block">
+              {preview ? (
+                <iframe title="Live preview" srcDoc={preview} sandbox="allow-scripts" className="h-full w-full border-0" />
+              ) : (
+                <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-600" /></div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </SiteCtx.Provider>
   )
