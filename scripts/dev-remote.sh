@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Development startup script for Matcha Recruit (Remote DB)
-# Connects to EC2 Postgres via SSH Tunnel
+# Development startup script for Matcha Recruit (LOCAL DB)
+# Uses a local pgvector/pg15 container (matcha-postgres) — the old EC2 dev
+# Postgres was retired; this DB was cloned from it. RDS/prod untouched.
 
 set -e
 
@@ -69,8 +70,7 @@ pick_available_port() {
 }
 
 if [ ! -f "$KEY_FILE" ]; then
-    echo -e "${RED}Error: SSH key not found at $KEY_FILE${NC}"
-    exit 1
+    echo -e "${YELLOW}Note: SSH key not found at $KEY_FILE (only needed for remote ops; local dev DB doesn't need it).${NC}"
 fi
 
 # Parse arguments
@@ -138,27 +138,32 @@ if [ -n "${REDIS_URL:-}" ]; then
     REDIS_URL_SOURCE="env"
 fi
 
-# Stop local postgres if running
-if docker ps --format '{{.Names}}' | grep -q '^matcha-postgres$'; then
-    echo -e "${YELLOW}Stopping local matcha-postgres container to free port $LOCAL_PORT...${NC}"
-    docker stop matcha-postgres
-fi
-
-if is_port_in_use "$LOCAL_PORT"; then
-    if [ "$LOCAL_PORT_SOURCE" = "env" ]; then
-        echo -e "${RED}Error: LOCAL_PORT $LOCAL_PORT is already in use. Set LOCAL_PORT or LOCAL_DB_PORT to a free port.${NC}"
-        exit 1
+# Ensure the LOCAL Postgres dev DB is running (no more SSH tunnel to EC2).
+# The dev data was cloned from the retired EC2 container into a local
+# pgvector/pg15 container. If it's missing, create it empty (restore a dump
+# into it separately); if stopped, start it.
+ensure_local_postgres() {
+    if docker ps --format '{{.Names}}' | grep -q '^matcha-postgres$'; then
+        echo -e "${GREEN}Local matcha-postgres already running${NC}"
+        return
     fi
-
-    ALT_LOCAL_PORT="$(pick_available_port 5433 5440)"
-    if [ -z "$ALT_LOCAL_PORT" ]; then
-        echo -e "${RED}Error: No free local DB ports found in 5433-5440.${NC}"
-        exit 1
+    if docker ps -a --format '{{.Names}}' | grep -q '^matcha-postgres$'; then
+        echo -e "${YELLOW}Starting local matcha-postgres...${NC}"
+        docker start matcha-postgres
+    else
+        echo -e "${YELLOW}Creating local matcha-postgres (pgvector/pg15) on port $LOCAL_PORT...${NC}"
+        docker run -d --name matcha-postgres \
+            -e POSTGRES_USER=matcha -e POSTGRES_PASSWORD=matcha_dev -e POSTGRES_DB=matcha \
+            -p "${LOCAL_PORT}:5432" -v matcha_pg_data:/var/lib/postgresql/data \
+            pgvector/pgvector:pg15
     fi
-
-    echo -e "${YELLOW}Port $LOCAL_PORT is in use; using $ALT_LOCAL_PORT for the DB tunnel instead.${NC}"
-    LOCAL_PORT="$ALT_LOCAL_PORT"
-fi
+    echo -e "${YELLOW}Waiting for Postgres to accept connections...${NC}"
+    for _ in $(seq 1 30); do
+        docker exec matcha-postgres pg_isready -U matcha -d matcha >/dev/null 2>&1 && break
+        sleep 1
+    done
+}
+ensure_local_postgres
 
 if is_port_in_use "$FRONTEND_PORT"; then
     if [ "$FRONTEND_PORT_SOURCE" = "env" ]; then
@@ -264,12 +269,11 @@ tmux rename-window -t "$SESSION_NAME:0" "dev"
 # Enable mouse mode for clicking panes and scrolling
 tmux set-option -t "$SESSION_NAME" mouse on
 
-# Pane 1: SSH Tunnel - Split right side (30% width)
+# Pane 1: Local Postgres logs (replaces the old EC2 SSH tunnel) - 30% width
 tmux split-window -t "$SESSION_NAME:dev" -h -p 30 -c "$PROJECT_ROOT" \
-    "while true; do echo 'Starting SSH Tunnel...'; ssh -i $KEY_FILE -N -L $LOCAL_PORT:localhost:$REMOTE_PORT $REMOTE_HOST -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -o ConnectTimeout=15; echo 'Tunnel dropped. Respawning in 2s...'; sleep 2; done"
+    "echo 'Local Postgres (matcha-postgres) — dev DB on localhost:$LOCAL_PORT'; docker start matcha-postgres >/dev/null 2>&1; docker logs -f matcha-postgres"
 
-echo -e "${YELLOW}Waiting for tunnel...${NC}"
-sleep 2
+sleep 1
 
 # Pane 2: Worker - Split below tunnel
 tmux split-window -t "$SESSION_NAME:dev.1" -v -c "$PROJECT_ROOT/server" \
@@ -289,7 +293,7 @@ fi
 tmux select-pane -t "$SESSION_NAME:dev.0"
 
 echo -e "${GREEN}Remote Dev environment started!${NC}"
-echo -e "  - Database: Tunnel to $REMOTE_HOST:$REMOTE_PORT (mapped to localhost:$LOCAL_PORT)"
+echo -e "  - Database: LOCAL matcha-postgres (localhost:$LOCAL_PORT/matcha)"
 echo -e "  - Redis:    Local ($REDIS_PORT)"
 echo -e "  - Backend:  http://localhost:$BACKEND_PORT"
 echo -e "  - Frontend: http://localhost:$FRONTEND_PORT"
