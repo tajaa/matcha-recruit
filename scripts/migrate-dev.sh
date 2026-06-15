@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# Migrate the DEV DB (matcha-postgres:5432) via SSH tunnel.
-# Mirror of migrate-prod.sh so the schema workflow is symmetric:
+# Migrate the LOCAL dev DB (matcha-postgres container on localhost:5432).
+# The old EC2 dev Postgres was retired; this targets the local pgvector/pg15
+# container that dev-remote.sh manages. Mirror of migrate-prod.sh so the schema
+# workflow stays symmetric:
 #   author migration -> ./scripts/migrate-dev.sh -> test -> ./scripts/migrate-prod.sh
-# Reads DEV_DATABASE_URL from server/.env, or falls back to the standard dev URL.
+# Override the target with DEV_DATABASE_URL (env or server/.env).
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PEM="$REPO_ROOT/roonMT-arm.pem"
-EC2="ec2-user@3.101.83.217"
 LOCAL_PORT=5432
 
-if [[ -z "${DEV_DATABASE_URL:-}" ]]; then
+DEV_DATABASE_URL="${DEV_DATABASE_URL:-}"
+if [[ -z "$DEV_DATABASE_URL" ]]; then
   ENV_FILE="$REPO_ROOT/server/.env"
   if [[ -f "$ENV_FILE" ]] && grep -q '^DEV_DATABASE_URL' "$ENV_FILE"; then
     DEV_DATABASE_URL=$(grep '^DEV_DATABASE_URL' "$ENV_FILE" | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" | tr -d ' ')
@@ -19,19 +20,22 @@ if [[ -z "${DEV_DATABASE_URL:-}" ]]; then
   fi
 fi
 
-echo "Connecting as: $(echo "$DEV_DATABASE_URL" | sed 's|://[^:]*:[^@]*@|://***:***@|')"
-
-# Reuse an existing tunnel (e.g. from dev-remote.sh) if :5432 is already open;
-# otherwise open our own and tear it down on exit.
-if lsof -n -P -iTCP:"$LOCAL_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
-  echo "Reusing existing listener on localhost:${LOCAL_PORT} (dev-remote tunnel?)."
-else
-  echo "Opening SSH tunnel ${EC2}:5432 -> localhost:${LOCAL_PORT}..."
-  ssh -i "$PEM" -L "${LOCAL_PORT}:localhost:5432" "$EC2" -N -f -o ExitOnForwardFailure=yes
-  trap 'pkill -f "ssh.*${LOCAL_PORT}:localhost:5432" 2>/dev/null; exit' EXIT INT TERM
-  sleep 1
+# Ensure the local dev Postgres container is up (created/started by dev-remote.sh).
+if ! docker ps --format '{{.Names}}' | grep -q '^matcha-postgres$'; then
+  if docker ps -a --format '{{.Names}}' | grep -q '^matcha-postgres$'; then
+    echo "Starting local matcha-postgres container..."
+    docker start matcha-postgres
+  else
+    echo "Error: local matcha-postgres container not found. Run ./scripts/dev-remote.sh first (it creates it)." >&2
+    exit 1
+  fi
+  for _ in $(seq 1 30); do
+    docker exec matcha-postgres pg_isready -U matcha -d matcha >/dev/null 2>&1 && break
+    sleep 1
+  done
 fi
 
+echo "Connecting as: $(echo "$DEV_DATABASE_URL" | sed 's|://[^:]*:[^@]*@|://***:***@|')"
 echo "Running Alembic upgrade on dev..."
 cd "$REPO_ROOT/server"
 DATABASE_URL="$DEV_DATABASE_URL" ./venv/bin/alembic upgrade head
