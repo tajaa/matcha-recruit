@@ -50,6 +50,7 @@ TENANT_CSP = (
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src 'self' https://fonts.gstatic.com data:; "
     "img-src 'self' data: https:; "
+    "media-src 'self' https:; "
     "connect-src 'self'; "
     "frame-ancestors 'self'"
 )

@@ -26,6 +26,20 @@ export const FONT_PAIRINGS: { id: string; label: string; heading: string; body: 
   { id: 'lora', label: 'Lora / Lora', heading: 'Lora', body: 'Lora' },
 ]
 
+// Granular font menus for the premium designer (independent heading/body).
+// All are Google-Fonts-hosted (fetched on demand by the renderer's _gfonts_link);
+// serif members are mirrored into render.py's `_SERIF` for correct fallbacks.
+export const HEADING_FONTS: string[] = [
+  'Inter', 'Sora', 'Space Grotesk', 'Manrope', 'Outfit', 'Archivo', 'Syne', 'Unbounded',
+  'Bricolage Grotesque', 'Familjen Grotesk', 'DM Sans',
+  'Fraunces', 'Playfair Display', 'Lora', 'Cormorant Garamond', 'Libre Baskerville',
+  'DM Serif Display', 'Instrument Serif', 'Newsreader', 'Spectral',
+]
+export const BODY_FONTS: string[] = [
+  'Inter', 'Manrope', 'Work Sans', 'DM Sans', 'Mulish', 'Public Sans', 'Hanken Grotesk',
+  'Libre Franklin', 'Source Serif 4', 'Lora', 'Spectral', 'Newsreader', 'PT Serif',
+]
+
 export const RADII: { value: string; label: string }[] = [
   { value: 'none', label: 'Sharp' }, { value: 'sm', label: 'Small' },
   { value: 'md', label: 'Medium' }, { value: 'lg', label: 'Large' },

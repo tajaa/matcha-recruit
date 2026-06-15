@@ -85,7 +85,8 @@ def test_map_and_hours_blocks_render():
 
 def test_premium_theme_adds_layer():
     h = _render_theme({"mode": "dark", "premium": True, "colors": {"brand": "#C6F16B"}})
-    assert '<body class="cz-premium">' in h
+    # Premium implies the motion runtime, so the body carries both classes now.
+    assert 'class="cz-premium cz-motion"' in h
     assert "czGlow" in h                         # glow keyframes present
     assert "classList.add('cz-js')" in h         # scroll-reveal script injected
 
@@ -98,7 +99,7 @@ def test_non_premium_theme_has_no_layer():
 
 def test_fancy_alias_enables_premium():
     h = _render_theme({"fancy": True})
-    assert '<body class="cz-premium">' in h
+    assert "cz-premium" in h.split("<body", 1)[1].split(">", 1)[0]
 
 
 def test_empty_meta_renders_minimal_footer():

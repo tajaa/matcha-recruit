@@ -18,6 +18,7 @@ contact, store, booking, newsletter.
 import html
 import itertools
 import json
+import re
 from typing import Any
 from urllib.parse import quote
 
@@ -33,6 +34,7 @@ def _uid() -> int:
 _SERIF = {
     "playfair display", "lora", "fraunces", "source serif pro", "source serif 4",
     "merriweather", "georgia", "pt serif", "cormorant garamond", "libre baskerville",
+    "dm serif display", "instrument serif", "newsreader", "spectral",
 }
 _RADIUS = {"none": "0px", "sm": "6px", "md": "10px", "lg": "14px", "xl": "18px", "2xl": "24px", "full": "9999px"}
 _LIGHT = {"bg": "#ffffff", "surface": "#f6f7f9", "text": "#16181d", "muted": "#5b6470",
@@ -72,6 +74,187 @@ def _js_obj(obj: Any) -> str:
 
 def _clean_css(v: Any) -> str:
     return str(v if v is not None else "").replace("<", "").replace(">", "").replace("}", "")
+
+
+# ── bespoke designer layer (per-block `_design`) ────────────────────────────
+# Every value below is an enum lookup, a clamped number, a hex-only color, or a
+# scheme-checked URL — no raw user string ever reaches a class/style/attr. A
+# block with no (or empty) `_design` renders byte-identical to before.
+
+_HEX_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+_SECTION_RE = re.compile(r"<section\b([^>]*)>")
+
+
+def _hexonly(v: Any) -> str:
+    s = str(v or "").strip()
+    return s if _HEX_RE.match(s) else ""
+
+
+def _clampi(v: Any, lo: int, hi: int, default: int = 0) -> int:
+    try:
+        n = int(float(v))
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(hi, n))
+
+
+_PAD_SCALE = {"none": "0rem", "sm": "2rem", "lg": "6rem", "xl": "9rem"}
+_MAXW = {"narrow": "44rem", "wide": "84rem", "full": "100%"}
+_MINH = {"tall": "70vh", "screen": "100vh"}
+_MOTION_FX = {"fade", "slide-up", "slide-left", "slide-right", "zoom", "blur-in"}
+_OVERLAYS = {"light", "medium", "dark"}
+
+
+def _design_motion(d: dict) -> bool:
+    m = d.get("motion") if isinstance(d.get("motion"), dict) else {}
+    return bool(
+        (m.get("effect") in _MOTION_FX) or m.get("parallax") or m.get("kenburns") or m.get("stagger")
+    )
+
+
+def _block_has_motion(b: Any) -> bool:
+    return isinstance(b, dict) and isinstance(b.get("_design"), dict) and _design_motion(b["_design"])
+
+
+def _safe_url_css(url: Any) -> str:
+    """Sanitized URL for a CSS url('...') — reuses the hero re-encode."""
+    u = _safe_image(url)
+    if not u:
+        return ""
+    return _esc(u).replace("'", "%27").replace("(", "%28").replace(")", "%29")
+
+
+def _apply_design(html_str: str, design: Any) -> str:
+    """Post-process a block's HTML: merge designer classes/attrs/style into its
+    first <section> tag and inject background media layers. No-op when absent."""
+    if not isinstance(design, dict) or not design:
+        return html_str
+    m = _SECTION_RE.search(html_str)
+    if not m:
+        return html_str
+
+    motion = design.get("motion") if isinstance(design.get("motion"), dict) else {}
+    bg = design.get("bg") if isinstance(design.get("bg"), dict) else {}
+    layout = design.get("layout") if isinstance(design.get("layout"), dict) else {}
+    colors = design.get("colors") if isinstance(design.get("colors"), dict) else {}
+
+    classes: list[str] = ["cz-design"]
+    attrs: list[str] = []
+    cssvars: list[str] = []
+
+    # ── motion ──────────────────────────────────────────────────────────────
+    effect = motion.get("effect")
+    if effect in _MOTION_FX:
+        classes += ["cz-rv", f"cz-rv--{effect}"]
+        attrs.append(f'data-cz-delay="{_clampi(motion.get("delay"), 0, 2000)}"')
+        attrs.append(f'data-cz-dur="{_clampi(motion.get("duration"), 100, 2000, 700)}"')
+        if motion.get("stagger"):
+            classes.append("cz-rv--stagger")
+    if motion.get("parallax"):
+        classes.append("cz-parallax")
+        attrs.append(f'data-cz-parallax="{_clampi(motion.get("parallaxStrength"), 0, 80, 20)}"')
+    if motion.get("kenburns"):
+        classes.append("cz-kenburns")
+
+    # ── background ──────────────────────────────────────────────────────────
+    bg_type = bg.get("type")
+    bg_media = ""
+    if bg_type == "color":
+        col = _hexonly(bg.get("color"))
+        if col:
+            classes.append("cz-bg--color")
+            cssvars.append(f"--cz-bg-color:{col}")
+    elif bg_type == "gradient":
+        grad = _design_gradient(bg.get("gradient"))
+        if grad:
+            classes.append("cz-bg--gradient")
+            cssvars.append(f"--cz-grad:{grad}")
+    elif bg_type == "image":
+        u = _safe_url_css(bg.get("image"))
+        if u:
+            classes += ["cz-bg", "cz-bg--image"]
+            bg_media = f"<div class=\"cz-bg-media\" style=\"background-image:url('{u}')\"></div>"
+    elif bg_type == "video":
+        u = _safe_image(bg.get("video"))
+        if u:
+            classes += ["cz-bg", "cz-bg--video"]
+            bg_media = ('<div class="cz-bg-media"><video autoplay muted loop playsinline '
+                        f'preload="metadata"><source src="{_esc(u)}"></video></div>')
+    if bg_media:
+        overlay = bg.get("overlay")
+        ov_cls = f"cz-ov-{overlay}" if overlay in _OVERLAYS else ""
+        op = bg.get("overlayOpacity")
+        ov_style = ""
+        if op is not None and str(op) != "":
+            ov_style = f' style="background:rgba(0,0,0,{_clampi(op, 0, 100) / 100})"'
+        bg_media += f'<div class="cz-bg-ov {ov_cls}"{ov_style}></div>'
+        blur = _clampi(bg.get("blur"), 0, 40)
+        if blur:
+            cssvars.append(f"--cz-blur:{blur}px")
+            classes.append("cz-bg--blur")
+
+    # ── layout ──────────────────────────────────────────────────────────────
+    pt = _PAD_SCALE.get(layout.get("padTop"))
+    if pt is not None:
+        cssvars.append(f"--cz-pad-t:{pt}")
+        classes.append("cz-has-pt")
+    pb = _PAD_SCALE.get(layout.get("padBottom"))
+    if pb is not None:
+        cssvars.append(f"--cz-pad-b:{pb}")
+        classes.append("cz-has-pb")
+    mw = _MAXW.get(layout.get("maxWidth"))
+    if mw:
+        cssvars.append(f"--cz-maxw:{mw}")
+        classes.append("cz-has-maxw")
+    mh = _MINH.get(layout.get("minHeight"))
+    if mh:
+        cssvars.append(f"--cz-minh:{mh}")
+        classes.append("cz-has-minh")
+    align = layout.get("align")
+    if align in ("left", "center"):
+        classes.append(f"cz-al-{align}")
+
+    # ── per-section color overrides ─────────────────────────────────────────
+    ctext, chead, cacc = _hexonly(colors.get("text")), _hexonly(colors.get("heading")), _hexonly(colors.get("accent"))
+    if ctext:
+        cssvars.append(f"--cz-text:{ctext}")
+    if chead:
+        cssvars.append(f"--cz-heading:{chead}")
+    if cacc:
+        cssvars += [f"--cz-brand:{cacc}", f"--cz-accent:{cacc}"]
+        classes.append("cz-acc")
+
+    # ── merge into the existing <section ...> tag ───────────────────────────
+    existing = m.group(1)  # attributes already on the tag (may include class/style)
+    new_attrs = existing
+    cls_str = " ".join(classes)
+    cm = re.search(r'\sclass="([^"]*)"', new_attrs)
+    if cm:
+        new_attrs = new_attrs.replace(cm.group(0), f' class="{cm.group(1)} {cls_str}"', 1)
+    else:
+        new_attrs += f' class="{cls_str}"'
+    if cssvars:
+        style_str = _clean_css(";".join(cssvars))
+        sm = re.search(r'\sstyle="([^"]*)"', new_attrs)
+        if sm:
+            new_attrs = new_attrs.replace(sm.group(0), f' style="{sm.group(1)};{style_str}"', 1)
+        else:
+            new_attrs += f' style="{style_str}"'
+    if attrs:
+        new_attrs += " " + " ".join(attrs)
+    open_tag = f"<section{new_attrs}>"
+    # Inject bg media as the section's first children (content .cz-wrap follows).
+    return html_str[:m.start()] + open_tag + bg_media + html_str[m.end():]
+
+
+def _design_gradient(g: Any) -> str:
+    if not isinstance(g, dict):
+        return ""
+    stops = [s for s in (_hexonly(x) for x in (g.get("stops") or [])) if s]
+    if len(stops) < 2:
+        return ""
+    angle = _clampi(g.get("angle"), 0, 360, 135)
+    return f"linear-gradient({angle}deg,{','.join(stops[:3])})"
 
 
 def _font_stack(name: str) -> str:
@@ -508,13 +691,87 @@ section{position:relative}
 .cz-premium .cz-feat__icon{background:linear-gradient(135deg,var(--brand),var(--accent));color:var(--brand-fg)}
 .cz-premium .cz-tile:hover{box-shadow:0 30px 60px -34px color-mix(in srgb,var(--brand) 50%,transparent)}
 
-/* scroll-reveal — only active once JS adds .cz-js (no-JS shows everything) */
-.cz-premium.cz-js main>section{opacity:0;transform:translateY(26px);
+/* scroll-reveal — only active once JS adds .cz-js (no-JS shows everything).
+   Per-section designer motion (.cz-rv) opts out so the two don't double-hide. */
+.cz-premium.cz-js main>section:not(.cz-rv){opacity:0;transform:translateY(26px);
   transition:opacity .9s cubic-bezier(.2,.7,.2,1),transform .9s cubic-bezier(.2,.7,.2,1)}
-.cz-premium.cz-js main>section.cz-in{opacity:1;transform:none}
+.cz-premium.cz-js main>section:not(.cz-rv).cz-in{opacity:1;transform:none}
 @media(prefers-reduced-motion:reduce){
-  .cz-premium.cz-js main>section{opacity:1;transform:none;transition:none}
+  .cz-premium.cz-js main>section:not(.cz-rv){opacity:1;transform:none;transition:none}
   .cz-premium::after{animation:none}}
+
+/* ── bespoke designer layer (per-section; independent of cz-premium) ──────── */
+/* layout: consume vars only when the matching cz-has-* class is present, so
+   unset sections keep today's exact spacing/width. */
+.cz-has-pt{padding-top:var(--cz-pad-t)}
+.cz-has-pb{padding-bottom:var(--cz-pad-b)}
+.cz-has-minh{min-height:var(--cz-minh);display:flex;flex-direction:column;justify-content:center}
+.cz-has-maxw>.cz-wrap,.cz-has-maxw>.cz-narrow{max-width:var(--cz-maxw)}
+.cz-al-left{text-align:left}
+.cz-al-center{text-align:center}
+/* per-section color overrides (scoped to the section) */
+.cz-design{color:var(--cz-text,inherit)}
+.cz-design h1,.cz-design h2,.cz-design h3{color:var(--cz-heading,inherit)}
+.cz-acc{--brand:var(--cz-brand);--accent:var(--cz-accent)}
+/* backgrounds: solid/gradient paint the section; image/video ride a media layer */
+.cz-bg--color{background:var(--cz-bg-color)}
+.cz-bg--gradient{background:var(--cz-grad)}
+.cz-bg{position:relative;overflow:hidden}
+.cz-bg>.cz-bg-media{position:absolute;inset:0;z-index:0}
+.cz-bg--image>.cz-bg-media{background-size:cover;background-position:center}
+.cz-bg--video>.cz-bg-media video{width:100%;height:100%;object-fit:cover;border:0}
+.cz-bg>.cz-bg-ov{position:absolute;inset:0;z-index:1;pointer-events:none}
+.cz-bg>.cz-bg-ov.cz-ov-light{background:linear-gradient(180deg,rgba(0,0,0,.1),rgba(0,0,0,.3) 60%,rgba(0,0,0,.5))}
+.cz-bg>.cz-bg-ov.cz-ov-medium{background:linear-gradient(180deg,rgba(0,0,0,.28),rgba(0,0,0,.5) 55%,rgba(0,0,0,.72))}
+.cz-bg>.cz-bg-ov.cz-ov-dark{background:linear-gradient(180deg,rgba(0,0,0,.46),rgba(0,0,0,.62) 55%,rgba(0,0,0,.78))}
+.cz-bg>.cz-wrap,.cz-bg>.cz-narrow,.cz-bg>*:not(.cz-bg-media):not(.cz-bg-ov){position:relative;z-index:2}
+.cz-bg--blur>.cz-bg-media{filter:blur(var(--cz-blur))}
+.cz-kenburns>.cz-bg-media{animation:czKen 18s ease-in-out infinite alternate}
+@keyframes czKen{from{transform:scale(1)}to{transform:scale(1.12)}}
+/* motion reveal — gated by body.cz-motion.cz-js (runtime present + JS available) */
+.cz-motion.cz-js .cz-rv{opacity:0;
+  transition:opacity var(--cz-dur,700ms) cubic-bezier(.2,.7,.2,1),
+    transform var(--cz-dur,700ms) cubic-bezier(.2,.7,.2,1),
+    filter var(--cz-dur,700ms) cubic-bezier(.2,.7,.2,1);
+  transition-delay:var(--cz-delay,0ms)}
+.cz-motion.cz-js .cz-rv--slide-up{transform:translateY(28px)}
+.cz-motion.cz-js .cz-rv--slide-left{transform:translateX(28px)}
+.cz-motion.cz-js .cz-rv--slide-right{transform:translateX(-28px)}
+.cz-motion.cz-js .cz-rv--zoom{transform:scale(.94)}
+.cz-motion.cz-js .cz-rv--blur-in{filter:blur(12px)}
+.cz-motion.cz-js .cz-rv.cz-in{opacity:1;transform:none;filter:none}
+/* stagger: direct grid children cascade via --i set by the runtime */
+.cz-motion.cz-js .cz-rv--stagger .cz-cards>*,.cz-motion.cz-js .cz-rv--stagger .cz-plans>*,
+.cz-motion.cz-js .cz-rv--stagger .cz-bento>*,.cz-motion.cz-js .cz-rv--stagger .cz-gallery>*,
+.cz-motion.cz-js .cz-rv--stagger .cz-creds>*,.cz-motion.cz-js .cz-rv--stagger .cz-quotes>*,
+.cz-motion.cz-js .cz-rv--stagger .cz-stats>*,.cz-motion.cz-js .cz-rv--stagger .cz-reviews-box>*{
+  opacity:0;transform:translateY(20px);
+  transition:opacity .6s cubic-bezier(.2,.7,.2,1),transform .6s cubic-bezier(.2,.7,.2,1);
+  transition-delay:calc(var(--i,0)*90ms)}
+.cz-motion.cz-js .cz-rv--stagger.cz-in .cz-cards>*,.cz-motion.cz-js .cz-rv--stagger.cz-in .cz-plans>*,
+.cz-motion.cz-js .cz-rv--stagger.cz-in .cz-bento>*,.cz-motion.cz-js .cz-rv--stagger.cz-in .cz-gallery>*,
+.cz-motion.cz-js .cz-rv--stagger.cz-in .cz-creds>*,.cz-motion.cz-js .cz-rv--stagger.cz-in .cz-quotes>*,
+.cz-motion.cz-js .cz-rv--stagger.cz-in .cz-stats>*,.cz-motion.cz-js .cz-rv--stagger.cz-in .cz-reviews-box>*{
+  opacity:1;transform:none}
+/* animated hero headline (theme.type.heroAnim) */
+.cz-h-rise .cz-hero__title{animation:czRise .9s cubic-bezier(.2,.7,.2,1) both}
+@keyframes czRise{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:none}}
+.cz-h-shimmer .cz-hero__title{background:linear-gradient(100deg,var(--ink) 30%,var(--brand) 50%,var(--ink) 70%);
+  background-size:200% auto;-webkit-background-clip:text;background-clip:text;color:transparent;
+  animation:czShim 4.5s linear infinite}
+@keyframes czShim{to{background-position:200% center}}
+/* typography tokens (consumed only when the editor set them) */
+.cz-typw h1,.cz-typw h2,.cz-typw h3,.cz-typw .cz-hero__title{font-weight:var(--font-h-wght)}
+.cz-hero__title,.cz-head h2,.cz-split__body h2{letter-spacing:var(--ls-h,normal)}
+/* brand gradient (falls back to solid brand — no-op when unset) */
+.cz-btn--solid{background:var(--brand-grad,var(--brand))}
+.cz-band{background:var(--brand-grad,var(--brand))}
+@media(max-width:768px){.cz-parallax>.cz-bg-media{transform:none!important}}
+@media(prefers-reduced-motion:reduce){
+  .cz-motion.cz-js .cz-rv,.cz-motion.cz-js .cz-rv--stagger .cz-cards>*,
+  .cz-motion.cz-js .cz-rv--stagger .cz-plans>*{opacity:1!important;transform:none!important;filter:none!important;transition:none}
+  .cz-kenburns>.cz-bg-media,.cz-parallax>.cz-bg-media,.cz-h-rise .cz-hero__title,.cz-h-shimmer .cz-hero__title{animation:none!important}
+  .cz-h-shimmer .cz-hero__title{color:var(--ink);-webkit-text-fill-color:var(--ink)}}
 """
 
 
@@ -774,16 +1031,34 @@ def _widget_runtime():
     )
 
 
-# Scroll-reveal for premium sites. Adds `cz-js` (so the hide-state CSS only
-# applies when JS is available — no-JS shows everything), then reveals each
-# <section> as it scrolls in. No-op if IntersectionObserver is unsupported.
-_PREMIUM_JS = (
+# Motion runtime. Adds `cz-js` (so hide-state CSS only applies when JS is
+# available — no-JS shows everything), reveals each <section> on scroll-in
+# (covers both the legacy premium full-section reveal and per-section .cz-rv
+# designer motion), wires stagger child indices, and runs rAF parallax. No-op
+# without IntersectionObserver; parallax is skipped under reduced-motion / mobile.
+_STAGGER_SEL = (".cz-cards>*,.cz-plans>*,.cz-bento>*,.cz-gallery>*,"
+                ".cz-creds>*,.cz-quotes>*,.cz-stats>*,.cz-reviews-box>*")
+_MOTION_JS = (
     "<script>(function(){var b=document.body;"
-    "if(!b||b.className.indexOf('cz-premium')<0||!('IntersectionObserver' in window))return;"
-    "b.classList.add('cz-js');"
+    "if(!b||!('IntersectionObserver' in window))return;b.classList.add('cz-js');"
+    "var rm=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;"
+    "document.querySelectorAll('.cz-rv').forEach(function(s){"
+    "var d=s.getAttribute('data-cz-delay');if(d)s.style.setProperty('--cz-delay',d+'ms');"
+    "var u=s.getAttribute('data-cz-dur');if(u)s.style.setProperty('--cz-dur',u+'ms');"
+    "if(s.className.indexOf('cz-rv--stagger')>=0){var k=s.querySelectorAll('" + _STAGGER_SEL + "');"
+    "for(var i=0;i<k.length;i++)k[i].style.setProperty('--i',i);}});"
     "var io=new IntersectionObserver(function(es){es.forEach(function(e){"
     "if(e.isIntersecting){e.target.classList.add('cz-in');io.unobserve(e.target);}});},{threshold:.12});"
-    "document.querySelectorAll('main>section').forEach(function(s){io.observe(s);});})();</script>"
+    "document.querySelectorAll('main>section').forEach(function(s){io.observe(s);});"
+    "var small=window.matchMedia&&window.matchMedia('(max-width:768px)').matches;"
+    "if(!rm&&!small){var px=[].slice.call(document.querySelectorAll('.cz-parallax'));"
+    "if(px.length){var tk=false;var upd=function(){tk=false;"
+    "px.forEach(function(s){var st=parseFloat(s.getAttribute('data-cz-parallax'))||0;"
+    "var m=s.querySelector('.cz-bg-media');if(!m)return;var r=s.getBoundingClientRect();"
+    "var off=r.top+r.height/2-window.innerHeight/2;"
+    "m.style.transform='translateY('+(off*st/-1000)+'px) scale(1.16)';});};"
+    "window.addEventListener('scroll',function(){if(!tk){tk=true;requestAnimationFrame(upd);}},{passive:true});"
+    "upd();}}})();</script>"
 )
 
 
@@ -1123,9 +1398,11 @@ def _render_block(block, t):
         return ""
     fn = _RENDERERS.get(block.get("type"))
     if fn:
-        return fn(block, t)
-    body = block.get("body") or block.get("heading")
-    return _text({"body": body}, t) if body else ""
+        raw = fn(block, t)
+    else:
+        body = block.get("body") or block.get("heading")
+        raw = _text({"body": body}, t) if body else ""
+    return _apply_design(raw, block.get("_design")) if raw else raw
 
 
 # ── head / footer (business identity + SEO from meta_config) ────────────────
@@ -1277,10 +1554,34 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
         f"--radius:{_clean_css(t['radius'])};--font-h:{_font_stack(t['heading'])};--font-b:{_font_stack(t['body'])}}}"
     )
 
+    # Designer typography + brand-gradient tokens (all optional; absent = today).
+    tc = site.get("theme_config") if isinstance(site.get("theme_config"), dict) else {}
+    typ = tc.get("type") if isinstance(tc.get("type"), dict) else {}
+    tc_colors = tc.get("colors") if isinstance(tc.get("colors"), dict) else {}
+    _extra = []
+    _hw = _clampi(typ.get("headingWeight"), 300, 900, 0)
+    if _hw:
+        _extra.append(f"--font-h-wght:{_hw}")
+    _ls = str(typ.get("headingSpacing") or "").strip()
+    if re.match(r"^-?[0-9]*\.?[0-9]+(em|px)$", _ls):
+        _extra.append(f"--ls-h:{_ls}")
+    _grad = _design_gradient(tc_colors.get("brandGradient"))
+    if _grad:
+        _extra.append(f"--brand-grad:{_grad}")
+    extra_vars = f":root{{{';'.join(_extra)}}}" if _extra else ""
+    _hero_anim = typ.get("heroAnim")
+    _anim_cls = f"cz-h-{_hero_anim}" if _hero_anim in ("rise", "shimmer") else ""
+
     meta_dict = meta if isinstance(meta, dict) else {}
     head_title, head_seo = _head_seo(site, page, meta_dict)
-    body_cls = "cz-premium" if t["premium"] else ""
-    premium_js = _PREMIUM_JS if t["premium"] else ""
+    needs_motion = t["premium"] or any(_block_has_motion(b) for b in blocks)
+    body_cls = " ".join(filter(None, [
+        "cz-premium" if t["premium"] else "",
+        "cz-motion" if needs_motion else "",
+        "cz-typw" if _hw else "",
+        _anim_cls,
+    ]))
+    premium_js = _MOTION_JS if needs_motion else ""
 
     return f"""<!doctype html>
 <html lang="en">
@@ -1290,7 +1591,7 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
   <title>{head_title}</title>
   {head_seo}
   {_gfonts_link(t['heading'], t['body'])}
-  <style>{theme_vars}{_BASE_CSS}</style>
+  <style>{theme_vars}{extra_vars}{_BASE_CSS}</style>
   <script>window.__CAPPE__={cappe_ctx};</script>
   {_widget_runtime()}
 </head>

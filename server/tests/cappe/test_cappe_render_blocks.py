@@ -107,3 +107,70 @@ def test_booking_picker_is_two_step_day_then_time():
     # Runtime copy: pick a day first, not a flat "Pick a time (UTC)" dump.
     assert "Pick a day" in html
     assert "Pick a time (" not in html
+
+
+# --- bespoke designer layer (_design) ----------------------------------------
+
+def _main(html: str) -> str:
+    # The rendered block markup, excluding the static <style> + runtime script
+    # (which always reference the designer class/var NAMES).
+    return html.split("<main>", 1)[1].split("</main>", 1)[0]
+
+
+def test_block_without_design_is_unchanged():
+    # No _design → no designer classes in the markup, no runtime, empty body class.
+    html = _render({"type": "features", "heading": "F", "items": [{"title": "a"}]})
+    main = _main(html)
+    assert "cz-design" not in main and "cz-rv" not in main and "cz-bg" not in main
+    assert 'class=""' in html  # body has no premium/motion class
+    assert "IntersectionObserver" not in html
+
+
+def test_design_motion_classes_and_runtime():
+    html = _render({"type": "features", "heading": "F", "items": [{"title": "a"}],
+                    "_design": {"motion": {"effect": "slide-up", "delay": 150, "duration": 900, "stagger": True}}})
+    assert "cz-design" in html and "cz-rv cz-rv--slide-up" in html and "cz-rv--stagger" in html
+    assert 'data-cz-delay="150"' in html and 'data-cz-dur="900"' in html
+    assert 'class="cz-motion"' in html  # body class
+    assert "IntersectionObserver" in html  # runtime emitted
+
+
+def test_design_background_video_injects_media_and_overlay():
+    html = _render({"type": "cta", "heading": "C",
+                    "_design": {"bg": {"type": "video", "video": "https://cdn.example.com/v.mp4",
+                                       "overlay": "dark", "blur": 8}}})
+    assert "cz-bg cz-bg--video" in html
+    assert '<video autoplay muted loop playsinline preload="metadata"><source src="https://cdn.example.com/v.mp4">' in html
+    assert "cz-bg-ov cz-ov-dark" in html and "--cz-blur:8px" in html
+
+
+def test_design_gradient_and_color_and_layout_and_colors():
+    html = _render({"type": "features", "heading": "F", "items": [],
+                    "_design": {"bg": {"type": "gradient", "gradient": {"angle": 90, "stops": ["#ffffff", "#000000"]}},
+                                "layout": {"maxWidth": "wide", "padTop": "xl", "align": "center", "minHeight": "tall"},
+                                "colors": {"text": "#222222", "accent": "#ff0000"}}})
+    assert "cz-bg--gradient" in html and "--cz-grad:linear-gradient(90deg,#ffffff,#000000)" in html
+    assert "cz-has-maxw" in html and "--cz-maxw:84rem" in html and "--cz-pad-t:9rem" in html
+    assert "cz-al-center" in html and "--cz-minh:70vh" in html
+    assert "--cz-text:#222222" in html and "cz-acc" in html and "--cz-brand:#ff0000" in html
+
+
+def test_design_rejects_malicious_values():
+    html = _render({"type": "cta", "heading": "C",
+                    "_design": {"bg": {"type": "color", "color": "red;background:url(evil)"},
+                                "colors": {"text": "javascript:alert(1)", "accent": "</style><script>x"},
+                                "motion": {"effect": "<script>"}}})
+    # invalid hex/url/effect all dropped; nothing injected into the section markup
+    main = _main(html)
+    open_tag = main.split(">", 1)[0] + ">"
+    assert "javascript" not in open_tag and "url(evil" not in open_tag and "<script" not in open_tag
+    assert "--cz-bg-color" not in main and "--cz-text:" not in main
+    assert "cz-rv--" not in main  # bogus effect not applied
+
+
+def test_design_preserves_trailing_widget_script():
+    # reviews emits <section>...</section><script>...; wrapper must not swallow it.
+    html = _render({"type": "reviews", "heading": "R",
+                    "_design": {"motion": {"effect": "fade"}, "bg": {"type": "color", "color": "#0a0a0a"}}})
+    assert "cz-rv--fade" in html and "--cz-bg-color:#0a0a0a" in html
+    assert "RT.get('/reviews')" in html  # widget script intact
