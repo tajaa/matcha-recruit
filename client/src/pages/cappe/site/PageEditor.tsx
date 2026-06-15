@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  ArrowLeft, Check, ChevronDown, ChevronUp, Copy, Film, GripVertical, ImagePlus, Loader2, MousePointerClick, Palette, Pencil, Plus, Save, Sparkles, Trash2, Wand2,
+  ArrowLeft, Check, ChevronDown, ChevronUp, Copy, Film, GripVertical, ImagePlus, Loader2, MousePointerClick, Palette, Pencil, Plus, Save, Sparkles, Trash2, Wand2, X,
 } from 'lucide-react'
 import { cappeApi } from '../../../api/cappeClient'
 import { useCappeMe } from '../../../hooks/useCappeMe'
@@ -761,7 +761,7 @@ function AddPalette({ onPick }: { onPick: (type: string) => void }) {
 
 /** Contextual editor for the block selected on the canvas. Same controls as the
  *  form editor (schema fields + DesignInspector), driven by selection. */
-function CanvasPanel({ blocks, sel, onChange, onMove, onRemove, onDuplicate, onAddAt, onAdd }: {
+function CanvasPanel({ blocks, sel, onChange, onMove, onRemove, onDuplicate, onAddAt, onAdd, onClose }: {
   blocks: CappeBlock[]
   sel: number | null
   onChange: (i: number, b: CappeBlock) => void
@@ -770,6 +770,7 @@ function CanvasPanel({ blocks, sel, onChange, onMove, onRemove, onDuplicate, onA
   onDuplicate: (i: number) => void
   onAddAt: (type: string, i: number) => void
   onAdd: (type: string) => void
+  onClose?: () => void
 }) {
   const [addOpen, setAddOpen] = useState(false)
   // Close the palette whenever the selection changes.
@@ -802,6 +803,7 @@ function CanvasPanel({ blocks, sel, onChange, onMove, onRemove, onDuplicate, onA
           <button title="Move down" onClick={() => onMove(sel, 1)} disabled={sel === blocks.length - 1} className="hover:text-zinc-200 disabled:opacity-30"><ChevronDown className="h-4 w-4" /></button>
           <button title="Duplicate" onClick={() => onDuplicate(sel)} className="hover:text-zinc-200"><Copy className="h-4 w-4" /></button>
           <button title="Delete" onClick={() => onRemove(sel)} className="hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
+          {onClose && <button title="Close" onClick={onClose} className="ml-1 border-l border-zinc-700 pl-1.5 hover:text-zinc-200"><X className="h-4 w-4" /></button>}
         </div>
       </div>
       {schema ? (
@@ -846,6 +848,7 @@ export default function PageEditor() {
   const [editMode, setEditMode] = useState<'form' | 'canvas'>('form')
   useEffect(() => { if (canvasUnlocked) setEditMode('canvas') }, [canvasUnlocked])
   const [selBlock, setSelBlock] = useState<number | null>(null)
+  const [popPos, setPopPos] = useState<{ top: number; left: number }>({ top: 96, left: 96 })
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const suspendPreview = useRef(false)
   const [refreshTick, setRefreshTick] = useState(0)
@@ -911,10 +914,19 @@ export default function PageEditor() {
         case 'cz-ready':
           if (selBlockRef.current != null) postToCanvas({ type: 'cz-highlight', block: selBlockRef.current })
           break
-        case 'cz-select':
+        case 'cz-select': {
           setSelBlock(d.block)
+          // Anchor the floating editor near the clicked element (iframe rect +
+          // element rect → parent viewport), clamped on-screen.
+          const fr = iframeRef.current?.getBoundingClientRect()
+          if (fr && d.rect) {
+            const left = Math.min(Math.max(fr.left + d.rect.left + 8, 8), window.innerWidth - 372)
+            const top = Math.min(Math.max(fr.top + d.rect.top + 8, 64), window.innerHeight - 160)
+            setPopPos({ top, left })
+          }
           postToCanvas({ type: 'cz-highlight', block: d.block })
           break
+        }
         case 'cz-edit': {
           const b = blocksRef.current[d.block]
           if (b) setBlocks((bs) => bs.map((x, j) => (j === d.block ? { ...x, [d.field]: d.value } : x)))
@@ -1217,8 +1229,8 @@ export default function PageEditor() {
         </div>
 
         {editMode === 'canvas' ? (
-          /* canvas: click-on-page preview + contextual panel (Business) */
-          <div className="flex min-h-0 flex-1">
+          /* canvas: click a section on the page → a floating editor pops up at it (Business) */
+          <div className="relative flex min-h-0 flex-1">
             <div className="hidden flex-1 bg-zinc-900 lg:block">
               {preview ? (
                 <iframe ref={iframeRef} title="Canvas" srcDoc={preview} sandbox="allow-scripts" className="h-full w-full border-0" />
@@ -1226,7 +1238,13 @@ export default function PageEditor() {
                 <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-600" /></div>
               )}
             </div>
-            <aside className="hidden w-[360px] shrink-0 overflow-y-auto border-l border-zinc-800 bg-zinc-950 lg:block">
+
+            {/* floating editor — anchored to the clicked element when selected,
+                else a corner card with the Add affordance + hint */}
+            <div
+              className="fixed z-40 hidden max-h-[74vh] w-[360px] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl shadow-black/60 lg:block"
+              style={selBlock != null ? { top: popPos.top, left: popPos.left } : { bottom: 16, left: 16 }}
+            >
               <CanvasPanel
                 blocks={blocks}
                 sel={selBlock}
@@ -1236,8 +1254,10 @@ export default function PageEditor() {
                 onDuplicate={duplicateBlock}
                 onAddAt={addBlockAt}
                 onAdd={addBlock}
+                onClose={() => { setSelBlock(null); postToCanvas({ type: 'cz-clear' }) }}
               />
-            </aside>
+            </div>
+
             <div className="flex w-full items-center justify-center p-8 text-center text-sm text-zinc-500 lg:hidden">
               Canvas editing needs a wider screen — switch to Form mode or use a desktop.
             </div>
