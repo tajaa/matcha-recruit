@@ -13,6 +13,7 @@ from .bookings import router as bookings_router
 from .clients import router as clients_router
 from .discounts import router as discounts_router
 from .forms import router as forms_router
+from .locations import router as locations_router
 from .messages import router as messages_router
 from .newsletter import router as newsletter_router
 from .pages import router as pages_router
@@ -39,6 +40,7 @@ cappe_router.include_router(shop_router)
 cappe_router.include_router(newsletter_router)
 cappe_router.include_router(forms_router)
 cappe_router.include_router(bookings_router)
+cappe_router.include_router(locations_router)
 cappe_router.include_router(staff_router)
 cappe_router.include_router(discounts_router)
 cappe_router.include_router(reviews_router)

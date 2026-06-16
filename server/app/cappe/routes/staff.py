@@ -4,9 +4,10 @@ Staff are the people a salon books appointments with. Which staff perform which
 service is set per booking type (the `staff_ids` replace-set on the booking-type
 routes in bookings.py). Public booking reads active staff via public.py.
 """
+from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from ...database import get_connection
 from ..dependencies import require_cappe_account
@@ -15,16 +16,33 @@ from ._shared import get_owned_site
 
 router = APIRouter()
 
-_STAFF_COLS = "id, site_id, name, bio, image_url, active, sort_order, created_at, updated_at"
+_STAFF_COLS = "id, site_id, name, bio, image_url, active, sort_order, location_id, created_at, updated_at"
+
+
+async def _validate_location(conn, site_id, location_id) -> None:
+    if location_id is None:
+        return
+    if not await conn.fetchval("SELECT 1 FROM cappe_locations WHERE id = $1 AND site_id = $2", location_id, site_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown location")
 
 
 @router.get("/sites/{site_id}/staff", response_model=list[CappeStaff])
-async def list_staff(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+async def list_staff(
+    site_id: UUID, location_id: Optional[UUID] = Query(None), shared: bool = Query(False),
+    account: CappeAccount = Depends(require_cappe_account),
+):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
+        args: list = [site_id]
+        clause = ""
+        if shared:
+            clause = " AND location_id IS NULL"
+        elif location_id is not None:
+            args.append(location_id)
+            clause = f" AND (location_id IS NULL OR location_id = ${len(args)})"
         rows = await conn.fetch(
-            f"SELECT {_STAFF_COLS} FROM cappe_staff WHERE site_id = $1 ORDER BY sort_order, created_at",
-            site_id,
+            f"SELECT {_STAFF_COLS} FROM cappe_staff WHERE site_id = $1{clause} ORDER BY sort_order, created_at",
+            *args,
         )
     return [dict(r) for r in rows]
 
@@ -35,10 +53,11 @@ async def create_staff(
 ):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
+        await _validate_location(conn, site_id, body.location_id)
         row = await conn.fetchrow(
-            f"""INSERT INTO cappe_staff (site_id, name, bio, image_url, active, sort_order)
-                VALUES ($1, $2, $3, $4, $5, $6) RETURNING {_STAFF_COLS}""",
-            site_id, body.name, body.bio, body.image_url, body.active, body.sort_order,
+            f"""INSERT INTO cappe_staff (site_id, name, bio, image_url, active, sort_order, location_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING {_STAFF_COLS}""",
+            site_id, body.name, body.bio, body.image_url, body.active, body.sort_order, body.location_id,
         )
     return dict(row)
 
@@ -50,8 +69,9 @@ async def update_staff(
 ):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
+        await _validate_location(conn, site_id, body.location_id)
         sets, args = [], []
-        for col in ("name", "bio", "image_url", "active", "sort_order"):
+        for col in ("name", "bio", "image_url", "active", "sort_order", "location_id"):
             val = getattr(body, col)
             if val is not None:
                 args.append(val)

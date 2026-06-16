@@ -34,6 +34,7 @@ from ..models.cappe import (
     CappePost,
     CappeProduct,
     CappePublicBooking,
+    CappePublicLocation,
     CappePublicReview,
     CappePublicSite,
     CappePublicStaff,
@@ -67,14 +68,30 @@ _PUBLIC_PRODUCT_COLS = (
 router = APIRouter()
 
 
-async def _site_rate_rules(conn, site_id, booking_type_id) -> list[dict]:
-    """Rate rules in effect for a booking type (its own + site-wide NULL ones)."""
+async def _site_rate_rules(conn, site_id, booking_type_id, location_id=None) -> list[dict]:
+    """Rate rules in effect for a booking type at a location (its own + site-wide
+    NULL ones; this location's + shared NULL-location ones)."""
     rows = await conn.fetch(
         """SELECT weekday, start_time, end_time, multiplier FROM cappe_rate_rules
-           WHERE site_id = $1 AND (booking_type_id IS NULL OR booking_type_id = $2)""",
-        site_id, booking_type_id,
+           WHERE site_id = $1 AND (booking_type_id IS NULL OR booking_type_id = $2)
+             AND (location_id IS NULL OR location_id = $3)""",
+        site_id, booking_type_id, location_id,
     )
     return [dict(r) for r in rows]
+
+
+async def _location_ctx(conn, site, location_id):
+    """Validate `location_id` belongs to the published site (and is active) and
+    return (location_id, tz). None → site timezone. Raises 400 on a bad id."""
+    if location_id is None:
+        return None, site["timezone"]
+    row = await conn.fetchrow(
+        "SELECT timezone FROM cappe_locations WHERE id = $1 AND site_id = $2 AND active = true",
+        location_id, site["id"],
+    )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown location")
+    return location_id, (row["timezone"] or site["timezone"])
 
 
 async def _site_rider(conn, site_id) -> list[dict]:
@@ -217,6 +234,7 @@ def _anchor_local(dt, tz_name):
 
 async def _resolve_booking_slot(
     conn, site, btype, starts_at, ends_at_override=None, exclude_booking_id=None, staff_id=None,
+    location_id=None, tz=None,
 ):
     """Validate availability + overlap and price a booking window. Returns
     {s_utc, e_utc, quote_cents, requires_approval, booking_status}; raises 4xx on
@@ -227,12 +245,15 @@ async def _resolve_booking_slot(
 
     `btype` must carry duration_minutes, price_cents, pricing_mode,
     requires_approval. For an hourly type the buyer may pass `ends_at_override`
-    to book a variable-length window; otherwise the type's duration is used."""
-    starts_at = _anchor_local(starts_at, site["timezone"])
+    to book a variable-length window; otherwise the type's duration is used.
+    `location_id`/`tz` scope availability + overlap + pricing to one location and
+    use that location's timezone (None → site timezone)."""
+    tz = tz or site["timezone"]
+    starts_at = _anchor_local(starts_at, tz)
     pricing_mode = btype.get("pricing_mode", "flat")
 
     if ends_at_override is not None and pricing_mode == "hourly":
-        ends_at_override = _anchor_local(ends_at_override, site["timezone"])
+        ends_at_override = _anchor_local(ends_at_override, tz)
         duration_min = (ends_at_override - starts_at).total_seconds() / 60
         if duration_min <= 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="End time must be after start")
@@ -241,7 +262,7 @@ async def _resolve_booking_slot(
     else:
         duration_min = btype["duration_minutes"]
 
-    bt = booking_times(starts_at, duration_min, site["timezone"])
+    bt = booking_times(starts_at, duration_min, tz)
     s_utc, e_utc = bt["start_utc"], bt["end_utc"]
 
     now_utc = await conn.fetchval("SELECT NOW()")
@@ -256,38 +277,42 @@ async def _resolve_booking_slot(
              AND start_time <= $3 AND end_time >= $4
              AND (booking_type_id IS NULL OR booking_type_id = $5)
              AND (staff_id IS NULL OR staff_id = $6)
+             AND (location_id IS NULL OR location_id = $7)
            LIMIT 1""",
-        site["id"], bt["weekday"], bt["local_start"].time(), bt["local_end"].time(), btype["id"], staff_id,
+        site["id"], bt["weekday"], bt["local_start"].time(), bt["local_end"].time(),
+        btype["id"], staff_id, location_id,
     )
     if not window:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Time is outside availability")
 
-    # Overlap is scoped to this staff member (NULL-safe); a buffer extends the
-    # candidate window on both sides so back-to-back bookings keep the gap.
+    # Overlap is scoped to this staff member AND location (both NULL-safe), so a
+    # booking at a DIFFERENT location never blocks this one (must agree with the
+    # double-book DB index). A buffer extends the window on both sides.
     buf_min = int(btype.get("buffer_minutes") or 0)
     overlap = await conn.fetchval(
         """SELECT 1 FROM cappe_bookings
            WHERE site_id = $1 AND booking_type_id = $2 AND status IN ('pending', 'confirmed')
              AND ($5::uuid IS NULL OR id <> $5)
              AND (staff_id IS NOT DISTINCT FROM $6)
+             AND (location_id IS NOT DISTINCT FROM $8)
              AND tstzrange(starts_at, ends_at)
                  && tstzrange($3 - ($7 * interval '1 minute'), $4 + ($7 * interval '1 minute'))
            LIMIT 1""",
-        site["id"], btype["id"], s_utc, e_utc, exclude_booking_id, staff_id, buf_min,
+        site["id"], btype["id"], s_utc, e_utc, exclude_booking_id, staff_id, buf_min, location_id,
     )
     if overlap:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That slot is taken")
 
     # Price the booked window (flat → base; hourly → per-minute × rate rules),
-    # then apply the best active discount judged on today (site timezone).
-    rules = await _site_rate_rules(conn, site["id"], btype["id"])
+    # then apply the best active discount judged on today (location timezone).
+    rules = await _site_rate_rules(conn, site["id"], btype["id"], location_id)
     quote_cents = booking_quote_cents(
         btype.get("price_cents") or 0, pricing_mode, bt["local_start"], bt["local_end"], rules
     )
     discounts = await _active_discounts(conn, site["id"])
     pct = best_discount_percent(
         discounts, kind="booking_type", target_id=str(btype["id"]),
-        on_date=_site_today(now_utc, site["timezone"]),
+        on_date=_site_today(now_utc, tz),
     )
     quote_cents = apply_discount_cents(quote_cents, pct)
 
@@ -304,20 +329,23 @@ async def _resolve_booking_slot(
 async def _create_booking_in_tx(
     conn, site, btype, starts_at, customer_name, customer_email, note,
     ends_at_override=None, rider_acknowledged=False, rider_snapshot=None, staff_id=None,
+    location_id=None, tz=None,
 ):
     """Validate + price + insert a booking. MUST run inside a transaction.
     Shared by the public booking intake and booking-fulfillment order lines."""
-    slot = await _resolve_booking_slot(conn, site, btype, starts_at, ends_at_override, staff_id=staff_id)
+    slot = await _resolve_booking_slot(
+        conn, site, btype, starts_at, ends_at_override, staff_id=staff_id, location_id=location_id, tz=tz,
+    )
     try:
         return await conn.fetchrow(
             """INSERT INTO cappe_bookings
-                   (site_id, booking_type_id, staff_id, customer_name, customer_email, starts_at, ends_at,
+                   (site_id, booking_type_id, staff_id, location_id, customer_name, customer_email, starts_at, ends_at,
                     note, status, requires_approval, quoted_price_cents,
                     rider_acknowledged, rider_snapshot)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                RETURNING id, status, starts_at, ends_at, quoted_price_cents, requires_approval, access_token""",
-            site["id"], btype["id"], staff_id, customer_name, customer_email, slot["s_utc"], slot["e_utc"], note,
-            slot["booking_status"], slot["requires_approval"], slot["quote_cents"],
+            site["id"], btype["id"], staff_id, location_id, customer_name, customer_email, slot["s_utc"], slot["e_utc"],
+            note, slot["booking_status"], slot["requires_approval"], slot["quote_cents"],
             bool(rider_acknowledged), json.dumps(rider_snapshot or []),
         )
     except Exception as exc:
@@ -650,30 +678,47 @@ async def _active_staff_for_type(conn, site_id, type_id) -> list:
     return [r["staff_id"] for r in rows]
 
 
+@router.get("/public/sites/{slug}/locations", response_model=list[CappePublicLocation])
+async def public_locations(slug: str, request: Request):
+    """Active locations for the booking widget's "choose a location" step."""
+    await _read_rate_limit(request)
+    async with get_connection() as conn:
+        site = await _published_site(conn, slug)
+        rows = await conn.fetch(
+            "SELECT id, name, address, lat, lng, timezone, hours, contact_phone, contact_email "
+            "FROM cappe_locations WHERE site_id = $1 AND active = true "
+            "ORDER BY is_default DESC, sort_order, created_at",
+            site["id"],
+        )
+    return [{**dict(r), "hours": loads_list(r["hours"])} for r in rows]
+
+
 @router.get("/public/sites/{slug}/staff", response_model=list[CappePublicStaff])
-async def public_staff(slug: str, request: Request):
-    """Active bookable staff for the booking-widget picker."""
+async def public_staff(slug: str, request: Request, location_id: UUID | None = Query(default=None)):
+    """Active bookable staff for the booking-widget picker (location-or-shared)."""
     await _read_rate_limit(request)
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         rows = await conn.fetch(
             "SELECT id, name, bio, image_url FROM cappe_staff "
-            "WHERE site_id = $1 AND active = true ORDER BY sort_order, created_at",
-            site["id"],
+            "WHERE site_id = $1 AND active = true AND (location_id IS NULL OR location_id = $2) "
+            "ORDER BY sort_order, created_at",
+            site["id"], location_id,
         )
     return [dict(r) for r in rows]
 
 
 @router.get("/public/sites/{slug}/booking-types", response_model=list[CappeBookingType])
-async def public_booking_types(slug: str, request: Request):
+async def public_booking_types(slug: str, request: Request, location_id: UUID | None = Query(default=None)):
     await _read_rate_limit(request)
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
         rows = await conn.fetch(
             "SELECT id, site_id, name, description, duration_minutes, price_cents, status, "
-            "requires_approval, pricing_mode, category, buffer_minutes, created_at, updated_at "
-            "FROM cappe_booking_types WHERE site_id = $1 AND status = 'active' ORDER BY created_at",
-            site["id"],
+            "requires_approval, pricing_mode, category, buffer_minutes, location_id, created_at, updated_at "
+            "FROM cappe_booking_types WHERE site_id = $1 AND status = 'active' "
+            "AND (location_id IS NULL OR location_id = $2) ORDER BY created_at",
+            site["id"], location_id,
         )
         staff = await conn.fetch(
             "SELECT ss.booking_type_id, ss.staff_id FROM cappe_staff_services ss "
@@ -725,6 +770,7 @@ async def public_booking_slots(
     slug: str, type_id: UUID, request: Request,
     days: int = Query(default=21, ge=1, le=60),
     staff_id: UUID | None = Query(default=None),
+    location_id: UUID | None = Query(default=None),
 ):
     """Concrete, openable slots for a booking type — the widget renders these as
     one-tap chips so a visitor never has to guess a valid time. Already-booked
@@ -743,16 +789,19 @@ async def public_booking_slots(
         )
         if btype is None or btype["status"] != "active":
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking type not found")
+        _, tz = await _location_ctx(conn, site, location_id)
         avail = await conn.fetch(
             "SELECT weekday, start_time, end_time, booking_type_id, staff_id "
-            "FROM cappe_availability WHERE site_id = $1", site["id"],
+            "FROM cappe_availability WHERE site_id = $1 AND (location_id IS NULL OR location_id = $2)",
+            site["id"], location_id,
         )
         booked = await conn.fetch(
             "SELECT starts_at, ends_at, staff_id FROM cappe_bookings "
-            "WHERE site_id = $1 AND booking_type_id = $2 AND status IN ('pending', 'confirmed')",
-            site["id"], type_id,
+            "WHERE site_id = $1 AND booking_type_id = $2 AND status IN ('pending', 'confirmed') "
+            "AND (location_id IS NULL OR location_id = $3)",
+            site["id"], type_id, location_id,
         )
-        rules = await _site_rate_rules(conn, site["id"], type_id)
+        rules = await _site_rate_rules(conn, site["id"], type_id, location_id)
         discounts = await _active_discounts(conn, site["id"])
         now_utc = await conn.fetchval("SELECT NOW()")
         offering_staff = await _active_staff_for_type(conn, site["id"], type_id)
@@ -778,28 +827,28 @@ async def public_booking_slots(
 
     if staff_id is not None:                          # a specific stylist
         sid = str(staff_id)
-        slots = generate_slots(availability, btype_d, _busy_for(sid), site["timezone"], now_utc, rules, days_ahead=days, staff_id=sid)
+        slots = generate_slots(availability, btype_d, _busy_for(sid), tz, now_utc, rules, days_ahead=days, staff_id=sid)
     elif offering_staff:                              # "any available" across the service's staff
         per_staff = []
         for s in offering_staff:
             sid = str(s)
             per_staff.append((sid, generate_slots(
-                availability, btype_d, _busy_for(sid), site["timezone"], now_utc, rules, days_ahead=days, staff_id=sid)))
+                availability, btype_d, _busy_for(sid), tz, now_utc, rules, days_ahead=days, staff_id=sid)))
         slots = merge_any_staff_slots(per_staff)
     else:                                             # legacy unstaffed shared calendar
-        slots = generate_slots(availability, btype_d, _busy_for(None), site["timezone"], now_utc, rules, days_ahead=days)
+        slots = generate_slots(availability, btype_d, _busy_for(None), tz, now_utc, rules, days_ahead=days)
 
     # Apply the best active discount so each chip already shows the sale price.
     pct = best_discount_percent(
         discounts, kind="booking_type", target_id=str(type_id),
-        on_date=_site_today(now_utc, site["timezone"]),
+        on_date=_site_today(now_utc, tz),
     )
     if pct:
         for s in slots:
             s["original_price_cents"] = s["price_cents"]
             s["price_cents"] = apply_discount_cents(s["price_cents"], pct)
     return {
-        "timezone": site["timezone"],
+        "timezone": tz,
         "duration_minutes": btype["duration_minutes"],
         "pricing_mode": btype["pricing_mode"],
         "requires_approval": bool(btype["requires_approval"]),
@@ -821,6 +870,7 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
 
     async with get_connection() as conn:
         site = await _published_site(conn, slug)
+        loc_id, loc_tz = await _location_ctx(conn, site, body.location_id)
         btype = await conn.fetchrow(
             "SELECT id, name, duration_minutes, status, price_cents, pricing_mode, requires_approval, buffer_minutes "
             "FROM cappe_booking_types WHERE id = $1 AND site_id = $2",
@@ -860,6 +910,7 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
                         ends_at_override=body.ends_at,
                         rider_acknowledged=body.rider_acknowledged,
                         rider_snapshot=rider, staff_id=sid,
+                        location_id=loc_id, tz=loc_tz,
                     )
                 break
             except HTTPException as exc:
@@ -877,7 +928,7 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
         owner = await _site_owner(conn, site["id"])
 
     # Notifications (best-effort): confirmation → customer, alert → creator.
-    when_label = format_when(booking["starts_at"], site["timezone"])
+    when_label = format_when(booking["starts_at"], loc_tz)
     needs_approval = bool(booking["requires_approval"])
     if cust_email:
         background.add_task(
@@ -905,14 +956,15 @@ async def public_create_booking(slug: str, body: CappeBookingRequest, request: R
 async def _booking_by_token(conn, token: str):
     """Resolve a booking + its type/site by the customer access token, or None."""
     return await conn.fetchrow(
-        """SELECT b.id, b.site_id, b.booking_type_id, b.staff_id, b.status, b.starts_at, b.ends_at,
-                  b.customer_name, b.customer_email, b.quoted_price_cents,
+        """SELECT b.id, b.site_id, b.booking_type_id, b.staff_id, b.location_id, b.status,
+                  b.starts_at, b.ends_at, b.customer_name, b.customer_email, b.quoted_price_cents,
                   bt.name AS type_name, bt.duration_minutes, bt.pricing_mode, bt.buffer_minutes,
                   bt.price_cents AS bt_price_cents, bt.requires_approval AS bt_requires_approval,
-                  s.name AS site_name, s.slug, s.timezone
+                  s.name AS site_name, s.slug, COALESCE(loc.timezone, s.timezone) AS timezone
            FROM cappe_bookings b
            JOIN cappe_sites s ON s.id = b.site_id
            LEFT JOIN cappe_booking_types bt ON bt.id = b.booking_type_id
+           LEFT JOIN cappe_locations loc ON loc.id = b.location_id
            WHERE b.access_token = $1""",
         token,
     )
@@ -989,10 +1041,11 @@ async def public_booking_reschedule(token: str, body: CappeBookingReschedule, re
                 "pricing_mode": row["pricing_mode"], "price_cents": row["bt_price_cents"],
                 "requires_approval": row["bt_requires_approval"], "buffer_minutes": row["buffer_minutes"],
             }
-            # Keep the same stylist on reschedule.
+            # Keep the same stylist + location on reschedule (tz is location-aware).
             slot = await _resolve_booking_slot(
                 conn, site, btype, body.starts_at, body.ends_at,
                 exclude_booking_id=row["id"], staff_id=row["staff_id"],
+                location_id=row["location_id"], tz=row["timezone"],
             )
             try:
                 updated = await conn.fetchrow(
@@ -1029,17 +1082,18 @@ async def public_booking_quote(slug: str, body: CappeBookingQuoteRequest, reques
         )
         if btype is None or btype["status"] != "active":
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking type not found")
-        starts_at = _anchor_local(body.starts_at, site["timezone"])
+        loc_id, tz = await _location_ctx(conn, site, body.location_id)
+        starts_at = _anchor_local(body.starts_at, tz)
         pricing_mode = btype["pricing_mode"]
         if body.ends_at is not None and pricing_mode == "hourly":
-            ends_at = _anchor_local(body.ends_at, site["timezone"])
+            ends_at = _anchor_local(body.ends_at, tz)
             duration_min = (ends_at - starts_at).total_seconds() / 60
             if duration_min <= 0:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="End time must be after start")
         else:
             duration_min = btype["duration_minutes"]
-        bt = booking_times(starts_at, duration_min, site["timezone"])
-        rules = await _site_rate_rules(conn, site["id"], btype["id"])
+        bt = booking_times(starts_at, duration_min, tz)
+        rules = await _site_rate_rules(conn, site["id"], btype["id"], loc_id)
         quote = booking_quote_cents(
             btype["price_cents"] or 0, pricing_mode, bt["local_start"], bt["local_end"], rules
         )
@@ -1047,7 +1101,7 @@ async def public_booking_quote(slug: str, body: CappeBookingQuoteRequest, reques
         now_utc = await conn.fetchval("SELECT NOW()")
     pct = best_discount_percent(
         discounts, kind="booking_type", target_id=str(btype["id"]),
-        on_date=_site_today(now_utc, site["timezone"]),
+        on_date=_site_today(now_utc, tz),
     )
     final = apply_discount_cents(quote, pct)
     return CappeBookingQuote(

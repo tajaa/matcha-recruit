@@ -3,9 +3,10 @@
 Public booking intake (with availability-window + overlap validation) lives in
 public.py.
 """
+from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
 from ...database import get_connection
 from ..dependencies import require_cappe_account
@@ -30,9 +31,32 @@ router = APIRouter()
 
 _TYPE_COLS = (
     "id, site_id, name, description, duration_minutes, price_cents, status, "
-    "requires_approval, pricing_mode, category, buffer_minutes, created_at, updated_at"
+    "requires_approval, pricing_mode, category, buffer_minutes, location_id, created_at, updated_at"
 )
-_AVAIL_COLS = "id, weekday, start_time, end_time, booking_type_id, staff_id"
+_AVAIL_COLS = "id, weekday, start_time, end_time, booking_type_id, staff_id, location_id"
+
+
+def _loc_filter(location_id, shared: bool, args: list, col: str = "location_id") -> str:
+    """SQL fragment for the location filter. `shared` → only NULL (the "all
+    locations / shared" set); a concrete id → that location's rows PLUS shared
+    NULL rows; neither → every row (today's behavior). Appends to `args`."""
+    if shared:
+        return f" AND {col} IS NULL"
+    if location_id is not None:
+        args.append(location_id)
+        return f" AND ({col} IS NULL OR {col} = ${len(args)})"
+    return ""
+
+
+async def _validate_location(conn, site_id, location_id) -> None:
+    """Reject a location_id that isn't an active location of this site."""
+    if location_id is None:
+        return
+    ok = await conn.fetchval(
+        "SELECT 1 FROM cappe_locations WHERE id = $1 AND site_id = $2", location_id, site_id
+    )
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown location")
 
 
 async def _staff_ids_for_types(conn, type_ids: list) -> dict:
@@ -68,9 +92,9 @@ async def _replace_type_staff(conn, site_id, type_id, staff_ids) -> None:
             "INSERT INTO cappe_staff_services (staff_id, booking_type_id, site_id) VALUES ($1, $2, $3)",
             sid, type_id, site_id,
         )
-_RULE_COLS = "id, site_id, booking_type_id, label, weekday, start_time, end_time, multiplier, created_at"
+_RULE_COLS = "id, site_id, booking_type_id, label, weekday, start_time, end_time, multiplier, location_id, created_at"
 _BOOKING_COLS = (
-    "id, site_id, booking_type_id, staff_id, customer_name, customer_email, starts_at, "
+    "id, site_id, booking_type_id, staff_id, location_id, customer_name, customer_email, starts_at, "
     "ends_at, status, note, requires_approval, quoted_price_cents, approved_at, "
     "decline_reason, rider_acknowledged, rider_snapshot, created_at"
 )
@@ -92,12 +116,17 @@ def _booking_row(r) -> dict:
 # --- Booking types ----------------------------------------------------------
 
 @router.get("/sites/{site_id}/booking-types", response_model=list[CappeBookingType])
-async def list_booking_types(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+async def list_booking_types(
+    site_id: UUID, location_id: Optional[UUID] = Query(None), shared: bool = Query(False),
+    account: CappeAccount = Depends(require_cappe_account),
+):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
+        args: list = [site_id]
+        clause = _loc_filter(location_id, shared, args)
         rows = await conn.fetch(
-            f"SELECT {_TYPE_COLS} FROM cappe_booking_types WHERE site_id = $1 ORDER BY created_at",
-            site_id,
+            f"SELECT {_TYPE_COLS} FROM cappe_booking_types WHERE site_id = $1{clause} ORDER BY created_at",
+            *args,
         )
         staff = await _staff_ids_for_types(conn, [r["id"] for r in rows])
     return [{**dict(r), "staff_ids": staff.get(r["id"], [])} for r in rows]
@@ -109,14 +138,15 @@ async def create_booking_type(
 ):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
+        await _validate_location(conn, site_id, body.location_id)
         async with conn.transaction():
             row = await conn.fetchrow(
                 f"""INSERT INTO cappe_booking_types
                         (site_id, name, description, duration_minutes, price_cents, status,
-                         requires_approval, pricing_mode, category, buffer_minutes)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING {_TYPE_COLS}""",
+                         requires_approval, pricing_mode, category, buffer_minutes, location_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING {_TYPE_COLS}""",
                 site_id, body.name, body.description, body.duration_minutes, body.price_cents, body.status,
-                body.requires_approval, body.pricing_mode, body.category, body.buffer_minutes,
+                body.requires_approval, body.pricing_mode, body.category, body.buffer_minutes, body.location_id,
             )
             await _replace_type_staff(conn, site_id, row["id"], body.staff_ids)
         staff = await _staff_ids_for_types(conn, [row["id"]])
@@ -130,10 +160,11 @@ async def update_booking_type(
 ):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
+        await _validate_location(conn, site_id, body.location_id)
         async with conn.transaction():
             sets, args = [], []
             for col in ("name", "description", "duration_minutes", "price_cents", "status",
-                        "requires_approval", "pricing_mode", "category", "buffer_minutes"):
+                        "requires_approval", "pricing_mode", "category", "buffer_minutes", "location_id"):
                 val = getattr(body, col)
                 if val is not None:
                     args.append(val)
@@ -174,23 +205,32 @@ async def delete_booking_type(
 # --- Availability (whole-schedule replace) ----------------------------------
 
 @router.get("/sites/{site_id}/availability", response_model=list[CappeAvailability])
-async def get_availability(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+async def get_availability(
+    site_id: UUID, location_id: Optional[UUID] = Query(None), shared: bool = Query(False),
+    account: CappeAccount = Depends(require_cappe_account),
+):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
+        args: list = [site_id]
+        clause = _loc_filter(location_id, shared, args)
         rows = await conn.fetch(
-            f"SELECT {_AVAIL_COLS} FROM cappe_availability WHERE site_id = $1 ORDER BY weekday, start_time",
-            site_id,
+            f"SELECT {_AVAIL_COLS} FROM cappe_availability WHERE site_id = $1{clause} ORDER BY weekday, start_time",
+            *args,
         )
     return [dict(r) for r in rows]
 
 
 @router.put("/sites/{site_id}/availability", response_model=list[CappeAvailability])
 async def replace_availability(
-    site_id: UUID, body: CappeAvailabilityReplace, account: CappeAccount = Depends(require_cappe_account)
+    site_id: UUID, body: CappeAvailabilityReplace,
+    location_id: Optional[UUID] = Query(None),
+    account: CappeAccount = Depends(require_cappe_account),
 ):
-    """Replace the entire weekly availability set in one transaction."""
+    """Replace the weekly availability set FOR ONE LOCATION (location_id=None =
+    the shared/all-locations set) in one transaction — other locations untouched."""
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
+        await _validate_location(conn, site_id, location_id)
         # Validate any referenced booking types belong to this site.
         type_ids = {s.booking_type_id for s in body.slots if s.booking_type_id}
         if type_ids:
@@ -209,7 +249,10 @@ async def replace_availability(
             if valid != len(staff_ids):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown staff member")
         async with conn.transaction():
-            await conn.execute("DELETE FROM cappe_availability WHERE site_id = $1", site_id)
+            await conn.execute(
+                "DELETE FROM cappe_availability WHERE site_id = $1 AND location_id IS NOT DISTINCT FROM $2",
+                site_id, location_id,
+            )
             seen = set()
             for s in body.slots:
                 if s.end_time <= s.start_time:
@@ -222,13 +265,15 @@ async def replace_availability(
                     continue  # de-dupe (whole-set replace, so this is the only dup source)
                 seen.add(key)
                 await conn.execute(
-                    """INSERT INTO cappe_availability (site_id, weekday, start_time, end_time, booking_type_id, staff_id)
-                       VALUES ($1, $2, $3, $4, $5, $6)""",
-                    site_id, s.weekday, s.start_time, s.end_time, s.booking_type_id, s.staff_id,
+                    """INSERT INTO cappe_availability
+                           (site_id, weekday, start_time, end_time, booking_type_id, staff_id, location_id)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7)""",
+                    site_id, s.weekday, s.start_time, s.end_time, s.booking_type_id, s.staff_id, location_id,
                 )
             rows = await conn.fetch(
-                f"SELECT {_AVAIL_COLS} FROM cappe_availability WHERE site_id = $1 ORDER BY weekday, start_time",
-                site_id,
+                f"SELECT {_AVAIL_COLS} FROM cappe_availability "
+                "WHERE site_id = $1 AND location_id IS NOT DISTINCT FROM $2 ORDER BY weekday, start_time",
+                site_id, location_id,
             )
     return [dict(r) for r in rows]
 
@@ -236,14 +281,24 @@ async def replace_availability(
 # --- Bookings ---------------------------------------------------------------
 
 @router.get("/sites/{site_id}/bookings", response_model=list[CappeBooking])
-async def list_bookings(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+async def list_bookings(
+    site_id: UUID, location_id: Optional[UUID] = Query(None),
+    account: CappeAccount = Depends(require_cappe_account),
+):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
+        args: list = [site_id]
+        loc = ""
+        if location_id is not None:
+            args.append(location_id)
+            loc = f" AND b.location_id = ${len(args)}"
         rows = await conn.fetch(
-            f"""SELECT {_BOOKING_COLS_Q}, st.name AS staff_name
-                FROM cappe_bookings b LEFT JOIN cappe_staff st ON st.id = b.staff_id
-                WHERE b.site_id = $1 ORDER BY b.starts_at DESC""",
-            site_id,
+            f"""SELECT {_BOOKING_COLS_Q}, st.name AS staff_name, loc.name AS location_name
+                FROM cappe_bookings b
+                LEFT JOIN cappe_staff st ON st.id = b.staff_id
+                LEFT JOIN cappe_locations loc ON loc.id = b.location_id
+                WHERE b.site_id = $1{loc} ORDER BY b.starts_at DESC""",
+            *args,
         )
     return [_booking_row(r) for r in rows]
 
@@ -372,24 +427,33 @@ async def list_requests(site_id: UUID, account: CappeAccount = Depends(require_c
 # --- Rate rules (dynamic time pricing) --------------------------------------
 
 @router.get("/sites/{site_id}/rate-rules", response_model=list[CappeRateRule])
-async def list_rate_rules(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+async def list_rate_rules(
+    site_id: UUID, location_id: Optional[UUID] = Query(None), shared: bool = Query(False),
+    account: CappeAccount = Depends(require_cappe_account),
+):
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
+        args: list = [site_id]
+        clause = _loc_filter(location_id, shared, args)
         rows = await conn.fetch(
-            f"SELECT {_RULE_COLS} FROM cappe_rate_rules WHERE site_id = $1 "
+            f"SELECT {_RULE_COLS} FROM cappe_rate_rules WHERE site_id = $1{clause} "
             "ORDER BY weekday NULLS FIRST, start_time",
-            site_id,
+            *args,
         )
     return [dict(r) for r in rows]
 
 
 @router.put("/sites/{site_id}/rate-rules", response_model=list[CappeRateRule])
 async def replace_rate_rules(
-    site_id: UUID, body: CappeRateRulesReplace, account: CappeAccount = Depends(require_cappe_account)
+    site_id: UUID, body: CappeRateRulesReplace,
+    location_id: Optional[UUID] = Query(None),
+    account: CappeAccount = Depends(require_cappe_account),
 ):
-    """Replace the whole rate-rule set in one transaction (mirrors availability)."""
+    """Replace the rate-rule set FOR ONE LOCATION (None = shared) — other
+    locations untouched (mirrors availability)."""
     async with get_connection() as conn:
         await get_owned_site(conn, site_id, account.id)
+        await _validate_location(conn, site_id, location_id)
         type_ids = {r.booking_type_id for r in body.rules if r.booking_type_id}
         if type_ids:
             valid = await conn.fetchval(
@@ -399,7 +463,10 @@ async def replace_rate_rules(
             if valid != len(type_ids):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown booking type")
         async with conn.transaction():
-            await conn.execute("DELETE FROM cappe_rate_rules WHERE site_id = $1", site_id)
+            await conn.execute(
+                "DELETE FROM cappe_rate_rules WHERE site_id = $1 AND location_id IS NOT DISTINCT FROM $2",
+                site_id, location_id,
+            )
             for r in body.rules:
                 if r.end_time <= r.start_time:
                     raise HTTPException(
@@ -408,13 +475,14 @@ async def replace_rate_rules(
                     )
                 await conn.execute(
                     """INSERT INTO cappe_rate_rules
-                           (site_id, booking_type_id, label, weekday, start_time, end_time, multiplier)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7)""",
-                    site_id, r.booking_type_id, r.label, r.weekday, r.start_time, r.end_time, r.multiplier,
+                           (site_id, booking_type_id, label, weekday, start_time, end_time, multiplier, location_id)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
+                    site_id, r.booking_type_id, r.label, r.weekday, r.start_time, r.end_time, r.multiplier, location_id,
                 )
             rows = await conn.fetch(
-                f"SELECT {_RULE_COLS} FROM cappe_rate_rules WHERE site_id = $1 "
+                f"SELECT {_RULE_COLS} FROM cappe_rate_rules "
+                "WHERE site_id = $1 AND location_id IS NOT DISTINCT FROM $2 "
                 "ORDER BY weekday NULLS FIRST, start_time",
-                site_id,
+                site_id, location_id,
             )
     return [dict(r) for r in rows]
