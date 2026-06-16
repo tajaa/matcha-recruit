@@ -33,7 +33,8 @@ router = APIRouter()
 
 _SITE_COLS = (
     "id, account_id, name, slug, subdomain, custom_domain, source_type, "
-    "template_id, status, theme_config, meta_config, timezone, published_at, created_at, updated_at"
+    "template_id, status, theme_config, meta_config, timezone, is_multi_location, "
+    "published_at, created_at, updated_at"
 )
 
 # Sites allowed per plan. Free is capped at one; paid plans are uncapped (None).
@@ -79,14 +80,16 @@ async def create_site(body: CappeSiteCreate, account: CappeAccount = Depends(req
         # slug doubles as the tenant subdomain — keep it off reserved labels.
         slug = await unique_slug(conn, safe_subdomain_base(body.name), "cappe_sites")
         row = await conn.fetchrow(
-            f"""INSERT INTO cappe_sites (account_id, name, slug, subdomain, custom_domain, source_type)
-                VALUES ($1, $2, $3, $3, $4, $5)
+            f"""INSERT INTO cappe_sites
+                    (account_id, name, slug, subdomain, custom_domain, source_type, is_multi_location)
+                VALUES ($1, $2, $3, $3, $4, $5, $6)
                 RETURNING {_SITE_COLS}""",
             account.id,
             body.name,
             slug,
             body.custom_domain or None,  # '' → NULL: empty strings would collide on the UNIQUE
             body.source_type,
+            body.is_multi_location,
         )
     return site_row_to_dict(row, page_count=0)
 
@@ -229,6 +232,8 @@ async def update_site(
             add("meta_config", json.dumps(body.meta_config))
         if body.timezone is not None:
             add("timezone", body.timezone)
+        if body.is_multi_location is not None:
+            add("is_multi_location", body.is_multi_location)
         if body.status is not None:
             add("status", body.status)
             if body.status == "published":

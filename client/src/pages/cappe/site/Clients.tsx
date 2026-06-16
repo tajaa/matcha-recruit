@@ -4,13 +4,14 @@ import { Loader2, Users, MessageSquare, Receipt, Calendar, Mail, MapPin, Upload 
 import { cappeApi } from '../../../api/cappeClient'
 import SurfaceShell, { centsToMoney } from '../../../components/cappe/SurfaceShell'
 import ClientImportModal from '../../../components/cappe/ClientImportModal'
-import type { CappeClient, CappeLocation } from '../../../types/cappe'
+import type { CappeClient, CappeLocation, CappeSite } from '../../../types/cappe'
 
 export default function Clients() {
   const { siteId } = useParams<{ siteId: string }>()
   const navigate = useNavigate()
   const [clients, setClients] = useState<CappeClient[] | null>(null)
   const [locations, setLocations] = useState<CappeLocation[]>([])
+  const [multiBranch, setMultiBranch] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [q, setQ] = useState('')
   const [branch, setBranch] = useState('') // '' = all, 'none' = unassigned, else location_id
@@ -24,6 +25,7 @@ export default function Clients() {
   useEffect(() => {
     load()
     cappeApi.get<CappeLocation[]>(`/sites/${siteId}/locations`).then(setLocations).catch(() => setLocations([]))
+    cappeApi.get<CappeSite>(`/sites/${siteId}`).then((s) => setMultiBranch(!!s.is_multi_location)).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteId])
 
@@ -32,7 +34,6 @@ export default function Clients() {
     navigate(`/cappe/sites/${siteId}/messages?${qs.toString()}`)
   }
 
-  const multiBranch = locations.length > 0
   const filtered = (clients || []).filter((c) => {
     if (q && !(c.email.toLowerCase().includes(q.toLowerCase()) || (c.name || '').toLowerCase().includes(q.toLowerCase()))) return false
     if (branch === 'none') return !c.location_id
@@ -116,6 +117,7 @@ export default function Clients() {
         <ClientImportModal
           siteId={siteId || ''}
           locations={locations}
+          multiBranch={multiBranch}
           onClose={() => setImporting(false)}
           onImported={() => load()}
         />

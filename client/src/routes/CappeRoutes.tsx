@@ -7,6 +7,7 @@ import CappeVerify from '../pages/cappe/CappeVerify'
 import ClientThread from '../pages/cappe/ClientThread'
 import CappeBookingManage from '../pages/cappe/CappeBookingManage'
 import CappeSites from '../pages/cappe/CappeSites'
+import CappeOnboardingWizard from '../features/cappe-onboarding/CappeOnboardingWizard'
 import CappeTemplates from '../pages/cappe/CappeTemplates'
 import CappeSiteEditor from '../pages/cappe/CappeSiteEditor'
 import PageEditor from '../pages/cappe/site/PageEditor'
@@ -39,6 +40,8 @@ export default function CappeRoutes() {
       {/* Public, token-gated booking self-serve (view / cancel / reschedule). */}
       <Route path="booking/:token" element={<CappeBookingManage />} />
       <Route element={<CappeLayout />}>
+        {/* First-run business-setup wizard — CappeSites redirects here on zero sites. */}
+        <Route path="onboarding" element={<CappeOnboardingWizard />} />
         <Route path="sites" element={<CappeSites />} />
         <Route path="templates" element={<CappeTemplates />} />
         <Route path="sites/:siteId" element={<CappeSiteEditor />} />

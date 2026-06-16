@@ -22,9 +22,16 @@ export default function CappeSites() {
   useEffect(() => {
     cappeApi
       .get<CappeSite[]>('/sites')
-      .then(setSites)
+      .then((list) => {
+        // First run (no sites yet) → the business-setup wizard, not a bare empty state.
+        if (list.length === 0) {
+          navigate('/cappe/onboarding', { replace: true })
+          return
+        }
+        setSites(list)
+      })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load sites'))
-  }, [])
+  }, [navigate])
 
   async function createBlank() {
     if (!siteName.trim()) return

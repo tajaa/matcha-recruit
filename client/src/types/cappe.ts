@@ -61,6 +61,7 @@ export type CappeSite = {
   theme_config: Record<string, unknown>
   meta_config: Record<string, unknown>
   timezone: string
+  is_multi_location: boolean
   published_at: string | null
   created_at: string
   updated_at: string

@@ -103,6 +103,9 @@ class CappeSiteCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     source_type: Literal["blank", "byo"] = "blank"
     custom_domain: Optional[str] = Field(default=None, max_length=255)
+    # Set by the onboarding wizard: True when the business runs multiple
+    # locations/branches. Drives whether the branch/location UI is surfaced.
+    is_multi_location: bool = False
 
     _norm_domain = field_validator("custom_domain")(normalize_custom_domain)
 
@@ -124,6 +127,7 @@ class CappeSiteUpdate(BaseModel):
     theme_config: Optional[dict[str, Any]] = None
     meta_config: Optional[dict[str, Any]] = None
     timezone: Optional[str] = Field(default=None, max_length=64)
+    is_multi_location: Optional[bool] = None
 
 
 class CappeReadinessItem(BaseModel):
@@ -155,6 +159,7 @@ class CappeSite(BaseModel):
     theme_config: dict[str, Any] = Field(default_factory=dict)
     meta_config: dict[str, Any] = Field(default_factory=dict)
     timezone: str = "UTC"
+    is_multi_location: bool = False
     published_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime

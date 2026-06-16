@@ -18,9 +18,12 @@ function downloadCsv(filename: string, rows: string[][]) {
   URL.revokeObjectURL(url)
 }
 
-export default function ClientImportModal({ siteId, locations, onClose, onImported }: {
+export default function ClientImportModal({ siteId, locations, multiBranch, onClose, onImported }: {
   siteId: string
   locations: CappeLocation[]
+  // Whether this site runs multiple locations (the site's is_multi_location
+  // flag, set in onboarding) — drives the branch-column guidance + template.
+  multiBranch: boolean
   onClose: () => void
   onImported: (r: CappeClientImportResult) => void
 }) {
@@ -31,11 +34,19 @@ export default function ClientImportModal({ siteId, locations, onClose, onImport
   const [result, setResult] = useState<CappeClientImportResult | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const branchNames = locations.map((l) => l.name)
-  const multiBranch = branchNames.length > 0
 
   function template() {
-    // Use reserved (non-deliverable) example domains; seed branch with the
+    // Use reserved (non-deliverable) example domains. Single-location sites get
+    // a simpler template with no branch column; multi seeds branch with the
     // business's real branch names so the spelling is obvious.
+    if (!multiBranch) {
+      downloadCsv('cappe-clients-template.csv', [
+        ['email', 'name', 'phone', 'notes', 'tags'],
+        ['jane.doe@example.com', 'Jane Doe', '555-0100', 'VIP regular', 'vip;loyal'],
+        ['john.smith@example.org', 'John Smith', '555-0101', '', 'new'],
+      ])
+      return
+    }
     const b1 = branchNames[0] || ''
     const b2 = branchNames[1] || branchNames[0] || ''
     downloadCsv('cappe-clients-template.csv', [
@@ -117,7 +128,7 @@ export default function ClientImportModal({ siteId, locations, onClose, onImport
             <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4 text-sm text-zinc-300">
               <p className="mb-2 font-medium text-zinc-100">How to prepare your CSV</p>
               <ul className="list-disc space-y-1.5 pl-4 text-xs text-zinc-400">
-                <li>First row must be headers. Columns: <code className="text-zinc-200">email</code> (required), <code className="text-zinc-200">name</code>, <code className="text-zinc-200">phone</code>, <code className="text-zinc-200">branch</code>, <code className="text-zinc-200">notes</code>, <code className="text-zinc-200">tags</code>.</li>
+                <li>First row must be headers. Columns: <code className="text-zinc-200">email</code> (required), <code className="text-zinc-200">name</code>, <code className="text-zinc-200">phone</code>, {multiBranch && <><code className="text-zinc-200">branch</code>, </>}<code className="text-zinc-200">notes</code>, <code className="text-zinc-200">tags</code>.</li>
                 <li>Tags in one cell, separated by <code className="text-zinc-200">;</code> (e.g. <span className="text-zinc-300">vip;loyal</span>).</li>
                 {multiBranch ? (
                   <li><b className="text-zinc-300">branch</b> must exactly match one of your branch names (case doesn't matter). Leave it blank for your main location.</li>

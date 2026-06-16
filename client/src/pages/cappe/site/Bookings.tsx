@@ -10,7 +10,7 @@ import { CAPPE_TIMEZONES } from '../../../data/timezones'
 import type {
   CappeBooking, CappeBookingType, CappeAvailabilitySlot,
   CappeRateRule, CappeRiderItem, CappePricingMode,
-  CappeDiscount, CappeProduct, CappeStaff, CappeLocation,
+  CappeDiscount, CappeProduct, CappeStaff, CappeLocation, CappeSite,
 } from '../../../types/cappe'
 
 const hhmm = (t: string) => t.slice(0, 5)
@@ -37,6 +37,7 @@ export default function Bookings() {
   const [discounts, setDiscounts] = useState<CappeDiscount[]>([])
   const [staff, setStaff] = useState<CappeStaff[]>([])
   const [locations, setLocations] = useState<CappeLocation[]>([])
+  const [multiLoc, setMultiLoc] = useState(false)  // site.is_multi_location — gates the branch UI
   const [selLoc, setSelLoc] = useState<string>('')  // '' = Shared / all locations
   const [showLocMgr, setShowLocMgr] = useState(false)
   const [locForm, setLocForm] = useState({ name: '', timezone: '', address: '', phone: '' })
@@ -82,6 +83,7 @@ export default function Bookings() {
   }
 
   useEffect(() => {
+    cappeApi.get<CappeSite>(`/sites/${siteId}`).then((s) => setMultiLoc(!!s.is_multi_location)).catch(() => {})
     cappeApi.get<CappeLocation[]>(`/sites/${siteId}/locations`).catch(() => [] as CappeLocation[])
       .then((locs) => {
         setLocations(locs)
@@ -317,7 +319,9 @@ export default function Bookings() {
     <SurfaceShell title="Bookings" subtitle="Appointment types, availability, pricing, and requests.">
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
 
-      {/* Location switcher — manage each location's appts/staff/hours separately */}
+      {/* Location switcher — manage each location's appts/staff/hours separately.
+          Multi-location sites only; single-location sites keep a simpler page. */}
+      {multiLoc && (
       <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -371,6 +375,7 @@ export default function Bookings() {
           </div>
         )}
       </section>
+      )}
 
       {/* Requests needing approval — the creator's queue */}
       {pending.length > 0 && (
