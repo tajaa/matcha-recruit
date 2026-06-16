@@ -26,7 +26,7 @@ from ...core.services.redis_cache import (
 )
 from ...database import get_connection
 from ..services.render import render_site_html
-from ._shared import RESERVED_SUBDOMAINS, loads
+from ._shared import RESERVED_SUBDOMAINS, loads, loads_list
 
 router = APIRouter()
 
@@ -246,8 +246,16 @@ async def _render(request: Request, page_slug: str | None) -> HTMLResponse:
         if page is None:
             return _not_found_html("Page not found")
 
+        loc_rows = await conn.fetch(
+            "SELECT id, name, address, lat, lng, timezone, hours, contact_phone, contact_email "
+            "FROM cappe_locations WHERE site_id = $1 AND active = true "
+            "ORDER BY is_default DESC, sort_order, created_at",
+            site["id"],
+        )
+
+    locations = [{**dict(r), "id": str(r["id"]), "hours": loads_list(r["hours"])} for r in loc_rows]
     nav = [{"slug": r["slug"], "title": r["title"]} for r in nav_rows]
-    html = render_site_html(_site_dict(site), _page_dict(page), nav)
+    html = render_site_html(_site_dict(site), _page_dict(page), nav, locations=locations)
     if redis:
         await cache_set(redis, cache_key, html, ttl=_RENDER_TTL)
     return HTMLResponse(html, headers=tenant_security_headers())

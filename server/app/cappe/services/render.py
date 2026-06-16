@@ -1249,7 +1249,16 @@ cats.forEach(function(k){if(k){var h=document.createElement('h3');h.className='c
 _BOOKING_JS = r"""(function(){
 var box=document.getElementById('__ID__'),RT=window.__CAPPE_RT__;if(!box||!RT)return;
 if(RT.preview){box.innerHTML='<p style="color:var(--muted)">Visitors pick from your open times here once your site is live.</p>';return;}
-Promise.all([RT.get('/booking-types'),RT.get('/rider').catch(function(){return {items:[]};}),RT.get('/staff').catch(function(){return [];})]).then(function(r){
+var selLoc='';
+function locP(){return selLoc?('location_id='+encodeURIComponent(selLoc)):'';}
+function qjoin(){var p=[];for(var i=0;i<arguments.length;i++){if(arguments[i])p.push(arguments[i]);}return p.length?('?'+p.join('&')):'';}
+RT.get('/locations').catch(function(){return [];}).then(function(locs){locs=locs||[];
+if(locs.length>1){box.innerHTML='<p class="cz-label">Choose a location</p><div class="cz-staffrow">'+
+locs.map(function(l){return '<button type="button" class="cz-staff" data-loc-id="'+RT.esc(l.id)+'">'+RT.esc(l.name)+(l.address?'<span style="display:block;font-size:.75em;color:var(--muted)">'+RT.esc(l.address)+'</span>':'')+'</button>';}).join('')+'</div>';
+box.querySelectorAll('[data-loc-id]').forEach(function(b){b.addEventListener('click',function(){selLoc=b.getAttribute('data-loc-id');start();});});}
+else{selLoc=locs.length===1?locs[0].id:'';start();}});
+function start(){
+Promise.all([RT.get('/booking-types'+qjoin(locP())),RT.get('/rider').catch(function(){return {items:[]};}),RT.get('/staff'+qjoin(locP())).catch(function(){return [];})]).then(function(r){
 var types=r[0],rider=(r[1]&&r[1].items)||[],staffList=r[2]||[];
 if(!types.length){box.innerHTML='<p style="color:var(--muted)">No appointments available.</p>';return;}
 var byId={};types.forEach(function(t){byId[t.id]=t;});
@@ -1276,7 +1285,7 @@ ids.map(function(id){var s=staffById[id];if(!s)return '';var iu=RT.url(s.image_u
 staffWrap.querySelectorAll('.cz-staff').forEach(function(b){b.addEventListener('click',function(){staffWrap.querySelectorAll('.cz-staff').forEach(function(x){x.classList.remove('cz-staff--on');});b.classList.add('cz-staff--on');selStaff=b.getAttribute('data-staff-id')||null;loadSlots();});});}
 function loadSlots(){sel=null;sb.disabled=true;sb.textContent='Select a time';slotWrap.innerHTML='<p style="color:var(--muted)">Loading times…</p>';
 var t=cur();if(!t)return;
-RT.get('/booking-types/'+encodeURIComponent(t.id)+'/slots'+(selStaff?('?staff_id='+encodeURIComponent(selStaff)):'')).then(function(d){var slots=(d&&d.slots)||[];
+RT.get('/booking-types/'+encodeURIComponent(t.id)+'/slots'+qjoin(locP(),selStaff?('staff_id='+encodeURIComponent(selStaff)):'')).then(function(d){var slots=(d&&d.slots)||[];
 if(!slots.length){slotWrap.innerHTML='<p style="color:var(--muted)">No open times in the next few weeks. Please check back soon.</p>';return;}
 var days=[],byDay={};slots.forEach(function(s){if(!byDay[s.date]){byDay[s.date]=[];days.push(s.date);}byDay[s.date].push(s);});
 // One price line when every slot costs the same; otherwise show price per time.
@@ -1307,12 +1316,13 @@ var ackEl=box.querySelector('[data-ack]');if(ackEl&&!ackEl.checked){msg.textCont
 var body={booking_type_id:t.id,starts_at:sel.start,customer_email:email,customer_name:box.querySelector('[data-name]').value.trim(),rider_acknowledged:ackEl?ackEl.checked:false};
 if(t.pricing_mode==='hourly'&&sel.end)body.ends_at=sel.end;
 if(selStaff)body.staff_id=selStaff;
+if(selLoc)body.location_id=selLoc;
 sb.disabled=true;msg.textContent='Requesting…';msg.className='cz-msg';
 RT.post('/bookings',body).then(function(res){var price=res.quoted_price_cents?(' — '+RT.money(res.quoted_price_cents,'USD')):'';
 var note=res.requires_approval?'Request sent for '+RT.esc(new Date(res.starts_at).toLocaleString())+price+'. The host will review and confirm by email.':'Booked for '+RT.esc(new Date(res.starts_at).toLocaleString())+price+'. A confirmation is on its way.';
 box.innerHTML='<p class="cz-msg ok">'+note+'</p>';
 }).catch(function(e){sb.disabled=false;sb.textContent='Request booking';msg.textContent=e.message;msg.className='cz-msg err';});});
-}).catch(function(){box.innerHTML='<p style="color:var(--muted)">Unable to load.</p>';});})();"""
+}).catch(function(){box.innerHTML='<p style="color:var(--muted)">Unable to load.</p>';});}})();"""
 
 
 _NEWSLETTER_JS = r"""(function(){
@@ -1418,14 +1428,33 @@ def _num(v):
         return None
 
 
+def _resolve_loc(t, b):
+    """The location a map/hours block displays: the block's `location` id if it
+    matches one, else the default (first, default-ordered) location, else None.
+    Falls back to meta_config for single-location sites (no locations)."""
+    locs = t.get("locations") or []
+    if not locs:
+        return None
+    want = str(b.get("location") or "").strip() if isinstance(b, dict) else ""
+    if want:
+        for l in locs:
+            if str(l.get("id")) == want:
+                return l
+    return locs[0]
+
+
 def _map(b, t):
     """A "find us" block: address + directions deep links (no API key), plus an
-    OpenStreetMap embed when the owner supplied lat/lng."""
+    OpenStreetMap embed when the owner supplied lat/lng. Per-location when the
+    site has locations."""
+    loc = _resolve_loc(t, b) or {}
     meta = t.get("meta") or {}
     geo = meta.get("geo") if isinstance(meta.get("geo"), dict) else {}
-    addr = (b.get("address") or meta.get("contact_address") or "").strip()
-    lat = _num(b.get("lat") if b.get("lat") not in (None, "") else geo.get("lat"))
-    lng = _num(b.get("lng") if b.get("lng") not in (None, "") else geo.get("lng"))
+    addr = (b.get("address") or loc.get("address") or meta.get("contact_address") or "").strip()
+    bl_lat = b.get("lat") if b.get("lat") not in (None, "") else (loc.get("lat") if loc.get("lat") is not None else geo.get("lat"))
+    bl_lng = b.get("lng") if b.get("lng") not in (None, "") else (loc.get("lng") if loc.get("lng") is not None else geo.get("lng"))
+    lat = _num(bl_lat)
+    lng = _num(bl_lng)
     if not addr and lat is None:
         return ""
 
@@ -1471,8 +1500,10 @@ _DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
 def _hours(b, t):
     """Structured weekly hours table + a client-computed "Open now" badge (the
     badge is computed in-browser from injected hours+tz, so it's cache-safe)."""
+    loc = _resolve_loc(t, b) or {}
     meta = t.get("meta") or {}
-    hours = meta.get("hours") if isinstance(meta.get("hours"), list) else []
+    hours = loc.get("hours") if (isinstance(loc.get("hours"), list) and loc.get("hours")) \
+        else (meta.get("hours") if isinstance(meta.get("hours"), list) else [])
     if not hours:
         return ""
     rows = ""
@@ -1626,18 +1657,25 @@ def _footer(site: dict, meta: dict) -> str:
 
 # ── document ──────────────────────────────────────────────────────────────
 
-def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: bool = False, editable: bool = False) -> str:
+def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: bool = False, editable: bool = False,
+                     locations: list[dict] | None = None) -> str:
     t = _tokens(site.get("theme_config"))
     c = t["colors"]
     slug = site.get("slug") or ""
     home_slug = nav_pages[0]["slug"] if nav_pages else "home"
+    locations = locations or []
+    # Default location (default-first ordered) drives the global hours/tz badge;
+    # the booking widget fetches /locations itself for the per-location picker.
+    _def_loc = locations[0] if locations else {}
     # `preview` flags the editor's sandboxed iframe (no same-origin = no live API
     # fetch). Widgets read it to show a static placeholder instead of failing.
     _meta_ctx = site.get("meta_config") if isinstance(site.get("meta_config"), dict) else {}
+    _ctx_hours = _def_loc.get("hours") if (isinstance(_def_loc.get("hours"), list) and _def_loc.get("hours")) \
+        else (_meta_ctx.get("hours") if isinstance(_meta_ctx.get("hours"), list) else [])
     cappe_ctx = _js_obj({
         "slug": slug, "api": f"/api/cappe/public/sites/{slug}", "preview": bool(preview),
-        "tz": site.get("timezone") or "UTC",
-        "hours": _meta_ctx.get("hours") if isinstance(_meta_ctx.get("hours"), list) else [],
+        "tz": _def_loc.get("timezone") or site.get("timezone") or "UTC",
+        "hours": _ctx_hours,
     })
 
     meta = site.get("meta_config") or {}
@@ -1646,6 +1684,7 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
 
     # Give block renderers access to site context (used by map/hours blocks).
     t["meta"] = meta if isinstance(meta, dict) else {}
+    t["locations"] = locations
     t["site_name"] = site.get("name") or ""
 
     content = page.get("content") or {}

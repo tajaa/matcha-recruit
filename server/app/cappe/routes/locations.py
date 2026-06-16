@@ -13,6 +13,7 @@ from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount, CappeLocation, CappeLocationCreate, CappeLocationUpdate
 from ._shared import get_owned_site, loads_list
+from .render import invalidate_render_cache
 
 router = APIRouter()
 
@@ -69,6 +70,7 @@ async def create_location(
             )
             if is_default:
                 await _clear_other_defaults(conn, site_id, row["id"])
+    await invalidate_render_cache(site_id)
     return _row(row)
 
 
@@ -108,6 +110,7 @@ async def update_location(
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Location not found")
             if body.is_default:
                 await _clear_other_defaults(conn, site_id, location_id)
+    await invalidate_render_cache(site_id)
     return _row(row)
 
 
@@ -139,3 +142,4 @@ async def delete_location(
                     "  ORDER BY sort_order, created_at LIMIT 1)",
                     site_id,
                 )
+    await invalidate_render_cache(site_id)
