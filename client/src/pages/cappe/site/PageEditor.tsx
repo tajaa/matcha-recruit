@@ -1062,7 +1062,6 @@ export default function PageEditor() {
   // edited here with live preview, persisted to the site on Save.
   const [meta, setMeta] = useState<Record<string, unknown>>({})
   const [promosDirty, setPromosDirty] = useState(false)
-  const [promosOpen, setPromosOpen] = useState(false)
 
   useEffect(() => {
     if (!siteId || !pageId) return
