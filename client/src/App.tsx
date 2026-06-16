@@ -40,6 +40,7 @@ const CalcOvertime = lazy(() => import('./pages/landing/resources/calculators/Ov
 const CalcTotalComp = lazy(() => import('./pages/landing/resources/calculators/TotalComp'))
 const ResourcesComplianceAudit = lazy(() => import('./pages/landing/resources/ComplianceAudit'))
 const FractionalPage = lazy(() => import('./pages/landing/FractionalPage'))
+const BrokersPage = lazy(() => import('./pages/landing/BrokersPage'))
 const SignupPicker = lazy(() => import('./pages/auth/SignupPicker'))
 const ResourcesSignup = lazy(() => import('./pages/auth/ResourcesSignup'))
 const VerifyEmail = lazy(() => import('./pages/auth/VerifyEmail'))
@@ -102,6 +103,7 @@ export default function App() {
         <Route path="/resources/calculators/total-comp" element={<CalcTotalComp />} />
         <Route path="/resources/audit" element={<RequireBusinessAccount><ResourcesComplianceAudit /></RequireBusinessAccount>} />
         <Route path="/fractional" element={<FractionalPage />} />
+        <Route path="/brokers" element={<BrokersPage />} />
         <Route path="/signup" element={<SignupPicker />} />
         <Route path="/auth/resources-signup" element={<ResourcesSignup />} />
         <Route path="/auth/verify-email" element={<VerifyEmail />} />

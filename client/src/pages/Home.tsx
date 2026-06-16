@@ -15,7 +15,7 @@ import { useSEO } from '../hooks/useSEO'
 const NOIR = '#0E0E0C'
 const BONE = '#F5F2ED'
 const ASH = '#8F8B80'
-const MATCHA = '#C7F04A'
+const MATCHA = '#F5F2ED'
 const LINE_D = 'rgba(245,242,237,0.14)'
 const DISPLAY = 'var(--font-display)' // Fraunces
 
@@ -34,7 +34,7 @@ const PRODUCTS: Product[] = [
     name: 'The Platform',
     blurb: 'Agentic risk management — safety, compliance, and employee relations on one brain.',
     to: '/platform',
-    accent: '#C7F04A',
+    accent: '#F5F2ED',
   },
   {
     n: '02',

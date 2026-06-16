@@ -10,6 +10,9 @@ type SEOOptions = {
     image?: string
   }
   jsonLd?: object
+  /** When true, emits <meta name="robots" content="noindex,nofollow"> — keeps a
+   * page reachable by direct link but out of search indexes (e.g. unlisted pages). */
+  noindex?: boolean
 }
 
 function setMeta(name: string, content: string) {
@@ -57,12 +60,13 @@ function setJsonLd(data: object) {
   return el
 }
 
-export function useSEO({ title, description, canonical, og, jsonLd }: SEOOptions) {
+export function useSEO({ title, description, canonical, og, jsonLd, noindex }: SEOOptions) {
   useEffect(() => {
     const prevTitle = document.title
     document.title = title
 
     const descEl = setMeta('description', description)
+    const robotsEl = noindex ? setMeta('robots', 'noindex,nofollow') : null
     const ogTitleEl = setOgMeta('og:title', og?.title ?? title)
     const ogDescEl = setOgMeta('og:description', og?.description ?? description)
     const ogTypeEl = setOgMeta('og:type', 'website')
@@ -85,6 +89,7 @@ export function useSEO({ title, description, canonical, og, jsonLd }: SEOOptions
     return () => {
       document.title = prevTitle
       descEl.remove()
+      robotsEl?.remove()
       ogTitleEl.remove()
       ogDescEl.remove()
       ogTypeEl.remove()
@@ -93,5 +98,5 @@ export function useSEO({ title, description, canonical, og, jsonLd }: SEOOptions
       ogImageEl?.remove()
       jsonLdEl?.remove()
     }
-  }, [title, description, canonical, og?.title, og?.description, og?.image, jsonLd])
+  }, [title, description, canonical, og?.title, og?.description, og?.image, jsonLd, noindex])
 }
