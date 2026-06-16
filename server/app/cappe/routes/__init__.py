@@ -17,6 +17,7 @@ from .locations import router as locations_router
 from .messages import router as messages_router
 from .newsletter import router as newsletter_router
 from .pages import router as pages_router
+from .payments import router as payments_router
 from .public import router as public_router
 from .reviews import router as reviews_router
 from .rider import router as rider_router
@@ -32,6 +33,10 @@ cappe_router = APIRouter(tags=["cappe"])
 cappe_router.include_router(auth_router)
 cappe_router.include_router(templates_router)
 cappe_router.include_router(public_router)
+
+# Stripe Connect: /payments/connect + /payments/status gate on require_cappe_account
+# per-route; /payments/webhook is public (Stripe-signature verified).
+cappe_router.include_router(payments_router)
 
 # Authenticated, per-site (each route gates on require_cappe_account + get_owned_site).
 cappe_router.include_router(sites_router)

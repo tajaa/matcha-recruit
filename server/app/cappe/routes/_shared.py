@@ -171,11 +171,12 @@ async def fetch_option_groups(conn, product_ids: list) -> dict:
 
 
 async def _site_owner(conn, site_id: UUID):
-    """The site owner's account email/name, for creator notifications. Returns
-    None if the site (or its account) is gone."""
+    """The site owner's account (email/name + Stripe-Connect status), for creator
+    notifications and storefront checkout. Returns None if the site (or its
+    account) is gone."""
     return await conn.fetchrow(
-        "SELECT a.email, a.name FROM cappe_accounts a "
-        "JOIN cappe_sites s ON s.account_id = a.id WHERE s.id = $1",
+        "SELECT a.email, a.name, a.stripe_account_id, a.stripe_charges_enabled "
+        "FROM cappe_accounts a JOIN cappe_sites s ON s.account_id = a.id WHERE s.id = $1",
         site_id,
     )
 

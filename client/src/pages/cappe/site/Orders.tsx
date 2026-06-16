@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Loader2, Receipt, ChevronDown, ChevronRight, Calendar, Check, X, Clock } from 'lucide-react'
 import { cappeApi } from '../../../api/cappeClient'
 import SurfaceShell, { centsToMoney } from '../../../components/cappe/SurfaceShell'
+import StripeConnectCard from '../../../components/cappe/StripeConnectCard'
 import ImageUpload from '../../../components/cappe/ImageUpload'
 import type { CappeOrder, CappeOrderItem } from '../../../types/cappe'
 
@@ -73,6 +74,7 @@ export default function Orders() {
 
   return (
     <SurfaceShell title="Orders" subtitle="Orders placed through your storefront.">
+      <StripeConnectCard />
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
       {orders === null ? (
         <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-zinc-400" /></div>

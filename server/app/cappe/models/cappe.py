@@ -427,6 +427,11 @@ class CappeCheckoutRequest(BaseModel):
     customer_name: Optional[str] = Field(default=None, max_length=255)
     items: list[CappeCartItem] = Field(min_length=1)
     note: Optional[str] = None
+    # Where Stripe Checkout returns the buyer (passed by the storefront widget,
+    # which knows its own published URL). Optional — absent → no card payment,
+    # order stays pending for manual handling.
+    success_url: Optional[str] = Field(default=None, max_length=2000)
+    cancel_url: Optional[str] = Field(default=None, max_length=2000)
 
 
 # Buyer-facing receipt (resolved by the order's unguessable access_token).

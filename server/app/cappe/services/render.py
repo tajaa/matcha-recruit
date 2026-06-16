@@ -1300,7 +1300,7 @@ var ans={};(p.intake_fields||[]).forEach(function(f){var el=info.querySelector('
 var item={product_id:p.id,quantity:qn(),intake_answers:ans,selected_option_ids:optIds};
 if(booking){var w=info.querySelector('[data-when]').value;if(!w){msg.textContent='Pick a time';msg.className='cz-msg err';return;}item.starts_at=w;}
 sb.disabled=true;msg.textContent='Placing order…';msg.className='cz-msg';
-RT.post('/orders',{customer_email:email,customer_name:info.querySelector('[data-name]').value.trim(),items:[item]}).then(function(){info.querySelector('.cz-pd__buy').innerHTML='<p class="cz-msg ok">Order placed. We will email you'+(p.fulfillment==='digital'?' your download once confirmed':'')+'.</p>';
+RT.post('/orders',{customer_email:email,customer_name:info.querySelector('[data-name]').value.trim(),items:[item],success_url:location.href,cancel_url:location.href}).then(function(res){if(res&&res.checkout_url){msg.textContent='Redirecting to secure checkout…';window.location=res.checkout_url;return;}info.querySelector('.cz-pd__buy').innerHTML='<p class="cz-msg ok">Order placed. We will email you'+(p.fulfillment==='digital'?' your download once confirmed':'')+'.</p>';
 }).catch(function(e){sb.disabled=false;refresh();msg.textContent=e.message;msg.className='cz-msg err';});});
 ov.querySelector('[data-reviews]').innerHTML=reviewsHtml();
 ov.querySelector('.cz-pd__panel').scrollTop=0;ov.hidden=false;document.body.style.overflow='hidden';

@@ -175,6 +175,11 @@ class Settings:
     stripe_webhook_secret: Optional[str] = None
     stripe_success_url: str = "http://localhost:5174/app/matcha/work/billing?success=1"
     stripe_cancel_url: str = "http://localhost:5174/app/matcha/work/billing?canceled=1"
+    # Separate webhook signing secret for the Cappe storefront Connect endpoint
+    # (/api/cappe/payments/webhook). Distinct endpoint → distinct secret.
+    cappe_stripe_webhook_secret: Optional[str] = None
+    # Platform fee taken on each Cappe storefront sale (basis points). 200 = 2%.
+    cappe_platform_fee_bps: int = 200
     # Monthly price (USD cents) for the Matcha IR upgrade offered to
     # resources_free tenants. Override with MATCHA_IR_PRICE_CENTS.
     matcha_ir_price_cents: int = 4900
@@ -315,6 +320,8 @@ def load_settings() -> Settings:
             "http://localhost:5174/app/matcha/work/billing?canceled=1",
         ),
         matcha_ir_price_cents=int(os.getenv("MATCHA_IR_PRICE_CENTS", "4900")),
+        cappe_stripe_webhook_secret=os.getenv("CAPPE_STRIPE_WEBHOOK_SECRET"),
+        cappe_platform_fee_bps=int(os.getenv("CAPPE_PLATFORM_FEE_BPS", "200")),
         livekit_url=os.getenv("LIVEKIT_URL"),
         livekit_api_key=os.getenv("LIVEKIT_API_KEY"),
         livekit_api_secret=os.getenv("LIVEKIT_API_SECRET"),

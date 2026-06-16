@@ -42,6 +42,11 @@ from ..models.cappe import (
     CappeReviewCreate,
     CappeSubscribeRequest,
 )
+from ..services.stripe_connect import (
+    CappeStripeError,
+    get_cappe_stripe,
+    platform_fee_cents as cappe_platform_fee_cents,
+)
 from ..services.email import (
     booking_manage_url,
     build_order_items_summary,
@@ -473,21 +478,67 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
                 )
         owner = await _site_owner(conn, site["id"])
 
-    # Notifications (best-effort, after response): receipt → customer, alert → creator.
-    items_summary = build_order_items_summary(
-        [{"title": t, "quantity": q} for (_pid, t, _u, q, *_r) in line_rows]
+    # If the order is payable AND the business has Stripe Connect ready AND the
+    # storefront passed return URLs → create a Checkout Session (direct charge on
+    # the connected account, 2% platform fee). The receipt waits for the paid
+    # webhook (payments.py). Otherwise fall back to the legacy pending flow.
+    pay_total = order["subtotal_cents"]
+    can_pay = bool(
+        pay_total > 0 and owner and owner["stripe_account_id"]
+        and owner["stripe_charges_enabled"] and body.success_url and body.cancel_url
     )
-    if email:
-        background.add_task(
-            send_cappe_order_receipt_email, email, body.customer_name, site["name"],
-            items_summary, order["subtotal_cents"], order["currency"], order["requires_approval"],
+    checkout_url = None
+    if can_pay:
+        cur = (order["currency"] or "USD").lower()
+        fee = cappe_platform_fee_cents(pay_total)
+        line_items = [
+            {
+                "price_data": {
+                    "currency": cur,
+                    "unit_amount": int(unit),
+                    "product_data": {"name": (title or "Item")[:250]},
+                },
+                "quantity": int(qty),
+            }
+            for (_pid, title, unit, qty, *_r) in line_rows
+        ]
+        try:
+            sess = await get_cappe_stripe().create_checkout_session(
+                account_id=owner["stripe_account_id"],
+                currency=cur,
+                line_items=line_items,
+                amount_cents=pay_total,
+                success_url=body.success_url,
+                cancel_url=body.cancel_url,
+                metadata={"order_id": str(order["id"]), "platform_fee_cents": str(fee)},
+                customer_email=email or None,
+            )
+            checkout_url = sess.get("url")
+            async with get_connection() as conn:
+                await conn.execute(
+                    "UPDATE cappe_orders SET stripe_session_id = $1, platform_fee_cents = $2, "
+                    "updated_at = NOW() WHERE id = $3",
+                    sess.get("id"), fee, order["id"],
+                )
+        except CappeStripeError:
+            checkout_url = None  # fall back to the manual pending flow below
+
+    if not checkout_url:
+        # Legacy / unpaid flow: notify now (receipt → customer, alert → creator).
+        items_summary = build_order_items_summary(
+            [{"title": t, "quantity": q} for (_pid, t, _u, q, *_r) in line_rows]
         )
-    if owner and owner["email"]:
-        background.add_task(
-            send_cappe_order_alert_email, owner["email"], owner["name"], site["name"],
-            body.customer_name, order["subtotal_cents"], order["currency"],
-            dashboard_url(f"/sites/{site['id']}/orders"),
-        )
+        if email:
+            background.add_task(
+                send_cappe_order_receipt_email, email, body.customer_name, site["name"],
+                items_summary, order["subtotal_cents"], order["currency"], order["requires_approval"],
+            )
+        if owner and owner["email"]:
+            background.add_task(
+                send_cappe_order_alert_email, owner["email"], owner["name"], site["name"],
+                body.customer_name, order["subtotal_cents"], order["currency"],
+                dashboard_url(f"/sites/{site['id']}/orders"),
+            )
 
     return {
         "order_id": str(order["id"]),
@@ -496,6 +547,7 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
         "subtotal_cents": order["subtotal_cents"],
         "currency": order["currency"],
         "requires_approval": order["requires_approval"],
+        "checkout_url": checkout_url,
     }
 
 
