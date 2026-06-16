@@ -16,6 +16,7 @@ import Subscribers from '../pages/cappe/site/Subscribers'
 import Campaigns from '../pages/cappe/site/Campaigns'
 import Forms from '../pages/cappe/site/Forms'
 import Bookings from '../pages/cappe/site/Bookings'
+import Locations from '../pages/cappe/site/Locations'
 import Blog from '../pages/cappe/site/Blog'
 import Messages from '../pages/cappe/site/Messages'
 import Clients from '../pages/cappe/site/Clients'
@@ -48,6 +49,7 @@ export default function CappeRoutes() {
         <Route path="sites/:siteId/campaigns" element={<Campaigns />} />
         <Route path="sites/:siteId/forms" element={<Forms />} />
         <Route path="sites/:siteId/bookings" element={<Bookings />} />
+        <Route path="sites/:siteId/locations" element={<Locations />} />
         <Route path="sites/:siteId/messages" element={<Messages />} />
         <Route path="sites/:siteId/clients" element={<Clients />} />
         <Route path="sites/:siteId/reviews" element={<Reviews />} />
