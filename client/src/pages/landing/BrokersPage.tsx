@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { motion, useInView } from 'framer-motion'
 
 import { useSEO } from '../../hooks/useSEO'
 import MarketingNav from './MarketingNav'
@@ -139,13 +140,23 @@ const PROCESS_STEPS = [
   },
 ]
 
-// Capability specs — what the book-of-business layer gives a broker, not
-// traction claims. Broker is a new distribution channel; no client-count metrics.
-const HERO_STATS = [
-  { label: 'Whole book', value: '1 view' },
-  { label: 'Renewal signals', value: 'Live' },
-  { label: 'Premium leaks', value: '$/mo' },
-  { label: 'Client setup', value: 'Self-serve' },
+// Hero radar card — an animated read of a book of business. Fictional clients;
+// the values illustrate the signal types (TRIR, turnover, premium leaks), not
+// real accounts.
+type RiskBand = 'critical' | 'elevated' | 'stable'
+
+const BAND_COLOR: Record<RiskBand, string> = {
+  critical: '#ff6b6b',
+  elevated: '#f5b545',
+  stable: '#6ee7a8',
+}
+
+const RADAR_ROWS: { client: string; band: RiskBand; metric: string; delta: string }[] = [
+  { client: 'Northgate Logistics', band: 'critical', metric: 'TRIR 6.2', delta: '+1.4' },
+  { client: 'Cedar Valley Mfg', band: 'elevated', metric: 'Turnover 22%', delta: '+5.0' },
+  { client: 'Harbor Foods Co', band: 'stable', metric: 'DART 1.1', delta: '−0.3' },
+  { client: 'Atlas Care Group', band: 'elevated', metric: 'Leak $1.4k/mo', delta: 'new' },
+  { client: 'Summit Builders', band: 'stable', metric: 'TRIR 0.9', delta: '−0.2' },
 ]
 
 const MODELS = [
@@ -271,45 +282,136 @@ function Hero({ onBookClick }: { onBookClick: () => void }) {
             </div>
           </div>
 
-          <div
-            className="rounded-xl overflow-hidden border grid grid-cols-2"
-            style={{
-              borderColor: 'rgba(0,0,0,0.08)',
-              backgroundColor: '#0e0d0b',
-              boxShadow: '0 40px 80px -20px rgba(31, 29, 26, 0.28)',
-            }}
-          >
-            {HERO_STATS.map((s, i) => {
-              const border: React.CSSProperties = {
-                borderColor: 'rgba(255,255,255,0.06)',
-              }
-              if (i % 2 === 0) border.borderRight = '1px solid rgba(255,255,255,0.06)'
-              if (i < 2) border.borderBottom = '1px solid rgba(255,255,255,0.06)'
-              return (
-                <div key={s.label} className="p-6 sm:p-8 flex flex-col relative" style={border}>
-                  <div
-                    className="text-[9px] font-mono uppercase tracking-wider"
-                    style={{ color: '#6a737d' }}
-                  >
-                    {s.label}
-                  </div>
-                  <div
-                    className="mt-2 font-light font-mono leading-none tabular-nums"
-                    style={{ color: '#e4ded2', fontSize: 'clamp(28px, 3.4vw, 42px)' }}
-                  >
-                    {s.value}
-                  </div>
-                  <div
-                    className="mt-2 h-[2px] rounded-full"
-                    style={{ backgroundColor: 'rgba(215,186,125,0.4)', width: '32px' }}
-                  />
-                </div>
-              )
-            })}
-          </div>
+          <RenewalRadarCard />
         </div>
       </div>
     </section>
+  )
+}
+
+// Animated hero card — a live read of a book of business. A scanline sweeps the
+// client rows; risk bands on the volatile accounts pulse to draw the eye.
+function RenewalRadarCard() {
+  const ref = useRef(null)
+  const inView = useInView(ref, { amount: 0.3 })
+
+  const counts = RADAR_ROWS.reduce(
+    (acc, r) => ({ ...acc, [r.band]: (acc[r.band] ?? 0) + 1 }),
+    {} as Record<RiskBand, number>,
+  )
+
+  return (
+    <div
+      ref={ref}
+      className="relative rounded-xl overflow-hidden border"
+      style={{
+        borderColor: 'rgba(0,0,0,0.08)',
+        backgroundColor: '#0e0d0b',
+        boxShadow: '0 40px 80px -20px rgba(31, 29, 26, 0.28)',
+      }}
+    >
+      {/* Header */}
+      <div
+        className="px-5 sm:px-6 py-4 flex items-center justify-between border-b"
+        style={{ borderColor: 'rgba(255,255,255,0.06)' }}
+      >
+        <div className="flex items-center gap-2.5">
+          <span className="relative flex w-2 h-2">
+            <motion.span
+              className="absolute inline-flex w-full h-full rounded-full"
+              style={{ backgroundColor: '#6ee7a8' }}
+              animate={inView ? { opacity: [0.6, 0, 0.6], scale: [1, 2.4, 1] } : { opacity: 0.6 }}
+              transition={{ duration: 2.2, repeat: Infinity, ease: 'easeOut' }}
+            />
+            <span className="relative inline-flex w-2 h-2 rounded-full" style={{ backgroundColor: '#6ee7a8' }} />
+          </span>
+          <span
+            className="text-[10px] font-mono uppercase tracking-[0.18em]"
+            style={{ color: '#e4ded2' }}
+          >
+            Renewal Risk Radar
+          </span>
+        </div>
+        <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: '#6a737d' }}>
+          Book · 24 clients
+        </span>
+      </div>
+
+      {/* Rows + scanline */}
+      <div className="relative">
+        <motion.div
+          aria-hidden
+          className="absolute inset-x-0 pointer-events-none z-10"
+          style={{
+            height: '38%',
+            background:
+              'linear-gradient(180deg, rgba(110,231,168,0) 0%, rgba(110,231,168,0.10) 50%, rgba(110,231,168,0) 100%)',
+          }}
+          animate={inView ? { top: ['-38%', '100%'] } : { top: '-38%' }}
+          transition={{ duration: 3.4, repeat: Infinity, ease: 'linear' }}
+        />
+
+        <ul>
+          {RADAR_ROWS.map((r, i) => {
+            const volatile = r.band !== 'stable'
+            return (
+              <motion.li
+                key={r.client}
+                className="px-5 sm:px-6 py-3.5 flex items-center justify-between gap-3 border-b"
+                style={{ borderColor: 'rgba(255,255,255,0.045)' }}
+                initial={{ opacity: 0, y: 6 }}
+                animate={inView ? { opacity: 1, y: 0 } : { opacity: 0, y: 6 }}
+                transition={{ duration: 0.5, delay: i * 0.12, ease: 'easeOut' }}
+              >
+                <div className="min-w-0">
+                  <div className="text-[13px] truncate" style={{ color: 'rgba(245,242,237,0.92)' }}>
+                    {r.client}
+                  </div>
+                  <div className="text-[11px] mt-0.5 font-mono" style={{ color: 'rgba(245,242,237,0.4)' }}>
+                    {r.metric}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <span className="text-[10px] font-mono tabular-nums" style={{ color: 'rgba(245,242,237,0.5)' }}>
+                    {r.delta}
+                  </span>
+                  <motion.span
+                    className="text-[9px] font-medium uppercase tracking-wider px-2 py-1 rounded"
+                    style={{
+                      color: BAND_COLOR[r.band],
+                      backgroundColor: `${BAND_COLOR[r.band]}1f`,
+                    }}
+                    animate={
+                      inView && volatile
+                        ? { opacity: [1, 0.45, 1] }
+                        : { opacity: 1 }
+                    }
+                    transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut', delay: i * 0.2 }}
+                  >
+                    {r.band}
+                  </motion.span>
+                </div>
+              </motion.li>
+            )
+          })}
+        </ul>
+      </div>
+
+      {/* Footer summary */}
+      <div
+        className="px-5 sm:px-6 py-3.5 flex items-center gap-4"
+        style={{ backgroundColor: 'rgba(255,255,255,0.015)' }}
+      >
+        {(['critical', 'elevated', 'stable'] as RiskBand[]).map((band) => (
+          <div key={band} className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: BAND_COLOR[band] }} />
+            <span className="text-[10px] font-mono tabular-nums" style={{ color: 'rgba(245,242,237,0.55)' }}>
+              {counts[band] ?? 0} {band}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 

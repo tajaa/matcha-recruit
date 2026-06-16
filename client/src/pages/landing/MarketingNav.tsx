@@ -1,29 +1,37 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Menu, X } from 'lucide-react'
+import { Menu, X, ChevronDown } from 'lucide-react'
 
 interface Props {
   onDemoClick?: () => void
 }
 
-const NAV_LINKS = [
+// The four offerings — primary nav, in sales order.
+const PRODUCT_LINKS = [
   { to: '/platform', label: 'Platform' },
   // { to: '/matcha-work', label: 'Matcha Work' }, // beta — hidden until launch
   { to: '/matcha-lite', label: 'Matcha Lite' },
-  { to: '/services', label: 'Consulting' },
-  { to: '/resources', label: 'Resources' },
   { to: '/fractional', label: 'Fractional' },
-  { to: '/blog', label: 'Blog' },
+  { to: '/services', label: 'Consulting' },
 ]
+
+// Content / non-offering — split into the Explore sub-nav.
+const EXPLORE_LINKS = [
+  { to: '/resources', label: 'Resources' },
+  { to: '/blog', label: 'Blog' },
+  { to: '/news', label: 'News' },
+]
+
+const TEXT_COLOR = '#F5F2ED'
+const PANEL_BG = '#161513'
 
 export default function MarketingNav({ onDemoClick }: Props) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [exploreOpen, setExploreOpen] = useState(false)
 
-  const textColor = '#F5F2ED'
-
-  const handleLinkClick = (action?: () => void) => {
+  const closeAll = () => {
     setMenuOpen(false)
-    action?.()
+    setExploreOpen(false)
   }
 
   return (
@@ -37,13 +45,13 @@ export default function MarketingNav({ onDemoClick }: Props) {
         }}
       >
         <div className="max-w-[1440px] mx-auto flex items-center justify-between px-6 sm:px-10 h-12">
-          <Link to="/" onClick={() => setMenuOpen(false)} className="flex items-center gap-2">
+          <Link to="/" onClick={closeAll} className="flex items-center gap-2">
             <span
               className="text-2xl tracking-tight"
               style={{
                 fontFamily: 'var(--font-display)',
                 fontWeight: 500,
-                color: textColor,
+                color: TEXT_COLOR,
               }}
             >
               MATCHA
@@ -51,23 +59,73 @@ export default function MarketingNav({ onDemoClick }: Props) {
           </Link>
 
           <div className="hidden md:flex items-center gap-8">
-            {NAV_LINKS.map(link => (
+            {PRODUCT_LINKS.map(link => (
               <Link
                 key={link.to}
                 to={link.to}
                 className="text-sm transition-opacity hover:opacity-60"
-                style={{ color: textColor }}
+                style={{ color: TEXT_COLOR }}
               >
                 {link.label}
               </Link>
             ))}
+
+            {/* Explore sub-nav — Blog / Resources / News split out from offerings */}
+            <div
+              className="relative"
+              onMouseEnter={() => setExploreOpen(true)}
+              onMouseLeave={() => setExploreOpen(false)}
+            >
+              <button
+                type="button"
+                onClick={() => setExploreOpen(v => !v)}
+                className="inline-flex items-center gap-1 text-sm transition-opacity hover:opacity-60"
+                style={{ color: TEXT_COLOR }}
+                aria-expanded={exploreOpen}
+                aria-haspopup="true"
+              >
+                Explore
+                <ChevronDown
+                  className="w-3.5 h-3.5 transition-transform duration-200"
+                  style={{ transform: exploreOpen ? 'rotate(180deg)' : 'none' }}
+                />
+              </button>
+
+              {exploreOpen && (
+                <div
+                  className="absolute right-0 top-full pt-3"
+                  // pt-3 keeps a hover bridge between trigger and panel
+                >
+                  <div
+                    className="min-w-[160px] rounded-lg overflow-hidden py-1.5"
+                    style={{
+                      backgroundColor: PANEL_BG,
+                      border: '1px solid rgba(245, 242, 237, 0.12)',
+                      boxShadow: '0 20px 40px -12px rgba(0,0,0,0.55)',
+                    }}
+                  >
+                    {EXPLORE_LINKS.map(link => (
+                      <Link
+                        key={link.to}
+                        to={link.to}
+                        onClick={closeAll}
+                        className="block px-4 py-2.5 text-sm transition-colors hover:bg-white/[0.06]"
+                        style={{ color: TEXT_COLOR }}
+                      >
+                        {link.label}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-4">
             <Link
               to="/login"
               className="hidden md:inline text-sm transition-opacity hover:opacity-60"
-              style={{ color: textColor }}
+              style={{ color: TEXT_COLOR }}
             >
               Login
             </Link>
@@ -84,7 +142,7 @@ export default function MarketingNav({ onDemoClick }: Props) {
             <button
               onClick={() => setMenuOpen(!menuOpen)}
               className="md:hidden inline-flex items-center justify-center w-10 h-10 -mr-2"
-              style={{ color: textColor }}
+              style={{ color: TEXT_COLOR }}
               aria-label={menuOpen ? 'Close menu' : 'Open menu'}
             >
               {menuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -95,15 +153,15 @@ export default function MarketingNav({ onDemoClick }: Props) {
 
       {menuOpen && (
         <div
-          className="fixed inset-0 z-40 md:hidden"
+          className="fixed inset-0 z-40 md:hidden overflow-y-auto"
           style={{ backgroundColor: '#0F0F0F' }}
         >
-          <div className="pt-32 px-6 flex flex-col gap-1">
-            {NAV_LINKS.map(link => (
+          <div className="pt-28 px-6 pb-12 flex flex-col gap-1">
+            {PRODUCT_LINKS.map(link => (
               <Link
                 key={link.to}
                 to={link.to}
-                onClick={() => handleLinkClick()}
+                onClick={closeAll}
                 className="py-4 text-2xl border-b"
                 style={{
                   fontFamily: 'var(--font-display)',
@@ -114,21 +172,40 @@ export default function MarketingNav({ onDemoClick }: Props) {
                 {link.label}
               </Link>
             ))}
+
+            {/* Explore sub-section */}
+            <div
+              className="mt-6 mb-2 text-[11px] uppercase tracking-[0.18em] font-mono"
+              style={{ color: 'rgba(245, 242, 237, 0.45)' }}
+            >
+              Explore
+            </div>
+            {EXPLORE_LINKS.map(link => (
+              <Link
+                key={link.to}
+                to={link.to}
+                onClick={closeAll}
+                className="py-3 text-lg border-b"
+                style={{
+                  color: 'rgba(245, 242, 237, 0.85)',
+                  borderColor: 'rgba(245, 242, 237, 0.1)',
+                }}
+              >
+                {link.label}
+              </Link>
+            ))}
+
             <Link
               to="/login"
-              onClick={() => setMenuOpen(false)}
-              className="py-4 text-2xl border-b"
-              style={{
-                fontFamily: 'var(--font-display)',
-                color: '#F5F2ED',
-                borderColor: 'rgba(245, 242, 237, 0.15)',
-              }}
+              onClick={closeAll}
+              className="mt-6 py-3 text-lg"
+              style={{ color: '#F5F2ED' }}
             >
               Login
             </Link>
             <button
-              onClick={() => { setMenuOpen(false); onDemoClick?.() }}
-              className="mt-6 inline-flex items-center justify-center px-6 h-12 rounded-full text-base font-medium cursor-pointer"
+              onClick={() => { closeAll(); onDemoClick?.() }}
+              className="mt-4 inline-flex items-center justify-center px-6 h-12 rounded-full text-base font-medium cursor-pointer"
               style={{
                 backgroundColor: '#F5F2ED',
                 color: '#0F0F0F',
