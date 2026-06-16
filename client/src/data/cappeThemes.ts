@@ -24,21 +24,96 @@ export const FONT_PAIRINGS: { id: string; label: string; heading: string; body: 
   { id: 'sora', label: 'Sora / Inter', heading: 'Sora', body: 'Inter' },
   { id: 'space', label: 'Space Grotesk / Inter', heading: 'Space Grotesk', body: 'Inter' },
   { id: 'lora', label: 'Lora / Lora', heading: 'Lora', body: 'Lora' },
+  { id: 'syne', label: 'Syne / Manrope', heading: 'Syne', body: 'Manrope' },
+  { id: 'unbounded', label: 'Unbounded / DM Sans', heading: 'Unbounded', body: 'DM Sans' },
+  { id: 'bricolage', label: 'Bricolage / Work Sans', heading: 'Bricolage Grotesque', body: 'Work Sans' },
+  { id: 'dmserif', label: 'DM Serif / DM Sans', heading: 'DM Serif Display', body: 'DM Sans' },
+  { id: 'cormorant', label: 'Cormorant / Public Sans', heading: 'Cormorant Garamond', body: 'Public Sans' },
+  { id: 'bodoni', label: 'Bodoni Moda / Spectral', heading: 'Bodoni Moda', body: 'Spectral' },
+  { id: 'bebas', label: 'Bebas Neue / Hanken Grotesk', heading: 'Bebas Neue', body: 'Hanken Grotesk' },
+  { id: 'jakarta', label: 'Plus Jakarta / Plus Jakarta', heading: 'Plus Jakarta Sans', body: 'Plus Jakarta Sans' },
+  { id: 'marcellus', label: 'Marcellus / Libre Franklin', heading: 'Marcellus', body: 'Libre Franklin' },
+  { id: 'instrument', label: 'Instrument Serif / Inter', heading: 'Instrument Serif', body: 'Inter' },
 ]
 
-// Granular font menus for the premium designer (independent heading/body).
-// All are Google-Fonts-hosted (fetched on demand by the renderer's _gfonts_link);
-// serif members are mirrored into render.py's `_SERIF` for correct fallbacks.
-export const HEADING_FONTS: string[] = [
-  'Inter', 'Sora', 'Space Grotesk', 'Manrope', 'Outfit', 'Archivo', 'Syne', 'Unbounded',
-  'Bricolage Grotesque', 'Familjen Grotesk', 'DM Sans',
-  'Fraunces', 'Playfair Display', 'Lora', 'Cormorant Garamond', 'Libre Baskerville',
-  'DM Serif Display', 'Instrument Serif', 'Newsreader', 'Spectral',
+// Granular font catalog for the premium designer (independent heading/body),
+// powering the searchable CappeFontPicker. All are Google-Fonts-hosted (fetched
+// on demand by the renderer's _gfonts_link); serif members are mirrored into
+// render.py's `_SERIF` for correct fallbacks. `body: true` = also reads well as
+// body copy (so it surfaces in the Body-font picker).
+export type FontCat = 'Sans' | 'Serif' | 'Display' | 'Mono' | 'Handwriting'
+export type FontDef = { name: string; cat: FontCat; body?: boolean }
+
+export const FONT_CATALOG: FontDef[] = [
+  // ── Sans ──────────────────────────────────────────────────────────────
+  { name: 'Inter', cat: 'Sans', body: true },
+  { name: 'Manrope', cat: 'Sans', body: true },
+  { name: 'DM Sans', cat: 'Sans', body: true },
+  { name: 'Work Sans', cat: 'Sans', body: true },
+  { name: 'Mulish', cat: 'Sans', body: true },
+  { name: 'Public Sans', cat: 'Sans', body: true },
+  { name: 'Hanken Grotesk', cat: 'Sans', body: true },
+  { name: 'Libre Franklin', cat: 'Sans', body: true },
+  { name: 'Plus Jakarta Sans', cat: 'Sans', body: true },
+  { name: 'Figtree', cat: 'Sans', body: true },
+  { name: 'Onest', cat: 'Sans', body: true },
+  { name: 'Albert Sans', cat: 'Sans', body: true },
+  { name: 'Be Vietnam Pro', cat: 'Sans', body: true },
+  { name: 'Epilogue', cat: 'Sans', body: true },
+  { name: 'Lexend', cat: 'Sans', body: true },
+  { name: 'Urbanist', cat: 'Sans', body: true },
+  { name: 'Instrument Sans', cat: 'Sans', body: true },
+  { name: 'Schibsted Grotesk', cat: 'Sans', body: true },
+  { name: 'Sora', cat: 'Sans' },
+  { name: 'Space Grotesk', cat: 'Sans' },
+  { name: 'Outfit', cat: 'Sans' },
+  { name: 'Archivo', cat: 'Sans' },
+  { name: 'Familjen Grotesk', cat: 'Sans' },
+  { name: 'Red Hat Display', cat: 'Sans' },
+  // ── Serif ─────────────────────────────────────────────────────────────
+  { name: 'Lora', cat: 'Serif', body: true },
+  { name: 'Spectral', cat: 'Serif', body: true },
+  { name: 'Newsreader', cat: 'Serif', body: true },
+  { name: 'PT Serif', cat: 'Serif', body: true },
+  { name: 'Source Serif 4', cat: 'Serif', body: true },
+  { name: 'EB Garamond', cat: 'Serif', body: true },
+  { name: 'Crimson Pro', cat: 'Serif', body: true },
+  { name: 'Bitter', cat: 'Serif', body: true },
+  { name: 'Frank Ruhl Libre', cat: 'Serif', body: true },
+  { name: 'Fraunces', cat: 'Serif' },
+  { name: 'Playfair Display', cat: 'Serif' },
+  { name: 'Cormorant Garamond', cat: 'Serif' },
+  { name: 'Libre Baskerville', cat: 'Serif' },
+  { name: 'DM Serif Display', cat: 'Serif' },
+  { name: 'Instrument Serif', cat: 'Serif' },
+  { name: 'Bodoni Moda', cat: 'Serif' },
+  { name: 'Marcellus', cat: 'Serif' },
+  { name: 'Gloock', cat: 'Serif' },
+  // ── Display ───────────────────────────────────────────────────────────
+  { name: 'Syne', cat: 'Display' },
+  { name: 'Unbounded', cat: 'Display' },
+  { name: 'Bricolage Grotesque', cat: 'Display' },
+  { name: 'Anton', cat: 'Display' },
+  { name: 'Bebas Neue', cat: 'Display' },
+  { name: 'Archivo Black', cat: 'Display' },
+  { name: 'Big Shoulders Display', cat: 'Display' },
+  { name: 'Caprasimo', cat: 'Display' },
+  // ── Mono ──────────────────────────────────────────────────────────────
+  { name: 'JetBrains Mono', cat: 'Mono', body: true },
+  { name: 'Space Mono', cat: 'Mono' },
+  { name: 'IBM Plex Mono', cat: 'Mono', body: true },
+  { name: 'DM Mono', cat: 'Mono' },
+  // ── Handwriting ───────────────────────────────────────────────────────
+  { name: 'Caveat', cat: 'Handwriting' },
+  { name: 'Dancing Script', cat: 'Handwriting' },
+  { name: 'Pacifico', cat: 'Handwriting' },
+  { name: 'Satisfy', cat: 'Handwriting' },
 ]
-export const BODY_FONTS: string[] = [
-  'Inter', 'Manrope', 'Work Sans', 'DM Sans', 'Mulish', 'Public Sans', 'Hanken Grotesk',
-  'Libre Franklin', 'Source Serif 4', 'Lora', 'Spectral', 'Newsreader', 'PT Serif',
-]
+
+export const FONT_CATEGORY: Record<string, FontCat> =
+  Object.fromEntries(FONT_CATALOG.map((f) => [f.name, f.cat]))
+export const HEADING_FONTS: string[] = FONT_CATALOG.map((f) => f.name)
+export const BODY_FONTS: string[] = FONT_CATALOG.filter((f) => f.body).map((f) => f.name)
 
 export const RADII: { value: string; label: string }[] = [
   { value: 'none', label: 'Sharp' }, { value: 'sm', label: 'Small' },

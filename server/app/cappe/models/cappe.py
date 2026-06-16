@@ -188,6 +188,8 @@ class CappePagePreview(BaseModel):
     slug: Optional[str] = Field(default=None, max_length=160)
     content: dict[str, Any] = Field(default_factory=dict)
     theme_config: Optional[dict[str, Any]] = None
+    # Unsaved meta_config (e.g. live promos editing) — when omitted, saved meta used.
+    meta_config: Optional[dict[str, Any]] = None
     # When true, render with the canvas selection/edit runtime (Business editor).
     editable: bool = False
 
@@ -977,12 +979,44 @@ class CappePublicThread(BaseModel):
 class CappeClient(BaseModel):
     email: str
     name: Optional[str] = None
+    phone: Optional[str] = None
     orders_count: int = 0
     bookings_count: int = 0
     is_subscriber: bool = False
     has_thread: bool = False
+    is_imported: bool = False           # has a row in cappe_clients (manual/CSV)
     total_spent_cents: int = 0
     last_activity: Optional[datetime] = None
+    # Branch the client belongs to (explicit on import, else latest booking's).
+    location_id: Optional[UUID] = None
+    location_name: Optional[str] = None
+
+
+class CappeClientCreate(BaseModel):
+    """Add/update a single managed client (upsert by email within the site)."""
+    email: str = Field(min_length=3, max_length=320)
+    name: Optional[str] = Field(default=None, max_length=255)
+    phone: Optional[str] = Field(default=None, max_length=40)
+    location_id: Optional[UUID] = None
+    notes: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
+    add_to_newsletter: bool = False
+
+
+class CappeClientImportError(BaseModel):
+    row: int                            # 1-based data row (header excluded)
+    email: Optional[str] = None
+    reason: str
+
+
+class CappeClientImportResult(BaseModel):
+    total: int = 0                      # data rows seen
+    created: int = 0
+    updated: int = 0
+    skipped: int = 0
+    newsletter_added: int = 0
+    branches_matched: int = 0           # rows that resolved a branch by name
+    errors: list[CappeClientImportError] = Field(default_factory=list)
 
 
 # ===========================================================================

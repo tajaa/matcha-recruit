@@ -35,6 +35,8 @@ _SERIF = {
     "playfair display", "lora", "fraunces", "source serif pro", "source serif 4",
     "merriweather", "georgia", "pt serif", "cormorant garamond", "libre baskerville",
     "dm serif display", "instrument serif", "newsreader", "spectral",
+    "eb garamond", "crimson pro", "bitter", "frank ruhl libre", "bodoni moda",
+    "marcellus", "gloock", "caprasimo",
 }
 _RADIUS = {"none": "0px", "sm": "6px", "md": "10px", "lg": "14px", "xl": "18px", "2xl": "24px", "full": "9999px"}
 _LIGHT = {"bg": "#ffffff", "surface": "#f6f7f9", "text": "#16181d", "muted": "#5b6470",
@@ -101,7 +103,11 @@ def _clampi(v: Any, lo: int, hi: int, default: int = 0) -> int:
 _PAD_SCALE = {"none": "0rem", "sm": "2rem", "lg": "6rem", "xl": "9rem"}
 _MAXW = {"narrow": "44rem", "wide": "84rem", "full": "100%"}
 _MINH = {"tall": "70vh", "screen": "100vh"}
-_MOTION_FX = {"fade", "slide-up", "slide-left", "slide-right", "zoom", "blur-in"}
+_MOTION_FX = {"fade", "slide-up", "slide-down", "slide-left", "slide-right", "zoom", "blur-in",
+              "flip", "rotate", "mask-up", "bounce"}
+_HOVER_FX = {"lift", "tilt", "glow"}
+_LOOP_FX = {"float", "pulse"}
+_HEADING_FX = {"rise", "shimmer"}
 _OVERLAYS = {"light", "medium", "dark"}
 
 
@@ -162,6 +168,13 @@ def _apply_design(html_str: str, design: Any, *, block_index: Any = None, editab
             attrs.append(f'data-cz-parallax="{_clampi(motion.get("parallaxStrength"), 0, 80, 20)}"')
         if motion.get("kenburns"):
             classes.append("cz-kenburns")
+        # hover / continuous-loop / per-heading animation (each CSS-only, ungated)
+        if motion.get("hover") in _HOVER_FX:
+            classes.append(f"cz-hover-{motion['hover']}")
+        if motion.get("loop") in _LOOP_FX:
+            classes.append(f"cz-loop-{motion['loop']}")
+        if motion.get("heading") in _HEADING_FX:
+            classes.append(f"cz-bh-{motion['heading']}")
 
         # ── background ──────────────────────────────────────────────────────
         bg_type = bg.get("type")
@@ -777,11 +790,74 @@ section{position:relative}
 .cz-btn--solid{background:var(--brand-grad,var(--brand))}
 .cz-band{background:var(--brand-grad,var(--brand))}
 @media(max-width:768px){.cz-parallax>.cz-bg-media{transform:none!important}}
+/* extra reveal effects (cz-rv variants — reset by .cz-rv.cz-in) */
+.cz-motion.cz-js .cz-rv--slide-down{transform:translateY(-28px)}
+.cz-motion.cz-js .cz-rv--flip{transform:perspective(800px) rotateX(26deg);transform-origin:top center}
+.cz-motion.cz-js .cz-rv--rotate{transform:rotate(-4deg) scale(.95)}
+.cz-motion.cz-js .cz-rv--bounce{transform:translateY(34px)}
+.cz-motion.cz-js .cz-rv--bounce.cz-in{animation:czBounce .8s cubic-bezier(.2,1.3,.4,1) both}
+@keyframes czBounce{from{transform:translateY(34px)}60%{transform:translateY(-8px)}to{transform:none}}
+.cz-motion.cz-js .cz-rv--mask-up{clip-path:inset(100% 0 0 0);opacity:1;
+  transition:clip-path var(--cz-dur,700ms) cubic-bezier(.2,.7,.2,1);transition-delay:var(--cz-delay,0ms)}
+.cz-motion.cz-js .cz-rv--mask-up.cz-in{clip-path:inset(0 0 0 0)}
+/* hover effects (whole-section, CSS-only) */
+.cz-hover-lift{transition:transform .35s cubic-bezier(.2,.7,.2,1),box-shadow .35s}
+.cz-hover-lift:hover{transform:translateY(-6px);box-shadow:0 30px 60px -34px color-mix(in srgb,var(--brand) 50%,transparent)}
+.cz-hover-tilt{transition:transform .35s cubic-bezier(.2,.7,.2,1)}
+.cz-hover-tilt:hover{transform:perspective(900px) rotateX(3deg) rotateY(-3deg) scale(1.01)}
+.cz-hover-glow{transition:box-shadow .4s}
+.cz-hover-glow:hover{box-shadow:0 0 0 1px color-mix(in srgb,var(--brand) 40%,transparent),0 24px 60px -30px color-mix(in srgb,var(--brand) 55%,transparent)}
+/* continuous loops */
+.cz-loop-float{animation:czFloat 6s ease-in-out infinite}
+@keyframes czFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+.cz-loop-pulse{animation:czPulse 4s ease-in-out infinite}
+@keyframes czPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.015)}}
+/* per-block heading animation (reuses czRise/czShim keyframes) */
+.cz-bh-rise h1,.cz-bh-rise h2{animation:czRise .9s cubic-bezier(.2,.7,.2,1) both}
+.cz-bh-shimmer h1,.cz-bh-shimmer h2{background:linear-gradient(100deg,var(--ink) 30%,var(--brand) 50%,var(--ink) 70%);
+  background-size:200% auto;-webkit-background-clip:text;background-clip:text;color:transparent;animation:czShim 4.5s linear infinite}
+
+/* ── promos: announcement bar + pop-up modal (meta_config.promos) ────────── */
+.cz-promobar{background:var(--czbar-bg,var(--brand));color:var(--czbar-fg,var(--brand-fg));
+  font-size:.92rem;font-weight:600;position:relative;z-index:60}
+.cz-promobar[hidden]{display:none}
+.cz-promobar--bottom{position:fixed;left:0;right:0;bottom:0}
+.cz-promobar__in{max-width:84rem;margin:0 auto;padding:.6rem 2.4rem;display:flex;align-items:center;
+  justify-content:center;gap:.9rem;flex-wrap:wrap;text-align:center}
+.cz-promobar__cta{color:inherit;text-decoration:underline;text-underline-offset:3px;font-weight:800;white-space:nowrap}
+.cz-promobar__x{position:absolute;right:.7rem;top:50%;transform:translateY(-50%);background:none;border:0;
+  color:inherit;opacity:.7;cursor:pointer;font-size:1.25rem;line-height:1;padding:.1rem .35rem}
+.cz-promobar__x:hover{opacity:1}
+.cz-modal{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;padding:1.2rem}
+.cz-modal[hidden]{display:none}
+.cz-modal__scrim{position:absolute;inset:0;background:rgba(8,10,14,.62);opacity:0;transition:opacity .3s}
+.cz-modal.cz-in .cz-modal__scrim{opacity:1}
+.cz-modal__card{position:relative;z-index:1;width:100%;max-width:30rem;background:var(--czpop-bg,var(--surface));
+  color:var(--ink);border:1px solid var(--line);border-radius:calc(var(--radius) + 4px);padding:1.9rem;
+  box-shadow:0 40px 80px -30px rgba(0,0,0,.55);text-align:center;
+  transform:translateY(14px) scale(.97);opacity:0;
+  transition:transform .35s cubic-bezier(.2,.7,.2,1),opacity .35s}
+.cz-modal.cz-in .cz-modal__card{transform:none;opacity:1}
+.cz-modal__x{position:absolute;right:.85rem;top:.65rem;background:none;border:0;color:var(--muted);
+  font-size:1.5rem;line-height:1;cursor:pointer}
+.cz-modal__x:hover{color:var(--ink)}
+.cz-modal__img{width:100%;height:9rem;object-fit:cover;border-radius:var(--radius);margin-bottom:1rem}
+.cz-modal__card h3{font-family:var(--font-h);font-size:1.5rem;margin:0 0 .55rem}
+.cz-modal__card p{color:var(--muted);margin:0 0 1.15rem;font-size:.98rem}
+.cz-modal__code{display:flex;align-items:center;justify-content:center;gap:.6rem;
+  border:1px dashed var(--brand);border-radius:var(--radius);padding:.7rem 1rem;margin-bottom:.7rem}
+.cz-modal__code b{font-family:var(--font-h);font-size:1.2rem;letter-spacing:.06em}
+.cz-modal__copy{background:none;border:0;color:var(--brand);font-weight:700;cursor:pointer;font-size:.85rem}
+.cz-modal .cz-inline{display:flex;gap:.5rem}
+@media(max-width:520px){.cz-modal .cz-inline{flex-direction:column}}
 @media(prefers-reduced-motion:reduce){
   .cz-motion.cz-js .cz-rv,.cz-motion.cz-js .cz-rv--stagger .cz-cards>*,
   .cz-motion.cz-js .cz-rv--stagger .cz-plans>*{opacity:1!important;transform:none!important;filter:none!important;transition:none}
-  .cz-kenburns>.cz-bg-media,.cz-parallax>.cz-bg-media,.cz-h-rise .cz-hero__title,.cz-h-shimmer .cz-hero__title{animation:none!important}
-  .cz-h-shimmer .cz-hero__title{color:var(--ink);-webkit-text-fill-color:var(--ink)}}
+  .cz-rv--mask-up{clip-path:none!important}
+  .cz-kenburns>.cz-bg-media,.cz-parallax>.cz-bg-media,.cz-h-rise .cz-hero__title,.cz-h-shimmer .cz-hero__title,
+  .cz-loop-float,.cz-loop-pulse,.cz-bh-rise h1,.cz-bh-rise h2,.cz-bh-shimmer h1,.cz-bh-shimmer h2{animation:none!important}
+  .cz-h-shimmer .cz-hero__title,.cz-bh-shimmer h1,.cz-bh-shimmer h2{color:var(--ink);-webkit-text-fill-color:var(--ink)}
+  .cz-modal__scrim,.cz-modal__card{transition:none}}
 """
 
 
@@ -1657,6 +1733,115 @@ def _footer(site: dict, meta: dict) -> str:
 
 # ── document ──────────────────────────────────────────────────────────────
 
+# ── site-wide promos (announcement bar + pop-up modal) ──────────────────────
+# Driven entirely by the DOM (data-* attrs + #czbar / #czpop ids) so this is a
+# static constant — no per-render interpolation, no user strings in JS. Newsletter
+# mode reuses the public /subscribe endpoint via the widget runtime (__CAPPE_RT__).
+_PROMO_JS = r"""(function(){
+var RT=window.__CAPPE_RT__,pv=RT&&RT.preview,edit=document.body.classList.contains('cz-editable');
+var slug=((window.__CAPPE__||{}).slug)||'';
+function k(s){return 'czp:'+slug+':'+s;}
+var bar=document.getElementById('czbar');
+if(bar){var bx=bar.querySelector('[data-czclose]');
+  if(bx){if(!pv){try{if(localStorage.getItem(k('bar'))==='1')bar.setAttribute('hidden','');}catch(e){}}
+    bx.addEventListener('click',function(){bar.setAttribute('hidden','');try{localStorage.setItem(k('bar'),'1');}catch(e){}});}}
+var pop=document.getElementById('czpop');
+if(pop){
+  var trig=pop.getAttribute('data-trigger')||'load',
+      delay=parseInt(pop.getAttribute('data-delay'),10)||0,
+      freq=pop.getAttribute('data-freq')||'session',shown=false;
+  function seen(){try{return (freq==='once'?localStorage:sessionStorage).getItem(k('pop'))==='1';}catch(e){return false;}}
+  function mark(){try{(freq==='once'?localStorage:sessionStorage).setItem(k('pop'),'1');}catch(e){}}
+  function open(){if(shown)return;if(!pv&&freq!=='always'&&seen())return;shown=true;
+    pop.removeAttribute('hidden');requestAnimationFrame(function(){pop.classList.add('cz-in');});if(!pv)mark();}
+  function close(){pop.classList.remove('cz-in');setTimeout(function(){pop.setAttribute('hidden','');},300);}
+  [].slice.call(pop.querySelectorAll('[data-czclose]')).forEach(function(el){el.addEventListener('click',close);});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!pop.hasAttribute('hidden'))close();});
+  if(pv){if(!edit)open();}
+  else if(trig==='delay'){setTimeout(open,Math.max(0,delay)*1000);}
+  else if(trig==='exit'){var armed=false;setTimeout(function(){armed=true;},2000);
+    document.addEventListener('mouseout',function(e){if(armed&&!e.relatedTarget&&e.clientY<=0)open();});
+    setTimeout(open,25000);}
+  else{setTimeout(open,500);}
+  var nf=pop.querySelector('[data-cznews]');
+  if(nf&&RT){var inp=nf.querySelector('input'),btn=nf.querySelector('button'),msg=pop.querySelector('[data-czmsg]');
+    btn.addEventListener('click',function(){var email=(inp.value||'').trim();
+      if(!email){if(msg){msg.textContent='Email required';msg.className='cz-msg err';}return;}
+      btn.disabled=true;RT.post('/subscribe',{email:email}).then(function(){
+        nf.innerHTML='<p class="cz-msg ok">You are subscribed!</p>';
+      }).catch(function(e){btn.disabled=false;if(msg){msg.textContent=e.message;msg.className='cz-msg err';}});});}
+  var cp=pop.querySelector('[data-czcopy]');
+  if(cp){cp.addEventListener('click',function(){var code=cp.getAttribute('data-code')||'';
+    try{navigator.clipboard.writeText(code);cp.textContent='Copied!';setTimeout(function(){cp.textContent='Copy';},1500);}catch(e){}});}
+}})();"""
+
+
+def _promo_link(label: Any, href: Any, cls: str) -> str:
+    if not label:
+        return ""
+    return f'<a class="{cls}" href="{_esc(_safe_href(href))}">{_esc(label)}</a>'
+
+
+def _promos(meta: dict, t: dict) -> tuple[str, str, str]:
+    """Site-wide promos from meta_config.promos → (bar_html, popup_html, js).
+    All-empty when promos absent/disabled. Colors hex-only, text escaped; the
+    pop-up newsletter mode reuses /subscribe via the widget runtime."""
+    promos = meta.get("promos") if isinstance(meta.get("promos"), dict) else {}
+    bar_html = popup_html = ""
+    need_js = False
+
+    bar = promos.get("bar") if isinstance(promos.get("bar"), dict) else {}
+    if bar.get("enabled") and (bar.get("text") or bar.get("ctaLabel")):
+        pos = "bottom" if bar.get("position") == "bottom" else "top"
+        styles = []
+        if _hexonly(bar.get("bg")):
+            styles.append(f"--czbar-bg:{_hexonly(bar.get('bg'))}")
+        if _hexonly(bar.get("color")):
+            styles.append(f"--czbar-fg:{_hexonly(bar.get('color'))}")
+        style_attr = f' style="{";".join(styles)}"' if styles else ""
+        cta = _promo_link(bar.get("ctaLabel"), bar.get("ctaHref"), "cz-promobar__cta")
+        dismiss = ('<button class="cz-promobar__x" data-czclose aria-label="Dismiss">&times;</button>'
+                   if bar.get("dismissible") else "")
+        bar_html = (f'<div class="cz-promobar cz-promobar--{pos}" id="czbar"{style_attr}>'
+                    f'<div class="cz-promobar__in"><span class="cz-promobar__txt">{_esc(bar.get("text"))}</span>'
+                    f'{cta}</div>{dismiss}</div>')
+        if bar.get("dismissible"):
+            need_js = True
+
+    popup = promos.get("popup") if isinstance(promos.get("popup"), dict) else {}
+    if popup.get("enabled") and (popup.get("heading") or popup.get("body")):
+        trigger = popup.get("trigger") if popup.get("trigger") in ("load", "delay", "exit") else "load"
+        delay = _clampi(popup.get("delaySec"), 0, 120, 5)
+        freq = popup.get("frequency") if popup.get("frequency") in ("session", "always", "once") else "session"
+        mode = popup.get("mode") if popup.get("mode") in ("newsletter", "cta", "code") else "newsletter"
+        style_attr = f' style="--czpop-bg:{_hexonly(popup.get("bg"))}"' if _hexonly(popup.get("bg")) else ""
+        img_u = _safe_image(popup.get("image"))
+        img = f'<img class="cz-modal__img" src="{_esc(img_u)}" alt="" />' if img_u else ""
+        heading = f'<h3>{_esc(popup.get("heading"))}</h3>' if popup.get("heading") else ""
+        body = f'<p>{_esc(popup.get("body"))}</p>' if popup.get("body") else ""
+        if mode == "newsletter":
+            inner = ('<div data-cznews><div class="cz-inline">'
+                     '<input class="cz-field" type="email" placeholder="you@example.com" />'
+                     f'<button class="cz-btn cz-btn--solid">{_esc(popup.get("ctaLabel") or "Subscribe")}</button>'
+                     '</div><p class="cz-msg" data-czmsg></p></div>')
+        elif mode == "code":
+            code = _esc(popup.get("code") or "")
+            inner = (f'<div class="cz-modal__code"><b>{code}</b>'
+                     f'<button class="cz-modal__copy" data-czcopy data-code="{code}">Copy</button></div>'
+                     + _promo_link(popup.get("ctaLabel"), popup.get("ctaHref"), "cz-btn cz-btn--solid cz-btn--block"))
+        else:  # cta
+            inner = _promo_link(popup.get("ctaLabel") or "Learn more", popup.get("ctaHref"),
+                                "cz-btn cz-btn--solid cz-btn--block")
+        popup_html = (f'<div class="cz-modal" id="czpop" data-trigger="{trigger}" data-delay="{delay}" '
+                      f'data-freq="{freq}" hidden><div class="cz-modal__scrim" data-czclose></div>'
+                      f'<div class="cz-modal__card"{style_attr}>'
+                      f'<button class="cz-modal__x" data-czclose aria-label="Close">&times;</button>'
+                      f'{img}{heading}{body}{inner}</div></div>')
+        need_js = True
+
+    return bar_html, popup_html, (f'<script>{_PROMO_JS}</script>' if need_js else "")
+
+
 def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: bool = False, editable: bool = False,
                      locations: list[dict] | None = None) -> str:
     t = _tokens(site.get("theme_config"))
@@ -1734,6 +1919,7 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
     ]))
     premium_js = _MOTION_JS if needs_motion else ""
     canvas_js = _CANVAS_JS if editable else ""
+    promo_bar, promo_popup, promo_js = _promos(meta_dict, t)
 
     return f"""<!doctype html>
 <html lang="en">
@@ -1748,12 +1934,15 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
   {_widget_runtime()}
 </head>
 <body class="{body_cls}">
+  {promo_bar}
   <header class="{header_cls}"><div class="cz-wrap cz-bar">
     <a class="cz-brand" href="/">{brand_inner}</a>
     <nav class="cz-nav">{nav_links}</nav>
   </div></header>
   <main>{body_html}</main>
   {_footer(site, meta_dict)}
+  {promo_popup}
+  {promo_js}
   {premium_js}
   {canvas_js}
 </body>

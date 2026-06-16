@@ -6,6 +6,7 @@ import ImageUpload from '../../components/cappe/ImageUpload'
 import SetupGuide from '../../components/cappe/SetupGuide'
 import { cappeSiteHost, CAPPE_HOST } from '../../utils/cappeHost'
 import { CAPPE_THEMES, type CappeThemePreset } from '../../data/cappeThemes'
+import { PAGE_PRESETS, type CappePagePreset } from '../../data/cappePagePresets'
 import { CAPPE_TIMEZONES } from '../../data/timezones'
 import type { CappePage, CappeSite } from '../../types/cappe'
 
@@ -186,12 +187,13 @@ export default function CappeSiteEditor() {
     }
   }
 
-  async function addPage(e: React.FormEvent) {
-    e.preventDefault()
-    if (!siteId || !newPageTitle.trim()) return
+  async function createPage(title: string, content?: Record<string, unknown>) {
+    if (!siteId || !title.trim()) return
     setAddingPage(true)
     try {
-      const page = await cappeApi.post<CappePage>(`/sites/${siteId}/pages`, { title: newPageTitle.trim() })
+      const body: Record<string, unknown> = { title: title.trim() }
+      if (content) body.content = content
+      const page = await cappeApi.post<CappePage>(`/sites/${siteId}/pages`, body)
       setPages((prev) => [...prev, page])
       setNewPageTitle('')
     } catch (e) {
@@ -199,6 +201,16 @@ export default function CappeSiteEditor() {
     } finally {
       setAddingPage(false)
     }
+  }
+
+  async function addPage(e: React.FormEvent) {
+    e.preventDefault()
+    await createPage(newPageTitle)
+  }
+
+  function addPreset(p: CappePagePreset) {
+    if (addingPage) return
+    createPage(p.title, { blocks: p.blocks })
   }
 
   async function deletePage(pageId: string) {
@@ -559,6 +571,26 @@ export default function CappeSiteEditor() {
             Add
           </button>
         </form>
+
+        {/* One-click page presets — seed a ready-made, fully-editable page. */}
+        <div className="mt-4 border-t border-zinc-800 pt-4">
+          <p className="mb-2 text-xs font-medium text-zinc-400">Or start from a template</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {PAGE_PRESETS.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => addPreset(p)}
+                disabled={addingPage}
+                className="flex flex-col items-start rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2.5 text-left hover:border-emerald-500/60 hover:bg-zinc-900 disabled:opacity-60"
+              >
+                <span className="flex items-center gap-1.5 text-sm font-semibold text-zinc-200">
+                  <Sparkles className="h-3.5 w-3.5 text-emerald-400" /> {p.label}
+                </span>
+                <span className="mt-0.5 text-xs text-zinc-500">{p.blurb}</span>
+              </button>
+            ))}
+          </div>
+        </div>
       </section>
 
       <button onClick={deleteSite} className="text-sm text-red-400 hover:text-red-300">

@@ -1,11 +1,11 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  ArrowLeft, Check, ChevronDown, ChevronUp, Copy, Film, GripVertical, ImagePlus, Loader2, MousePointerClick, Palette, Pencil, Plus, Save, Sparkles, Trash2, Wand2, X,
+  ArrowLeft, Check, ChevronDown, ChevronUp, Copy, Film, GripVertical, ImagePlus, Loader2, Megaphone, MousePointerClick, Palette, Pencil, Plus, Save, Search, Sparkles, Trash2, Wand2, X,
 } from 'lucide-react'
 import { cappeApi } from '../../../api/cappeClient'
 import { useCappeMe } from '../../../hooks/useCappeMe'
-import { BODY_FONTS, CAPPE_THEMES, FONT_PAIRINGS, HEADING_FONTS, RADII, contrastText } from '../../../data/cappeThemes'
+import { BODY_FONTS, CAPPE_THEMES, FONT_CATEGORY, FONT_PAIRINGS, HEADING_FONTS, RADII, contrastText } from '../../../data/cappeThemes'
 import type { CappeBlock, CappePage, CappeSite } from '../../../types/cappe'
 
 // ── theme helpers (operate on the freeform theme_config object) ─────────────
@@ -626,6 +626,192 @@ function GradientPicker({ value, onChange }: { value: Record<string, unknown>; o
   )
 }
 
+// ── promos panel (site-wide announcement bar + pop-up) ───────────────────────
+function PInput({ label, value, onChange, ph, area }: {
+  label: string; value: unknown; onChange: (v: string) => void; ph?: string; area?: boolean
+}) {
+  return (
+    <label className="block"><span className={dLabel}>{label}</span>
+      {area
+        ? <textarea value={str(value)} onChange={(e) => onChange(e.target.value)} rows={2} placeholder={ph} className={`${inputCls} py-1.5`} />
+        : <input value={str(value)} onChange={(e) => onChange(e.target.value)} placeholder={ph} className={`${inputCls} py-1.5`} />}
+    </label>
+  )
+}
+
+/** Site-wide promotions editor: an announcement bar + a pop-up modal stored on
+ *  the site's meta_config.promos. Pro/Business only. Previews live; saved on the
+ *  page editor's Save. */
+function PromosPanel({ meta, premium, onChange, dirty }: {
+  meta: Record<string, unknown>
+  premium: boolean
+  onChange: (m: Record<string, unknown>) => void
+  dirty: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const promos = obj(meta.promos)
+  const bar = obj(promos.bar)
+  const popup = obj(promos.popup)
+  const patch = (group: 'bar' | 'popup', key: string, value: unknown) =>
+    onChange({ ...meta, promos: { ...promos, [group]: { ...obj(promos[group]), [key]: value } } })
+  const popMode = str(popup.mode) || 'newsletter'
+  const popTrigger = str(popup.trigger) || 'load'
+
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen((o) => !o)}
+        className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium ${open ? 'border-emerald-500 text-emerald-400' : 'border-zinc-700 text-zinc-300 hover:bg-zinc-800'}`}>
+        <Megaphone className="h-4 w-4" /> Promos{dirty && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-30 mt-1 max-h-[80vh] w-80 overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 p-3 shadow-2xl shadow-black/50">
+            {!premium ? (
+              <PremiumLock>Upgrade to Pro to add sale banners &amp; pop-ups that grow your list.</PremiumLock>
+            ) : (
+              <>
+                {/* Announcement bar */}
+                <section className="space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <p className={dHead}>Announcement bar</p>
+                    <DCheck label="On" checked={isOn(bar.enabled)} onChange={(v) => patch('bar', 'enabled', v)} />
+                  </div>
+                  {isOn(bar.enabled) && (
+                    <>
+                      <PInput label="Message" value={bar.text} onChange={(v) => patch('bar', 'text', v)} ph="Summer sale — 20% off everything" />
+                      <div className="grid grid-cols-2 gap-2">
+                        <PInput label="Button label" value={bar.ctaLabel} onChange={(v) => patch('bar', 'ctaLabel', v)} ph="Shop now" />
+                        <PInput label="Button link" value={bar.ctaHref} onChange={(v) => patch('bar', 'ctaHref', v)} ph="/p/shop" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <DSelect label="Position" value={str(bar.position) || 'top'} onChange={(v) => patch('bar', 'position', v)} options={[['top', 'Top'], ['bottom', 'Bottom (sticky)']]} />
+                        <div className="flex items-end pb-1"><DCheck label="Dismissible" checked={isOn(bar.dismissible)} onChange={(v) => patch('bar', 'dismissible', v)} /></div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <DColor label="Background" value={str(bar.bg)} onChange={(v) => patch('bar', 'bg', v)} />
+                        <DColor label="Text" value={str(bar.color)} onChange={(v) => patch('bar', 'color', v)} />
+                      </div>
+                    </>
+                  )}
+                </section>
+
+                {/* Pop-up modal */}
+                <section className="mt-3 space-y-2.5 border-t border-zinc-800 pt-3">
+                  <div className="flex items-center justify-between">
+                    <p className={dHead}>Pop-up</p>
+                    <DCheck label="On" checked={isOn(popup.enabled)} onChange={(v) => patch('popup', 'enabled', v)} />
+                  </div>
+                  {isOn(popup.enabled) && (
+                    <>
+                      <div className="grid grid-cols-2 gap-2">
+                        <DSelect label="Show on" value={popTrigger} onChange={(v) => patch('popup', 'trigger', v)} options={[['load', 'Page load'], ['delay', 'After delay'], ['exit', 'Exit intent']]} />
+                        {popTrigger === 'delay'
+                          ? <DNum label="Delay (sec)" value={Number(popup.delaySec) || 5} min={0} max={120} onChange={(v) => patch('popup', 'delaySec', v)} />
+                          : <DSelect label="Frequency" value={str(popup.frequency) || 'session'} onChange={(v) => patch('popup', 'frequency', v)} options={[['session', 'Once / visit'], ['once', 'Once ever'], ['always', 'Every load']]} />}
+                      </div>
+                      {popTrigger === 'delay' && (
+                        <DSelect label="Frequency" value={str(popup.frequency) || 'session'} onChange={(v) => patch('popup', 'frequency', v)} options={[['session', 'Once / visit'], ['once', 'Once ever'], ['always', 'Every load']]} />
+                      )}
+                      <DSelect label="Goal" value={popMode} onChange={(v) => patch('popup', 'mode', v)} options={[['newsletter', 'Collect emails'], ['code', 'Show discount code'], ['cta', 'Call to action']]} />
+                      <PInput label="Heading" value={popup.heading} onChange={(v) => patch('popup', 'heading', v)} ph="Get 10% off your first order" />
+                      <PInput label="Body" value={popup.body} onChange={(v) => patch('popup', 'body', v)} ph="Join our list for early drops & deals." area />
+                      <div><span className={dLabel}>Image (optional)</span><ImageInput value={popup.image} onChange={(v) => patch('popup', 'image', v)} /></div>
+                      {popMode === 'newsletter' && <PInput label="Button label" value={popup.ctaLabel} onChange={(v) => patch('popup', 'ctaLabel', v)} ph="Subscribe" />}
+                      {popMode === 'code' && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <PInput label="Discount code" value={popup.code} onChange={(v) => patch('popup', 'code', v)} ph="WELCOME10" />
+                          <PInput label="Button label" value={popup.ctaLabel} onChange={(v) => patch('popup', 'ctaLabel', v)} ph="Shop now" />
+                        </div>
+                      )}
+                      {popMode === 'cta' && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <PInput label="Button label" value={popup.ctaLabel} onChange={(v) => patch('popup', 'ctaLabel', v)} ph="Learn more" />
+                          <PInput label="Button link" value={popup.ctaHref} onChange={(v) => patch('popup', 'ctaHref', v)} ph="/p/about" />
+                        </div>
+                      )}
+                      {popMode === 'code' && (
+                        <PInput label="Button link" value={popup.ctaHref} onChange={(v) => patch('popup', 'ctaHref', v)} ph="/p/shop" />
+                      )}
+                      <DColor label="Card background" value={str(popup.bg)} onChange={(v) => patch('popup', 'bg', v)} />
+                    </>
+                  )}
+                </section>
+                <p className="mt-3 text-[11px] text-zinc-500">Previews live (switch to Form preview to see the pop-up). <span className="text-zinc-300">Save</span> to publish.</p>
+              </>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// Lazy-load every catalog family (one Google Fonts request) so the picker can
+// render each option in its own typeface. Injected once, on first open.
+const FONT_CATS: ('Sans' | 'Serif' | 'Display' | 'Mono' | 'Handwriting')[] = ['Sans', 'Serif', 'Display', 'Mono', 'Handwriting']
+function ensureFontPreviewCss() {
+  const id = 'cz-fontpreview'
+  if (document.getElementById(id)) return
+  const parts = HEADING_FONTS.map((f) => `family=${encodeURIComponent(f)}:wght@500;700`).join('&')
+  const link = document.createElement('link')
+  link.id = id
+  link.rel = 'stylesheet'
+  link.href = `https://fonts.googleapis.com/css2?${parts}&display=swap`
+  document.head.appendChild(link)
+}
+
+/** Searchable font picker — renders each option in its own typeface, grouped by
+ *  category. `bodyOnly` narrows to body-readable families. */
+function CappeFontPicker({ label, value, onChange, bodyOnly }: {
+  label: string; value: string; onChange: (v: string) => void; bodyOnly?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const list = bodyOnly ? BODY_FONTS : HEADING_FONTS
+  useEffect(() => { if (open) ensureFontPreviewCss() }, [open])
+  const filtered = list.filter((n) => n.toLowerCase().includes(q.trim().toLowerCase()))
+  return (
+    <div className="relative">
+      <span className={dLabel}>{label}</span>
+      <button type="button" onClick={() => setOpen((o) => !o)}
+        className={`${inputCls} flex items-center justify-between py-1.5`} style={{ fontFamily: `'${value}', sans-serif` }}>
+        <span className="truncate">{value || 'Choose font'}</span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => { setOpen(false); setQ('') }} />
+          <div className="absolute z-30 mt-1 max-h-72 w-full overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 p-1.5 shadow-xl shadow-black/40">
+            <div className="relative mb-1">
+              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
+              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search fonts…" className={`${inputCls} py-1.5 pl-7`} />
+            </div>
+            {FONT_CATS.map((cat) => {
+              const items = filtered.filter((n) => FONT_CATEGORY[n] === cat)
+              if (!items.length) return null
+              return (
+                <div key={cat}>
+                  <p className="px-2 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">{cat}</p>
+                  {items.map((n) => (
+                    <button key={n} type="button" onClick={() => { onChange(n); setOpen(false); setQ('') }}
+                      className={`flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-emerald-500/10 ${n === value ? 'text-emerald-400' : 'text-zinc-200'}`}
+                      style={{ fontFamily: `'${n}', sans-serif` }}>
+                      <span className="truncate">{n}</span>
+                      {n === value && <Check className="h-3.5 w-3.5 shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+              )
+            })}
+            {!filtered.length && <p className="px-2 py-3 text-center text-xs text-zinc-500">No fonts match.</p>}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 /** Per-block design inspector — motion, background, layout & section colors.
  *  Writes a nested `_design` object on the block. Pro/Business only. */
 function DesignInspector({ design, onChange }: { design: unknown; onChange: (d: Record<string, unknown>) => void }) {
@@ -634,6 +820,9 @@ function DesignInspector({ design, onChange }: { design: unknown; onChange: (d: 
   const d = obj(design)
   const motion = obj(d.motion), bg = obj(d.bg), layout = obj(d.layout), colors = obj(d.colors)
   const fx = str(motion.effect) || 'none'
+  const hover = str(motion.hover) || 'none'
+  const loop = str(motion.loop) || 'none'
+  const headingFx = str(motion.heading) || 'none'
   const bgType = str(bg.type) || 'none'
   const patch = (group: string, key: string, value: unknown) =>
     onChange({ ...d, [group]: { ...obj(d[group]), [key]: value } })
@@ -653,13 +842,18 @@ function DesignInspector({ design, onChange }: { design: unknown; onChange: (d: 
             <>
               <section className="space-y-2">
                 <p className={dHead}>Motion</p>
-                <DSelect label="Reveal on scroll" value={fx} onChange={(v) => patch('motion', 'effect', v)} options={[['none', 'None'], ['fade', 'Fade'], ['slide-up', 'Slide up'], ['slide-left', 'Slide left'], ['slide-right', 'Slide right'], ['zoom', 'Zoom'], ['blur-in', 'Blur in']]} />
+                <DSelect label="Reveal on scroll" value={fx} onChange={(v) => patch('motion', 'effect', v)} options={[['none', 'None'], ['fade', 'Fade'], ['slide-up', 'Slide up'], ['slide-down', 'Slide down'], ['slide-left', 'Slide left'], ['slide-right', 'Slide right'], ['zoom', 'Zoom'], ['blur-in', 'Blur in'], ['flip', 'Flip'], ['rotate', 'Rotate in'], ['mask-up', 'Mask up'], ['bounce', 'Bounce']]} />
                 {fx !== 'none' && (
                   <div className="grid grid-cols-2 gap-2">
                     <DNum label="Delay (ms)" value={Number(motion.delay) || 0} min={0} max={2000} step={50} onChange={(v) => patch('motion', 'delay', v)} />
                     <DNum label="Duration (ms)" value={Number(motion.duration) || 700} min={100} max={2000} step={50} onChange={(v) => patch('motion', 'duration', v)} />
                   </div>
                 )}
+                <div className="grid grid-cols-2 gap-2">
+                  <DSelect label="Hover effect" value={hover} onChange={(v) => patch('motion', 'hover', v)} options={[['none', 'None'], ['lift', 'Lift'], ['tilt', 'Tilt 3D'], ['glow', 'Glow']]} />
+                  <DSelect label="Continuous loop" value={loop} onChange={(v) => patch('motion', 'loop', v)} options={[['none', 'None'], ['float', 'Float'], ['pulse', 'Pulse']]} />
+                </div>
+                <DSelect label="Heading animation" value={headingFx} onChange={(v) => patch('motion', 'heading', v)} options={[['none', 'None'], ['rise', 'Rise in'], ['shimmer', 'Shimmer']]} />
                 <div className="flex flex-wrap gap-x-4 gap-y-1.5">
                   <DCheck label="Stagger children" checked={isOn(motion.stagger)} onChange={(v) => patch('motion', 'stagger', v)} />
                   <DCheck label="Parallax" checked={isOn(motion.parallax)} onChange={(v) => patch('motion', 'parallax', v)} />
@@ -864,6 +1058,12 @@ export default function PageEditor() {
   const [themeDirty, setThemeDirty] = useState(false)
   const [themeOpen, setThemeOpen] = useState(false)
 
+  // Site-wide promos (announcement bar + pop-up) live on the site's meta_config,
+  // edited here with live preview, persisted to the site on Save.
+  const [meta, setMeta] = useState<Record<string, unknown>>({})
+  const [promosDirty, setPromosDirty] = useState(false)
+  const [promosOpen, setPromosOpen] = useState(false)
+
   useEffect(() => {
     if (!siteId || !pageId) return
     Promise.all([
@@ -879,6 +1079,7 @@ export default function PageEditor() {
         const bs = (p.content?.blocks as CappeBlock[]) || []
         setBlocks(Array.isArray(bs) ? bs : [])
         setTheme(themeObj(site?.theme_config))
+        setMeta(themeObj(site?.meta_config))
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load page'))
       .finally(() => setLoading(false))
@@ -895,13 +1096,13 @@ export default function PageEditor() {
       if (suspendPreview.current) return
       cappeApi
         .postHtml(`/sites/${siteId}/preview`, {
-          title, slug: page.slug, content: { blocks }, theme_config: theme, editable: editMode === 'canvas',
+          title, slug: page.slug, content: { blocks }, theme_config: theme, meta_config: meta, editable: editMode === 'canvas',
         })
         .then((html) => { if (seq === previewSeq.current) setPreview(html) })
         .catch(() => { /* keep last good preview */ })
     }, 400)
     return () => clearTimeout(t)
-  }, [siteId, page, title, blocks, theme, editMode, refreshTick])
+  }, [siteId, page, title, blocks, theme, meta, editMode, refreshTick])
 
   // Canvas bridge: the framed runtime posts selection/edit/reorder events; we
   // validate by source identity (the iframe is opaque-origin, so `e.origin` is
@@ -1030,10 +1231,14 @@ export default function PageEditor() {
         content: { blocks },
       })
       setPage(updated)
-      // Persist the theme to the site too, if it was changed here.
-      if (themeDirty) {
-        await cappeApi.put<CappeSite>(`/sites/${siteId}`, { theme_config: theme })
+      // Persist the theme + promos (meta_config) to the site too, if changed here.
+      if (themeDirty || promosDirty) {
+        const patch: Record<string, unknown> = {}
+        if (themeDirty) patch.theme_config = theme
+        if (promosDirty) patch.meta_config = meta
+        await cappeApi.put<CappeSite>(`/sites/${siteId}`, patch)
         setThemeDirty(false)
+        setPromosDirty(false)
       }
       setNotice('Saved.')
       setTimeout(() => setNotice(null), 2000)
@@ -1075,6 +1280,9 @@ export default function PageEditor() {
           <div className="flex items-center gap-2">
             {notice && <span className="text-sm text-emerald-400">{notice}</span>}
             {error && <span className="text-sm text-red-400">{error}</span>}
+
+            {/* Site-wide promos (announcement bar + pop-up) */}
+            <PromosPanel meta={meta} premium={designerUnlocked} dirty={promosDirty} onChange={(m) => { setMeta(m); setPromosDirty(true) }} />
 
             {/* Live theme switcher + tweaks */}
             <div className="relative">
@@ -1166,14 +1374,8 @@ export default function PageEditor() {
                       ) : (
                         <>
                           <div className="grid grid-cols-2 gap-2">
-                            <label className="block"><span className={dLabel}>Heading font</span>
-                              <select value={themeFonts(theme).heading || 'Inter'} onChange={(e) => setHeadingFont(e.target.value)} className={`${inputCls} py-1.5`}>
-                                {HEADING_FONTS.map((f) => <option key={f} value={f}>{f}</option>)}
-                              </select></label>
-                            <label className="block"><span className={dLabel}>Body font</span>
-                              <select value={themeFonts(theme).body || 'Inter'} onChange={(e) => setBodyFont(e.target.value)} className={`${inputCls} py-1.5`}>
-                                {BODY_FONTS.map((f) => <option key={f} value={f}>{f}</option>)}
-                              </select></label>
+                            <CappeFontPicker label="Heading font" value={themeFonts(theme).heading || 'Inter'} onChange={setHeadingFont} />
+                            <CappeFontPicker label="Body font" value={themeFonts(theme).body || 'Inter'} onChange={setBodyFont} bodyOnly />
                           </div>
                           <div className="grid grid-cols-2 gap-2">
                             <label className="block"><span className={dLabel}>Heading weight</span>

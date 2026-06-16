@@ -522,12 +522,28 @@ export type CappeReview = {
 export type CappeClient = {
   email: string
   name: string | null
+  phone?: string | null
   orders_count: number
   bookings_count: number
   is_subscriber: boolean
   has_thread: boolean
+  is_imported?: boolean
   total_spent_cents: number
   last_activity: string | null
+  location_id?: string | null
+  location_name?: string | null
+}
+
+export type CappeClientImportError = { row: number; email: string | null; reason: string }
+
+export type CappeClientImportResult = {
+  total: number
+  created: number
+  updated: number
+  skipped: number
+  newsletter_added: number
+  branches_matched: number
+  errors: CappeClientImportError[]
 }
 
 // --- Blog -------------------------------------------------------------------

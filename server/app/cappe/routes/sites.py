@@ -163,7 +163,8 @@ async def preview_site_page(
         "slug": site["slug"],
         # Unsaved theme override (live theme switcher) wins over the saved theme.
         "theme_config": body.theme_config if body.theme_config is not None else loads(site["theme_config"]),
-        "meta_config": loads(site["meta_config"]),
+        # Unsaved meta override (live promos editing) wins over the saved meta.
+        "meta_config": body.meta_config if body.meta_config is not None else loads(site["meta_config"]),
     }
     nav = [{"slug": r["slug"], "title": r["title"]} for r in nav_rows] or [{"slug": "home", "title": "Home"}]
     page = {"title": body.title or "Page", "slug": body.slug or "home", "content": body.content or {}}
