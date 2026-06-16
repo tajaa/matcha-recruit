@@ -544,12 +544,6 @@ function usePremium(): boolean {
   return account?.plan === 'pro' || account?.plan === 'business'
 }
 
-// Canvas (click-on-page) mode is the top-tier flagship — Business only.
-function useBusinessTier(): boolean {
-  const { account } = useCappeMe()
-  return account?.plan === 'business'
-}
-
 function PremiumLock({ children }: { children: ReactNode }) {
   return (
     <div className="rounded-lg border border-dashed border-amber-700/40 bg-amber-500/[0.06] px-3 py-2.5 text-xs text-amber-300/90">
@@ -1037,8 +1031,8 @@ export default function PageEditor() {
   const [preview, setPreview] = useState('')
   const previewSeq = useRef(0)
 
-  // ── Canvas mode (Business only): click-on-page editing via the preview iframe.
-  const canvasUnlocked = useBusinessTier()
+  // ── Canvas mode (Pro & Business): click-on-page editing via the preview iframe.
+  const canvasUnlocked = usePremium()
   const [editMode, setEditMode] = useState<'form' | 'canvas'>('form')
   useEffect(() => { if (canvasUnlocked) setEditMode('canvas') }, [canvasUnlocked])
   const [selBlock, setSelBlock] = useState<number | null>(null)
@@ -1430,7 +1424,7 @@ export default function PageEditor() {
         </div>
 
         {editMode === 'canvas' ? (
-          /* canvas: click a section on the page → a floating editor pops up at it (Business) */
+          /* canvas: click a section on the page → a floating editor pops up at it (Pro & Business) */
           <div className="relative flex min-h-0 flex-1">
             <div className="hidden flex-1 bg-zinc-900 lg:block">
               {preview ? (
