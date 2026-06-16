@@ -265,6 +265,41 @@ export type CappeFormSubmission = {
 
 export type CappePricingMode = 'flat' | 'hourly'
 
+// One day's hours (Mon=0..Sun=6). open/close "HH:MM"; closed = no hours that day.
+export type CappeLocationHours = { day: number; open?: string | null; close?: string | null; closed?: boolean }
+
+export type CappeLocation = {
+  id: string
+  site_id: string
+  name: string
+  address: string | null
+  lat: number | null
+  lng: number | null
+  timezone: string | null
+  hours: CappeLocationHours[]
+  contact_phone: string | null
+  contact_email: string | null
+  is_default: boolean
+  active: boolean
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export type CappeLocationInput = {
+  name: string
+  address?: string | null
+  lat?: number | null
+  lng?: number | null
+  timezone?: string | null
+  hours?: CappeLocationHours[]
+  contact_phone?: string | null
+  contact_email?: string | null
+  is_default?: boolean
+  active?: boolean
+  sort_order?: number
+}
+
 export type CappeStaff = {
   id: string
   site_id: string
@@ -273,6 +308,7 @@ export type CappeStaff = {
   image_url: string | null
   active: boolean
   sort_order: number
+  location_id?: string | null
   created_at: string
   updated_at: string
 }
@@ -290,6 +326,7 @@ export type CappeBookingType = {
   category: string | null
   buffer_minutes: number
   staff_ids: string[]
+  location_id?: string | null
   created_at: string
   updated_at: string
 }
@@ -300,6 +337,7 @@ export type CappeAvailabilitySlot = {
   end_time: string
   booking_type_id: string | null
   staff_id?: string | null
+  location_id?: string | null
 }
 
 // Time-window rate multiplier (e.g. after 8pm = 2x). weekday null = every day.
@@ -312,6 +350,7 @@ export type CappeRateRule = {
   start_time: string
   end_time: string
   multiplier: number
+  location_id?: string | null
   created_at: string
 }
 
@@ -322,6 +361,7 @@ export type CappeRateRuleInput = {
   start_time: string
   end_time: string
   multiplier: number
+  location_id?: string | null
 }
 
 export type CappeRiderItem = {
@@ -346,6 +386,7 @@ export type CappeDiscount = {
   active: boolean
   starts_on: string | null
   ends_on: string | null
+  location_id?: string | null
   created_at: string
 }
 
@@ -357,6 +398,7 @@ export type CappeDiscountInput = {
   active: boolean
   starts_on: string | null
   ends_on: string | null
+  location_id?: string | null
 }
 
 export type CappeRiderItemInput = {

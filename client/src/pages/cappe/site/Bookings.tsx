@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Loader2, Plus, Trash2, Calendar, Save, Check, X, Lock, Clock, ShieldCheck, List, Percent, Users } from 'lucide-react'
+import { Loader2, Plus, Trash2, Calendar, Save, Check, X, Lock, Clock, ShieldCheck, List, Percent, Users, MapPin } from 'lucide-react'
 import { cappeApi } from '../../../api/cappeClient'
 import { useCappeMe } from '../../../hooks/useCappeMe'
 import SurfaceShell, { WEEKDAYS } from '../../../components/cappe/SurfaceShell'
 import BookingsCalendar from '../../../components/cappe/BookingsCalendar'
 import ImageUpload from '../../../components/cappe/ImageUpload'
+import { CAPPE_TIMEZONES } from '../../../data/timezones'
 import type {
   CappeBooking, CappeBookingType, CappeAvailabilitySlot,
   CappeRateRule, CappeRiderItem, CappePricingMode,
-  CappeDiscount, CappeProduct, CappeStaff,
+  CappeDiscount, CappeProduct, CappeStaff, CappeLocation,
 } from '../../../types/cappe'
 
 const hhmm = (t: string) => t.slice(0, 5)
@@ -35,6 +36,10 @@ export default function Bookings() {
   const [products, setProducts] = useState<CappeProduct[]>([])
   const [discounts, setDiscounts] = useState<CappeDiscount[]>([])
   const [staff, setStaff] = useState<CappeStaff[]>([])
+  const [locations, setLocations] = useState<CappeLocation[]>([])
+  const [selLoc, setSelLoc] = useState<string>('')  // '' = Shared / all locations
+  const [showLocMgr, setShowLocMgr] = useState(false)
+  const [locForm, setLocForm] = useState({ name: '', timezone: '', address: '', phone: '' })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<'calendar' | 'list'>('calendar')
@@ -51,23 +56,69 @@ export default function Bookings() {
   const isCreator = account?.account_type === 'personal'
   const riderUnlocked = isCreator && account?.plan === 'pro'
 
-  useEffect(() => {
-    Promise.all([
-      cappeApi.get<CappeBookingType[]>(`/sites/${siteId}/booking-types`),
-      cappeApi.get<CappeAvailabilitySlot[]>(`/sites/${siteId}/availability`),
-      cappeApi.get<CappeBooking[]>(`/sites/${siteId}/bookings`),
-      cappeApi.get<CappeRateRule[]>(`/sites/${siteId}/rate-rules`).catch(() => []),
+  // Config (types/availability/staff/rates/discounts) is scoped to the selected
+  // location: a concrete location → its rows + shared (NULL); '' with locations
+  // present → only shared; no locations → everything (today's behavior). The
+  // bookings LIST filters to the location (or all when '').
+  async function loadConfig(locs: CappeLocation[], loc: string) {
+    const cfg = locs.length === 0 ? '' : (loc ? `?location_id=${loc}` : '?shared=true')
+    const bq = loc ? `?location_id=${loc}` : ''
+    const [t, a, b, r, rd, p, d, st] = await Promise.all([
+      cappeApi.get<CappeBookingType[]>(`/sites/${siteId}/booking-types${cfg}`),
+      cappeApi.get<CappeAvailabilitySlot[]>(`/sites/${siteId}/availability${cfg}`),
+      cappeApi.get<CappeBooking[]>(`/sites/${siteId}/bookings${bq}`),
+      cappeApi.get<CappeRateRule[]>(`/sites/${siteId}/rate-rules${cfg}`).catch(() => []),
       cappeApi.get<CappeRiderItem[]>(`/sites/${siteId}/rider`).catch(() => []),
       cappeApi.get<CappeProduct[]>(`/sites/${siteId}/products`).catch(() => []),
-      cappeApi.get<CappeDiscount[]>(`/sites/${siteId}/discounts`).catch(() => []),
-      cappeApi.get<CappeStaff[]>(`/sites/${siteId}/staff`).catch(() => []),
+      cappeApi.get<CappeDiscount[]>(`/sites/${siteId}/discounts${cfg}`).catch(() => []),
+      cappeApi.get<CappeStaff[]>(`/sites/${siteId}/staff${cfg}`).catch(() => []),
     ])
-      .then(([t, a, b, r, rd, p, d, st]) => {
-        setTypes(t); setSlots(a); setBookings(b); setRules(r); setRider(rd); setProducts(p); setDiscounts(d); setStaff(st)
+    setTypes(t); setSlots(a); setBookings(b); setRules(r); setRider(rd); setProducts(p); setDiscounts(d); setStaff(st)
+  }
+
+  function switchLocation(loc: string) {
+    setSelLoc(loc)
+    loadConfig(locations, loc).catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
+  }
+
+  useEffect(() => {
+    cappeApi.get<CappeLocation[]>(`/sites/${siteId}/locations`).catch(() => [] as CappeLocation[])
+      .then((locs) => {
+        setLocations(locs)
+        const def = locs.find((l) => l.is_default && l.active) || locs.find((l) => l.active)
+        const init = def ? def.id : ''
+        setSelLoc(init)
+        return loadConfig(locs, init)
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false))
   }, [siteId])
+
+  // --- Locations ---
+  async function addLocation(e: React.FormEvent) {
+    e.preventDefault()
+    if (!locForm.name.trim()) return
+    const created = await cappeApi.post<CappeLocation>(`/sites/${siteId}/locations`, {
+      name: locForm.name.trim(),
+      timezone: locForm.timezone || null,
+      address: locForm.address.trim() || null,
+      contact_phone: locForm.phone.trim() || null,
+    })
+    setLocations((ls) => [...ls, created])
+    setLocForm({ name: '', timezone: '', address: '', phone: '' })
+    switchLocation(created.id)
+  }
+  async function setLocationDefault(id: string) {
+    const updated = await cappeApi.put<CappeLocation>(`/sites/${siteId}/locations/${id}`, { is_default: true })
+    setLocations((ls) => ls.map((l) => ({ ...l, is_default: l.id === id })).map((l) => (l.id === id ? updated : l)))
+  }
+  async function deactivateLocation(id: string) {
+    if (!window.confirm('Deactivate this location? Its appointment history is kept.')) return
+    await cappeApi.delete(`/sites/${siteId}/locations/${id}`)
+    const next = locations.filter((l) => l.id !== id)
+    setLocations(next)
+    if (selLoc === id) switchLocation(next.find((l) => l.active)?.id || '')
+  }
 
   async function addType(e: React.FormEvent) {
     e.preventDefault()
@@ -82,6 +133,7 @@ export default function Bookings() {
       category: typeForm.category.trim() || null,
       buffer_minutes: parseInt(typeForm.buffer, 10) || 0,
       staff_ids: typeForm.staffIds,
+      location_id: selLoc || null,
     })
     setTypes((t) => [...t, created])
     setTypeForm({ name: '', description: '', duration_minutes: '30', pricing_mode: 'flat', price: '', requires_approval: false, category: '', buffer: '0', staffIds: [] })
@@ -93,6 +145,7 @@ export default function Bookings() {
     if (!staffForm.name.trim()) return
     const created = await cappeApi.post<CappeStaff>(`/sites/${siteId}/staff`, {
       name: staffForm.name.trim(), bio: staffForm.bio.trim() || null, image_url: staffForm.image_url.trim() || null,
+      location_id: selLoc || null,
     })
     setStaff((s) => [...s, created])
     setStaffForm({ name: '', bio: '', image_url: '' })
@@ -131,7 +184,8 @@ export default function Bookings() {
     setError(null)
     try {
       const payload = { slots: slots.map((s) => ({ ...s, start_time: hhmm(s.start_time), end_time: hhmm(s.end_time) })) }
-      const saved = await cappeApi.put<CappeAvailabilitySlot[]>(`/sites/${siteId}/availability`, payload)
+      const q = selLoc ? `?location_id=${selLoc}` : ''
+      const saved = await cappeApi.put<CappeAvailabilitySlot[]>(`/sites/${siteId}/availability${q}`, payload)
       setSlots(saved)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save availability')
@@ -160,7 +214,8 @@ export default function Bookings() {
           start_time: hhmm(r.start_time), end_time: hhmm(r.end_time), multiplier: r.multiplier,
         })),
       }
-      const saved = await cappeApi.put<CappeRateRule[]>(`/sites/${siteId}/rate-rules`, payload)
+      const q = selLoc ? `?location_id=${selLoc}` : ''
+      const saved = await cappeApi.put<CappeRateRule[]>(`/sites/${siteId}/rate-rules${q}`, payload)
       setRules(saved)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save rate rules')
@@ -224,7 +279,8 @@ export default function Bookings() {
           ends_on: d.ends_on || null,
         })),
       }
-      const saved = await cappeApi.put<CappeDiscount[]>(`/sites/${siteId}/discounts`, payload)
+      const q = selLoc ? `?location_id=${selLoc}` : ''
+      const saved = await cappeApi.put<CappeDiscount[]>(`/sites/${siteId}/discounts${q}`, payload)
       setDiscounts(saved)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save discounts')
@@ -260,6 +316,61 @@ export default function Bookings() {
   return (
     <SurfaceShell title="Bookings" subtitle="Appointment types, availability, pricing, and requests.">
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
+
+      {/* Location switcher — manage each location's appts/staff/hours separately */}
+      <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <MapPin className="h-4 w-4 text-emerald-400" />
+            {locations.filter((l) => l.active).length > 0 ? (
+              <>
+                <span className="text-xs text-zinc-500">Managing</span>
+                <select value={selLoc} onChange={(e) => switchLocation(e.target.value)} className={inputCls}>
+                  {locations.filter((l) => l.active).map((l) => (
+                    <option key={l.id} value={l.id}>{l.name}{l.is_default ? ' · default' : ''}</option>
+                  ))}
+                  <option value="">Shared · all locations</option>
+                </select>
+              </>
+            ) : (
+              <span className="text-sm text-zinc-400">One location. Add another to manage (e.g.) LA and San Diego separately.</span>
+            )}
+          </div>
+          <button onClick={() => setShowLocMgr((o) => !o)} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800">
+            {showLocMgr ? 'Done' : 'Manage locations'}
+          </button>
+        </div>
+        {selLoc === '' && locations.filter((l) => l.active).length > 0 && (
+          <p className="mt-2 text-xs text-zinc-500">Editing the <span className="text-zinc-300">shared</span> set — applies to every location. Pick a location to edit just its appointments.</p>
+        )}
+        {showLocMgr && (
+          <div className="mt-4 space-y-2 border-t border-zinc-800 pt-4">
+            {locations.filter((l) => l.active).map((l) => (
+              <div key={l.id} className="flex items-center gap-2 text-sm">
+                <span className="flex-1 text-zinc-200">
+                  {l.name}
+                  {l.is_default && <span className="ml-2 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400">DEFAULT</span>}
+                  {l.timezone && <span className="ml-2 text-xs text-zinc-500">{l.timezone}</span>}
+                </span>
+                {!l.is_default && <button onClick={() => setLocationDefault(l.id)} className="text-xs text-zinc-400 hover:text-emerald-400">Make default</button>}
+                <button onClick={() => deactivateLocation(l.id)} className="text-zinc-500 hover:text-red-400" title="Deactivate"><Trash2 className="h-4 w-4" /></button>
+              </div>
+            ))}
+            <form onSubmit={addLocation} className="grid grid-cols-2 gap-2 pt-1 sm:grid-cols-4">
+              <input value={locForm.name} onChange={(e) => setLocForm((f) => ({ ...f, name: e.target.value }))} placeholder="Name (e.g. LA)" className={inputCls} />
+              <select value={locForm.timezone} onChange={(e) => setLocForm((f) => ({ ...f, timezone: e.target.value }))} className={inputCls}>
+                <option value="">Timezone…</option>
+                {CAPPE_TIMEZONES.map((tz) => <option key={tz.value} value={tz.value}>{tz.label}</option>)}
+              </select>
+              <input value={locForm.address} onChange={(e) => setLocForm((f) => ({ ...f, address: e.target.value }))} placeholder="Address" className={inputCls} />
+              <input value={locForm.phone} onChange={(e) => setLocForm((f) => ({ ...f, phone: e.target.value }))} placeholder="Phone" className={inputCls} />
+              <button type="submit" className="col-span-2 inline-flex items-center justify-center gap-1 rounded-lg border border-dashed border-zinc-700 py-2 text-sm font-medium text-zinc-300 hover:border-emerald-500 hover:text-emerald-400 sm:col-span-4">
+                <Plus className="h-4 w-4" /> Add location
+              </button>
+            </form>
+          </div>
+        )}
+      </section>
 
       {/* Requests needing approval — the creator's queue */}
       {pending.length > 0 && (
