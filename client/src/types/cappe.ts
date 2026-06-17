@@ -110,6 +110,7 @@ export type CappeProductOption = {
   name: string
   price_delta_cents: number
   sort_order: number
+  inventory?: number | null
 }
 export type CappeProductOptionGroup = {
   id: string
@@ -120,7 +121,18 @@ export type CappeProductOptionGroup = {
   options: CappeProductOption[]
 }
 // Input shapes for the product editor (whole-set replace).
-export type CappeProductOptionInput = { name: string; price_delta_cents: number; sort_order?: number }
+export type CappeProductOptionInput = { name: string; price_delta_cents: number; sort_order?: number; inventory?: number | null }
+
+export type CappeInventoryAdjustment = {
+  id: string
+  product_id: string
+  option_id: string | null
+  delta: number
+  balance_after: number | null
+  reason: string
+  note: string | null
+  created_at: string
+}
 export type CappeProductOptionGroupInput = {
   name: string
   select_type: 'single' | 'multi'
@@ -139,6 +151,7 @@ export type CappeProduct = {
   image_url: string | null
   sku: string | null
   inventory: number | null
+  low_stock_threshold: number | null
   status: 'active' | 'draft' | 'archived'
   sort_order: number
   fulfillment: CappeFulfillment

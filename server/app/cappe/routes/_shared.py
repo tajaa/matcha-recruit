@@ -148,7 +148,7 @@ async def fetch_option_groups(conn, product_ids: list) -> dict:
         product_ids,
     )
     orows = await conn.fetch(
-        "SELECT o.id, o.group_id, o.name, o.price_delta_cents, o.sort_order "
+        "SELECT o.id, o.group_id, o.name, o.price_delta_cents, o.sort_order, o.inventory "
         "FROM cappe_product_options o "
         "JOIN cappe_product_option_groups g ON g.id = o.group_id "
         "WHERE g.product_id = ANY($1::uuid[]) ORDER BY o.sort_order, o.created_at",
@@ -159,6 +159,7 @@ async def fetch_option_groups(conn, product_ids: list) -> dict:
         opts_by_group.setdefault(o["group_id"], []).append({
             "id": o["id"], "name": o["name"],
             "price_delta_cents": o["price_delta_cents"], "sort_order": o["sort_order"],
+            "inventory": o["inventory"],
         })
     by_product: dict = {}
     for g in grows:

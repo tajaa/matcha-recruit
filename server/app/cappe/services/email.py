@@ -308,6 +308,30 @@ async def send_cappe_order_alert_email(
     await _send(to_email, to_name, f"New order — {site_name}", html, text, label="order alert")
 
 
+async def send_cappe_low_stock_email(
+    to_email: str, to_name: str | None, site_name: str,
+    items: list[tuple[str, int]], dashboard_url: str,
+) -> None:
+    """Low-stock alert to the creator after a sale drops stock to/below the
+    product's threshold. `items` = [(product name, remaining)]. Best-effort."""
+    e_site = escape(site_name or "")
+    rows = "".join(
+        f'<li style="margin:2px 0;"><b style="color:#fafafa;">{escape(str(n))}</b> — '
+        f'{int(bal)} left</li>'
+        for n, bal in items
+    )
+    body = (
+        f'<p style="margin:0 0 6px;font-size:15px;color:#d4d4d8;">A sale on {e_site} left these low on stock:</p>'
+        f'<ul style="margin:8px 0 0;padding-left:18px;color:#d4d4d8;font-size:14px;">{rows}</ul>'
+    )
+    html = _email_shell(f"Low stock — {e_site}", body, cta_label="Manage inventory",
+                        cta_url=dashboard_url, accent="#f59e0b")
+    text = "Low stock on {0}:\n{1}\n\nManage: {2}".format(
+        site_name, "\n".join(f"- {n}: {bal} left" for n, bal in items), dashboard_url
+    )
+    await _send(to_email, to_name, f"Low stock — {site_name}", html, text, label="low stock")
+
+
 # ── transactional: bookings ──────────────────────────────────────────────────
 
 async def send_cappe_booking_received_email(

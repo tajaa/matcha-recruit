@@ -14,21 +14,24 @@ from ..models.cappe import (
     CappeAccount,
     CappeApprovalDecline,
     CappeDeliverableUpdate,
+    CappeInventoryAdjustment,
     CappeOrder,
     CappeOrderItem,
     CappeOrderStatusUpdate,
     CappeProduct,
     CappeProductCreate,
     CappeProductUpdate,
+    CappeStockAdjust,
 )
 from ._shared import fetch_option_groups, get_owned_site, loads, loads_list
+from ..services.inventory import log_adjustment
 
 router = APIRouter()
 
 _PRODUCT_COLS = (
     "id, site_id, name, description, price_cents, currency, image_url, sku, "
-    "inventory, status, sort_order, fulfillment, digital_file_url, booking_type_id, "
-    "requires_approval, intake_fields, category, created_at, updated_at"
+    "inventory, low_stock_threshold, status, sort_order, fulfillment, digital_file_url, "
+    "booking_type_id, requires_approval, intake_fields, category, created_at, updated_at"
 )
 _ORDER_COLS = (
     "id, site_id, customer_email, customer_name, status, subtotal_cents, "
@@ -61,6 +64,16 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
     [] = clear). Mirrors the availability/rate-rule replace pattern."""
     if groups is None:
         return
+    # Preserve per-variant stock across the destructive replace: if an incoming
+    # option omits inventory (None), inherit the prior value matched by
+    # (group name, option name) so an unrelated product edit can't wipe stock.
+    prior = await conn.fetch(
+        "SELECT g.name AS gname, o.name AS oname, o.inventory "
+        "FROM cappe_product_options o JOIN cappe_product_option_groups g ON g.id = o.group_id "
+        "WHERE g.product_id = $1",
+        product_id,
+    )
+    prior_inv = {(r["gname"], r["oname"]): r["inventory"] for r in prior}
     await conn.execute(
         "DELETE FROM cappe_product_option_groups WHERE product_id = $1 AND site_id = $2",
         product_id, site_id,
@@ -73,11 +86,12 @@ async def _replace_option_groups(conn, site_id, product_id, groups) -> None:
             site_id, product_id, g.name, g.select_type, g.required, g.sort_order or gi,
         )
         for oi, o in enumerate(g.options or []):
+            inv = o.inventory if o.inventory is not None else prior_inv.get((g.name, o.name))
             await conn.execute(
                 """INSERT INTO cappe_product_options
-                       (site_id, group_id, name, price_delta_cents, sort_order)
-                   VALUES ($1, $2, $3, $4, $5)""",
-                site_id, gid, o.name, o.price_delta_cents, o.sort_order or oi,
+                       (site_id, group_id, name, price_delta_cents, sort_order, inventory)
+                   VALUES ($1, $2, $3, $4, $5, $6)""",
+                site_id, gid, o.name, o.price_delta_cents, o.sort_order or oi, inv,
             )
 
 
@@ -125,13 +139,13 @@ async def create_product(
             row = await conn.fetchrow(
                 f"""INSERT INTO cappe_products
                         (site_id, name, description, price_cents, currency, image_url, sku, inventory,
-                         status, sort_order, fulfillment, digital_file_url, booking_type_id,
-                         requires_approval, intake_fields, category)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                         low_stock_threshold, status, sort_order, fulfillment, digital_file_url,
+                         booking_type_id, requires_approval, intake_fields, category)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
                     RETURNING {_PRODUCT_COLS}""",
                 site_id, body.name, body.description, body.price_cents, body.currency,
-                body.image_url, body.sku, body.inventory, body.status, body.sort_order,
-                body.fulfillment, body.digital_file_url, body.booking_type_id,
+                body.image_url, body.sku, body.inventory, body.low_stock_threshold, body.status,
+                body.sort_order, body.fulfillment, body.digital_file_url, body.booking_type_id,
                 body.requires_approval, json.dumps(body.intake_fields), body.category,
             )
             await _replace_option_groups(conn, site_id, row["id"], body.option_groups)
@@ -166,8 +180,9 @@ async def update_product(
         async with conn.transaction():
             sets, args = [], []
             for col in ("name", "description", "price_cents", "currency", "image_url",
-                        "sku", "inventory", "status", "sort_order", "fulfillment",
-                        "digital_file_url", "booking_type_id", "requires_approval", "category"):
+                        "sku", "inventory", "low_stock_threshold", "status", "sort_order",
+                        "fulfillment", "digital_file_url", "booking_type_id", "requires_approval",
+                        "category"):
                 val = getattr(body, col)
                 if val is not None:
                     args.append(val)
@@ -206,6 +221,85 @@ async def delete_product(
         )
     if result.endswith(" 0"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+
+@router.post("/sites/{site_id}/products/{product_id}/adjust", response_model=CappeProduct)
+async def adjust_stock(
+    site_id: UUID, product_id: UUID, body: CappeStockAdjust,
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """Manually change stock for a product or one of its variants (restock,
+    damage, correction). Writes an audit row. Only tracked stock can be adjusted."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        async with conn.transaction():
+            if body.option_id is not None:
+                cur = await conn.fetchval(
+                    "SELECT o.inventory FROM cappe_product_options o "
+                    "JOIN cappe_product_option_groups g ON g.id = o.group_id "
+                    "WHERE o.id = $1 AND g.product_id = $2 AND o.site_id = $3 FOR UPDATE",
+                    body.option_id, product_id, site_id,
+                )
+                if cur is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="That variant isn't tracking stock — set a stock number on it first.",
+                    )
+                new_bal = max(0, cur + body.delta)
+                await conn.execute(
+                    "UPDATE cappe_product_options SET inventory = $1 WHERE id = $2", new_bal, body.option_id
+                )
+                await log_adjustment(
+                    conn, site_id=site_id, product_id=product_id, option_id=body.option_id,
+                    delta=new_bal - cur, balance_after=new_bal, reason=body.reason, note=body.note,
+                )
+            else:
+                prow = await conn.fetchrow(
+                    "SELECT inventory FROM cappe_products WHERE id = $1 AND site_id = $2 FOR UPDATE",
+                    product_id, site_id,
+                )
+                if prow is None:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+                if prow["inventory"] is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="This product isn't tracking stock — set a stock number first.",
+                    )
+                new_bal = max(0, prow["inventory"] + body.delta)
+                await conn.execute(
+                    "UPDATE cappe_products SET inventory = $1, updated_at = NOW() WHERE id = $2",
+                    new_bal, product_id,
+                )
+                await log_adjustment(
+                    conn, site_id=site_id, product_id=product_id,
+                    delta=new_bal - prow["inventory"], balance_after=new_bal,
+                    reason=body.reason, note=body.note,
+                )
+            row = await conn.fetchrow(
+                f"SELECT {_PRODUCT_COLS} FROM cappe_products WHERE id = $1 AND site_id = $2",
+                product_id, site_id,
+            )
+        groups = await fetch_option_groups(conn, [product_id])
+    return _product_row(row, groups.get(product_id))
+
+
+@router.get(
+    "/sites/{site_id}/products/{product_id}/inventory-log",
+    response_model=list[CappeInventoryAdjustment],
+)
+async def inventory_log(
+    site_id: UUID, product_id: UUID, account: CappeAccount = Depends(require_cappe_account)
+):
+    """Recent stock changes for a product (newest first)."""
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        rows = await conn.fetch(
+            "SELECT id, product_id, option_id, delta, balance_after, reason, note, created_at "
+            "FROM cappe_inventory_adjustments WHERE site_id = $1 AND product_id = $2 "
+            "ORDER BY created_at DESC LIMIT 100",
+            site_id, product_id,
+        )
+    return [dict(r) for r in rows]
 
 
 # --- Orders -----------------------------------------------------------------
@@ -330,15 +424,36 @@ async def decline_order(
             )
             if order is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No pending order to decline")
-            # Restock physical lines + free any held booking slots.
-            await conn.execute(
-                """UPDATE cappe_products p
-                   SET inventory = p.inventory + oi.quantity, updated_at = NOW()
-                   FROM cappe_order_items oi
-                   WHERE oi.order_id = $1 AND oi.product_id = p.id
-                     AND oi.fulfillment = 'physical' AND p.inventory IS NOT NULL""",
+            # Restock physical lines (product + variant) with an audit row each.
+            phys = await conn.fetch(
+                "SELECT product_id, quantity, selected_option_ids FROM cappe_order_items "
+                "WHERE order_id = $1 AND fulfillment = 'physical'",
                 order_id,
             )
+            for it in phys:
+                pid, q = it["product_id"], it["quantity"]
+                if pid is not None:
+                    bal = await conn.fetchval(
+                        "UPDATE cappe_products SET inventory = inventory + $1, updated_at = NOW() "
+                        "WHERE id = $2 AND site_id = $3 AND inventory IS NOT NULL RETURNING inventory",
+                        q, pid, site_id,
+                    )
+                    if bal is not None:
+                        await log_adjustment(
+                            conn, site_id=site_id, product_id=pid, delta=q,
+                            balance_after=bal, reason="decline_restock",
+                        )
+                for oid in (it["selected_option_ids"] or []):
+                    obal = await conn.fetchval(
+                        "UPDATE cappe_product_options SET inventory = inventory + $1 "
+                        "WHERE id = $2 AND site_id = $3 AND inventory IS NOT NULL RETURNING inventory",
+                        q, oid, site_id,
+                    )
+                    if obal is not None and pid is not None:
+                        await log_adjustment(
+                            conn, site_id=site_id, product_id=pid, option_id=oid, delta=q,
+                            balance_after=obal, reason="decline_restock",
+                        )
             await conn.execute(
                 """UPDATE cappe_bookings SET status = 'declined', updated_at = NOW()
                    WHERE id IN (SELECT booking_id FROM cappe_order_items

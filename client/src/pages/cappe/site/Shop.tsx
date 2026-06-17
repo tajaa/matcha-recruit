@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Loader2, Plus, Trash2, Package } from 'lucide-react'
+import { Loader2, Plus, Trash2, Package, SlidersHorizontal, AlertTriangle } from 'lucide-react'
 import { cappeApi } from '../../../api/cappeClient'
 import SurfaceShell, { centsToMoney } from '../../../components/cappe/SurfaceShell'
 import TaxSettingsCard from '../../../components/cappe/TaxSettingsCard'
+import StockAdjustModal from '../../../components/cappe/StockAdjustModal'
 import ImageUpload from '../../../components/cappe/ImageUpload'
 import type { CappeBookingType, CappeFulfillment, CappeProduct } from '../../../types/cappe'
 
@@ -32,9 +33,9 @@ function keyFromLabel(label: string): string {
 }
 
 type IntakeRow = { label: string; type: string; required: boolean }
-type OptRow = { name: string; price: string }
+type OptRow = { name: string; price: string; stock: string }
 type OptGroupRow = { name: string; select_type: 'single' | 'multi'; required: boolean; options: OptRow[] }
-const EMPTY = { name: '', description: '', price: '', inventory: '', image_url: '', digital_file_url: '', booking_type_id: '', category: '' }
+const EMPTY = { name: '', description: '', price: '', inventory: '', low_stock_threshold: '', image_url: '', digital_file_url: '', booking_type_id: '', category: '' }
 
 export default function Shop() {
   const { siteId } = useParams<{ siteId: string }>()
@@ -47,6 +48,10 @@ export default function Shop() {
   const [form, setForm] = useState(EMPTY)
   const [intake, setIntake] = useState<IntakeRow[]>([])
   const [optionGroups, setOptionGroups] = useState<OptGroupRow[]>([])
+  const [adjustProduct, setAdjustProduct] = useState<CappeProduct | null>(null)
+
+  const isLowStock = (p: CappeProduct) =>
+    p.fulfillment === 'physical' && p.inventory != null && p.low_stock_threshold != null && p.inventory <= p.low_stock_threshold
 
   // option-group editors
   const setGroup = (gi: number, patch: Partial<OptGroupRow>) =>
@@ -75,6 +80,7 @@ export default function Shop() {
         status: 'active',
         fulfillment,
         inventory: fulfillment === 'physical' && form.inventory !== '' ? parseInt(form.inventory, 10) : null,
+        low_stock_threshold: fulfillment === 'physical' && form.low_stock_threshold !== '' ? parseInt(form.low_stock_threshold, 10) : null,
         image_url: form.image_url.trim() || null,
         digital_file_url: fulfillment === 'digital' ? form.digital_file_url.trim() || null : null,
         booking_type_id: fulfillment === 'booking' ? form.booking_type_id || null : null,
@@ -91,6 +97,7 @@ export default function Shop() {
             name: g.name.trim(), select_type: g.select_type, required: g.required,
             options: g.options.filter((o) => o.name.trim()).map((o) => ({
               name: o.name.trim(), price_delta_cents: Math.round(parseFloat(o.price || '0') * 100),
+              inventory: fulfillment === 'physical' && o.stock !== '' ? parseInt(o.stock, 10) : null,
             })),
           })),
       })
@@ -157,7 +164,10 @@ export default function Shop() {
 
         {/* conditional fields */}
         {fulfillment === 'physical' && (
-          <input value={form.inventory} onChange={(e) => setForm({ ...form, inventory: e.target.value })} placeholder="Stock (blank = unlimited)" type="number" min="0" className={input} />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <input value={form.inventory} onChange={(e) => setForm({ ...form, inventory: e.target.value })} placeholder="Stock (blank = unlimited)" type="number" min="0" className={input} />
+            <input value={form.low_stock_threshold} onChange={(e) => setForm({ ...form, low_stock_threshold: e.target.value })} placeholder="Low-stock alert at… (optional)" type="number" min="0" className={input} />
+          </div>
         )}
         {fulfillment === 'digital' && (
           <div>
@@ -223,14 +233,17 @@ export default function Shop() {
                     <div key={oi} className="flex items-center gap-2">
                       <input value={o.name} onChange={(e) => setOpt(gi, oi, { name: e.target.value })} placeholder="Option (e.g. Large)" className={`flex-1 ${input}`} />
                       <input value={o.price} onChange={(e) => setOpt(gi, oi, { price: e.target.value })} placeholder="+$0.00" type="number" step="0.01" className={`w-24 ${input}`} />
+                      {fulfillment === 'physical' && (
+                        <input value={o.stock} onChange={(e) => setOpt(gi, oi, { stock: e.target.value })} placeholder="stock" type="number" min="0" title="Per-variant stock (blank = untracked)" className={`w-20 ${input}`} />
+                      )}
                       <button type="button" onClick={() => setGroup(gi, { options: g.options.filter((_, k) => k !== oi) })} className="text-zinc-500 hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
                     </div>
                   ))}
-                  <button type="button" onClick={() => setGroup(gi, { options: [...g.options, { name: '', price: '' }] })} className="text-xs font-medium text-emerald-400 hover:text-emerald-300">+ Add option</button>
+                  <button type="button" onClick={() => setGroup(gi, { options: [...g.options, { name: '', price: '', stock: '' }] })} className="text-xs font-medium text-emerald-400 hover:text-emerald-300">+ Add option</button>
                 </div>
               </div>
             ))}
-            <button type="button" onClick={() => setOptionGroups((gs) => [...gs, { name: '', select_type: 'single', required: false, options: [{ name: '', price: '' }] }])} className="text-xs font-medium text-emerald-400 hover:text-emerald-300">+ Add option group</button>
+            <button type="button" onClick={() => setOptionGroups((gs) => [...gs, { name: '', select_type: 'single', required: false, options: [{ name: '', price: '', stock: '' }] }])} className="text-xs font-medium text-emerald-400 hover:text-emerald-300">+ Add option group</button>
           </div>
         </div>
 
@@ -263,12 +276,18 @@ export default function Shop() {
                 <div className="flex items-center gap-2">
                   <span className="truncate font-medium text-zinc-100">{p.name}</span>
                   <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${fulfillBadge[p.fulfillment] || fulfillBadge.physical}`}>{p.fulfillment}</span>
+                  {isLowStock(p) && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-400"><AlertTriangle className="h-3 w-3" /> low stock</span>
+                  )}
                 </div>
                 <div className="text-xs text-zinc-500">
                   {p.category ? `${p.category} · ` : ''}{centsToMoney(p.price_cents, p.currency)} · {meta(p)}
                   {p.option_groups?.length ? ` · ${p.option_groups.length} option${p.option_groups.length > 1 ? 's' : ''}` : ''}
                 </div>
               </div>
+              {p.fulfillment === 'physical' && (
+                <button onClick={() => setAdjustProduct(p)} title="Adjust stock" className="text-zinc-400 hover:text-emerald-400"><SlidersHorizontal className="h-4 w-4" /></button>
+              )}
               <select value={p.status} onChange={(e) => setStatus(p, e.target.value)} className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-100">
                 {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
@@ -276,6 +295,15 @@ export default function Shop() {
             </div>
           ))}
         </div>
+      )}
+
+      {adjustProduct && (
+        <StockAdjustModal
+          siteId={siteId || ''}
+          product={adjustProduct}
+          onClose={() => setAdjustProduct(null)}
+          onUpdated={(u) => { setProducts((p) => (p || []).map((x) => (x.id === u.id ? u : x))); setAdjustProduct(u) }}
+        />
       )}
     </SurfaceShell>
   )

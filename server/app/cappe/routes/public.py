@@ -42,6 +42,7 @@ from ..models.cappe import (
     CappeReviewCreate,
     CappeSubscribeRequest,
 )
+from ..services.inventory import log_adjustment as _inv_log
 from ..services.stripe_connect import (
     CappeStripeError,
     get_cappe_stripe,
@@ -56,6 +57,7 @@ from ..services.email import (
     send_cappe_booking_cancelled_email,
     send_cappe_booking_received_email,
     send_cappe_form_alert_email,
+    send_cappe_low_stock_email,
     send_cappe_message_email,
     send_cappe_order_alert_email,
     send_cappe_order_receipt_email,
@@ -379,12 +381,13 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
         async with conn.transaction():
             order_currency = None
             order_requires_approval = False  # any line needing creator review holds the whole order
+            low_stock_hits: list[tuple[str, int]] = []  # (product name, balance) for the owner alert
             # (product_id, title, unit_price, qty, fulfillment, intake_answers, booking_id)
             line_rows = []
             for item in body.items:
                 product = await conn.fetchrow(
-                    "SELECT id, name, price_cents, currency, inventory, status, fulfillment, "
-                    "booking_type_id, requires_approval, intake_fields "
+                    "SELECT id, name, price_cents, currency, inventory, low_stock_threshold, "
+                    "status, fulfillment, booking_type_id, requires_approval, intake_fields "
                     "FROM cappe_products WHERE id = $1 AND site_id = $2 FOR UPDATE",
                     item.product_id, site["id"],
                 )
@@ -404,16 +407,44 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
 
                 if f == "physical":
                     if product["inventory"] is not None:
-                        res = await conn.execute(
+                        new_bal = await conn.fetchval(
                             "UPDATE cappe_products SET inventory = inventory - $1, updated_at = NOW() "
-                            "WHERE id = $2 AND inventory >= $1",
+                            "WHERE id = $2 AND inventory >= $1 RETURNING inventory",
                             qty, item.product_id,
                         )
-                        if res.endswith(" 0"):
+                        if new_bal is None:
                             raise HTTPException(
                                 status_code=status.HTTP_409_CONFLICT,
                                 detail=f"Insufficient stock for {product['name']}",
                             )
+                        await _inv_log(
+                            conn, site_id=site["id"], product_id=item.product_id,
+                            delta=-qty, balance_after=new_bal, reason="sale",
+                        )
+                        thr = product["low_stock_threshold"]
+                        if thr is not None and new_bal <= thr:
+                            low_stock_hits.append((product["name"], new_bal))
+                    # Per-variant stock: decrement each selected option that tracks it.
+                    for oid in (item.selected_option_ids or []):
+                        inv = await conn.fetchval(
+                            "SELECT inventory FROM cappe_product_options "
+                            "WHERE id = $1 AND site_id = $2 FOR UPDATE",
+                            oid, site["id"],
+                        )
+                        if inv is None:
+                            continue  # untracked variant
+                        if inv < qty:
+                            raise HTTPException(
+                                status_code=status.HTTP_409_CONFLICT,
+                                detail=f"Insufficient stock for {product['name']} (selected option)",
+                            )
+                        await conn.execute(
+                            "UPDATE cappe_product_options SET inventory = $1 WHERE id = $2", inv - qty, oid
+                        )
+                        await _inv_log(
+                            conn, site_id=site["id"], product_id=item.product_id, option_id=oid,
+                            delta=-qty, balance_after=inv - qty, reason="sale",
+                        )
                 elif f == "service":
                     _validate_intake(loads_list(product["intake_fields"]), intake)
                 elif f == "digital":
@@ -454,7 +485,8 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
                 )
                 unit_price = apply_discount_cents(max(0, product["price_cents"] + opt_delta), dpct)
                 line_rows.append(
-                    (item.product_id, product["name"], unit_price, qty, f, intake, booking_id, opt_snapshot)
+                    (item.product_id, product["name"], unit_price, qty, f, intake, booking_id,
+                     opt_snapshot, item.selected_option_ids or [])
                 )
 
             subtotal = order_subtotal((unit, qty) for (_, _, unit, qty, *_rest) in line_rows)
@@ -478,16 +510,24 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
                 site["id"], email, body.customer_name, subtotal, tax_cents, total_cents,
                 order_currency or "USD", body.note, order_requires_approval,
             )
-            for product_id, title, unit_price, qty, f, intake, booking_id, opt_snapshot in line_rows:
+            for product_id, title, unit_price, qty, f, intake, booking_id, opt_snapshot, sel_ids in line_rows:
                 await conn.execute(
                     """INSERT INTO cappe_order_items
                            (order_id, site_id, product_id, title, unit_price_cents, quantity,
-                            fulfillment, intake_answers, selected_options, booking_id)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)""",
+                            fulfillment, intake_answers, selected_options, booking_id, selected_option_ids)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)""",
                     order["id"], site["id"], product_id, title, unit_price, qty,
-                    f, json.dumps(intake), json.dumps(opt_snapshot), booking_id,
+                    f, json.dumps(intake), json.dumps(opt_snapshot), booking_id, sel_ids,
                 )
         owner = await _site_owner(conn, site["id"])
+
+    # Low-stock alert to the owner (stock was decremented at order creation,
+    # regardless of the payment path below).
+    if low_stock_hits and owner and owner["email"]:
+        background.add_task(
+            send_cappe_low_stock_email, owner["email"], owner["name"], site["name"],
+            low_stock_hits, dashboard_url(f"/sites/{site['id']}/shop"),
+        )
 
     # If the order is payable AND the business has Stripe Connect ready AND the
     # storefront passed return URLs → create a Checkout Session (direct charge on

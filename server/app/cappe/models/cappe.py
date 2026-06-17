@@ -263,6 +263,8 @@ class CappeProductOptionInput(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     price_delta_cents: int = 0
     sort_order: int = 0
+    # Per-variant stock (NULL = untracked/unlimited). Decremented at checkout.
+    inventory: Optional[int] = Field(default=None, ge=0)
 
 
 class CappeProductOptionGroupInput(BaseModel):
@@ -278,6 +280,7 @@ class CappeProductOption(BaseModel):
     name: str
     price_delta_cents: int = 0
     sort_order: int = 0
+    inventory: Optional[int] = None
 
 
 class CappeProductOptionGroup(BaseModel):
@@ -297,6 +300,7 @@ class CappeProductCreate(BaseModel):
     image_url: Optional[str] = None
     sku: Optional[str] = Field(default=None, max_length=120)
     inventory: Optional[int] = Field(default=None, ge=0)
+    low_stock_threshold: Optional[int] = Field(default=None, ge=0)
     status: Literal["active", "draft", "archived"] = "draft"
     sort_order: int = 0
     fulfillment: Fulfillment = "physical"
@@ -319,6 +323,7 @@ class CappeProductUpdate(BaseModel):
     image_url: Optional[str] = None
     sku: Optional[str] = Field(default=None, max_length=120)
     inventory: Optional[int] = Field(default=None, ge=0)
+    low_stock_threshold: Optional[int] = Field(default=None, ge=0)
     status: Optional[Literal["active", "draft", "archived"]] = None
     sort_order: Optional[int] = None
     fulfillment: Optional[Fulfillment] = None
@@ -340,6 +345,7 @@ class CappeProduct(BaseModel):
     image_url: Optional[str] = None
     sku: Optional[str] = None
     inventory: Optional[int] = None
+    low_stock_threshold: Optional[int] = None
     status: str
     sort_order: int
     fulfillment: str = "physical"
@@ -349,6 +355,25 @@ class CappeProduct(BaseModel):
     intake_fields: list[dict[str, Any]] = Field(default_factory=list)
     category: Optional[str] = None
     option_groups: list[CappeProductOptionGroup] = Field(default_factory=list)
+
+
+class CappeStockAdjust(BaseModel):
+    """Manual stock change from the owner (restock, damage, correction, …)."""
+    delta: int                                   # signed; new balance clamped at 0
+    option_id: Optional[UUID] = None             # adjust a variant instead of the product
+    reason: Literal["manual", "restock", "damage", "return", "adjustment"] = "manual"
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
+class CappeInventoryAdjustment(BaseModel):
+    id: UUID
+    product_id: UUID
+    option_id: Optional[UUID] = None
+    delta: int
+    balance_after: Optional[int] = None
+    reason: str
+    note: Optional[str] = None
+    created_at: datetime
     created_at: datetime
     updated_at: datetime
     # Storefront display only — best active discount for this product (0 if none).
