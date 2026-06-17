@@ -62,6 +62,9 @@ export type CappeSite = {
   meta_config: Record<string, unknown>
   timezone: string
   is_multi_location: boolean
+  tax_rate_bps?: number | null
+  tax_label?: string | null
+  receipt_prefix?: string | null
   published_at: string | null
   created_at: string
   updated_at: string
