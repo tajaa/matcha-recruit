@@ -16,11 +16,19 @@ export default defineConfig({
     sourcemap: true,
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor-three': ['three'],
-          'vendor-framer': ['framer-motion'],
-          'vendor-react': ['react', 'react-dom'],
-        }
+        // Function form (not the array form) so React's core is pinned into a
+        // single chunk deterministically. The array form let framer-motion
+        // absorb react/cjs/react.js while react-dom/client landed in the entry
+        // chunk — React 19's machinery split across chunks that init out of
+        // order, so a React.lazy payload's _result was undefined and the first
+        // lazy route crashed ("undefined is not an object evaluating
+        // h._result.default"). Match react FIRST so nothing else can claim it.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'vendor-react'
+          if (/[\\/]node_modules[\\/](framer-motion|motion-dom|motion-utils)[\\/]/.test(id)) return 'vendor-framer'
+          if (/[\\/]node_modules[\\/]three[\\/]/.test(id)) return 'vendor-three'
+        },
       }
     }
   },
