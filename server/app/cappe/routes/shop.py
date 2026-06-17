@@ -32,6 +32,7 @@ _PRODUCT_COLS = (
 )
 _ORDER_COLS = (
     "id, site_id, customer_email, customer_name, status, subtotal_cents, "
+    "tax_cents, total_cents, receipt_number, "
     "currency, payment_ref, note, requires_approval, approved_at, decline_reason, "
     "metadata, created_at, updated_at"
 )
@@ -237,6 +238,32 @@ async def get_order(
             order_id,
         )
     return _order_row(order, [_item_row(i) for i in items])
+
+
+@router.get("/sites/{site_id}/orders/{order_id}/receipt.pdf")
+async def owner_order_receipt_pdf(
+    site_id: UUID, order_id: UUID, account: CappeAccount = Depends(require_cappe_account)
+):
+    """Owner-facing printable/exportable PDF receipt for one of their orders."""
+    from fastapi import Response
+    from ..services.receipt import render_order_receipt_pdf
+
+    async with get_connection() as conn:
+        await get_owned_site(conn, site_id, account.id)
+        owns = await conn.fetchval(
+            "SELECT 1 FROM cappe_orders WHERE id = $1 AND site_id = $2", order_id, site_id
+        )
+        if not owns:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+        rendered = await render_order_receipt_pdf(conn, order_id)
+    if rendered is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    _order, pdf = rendered
+    fname = (_order.get("receipt_number") or "receipt") + ".pdf"
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{fname}"'},
+    )
 
 
 @router.patch("/sites/{site_id}/orders/{order_id}", response_model=CappeOrder)

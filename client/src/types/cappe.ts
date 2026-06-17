@@ -193,6 +193,9 @@ export type CappeOrder = {
   customer_name: string | null
   status: 'pending' | 'paid' | 'fulfilled' | 'cancelled' | 'refunded' | 'declined'
   subtotal_cents: number
+  tax_cents: number
+  total_cents: number | null
+  receipt_number: string | null
   currency: string
   payment_ref: string | null
   note: string | null

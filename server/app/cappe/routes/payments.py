@@ -12,13 +12,14 @@ import logging
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
 from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import CappeAccount
 from ..services.email import dashboard_url
+from ..services.receipt import issue_receipt_for_paid_order
 from ..services.stripe_connect import CappeStripeError, get_cappe_stripe
 
 logger = logging.getLogger("cappe.payments")
@@ -97,7 +98,7 @@ async def connect_status(account: CappeAccount = Depends(require_cappe_account))
 
 
 @router.post("/payments/webhook")
-async def payments_webhook(request: Request):
+async def payments_webhook(request: Request, background: BackgroundTasks):
     """Stripe Connect webhook. Verifies the signature, then:
       - checkout.session.completed → mark the order paid (+ payment intent, fee).
       - account.updated            → refresh the business's capability flags.
@@ -148,7 +149,9 @@ async def payments_webhook(request: Request):
                     oid, payment_intent, fee, event_account_id,
                 )
             if row is not None:
-                # Phase 2 (receipts) hooks here: generate + email the PDF receipt.
+                # Issue the receipt (assign number → render PDF → email) after
+                # the 200 so Stripe isn't kept waiting on render/SMTP.
+                background.add_task(issue_receipt_for_paid_order, row["id"], row["site_id"])
                 logger.info("cappe order %s marked paid via Stripe", order_id)
             else:
                 logger.warning(

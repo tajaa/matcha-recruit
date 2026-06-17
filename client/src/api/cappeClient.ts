@@ -151,6 +151,18 @@ export const cappeApi = {
     if (!res.ok) throw new Error(`${res.status} ${res.statusText || 'Preview failed'}`)
     return res.text()
   },
+  // Authed GET of a binary (e.g. a receipt PDF) → opens it in a new tab.
+  openBlob: async (path: string): Promise<void> => {
+    const token = localStorage.getItem(ACCESS_KEY)
+    const res = await fetch(`${BASE}${path}`, { headers: _buildHeaders(undefined, token) })
+    if (!res.ok) {
+      const body = await res.json().catch(() => null)
+      throw new Error(body?.detail || `${res.status} ${res.statusText || 'Download failed'}`)
+    }
+    const url = URL.createObjectURL(await res.blob())
+    window.open(url, '_blank')
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  },
 }
 
 export { _logout as cappeLogout }

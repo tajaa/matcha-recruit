@@ -458,14 +458,25 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
                 )
 
             subtotal = order_subtotal((unit, qty) for (_, _, unit, qty, *_rest) in line_rows)
+            # Tax (per-site rate, applied to physical/taxable lines only). Added
+            # as a Stripe line item below so the charge matches the receipt total.
+            tax_cfg = await conn.fetchrow(
+                "SELECT tax_rate_bps, tax_label FROM cappe_sites WHERE id = $1", site["id"]
+            )
+            tax_rate_bps = int(tax_cfg["tax_rate_bps"]) if tax_cfg else 0
+            tax_label = (tax_cfg["tax_label"] if tax_cfg else None) or "Tax"
+            taxable = sum(unit * qty for (_p, _t, unit, qty, f, *_r) in line_rows if f == "physical")
+            tax_cents = (taxable * tax_rate_bps) // 10000 if tax_rate_bps > 0 else 0
+            total_cents = subtotal + tax_cents
             order = await conn.fetchrow(
                 """INSERT INTO cappe_orders
-                       (site_id, customer_email, customer_name, status, subtotal_cents, currency,
-                        note, requires_approval)
-                   VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7)
-                   RETURNING id, status, subtotal_cents, currency, access_token, requires_approval""",
-                site["id"], email, body.customer_name, subtotal, order_currency or "USD", body.note,
-                order_requires_approval,
+                       (site_id, customer_email, customer_name, status, subtotal_cents, tax_cents,
+                        total_cents, currency, note, requires_approval)
+                   VALUES ($1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9)
+                   RETURNING id, status, subtotal_cents, tax_cents, total_cents, currency,
+                             access_token, requires_approval""",
+                site["id"], email, body.customer_name, subtotal, tax_cents, total_cents,
+                order_currency or "USD", body.note, order_requires_approval,
             )
             for product_id, title, unit_price, qty, f, intake, booking_id, opt_snapshot in line_rows:
                 await conn.execute(
@@ -502,6 +513,17 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
             }
             for (_pid, title, unit, qty, *_r) in line_rows
         ]
+        # Tax as its own line so the charged amount equals the receipt total.
+        # The 2% platform fee stays on the goods subtotal (amount_cents below).
+        if order["tax_cents"] and order["tax_cents"] > 0:
+            line_items.append({
+                "price_data": {
+                    "currency": cur,
+                    "unit_amount": int(order["tax_cents"]),
+                    "product_data": {"name": tax_label[:120]},
+                },
+                "quantity": 1,
+            })
         try:
             sess = await get_cappe_stripe().create_checkout_session(
                 account_id=owner["stripe_account_id"],
@@ -549,6 +571,35 @@ async def public_create_order(slug: str, body: CappeCheckoutRequest, request: Re
         "requires_approval": order["requires_approval"],
         "checkout_url": checkout_url,
     }
+
+
+@router.get("/public/orders/{token}/receipt.pdf")
+async def public_order_receipt_pdf(token: str, request: Request):
+    """Customer-downloadable PDF receipt — released once the order is paid/fulfilled."""
+    from fastapi import Response
+    from ..services.receipt import render_order_receipt_pdf
+
+    await check_rate_limit(client_ip(request), "cappe_receipt", 30, 60)
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, status FROM cappe_orders WHERE access_token = $1", token
+        )
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+        if row["status"] not in ("paid", "fulfilled"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Your receipt will be available once payment completes.",
+            )
+        rendered = await render_order_receipt_pdf(conn, row["id"])
+    if rendered is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    order, pdf = rendered
+    fname = (order.get("receipt_number") or "receipt") + ".pdf"
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{fname}"'},
+    )
 
 
 @router.get("/public/orders/{token}", response_model=CappeOrderReceipt)

@@ -94,11 +94,20 @@ export default function Orders() {
                   <div className="truncate text-sm font-medium text-zinc-100">{o.customer_email || 'No email'}</div>
                   <div className="text-xs text-zinc-400">{new Date(o.created_at).toLocaleString()}</div>
                 </div>
-                <div className="text-sm font-medium text-zinc-300">{centsToMoney(o.subtotal_cents, o.currency)}</div>
+                <div className="text-sm font-medium text-zinc-300">{centsToMoney(o.total_cents ?? o.subtotal_cents, o.currency)}</div>
                 {o.requires_approval && o.status === 'pending' && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-400"><Clock className="h-3 w-3" /> needs approval</span>
                 )}
                 <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${statusStyle[o.status]}`}>{o.status}</span>
+                {(o.status === 'paid' || o.status === 'fulfilled') && (
+                  <button
+                    onClick={() => cappeApi.openBlob(`/sites/${siteId}/orders/${o.id}/receipt.pdf`).catch((e) => setError(e instanceof Error ? e.message : 'Could not open receipt'))}
+                    title="View / print receipt"
+                    className="flex items-center gap-1 rounded-lg border border-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
+                  >
+                    <Receipt className="h-3.5 w-3.5" /> Receipt
+                  </button>
+                )}
                 {o.requires_approval && o.status === 'pending' ? (
                   <>
                     <button onClick={() => acceptOrder(o)} className="flex items-center gap-1 rounded-lg bg-emerald-500 px-2.5 py-1 text-xs font-semibold text-zinc-950 hover:bg-emerald-400"><Check className="h-3.5 w-3.5" /> Accept</button>

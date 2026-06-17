@@ -128,6 +128,9 @@ class CappeSiteUpdate(BaseModel):
     meta_config: Optional[dict[str, Any]] = None
     timezone: Optional[str] = Field(default=None, max_length=64)
     is_multi_location: Optional[bool] = None
+    tax_rate_bps: Optional[int] = Field(default=None, ge=0, le=10000)
+    tax_label: Optional[str] = Field(default=None, max_length=40)
+    receipt_prefix: Optional[str] = Field(default=None, max_length=12)
 
 
 class CappeReadinessItem(BaseModel):
@@ -160,6 +163,9 @@ class CappeSite(BaseModel):
     meta_config: dict[str, Any] = Field(default_factory=dict)
     timezone: str = "UTC"
     is_multi_location: bool = False
+    tax_rate_bps: int = 0
+    tax_label: str = "Tax"
+    receipt_prefix: Optional[str] = None
     published_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
@@ -372,6 +378,9 @@ class CappeOrder(BaseModel):
     customer_name: Optional[str] = None
     status: str
     subtotal_cents: int
+    tax_cents: int = 0
+    total_cents: Optional[int] = None
+    receipt_number: Optional[str] = None
     currency: str
     payment_ref: Optional[str] = None
     note: Optional[str] = None

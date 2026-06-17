@@ -34,6 +34,7 @@ router = APIRouter()
 _SITE_COLS = (
     "id, account_id, name, slug, subdomain, custom_domain, source_type, "
     "template_id, status, theme_config, meta_config, timezone, is_multi_location, "
+    "tax_rate_bps, tax_label, receipt_prefix, "
     "published_at, created_at, updated_at"
 )
 
@@ -234,6 +235,12 @@ async def update_site(
             add("timezone", body.timezone)
         if body.is_multi_location is not None:
             add("is_multi_location", body.is_multi_location)
+        if body.tax_rate_bps is not None:
+            add("tax_rate_bps", body.tax_rate_bps)
+        if body.tax_label is not None:
+            add("tax_label", body.tax_label)
+        if body.receipt_prefix is not None:
+            add("receipt_prefix", body.receipt_prefix or None)
         if body.status is not None:
             add("status", body.status)
             if body.status == "published":

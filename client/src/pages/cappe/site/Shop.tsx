@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Loader2, Plus, Trash2, Package } from 'lucide-react'
 import { cappeApi } from '../../../api/cappeClient'
 import SurfaceShell, { centsToMoney } from '../../../components/cappe/SurfaceShell'
+import TaxSettingsCard from '../../../components/cappe/TaxSettingsCard'
 import ImageUpload from '../../../components/cappe/ImageUpload'
 import type { CappeBookingType, CappeFulfillment, CappeProduct } from '../../../types/cappe'
 
@@ -122,6 +123,7 @@ export default function Shop() {
   return (
     <SurfaceShell title="Shop" subtitle="Anything you sell — goods, downloads, services, or bookable sessions.">
       {error && <p className="mb-4 text-sm text-red-400">{error}</p>}
+      <TaxSettingsCard siteId={siteId || ''} />
 
       <form onSubmit={addProduct} className="mb-6 space-y-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
         <div className="grid gap-3 sm:grid-cols-3">
