@@ -1,6 +1,7 @@
 import { Component, useEffect, useRef, type ErrorInfo, type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 import { reportReactError } from '../api/errorReporter'
+import { isStaleChunkError, reloadForStaleChunk } from '../utils/staleChunk'
 
 interface Props {
   children: ReactNode
@@ -22,6 +23,10 @@ class ErrorBoundaryInner extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
+    // A React.lazy() chunk that 404s after a deploy throws here rather than
+    // firing vite:preloadError. Reload once to pick up the fresh manifest
+    // instead of reporting it as a crash — it auto-heals on the new build.
+    if (isStaleChunkError(error) && reloadForStaleChunk()) return
     reportReactError(error, info.componentStack ?? undefined)
     if (import.meta.env.DEV) {
       console.error('[ErrorBoundary]', error, info.componentStack)
