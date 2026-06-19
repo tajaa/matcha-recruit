@@ -14,23 +14,15 @@ export default defineConfig({
     // reporter — prod stacks would otherwise be mangled minified names.
     // Source isn't a secret; the same code is already in git.
     sourcemap: true,
-    rollupOptions: {
-      output: {
-        // Function form (not the array form) so React's core is pinned into a
-        // single chunk deterministically. The array form let framer-motion
-        // absorb react/cjs/react.js while react-dom/client landed in the entry
-        // chunk — React 19's machinery split across chunks that init out of
-        // order, so a React.lazy payload's _result was undefined and the first
-        // lazy route crashed ("undefined is not an object evaluating
-        // h._result.default"). Match react FIRST so nothing else can claim it.
-        manualChunks(id) {
-          if (!id.includes('node_modules')) return
-          if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'vendor-react'
-          if (/[\\/]node_modules[\\/](framer-motion|motion-dom|motion-utils)[\\/]/.test(id)) return 'vendor-framer'
-          if (/[\\/]node_modules[\\/]three[\\/]/.test(id)) return 'vendor-three'
-        },
-      }
-    }
+    // NO custom manualChunks. Hand-chunking React into its own vendor chunk
+    // repeatedly caused a cross-chunk init-order race in React 19 where the
+    // first React.lazy route crashed with "undefined is not an object
+    // (evaluating _result.default)" — the lazy payload's _result was read
+    // before the React chunk initialized. Both the array AND function forms
+    // hit this. Vite/Rollup's default chunking keeps React with the entry and
+    // orders dynamic-import deps correctly, so lazy routes resolve safely.
+    // Chunks are still content-hashed (cache-busting intact). Do not re-add a
+    // react/react-dom manualChunks rule.
   },
   server: {
     port: 5174,
