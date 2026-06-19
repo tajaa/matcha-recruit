@@ -1168,23 +1168,47 @@ _CANVAS_JS = """<style>
 .cz-editable [data-cz-field].cz-editing{outline:2px solid #10b981;outline-offset:3px;background:rgba(16,185,129,.07);border-radius:3px}
 .cz-editable .cz-drop{height:0;border-top:3px solid #10b981;position:relative;z-index:9999}
 .cz-editable.cz-dragging *{cursor:grabbing !important;user-select:none !important}
+.cz-editable .cz-el{cursor:move}
+.cz-editable .cz-el.cz-editing{cursor:text}
+.cz-editable .cz-el.cz-el-sel{outline:2px solid #10b981;outline-offset:1px}
+.cz-cv-h{position:absolute;width:11px;height:11px;background:#10b981;border:2px solid #fff;border-radius:50%;z-index:10000;box-shadow:0 0 0 1px rgba(0,0,0,.15)}
+.cz-cv-h[data-dir=nw]{top:-6px;left:-6px;cursor:nwse-resize}
+.cz-cv-h[data-dir=ne]{top:-6px;right:-6px;cursor:nesw-resize}
+.cz-cv-h[data-dir=sw]{bottom:-6px;left:-6px;cursor:nesw-resize}
+.cz-cv-h[data-dir=se]{bottom:-6px;right:-6px;cursor:nwse-resize}
+.cz-cv-h[data-dir=n]{top:-6px;left:50%;margin-left:-5.5px;cursor:ns-resize}
+.cz-cv-h[data-dir=s]{bottom:-6px;left:50%;margin-left:-5.5px;cursor:ns-resize}
+.cz-cv-h[data-dir=w]{left:-6px;top:50%;margin-top:-5.5px;cursor:ew-resize}
+.cz-cv-h[data-dir=e]{right:-6px;top:50%;margin-top:-5.5px;cursor:ew-resize}
+.cz-cv-grabbing *{user-select:none !important}
 </style>
 <script>(function(){
 var editing=null,origText='',cancelEdit=false,dragging=false,dragFrom=-1,downY=0,downIdx=-1,moved=false,dropLine=null;
+var elDrag=null,elResize=null,rdir='',selEl=null,curBp='d',gx=0,gy=0,sx=0,sy=0,sw=0,sh=0,gg=null;
 function post(m){try{window.parent.postMessage(m,'*');}catch(e){}}
 function blocks(){return [].slice.call(document.querySelectorAll('main>[data-cz-block]'));}
 function blockEl(i){return document.querySelector('[data-cz-block="'+i+'"]');}
 function idxOf(el){var b=el&&el.closest?el.closest('[data-cz-block]'):null;return b?parseInt(b.getAttribute('data-cz-block'),10):-1;}
-function clearSel(){var s=document.querySelectorAll('.cz-selected');for(var i=0;i<s.length;i++)s[i].classList.remove('cz-selected');}
+function clearHandles(){var hs=document.querySelectorAll('.cz-cv-h');for(var i=0;i<hs.length;i++)hs[i].parentNode.removeChild(hs[i]);}
+function addHandles(el){clearHandles();var ds=['nw','n','ne','e','se','s','sw','w'];for(var i=0;i<ds.length;i++){var h=document.createElement('div');h.className='cz-cv-h';h.setAttribute('data-dir',ds[i]);el.appendChild(h);}}
+function clearSel(){var s=document.querySelectorAll('.cz-selected,.cz-el-sel');for(var i=0;i<s.length;i++)s[i].classList.remove('cz-selected','cz-el-sel');clearHandles();selEl=null;}
 function highlight(i){clearSel();var el=blockEl(i);if(el)el.classList.add('cz-selected');}
-document.addEventListener('mouseover',function(e){if(editing||dragging)return;var b=e.target.closest&&e.target.closest('[data-cz-block]');if(b)b.classList.add('cz-hover');});
+function selectEl(el){clearSel();el.classList.add('cz-el-sel');selEl=el;addHandles(el);}
+function postSelectEl(el){var r=el.getBoundingClientRect();post({type:'cz-select',block:idxOf(el),field:el.getAttribute('data-cz-id'),rect:{top:r.top,left:r.left,width:r.width,height:r.height}});}
+function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
+function gridInfo(el){var w=el.closest&&el.closest('.cz-cv-wrap');if(!w)return null;var cs=getComputedStyle(w);var cols=parseInt(cs.getPropertyValue('--cv-cols'),10)||12;var rh=parseFloat(cs.getPropertyValue('--cv-rowh'))||24;return {cols:cols,rowH:rh,cellW:(w.clientWidth/cols)||1};}
+function pos(el){var p=(curBp==='m')?'m':'d';return {x:parseInt(el.getAttribute('data-'+p+'x'),10)||0,y:parseInt(el.getAttribute('data-'+p+'y'),10)||0,w:parseInt(el.getAttribute('data-'+p+'w'),10)||1,h:parseInt(el.getAttribute('data-'+p+'h'),10)||1};}
+function setPos(el,x,y,w,h){el.style.gridColumn=(x+1)+'/span '+w;el.style.gridRow=(y+1)+'/span '+h;var p=(curBp==='m')?'m':'d';el.setAttribute('data-'+p+'x',x);el.setAttribute('data-'+p+'y',y);el.setAttribute('data-'+p+'w',w);el.setAttribute('data-'+p+'h',h);}
+document.addEventListener('mouseover',function(e){if(editing||dragging||elDrag||elResize)return;var b=e.target.closest&&e.target.closest('[data-cz-block]');if(b)b.classList.add('cz-hover');});
 document.addEventListener('mouseout',function(e){var b=e.target.closest&&e.target.closest('[data-cz-block]');if(b)b.classList.remove('cz-hover');});
 document.addEventListener('click',function(e){
   var a=e.target.closest&&e.target.closest('a');if(a)e.preventDefault();
   if(editing&&editing.contains(e.target))return;
   if(moved){moved=false;return;}
+  var ce=e.target.closest&&e.target.closest('.cz-el');
   var b=e.target.closest&&e.target.closest('[data-cz-block]');if(!b)return;
   var i=parseInt(b.getAttribute('data-cz-block'),10);
+  if(ce){if(ce!==selEl){selectEl(ce);postSelectEl(ce);}return;}
   var f=e.target.closest&&e.target.closest('[data-cz-field]');
   var r=b.getBoundingClientRect();
   highlight(i);
@@ -1194,6 +1218,7 @@ document.addEventListener('dblclick',function(e){
   var f=e.target.closest&&e.target.closest('[data-cz-field]');if(!f)return;
   e.preventDefault();
   if(editing&&editing!==f)editing.blur();
+  clearHandles();
   editing=f;origText=f.innerText;cancelEdit=false;
   f.setAttribute('contenteditable','true');f.classList.add('cz-editing');
   post({type:'cz-editing-start'});f.focus();
@@ -1210,22 +1235,48 @@ document.addEventListener('blur',function(e){
   var i=idxOf(f),field=f.getAttribute('data-cz-field');
   if(cancelEdit){f.innerText=origText;cancelEdit=false;}
   else{var v=f.innerText.replace(/\\s+$/,'');if(v!==origText)post({type:'cz-edit',block:i,field:field,value:v});}
+  if(selEl===f)addHandles(f);
   post({type:'cz-editing-end'});
 },true);
 document.addEventListener('pointerdown',function(e){
   if(editing)return;
+  var h=e.target.closest&&e.target.closest('.cz-cv-h');
+  if(h&&selEl){e.preventDefault();gg=gridInfo(selEl);if(!gg)return;elResize=selEl;rdir=h.getAttribute('data-dir');var p=pos(selEl);sx=p.x;sy=p.y;sw=p.w;sh=p.h;gx=e.clientX;gy=e.clientY;moved=false;downIdx=-1;dragging=false;return;}
+  var ce=e.target.closest&&e.target.closest('.cz-el');
+  if(ce){gg=gridInfo(ce);if(!gg)return;if(ce!==selEl){selectEl(ce);postSelectEl(ce);}elDrag=ce;var q=pos(ce);sx=q.x;sy=q.y;sw=q.w;sh=q.h;gx=e.clientX;gy=e.clientY;moved=false;downIdx=-1;dragging=false;return;}
   var b=e.target.closest&&e.target.closest('[data-cz-block]');if(!b)return;
   downIdx=parseInt(b.getAttribute('data-cz-block'),10);downY=e.clientY;moved=false;dragFrom=downIdx;dragging=false;
 });
-function targetIdx(y){var bs=blocks(),to=bs.length;for(var k=0;k<bs.length;k++){var r=bs[k].getBoundingClientRect();if(y<r.top+r.height/2){to=k;break;}}return to;}
-function showDrop(to){removeDrop();var bs=blocks();dropLine=document.createElement('div');dropLine.className='cz-drop';var main=document.querySelector('main');if(to>=bs.length)main.appendChild(dropLine);else main.insertBefore(dropLine,bs[to]);}
-function removeDrop(){if(dropLine&&dropLine.parentNode)dropLine.parentNode.removeChild(dropLine);dropLine=null;}
+function startedMove(e){if(moved)return true;if(Math.abs(e.clientX-gx)<4&&Math.abs(e.clientY-gy)<4)return false;moved=true;document.body.classList.add('cz-cv-grabbing');post({type:'cz-editing-start'});return true;}
 document.addEventListener('pointermove',function(e){
+  if(elDrag){
+    if(!startedMove(e))return;
+    var dx=Math.round((e.clientX-gx)/gg.cellW),dy=Math.round((e.clientY-gy)/gg.rowH);
+    setPos(elDrag,clamp(sx+dx,0,gg.cols-sw),Math.max(0,sy+dy),sw,sh);e.preventDefault();return;
+  }
+  if(elResize){
+    if(!startedMove(e))return;
+    var cx=Math.round((e.clientX-gx)/gg.cellW),cy=Math.round((e.clientY-gy)/gg.rowH);
+    var x=sx,y=sy,w=sw,h=sh;
+    if(rdir.indexOf('e')>=0)w=clamp(sw+cx,1,gg.cols-sx);
+    if(rdir.indexOf('s')>=0)h=Math.max(1,sh+cy);
+    if(rdir.indexOf('w')>=0){var nx=clamp(sx+cx,0,sx+sw-1);w=sw+(sx-nx);x=nx;}
+    if(rdir.indexOf('n')>=0){var ny=clamp(sy+cy,0,sy+sh-1);h=sh+(sy-ny);y=ny;}
+    setPos(elResize,x,y,w,h);e.preventDefault();return;
+  }
   if(downIdx<0||editing)return;
   if(!dragging){if(Math.abs(e.clientY-downY)<6)return;dragging=true;moved=true;document.body.classList.add('cz-dragging');post({type:'cz-editing-start'});}
   showDrop(targetIdx(e.clientY));e.preventDefault();
 },{passive:false});
+function targetIdx(y){var bs=blocks(),to=bs.length;for(var k=0;k<bs.length;k++){var r=bs[k].getBoundingClientRect();if(y<r.top+r.height/2){to=k;break;}}return to;}
+function showDrop(to){removeDrop();var bs=blocks();dropLine=document.createElement('div');dropLine.className='cz-drop';var main=document.querySelector('main');if(to>=bs.length)main.appendChild(dropLine);else main.insertBefore(dropLine,bs[to]);}
+function removeDrop(){if(dropLine&&dropLine.parentNode)dropLine.parentNode.removeChild(dropLine);dropLine=null;}
 document.addEventListener('pointerup',function(e){
+  var el=elDrag||elResize;
+  if(el){
+    if(moved){var p=pos(el);post({type:elDrag?'cz-elem-move':'cz-elem-resize',block:idxOf(el),id:el.getAttribute('data-cz-id'),bp:curBp,pos:p});document.body.classList.remove('cz-cv-grabbing');post({type:'cz-editing-end'});}
+    elDrag=null;elResize=null;setTimeout(function(){moved=false;},0);return;
+  }
   if(dragging){
     var to=targetIdx(e.clientY);removeDrop();document.body.classList.remove('cz-dragging');
     var dest=to>dragFrom?to-1:to;
@@ -1238,6 +1289,8 @@ window.addEventListener('message',function(e){
   var d=e.data||{};
   if(d.type==='cz-highlight')highlight(d.block);
   else if(d.type==='cz-clear')clearSel();
+  else if(d.type==='cz-bp')curBp=(d.bp==='m')?'m':'d';
+  else if(d.type==='cz-elem-highlight'){var el=document.querySelector('.cz-el[data-cz-id="'+d.id+'"]');if(el)selectEl(el);}
 });
 post({type:'cz-ready'});
 })();</script>"""
@@ -1596,6 +1649,146 @@ def _hours(b, t):
             f'{_OPENNOW_JS}')
 
 
+# ── freeform grid-snap canvas block ─────────────────────────────────────────
+# A `canvas` block lays its child elements (heading / text / image) on a CSS
+# grid at explicit per-breakpoint coordinates (Squarespace "Fluid Engine" style).
+# Stored opaquely in page content (no migration). Every value below is clamped /
+# enum / hex / scheme-checked / id-regex'd — no raw user string reaches CSS/HTML.
+_CV_COLS_MAX = 48
+_CV_SPAN_MAX = 48
+_CV_ROWS_MAX = 400
+_CV_WEIGHTS = {"300", "400", "500", "600", "700", "800", "900"}
+_CV_ALIGN = {"left", "center", "right", "justify"}
+_CV_FIT = {"cover", "contain", "fill", "none"}
+_CV_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+_CV_SPACING_RE = re.compile(r"^-?[0-9]*\.?[0-9]+(em|px)$")
+
+_CANVAS_CSS = (
+    ".cz-canvas{padding:3rem 1.25rem}"
+    ".cz-canvas .cz-cv-wrap{display:grid;grid-template-columns:repeat(var(--cv-cols,12),1fr);"
+    "grid-auto-rows:var(--cv-rowh,24px);gap:0;max-width:72rem;margin:0 auto;position:relative}"
+    ".cz-el{min-width:0;min-height:1em;overflow-wrap:break-word}"
+    ".cz-canvas h2.cz-el,.cz-canvas p.cz-el{margin:0}"
+    ".cz-el--img{overflow:hidden}"
+    ".cz-el--img img{width:100%;height:100%;object-fit:var(--cv-fit,cover);"
+    "border-radius:var(--cv-rad,0);display:block}"
+)
+
+
+def _cv_safe_id(v: Any) -> str:
+    s = str(v or "")
+    return s if _CV_ID_RE.match(s) else ""
+
+
+def _canvas(b, t, editable=False, index=0):
+    grid = b.get("grid") if isinstance(b.get("grid"), dict) else {}
+    mob = b.get("mobile") if isinstance(b.get("mobile"), dict) else {}
+    cols = _clampi(grid.get("cols"), 1, _CV_COLS_MAX, 24)
+    rowH = _clampi(grid.get("rowH"), 4, 200, 24)
+    mcols = _clampi(mob.get("cols"), 1, _CV_COLS_MAX, 8)
+    mrowH = _clampi(mob.get("rowH"), 4, 200, rowH)
+
+    # Parse + clamp every element first (so we can derive a mobile stack order).
+    parsed = []
+    for el in (b.get("elements") if isinstance(b.get("elements"), list) else []):
+        if not isinstance(el, dict):
+            continue
+        eid = _cv_safe_id(el.get("id"))
+        kind = el.get("kind")
+        if not eid or kind not in ("heading", "text", "image"):
+            continue
+        d = el.get("d") if isinstance(el.get("d"), dict) else {}
+        dx = _clampi(d.get("x"), 0, _CV_COLS_MAX, 0)
+        dy = _clampi(d.get("y"), 0, _CV_ROWS_MAX, 0)
+        dw = _clampi(d.get("w"), 1, _CV_SPAN_MAX, max(1, cols // 2))
+        dh = _clampi(d.get("h"), 1, _CV_SPAN_MAX, 2)
+        parsed.append((el, eid, kind, dx, dy, dw, dh))
+
+    # Auto-derive mobile placement (full-width stack by desktop reading order)
+    # for elements that have no explicit `m`. Mirrored client-side.
+    derived = {}
+    running = 0
+    for k in sorted(range(len(parsed)), key=lambda j: (parsed[j][4], parsed[j][3])):
+        dh = parsed[k][6]
+        derived[k] = (0, running, mcols, max(1, dh))
+        running += max(1, dh)
+
+    # Placement (grid-column/row) + the wrap's grid vars go into a scoped <style>
+    # — NOT inline — so the mobile @media rules can override them (inline styles
+    # beat media queries). The JS engine reads coords from data-d*/data-m* attrs,
+    # not the CSS, so live-drag still works. Only breakpoint-invariant visual
+    # styling (font/color/fit/radius) is inlined on the element.
+    els_html = []
+    desk_rules = [f'.cz-cv-{index} .cz-cv-wrap{{--cv-cols:{cols};--cv-rowh:{rowH}px}}']
+    mob_rules = [f'.cz-cv-{index} .cz-cv-wrap{{--cv-cols:{mcols};--cv-rowh:{mrowH}px}}']
+    for k, (el, eid, kind, dx, dy, dw, dh) in enumerate(parsed):
+        style = el.get("style") if isinstance(el.get("style"), dict) else {}
+        parts = []
+        if kind == "image":
+            if style.get("fit") in _CV_FIT:
+                parts.append(f"--cv-fit:{style['fit']}")
+            rad = _clampi(style.get("radius"), 0, 200, 0)
+            if rad:
+                parts.append(f"--cv-rad:{rad}px")
+        else:
+            if style.get("font"):
+                parts.append(f"font-family:{_font_stack(style['font'])}")
+            sz = _clampi(style.get("size"), 8, 200, 0)
+            if sz:
+                parts.append(f"font-size:{sz}px")
+            wt = str(style.get("weight") or "")
+            if wt in _CV_WEIGHTS:
+                parts.append(f"font-weight:{wt}")
+            sp = str(style.get("spacing") or "").strip()
+            if _CV_SPACING_RE.match(sp):
+                parts.append(f"letter-spacing:{sp}")
+            try:
+                lh = float(style.get("lineHeight"))
+                if 0.8 <= lh <= 3.0:
+                    parts.append(f"line-height:{lh}")
+            except (TypeError, ValueError):
+                pass
+            col = _hexonly(style.get("color"))
+            if col:
+                parts.append(f"color:{col}")
+            if style.get("align") in _CV_ALIGN:
+                parts.append(f"text-align:{style['align']}")
+        style_attr = f' style="{_clean_css(";".join(parts))}"' if parts else ""
+
+        m = el.get("m") if isinstance(el.get("m"), dict) else None
+        if m:
+            mx = _clampi(m.get("x"), 0, _CV_COLS_MAX, 0)
+            my = _clampi(m.get("y"), 0, _CV_ROWS_MAX, 0)
+            mw = _clampi(m.get("w"), 1, _CV_SPAN_MAX, mcols)
+            mh = _clampi(m.get("h"), 1, _CV_SPAN_MAX, dh)
+        else:
+            mx, my, mw, mh = derived[k]
+        # Both breakpoints' coords ride on the element so the canvas runtime can
+        # read the active set on drag (data attrs, not the rendered CSS).
+        dataattr = (f' data-cz-id="{eid}" data-dx="{dx}" data-dy="{dy}" data-dw="{dw}" data-dh="{dh}"'
+                    f' data-mx="{mx}" data-my="{my}" data-mw="{mw}" data-mh="{mh}"')
+        desk_rules.append(f'.cz-cv-{index} [data-cz-id="{eid}"]{{grid-column:{dx + 1}/span {dw};grid-row:{dy + 1}/span {dh}}}')
+        mob_rules.append(f'.cz-cv-{index} [data-cz-id="{eid}"]{{grid-column:{mx + 1}/span {mw};grid-row:{my + 1}/span {mh}}}')
+
+        if kind == "image":
+            src = _safe_image(el.get("src"))
+            inner = f'<img src="{_esc(src)}" alt="{_esc(el.get("alt"))}" loading="lazy" />' if src else ""
+            els_html.append(f'<div class="cz-el cz-el--img"{dataattr}{style_attr}>{inner}</div>')
+        else:
+            tag = "h2" if kind == "heading" else "p"
+            # Only text gets data-cz-field, so the inline-text editor (dblclick →
+            # contenteditable) targets text and never an image wrapper.
+            els_html.append(
+                f'<{tag} class="cz-el cz-el--{kind}"{dataattr}{_fattr(eid, editable)}{style_attr}>'
+                f'{_esc(el.get("text"))}</{tag}>'
+            )
+
+    style_block = (f'<style>{"".join(desk_rules)}'
+                   f'@media(max-width:767px){{{"".join(mob_rules)}}}</style>')
+    wrap = f'<div class="cz-cv-wrap">{"".join(els_html)}</div>'
+    return f'<section class="cz-canvas cz-cv-{index}">{style_block}{wrap}</section>'
+
+
 _RENDERERS = {
     "hero": _hero, "features": _features, "gallery": _gallery, "pricing": _pricing,
     "testimonial": _testimonial, "cta": _cta, "menu": _menu, "posts": _posts,
@@ -1612,9 +1805,15 @@ _EDITABLE_AWARE: frozenset[str] = frozenset({"hero", "cta", "text", "split", "fe
 def _render_block(block, t, index=None, editable=False):
     if not isinstance(block, dict):
         return ""
-    fn = _RENDERERS.get(block.get("type"))
+    btype = block.get("type")
+    # Canvas needs the block index (for per-block CSS scoping) + editable, so it's
+    # dispatched here rather than through _RENDERERS' (block, t[, editable]) shape.
+    if btype == "canvas":
+        raw = _canvas(block, t, editable, index if index is not None else 0)
+        return _apply_design(raw, block.get("_design"), block_index=index, editable=editable) if raw else raw
+    fn = _RENDERERS.get(btype)
     if fn:
-        raw = fn(block, t, editable) if block.get("type") in _EDITABLE_AWARE else fn(block, t)
+        raw = fn(block, t, editable) if btype in _EDITABLE_AWARE else fn(block, t)
     else:
         body = block.get("body") or block.get("heading")
         raw = _text({"body": body}, t) if body else ""
@@ -1929,7 +2128,7 @@ def render_site_html(site: dict, page: dict, nav_pages: list[dict], preview: boo
   <title>{head_title}</title>
   {head_seo}
   {_gfonts_link(t['heading'], t['body'])}
-  <style>{theme_vars}{extra_vars}{_BASE_CSS}</style>
+  <style>{theme_vars}{extra_vars}{_BASE_CSS}{_CANVAS_CSS}</style>
   <script>window.__CAPPE__={cappe_ctx};</script>
   {_widget_runtime()}
 </head>

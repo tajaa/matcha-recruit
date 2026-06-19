@@ -22,6 +22,28 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'cappe-freeform-canvas',
+    date: '2026-06-19',
+    category: 'Cappe',
+    title: 'Freeform canvas — click & place individual elements',
+    summary:
+      'A new "Blank / Freeform" section (Pro/Business) lets you click any heading, subheader, or image and drag it anywhere on a snap-grid — with separate desktop and mobile layouts. Squarespace "Fluid Engine"–style, on top of the existing block editor.',
+    whatsNew: [
+      'Add a "Blank / Freeform" section, then drop in heading / text / image elements.',
+      'Click an element to select it; drag to move (snaps to a grid), drag a corner to resize, double-click text to type in place.',
+      'Per-element styling: font, size, weight, spacing, color, alignment for text; replace / fit / corner-radius / alignment for images.',
+      'Separate Desktop and Mobile layouts — flip the toggle to arrange the phone view independently (it auto-stacks until you customize it).',
+      'Published pages stay fast: positions render as plain CSS grid (no editor code shipped), so it scales to many sites.',
+    ],
+    howToUse: [
+      'Open a site → a page → the editor opens in Canvas mode (Pro/Business).',
+      'Add block → "Blank / Freeform" (or use Form mode to add/position elements numerically).',
+      'Click an element on the canvas to edit it in the floating panel; drag to move, corner-drag to resize.',
+      'Use the Desktop / Mobile toggle in the panel to tune each breakpoint, then Save.',
+    ],
+    tag: 'new',
+  },
+  {
     id: 'cappe-staff-csv-import',
     date: '2026-06-19',
     category: 'Cappe',

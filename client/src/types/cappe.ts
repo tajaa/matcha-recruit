@@ -119,6 +119,40 @@ export type CappePage = {
 // fields generically against a per-type schema.
 export type CappeBlock = { type: string; [key: string]: unknown }
 
+// Freeform grid-snap canvas block (a `canvas` block type). Elements sit on a CSS
+// grid at explicit per-breakpoint coordinates. Stored opaquely inside the block;
+// the editor narrows a CappeBlock to these shapes when type === 'canvas'.
+export type CappeCanvasPos = { x: number; y: number; w: number; h: number }
+export type CappeCanvasElementStyle = {
+  font?: string
+  size?: number
+  weight?: number
+  spacing?: string
+  lineHeight?: number
+  color?: string
+  align?: 'left' | 'center' | 'right' | 'justify'
+  fit?: 'cover' | 'contain' | 'fill' | 'none'
+  radius?: number
+}
+export type CappeCanvasElement = {
+  id: string
+  kind: 'heading' | 'text' | 'image'
+  text?: string
+  src?: string
+  alt?: string
+  d: CappeCanvasPos // desktop placement (grid units)
+  m?: CappeCanvasPos // mobile placement (auto-derived when absent)
+  style?: CappeCanvasElementStyle
+}
+export type CappeCanvasGrid = { cols: number; rowH: number; rows?: number }
+export type CappeCanvasBlock = {
+  type: 'canvas'
+  grid: CappeCanvasGrid
+  mobile: CappeCanvasGrid
+  elements: CappeCanvasElement[]
+  _design?: Record<string, unknown>
+}
+
 export type CappeTemplateSummary = {
   id: string
   name: string

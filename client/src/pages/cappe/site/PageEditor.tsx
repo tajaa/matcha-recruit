@@ -1,12 +1,12 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  ArrowLeft, Check, ChevronDown, ChevronUp, Copy, Film, GripVertical, ImagePlus, Loader2, Megaphone, MousePointerClick, Palette, Pencil, Plus, Save, Search, Sparkles, Trash2, Wand2, X,
+  ArrowLeft, Check, ChevronDown, ChevronUp, Copy, Film, GripVertical, ImagePlus, Loader2, Megaphone, Monitor, MousePointerClick, Palette, Pencil, Plus, Save, Search, Smartphone, Sparkles, Trash2, Type, Wand2, X,
 } from 'lucide-react'
 import { cappeApi } from '../../../api/cappeClient'
 import { useCappeMe } from '../../../hooks/useCappeMe'
 import { BODY_FONTS, CAPPE_THEMES, FONT_CATEGORY, FONT_PAIRINGS, HEADING_FONTS, RADII, contrastText } from '../../../data/cappeThemes'
-import type { CappeBlock, CappePage, CappeSite } from '../../../types/cappe'
+import type { CappeBlock, CappeCanvasElement, CappeCanvasPos, CappePage, CappeSite } from '../../../types/cappe'
 
 // ── theme helpers (operate on the freeform theme_config object) ─────────────
 const themeObj = (v: unknown): Record<string, unknown> =>
@@ -45,6 +45,26 @@ type BlockSchema = { label: string; fields: Field[]; make: () => CappeBlock }
 
 const F = (key: string, label: string, kind: FieldKind = 'text', extra: Partial<Field> = {}): Field =>
   ({ key, label, kind, ...extra })
+
+// ── freeform canvas helpers (shared by the canvas inspector + form editor) ───
+function genId(): string {
+  try { return crypto.randomUUID().replace(/-/g, '').slice(0, 8) } catch { return Math.random().toString(36).slice(2, 10) }
+}
+function cvEls(b: unknown): CappeCanvasElement[] {
+  const els = (b as { elements?: unknown } | null)?.elements
+  return Array.isArray(els) ? (els as CappeCanvasElement[]) : []
+}
+function cvNextY(els: CappeCanvasElement[]): number {
+  return els.reduce((m, e) => Math.max(m, (e.d?.y || 0) + (e.d?.h || 1)), 0)
+}
+function cvNewElement(kind: CappeCanvasElement['kind'], y: number): CappeCanvasElement {
+  if (kind === 'image') return { id: genId(), kind, src: '', d: { x: 2, y, w: 8, h: 6 }, style: { fit: 'cover' } }
+  return { id: genId(), kind, text: kind === 'heading' ? 'Heading' : 'Text', d: { x: 2, y, w: 12, h: kind === 'heading' ? 3 : 2 }, style: {} }
+}
+function isCanvasBlock(b: unknown): boolean {
+  return !!b && (b as { type?: string }).type === 'canvas'
+}
+const CV_MAX_ELEMENTS = 200
 
 const BLOCK_SCHEMAS: Record<string, BlockSchema> = {
   hero: {
@@ -316,9 +336,17 @@ const BLOCK_SCHEMAS: Record<string, BlockSchema> = {
       F('heading', 'Section heading'), F('subheading', 'Section subheading', 'textarea'),
     ],
   },
+  canvas: {
+    label: 'Blank / Freeform',
+    make: () => ({
+      type: 'canvas', grid: { cols: 24, rowH: 24, rows: 30 }, mobile: { cols: 8, rowH: 24, rows: 60 },
+      elements: [cvNewElement('heading', 2)],
+    }),
+    fields: [],  // canvas uses its own inspector/form editor, not generic Field rows
+  },
 }
 
-const BLOCK_ORDER = ['hero', 'features', 'split', 'bento', 'stats', 'credentials', 'logos', 'gallery', 'pricing', 'testimonial', 'reviews', 'faq', 'cta', 'store', 'booking', 'menu', 'hours', 'map', 'posts', 'text', 'contact', 'newsletter']
+const BLOCK_ORDER = ['hero', 'features', 'split', 'bento', 'stats', 'credentials', 'logos', 'gallery', 'pricing', 'testimonial', 'reviews', 'faq', 'cta', 'store', 'booking', 'menu', 'hours', 'map', 'posts', 'text', 'contact', 'newsletter', 'canvas']
 
 // ── upload context (only ImageInput needs the siteId) ───────────────────────
 const SiteCtx = createContext<string>('')
@@ -921,7 +949,8 @@ function BlockCard({
           <button type="button" onClick={() => setOpen((o) => !o)} className="hover:text-zinc-200">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</button>
         </div>
       </div>
-      {open && schema && (
+      {open && block.type === 'canvas' && <CanvasFormEditor block={block} onChange={onChange} />}
+      {open && block.type !== 'canvas' && schema && (
         <div className="space-y-3 p-4">
           {schema.fields.map((f) => (
             <FieldInput key={f.key} field={f} value={block[f.key]} onChange={(v) => onChange({ ...block, [f.key]: v })} />
@@ -929,7 +958,7 @@ function BlockCard({
           <DesignInspector design={block._design} onChange={(dz) => onChange({ ...block, _design: dz })} />
         </div>
       )}
-      {open && !schema && <div className="p-4 text-sm text-zinc-500">Unknown block type “{block.type}”.</div>}
+      {open && block.type !== 'canvas' && !schema && <div className="p-4 text-sm text-zinc-500">Unknown block type “{block.type}”.</div>}
     </div>
   )
 }
@@ -1012,6 +1041,156 @@ function CanvasPanel({ blocks, sel, onChange, onMove, onRemove, onDuplicate, onA
   )
 }
 
+// ── freeform canvas: per-element controls (shared by inspector + form editor) ─
+function ElementControls({ el, bp, onPatch }: {
+  el: CappeCanvasElement
+  bp: 'd' | 'm'
+  onPatch: (fn: (e: CappeCanvasElement) => CappeCanvasElement) => void
+}) {
+  const style = el.style || {}
+  const setStyle = (k: keyof NonNullable<CappeCanvasElement['style']>, v: unknown) =>
+    onPatch((e) => ({ ...e, style: { ...(e.style || {}), [k]: v } }))
+  const place = (bp === 'm' ? el.m : el.d) || { x: 0, y: 0, w: 1, h: 1 }
+  const setPlace = (k: keyof CappeCanvasPos, v: number) =>
+    onPatch((e) => {
+      const cur = (bp === 'm' ? e.m : e.d) || { x: 0, y: 0, w: 1, h: 1 }
+      const next = { ...cur, [k]: Math.max(0, Math.round(v)) }
+      return bp === 'm' ? { ...e, m: next } : { ...e, d: next }
+    })
+  return (
+    <div className="space-y-2.5">
+      {el.kind === 'image' ? (
+        <>
+          <div><span className={dLabel}>Image</span><ImageInput value={el.src || ''} onChange={(v) => onPatch((e) => ({ ...e, src: v }))} /></div>
+          <input value={el.alt || ''} onChange={(e) => onPatch((x) => ({ ...x, alt: e.target.value }))} placeholder="Alt text (accessibility)" className={`${inputCls} py-1.5`} />
+          <div className="grid grid-cols-2 gap-2">
+            <DSelect label="Fit" value={style.fit || 'cover'} options={[['cover', 'Cover'], ['contain', 'Contain'], ['fill', 'Fill'], ['none', 'None']]} onChange={(v) => setStyle('fit', v)} />
+            <DNum label="Corner radius" value={style.radius || 0} min={0} max={200} onChange={(v) => setStyle('radius', v || undefined)} />
+          </div>
+        </>
+      ) : (
+        <>
+          <div><span className={dLabel}>Text</span><textarea value={el.text || ''} onChange={(e) => onPatch((x) => ({ ...x, text: e.target.value }))} rows={2} className={`${inputCls} py-1.5`} /></div>
+          <CappeFontPicker label="Font" value={style.font || 'Inter'} onChange={(v) => setStyle('font', v)} />
+          <div className="grid grid-cols-2 gap-2">
+            <DNum label="Size (px)" value={style.size || 0} min={0} max={200} onChange={(v) => setStyle('size', v || undefined)} />
+            <DSelect label="Weight" value={String(style.weight || '')} options={[['', 'Default'], ['400', 'Regular'], ['500', 'Medium'], ['600', 'Semibold'], ['700', 'Bold'], ['800', 'Extrabold'], ['900', 'Black']]} onChange={(v) => setStyle('weight', v ? Number(v) : undefined)} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <DSelect label="Align" value={style.align || 'left'} options={[['left', 'Left'], ['center', 'Center'], ['right', 'Right'], ['justify', 'Justify']]} onChange={(v) => setStyle('align', v)} />
+            <DColor label="Color" value={style.color || ''} onChange={(v) => setStyle('color', v)} />
+          </div>
+        </>
+      )}
+      <div>
+        <span className={dLabel}>Position — {bp === 'm' ? 'Mobile' : 'Desktop'} (grid units)</span>
+        <div className="grid grid-cols-4 gap-1.5">
+          <DNum label="X" value={place.x} min={0} max={48} onChange={(v) => setPlace('x', v)} />
+          <DNum label="Y" value={place.y} min={0} max={400} onChange={(v) => setPlace('y', v)} />
+          <DNum label="W" value={place.w} min={1} max={48} onChange={(v) => setPlace('w', v)} />
+          <DNum label="H" value={place.h} min={1} max={48} onChange={(v) => setPlace('h', v)} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** Canvas-mode floating inspector: edits the selected freeform element (or, when
+ *  none is selected, shows add-element + the section design). */
+function CanvasInspector({ block, elementId, bp, onSetBp, onPatchElement, onAddElement, onRemoveElement, onChangeBlock, onClose }: {
+  block: CappeBlock
+  elementId: string | null
+  bp: 'd' | 'm'
+  onSetBp: (bp: 'd' | 'm') => void
+  onPatchElement: (id: string, fn: (e: CappeCanvasElement) => CappeCanvasElement) => void
+  onAddElement: (kind: CappeCanvasElement['kind']) => void
+  onRemoveElement: (id: string) => void
+  onChangeBlock: (b: CappeBlock) => void
+  onClose: () => void
+}) {
+  const el = cvEls(block).find((e) => e.id === elementId) || null
+  const kindLabel = el ? ({ heading: 'Heading', text: 'Text', image: 'Image' } as const)[el.kind] : 'Freeform section'
+  return (
+    <div className="space-y-3 p-4">
+      <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
+        <span className="text-sm font-semibold text-zinc-100">{kindLabel}</span>
+        <div className="flex items-center gap-1.5 text-zinc-500">
+          {el && <button title="Delete element" onClick={() => onRemoveElement(el.id)} className="hover:text-red-400"><Trash2 className="h-4 w-4" /></button>}
+          <button title="Close" onClick={onClose} className="ml-1 border-l border-zinc-700 pl-1.5 hover:text-zinc-200"><X className="h-4 w-4" /></button>
+        </div>
+      </div>
+      <div className="flex rounded-lg border border-zinc-700 p-0.5">
+        {(['d', 'm'] as const).map((x) => (
+          <button key={x} onClick={() => onSetBp(x)} className={`flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1 text-xs font-medium ${bp === x ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}>
+            {x === 'd' ? <Monitor className="h-3.5 w-3.5" /> : <Smartphone className="h-3.5 w-3.5" />} {x === 'd' ? 'Desktop' : 'Mobile'}
+          </button>
+        ))}
+      </div>
+      {el ? (
+        <ElementControls el={el} bp={bp} onPatch={(fn) => onPatchElement(el.id, fn)} />
+      ) : (
+        <p className="rounded-lg border border-dashed border-zinc-700 p-3 text-center text-xs text-zinc-500">Click any element on the canvas to edit it. Drag to move; drag a corner to resize.</p>
+      )}
+      <div className="flex gap-1.5 border-t border-zinc-800 pt-2">
+        {(['heading', 'text', 'image'] as const).map((k) => (
+          <button key={k} onClick={() => onAddElement(k)} className="flex-1 rounded-lg border border-dashed border-zinc-700 px-2 py-1.5 text-xs font-medium capitalize text-zinc-300 hover:border-emerald-500 hover:text-emerald-400">+ {k}</button>
+        ))}
+      </div>
+      <DesignInspector design={(block as { _design?: unknown })._design} onChange={(dz) => onChangeBlock({ ...block, _design: dz })} />
+    </div>
+  )
+}
+
+/** Form-mode editor for a freeform canvas block — element list + the same
+ *  controls + numeric positions, so it's fully editable without the drag canvas. */
+function CanvasFormEditor({ block, onChange }: { block: CappeBlock; onChange: (b: CappeBlock) => void }) {
+  const [openId, setOpenId] = useState<string | null>(null)
+  const [bp, setBp] = useState<'d' | 'm'>('d')
+  const els = cvEls(block)
+  const patchEl = (id: string, fn: (e: CappeCanvasElement) => CappeCanvasElement) =>
+    onChange({ ...block, elements: els.map((e) => (e.id === id ? fn(e) : e)) })
+  const addEl = (kind: CappeCanvasElement['kind']) => {
+    if (els.length >= CV_MAX_ELEMENTS) return
+    const ne = cvNewElement(kind, cvNextY(els))
+    onChange({ ...block, elements: [...els, ne] }); setOpenId(ne.id)
+  }
+  const removeEl = (id: string) => onChange({ ...block, elements: els.filter((e) => e.id !== id) })
+  return (
+    <div className="space-y-3 p-4">
+      <p className="text-xs text-zinc-500">Freeform section — switch to <b className="text-zinc-300">Canvas</b> mode to drag elements; here you can edit them and set exact grid positions.</p>
+      <div className="flex w-44 rounded-lg border border-zinc-700 p-0.5">
+        {(['d', 'm'] as const).map((x) => (
+          <button key={x} onClick={() => setBp(x)} className={`flex-1 rounded-md px-2 py-1 text-xs font-medium ${bp === x ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}>{x === 'd' ? 'Desktop' : 'Mobile'}</button>
+        ))}
+      </div>
+      <ul className="space-y-2">
+        {els.map((el) => (
+          <li key={el.id} className="rounded-lg border border-zinc-800 bg-zinc-950/60">
+            <div className="flex items-center justify-between px-3 py-2">
+              <button onClick={() => setOpenId((o) => (o === el.id ? null : el.id))} className="flex min-w-0 items-center gap-2 text-sm text-zinc-200">
+                {el.kind === 'image' ? <ImagePlus className="h-3.5 w-3.5 shrink-0 text-zinc-500" /> : <Type className="h-3.5 w-3.5 shrink-0 text-zinc-500" />}
+                <span className="truncate">{el.kind === 'image' ? (el.src ? 'Image' : 'Image (empty)') : (el.text || '(empty text)')}</span>
+              </button>
+              <div className="flex items-center gap-1 text-zinc-500">
+                <button onClick={() => removeEl(el.id)} className="hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
+                <button onClick={() => setOpenId((o) => (o === el.id ? null : el.id))} className="hover:text-zinc-200">{openId === el.id ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</button>
+              </div>
+            </div>
+            {openId === el.id && <div className="border-t border-zinc-800 p-3"><ElementControls el={el} bp={bp} onPatch={(fn) => patchEl(el.id, fn)} /></div>}
+          </li>
+        ))}
+        {els.length === 0 && <li className="rounded-lg border border-dashed border-zinc-700 p-3 text-center text-xs text-zinc-500">No elements yet.</li>}
+      </ul>
+      <div className="flex gap-1.5">
+        {(['heading', 'text', 'image'] as const).map((k) => (
+          <button key={k} onClick={() => addEl(k)} className="flex-1 rounded-lg border border-dashed border-zinc-700 px-2 py-1.5 text-xs font-medium capitalize text-zinc-300 hover:border-emerald-500 hover:text-emerald-400">+ {k}</button>
+        ))}
+      </div>
+      <DesignInspector design={(block as { _design?: unknown })._design} onChange={(dz) => onChange({ ...block, _design: dz })} />
+    </div>
+  )
+}
+
 // ── page editor ──────────────────────────────────────────────────────────────
 export default function PageEditor() {
   const { siteId, pageId } = useParams<{ siteId: string; pageId: string }>()
@@ -1036,6 +1215,8 @@ export default function PageEditor() {
   const [editMode, setEditMode] = useState<'form' | 'canvas'>('form')
   useEffect(() => { if (canvasUnlocked) setEditMode('canvas') }, [canvasUnlocked])
   const [selBlock, setSelBlock] = useState<number | null>(null)
+  const [selElement, setSelElement] = useState<string | null>(null)  // freeform canvas: selected element id
+  const [canvasBp, setCanvasBp] = useState<'d' | 'm'>('d')            // freeform canvas: editing desktop vs mobile
   const [popPos, setPopPos] = useState<{ top: number; left: number }>({ top: 96, left: 96 })
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const suspendPreview = useRef(false)
@@ -1043,9 +1224,29 @@ export default function PageEditor() {
   // Refs mirror state for the (mount-once) postMessage handler — avoid stale closures.
   const selBlockRef = useRef<number | null>(null)
   const blocksRef = useRef<CappeBlock[]>([])
+  const selElementRef = useRef<string | null>(null)
+  const canvasBpRef = useRef<'d' | 'm'>('d')
   selBlockRef.current = selBlock
   blocksRef.current = blocks
+  selElementRef.current = selElement
+  canvasBpRef.current = canvasBp
   const postToCanvas = (msg: unknown) => iframeRef.current?.contentWindow?.postMessage(msg, '*')
+  // Flip desktop/mobile editing: tell the canvas runtime (so drags write the right
+  // coords) and narrow the preview iframe so the mobile @media layout activates.
+  const setCanvasBreakpoint = (bp: 'd' | 'm') => { setCanvasBp(bp); postToCanvas({ type: 'cz-bp', bp }) }
+  const patchCanvasElement = (blockIdx: number, id: string, fn: (e: CappeCanvasElement) => CappeCanvasElement) =>
+    setBlocks((bs) => bs.map((b, i) => (i !== blockIdx ? b : { ...b, elements: cvEls(b).map((e) => (e.id === id ? fn(e) : e)) })))
+  const addCanvasElement = (blockIdx: number, kind: CappeCanvasElement['kind']) => {
+    const b = blocks[blockIdx]
+    if (!b || cvEls(b).length >= CV_MAX_ELEMENTS) return
+    const ne = cvNewElement(kind, cvNextY(cvEls(b)))
+    setBlocks((bs) => bs.map((x, i) => (i !== blockIdx ? x : { ...x, elements: [...cvEls(x), ne] })))
+    setSelElement(ne.id)
+  }
+  const removeCanvasElement = (blockIdx: number, id: string) => {
+    setBlocks((bs) => bs.map((b, i) => (i !== blockIdx ? b : { ...b, elements: cvEls(b).filter((e) => e.id !== id) })))
+    setSelElement((cur) => (cur === id ? null : cur))
+  }
 
   // Live theme switching — edited locally, previewed instantly, saved on demand.
   const [theme, setTheme] = useState<Record<string, unknown>>({})
@@ -1105,11 +1306,19 @@ export default function PageEditor() {
       if (e.source !== iframeRef.current?.contentWindow) return
       const d = e.data || {}
       switch (d.type) {
-        case 'cz-ready':
-          if (selBlockRef.current != null) postToCanvas({ type: 'cz-highlight', block: selBlockRef.current })
+        case 'cz-ready': {
+          const sb = selBlockRef.current
+          if (sb != null) {
+            if (isCanvasBlock(blocksRef.current[sb]) && selElementRef.current) postToCanvas({ type: 'cz-elem-highlight', id: selElementRef.current })
+            else postToCanvas({ type: 'cz-highlight', block: sb })
+          }
+          if (canvasBpRef.current === 'm') postToCanvas({ type: 'cz-bp', bp: 'm' })
           break
+        }
         case 'cz-select': {
           setSelBlock(d.block)
+          const onEl = isCanvasBlock(blocksRef.current[d.block]) && d.field != null
+          setSelElement(onEl ? d.field : null)
           // Anchor the floating editor near the clicked element (iframe rect +
           // element rect → parent viewport), clamped on-screen.
           const fr = iframeRef.current?.getBoundingClientRect()
@@ -1118,12 +1327,23 @@ export default function PageEditor() {
             const top = Math.min(Math.max(fr.top + d.rect.top + 8, 64), window.innerHeight - 160)
             setPopPos({ top, left })
           }
-          postToCanvas({ type: 'cz-highlight', block: d.block })
+          // A canvas element already shows resize handles in the iframe; re-highlighting
+          // the section would clear them, so only highlight non-element selections.
+          if (!onEl) postToCanvas({ type: 'cz-highlight', block: d.block })
           break
         }
         case 'cz-edit': {
           const b = blocksRef.current[d.block]
-          if (b) setBlocks((bs) => bs.map((x, j) => (j === d.block ? { ...x, [d.field]: d.value } : x)))
+          if (isCanvasBlock(b)) setBlocks((bs) => bs.map((x, j) => (j === d.block ? { ...x, elements: cvEls(x).map((el) => (el.id === d.field ? { ...el, text: d.value } : el)) } : x)))
+          else if (b) setBlocks((bs) => bs.map((x, j) => (j === d.block ? { ...x, [d.field]: d.value } : x)))
+          break
+        }
+        case 'cz-elem-move':
+        case 'cz-elem-resize': {
+          const bp = d.bp === 'm' ? 'm' : 'd'
+          const p = d.pos || {}
+          const pos = { x: Math.max(0, p.x | 0), y: Math.max(0, p.y | 0), w: Math.max(1, p.w | 0), h: Math.max(1, p.h | 0) }
+          setBlocks((bs) => bs.map((x, j) => (j === d.block ? { ...x, elements: cvEls(x).map((el) => (el.id === d.id ? { ...el, [bp]: pos } : el)) } : x)))
           break
         }
         case 'cz-reorder':
@@ -1426,9 +1646,20 @@ export default function PageEditor() {
         {editMode === 'canvas' ? (
           /* canvas: click a section on the page → a floating editor pops up at it (Pro & Business) */
           <div className="relative flex min-h-0 flex-1">
-            <div className="hidden flex-1 bg-zinc-900 lg:block">
+            <div className="hidden flex-1 justify-center overflow-auto bg-zinc-900 lg:flex">
               {preview ? (
-                <iframe ref={iframeRef} title="Canvas" srcDoc={preview} sandbox="allow-scripts" className="h-full w-full border-0" />
+                <iframe
+                  ref={iframeRef}
+                  title="Canvas"
+                  srcDoc={preview}
+                  sandbox="allow-scripts"
+                  className="h-full border-0 bg-white transition-[width] duration-200"
+                  style={
+                    canvasBp === 'm' && selBlock != null && isCanvasBlock(blocks[selBlock])
+                      ? { width: 414, maxWidth: '100%', boxShadow: '0 0 0 1px rgb(63 63 70)' }
+                      : { width: '100%' }
+                  }
+                />
               ) : (
                 <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-600" /></div>
               )}
@@ -1440,17 +1671,31 @@ export default function PageEditor() {
               className="fixed z-40 hidden max-h-[74vh] w-[360px] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl shadow-black/60 lg:block"
               style={selBlock != null ? { top: popPos.top, left: popPos.left } : { bottom: 16, left: 16 }}
             >
-              <CanvasPanel
-                blocks={blocks}
-                sel={selBlock}
-                onChange={updateBlock}
-                onMove={moveBlock}
-                onRemove={removeBlock}
-                onDuplicate={duplicateBlock}
-                onAddAt={addBlockAt}
-                onAdd={addBlock}
-                onClose={() => { setSelBlock(null); postToCanvas({ type: 'cz-clear' }) }}
-              />
+              {selBlock != null && isCanvasBlock(blocks[selBlock]) ? (
+                <CanvasInspector
+                  block={blocks[selBlock]}
+                  elementId={selElement}
+                  bp={canvasBp}
+                  onSetBp={setCanvasBreakpoint}
+                  onPatchElement={(id, fn) => patchCanvasElement(selBlock, id, fn)}
+                  onAddElement={(k) => addCanvasElement(selBlock, k)}
+                  onRemoveElement={(id) => { removeCanvasElement(selBlock, id); postToCanvas({ type: 'cz-clear' }) }}
+                  onChangeBlock={(b) => updateBlock(selBlock, b)}
+                  onClose={() => { setSelBlock(null); setSelElement(null); postToCanvas({ type: 'cz-clear' }) }}
+                />
+              ) : (
+                <CanvasPanel
+                  blocks={blocks}
+                  sel={selBlock}
+                  onChange={updateBlock}
+                  onMove={moveBlock}
+                  onRemove={removeBlock}
+                  onDuplicate={duplicateBlock}
+                  onAddAt={addBlockAt}
+                  onAdd={addBlock}
+                  onClose={() => { setSelBlock(null); postToCanvas({ type: 'cz-clear' }) }}
+                />
+              )}
             </div>
 
             <div className="flex w-full items-center justify-center p-8 text-center text-sm text-zinc-500 lg:hidden">
@@ -1489,9 +1734,9 @@ export default function PageEditor() {
                   </button>
                   {adding && (
                     <div className="absolute z-10 mt-1 grid w-full grid-cols-2 gap-1 rounded-xl border border-zinc-700 bg-zinc-900 p-2 shadow-xl shadow-black/40">
-                      {BLOCK_ORDER.map((t) => (
-                        <button key={t} onClick={() => addBlock(t)} className="rounded-lg px-3 py-2 text-left text-sm text-zinc-300 hover:bg-emerald-500/10 hover:text-emerald-400">
-                          {BLOCK_SCHEMAS[t].label}
+                      {BLOCK_ORDER.filter((t) => t !== 'canvas' || canvasUnlocked).map((t) => (
+                        <button key={t} onClick={() => addBlock(t)} className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-left text-sm text-zinc-300 hover:bg-emerald-500/10 hover:text-emerald-400">
+                          {t === 'canvas' && <Sparkles className="h-3.5 w-3.5 text-amber-400" />}{BLOCK_SCHEMAS[t].label}
                         </button>
                       ))}
                     </div>
