@@ -338,6 +338,7 @@ export interface MeClientProfile {
   email: string
   created_at: string
   headcount?: number
+  jurisdiction_count?: number
 }
 
 export interface MeResponse {

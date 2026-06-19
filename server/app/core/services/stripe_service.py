@@ -85,6 +85,30 @@ def matcha_x_price_cents(headcount: int) -> Optional[int]:
     return math.ceil(headcount / 10) * 10_000
 
 
+# Per-jurisdiction monthly surcharge for Matcha Compliance, added on top of the
+# headcount component.
+# TODO: finalize price — placeholder so the flow works end-to-end (same
+# convention as the matcha_x_price_cents stub). Tunable in one constant.
+COMPLIANCE_PER_JURISDICTION_CENTS = 5_000
+
+
+def matcha_compliance_price_cents(headcount: int, jurisdiction_count: int) -> Optional[int]:
+    """Monthly price for Matcha Compliance in cents.
+
+    Headcount component (mirrors Lite's $100/mo-per-10-employees formula) PLUS a
+    per-jurisdiction surcharge. Returns None if headcount < 1 or > 300.
+
+    TODO: finalize pricing — both the headcount formula and
+    COMPLIANCE_PER_JURISDICTION_CENTS are placeholders so the flow works
+    end-to-end (same convention as matcha_x_price_cents).
+    """
+    base = matcha_lite_price_cents(headcount)
+    if base is None:
+        return None
+    jurisdictions = max(0, jurisdiction_count or 0)
+    return base + jurisdictions * COMPLIANCE_PER_JURISDICTION_CENTS
+
+
 class StripeServiceError(Exception):
     """Raised when Stripe operations fail or are misconfigured."""
 
@@ -485,6 +509,73 @@ class StripeService:
             return await asyncio.to_thread(_create)
         except Exception as exc:
             raise StripeServiceError(f"Failed to create Matcha-X checkout: {exc}") from exc
+
+    async def create_matcha_compliance_checkout(
+        self,
+        company_id: UUID,
+        headcount: int,
+        jurisdiction_count: int,
+        success_url: Optional[str] = None,
+        cancel_url: Optional[str] = None,
+    ):
+        """Subscription checkout for Matcha Compliance (standalone self-serve).
+
+        Priced by headcount + number of jurisdictions
+        (see matcha_compliance_price_cents). Headcount > 300 is rejected
+        (contact sales). The webhook catches metadata.type ==
+        'matcha_compliance' and flips the full `compliance` feature on.
+        """
+        self._ensure_secret_key()
+
+        amount_cents = matcha_compliance_price_cents(headcount, jurisdiction_count)
+        if amount_cents is None:
+            raise StripeServiceError("Headcount over 300 — please contact us for pricing")
+
+        resolved_success_url = success_url or self.settings.stripe_success_url
+        resolved_cancel_url = cancel_url or self.settings.stripe_cancel_url
+
+        jurisdictions = max(0, jurisdiction_count or 0)
+        metadata = {
+            "company_id": str(company_id),
+            "type": "matcha_compliance",
+            "headcount": str(headcount),
+            "jurisdiction_count": str(jurisdictions),
+            "mode": "subscription",
+        }
+
+        def _create():
+            return stripe.checkout.Session.create(
+                mode="subscription",
+                success_url=resolved_success_url,
+                cancel_url=resolved_cancel_url,
+                payment_method_types=["card"],
+                metadata=metadata,
+                subscription_data={"metadata": metadata},
+                line_items=[
+                    {
+                        "price_data": {
+                            "currency": "usd",
+                            "unit_amount": amount_cents,
+                            "recurring": {"interval": "month"},
+                            "product_data": {
+                                "name": "Matcha Compliance",
+                                "description": (
+                                    f"Jurisdiction-aware compliance "
+                                    f"({headcount} employee{'s' if headcount != 1 else ''}, "
+                                    f"{jurisdictions} jurisdiction{'s' if jurisdictions != 1 else ''}). "
+                                    f"Auto-renews monthly."
+                                ),
+                            },
+                        },
+                        "quantity": 1,
+                    }
+                ],
+            )
+
+        try:
+            return await asyncio.to_thread(_create)
+        except Exception as exc:
+            raise StripeServiceError(f"Failed to create Matcha Compliance checkout: {exc}") from exc
 
     async def create_recruiter_tier_checkout(
         self,

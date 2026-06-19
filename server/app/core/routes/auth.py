@@ -168,6 +168,7 @@ async def _upsert_business_headcount_profile(
     company_name: str,
     owner_name: str,
     headcount: int,
+    jurisdiction_count: int | None = None,
     updated_by: UUID,
 ) -> None:
     if not await _table_exists(conn, "company_handbook_profiles"):
@@ -184,20 +185,26 @@ async def _upsert_business_headcount_profile(
         """
         INSERT INTO company_handbook_profiles (
             company_id, legal_name, dba, ceo_or_president, headcount,
+            compliance_jurisdiction_count,
             remote_workers, minors, tipped_employees, union_employees, federal_contracts,
             group_health_insurance, background_checks, hourly_employees,
             salaried_employees, commissioned_employees, tip_pooling, updated_by, updated_at
         )
         VALUES (
             $1, $2, NULL, $3, $4,
+            $5,
             false, false, false, false, false,
             false, false, true,
-            false, false, false, $5, NOW()
+            false, false, false, $6, NOW()
         )
         ON CONFLICT (company_id)
         DO UPDATE SET
             legal_name = EXCLUDED.legal_name,
             headcount = EXCLUDED.headcount,
+            compliance_jurisdiction_count = COALESCE(
+                EXCLUDED.compliance_jurisdiction_count,
+                company_handbook_profiles.compliance_jurisdiction_count
+            ),
             updated_by = EXCLUDED.updated_by,
             updated_at = NOW()
         """,
@@ -205,6 +212,7 @@ async def _upsert_business_headcount_profile(
         legal_name,
         ceo_or_president,
         headcount,
+        jurisdiction_count,
         updated_by,
     )
 
@@ -1704,7 +1712,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
             # can't both pass (matches business_invitations pattern above).
             lite_invite_activated = False
             lite_invite_id = None
-            if request.lite_invite_token and request.tier in ("matcha_lite", "matcha_x"):
+            if request.lite_invite_token and request.tier in ("matcha_lite", "matcha_x", "matcha_compliance"):
                 invite_row = await conn.fetchrow(
                     """UPDATE matcha_lite_invite_tokens
                        SET used_at = NOW()
@@ -1724,10 +1732,11 @@ async def register_business(request: BusinessRegister, http_request: Request):
             is_resources_free = request.tier == "resources_free"
             is_matcha_lite = request.tier == "matcha_lite"
             is_matcha_x = request.tier == "matcha_x"
+            is_matcha_compliance = request.tier == "matcha_compliance"
 
             # Broker seat invites carry their own allocation, so they bypass the
             # self-serve 300 cap (same as an admin comp invite).
-            if (is_matcha_lite or is_matcha_x) and not lite_invite_activated and broker_seat_count is None and request.headcount > 300:
+            if (is_matcha_lite or is_matcha_x or is_matcha_compliance) and not lite_invite_activated and broker_seat_count is None and request.headcount > 300:
                 raise HTTPException(
                     status_code=400,
                     detail="Headcount over 300 — please contact us for pricing at matcha.work",
@@ -1808,6 +1817,20 @@ async def register_business(request: BusinessRegister, http_request: Request):
                     x_features["employees"] = True
                     x_features["discipline"] = True
                 enabled_features_json = json.dumps(x_features)
+            elif is_matcha_compliance:
+                # Standalone self-serve Compliance product. Same payment model
+                # as Lite/X: broker-pays/invite signups activate immediately;
+                # business-pays signups complete Stripe checkout first and the
+                # webhook flips the full `compliance` flag. Nothing else is
+                # bundled — every other default flag stays off. `compliance` is
+                # NOT in any TIER_REQUIRED overlay, so it's the live paid gate
+                # (mirrors how `incidents` gates Lite/X), not force-asserted on.
+                company_status = "approved"
+                signup_source = "matcha_compliance"
+                compliance_features = {k: False for k in DEFAULT_COMPANY_FEATURES}
+                if lite_broker_pays or lite_invite_activated:
+                    compliance_features["compliance"] = True
+                enabled_features_json = json.dumps(compliance_features)
             else:
                 # Bespoke/platform tier from a PUBLIC endpoint. Only an
                 # admin-issued invite token may provision a full Pro company
@@ -1931,6 +1954,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 company_name=request.company_name,
                 owner_name=request.name,
                 headcount=request.headcount,
+                jurisdiction_count=request.jurisdiction_count,
                 updated_by=user["id"],
             )
 
@@ -1988,9 +2012,9 @@ async def register_business(request: BusinessRegister, http_request: Request):
 
             # Send appropriate email
             email_service = get_email_service()
-            if is_matcha_lite or is_matcha_x:
-                # matcha_x reuses the Lite transactional emails for now —
-                # swap in Matcha-X-branded copy when the tier productizes.
+            if is_matcha_lite or is_matcha_x or is_matcha_compliance:
+                # matcha_x + matcha_compliance reuse the Lite transactional
+                # emails for now — swap in branded copy when each productizes.
                 if lite_broker_pays or lite_invite_activated:
                     # Broker or admin invite — account is fully active.
                     await email_service.send_business_approved_email(
@@ -2028,7 +2052,15 @@ async def register_business(request: BusinessRegister, http_request: Request):
                     company_name=request.company_name
                 )
 
-            if is_matcha_x and (lite_broker_pays or lite_invite_activated):
+            if is_matcha_compliance and (lite_broker_pays or lite_invite_activated):
+                next_route = "/compliance/onboarding"
+                msg = "Welcome to Matcha Compliance. Let's set up your locations."
+            elif is_matcha_compliance:
+                # Client SPA chains the Stripe call directly; this hint is for
+                # any caller that doesn't.
+                next_route = "/checkout/compliance"
+                msg = "Account created. Complete payment to activate Matcha Compliance."
+            elif is_matcha_x and (lite_broker_pays or lite_invite_activated):
                 next_route = "/matcha-x/onboarding"
                 msg = "Welcome to Matcha-X. Let's set up your team."
             elif is_matcha_x:
@@ -2484,7 +2516,8 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                        comp.signup_source,
                        comp.ir_onboarding_completed_at,
                        c.name, c.phone, c.job_title, c.created_at,
-                       COALESCE(chp.headcount, 0) as headcount
+                       COALESCE(chp.headcount, 0) as headcount,
+                       COALESCE(chp.compliance_jurisdiction_count, 0) as jurisdiction_count
                 FROM clients c
                 JOIN companies comp ON c.company_id = comp.id
                 LEFT JOIN company_handbook_profiles chp ON chp.company_id = comp.id
@@ -2581,6 +2614,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                     "email": current_user.email,
                     "created_at": profile["created_at"].isoformat(),
                     "headcount": int(profile["headcount"]) if "headcount" in profile.keys() else 0,
+                    "jurisdiction_count": int(profile["jurisdiction_count"]) if "jurisdiction_count" in profile.keys() else 0,
                 } if profile else None,
                 "onboarding_needed": onboarding_needed,
                 "visible_features": visible_features,

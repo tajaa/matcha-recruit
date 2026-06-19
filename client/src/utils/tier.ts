@@ -46,6 +46,27 @@ export function isMatchaXPending(profile: MeClientProfile | null | undefined): b
 }
 
 /**
+ * True when the company is on the standalone Matcha Compliance product with
+ * payment complete (full `compliance` feature on). Self-serve, Stripe-billed,
+ * priced by headcount + jurisdiction count. Drives ComplianceSidebar.
+ * `compliance` must be true so a company mid-checkout doesn't land here —
+ * see isMatchaCompliancePending.
+ */
+export function isMatchaCompliance(profile: MeClientProfile | null | undefined): boolean {
+  if (!profile) return false
+  return profile.signup_source === 'matcha_compliance' && !!profile.enabled_features?.compliance
+}
+
+/**
+ * True for a matcha_compliance company that registered but hasn't completed the
+ * Stripe checkout yet (the `compliance` feature is still false).
+ */
+export function isMatchaCompliancePending(profile: MeClientProfile | null | undefined): boolean {
+  if (!profile) return false
+  return profile.signup_source === 'matcha_compliance' && !profile.enabled_features?.compliance
+}
+
+/**
  * True for the free Resources-tier signup. They get access to the marketing
  * resource hub (templates, calculators, audit) but no paid features. Sidebar
  * surfaces the upgrade-to-IR + contact-for-full-platform CTAs for them.

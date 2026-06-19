@@ -17,6 +17,16 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # The public lead-gen analyzer is unaffected — it gates teaser/full via
     # handbook_gap_analyzer._resolve_caller_tier, which reads this flag.
     "handbook_audit": False,
+    # Full Compliance feature. Two ways a company gets it: (1) the self-serve,
+    # Stripe-billed "Matcha Compliance" product flips it on via the
+    # checkout.session.completed webhook (signup_source='matcha_compliance');
+    # (2) Pro/bespoke stores compliance=True at signup for the power tools
+    # (live re-research, AI ask, action plans, wage-violations, payer policies).
+    # Default off so require_feature("compliance") is well-defined for every
+    # company; existing Pro rows keep their stored compliance=True. NOT in any
+    # TIER_REQUIRED overlay — it's a paid gate flipped by payment, never
+    # force-asserted at read time (same rule as `incidents`).
+    "compliance": False,
     # Read-only "taste" of Compliance for Matcha-X. Distinct from the full
     # `compliance` feature (Pro-only, stored at bespoke signup) which unlocks the
     # power tools (live re-research, AI ask, action plans, wage-violations, payer

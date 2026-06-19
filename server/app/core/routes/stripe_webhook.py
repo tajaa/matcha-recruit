@@ -246,12 +246,23 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                 except Exception as exc:
                     logger.error("Failed to fulfill IR upgrade for %s: %s", company_id_str, exc)
 
-        elif session_mode == "subscription" and meta.get("type") in ("matcha_lite", "matcha_x"):
-            # ── Matcha Lite / Matcha-X signup payment ──────────────────────
-            # Both flip `incidents` on; the only differences are the
-            # subscription pack_id (used by the cancel handler) and log copy.
+        elif session_mode == "subscription" and meta.get("type") in ("matcha_lite", "matcha_x", "matcha_compliance"):
+            # ── Matcha Lite / Matcha-X / Matcha Compliance signup payment ──
+            # Each flips its single paid gate on. The differences: which feature
+            # flag (incidents for Lite/X; the full `compliance` for the
+            # standalone Compliance product), the subscription pack_id (used by
+            # the cancel handler), and log copy.
             _tier_type = meta.get("type")
-            _tier_label = "Matcha-X" if _tier_type == "matcha_x" else "Matcha Lite"
+            _tier_label = {
+                "matcha_x": "Matcha-X",
+                "matcha_compliance": "Matcha Compliance",
+            }.get(_tier_type, "Matcha Lite")
+            # The single feature flag this checkout activates on payment.
+            _paid_feature = {
+                "matcha_lite": "incidents",
+                "matcha_x": "incidents",
+                "matcha_compliance": "compliance",
+            }.get(_tier_type, "incidents")
             company_id_str = meta.get("company_id") or ""
             stripe_sub_id = str(event_object.get("subscription") or "")
             stripe_customer_id = str(event_object.get("customer") or "")
@@ -273,8 +284,8 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                         # Track first-time activation so a Stripe retry
                         # of the same checkout.session.completed event
                         # doesn't send duplicate activation emails.
-                        just_activated = not bool(features.get("incidents"))
-                        features["incidents"] = True
+                        just_activated = not bool(features.get(_paid_feature))
+                        features[_paid_feature] = True
                         await conn.execute(
                             """
                             UPDATE companies

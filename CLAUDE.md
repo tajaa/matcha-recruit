@@ -10,6 +10,7 @@ Differentiated at signup via `companies.signup_source` and routed in the UI by `
 |---|---|---|---|---|---|---|
 | **Free** | `pages/auth/ResourcesSignup.tsx` | `resources_free` | `resources_free` | `ResourcesFreeSidebar` | `/resources/*` | None — upgrade CTA |
 | **Matcha-lite** | `pages/auth/MatchaLiteSignup.tsx` | `matcha_lite` | `matcha_lite` | `IrSidebar` once paid; `MatchaLitePendingSidebar` while pending | `/ir/*` | Stripe sub, headcount-based |
+| **Matcha Compliance** | `pages/auth/ComplianceSignup.tsx` | `matcha_compliance` | `matcha_compliance` | `ComplianceSidebar` once paid; `CompliancePendingSidebar` while pending | `/app/compliance*` | Stripe sub, headcount + jurisdictions |
 | **Matcha (platform)** | `pages/BetaRegister.tsx` (token) or admin-created post-sale | n/a | `bespoke` (default) / `invite` | `ClientSidebar` (full nav) | `/app/*` | Contract / invoice |
 | **Matcha-work** | `pages/BetaRegister.tsx` (personal token) → `/work`; or inside Matcha company | n/a | `bespoke` (personal: `is_personal=true`) | `ClientSidebar` AI group; macOS app | `/work/*` | Stripe `matcha_work_personal` $20/mo or business token packs |
 
@@ -28,6 +29,14 @@ Sidebar dispatch in `client/src/components/TenantSidebar.tsx`. Tier-check helper
 - Backend routers: `ir_incidents_router` (`/ir/incidents/*`), `ir_onboarding_router` (`/ir-onboarding/*`) in `server/app/matcha/routes/__init__.py`.
 - Onboarding: `client/src/features/ir-onboarding/IrOnboardingWizard.tsx`; completion stamps `companies.ir_onboarding_completed_at`.
 - Legacy `pages/auth/IrSignup.tsx` (`tier='ir_only'`, `signup_source='ir_only_self_serve'`) still wired at `/ir/signup` for private beta — also lands on `IrSidebar`.
+
+### Matcha Compliance — standalone self-serve compliance product
+- Self-serve, Stripe-purchasable product that grants the **full** `compliance` feature and nothing else. Modeled on Matcha-lite/Matcha-X: signup page → pending sidebar → Stripe checkout → webhook flips a flag → active sidebar.
+- Signup: `pages/auth/ComplianceSignup.tsx` at `/compliance/signup` (`tier='matcha_compliance'`, `signup_source='matcha_compliance'`); collects headcount **+ jurisdiction count**.
+- Checkout: `POST /resources/checkout/compliance` (`server/app/core/routes/resources.py`). Pricing = headcount component + per-jurisdiction surcharge (`matcha_compliance_price_cents`, `stripe_service.py` — placeholder, see TODO). Stripe webhook `checkout.session.completed` (`type='matcha_compliance'`) flips `enabled_features.compliance=true`; until then `CompliancePendingSidebar` shows the Subscribe CTA.
+- Once paid: `ComplianceSidebar` (Compliance, Compliance Calendar, Company, Compliance Setup); `/app/compliance` renders the full `ComplianceFull` view (not the lite taste — `compliance` is true).
+- Onboarding **reuses** `MatchaXOnboardingWizard` at `/compliance/onboarding` (locations → policies → people → build).
+- Jurisdiction count persists in `company_handbook_profiles.compliance_jurisdiction_count` (migration `compljuris01`); surfaced on `/auth/me` as `profile.jurisdiction_count`.
 
 ### Matcha — full bespoke platform
 - Companies created with `signup_source='bespoke'` (default) by admins post-sales call, or via `BetaRegister.tsx` invite tokens.
@@ -207,6 +216,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 | `cobra` | ❌ | COBRA admin |
 | `separation_agreements` | ❌ | Separation doc workflow |
 | `credential_templates` | ❌ | Credentialing / license tracking. Default-off, but in the **Matcha-X** bundle (tier overlay) and **Pro** (stored on bespoke signup). |
+| `compliance` | ❌ | Full Compliance feature. The self-serve **paid gate** for the standalone **Matcha Compliance** product (flipped on by the Stripe webhook; `signup_source='matcha_compliance'`), and the **Pro** power-tools flag (stored at bespoke signup — live re-research, alerts/action-plans, AI ask, wage-violations, payer policies). Default-off so `require_feature("compliance")` is well-defined for every company; **NOT** in any tier overlay (a paid gate flipped by payment, like `incidents`). |
 | `compliance_lite` | ❌ | **Read-only** "taste" of Compliance for **Matcha-X** (tier overlay). Surfaces the per-location requirements + jurisdiction stack + summary + upcoming-legislation the onboarding build wrote; Pro power-tools render locked. Distinct from full `compliance` (Pro, stored at bespoke signup — live re-research, alerts/action-plans, AI ask, wage-violations, payer policies). Gating: read-only GETs moved to `compliance.py:shared_router`, mounted under `require_any_feature("compliance","compliance_lite")`; all mutating/power endpoints stay on the `compliance`-gated `router`. FE reuses `pages/app/Compliance.tsx` tier-shaped by `isLite` + `<FeatureGate anyOf={['compliance','compliance_lite']}>`. |
 | `hris_import` | ❌ | HRIS sync — legacy umbrella; gates treat it as "both providers" |
 | `hris_gusto` | ❌ | HRIS via Gusto OAuth (direct) |
@@ -222,6 +232,7 @@ Defined in `server/app/core/feature_flags.py` as `DEFAULT_COMPANY_FEATURES`. Per
 - **Lite** (`matcha_lite`) = `incidents` (paid) + `employees` + `handbooks` (generation). `training`/`discipline` force-asserted **off** here; no `handbook_audit`/`credential_templates`.
 - **Matcha-X** (`matcha_x`) = Lite + `training` + `discipline` + `handbook_audit` + `credential_templates` + `compliance_lite` (read-only Compliance taste) — all forced on via overlay.
 - **Pro** (`bespoke`/`invite`/`broker`) = full `DEFAULT_COMPANY_FEATURES` + `incidents` + `handbook_audit` + `credential_templates`, stored at signup (toggleable per-company; not an overlay, so it doesn't leak to personal Werk which shares `signup_source='bespoke'`).
+- **Matcha Compliance** (`matcha_compliance`) = full `compliance` only, nothing else bundled. `compliance` is **not** in any overlay — it's the Stripe-gated paid flag (flipped by `checkout.session.completed`), exactly like `incidents` gates Lite/X. Onboarding reuses `MatchaXOnboardingWizard`.
 
 ## Key Modules
 

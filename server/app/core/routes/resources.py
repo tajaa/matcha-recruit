@@ -389,6 +389,77 @@ async def create_matcha_x_checkout(
 
 
 # ---------------------------------------------------------------------------
+# Matcha Compliance — headcount + jurisdiction priced subscription checkout
+# ---------------------------------------------------------------------------
+
+
+@router.post("/checkout/compliance", response_model=UpgradeCheckoutResponse)
+async def create_compliance_checkout(
+    body: LiteCheckoutRequest,
+    current_user: CurrentUser = Depends(require_client),
+):
+    """Open a Stripe subscription checkout for the standalone Matcha Compliance product.
+
+    Pricing reads the headcount + jurisdiction count stored at registration time
+    (company_handbook_profiles). Headcount > 300 is rejected — must contact
+    sales. The webhook (metadata.type == 'matcha_compliance') flips the full
+    `compliance` feature on successful payment. Only callable by
+    matcha_compliance companies.
+    """
+    from ..services.stripe_service import StripeService, StripeServiceError
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with this account")
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT c.signup_source,
+                   COALESCE(chp.headcount, 0) AS headcount,
+                   COALESCE(chp.compliance_jurisdiction_count, 0) AS jurisdiction_count
+            FROM companies c
+            LEFT JOIN company_handbook_profiles chp ON chp.company_id = c.id
+            WHERE c.id = $1
+            """,
+            company_id,
+        )
+
+    if not row or row["signup_source"] != "matcha_compliance":
+        raise HTTPException(status_code=403, detail="This endpoint is only available for Matcha Compliance accounts")
+
+    headcount = int(row["headcount"])
+    jurisdiction_count = int(row["jurisdiction_count"])
+    if headcount < 1:
+        raise HTTPException(status_code=400, detail="Company headcount not set — please contact support")
+    if headcount > 300:
+        raise HTTPException(status_code=400, detail="Headcount over 300 — please contact us for pricing")
+
+    stripe_service = StripeService()
+    try:
+        session = await stripe_service.create_matcha_compliance_checkout(
+            company_id=company_id,
+            headcount=headcount,
+            jurisdiction_count=jurisdiction_count,
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+        )
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    stripe_session_id = str(getattr(session, "id", "") or "")
+    checkout_url = str(getattr(session, "url", "") or "")
+    if not stripe_session_id or not checkout_url:
+        raise HTTPException(status_code=502, detail="Stripe checkout did not return expected fields")
+
+    logger.info(
+        "Matcha Compliance checkout opened: company=%s headcount=%d jurisdictions=%d session=%s",
+        company_id, headcount, jurisdiction_count, stripe_session_id,
+    )
+    return UpgradeCheckoutResponse(checkout_url=checkout_url, stripe_session_id=stripe_session_id)
+
+
+# ---------------------------------------------------------------------------
 # Upgrade Inquiry — in-app contact form for Cap → Matcha Platform upgrade.
 # Records a lead_captures row + emails sales (best-effort).
 # ---------------------------------------------------------------------------

@@ -100,6 +100,10 @@ class BusinessRegister(BaseModel):
     company_size: Optional[str] = None  # e.g., "1-10", "11-50", etc.
     healthcare_specialties: Optional[list[str]] = None
     headcount: int = Field(..., ge=1)
+    # Number of jurisdictions the company operates in. Only collected on the
+    # Matcha Compliance signup (/compliance/signup) — drives the per-jurisdiction
+    # pricing component. Optional/None on every other tier.
+    jurisdiction_count: Optional[int] = None
 
     # First admin user info
     email: EmailStr
@@ -122,8 +126,10 @@ class BusinessRegister(BaseModel):
     # "matcha_lite" = paid entry IR/HR bundle (headcount-priced Stripe).
     # "matcha_x" = paid mid tier — clone of matcha_lite at Lite parity,
     # branded between Lite and the full platform (extra modules layered later).
-    # "resources_free" = free resources hub. Anything else / None = bespoke
-    # sales-led path (existing behavior).
+    # "matcha_compliance" = standalone self-serve Compliance product
+    # (headcount + jurisdiction-priced Stripe; webhook flips the full
+    # `compliance` flag). "resources_free" = free resources hub. Anything
+    # else / None = bespoke sales-led path (existing behavior).
     tier: Optional[str] = None
 
 
