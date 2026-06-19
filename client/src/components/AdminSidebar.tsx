@@ -1,10 +1,17 @@
-import { Building2, ToggleRight, Settings, MapPin, Globe, ClipboardList, Microscope, FileText, Briefcase, ShieldCheck, Mail, Image as ImageIcon, AlertOctagon, AlertTriangle, BookOpen, Users, Sparkles, Leaf, Calculator, HeartHandshake, LayoutTemplate } from 'lucide-react'
+import { Building2, ToggleRight, Settings, MapPin, Globe, ClipboardList, Microscope, FileText, Briefcase, ShieldCheck, Mail, Image as ImageIcon, AlertOctagon, AlertTriangle, BookOpen, Users, Sparkles, Leaf, Calculator, HeartHandshake, LayoutTemplate, Rocket } from 'lucide-react'
 import SidebarShell, { type NavGroup } from './SidebarShell'
 
 // Grouped master-admin nav. SidebarShell renders each group as a collapsible
 // section (auto-opens when a child route is active), so related tabs stay
 // together instead of one long flat list.
 const nav: NavGroup[] = [
+  {
+    defaultOpen: true,
+    label: "What's New",
+    items: [
+      { to: '/admin/updates', icon: Rocket, label: 'Updates' },
+    ],
+  },
   {
     defaultOpen: true,
     label: 'Customers',
