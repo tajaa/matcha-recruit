@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Loader2, Plus, Trash2, Calendar, Save, Check, X, Lock, Clock, ShieldCheck, List, Percent, Users, MapPin } from 'lucide-react'
+import { Loader2, Plus, Trash2, Calendar, Save, Check, X, Lock, Clock, ShieldCheck, List, Percent, Users, MapPin, Upload } from 'lucide-react'
 import { cappeApi } from '../../../api/cappeClient'
 import { useCappeMe } from '../../../hooks/useCappeMe'
 import SurfaceShell, { WEEKDAYS } from '../../../components/cappe/SurfaceShell'
 import BookingsCalendar from '../../../components/cappe/BookingsCalendar'
 import ImageUpload from '../../../components/cappe/ImageUpload'
+import StaffImportModal from '../../../components/cappe/StaffImportModal'
 import { CAPPE_TIMEZONES } from '../../../data/timezones'
 import type {
   CappeBooking, CappeBookingType, CappeAvailabilitySlot,
@@ -49,6 +50,7 @@ export default function Bookings() {
     price: '', requires_approval: false, category: '', buffer: '0', staffIds: [] as string[],
   })
   const [staffForm, setStaffForm] = useState({ name: '', bio: '', image_url: '' })
+  const [showStaffImport, setShowStaffImport] = useState(false)
   const [savingAvail, setSavingAvail] = useState(false)
   const [savingRules, setSavingRules] = useState(false)
   const [savingRider, setSavingRider] = useState(false)
@@ -436,8 +438,13 @@ export default function Bookings() {
 
       {/* Staff / stylists */}
       <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">
-        <h2 className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100"><Users className="h-4 w-4 text-emerald-400" /> Staff</h2>
-        <p className="mb-3 mt-1 text-xs text-zinc-500">Add the people customers book with. Then choose who performs each service below — customers can pick a specific person or “any available”. Leave a service with no staff to keep one shared calendar.</p>
+        <div className="flex items-start justify-between gap-3">
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-zinc-100"><Users className="h-4 w-4 text-emerald-400" /> Staff</h2>
+          <button onClick={() => setShowStaffImport(true)} className="flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800">
+            <Upload className="h-3.5 w-3.5" /> Import CSV
+          </button>
+        </div>
+        <p className="mb-3 mt-1 text-xs text-zinc-500">Add the people customers book with. Then choose who performs each service below — customers can pick a specific person or “any available”. Leave a service with no staff to keep one shared calendar.{multiLoc && ' Importing a CSV with a branch column maps each employee to the right location automatically.'}</p>
         <form onSubmit={addStaff} className="mb-4 flex flex-wrap items-end gap-2">
           <input value={staffForm.name} onChange={(e) => setStaffForm({ ...staffForm, name: e.target.value })} placeholder="Name — e.g. Maria" className={`w-44 ${inputCls}`} />
           <input value={staffForm.bio} onChange={(e) => setStaffForm({ ...staffForm, bio: e.target.value })} placeholder="Title / bio (optional)" className={`flex-1 ${inputCls}`} />
@@ -460,6 +467,16 @@ export default function Bookings() {
           </ul>
         )}
       </section>
+
+      {showStaffImport && (
+        <StaffImportModal
+          siteId={siteId || ''}
+          locations={locations}
+          multiBranch={multiLoc}
+          onClose={() => setShowStaffImport(false)}
+          onImported={() => { loadConfig(locations, selLoc).catch(() => {}) }}
+        />
+      )}
 
       {/* Booking types */}
       <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-sm">

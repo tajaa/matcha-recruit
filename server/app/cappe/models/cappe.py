@@ -1063,6 +1063,21 @@ class CappeClientImportResult(BaseModel):
     errors: list[CappeClientImportError] = Field(default_factory=list)
 
 
+class CappeStaffImportError(BaseModel):
+    row: int                            # 1-based data row (header excluded)
+    name: Optional[str] = None
+    reason: str
+
+
+class CappeStaffImportResult(BaseModel):
+    total: int = 0                      # data rows seen
+    created: int = 0
+    updated: int = 0                    # matched an existing staff name (location/bio updated)
+    skipped: int = 0
+    branches_matched: int = 0           # rows that resolved a branch by name
+    errors: list[CappeStaffImportError] = Field(default_factory=list)
+
+
 # ===========================================================================
 # Blog
 # ===========================================================================

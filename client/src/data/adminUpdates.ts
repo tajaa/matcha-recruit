@@ -22,6 +22,26 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'cappe-staff-csv-import',
+    date: '2026-06-19',
+    category: 'Cappe',
+    title: 'Staff CSV import with branch auto-mapping',
+    summary:
+      'Multi-location businesses can import their team from a CSV. A branch column maps each employee to the right location automatically — no manual re-tagging.',
+    whatsNew: [
+      'Import staff from a CSV (name required; optional branch, bio, active).',
+      'The branch column is matched to a location by name, so each employee auto-lands at their branch; blank = works at all locations.',
+      'Re-importing the same name updates that person (branch/bio) instead of creating a duplicate; unknown branch names are reported per-row.',
+      'Single-location sites get a simpler template with no branch column.',
+    ],
+    howToUse: [
+      'Open a site → Bookings → Staff → Import CSV.',
+      'Download the template (multi-location templates are pre-filled with your real branch names).',
+      'Fill in your team, upload, and review the per-row summary (added / updated / branch-mapped / skipped).',
+    ],
+    tag: 'new',
+  },
+  {
     id: 'cappe-domains',
     date: '2026-06-18',
     category: 'Cappe',

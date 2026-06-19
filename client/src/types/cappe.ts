@@ -598,6 +598,17 @@ export type CappeClientImportResult = {
   errors: CappeClientImportError[]
 }
 
+export type CappeStaffImportError = { row: number; name: string | null; reason: string }
+
+export type CappeStaffImportResult = {
+  total: number
+  created: number
+  updated: number
+  skipped: number
+  branches_matched: number
+  errors: CappeStaffImportError[]
+}
+
 // --- Blog -------------------------------------------------------------------
 
 export type CappePost = {
