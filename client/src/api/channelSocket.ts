@@ -65,6 +65,14 @@ export class ChannelSocket {
   onVoiceAnswer: ((data: { from_user_id: string; sdp: RTCSessionDescriptionInit }) => void) | null = null
   onVoiceIceCandidate: ((data: { from_user_id: string; candidate: RTCIceCandidateInit }) => void) | null = null
 
+  // LiveKit SFU call lifecycle callbacks (werk-lite). The server fans these out
+  // over the same /ws/channels socket as the call's roster changes; the
+  // useLiveKitCall hook drives the join banner + auto-teardown off them.
+  onCallStarted: ((data: { channel_id: string; call_id: string; started_by: string; started_at: string; mode: string; max_participants: number }) => void) | null = null
+  onCallEnded: ((data: { channel_id: string; call_id: string; reason?: string }) => void) | null = null
+  onCallParticipantsChanged: ((data: { channel_id: string; call_id: string; participant_ids: string[]; count: number; max_participants: number }) => void) | null = null
+  onCallInvited: ((data: { channel_id: string; call_id: string; invited_by: string }) => void) | null = null
+
   get isOpen(): boolean {
     return this.ws?.readyState === WebSocket.OPEN
   }
@@ -146,6 +154,18 @@ export class ChannelSocket {
             break
           case 'voice_ice':
             this.onVoiceIceCandidate?.({ from_user_id: data.from_user_id, candidate: data.candidate })
+            break
+          case 'call.started':
+            this.onCallStarted?.(data)
+            break
+          case 'call.ended':
+            this.onCallEnded?.(data)
+            break
+          case 'call.participants_changed':
+            this.onCallParticipantsChanged?.(data)
+            break
+          case 'call.invited':
+            this.onCallInvited?.(data)
             break
         }
       } catch { /* ignore malformed messages */ }

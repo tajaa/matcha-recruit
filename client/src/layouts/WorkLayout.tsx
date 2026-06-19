@@ -6,6 +6,7 @@ import { OnlineUsersPanel } from '../components/work/OnlineUsersPanel'
 import NotificationBell from '../components/work/NotificationBell'
 import NotificationSettingsMenu from '../components/work/NotificationSettingsMenu'
 import WorkSidebar from '../components/work/WorkSidebar'
+import WerkLiteSidebar from '../components/work/WerkLiteSidebar'
 import { useEffect, useState } from 'react'
 import { useMe } from '../hooks/useMe'
 import { api } from '../api/client'
@@ -89,6 +90,7 @@ export default function WorkLayout() {
   const { pathname, search } = useLocation()
   const surface = useWorkSurface()
   const brand = useWorkBrand()
+  const SidebarComp = surface === 'werk-lite' ? WerkLiteSidebar : WorkSidebar
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     const saved = localStorage.getItem('mw-sidebar')
     return saved !== 'closed'
@@ -111,7 +113,10 @@ export default function WorkLayout() {
   // Identity ↔ surface alignment: personal users live under /werk, business
   // users under /work. Bounce stale/cross bookmarks, preserving subpath + query
   // ('/work' and '/werk' are both 5 chars, so slice(5) yields the shared tail).
-  if (!loading) {
+  // werk-lite is business-only (no personal counterpart), so it's never part of
+  // the identity bounce — access is gated by the feature flag instead. The
+  // slice(5) tail trick also only holds for the 5-char /work + /werk bases.
+  if (!loading && surface !== 'werk-lite') {
     if (surface === 'matcha-work' && isPersonal) {
       return <Navigate to={`/werk${pathname.slice(5)}${search}`} replace />
     }
@@ -168,14 +173,14 @@ export default function WorkLayout() {
 
         {/* Desktop Sidebar Container */}
         <div className="hidden md:flex shrink-0">
-          <WorkSidebar open={sidebarOpen} onToggle={toggleSidebar} />
+          <SidebarComp open={sidebarOpen} onToggle={toggleSidebar} />
         </div>
 
         {/* Mobile Sidebar Container */}
         <div className={`fixed inset-y-0 left-0 z-50 transform transition-transform duration-200 ease-in-out md:hidden flex ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
           <div className="flex-1 w-full overflow-hidden bg-[#0c0c0e]">
-            {/* Always pass open=true to WorkSidebar on mobile so it's fully expanded */}
-            <WorkSidebar open={true} onToggle={() => {}} />
+            {/* Always pass open=true to the sidebar on mobile so it's fully expanded */}
+            <SidebarComp open={true} onToggle={() => {}} />
           </div>
           <button 
             onClick={() => setMobileMenuOpen(false)}

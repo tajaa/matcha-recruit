@@ -19,7 +19,8 @@ import { listOpenPostings } from '../../api/channelJobPostings'
 import type { OpenPostingSummary } from '../../api/channelJobPostings'
 import VoiceCallBar from '../../components/channels/VoiceCallBar'
 import { useVoiceCall } from '../../hooks/useVoiceCall'
-import { useWorkBase, useWorkBrand } from '../../routes/WorkSurfaceContext'
+import { useLiveKitCall } from '../../hooks/useLiveKitCall'
+import { useWorkBase, useWorkBrand, useWorkSurface } from '../../routes/WorkSurfaceContext'
 
 // @-mention rendering — splits message content into plain-text + mention-chip
 // nodes. Server stamps `mentioned_user_ids` on the broadcast payload so we can
@@ -116,11 +117,24 @@ export default function ChannelView() {
   const socketRef = useRef<ChannelSocket | null>(null)
   const lastTypingSentRef = useRef(0)
 
-  const voice = useVoiceCall({
+  // Calls: werk-lite uses the LiveKit SFU (reliable group A/V); /work + /werk
+  // keep the homegrown WebRTC P2P bar. Both hooks are called unconditionally
+  // (hooks rule) but the inactive one stays inert — useLiveKitCall is gated by
+  // `enabled`, and useVoiceCall does nothing until joinCall fires.
+  const surface = useWorkSurface()
+  const useLiveKit = surface === 'werk-lite'
+  const p2pVoice = useVoiceCall({
     socket: socketRef.current,
     channelId: channelId || null,
     myUserId: me?.user?.id || '',
   })
+  const liveKitVoice = useLiveKitCall({
+    channelId: channelId || null,
+    enabled: useLiveKit,
+    members: channel?.members?.map((m) => ({ user_id: m.user_id, name: m.name })),
+    onError: (m) => alert(m),
+  })
+  const voice = useLiveKit ? liveKitVoice : p2pVoice
 
   const postingParam = new URLSearchParams(window.location.search).get('posting')
 

@@ -10,6 +10,7 @@ const AppRoutes = lazy(() => import('./routes/AppRoutes'))
 const BrokerRoutes = lazy(() => import('./routes/BrokerRoutes'))
 const WorkRoutes = lazy(() => import('./routes/WorkRoutes'))
 const WerkRoutes = lazy(() => import('./routes/WerkRoutes'))
+const WerkLiteRoutes = lazy(() => import('./routes/WerkLiteRoutes'))
 const PortalRoutes = lazy(() => import('./routes/PortalRoutes'))
 const CappeRoutes = lazy(() => import('./routes/CappeRoutes')) // Cappe — website builder (separate product)
 
@@ -136,6 +137,7 @@ export default function App() {
         {isCappeHost && <Route path="/*" element={<CappeRoutes />} />}
         <Route path="/work/*" element={<WorkRoutes />} />
         <Route path="/werk/*" element={<WerkRoutes />} />
+        <Route path="/werk-lite/*" element={<WerkLiteRoutes />} />
         <Route path="/admin/*" element={<AdminRoutes />} />
         <Route path="/broker/*" element={<BrokerRoutes />} />
         <Route path="/portal/*" element={<PortalRoutes />} />

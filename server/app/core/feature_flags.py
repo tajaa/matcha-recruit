@@ -5,6 +5,16 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "handbooks": True,
     "accommodations": True,
     "matcha_work": False,
+    # Werk Lite — the standalone business work-chat surface (/werk-lite): channel
+    # chat + LiveKit calls + collaborative boards only. Presentation/entry gate
+    # (sidebar entry + page access); the Boards kanban backend stays gated by
+    # `matcha_work`, so a Werk-Lite company needs BOTH flags on. Default off.
+    "werk_lite": False,
+    # Werk Lite call-start policy. False = only admins/business-admins (role in
+    # admin/client) may START a call; True = any channel member may start.
+    # Joining an active call is always open to members. Only consulted for
+    # werk_lite companies (other surfaces keep the owner + Pro gate).
+    "werk_lite_calls_all_members": False,
     "risk_assessment": True,
     "training": False,
     "i9": False,

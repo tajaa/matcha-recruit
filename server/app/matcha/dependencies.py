@@ -16,6 +16,12 @@ require_admin_or_client = require_roles("admin", "client", "individual")
 require_admin_or_client_or_broker = require_roles("admin", "client", "broker")
 require_admin_or_employee = require_roles("admin", "employee")
 require_broker = require_roles("broker")
+# Whole-company access (werk-lite): admits employees alongside admins/clients so
+# the entire company — not just admins — can reach company-scoped surfaces
+# (channels + boards). Tenant scoping is enforced downstream by
+# resolve_accessible_company_scope (it resolves the employee's org_id), so an
+# employee still only ever sees/touches their own company's rows.
+require_company_member = require_roles("admin", "client", "individual", "employee")
 
 BROKER_ACTIVE_LINK_STATUSES = ("active", "grace")
 

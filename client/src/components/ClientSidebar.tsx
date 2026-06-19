@@ -2,7 +2,7 @@ import {
   LayoutDashboard, Users, Shield, FileText, ClipboardCheck, Scale,
   AlertTriangle, BookOpen, BarChart2, Sparkles, Building2, Accessibility,
   BadgeCheck, MessageSquareWarning, Mail, Bell, Gavel, MapPin, CalendarDays,
-  GraduationCap, TrendingUp, ClipboardList, ShieldAlert,
+  GraduationCap, TrendingUp, ClipboardList, ShieldAlert, MessagesSquare,
 } from 'lucide-react'
 import SidebarShell from './SidebarShell'
 import type { NavGroup, NavItem } from './SidebarShell'
@@ -56,6 +56,7 @@ const nav: (NavItem | NavGroup)[] = [
     label: 'AI',
     items: [
       { to: '/work', icon: Sparkles, label: 'Matcha-Work' },
+      { to: '/werk-lite', icon: MessagesSquare, label: 'Werk Lite', feature: 'werk_lite' },
     ],
   },
 ]

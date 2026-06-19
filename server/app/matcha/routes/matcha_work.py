@@ -20,7 +20,7 @@ from ...core.models.auth import CurrentUser
 from ...core.services.compliance_service import get_location_requirements, get_locations
 from ...core.services.storage import get_storage
 from ...database import get_connection
-from ..dependencies import require_admin_or_client, get_client_company_id, require_feature
+from ..dependencies import require_admin_or_client, require_company_member, get_client_company_id, require_feature
 from ..services.escalation_service import should_escalate, create_escalation
 from ..services.model_pricing import calculate_call_cost
 from ..models.matcha_work import (
@@ -2913,7 +2913,7 @@ def _can_edit_project(role: Optional[str]) -> bool:
 async def list_projects_endpoint(
     status: Optional[str] = Query(None, pattern="^(active|archived|completed)$"),
     hiring_client_id: Optional[UUID] = Query(None),
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_company_member),
 ):
     """List all projects for the current user."""
     from ..services import project_service as proj_svc
@@ -2927,7 +2927,14 @@ async def list_projects_endpoint(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return []
-    return await proj_svc.list_projects(company_id, status, user_id=current_user.id, hiring_client_id=hiring_client_id)
+    projects = await proj_svc.list_projects(company_id, status, user_id=current_user.id, hiring_client_id=hiring_client_id)
+    # werk-lite whole-company access: employees may list company boards, but the
+    # HR-sensitive project types (discipline cases, recruiting pipelines) are
+    # also stored as mw_projects under the same company_id — never expose those
+    # to a regular employee. Admins/clients keep full visibility (the /work product).
+    if current_user.role == "employee":
+        projects = [p for p in projects if p.get("project_type") not in ("discipline", "recruiting")]
+    return projects
 
 
 @router.post("/projects", status_code=201)
@@ -3083,7 +3090,7 @@ async def unarchive_recruiting_client_endpoint(
 @router.get("/projects/{project_id}")
 async def get_project_endpoint(
     project_id: UUID,
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_company_member),
 ):
     """Get a project with its chat list."""
     project, _role = await _verify_project_access(project_id, current_user)
@@ -4243,7 +4250,7 @@ async def upload_blog_media(
 @router.get("/projects/{project_id}/tasks")
 async def list_project_tasks_endpoint(
     project_id: UUID,
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_company_member),
 ):
     """List all kanban tasks for a project. Embeds attachments per task so
     the kanban card can render thumbnails without N+1 follow-up requests."""
@@ -4477,7 +4484,7 @@ async def list_recent_activity_endpoint(
 async def create_project_task_endpoint(
     project_id: UUID,
     body: dict = Body(...),
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_company_member),
 ):
     """Create a kanban task in a project."""
     from datetime import date as _date
@@ -4571,7 +4578,7 @@ async def update_project_task_endpoint(
     project_id: UUID,
     task_id: UUID,
     body: dict = Body(...),
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_company_member),
 ):
     """Partial update. Drag-drop updates board_column; checkbox updates status."""
     from datetime import date as _date
@@ -4862,7 +4869,7 @@ async def set_project_pipeline_mode_endpoint(
 async def delete_project_task_endpoint(
     project_id: UUID,
     task_id: UUID,
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_company_member),
 ):
     from ..services import project_task_service as pt_svc
     await _verify_project_access(project_id, current_user)
@@ -4881,7 +4888,7 @@ async def delete_project_task_endpoint(
 async def list_task_subtasks_endpoint(
     project_id: UUID,
     task_id: UUID,
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_company_member),
 ):
     from ..services import project_subtask_service as st_svc
     await _verify_project_access(project_id, current_user)
@@ -4896,7 +4903,7 @@ async def create_task_subtask_endpoint(
     project_id: UUID,
     task_id: UUID,
     body: dict = Body(...),
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_company_member),
 ):
     from ..services import project_subtask_service as st_svc
     await _verify_project_access(project_id, current_user)
@@ -4922,7 +4929,7 @@ async def update_task_subtask_endpoint(
     task_id: UUID,
     subtask_id: UUID,
     body: dict = Body(...),
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_company_member),
 ):
     from ..services import project_subtask_service as st_svc
     await _verify_project_access(project_id, current_user)
@@ -4973,7 +4980,7 @@ async def delete_task_subtask_endpoint(
     project_id: UUID,
     task_id: UUID,
     subtask_id: UUID,
-    current_user: CurrentUser = Depends(require_admin_or_client),
+    current_user: CurrentUser = Depends(require_company_member),
 ):
     from ..services import project_subtask_service as st_svc
     await _verify_project_access(project_id, current_user)

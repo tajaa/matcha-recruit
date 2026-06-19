@@ -281,6 +281,18 @@ class InviteBody(BaseModel):
 # POST /channels/{channel_id}/call/start
 # ---------------------------------------------------------------------------
 
+async def _channel_company_features(conn, company_id) -> dict:
+    """Merged enabled_features for a channel's company (werk-lite call policy)."""
+    from ..feature_flags import merge_company_features
+    row = await conn.fetchrow(
+        "SELECT enabled_features, signup_source FROM companies WHERE id = $1",
+        company_id,
+    )
+    if not row:
+        return {}
+    return merge_company_features(row["enabled_features"], row["signup_source"])
+
+
 @router.post("/{channel_id}/call/start")
 async def start_call(
     channel_id: UUID,
@@ -295,11 +307,29 @@ async def start_call(
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
-    # Same Pro/Business gate as Go Live — starting is gated, joining is free.
-    await entitlements_service.require_plan(current_user.id, entitlements_service.PLAN_PRO, "go_live")
-
     async with get_connection() as conn:
-        await _assert_owner(conn, channel_id, current_user.id)
+        # werk-lite is a company-paid product: the per-user Werk plan gate
+        # (Go Live = Pro) doesn't apply, and WHO may start a call is a company
+        # policy (admins only, or any member via werk_lite_calls_all_members)
+        # rather than owner-only. Joining stays open to members either way.
+        # Every other surface (matcha-work / personal Werk) keeps the Pro +
+        # owner gate unchanged.
+        _chan = await conn.fetchrow("SELECT company_id FROM channels WHERE id = $1", channel_id)
+        if not _chan:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        _feats = await _channel_company_features(conn, _chan["company_id"])
+        if _feats.get("werk_lite"):
+            await _assert_member(conn, channel_id, current_user.id)
+            # Allowlist — never admit personal/individual or broker accounts even
+            # if they happen to be cross-tenant channel members. Any company
+            # member when the policy is "all", else admins/business-admins only.
+            _allowed = ("admin", "client", "employee") if _feats.get("werk_lite_calls_all_members") else ("admin", "client")
+            if current_user.role not in _allowed:
+                raise HTTPException(status_code=403, detail="You're not allowed to start a call in this workspace")
+        else:
+            # Same Pro/Business gate as Go Live — starting is gated, joining is free.
+            await entitlements_service.require_plan(current_user.id, entitlements_service.PLAN_PRO, "go_live")
+            await _assert_owner(conn, channel_id, current_user.id)
 
         # Serialize the check-then-insert against concurrent call/broadcast
         # starts on the SAME channel. The advisory lock (same key in
@@ -383,7 +413,7 @@ async def start_call(
             can_publish=True,
             can_subscribe=True,
             ttl_seconds=CALL_TOKEN_TTL_SECONDS,
-            can_publish_sources=["microphone"],
+            can_publish_sources=["microphone", "camera"],
         )
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
@@ -473,7 +503,7 @@ async def get_call_token(
             can_publish=True,
             can_subscribe=True,
             ttl_seconds=remaining,
-            can_publish_sources=["microphone"],
+            can_publish_sources=["microphone", "camera"],
         )
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))

@@ -63,6 +63,119 @@ export interface ProjectCollaborator {
   created_at: string
 }
 
+// ── Project kanban tasks (collaborative 5-column board) ──
+
+/** Board lane. Order on the board: todo → in_progress → review →
+ *  changes_requested → done (matches the desktop `kanbanColumns`). The backend
+ *  also tolerates legacy sales-pipeline stages, but the web board only uses
+ *  these five. */
+export type BoardColumn =
+  | 'todo'
+  | 'in_progress'
+  | 'review'
+  | 'changes_requested'
+  | 'done'
+
+export type TaskPriority = 'critical' | 'high' | 'medium' | 'low'
+
+/** A file attached to a kanban task — embedded in the list query so cards can
+ *  render thumbnails without an N+1 follow-up (shape from
+ *  project_file_service.list_files_for_tasks). storage_url is presigned. */
+export interface MWTaskAttachment {
+  id: string
+  project_id: string
+  task_id: string
+  uploaded_by: string | null
+  filename: string
+  storage_url: string
+  content_type: string | null
+  file_size: number
+  folder_id: string | null
+  created_at: string
+  uploader_name: string | null
+  uploader_avatar_url: string | null
+}
+
+/** One kanban card (`mw_tasks` row with project_id set). Mirrors the desktop
+ *  `MWProjectTask`. The aggregate fields (`subtask_total`, `subtask_done`,
+ *  `review_cycle_count`, `last_moved_at`, `assigned_name`, `assigned_email`,
+ *  `attachments`, `update_count`, `recent_event_ids`, `element_name`) are
+ *  present only on the list query — create/update/reject RETURNING clauses
+ *  omit them, so treat them as optional. */
+export interface MWProjectTask {
+  id: string
+  project_id: string | null
+  company_id?: string | null
+  created_by?: string | null
+  title: string
+  description: string | null
+  board_column: BoardColumn
+  priority: TaskPriority
+  status: 'pending' | 'completed' | 'cancelled'
+  assigned_to: string | null
+  assigned_name?: string | null
+  assigned_email?: string | null
+  due_date: string | null
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+  progress_note: string | null
+  category: string | null
+  element_id: string | null
+  element_name?: string | null
+  review_note?: string | null
+  // List-query-only aggregates (undefined on create/update/reject responses).
+  last_moved_at?: string | null
+  review_cycle_count?: number | null
+  subtask_total?: number | null
+  subtask_done?: number | null
+  update_count?: number | null
+  recent_event_ids?: string[] | null
+  attachments?: MWTaskAttachment[]
+}
+
+/** Body accepted by `POST /projects/{id}/tasks`. Only `title` is required. */
+export interface MWProjectTaskCreate {
+  title: string
+  board_column?: BoardColumn
+  priority?: TaskPriority
+  description?: string | null
+  assigned_to?: string | null
+  due_date?: string | null
+  category?: string | null
+}
+
+/** Partial patch for `PATCH /projects/{id}/tasks/{taskId}`. Send ONLY the keys
+ *  that changed — a present key with a null value (e.g. `board_column: null`)
+ *  is rejected 400 by the column validator (drag-to-move sends just
+ *  `{ board_column }`). */
+export type MWProjectTaskPatch = Partial<{
+  title: string
+  description: string | null
+  board_column: BoardColumn
+  priority: TaskPriority
+  status: 'pending' | 'completed' | 'cancelled'
+  assigned_to: string | null
+  due_date: string | null
+  progress_note: string | null
+}>
+
+/** A checklist item under a kanban task (`mw_subtasks`). */
+export interface MWSubtask {
+  id: string
+  task_id: string | null
+  project_id: string | null
+  title: string
+  is_done: boolean
+  position: number
+  round_index: number | null
+  assigned_to: string | null
+  created_by: string | null
+  completed_at: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
 // ── Research Tasks ──
 
 export interface ResearchField {
