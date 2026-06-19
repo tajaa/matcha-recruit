@@ -31,7 +31,10 @@ from ...database import get_connection
 from ..dependencies import require_cappe_account
 from ..models.cappe import (
     CappeAccount,
+    CappeDnsRecord,
+    CappeDnsRecordInput,
     CappeDomain,
+    CappeDomainAutoRenewUpdate,
     CappeDomainCheckoutResponse,
     CappeDomainConnectRequest,
     CappeDomainPurchaseRequest,
@@ -51,8 +54,10 @@ router = APIRouter()
 _SEARCH_TLDS = ["com", "co", "shop", "store", "io", "site"]
 _DOMAIN_COLS = (
     "id, site_id, domain, kind, status, retail_cents AS price_cents, "
-    "auto_renew, expires_at, failure_reason, verification_token, created_at"
+    "auto_renew, expires_at, failure_reason, verification_token, transfer_requested_at, created_at"
 )
+# ICANN locks a freshly registered domain from transferring out for 60 days.
+_TRANSFER_LOCK_DAYS = 60
 # Host prefix where a connect domain must publish its ownership TXT record.
 _VERIFY_PREFIX = "_cappe-verify"
 
@@ -154,6 +159,7 @@ async def purchase_domain(
             cancel_url=cancel,
             metadata={"type": "cappe_domain", "domain_id": str(domain_id)},
             customer_email=account.email,
+            save_card=True,  # store the card so the renewal cron can charge off-session
         )
     except CappeStripeError as exc:
         async with get_connection() as conn:
@@ -287,6 +293,147 @@ async def get_domain(domain_id: UUID, account: CappeAccount = Depends(require_ca
     return dict(row)
 
 
+# ── Manage DNS records (register-kind domains only — they live in our account) ──
+async def _owned_register_domain(conn, account_id: UUID, domain_id: UUID):
+    row = await conn.fetchrow(
+        "SELECT id, domain, kind, status FROM cappe_domains WHERE id = $1 AND account_id = $2",
+        domain_id, account_id,
+    )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Domain not found")
+    if row["kind"] != "register":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="DNS for a connected domain is managed at your own registrar",
+        )
+    return row
+
+
+@router.get("/domains/{domain_id}/dns", response_model=list[CappeDnsRecord])
+async def list_dns(domain_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    async with get_connection() as conn:
+        row = await _owned_register_domain(conn, account.id, domain_id)
+    try:
+        records = await get_porkbun().list_dns_records(row["domain"])
+    except PorkbunError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    return [
+        {
+            "id": str(r.get("id")), "type": r.get("type", ""), "name": r.get("name", ""),
+            "content": r.get("content", ""), "ttl": r.get("ttl"), "prio": r.get("prio"),
+        }
+        for r in records
+    ]
+
+
+@router.post("/domains/{domain_id}/dns", status_code=status.HTTP_201_CREATED)
+async def create_dns(
+    domain_id: UUID, body: CappeDnsRecordInput, account: CappeAccount = Depends(require_cappe_account)
+):
+    async with get_connection() as conn:
+        row = await _owned_register_domain(conn, account.id, domain_id)
+    try:
+        await get_porkbun().create_dns_record(
+            row["domain"], record_type=body.type, name=body.name, content=body.content,
+            ttl=body.ttl, prio=body.prio,
+        )
+    except PorkbunError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    return {"ok": True}
+
+
+@router.put("/domains/{domain_id}/dns/{record_id}")
+async def edit_dns(
+    domain_id: UUID, record_id: str, body: CappeDnsRecordInput,
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    async with get_connection() as conn:
+        row = await _owned_register_domain(conn, account.id, domain_id)
+    try:
+        await get_porkbun().edit_dns_record(
+            row["domain"], record_id, record_type=body.type, name=body.name,
+            content=body.content, ttl=body.ttl, prio=body.prio,
+        )
+    except PorkbunError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    return {"ok": True}
+
+
+@router.delete("/domains/{domain_id}/dns/{record_id}")
+async def delete_dns(
+    domain_id: UUID, record_id: str, account: CappeAccount = Depends(require_cappe_account)
+):
+    async with get_connection() as conn:
+        row = await _owned_register_domain(conn, account.id, domain_id)
+    try:
+        await get_porkbun().delete_dns_record(row["domain"], record_id)
+    except PorkbunError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    return {"ok": True}
+
+
+# ── Auto-renew toggle ──────────────────────────────────────────────────────
+@router.patch("/domains/{domain_id}/auto-renew", response_model=CappeDomain)
+async def set_auto_renew(
+    domain_id: UUID, body: CappeDomainAutoRenewUpdate,
+    account: CappeAccount = Depends(require_cappe_account),
+):
+    """Toggle renewal for a registered domain. Mirrors the flag to Porkbun so we
+    stop being billed when a tenant turns it off (best-effort)."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            f"UPDATE cappe_domains SET auto_renew = $3, updated_at = NOW() "
+            f"WHERE id = $1 AND account_id = $2 AND kind = 'register' RETURNING {_DOMAIN_COLS}",
+            domain_id, account.id, body.auto_renew,
+        )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Domain not found")
+    try:
+        await get_porkbun().set_auto_renew(row["domain"], body.auto_renew)
+    except PorkbunError as exc:
+        logger.warning("cappe domain %s auto-renew sync to Porkbun failed: %s", domain_id, exc)
+    return dict(row)
+
+
+# ── Transfer-out request (Porkbun has no auth-code API → manual fulfillment) ─
+@router.post("/domains/{domain_id}/transfer-request", response_model=CappeDomain)
+async def request_transfer(domain_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    """Tenant requests to move the domain to their own registrar. Enforces the
+    60-day ICANN transfer lock, records the request, and flags it for an operator
+    to retrieve + send the auth/EPP code (Porkbun exposes no auth-code endpoint)."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            f"SELECT {_DOMAIN_COLS} FROM cappe_domains "
+            "WHERE id = $1 AND account_id = $2 AND kind = 'register'",
+            domain_id, account.id,
+        )
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Domain not found")
+        if row["status"] != "active":
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Domain is not active")
+        locked = await conn.fetchval(
+            "SELECT created_at > NOW() - ($2 || ' days')::interval FROM cappe_domains WHERE id = $1",
+            domain_id, str(_TRANSFER_LOCK_DAYS),
+        )
+        if locked:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Domains can't be transferred within {_TRANSFER_LOCK_DAYS} days of registration",
+            )
+        updated = await conn.fetchrow(
+            f"UPDATE cappe_domains SET transfer_requested_at = NOW(), updated_at = NOW() "
+            f"WHERE id = $1 RETURNING {_DOMAIN_COLS}",
+            domain_id,
+        )
+    # Operator action: retrieve the auth code from the Porkbun dashboard + unlock,
+    # then email it to the tenant. Surfaced in logs until an email/admin queue exists.
+    logger.warning(
+        "cappe TRANSFER-OUT requested: domain=%s account=%s — provide auth code from Porkbun",
+        row["domain"], account.email,
+    )
+    return dict(updated)
+
+
 # ── Caddy on-demand TLS ask-endpoint (public) ──────────────────────────────
 @router.get("/tls/authorize")
 async def tls_authorize(domain: str = Query(..., max_length=255)):
@@ -331,13 +478,15 @@ async def domains_webhook(request: Request, background: BackgroundTasks):
                 did = None
             if did is not None:
                 payment_intent = obj.get("payment_intent")
+                customer_id = obj.get("customer")  # saved-card Customer (renewals)
                 async with get_connection() as conn:
                     row = await conn.fetchrow(
                         """UPDATE cappe_domains
-                              SET status = 'registering', stripe_payment_intent = $2, updated_at = NOW()
+                              SET status = 'registering', stripe_payment_intent = $2,
+                                  stripe_customer_id = $3, updated_at = NOW()
                             WHERE id = $1 AND status = 'pending'
                             RETURNING id""",
-                        did, payment_intent,
+                        did, payment_intent, customer_id,
                     )
                 if row is not None:
                     background.add_task(finalize_domain_registration, did)

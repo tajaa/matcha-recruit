@@ -71,14 +71,28 @@ which resolves the TXT and only then activates + writes `cappe_sites.custom_doma
 Uniqueness is a partial index over `status='active'` rows, so an unverified claim
 can't block the real owner.
 
-## TODO — renewals (Phase 2, not built)
-Domains are 1-year. Current code sets `expires_at` but does **not** auto-renew.
-To add:
-1. Save the card at purchase — create a Stripe **Customer** + `setup_future_usage`
-   on the checkout so renewals can charge off-session.
-2. Daily cron (gate via a scheduler row like the matcha workers): find
-   `cappe_domains` where `status='active' AND auto_renew AND expires_at < now()+30d`,
-   charge the customer (retail), and renew at Porkbun. On a failed charge, dun /
-   let lapse → `expired`. (Confirm Porkbun's renew endpoint first — it wasn't in
-   the client lib surface checked during the build; account-level auto-renew may
-   be the interim path.)
+## DNS management (registered domains)
+`/domains/{id}/dns` (GET/POST/PUT/DELETE) proxies Porkbun's DNS API so tenants
+edit A/CNAME/MX/TXT etc. in-app (email, Google verification…). Register-kind only
+— connected domains' DNS lives at the tenant's own registrar (returns 400).
+
+## Renewals (built — enable the scheduler)
+The purchase checkout saves the card (Stripe Customer, off-session) →
+`cappe_domains.stripe_customer_id`. Celery task `cappe.domain_renewals`
+(`workers/tasks/cappe_domain_renewals.py`) charges the tenant retail within 14
+days of expiry, bumps `expires_at +1yr`, and lapses non-payers (→ `expired` +
+Porkbun auto-renew off). Idempotent: the +1yr bump exits the window; a Stripe
+idempotency key (`cappe-renew-<id>-<expiry>`) dedupes retries within 24h.
+
+**To turn on:** insert/enable a `scheduler_settings` row with
+`task_key='cappe_domain_renewals'` (defaults off, like every scheduled task).
+Note: Porkbun's own account-level auto-renew keeps the registration alive (bills
+us); this task recoups from the tenant and flips Porkbun auto-renew off when they
+stop paying. `/domains/{id}/auto-renew` (PATCH) toggles it per domain.
+
+## Transfer-out (built — manual auth-code step)
+`/domains/{id}/transfer-request` enforces the 60-day ICANN lock, records the
+request, and logs it for an operator. **Porkbun exposes no auth-code/EPP API**, so
+fulfillment is manual: retrieve the auth code + unlock in the Porkbun dashboard
+and email it to the tenant. (If this volume grows, wire an admin email/queue off
+the `transfer_requested_at` flag.)

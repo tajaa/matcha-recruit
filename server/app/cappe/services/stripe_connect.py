@@ -144,12 +144,20 @@ class CappeStripe:
         cancel_url: str,
         metadata: dict[str, str],
         customer_email: Optional[str] = None,
+        save_card: bool = False,
     ):
         """Checkout Session on OUR platform account (we keep 100%). Used for
-        domain registration and plan billing — no connected account, no fee."""
+        domain registration and plan billing — no connected account, no fee.
+        With save_card, create a Customer + store the card off-session so renewals
+        can charge it later."""
         self._ensure_key()
 
         def _create():
+            pi_data: dict[str, Any] = {"metadata": metadata}
+            kwargs: dict[str, Any] = {}
+            if save_card:
+                pi_data["setup_future_usage"] = "off_session"
+                kwargs["customer_creation"] = "always"
             return stripe.checkout.Session.create(
                 mode="payment",
                 success_url=success_url,
@@ -157,13 +165,41 @@ class CappeStripe:
                 line_items=line_items,
                 customer_email=customer_email or None,
                 metadata=metadata,
-                payment_intent_data={"metadata": metadata},
+                payment_intent_data=pi_data,
+                **kwargs,
             )
 
         try:
             return await asyncio.to_thread(_create)
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to create checkout session: {exc}") from exc
+
+    async def charge_off_session(
+        self, *, customer_id: str, amount_cents: int, currency: str, metadata: dict[str, str],
+        idempotency_key: Optional[str] = None,
+    ):
+        """Charge a saved-card Customer off-session (e.g. a domain renewal).
+        Raises CappeStripeError on decline so the caller can dun/lapse. The
+        idempotency key (24h replay) keeps a retrying cron from double-charging
+        or re-hammering a declined card within a renewal window."""
+        self._ensure_key()
+
+        def _charge():
+            kwargs = {"idempotency_key": idempotency_key} if idempotency_key else {}
+            return stripe.PaymentIntent.create(
+                amount=amount_cents,
+                currency=currency,
+                customer=customer_id,
+                off_session=True,
+                confirm=True,
+                metadata=metadata,
+                **kwargs,
+            )
+
+        try:
+            return await asyncio.to_thread(_charge)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Off-session charge failed: {exc}") from exc
 
     async def refund(self, payment_intent: str):
         """Refund a platform charge in full (e.g. domain registration failed

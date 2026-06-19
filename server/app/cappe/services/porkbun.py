@@ -116,13 +116,40 @@ class Porkbun:
         )
 
     async def create_dns_record(
-        self, domain: str, *, record_type: str, name: str, content: str, ttl: int = 600
+        self, domain: str, *, record_type: str, name: str, content: str,
+        ttl: int = 600, prio: Optional[int] = None,
     ) -> dict:
         """Create a DNS record on a domain in our account. `name` is the subdomain
-        ('' for apex, 'www' for www)."""
+        ('' for apex, 'www' for www). `prio` is required for MX records."""
+        body = {"type": record_type, "name": name, "content": content, "ttl": str(ttl)}
+        if prio is not None:
+            body["prio"] = str(prio)
+        return await self._post(f"/dns/create/{domain.lower()}", body)
+
+    # ── DNS records (manage records on a domain in our account) ───────────
+    async def list_dns_records(self, domain: str) -> list[dict]:
+        """All DNS records for a domain. Each: {id, name, type, content, ttl, prio}."""
+        data = await self._post(f"/dns/retrieve/{domain.lower()}")
+        return data.get("records") or []
+
+    async def edit_dns_record(
+        self, domain: str, record_id: str, *,
+        record_type: str, name: str, content: str, ttl: int = 600, prio: Optional[int] = None,
+    ) -> dict:
+        body = {"type": record_type, "name": name, "content": content, "ttl": str(ttl)}
+        if prio is not None:
+            body["prio"] = str(prio)
+        return await self._post(f"/dns/edit/{domain.lower()}/{record_id}", body)
+
+    async def delete_dns_record(self, domain: str, record_id: str) -> dict:
+        return await self._post(f"/dns/delete/{domain.lower()}/{record_id}")
+
+    # ── Auto-renew toggle (Porkbun-side; bills our account) ────────────────
+    async def set_auto_renew(self, domain: str, enabled: bool) -> dict:
+        """Turn Porkbun's own auto-renew on/off for a domain — used to stop
+        getting billed for a domain whose tenant stopped paying us."""
         return await self._post(
-            f"/dns/create/{domain.lower()}",
-            {"type": record_type, "name": name, "content": content, "ttl": str(ttl)},
+            f"/domain/updateAutoRenew/{domain.lower()}", {"status": "on" if enabled else "off"}
         )
 
     async def point_at_app(self, domain: str) -> None:

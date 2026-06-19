@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Search, Loader2, Globe, Check, CircleAlert, ExternalLink } from 'lucide-react'
+import { Search, Loader2, Globe, Check, CircleAlert, ExternalLink, Server, RefreshCw, LogOut } from 'lucide-react'
 import { cappeApi } from '../../api/cappeClient'
+import DnsRecordsModal from './DnsRecordsModal'
 import type { CappeDomain, CappeDomainSearchResult } from '../../types/cappe'
 
 const input =
@@ -27,6 +28,8 @@ export default function DomainManager({ siteId }: { siteId: string }) {
   const [connect, setConnect] = useState('')
   const [connecting, setConnecting] = useState(false)
   const [verifying, setVerifying] = useState<string | null>(null)
+  const [dnsFor, setDnsFor] = useState<CappeDomain | null>(null)
+  const [acting, setActing] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const loadDomains = useCallback(() => {
@@ -95,6 +98,31 @@ export default function DomainManager({ siteId }: { siteId: string }) {
       setError(e instanceof Error ? e.message : 'Verification failed')
     } finally {
       setVerifying(null)
+    }
+  }
+
+  async function toggleAutoRenew(d: CappeDomain) {
+    setActing(d.id); setError(null)
+    try {
+      await cappeApi.patch<CappeDomain>(`/domains/${d.id}/auto-renew`, { auto_renew: !d.auto_renew })
+      loadDomains()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not update auto-renew')
+    } finally {
+      setActing(null)
+    }
+  }
+
+  async function requestTransfer(d: CappeDomain) {
+    if (!confirm(`Request to transfer ${d.domain} to another registrar? We'll email you the authorization code.`)) return
+    setActing(d.id); setError(null)
+    try {
+      await cappeApi.post<CappeDomain>(`/domains/${d.id}/transfer-request`)
+      loadDomains()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not request transfer')
+    } finally {
+      setActing(null)
     }
   }
 
@@ -207,6 +235,37 @@ export default function DomainManager({ siteId }: { siteId: string }) {
                         {verifying === d.id ? <Loader2 className="h-3 w-3 animate-spin" /> : null} Verify
                       </button>
                     )}
+                    {d.kind === 'register' && d.status === 'active' && (
+                      <>
+                        <button
+                          onClick={() => setDnsFor(d)}
+                          title="Manage DNS records"
+                          className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
+                        >
+                          <Server className="h-3 w-3" /> DNS
+                        </button>
+                        <button
+                          onClick={() => toggleAutoRenew(d)}
+                          disabled={acting === d.id}
+                          title={d.auto_renew ? 'Auto-renew on — click to turn off' : 'Auto-renew off — click to turn on'}
+                          className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs disabled:opacity-60 ${
+                            d.auto_renew
+                              ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
+                              : 'border-zinc-700 text-zinc-400'
+                          }`}
+                        >
+                          <RefreshCw className="h-3 w-3" /> {d.auto_renew ? 'Auto-renew' : 'Renew off'}
+                        </button>
+                        <button
+                          onClick={() => requestTransfer(d)}
+                          disabled={acting === d.id || !!d.transfer_requested_at}
+                          title="Transfer this domain to another registrar"
+                          className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-60"
+                        >
+                          <LogOut className="h-3 w-3" /> {d.transfer_requested_at ? 'Transfer requested' : 'Transfer out'}
+                        </button>
+                      </>
+                    )}
                     <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_STYLE[d.status]}`}>
                       {d.status === 'registering' ? 'setting up…' : d.status}
                     </span>
@@ -229,6 +288,8 @@ export default function DomainManager({ siteId }: { siteId: string }) {
           </ul>
         </div>
       )}
+
+      {dnsFor && <DnsRecordsModal domainId={dnsFor.id} domain={dnsFor.domain} onClose={() => setDnsFor(null)} />}
     </div>
   )
 }

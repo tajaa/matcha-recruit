@@ -90,7 +90,17 @@ export type CappeDomain = {
   expires_at: string | null
   failure_reason: string | null
   verification_token: string | null
+  transfer_requested_at: string | null
   created_at: string
+}
+
+export type CappeDnsRecord = {
+  id: string
+  type: string
+  name: string
+  content: string
+  ttl: string | null
+  prio: string | null
 }
 
 export type CappePage = {

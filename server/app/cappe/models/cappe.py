@@ -1185,7 +1185,30 @@ class CappeDomain(BaseModel):
     # Set on a pending 'connect' domain: add a TXT record at
     # `_cappe-verify.<domain>` with this value, then call /verify.
     verification_token: Optional[str] = None
+    transfer_requested_at: Optional[datetime] = None
     created_at: datetime
+
+
+class CappeDnsRecord(BaseModel):
+    id: str
+    type: str
+    name: str  # full host as Porkbun returns it (FQDN)
+    content: str
+    ttl: Optional[str] = None
+    prio: Optional[str] = None
+
+
+class CappeDnsRecordInput(BaseModel):
+    type: Literal["A", "AAAA", "CNAME", "MX", "TXT", "NS", "ALIAS", "CAA", "SRV"]
+    # Subdomain only ('' = apex, 'www', 'mail'); Porkbun appends the domain.
+    name: str = Field(default="", max_length=255)
+    content: str = Field(min_length=1, max_length=2048)
+    ttl: int = Field(default=600, ge=600)
+    prio: Optional[int] = Field(default=None, ge=0)
+
+
+class CappeDomainAutoRenewUpdate(BaseModel):
+    auto_renew: bool
 
 
 # ===========================================================================
