@@ -2878,6 +2878,16 @@ def _strip_markdown(text: str) -> str:
 # ── Project (top-level) endpoints ──
 
 
+def _guard_sensitive_project_type(project: dict, current_user: CurrentUser) -> None:
+    """werk-lite whole-company access: employees may reach company boards, but the
+    HR-sensitive project types (discipline cases, recruiting pipelines) are also
+    mw_projects under the same company and must stay hidden — even by direct id,
+    not just absent from the board list. 404 (not 403) so existence isn't leaked.
+    Admins/clients are unaffected."""
+    if current_user.role == "employee" and project.get("project_type") in ("discipline", "recruiting"):
+        raise HTTPException(status_code=404, detail="Project not found")
+
+
 async def _verify_project_access(project_id: UUID, current_user: CurrentUser) -> tuple[dict, str]:
     """Check project access. For admins, uses collaborator table. Returns (project, role)."""
     from ..services import project_service as proj_svc
@@ -2893,8 +2903,10 @@ async def _verify_project_access(project_id: UUID, current_user: CurrentUser) ->
     if not project:
         result = await proj_svc.get_project_as_collaborator(project_id, current_user.id)
         if result:
+            _guard_sensitive_project_type(result[0], current_user)
             return result
         raise HTTPException(status_code=404, detail="Project not found")
+    _guard_sensitive_project_type(project, current_user)
     if not project.get("collaborator_role"):
         project["collaborator_role"] = "owner"
     return project, project["collaborator_role"]
