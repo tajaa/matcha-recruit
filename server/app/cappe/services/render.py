@@ -1181,10 +1181,11 @@ _CANVAS_JS = """<style>
 .cz-cv-h[data-dir=w]{left:-6px;top:50%;margin-top:-5.5px;cursor:ew-resize}
 .cz-cv-h[data-dir=e]{right:-6px;top:50%;margin-top:-5.5px;cursor:ew-resize}
 .cz-cv-grabbing *{user-select:none !important}
+.cz-editable .cz-canvas .cz-cv-wrap{min-height:96px}
 </style>
 <script>(function(){
 var editing=null,origText='',cancelEdit=false,dragging=false,dragFrom=-1,downY=0,downIdx=-1,moved=false,dropLine=null;
-var elDrag=null,elResize=null,rdir='',selEl=null,curBp='d',gx=0,gy=0,sx=0,sy=0,sw=0,sh=0,gg=null;
+var elDrag=null,elResize=null,rdir='',selEl=null,curBp='d',gx=0,gy=0,sx=0,sy=0,sw=0,sh=0,gg=null,pid=0;
 function post(m){try{window.parent.postMessage(m,'*');}catch(e){}}
 function blocks(){return [].slice.call(document.querySelectorAll('main>[data-cz-block]'));}
 function blockEl(i){return document.querySelector('[data-cz-block="'+i+'"]');}
@@ -1241,9 +1242,9 @@ document.addEventListener('blur',function(e){
 document.addEventListener('pointerdown',function(e){
   if(editing)return;
   var h=e.target.closest&&e.target.closest('.cz-cv-h');
-  if(h&&selEl){e.preventDefault();gg=gridInfo(selEl);if(!gg)return;elResize=selEl;rdir=h.getAttribute('data-dir');var p=pos(selEl);sx=p.x;sy=p.y;sw=p.w;sh=p.h;gx=e.clientX;gy=e.clientY;moved=false;downIdx=-1;dragging=false;return;}
+  if(h&&selEl){e.preventDefault();gg=gridInfo(selEl);if(!gg)return;elResize=selEl;rdir=h.getAttribute('data-dir');var p=pos(selEl);sx=p.x;sy=p.y;sw=p.w;sh=p.h;gx=e.clientX;gy=e.clientY;moved=false;downIdx=-1;dragging=false;pid=e.pointerId;try{selEl.setPointerCapture(pid);}catch(_){}return;}
   var ce=e.target.closest&&e.target.closest('.cz-el');
-  if(ce){gg=gridInfo(ce);if(!gg)return;if(ce!==selEl){selectEl(ce);postSelectEl(ce);}elDrag=ce;var q=pos(ce);sx=q.x;sy=q.y;sw=q.w;sh=q.h;gx=e.clientX;gy=e.clientY;moved=false;downIdx=-1;dragging=false;return;}
+  if(ce){gg=gridInfo(ce);if(!gg)return;if(ce!==selEl){selectEl(ce);postSelectEl(ce);}elDrag=ce;var q=pos(ce);sx=q.x;sy=q.y;sw=q.w;sh=q.h;gx=e.clientX;gy=e.clientY;moved=false;downIdx=-1;dragging=false;pid=e.pointerId;try{ce.setPointerCapture(pid);}catch(_){}return;}
   var b=e.target.closest&&e.target.closest('[data-cz-block]');if(!b)return;
   downIdx=parseInt(b.getAttribute('data-cz-block'),10);downY=e.clientY;moved=false;dragFrom=downIdx;dragging=false;
 });
@@ -1274,6 +1275,7 @@ function removeDrop(){if(dropLine&&dropLine.parentNode)dropLine.parentNode.remov
 document.addEventListener('pointerup',function(e){
   var el=elDrag||elResize;
   if(el){
+    try{el.releasePointerCapture(pid);}catch(_){}
     if(moved){var p=pos(el);post({type:elDrag?'cz-elem-move':'cz-elem-resize',block:idxOf(el),id:el.getAttribute('data-cz-id'),bp:curBp,pos:p});document.body.classList.remove('cz-cv-grabbing');post({type:'cz-editing-end'});}
     elDrag=null;elResize=null;setTimeout(function(){moved=false;},0);return;
   }

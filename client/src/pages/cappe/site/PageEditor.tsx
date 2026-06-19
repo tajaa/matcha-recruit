@@ -1354,6 +1354,7 @@ export default function PageEditor() {
             return next
           })
           setSelBlock(d.to)
+          setSelElement(null)  // a freeform element selection doesn't survive a section move
           break
         case 'cz-editing-start':
           suspendPreview.current = true
