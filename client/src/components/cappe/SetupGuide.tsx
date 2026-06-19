@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Check, Copy, Rocket, Loader2, Sparkles, ArrowRight, CircleAlert } from 'lucide-react'
 import { cappeApi } from '../../api/cappeClient'
 import { cappeSiteHost } from '../../utils/cappeHost'
@@ -18,8 +18,10 @@ interface SetupGuideProps {
  *  enforces), shows required vs. recommended steps with a deep link to build
  *  each, and only enables publish once the required items are done. */
 export default function SetupGuide({ site, pages, publishing, onPublish, refreshKey }: SetupGuideProps) {
+  const navigate = useNavigate()
   const [readiness, setReadiness] = useState<CappeReadiness | null>(null)
   const [copied, setCopied] = useState(false)
+  const [creatingPage, setCreatingPage] = useState(false)
 
   const load = useCallback(() => {
     cappeApi.get<CappeReadiness>(`/sites/${site.id}/readiness`).then(setReadiness).catch(() => {})
@@ -38,6 +40,24 @@ export default function SetupGuide({ site, pages, publishing, onPublish, refresh
       case 'pages': return homePageId ? `/cappe/sites/${site.id}/pages/${homePageId}` : `/cappe/sites/${site.id}`
       case 'settings': return `/cappe/sites/${site.id}`
       default: return `/cappe/sites/${site.id}`
+    }
+  }
+
+  // Page-editing tasks (intro/about, sell-on-page, contact) need a page to open.
+  // Blank sites historically shipped with none, so the 'pages' deep link
+  // resolved to the dashboard the user was already on — a dead "Do this".
+  // Create a Home page on the fly, then open the editor.
+  async function goToPageAction() {
+    if (homePageId) { navigate(actionTo('pages')); return }
+    if (creatingPage) return
+    setCreatingPage(true)
+    try {
+      const page = await cappeApi.post<CappePage>(`/sites/${site.id}/pages`, { title: 'Home' })
+      navigate(`/cappe/sites/${site.id}/pages/${page.id}`)
+    } catch {
+      navigate(`/cappe/sites/${site.id}`)
+    } finally {
+      setCreatingPage(false)
     }
   }
 
@@ -89,9 +109,19 @@ export default function SetupGuide({ site, pages, publishing, onPublish, refresh
         {!item.done && (
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <span className="text-xs leading-relaxed text-zinc-400">{item.hint}</span>
-            <Link to={actionTo(item.action)} className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20">
-              Do this <ArrowRight className="h-3 w-3" />
-            </Link>
+            {item.action === 'pages' && !homePageId ? (
+              <button
+                onClick={goToPageAction}
+                disabled={creatingPage}
+                className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-60"
+              >
+                Do this {creatingPage ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowRight className="h-3 w-3" />}
+              </button>
+            ) : (
+              <Link to={actionTo(item.action)} className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20">
+                Do this <ArrowRight className="h-3 w-3" />
+              </Link>
+            )}
           </div>
         )}
       </div>

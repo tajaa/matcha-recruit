@@ -80,19 +80,29 @@ async def create_site(body: CappeSiteCreate, account: CappeAccount = Depends(req
         await _enforce_site_limit(conn, account)
         # slug doubles as the tenant subdomain — keep it off reserved labels.
         slug = await unique_slug(conn, safe_subdomain_base(body.name), "cappe_sites")
-        row = await conn.fetchrow(
-            f"""INSERT INTO cappe_sites
-                    (account_id, name, slug, subdomain, custom_domain, source_type, is_multi_location)
-                VALUES ($1, $2, $3, $3, $4, $5, $6)
-                RETURNING {_SITE_COLS}""",
-            account.id,
-            body.name,
-            slug,
-            body.custom_domain or None,  # '' → NULL: empty strings would collide on the UNIQUE
-            body.source_type,
-            body.is_multi_location,
-        )
-    return site_row_to_dict(row, page_count=0)
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                f"""INSERT INTO cappe_sites
+                        (account_id, name, slug, subdomain, custom_domain, source_type, is_multi_location)
+                    VALUES ($1, $2, $3, $3, $4, $5, $6)
+                    RETURNING {_SITE_COLS}""",
+                account.id,
+                body.name,
+                slug,
+                body.custom_domain or None,  # '' → NULL: empty strings would collide on the UNIQUE
+                body.source_type,
+                body.is_multi_location,
+            )
+            # Every site needs a homepage to edit — without one the launch
+            # checklist's "Add an intro / about section" deep link had nowhere
+            # to go. Seed an empty Home page (no content blocks, so the readiness
+            # gate still requires the owner to add their intro).
+            await conn.execute(
+                """INSERT INTO cappe_pages (site_id, title, slug, content, sort_order, status)
+                   VALUES ($1, 'Home', 'home', '{}', 0, 'draft')""",
+                row["id"],
+            )
+    return site_row_to_dict(row, page_count=1)
 
 
 @router.post("/sites/from-template", response_model=CappeSite, status_code=status.HTTP_201_CREATED)
