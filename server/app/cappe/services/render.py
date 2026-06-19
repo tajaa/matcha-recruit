@@ -1182,6 +1182,7 @@ _CANVAS_JS = """<style>
 .cz-cv-h[data-dir=e]{right:-6px;top:50%;margin-top:-5.5px;cursor:ew-resize}
 .cz-cv-grabbing *{user-select:none !important}
 .cz-editable .cz-canvas .cz-cv-wrap{min-height:96px}
+.cz-editable a.cz-el,.cz-editable .cz-el img{-webkit-user-drag:none;user-drag:none}
 </style>
 <script>(function(){
 var editing=null,origText='',cancelEdit=false,dragging=false,dragFrom=-1,downY=0,downIdx=-1,moved=false,dropLine=null;
@@ -1674,6 +1675,7 @@ _CANVAS_CSS = (
     ".cz-el--img{overflow:hidden}"
     ".cz-el--img img{width:100%;height:100%;object-fit:var(--cv-fit,cover);"
     "border-radius:var(--cv-rad,0);display:block}"
+    ".cz-canvas a.cz-el--btn{width:100%;height:100%}"
 )
 
 
@@ -1697,7 +1699,7 @@ def _canvas(b, t, editable=False, index=0):
             continue
         eid = _cv_safe_id(el.get("id"))
         kind = el.get("kind")
-        if not eid or kind not in ("heading", "text", "image"):
+        if not eid or kind not in ("heading", "text", "image", "button"):
             continue
         d = el.get("d") if isinstance(el.get("d"), dict) else {}
         dx = _clampi(d.get("x"), 0, _CV_COLS_MAX, 0)
@@ -1732,6 +1734,25 @@ def _canvas(b, t, editable=False, index=0):
             rad = _clampi(style.get("radius"), 0, 200, 0)
             if rad:
                 parts.append(f"--cv-rad:{rad}px")
+        elif kind == "button":
+            # Typography + button colors; variant (solid/outline) rides on a class.
+            if style.get("font"):
+                parts.append(f"font-family:{_font_stack(style['font'])}")
+            sz = _clampi(style.get("size"), 8, 200, 0)
+            if sz:
+                parts.append(f"font-size:{sz}px")
+            wt = str(style.get("weight") or "")
+            if wt in _CV_WEIGHTS:
+                parts.append(f"font-weight:{wt}")
+            bg = _hexonly(style.get("bg"))
+            if bg:
+                parts.append(f"background:{bg}")
+            col = _hexonly(style.get("color"))
+            if col:
+                parts.append(f"color:{col}")
+            rad = _clampi(style.get("radius"), 0, 200, 0)
+            if rad:
+                parts.append(f"border-radius:{rad}px")
         else:
             if style.get("font"):
                 parts.append(f"font-family:{_font_stack(style['font'])}")
@@ -1776,10 +1797,19 @@ def _canvas(b, t, editable=False, index=0):
             src = _safe_image(el.get("src"))
             inner = f'<img src="{_esc(src)}" alt="{_esc(el.get("alt"))}" loading="lazy" />' if src else ""
             els_html.append(f'<div class="cz-el cz-el--img"{dataattr}{style_attr}>{inner}</div>')
+        elif kind == "button":
+            btncls = "cz-btn--ghost" if style.get("variant") == "outline" else "cz-btn--solid"
+            href = _esc(_safe_href(el.get("href")))
+            # data-cz-field tags the label for inline editing; the click runtime
+            # already preventDefaults <a> navigation in the editor.
+            els_html.append(
+                f'<a class="cz-el cz-el--btn cz-btn {btncls}"{dataattr}{_fattr(eid, editable)} '
+                f'href="{href}"{style_attr}>{_esc(el.get("text"))}</a>'
+            )
         else:
             tag = "h2" if kind == "heading" else "p"
-            # Only text gets data-cz-field, so the inline-text editor (dblclick →
-            # contenteditable) targets text and never an image wrapper.
+            # Only text/buttons get data-cz-field, so the inline-text editor
+            # (dblclick → contenteditable) targets a label, never an image wrapper.
             els_html.append(
                 f'<{tag} class="cz-el cz-el--{kind}"{dataattr}{_fattr(eid, editable)}{style_attr}>'
                 f'{_esc(el.get("text"))}</{tag}>'

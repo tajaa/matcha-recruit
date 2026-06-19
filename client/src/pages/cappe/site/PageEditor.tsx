@@ -6,7 +6,7 @@ import {
 import { cappeApi } from '../../../api/cappeClient'
 import { useCappeMe } from '../../../hooks/useCappeMe'
 import { BODY_FONTS, CAPPE_THEMES, FONT_CATEGORY, FONT_PAIRINGS, HEADING_FONTS, RADII, contrastText } from '../../../data/cappeThemes'
-import type { CappeBlock, CappeCanvasElement, CappeCanvasPos, CappePage, CappeSite } from '../../../types/cappe'
+import type { CappeBlock, CappeCanvasElement, CappeCanvasElementStyle, CappeCanvasPos, CappePage, CappeSite } from '../../../types/cappe'
 
 // ── theme helpers (operate on the freeform theme_config object) ─────────────
 const themeObj = (v: unknown): Record<string, unknown> =>
@@ -59,12 +59,82 @@ function cvNextY(els: CappeCanvasElement[]): number {
 }
 function cvNewElement(kind: CappeCanvasElement['kind'], y: number): CappeCanvasElement {
   if (kind === 'image') return { id: genId(), kind, src: '', d: { x: 2, y, w: 8, h: 6 }, style: { fit: 'cover' } }
+  if (kind === 'button') return { id: genId(), kind, text: 'Button', href: '', d: { x: 2, y, w: 6, h: 2 }, style: { variant: 'solid' } }
   return { id: genId(), kind, text: kind === 'heading' ? 'Heading' : 'Text', d: { x: 2, y, w: 12, h: kind === 'heading' ? 3 : 2 }, style: {} }
 }
 function isCanvasBlock(b: unknown): boolean {
   return !!b && (b as { type?: string }).type === 'canvas'
 }
 const CV_MAX_ELEMENTS = 200
+const CV_ELEMENT_KINDS: CappeCanvasElement['kind'][] = ['heading', 'text', 'image', 'button']
+
+// Sections whose single-instance content maps cleanly to freeform elements.
+const CONVERTIBLE_TO_CANVAS = new Set(['hero', 'cta', 'split', 'text'])
+
+/** "Customize freely": map a template section's content into a freeform canvas
+ *  block — keeps the content, unlocks per-element editing. One-way. */
+function convertSectionToCanvas(block: CappeBlock): CappeBlock {
+  const s = (k: string) => (typeof block[k] === 'string' ? (block[k] as string) : '')
+  const els: CappeCanvasElement[] = []
+  const txt = (kind: 'heading' | 'text', text: string, d: CappeCanvasPos, style: CappeCanvasElementStyle = {}) => {
+    if (text) els.push({ id: genId(), kind, text, d, style })
+  }
+  const btn = (label: string, href: string, variant: 'solid' | 'outline', d: CappeCanvasPos) => {
+    if (label) els.push({ id: genId(), kind: 'button', text: label, href: href || '', d, style: { variant } })
+  }
+  const img = (src: string, d: CappeCanvasPos) => {
+    if (src) els.push({ id: genId(), kind: 'image', src, d, style: { fit: 'cover' } })
+  }
+  const design: Record<string, unknown> = {
+    ...(block._design && typeof block._design === 'object' && !Array.isArray(block._design) ? (block._design as Record<string, unknown>) : {}),
+  }
+
+  if (block.type === 'hero') {
+    const style = s('style'); const image = s('image'); const video = s('video')
+    const fullBleed = !!video || style === 'image' || ((style === 'centered' || !style) && !!image)
+    if (fullBleed && (image || video)) {
+      design.bg = video
+        ? { type: 'video', video, overlay: s('overlay') || 'medium' }
+        : { type: 'image', image, overlay: s('overlay') || 'medium' }
+    }
+    txt('text', s('eyebrow'), { x: 6, y: 3, w: 12, h: 1 }, { size: 13, weight: 600 })
+    txt('heading', s('heading'), { x: 6, y: 5, w: 12, h: 3 })
+    txt('text', s('subheading'), { x: 6, y: 9, w: 12, h: 2 })
+    btn(s('cta'), s('ctaHref'), 'solid', { x: 6, y: 12, w: 5, h: 2 })
+    btn(s('cta2'), s('cta2Href'), 'outline', { x: 11, y: 12, w: 5, h: 2 })
+    if (style === 'split') img(image, { x: 13, y: 3, w: 10, h: 10 })
+  } else if (block.type === 'cta') {
+    txt('heading', s('heading'), { x: 4, y: 2, w: 16, h: 3 })
+    txt('text', s('subheading'), { x: 4, y: 6, w: 16, h: 2 })
+    btn(s('cta') || 'Get started', s('ctaHref'), 'solid', { x: 4, y: 10, w: 6, h: 2 })
+  } else if (block.type === 'split') {
+    const reverse = block.reverse === true
+    const tx = reverse ? 13 : 1
+    const ix = reverse ? 1 : 13
+    txt('text', s('eyebrow'), { x: tx, y: 2, w: 10, h: 1 }, { size: 13, weight: 600 })
+    txt('heading', s('heading'), { x: tx, y: 4, w: 10, h: 2 })
+    txt('text', s('body'), { x: tx, y: 7, w: 10, h: 4 })
+    const bullets = Array.isArray(block.bullets) ? (block.bullets as unknown[]).filter((x): x is string => typeof x === 'string' && !!x) : []
+    if (bullets.length) txt('text', bullets.map((x) => `• ${x}`).join('\n'), { x: tx, y: 11, w: 10, h: bullets.length + 1 })
+    btn(s('cta'), s('ctaHref'), 'solid', { x: tx, y: 16, w: 6, h: 2 })
+    img(s('image'), { x: ix, y: 2, w: 10, h: 14 })
+  } else if (block.type === 'text') {
+    txt('heading', s('heading'), { x: 4, y: 2, w: 16, h: 2 })
+    const body = block.body
+    const bodyText = Array.isArray(body)
+      ? (body as unknown[]).filter((x): x is string => typeof x === 'string').join('\n\n')
+      : (typeof body === 'string' ? body : '')
+    txt('text', bodyText, { x: 4, y: 5, w: 16, h: 6 })
+  }
+
+  return {
+    type: 'canvas',
+    grid: { cols: 24, rowH: 24, rows: 30 },
+    mobile: { cols: 8, rowH: 24, rows: 60 },
+    elements: els,
+    ...(Object.keys(design).length ? { _design: design } : {}),
+  }
+}
 
 const BLOCK_SCHEMAS: Record<string, BlockSchema> = {
   hero: {
@@ -935,6 +1005,7 @@ function BlockCard({
 }) {
   const [open, setOpen] = useState(true)
   const schema = BLOCK_SCHEMAS[block.type]
+  const premium = usePremium()
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900">
       <div className="flex items-center justify-between gap-2 border-b border-zinc-800 px-4 py-2.5">
@@ -943,6 +1014,13 @@ function BlockCard({
           {schema?.label || block.type}
         </button>
         <div className="flex items-center gap-1 text-zinc-500">
+          {premium && CONVERTIBLE_TO_CANVAS.has(block.type) && (
+            <button type="button" title="Customize freely — turn this section into a freeform layout you can drag & restyle (one-way)"
+              onClick={() => onChange(convertSectionToCanvas(block))}
+              className="mr-1 flex items-center gap-1 rounded-md border border-zinc-700 px-2 py-1 text-[11px] font-medium text-zinc-300 hover:border-emerald-500 hover:text-emerald-400">
+              <Wand2 className="h-3.5 w-3.5 text-amber-400" /> Customize freely
+            </button>
+          )}
           <button type="button" onClick={() => onMove(-1)} disabled={index === 0} className="hover:text-zinc-200 disabled:opacity-30"><ChevronUp className="h-4 w-4" /></button>
           <button type="button" onClick={() => onMove(1)} disabled={index === total - 1} className="hover:text-zinc-200 disabled:opacity-30"><ChevronDown className="h-4 w-4" /></button>
           <button type="button" onClick={onRemove} className="hover:text-red-400"><Trash2 className="h-4 w-4" /></button>
@@ -1023,6 +1101,12 @@ function CanvasPanel({ blocks, sel, onChange, onMove, onRemove, onDuplicate, onA
           {onClose && <button title="Close" onClick={onClose} className="ml-1 border-l border-zinc-700 pl-1.5 hover:text-zinc-200"><X className="h-4 w-4" /></button>}
         </div>
       </div>
+      {CONVERTIBLE_TO_CANVAS.has(block.type) && (
+        <button onClick={() => onChange(sel, convertSectionToCanvas(block))}
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-amber-700/40 bg-amber-500/[0.06] px-3 py-2 text-xs font-semibold text-amber-200 hover:bg-amber-500/10">
+          <Wand2 className="h-3.5 w-3.5" /> Customize freely
+        </button>
+      )}
       {schema ? (
         <>
           {schema.fields.map((f) => (
@@ -1066,6 +1150,23 @@ function ElementControls({ el, bp, onPatch }: {
           <div className="grid grid-cols-2 gap-2">
             <DSelect label="Fit" value={style.fit || 'cover'} options={[['cover', 'Cover'], ['contain', 'Contain'], ['fill', 'Fill'], ['none', 'None']]} onChange={(v) => setStyle('fit', v)} />
             <DNum label="Corner radius" value={style.radius || 0} min={0} max={200} onChange={(v) => setStyle('radius', v || undefined)} />
+          </div>
+        </>
+      ) : el.kind === 'button' ? (
+        <>
+          <div><span className={dLabel}>Label</span><input value={el.text || ''} onChange={(e) => onPatch((x) => ({ ...x, text: e.target.value }))} className={`${inputCls} py-1.5`} /></div>
+          <div><span className={dLabel}>Link</span><input value={el.href || ''} onChange={(e) => onPatch((x) => ({ ...x, href: e.target.value }))} placeholder="/p/contact or https://…" className={`${inputCls} py-1.5`} /></div>
+          <div className="grid grid-cols-2 gap-2">
+            <DSelect label="Style" value={style.variant || 'solid'} options={[['solid', 'Solid'], ['outline', 'Outline']]} onChange={(v) => setStyle('variant', v)} />
+            <DNum label="Corner radius" value={style.radius || 0} min={0} max={200} onChange={(v) => setStyle('radius', v || undefined)} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <DColor label="Background" value={style.bg || ''} onChange={(v) => setStyle('bg', v)} />
+            <DColor label="Text color" value={style.color || ''} onChange={(v) => setStyle('color', v)} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <CappeFontPicker label="Font" value={style.font || 'Inter'} onChange={(v) => setStyle('font', v)} />
+            <DSelect label="Weight" value={String(style.weight || '')} options={[['', 'Default'], ['400', 'Regular'], ['500', 'Medium'], ['600', 'Semibold'], ['700', 'Bold'], ['800', 'Extrabold'], ['900', 'Black']]} onChange={(v) => setStyle('weight', v ? Number(v) : undefined)} />
           </div>
         </>
       ) : (
@@ -1132,7 +1233,7 @@ function CanvasInspector({ block, elementId, bp, onSetBp, onPatchElement, onAddE
         <p className="rounded-lg border border-dashed border-zinc-700 p-3 text-center text-xs text-zinc-500">Click any element on the canvas to edit it. Drag to move; drag a corner to resize.</p>
       )}
       <div className="flex gap-1.5 border-t border-zinc-800 pt-2">
-        {(['heading', 'text', 'image'] as const).map((k) => (
+        {CV_ELEMENT_KINDS.map((k) => (
           <button key={k} onClick={() => onAddElement(k)} className="flex-1 rounded-lg border border-dashed border-zinc-700 px-2 py-1.5 text-xs font-medium capitalize text-zinc-300 hover:border-emerald-500 hover:text-emerald-400">+ {k}</button>
         ))}
       </div>
@@ -1182,7 +1283,7 @@ function CanvasFormEditor({ block, onChange }: { block: CappeBlock; onChange: (b
         {els.length === 0 && <li className="rounded-lg border border-dashed border-zinc-700 p-3 text-center text-xs text-zinc-500">No elements yet.</li>}
       </ul>
       <div className="flex gap-1.5">
-        {(['heading', 'text', 'image'] as const).map((k) => (
+        {CV_ELEMENT_KINDS.map((k) => (
           <button key={k} onClick={() => addEl(k)} className="flex-1 rounded-lg border border-dashed border-zinc-700 px-2 py-1.5 text-xs font-medium capitalize text-zinc-300 hover:border-emerald-500 hover:text-emerald-400">+ {k}</button>
         ))}
       </div>

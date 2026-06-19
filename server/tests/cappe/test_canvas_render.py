@@ -62,3 +62,26 @@ def test_coords_become_one_based_grid_lines():
     html = R._render_block(_block(), R._tokens({}), 3, True)
     # heading d.x=2,w=12 -> grid-column:3/span 12 ; d.y=1,h=3 -> grid-row:2/span 3
     assert "grid-column:3/span 12;grid-row:2/span 3" in html
+
+
+def _btn_block():
+    return {
+        "type": "canvas", "grid": {"cols": 24, "rowH": 24}, "mobile": {"cols": 8, "rowH": 24},
+        "elements": [
+            {"id": "ok", "kind": "button", "text": "Book <now>", "href": "/book",
+             "d": {"x": 2, "y": 1, "w": 6, "h": 2},
+             "style": {"variant": "solid", "bg": "#10b981", "color": "#ffffff", "radius": 8}},
+            {"id": "evil", "kind": "button", "text": "x", "href": "javascript:alert(1)",
+             "d": {"x": 9, "y": 1, "w": 6, "h": 2}, "style": {"variant": "outline"}},
+        ],
+    }
+
+
+def test_button_element_render_and_safety():
+    html = R._render_block(_btn_block(), R._tokens({}), 0, True)
+    assert "Book &lt;now&gt;" in html and "Book <now>" not in html   # label escaped
+    assert 'href="/book"' in html                                    # safe link kept
+    assert "javascript:" not in html                                 # bad scheme dropped
+    assert "cz-btn--solid" in html and "cz-btn--ghost" in html       # variant → class
+    assert html.count("data-cz-field") == 2                          # both labels inline-editable
+    assert "background:#10b981" in html and "border-radius:8px" in html

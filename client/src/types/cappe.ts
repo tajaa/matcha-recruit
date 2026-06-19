@@ -133,13 +133,16 @@ export type CappeCanvasElementStyle = {
   align?: 'left' | 'center' | 'right' | 'justify'
   fit?: 'cover' | 'contain' | 'fill' | 'none'
   radius?: number
+  variant?: 'solid' | 'outline' // button
+  bg?: string // button background
 }
 export type CappeCanvasElement = {
   id: string
-  kind: 'heading' | 'text' | 'image'
+  kind: 'heading' | 'text' | 'image' | 'button'
   text?: string
   src?: string
   alt?: string
+  href?: string // button link
   d: CappeCanvasPos // desktop placement (grid units)
   m?: CappeCanvasPos // mobile placement (auto-derived when absent)
   style?: CappeCanvasElementStyle
