@@ -1210,7 +1210,7 @@ function CanvasInspector({ block, elementId, bp, onSetBp, onPatchElement, onAddE
   onClose: () => void
 }) {
   const el = cvEls(block).find((e) => e.id === elementId) || null
-  const kindLabel = el ? ({ heading: 'Heading', text: 'Text', image: 'Image' } as const)[el.kind] : 'Freeform section'
+  const kindLabel = el ? ({ heading: 'Heading', text: 'Text', image: 'Image', button: 'Button' } as const)[el.kind] : 'Freeform section'
   return (
     <div className="space-y-3 p-4">
       <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
