@@ -37,7 +37,7 @@ from .benefits import router as benefits_router
 from .separation import router as separation_router
 from .fake_hris import router as fake_hris_router
 from .twilio_webhook import router as twilio_webhook_router
-from ..dependencies import require_feature
+from ..dependencies import require_feature, require_any_feature
 from ...core.dependencies import require_admin
 
 # Create main Matcha router
@@ -72,7 +72,11 @@ matcha_router.include_router(ir_onboarding_router, prefix="/ir-onboarding", tags
                              dependencies=[Depends(require_feature("incidents"))])
 matcha_router.include_router(matcha_x_onboarding_router, prefix="/matcha-x-onboarding",
                              tags=["matcha-x-onboarding"],
-                             dependencies=[Depends(require_feature("handbook_audit"))])
+                             # Matcha-X reaches this via handbook_audit (always-on
+                             # in its overlay); the standalone Matcha Compliance
+                             # product reuses the same wizard but only holds the
+                             # full `compliance` flag — admit either.
+                             dependencies=[Depends(require_any_feature("handbook_audit", "compliance"))])
 matcha_router.include_router(ir_surveys_router, prefix="/ir/surveys", tags=["ir-surveys"],
                              dependencies=[Depends(require_feature("incidents"))])
 matcha_router.include_router(accommodations_router, prefix="/accommodations", tags=["accommodations"],

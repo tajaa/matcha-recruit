@@ -1688,7 +1688,7 @@ async def register_business(request: BusinessRegister, http_request: Request):
             # Resolve Lite referral token — non-blocking if invalid/expired
             lite_broker_pays = False
             broker_seat_count = None  # set when a company-pinned broker seat invite is redeemed
-            if request.lite_broker_token and request.tier in ("matcha_lite", "matcha_x") and referring_broker_id is None:
+            if request.lite_broker_token and request.tier in ("matcha_lite", "matcha_x", "matcha_compliance") and referring_broker_id is None:
                 lite_ref_row = await conn.fetchrow(
                     """
                     UPDATE broker_lite_referral_tokens

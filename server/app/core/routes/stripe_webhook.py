@@ -598,10 +598,21 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                 if sub and sub["pack_id"] == token_budget_service.SUBSCRIPTION_PACK_ID:
                     await token_budget_service.cancel_subscription_budget(sub["company_id"])
                     logger.info("Token budget zeroed for company %s", sub["company_id"])
-                elif sub and sub["pack_id"] in ("matcha_lite", "matcha_x"):
-                    # Both tiers gate the same headline feature (incidents);
-                    # cancellation flips it off identically.
-                    _tier_label = "Matcha-X" if sub["pack_id"] == "matcha_x" else "Matcha Lite"
+                elif sub and sub["pack_id"] in ("matcha_lite", "matcha_x", "matcha_compliance"):
+                    # Each tier flips its single paid gate off on cancellation —
+                    # incidents for Lite/X, the full `compliance` for the
+                    # standalone Compliance product (mirror of the activation
+                    # branch above; keep the flag map in sync with it).
+                    _pack = sub["pack_id"]
+                    _tier_label = {
+                        "matcha_x": "Matcha-X",
+                        "matcha_compliance": "Matcha Compliance",
+                    }.get(_pack, "Matcha Lite")
+                    _paid_feature = {
+                        "matcha_lite": "incidents",
+                        "matcha_x": "incidents",
+                        "matcha_compliance": "compliance",
+                    }.get(_pack, "incidents")
                     try:
                         import json as _json
                         from ...database import get_connection as _gc
@@ -613,7 +624,7 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                             features = existing if isinstance(existing, dict) else (
                                 _json.loads(existing) if existing else {}
                             )
-                            features["incidents"] = False
+                            features[_paid_feature] = False
                             await conn.execute(
                                 "UPDATE companies SET enabled_features = $1::jsonb WHERE id = $2",
                                 _json.dumps(features), sub["company_id"],

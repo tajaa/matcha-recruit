@@ -78,9 +78,11 @@ export default function AppLayout({ sidebar, logoLabel }: { sidebar: ReactNode; 
   const derivedLabel = logoLabel ?? (
     src === 'matcha_x'
       ? 'Matcha-X'
-      : src === 'matcha_lite' || src === 'ir_only_self_serve' || src === 'ir_only'
-        ? 'Matcha Lite'
-        : 'Matcha'
+      : src === 'matcha_compliance'
+        ? 'Matcha Compliance'
+        : src === 'matcha_lite' || src === 'ir_only_self_serve' || src === 'ir_only'
+          ? 'Matcha Lite'
+          : 'Matcha'
   )
 
   return (
