@@ -29,13 +29,16 @@ def upgrade() -> None:
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             account_id UUID NOT NULL REFERENCES cappe_accounts(id) ON DELETE CASCADE,
             site_id UUID NOT NULL REFERENCES cappe_sites(id) ON DELETE CASCADE,
-            domain VARCHAR(255) NOT NULL UNIQUE,
+            domain VARCHAR(255) NOT NULL,
             -- 'register' = bought through us via Porkbun; 'connect' = tenant-owned, BYO.
             kind VARCHAR(16) NOT NULL DEFAULT 'register'
                 CHECK (kind IN ('register','connect')),
             registrar VARCHAR(32) NOT NULL DEFAULT 'porkbun',
             status VARCHAR(16) NOT NULL DEFAULT 'pending'
                 CHECK (status IN ('pending','registering','active','failed','expired')),
+            -- BYO 'connect' domains must prove control via a DNS TXT record before
+            -- they go active (prevents claiming/squatting a domain you don't own).
+            verification_token TEXT,
             -- Pricing snapshot (cents): what Porkbun charged us vs. what we charged the tenant.
             wholesale_cents INTEGER,
             retail_cents INTEGER,
@@ -49,6 +52,13 @@ def upgrade() -> None:
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         """
+    )
+    # Only ONE active claim per domain — but multiple unverified/pending claims
+    # are allowed, so a bogus pending claim can't block the real owner from
+    # later verifying and activating the same domain.
+    op.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS cappe_domains_active_domain_uniq "
+        "ON cappe_domains(domain) WHERE status = 'active'"
     )
     op.execute("CREATE INDEX IF NOT EXISTS idx_cappe_domains_site ON cappe_domains(site_id)")
     op.execute("CREATE INDEX IF NOT EXISTS idx_cappe_domains_account ON cappe_domains(account_id)")

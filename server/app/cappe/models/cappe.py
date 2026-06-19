@@ -1182,6 +1182,9 @@ class CappeDomain(BaseModel):
     auto_renew: bool = True
     expires_at: Optional[datetime] = None
     failure_reason: Optional[str] = None
+    # Set on a pending 'connect' domain: add a TXT record at
+    # `_cappe-verify.<domain>` with this value, then call /verify.
+    verification_token: Optional[str] = None
     created_at: datetime
 
 

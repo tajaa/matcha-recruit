@@ -71,6 +71,28 @@ export type CappeSite = {
   page_count?: number | null
 }
 
+export type CappeDomainSearchResult = {
+  domain: string
+  available: boolean
+  price_cents: number | null
+}
+
+export type CappeDomainStatus = 'pending' | 'registering' | 'active' | 'failed' | 'expired'
+
+export type CappeDomain = {
+  id: string
+  site_id: string
+  domain: string
+  kind: 'register' | 'connect'
+  status: CappeDomainStatus
+  price_cents: number | null
+  auto_renew: boolean
+  expires_at: string | null
+  failure_reason: string | null
+  verification_token: string | null
+  created_at: string
+}
+
 export type CappePage = {
   id: string
   site_id: string

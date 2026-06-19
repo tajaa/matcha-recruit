@@ -16,8 +16,13 @@ live domain is issued on-demand by Caddy, gated by GET /tls/authorize.
 from __future__ import annotations
 
 import logging
+import secrets
 from typing import Optional
 from uuid import UUID
+
+import dns.asyncresolver
+import dns.exception
+import dns.resolver
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response, status
 
@@ -46,8 +51,10 @@ router = APIRouter()
 _SEARCH_TLDS = ["com", "co", "shop", "store", "io", "site"]
 _DOMAIN_COLS = (
     "id, site_id, domain, kind, status, retail_cents AS price_cents, "
-    "auto_renew, expires_at, failure_reason, created_at"
+    "auto_renew, expires_at, failure_reason, verification_token, created_at"
 )
+# Host prefix where a connect domain must publish its ownership TXT record.
+_VERIFY_PREFIX = "_cappe-verify"
 
 
 async def _require_owned_site(conn, account_id: UUID, site_id: UUID) -> None:
@@ -161,39 +168,91 @@ async def purchase_domain(
     return {"domain_id": domain_id, "checkout_url": session["url"]}
 
 
-# ── Connect a domain you already own (BYO — no registration) ───────────────
+# ── Connect a domain you already own (BYO — verify control, then activate) ──
 @router.post("/domains/connect", response_model=CappeDomain)
 async def connect_domain(
     body: CappeDomainConnectRequest, account: CappeAccount = Depends(require_cappe_account)
 ):
-    """Attach a tenant-owned domain. The tenant points DNS (A → our IP) at us;
-    Caddy then issues TLS on first request. We record it active and set it as the
-    site's custom_domain so the renderer resolves it."""
+    """Start connecting a tenant-owned domain. Creates a PENDING claim with a
+    verification token — the caller must add a TXT record at
+    `_cappe-verify.<domain>` and call /verify before it activates. We never write
+    custom_domain (or authorize TLS) for an unverified claim, so a domain can't be
+    hijacked/squatted by someone who doesn't control it."""
     if not body.domain:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Enter a domain")
+    token = secrets.token_urlsafe(24)
     async with get_connection() as conn:
         await _require_owned_site(conn, account.id, body.site_id)
+        if await conn.fetchval(
+            "SELECT 1 FROM cappe_domains WHERE domain = $1 AND status = 'active'", body.domain
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail="That domain is already connected"
+            )
+        # Reuse an existing pending claim for the same (account, site, domain) so
+        # repeated clicks don't pile up rows; otherwise insert a fresh pending one.
+        row = await conn.fetchrow(
+            f"""INSERT INTO cappe_domains
+                    (account_id, site_id, domain, kind, status, verification_token)
+                VALUES ($1, $2, $3, 'connect', 'pending', $4)
+                RETURNING {_DOMAIN_COLS}""",
+            account.id, body.site_id, body.domain, token,
+        )
+    return dict(row)
+
+
+@router.post("/domains/{domain_id}/verify", response_model=CappeDomain)
+async def verify_domain(domain_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
+    """Resolve the ownership TXT record for a pending connect domain; on a match,
+    activate it and set it as the site's custom_domain."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            f"SELECT {_DOMAIN_COLS} FROM cappe_domains "
+            "WHERE id = $1 AND account_id = $2 AND kind = 'connect'",
+            domain_id, account.id,
+        )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Domain not found")
+    if row["status"] == "active":
+        return dict(row)
+    if not row["verification_token"]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nothing to verify")
+
+    fqdn = f"{_VERIFY_PREFIX}.{row['domain']}"
+    try:
+        answers = await dns.asyncresolver.resolve(fqdn, "TXT")
+        values = {txt.strip('"') for r in answers for txt in [b"".join(r.strings).decode("utf-8", "ignore")]}
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
+        values = set()
+    except dns.exception.DNSException as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"DNS lookup failed: {exc}")
+
+    if row["verification_token"] not in values:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"TXT record not found yet. Add a TXT record at {fqdn} with the token, then retry.",
+        )
+
+    async with get_connection() as conn:
         async with conn.transaction():
-            try:
-                row = await conn.fetchrow(
-                    f"""INSERT INTO cappe_domains
-                            (account_id, site_id, domain, kind, status)
-                        VALUES ($1, $2, $3, 'connect', 'active')
-                        RETURNING {_DOMAIN_COLS}""",
-                    account.id, body.site_id, body.domain,
+            if await conn.fetchval(
+                "SELECT 1 FROM cappe_domains WHERE domain = $1 AND status = 'active' AND id <> $2",
+                row["domain"], domain_id,
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT, detail="That domain is already connected"
                 )
-            except Exception as exc:
-                if "cappe_domains_domain_key" in str(exc):
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT, detail="That domain is already connected"
-                    )
-                raise
+            updated = await conn.fetchrow(
+                f"UPDATE cappe_domains SET status = 'active', updated_at = NOW() "
+                f"WHERE id = $1 RETURNING {_DOMAIN_COLS}",
+                domain_id,
+            )
             await conn.execute(
                 "UPDATE cappe_sites SET custom_domain = $1, updated_at = NOW() WHERE id = $2",
-                body.domain, body.site_id,
+                row["domain"], row["site_id"],
             )
-    await invalidate_render_cache(body.site_id)
-    return dict(row)
+    await invalidate_render_cache(row["site_id"])
+    return dict(updated)
 
 
 # ── List / get ──────────────────────────────────────────────────────────

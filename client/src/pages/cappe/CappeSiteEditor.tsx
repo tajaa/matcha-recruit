@@ -4,6 +4,7 @@ import { Loader2, ArrowLeft, Plus, Trash2, Rocket, Save, Globe, Pencil, Check, S
 import { cappeApi } from '../../api/cappeClient'
 import ImageUpload from '../../components/cappe/ImageUpload'
 import SetupGuide from '../../components/cappe/SetupGuide'
+import DomainManager from '../../components/cappe/DomainManager'
 import { cappeSiteHost, CAPPE_HOST } from '../../utils/cappeHost'
 import { CAPPE_THEMES, type CappeThemePreset } from '../../data/cappeThemes'
 import { PAGE_PRESETS, type CappePagePreset } from '../../data/cappePagePresets'
@@ -92,7 +93,6 @@ export default function CappeSiteEditor() {
 
   const [name, setName] = useState('')
   const [subdomain, setSubdomain] = useState('')
-  const [domain, setDomain] = useState('')
   const [logo, setLogo] = useState('')
   const [timezone, setTimezone] = useState('UTC')
   const [biz, setBiz] = useState<BizMeta>(bizFromMeta(undefined))
@@ -114,7 +114,6 @@ export default function CappeSiteEditor() {
         setPages(p)
         setName(s.name)
         setSubdomain(s.subdomain || s.slug)
-        setDomain(s.custom_domain || '')
         setLogo((s.meta_config?.logo_url as string) || '')
         setTimezone(s.timezone || 'UTC')
         setBiz(bizFromMeta(s.meta_config))
@@ -130,7 +129,6 @@ export default function CappeSiteEditor() {
     try {
       const body: Record<string, unknown> = {
         name,
-        custom_domain: domain || null,
         timezone,
         meta_config: {
           ...(site?.meta_config || {}),
@@ -220,17 +218,6 @@ export default function CappeSiteEditor() {
       setPages((prev) => prev.filter((p) => p.id !== pageId))
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to delete page')
-    }
-  }
-
-  async function buy(kind: 'hosting' | 'domain') {
-    if (!siteId) return
-    setNotice(null)
-    try {
-      await cappeApi.post(`/sites/${siteId}/${kind === 'hosting' ? 'hosting/checkout' : 'domain/purchase'}`)
-    } catch (e) {
-      // 501 stub for now — surface as a friendly "coming soon".
-      setNotice(`${kind === 'hosting' ? 'Hosting plans' : 'Domain purchase'} coming soon.`)
     }
   }
 
@@ -339,24 +326,8 @@ export default function CappeSiteEditor() {
             <p className="mt-1 text-xs text-zinc-500">Shown in your published site's header. Save to apply.</p>
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-zinc-300">Custom domain (bring your own)</label>
-            <input
-              value={domain}
-              onChange={(e) => setDomain(e.target.value)}
-              placeholder="www.yourdomain.com"
-              className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
-            />
-            <p className="mt-1 text-xs text-zinc-500">
-              Don't have one?{' '}
-              <button onClick={() => buy('domain')} className="font-medium text-emerald-400 hover:text-emerald-300">
-                Buy a domain
-              </button>{' '}
-              or{' '}
-              <button onClick={() => buy('hosting')} className="font-medium text-emerald-400 hover:text-emerald-300">
-                get a hosting plan
-              </button>
-              .
-            </p>
+            <label className="mb-2 block text-sm font-medium text-zinc-300">Custom domain</label>
+            <DomainManager siteId={siteId || ''} />
           </div>
           <button
             onClick={save}
