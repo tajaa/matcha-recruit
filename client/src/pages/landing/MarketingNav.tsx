@@ -6,11 +6,12 @@ interface Props {
   onDemoClick?: () => void
 }
 
-// The four offerings — primary nav, in sales order.
+// The five offerings — primary nav, in sales order.
 const PRODUCT_LINKS = [
   { to: '/platform', label: 'Platform' },
   // { to: '/matcha-work', label: 'Matcha Work' }, // beta — hidden until launch
   { to: '/matcha-lite', label: 'Matcha Lite' },
+  { to: '/compliance', label: 'Compliance' },
   { to: '/fractional', label: 'Fractional' },
   { to: '/services', label: 'Consulting' },
 ]

@@ -18,6 +18,7 @@ const CappeRoutes = lazy(() => import('./routes/CappeRoutes')) // Cappe — webs
 const Landing = lazy(() => import('./pages/Landing')) // the Platform page, now at /platform
 const MatchaWorkPage = lazy(() => import('./pages/landing/MatchaWorkPage'))
 const MatchaLitePage = lazy(() => import('./pages/landing/MatchaLitePage'))
+const CompliancePage = lazy(() => import('./pages/landing/CompliancePage'))
 const ServicesPage = lazy(() => import('./pages/landing/ServicesPage'))
 const Subscribe = lazy(() => import('./pages/landing/Subscribe'))
 const TermsPage = lazy(() => import('./pages/landing/TermsPage'))
@@ -82,6 +83,9 @@ export default function App() {
         <Route path="/platform" element={<Landing />} />
         <Route path="/matcha-work" element={<MatchaWorkPage />} />
         <Route path="/matcha-lite" element={<MatchaLitePage />} />
+        {/* Marketing page for the standalone Compliance product (distinct from
+            /compliance/signup + /compliance/onboarding, which are exact paths). */}
+        <Route path="/compliance" element={<CompliancePage />} />
         <Route path="/services" element={<ServicesPage />} />
         <Route path="/subscribe" element={<Subscribe />} />
         <Route path="/terms" element={<TermsPage />} />
