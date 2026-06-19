@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeft, Check, ChevronDown, ChevronUp, Copy, Film, GripVertical, ImagePlus, Loader2, Megaphone, Monitor, MousePointerClick, Palette, Pencil, Plus, Save, Search, Smartphone, Sparkles, Trash2, Type, Wand2, X,
@@ -1056,7 +1056,7 @@ function AddPalette({ onPick }: { onPick: (type: string) => void }) {
 
 /** Contextual editor for the block selected on the canvas. Same controls as the
  *  form editor (schema fields + DesignInspector), driven by selection. */
-function CanvasPanel({ blocks, sel, onChange, onMove, onRemove, onDuplicate, onAddAt, onAdd, onClose }: {
+function CanvasPanel({ blocks, sel, onChange, onMove, onRemove, onDuplicate, onAddAt, onAdd, onHeaderPointerDown, onClose }: {
   blocks: CappeBlock[]
   sel: number | null
   onChange: (i: number, b: CappeBlock) => void
@@ -1065,6 +1065,7 @@ function CanvasPanel({ blocks, sel, onChange, onMove, onRemove, onDuplicate, onA
   onDuplicate: (i: number) => void
   onAddAt: (type: string, i: number) => void
   onAdd: (type: string) => void
+  onHeaderPointerDown?: (e: ReactPointerEvent) => void
   onClose?: () => void
 }) {
   const [addOpen, setAddOpen] = useState(false)
@@ -1092,7 +1093,9 @@ function CanvasPanel({ blocks, sel, onChange, onMove, onRemove, onDuplicate, onA
   return (
     <div className="space-y-3 p-4">
       <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
-        <span className="text-sm font-semibold text-zinc-100">{schema?.label || block.type}</span>
+        <button type="button" onPointerDown={onHeaderPointerDown} title="Drag to move" className="flex cursor-move select-none items-center gap-1.5 text-sm font-semibold text-zinc-100">
+          <GripVertical className="h-3.5 w-3.5 text-zinc-600" />{schema?.label || block.type}
+        </button>
         <div className="flex items-center gap-1.5 text-zinc-500">
           <button title="Move up" onClick={() => onMove(sel, -1)} disabled={sel === 0} className="hover:text-zinc-200 disabled:opacity-30"><ChevronUp className="h-4 w-4" /></button>
           <button title="Move down" onClick={() => onMove(sel, 1)} disabled={sel === blocks.length - 1} className="hover:text-zinc-200 disabled:opacity-30"><ChevronDown className="h-4 w-4" /></button>
@@ -1198,7 +1201,7 @@ function ElementControls({ el, bp, onPatch }: {
 
 /** Canvas-mode floating inspector: edits the selected freeform element (or, when
  *  none is selected, shows add-element + the section design). */
-function CanvasInspector({ block, elementId, bp, onSetBp, onPatchElement, onAddElement, onRemoveElement, onChangeBlock, onClose }: {
+function CanvasInspector({ block, elementId, bp, onSetBp, onPatchElement, onAddElement, onRemoveElement, onChangeBlock, onHeaderPointerDown, onClose }: {
   block: CappeBlock
   elementId: string | null
   bp: 'd' | 'm'
@@ -1207,6 +1210,7 @@ function CanvasInspector({ block, elementId, bp, onSetBp, onPatchElement, onAddE
   onAddElement: (kind: CappeCanvasElement['kind']) => void
   onRemoveElement: (id: string) => void
   onChangeBlock: (b: CappeBlock) => void
+  onHeaderPointerDown?: (e: ReactPointerEvent) => void
   onClose: () => void
 }) {
   const el = cvEls(block).find((e) => e.id === elementId) || null
@@ -1214,7 +1218,9 @@ function CanvasInspector({ block, elementId, bp, onSetBp, onPatchElement, onAddE
   return (
     <div className="space-y-3 p-4">
       <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
-        <span className="text-sm font-semibold text-zinc-100">{kindLabel}</span>
+        <button type="button" onPointerDown={onHeaderPointerDown} title="Drag to move" className="flex cursor-move select-none items-center gap-1.5 text-sm font-semibold text-zinc-100">
+          <GripVertical className="h-3.5 w-3.5 text-zinc-600" />{kindLabel}
+        </button>
         <div className="flex items-center gap-1.5 text-zinc-500">
           {el && <button title="Delete element" onClick={() => onRemoveElement(el.id)} className="hover:text-red-400"><Trash2 className="h-4 w-4" /></button>}
           <button title="Close" onClick={onClose} className="ml-1 border-l border-zinc-700 pl-1.5 hover:text-zinc-200"><X className="h-4 w-4" /></button>
@@ -1319,6 +1325,27 @@ export default function PageEditor() {
   const [selElement, setSelElement] = useState<string | null>(null)  // freeform canvas: selected element id
   const [canvasBp, setCanvasBp] = useState<'d' | 'm'>('d')            // freeform canvas: editing desktop vs mobile
   const [popPos, setPopPos] = useState<{ top: number; left: number }>({ top: 96, left: 96 })
+  // Once the user drags the floating inspector, keep it where they put it (don't
+  // re-anchor to the next clicked element); reset when the panel closes.
+  const panelDragged = useRef(false)
+  function startPanelDrag(e: ReactPointerEvent) {
+    e.preventDefault()
+    const sx = e.clientX, sy = e.clientY
+    const orig = { ...popPos }
+    const onMove = (ev: PointerEvent) => {
+      panelDragged.current = true
+      setPopPos({
+        left: Math.min(Math.max(orig.left + (ev.clientX - sx), 8), window.innerWidth - 372),
+        top: Math.min(Math.max(orig.top + (ev.clientY - sy), 8), window.innerHeight - 80),
+      })
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const suspendPreview = useRef(false)
   const [refreshTick, setRefreshTick] = useState(0)
@@ -1421,9 +1448,10 @@ export default function PageEditor() {
           const onEl = isCanvasBlock(blocksRef.current[d.block]) && d.field != null
           setSelElement(onEl ? d.field : null)
           // Anchor the floating editor near the clicked element (iframe rect +
-          // element rect → parent viewport), clamped on-screen.
+          // element rect → parent viewport), clamped on-screen — unless the user
+          // has dragged the panel somewhere, in which case leave it.
           const fr = iframeRef.current?.getBoundingClientRect()
-          if (fr && d.rect) {
+          if (!panelDragged.current && fr && d.rect) {
             const left = Math.min(Math.max(fr.left + d.rect.left + 8, 8), window.innerWidth - 372)
             const top = Math.min(Math.max(fr.top + d.rect.top + 8, 64), window.innerHeight - 160)
             setPopPos({ top, left })
@@ -1783,7 +1811,8 @@ export default function PageEditor() {
                   onAddElement={(k) => addCanvasElement(selBlock, k)}
                   onRemoveElement={(id) => { removeCanvasElement(selBlock, id); postToCanvas({ type: 'cz-clear' }) }}
                   onChangeBlock={(b) => updateBlock(selBlock, b)}
-                  onClose={() => { setSelBlock(null); setSelElement(null); postToCanvas({ type: 'cz-clear' }) }}
+                  onHeaderPointerDown={startPanelDrag}
+                  onClose={() => { setSelBlock(null); setSelElement(null); panelDragged.current = false; postToCanvas({ type: 'cz-clear' }) }}
                 />
               ) : (
                 <CanvasPanel
@@ -1795,7 +1824,8 @@ export default function PageEditor() {
                   onDuplicate={duplicateBlock}
                   onAddAt={addBlockAt}
                   onAdd={addBlock}
-                  onClose={() => { setSelBlock(null); postToCanvas({ type: 'cz-clear' }) }}
+                  onHeaderPointerDown={startPanelDrag}
+                  onClose={() => { setSelBlock(null); panelDragged.current = false; postToCanvas({ type: 'cz-clear' }) }}
                 />
               )}
             </div>
