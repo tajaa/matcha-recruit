@@ -180,6 +180,22 @@ class Settings:
     cappe_stripe_webhook_secret: Optional[str] = None
     # Platform fee taken on each Cappe storefront sale (basis points). 200 = 2%.
     cappe_platform_fee_bps: int = 200
+
+    # Cappe domain reselling (Porkbun registrar). We register under our own
+    # funded Porkbun account and resell to tenants at wholesale + a flat markup.
+    porkbun_api_key: Optional[str] = None
+    porkbun_secret_key: Optional[str] = None
+    # Flat markup (USD cents) added over Porkbun's wholesale price to set the
+    # tenant-facing yearly price. 800 = +$8/yr on every TLD.
+    cappe_domain_markup_cents: int = 800
+    # Webhook secret for the PLATFORM Cappe checkout endpoint
+    # (/api/cappe/domains/webhook) — domain purchases are charged on our own
+    # account (no Connect), so they need a separate endpoint + secret from the
+    # storefront Connect webhook above.
+    cappe_platform_webhook_secret: Optional[str] = None
+    # Public IP the registered/connected custom domains' apex A-record points at
+    # (the app EC2 elastic IP). www is CNAMEd to the apex.
+    cappe_domain_target_ip: str = "54.177.107.107"
     # Monthly price (USD cents) for the Matcha IR upgrade offered to
     # resources_free tenants. Override with MATCHA_IR_PRICE_CENTS.
     matcha_ir_price_cents: int = 4900
@@ -322,6 +338,11 @@ def load_settings() -> Settings:
         matcha_ir_price_cents=int(os.getenv("MATCHA_IR_PRICE_CENTS", "4900")),
         cappe_stripe_webhook_secret=os.getenv("CAPPE_STRIPE_WEBHOOK_SECRET"),
         cappe_platform_fee_bps=int(os.getenv("CAPPE_PLATFORM_FEE_BPS", "200")),
+        porkbun_api_key=os.getenv("PORKBUN_API_KEY"),
+        porkbun_secret_key=os.getenv("PORKBUN_SECRET_KEY"),
+        cappe_domain_markup_cents=int(os.getenv("CAPPE_DOMAIN_MARKUP_CENTS", "800")),
+        cappe_platform_webhook_secret=os.getenv("CAPPE_PLATFORM_WEBHOOK_SECRET"),
+        cappe_domain_target_ip=os.getenv("CAPPE_DOMAIN_TARGET_IP", "54.177.107.107"),
         livekit_url=os.getenv("LIVEKIT_URL"),
         livekit_api_key=os.getenv("LIVEKIT_API_KEY"),
         livekit_api_secret=os.getenv("LIVEKIT_API_SECRET"),

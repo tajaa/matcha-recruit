@@ -134,6 +134,66 @@ class CappeStripe:
         except Exception as exc:  # noqa: BLE001
             raise CappeStripeError(f"Failed to create checkout session: {exc}") from exc
 
+    # ── Platform checkout (our own revenue — domains, plans; NO Connect) ───
+    async def create_platform_checkout_session(
+        self,
+        *,
+        currency: str,
+        line_items: list[dict[str, Any]],
+        success_url: str,
+        cancel_url: str,
+        metadata: dict[str, str],
+        customer_email: Optional[str] = None,
+    ):
+        """Checkout Session on OUR platform account (we keep 100%). Used for
+        domain registration and plan billing — no connected account, no fee."""
+        self._ensure_key()
+
+        def _create():
+            return stripe.checkout.Session.create(
+                mode="payment",
+                success_url=success_url,
+                cancel_url=cancel_url,
+                line_items=line_items,
+                customer_email=customer_email or None,
+                metadata=metadata,
+                payment_intent_data={"metadata": metadata},
+            )
+
+        try:
+            return await asyncio.to_thread(_create)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to create checkout session: {exc}") from exc
+
+    async def refund(self, payment_intent: str):
+        """Refund a platform charge in full (e.g. domain registration failed
+        after the customer paid)."""
+        self._ensure_key()
+
+        def _refund():
+            return stripe.Refund.create(payment_intent=payment_intent)
+
+        try:
+            return await asyncio.to_thread(_refund)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Failed to refund: {exc}") from exc
+
+    async def verify_platform_webhook(self, payload: bytes, signature: str):
+        """Verify a PLATFORM webhook (domain/plan checkout). Distinct endpoint +
+        secret from the Connect storefront webhook."""
+        self._ensure_key()
+        secret = self.settings.cappe_platform_webhook_secret
+        if not secret:
+            raise CappeStripeError("Cappe platform webhook secret is not configured")
+
+        def _construct():
+            return stripe.Webhook.construct_event(payload, signature, secret)
+
+        try:
+            return await asyncio.to_thread(_construct)
+        except Exception as exc:  # noqa: BLE001
+            raise CappeStripeError(f"Invalid Stripe webhook: {exc}") from exc
+
     # ── Webhook (Connect endpoint; events arrive with event.account set) ───
     async def verify_webhook(self, payload: bytes, signature: str):
         self._ensure_key()

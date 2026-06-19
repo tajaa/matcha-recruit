@@ -1134,6 +1134,58 @@ class CappePublicReview(BaseModel):
 
 
 # ===========================================================================
+# Domains (reselling via Porkbun)
+# ===========================================================================
+
+class CappeDomainSearchResult(BaseModel):
+    """One candidate from a domain search."""
+    domain: str
+    available: bool
+    # Tenant-facing yearly price (wholesale + markup). None if pricing unknown.
+    price_cents: Optional[int] = None
+
+
+class CappeDomainPurchaseRequest(BaseModel):
+    site_id: UUID
+    domain: str
+    success_url: Optional[str] = None
+    cancel_url: Optional[str] = None
+
+    @field_validator("domain")
+    @classmethod
+    def _check_domain(cls, v: str) -> str:
+        v = (v or "").strip().lower().rstrip(".")
+        if not _DOMAIN_RE.match(v) or len(v) > 255:
+            raise ValueError("Enter a valid domain (e.g. yourbrand.com)")
+        return v
+
+
+class CappeDomainConnectRequest(BaseModel):
+    """Attach a domain the tenant already owns (BYO — no registration)."""
+    site_id: UUID
+    domain: str
+    _norm = field_validator("domain")(normalize_custom_domain)
+
+
+class CappeDomainCheckoutResponse(BaseModel):
+    domain_id: UUID
+    checkout_url: str
+
+
+class CappeDomain(BaseModel):
+    id: UUID
+    site_id: UUID
+    domain: str
+    kind: Literal["register", "connect"] = "register"
+    status: Literal["pending", "registering", "active", "failed", "expired"]
+    price_cents: Optional[int] = None
+    auto_renew: bool = True
+    expires_at: Optional[datetime] = None
+    failure_reason: Optional[str] = None
+    created_at: datetime
+
+
+# ===========================================================================
 # Shared
 # ===========================================================================
 

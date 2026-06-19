@@ -343,11 +343,5 @@ async def hosting_checkout(site_id: UUID, account: CappeAccount = Depends(requir
         detail="Hosting checkout is not available yet",
     )
 
-
-@router.post("/sites/{site_id}/domain/purchase", status_code=status.HTTP_501_NOT_IMPLEMENTED)
-async def domain_purchase(site_id: UUID, account: CappeAccount = Depends(require_cappe_account)):
-    """STUB — domain registrar purchase (later phase)."""
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Domain purchase is not available yet",
-    )
+# Domain registrar purchase moved to its own router — see routes/domains.py
+# (POST /domains/purchase + /domains/connect, Porkbun-backed).

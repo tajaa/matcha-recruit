@@ -12,6 +12,7 @@ from .blog import router as blog_router
 from .bookings import router as bookings_router
 from .clients import router as clients_router
 from .discounts import router as discounts_router
+from .domains import router as domains_router
 from .forms import router as forms_router
 from .locations import router as locations_router
 from .messages import router as messages_router
@@ -37,6 +38,10 @@ cappe_router.include_router(public_router)
 # Stripe Connect: /payments/connect + /payments/status gate on require_cappe_account
 # per-route; /payments/webhook is public (Stripe-signature verified).
 cappe_router.include_router(payments_router)
+
+# Domain reselling: /domains/* gate on require_cappe_account per-route;
+# /domains/webhook (platform Stripe) + /tls/authorize (Caddy ask) are public.
+cappe_router.include_router(domains_router)
 
 # Authenticated, per-site (each route gates on require_cappe_account + get_owned_site).
 cappe_router.include_router(sites_router)
