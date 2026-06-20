@@ -22,6 +22,53 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'broker-epl-readiness',
+    date: '2026-06-20',
+    category: 'Broker',
+    title: 'EPL Readiness — score a client’s HR posture against what EPL underwriters ask',
+    summary:
+      'Brokers get an Employment Practices Liability (EPL) underwriting-readiness score per client, built from the HR data Matcha already holds plus a short broker-attested checklist. It maps the client’s posture to what EPL carriers actually ask about (WTW Insurance Marketplace Realities 2026), so the broker has a consultative talking point and a punch-list to fix before renewal. Lives on a new client-detail tab + a book-wide strip on the broker dashboard.',
+    whatsNew: [
+      'Composite 0–100 readiness score per client with a band (Strong / Adequate / Developing / Exposed) and a headline “top gap”.',
+      'Derived automatically from existing data (55% of the score): anti-harassment/EEO policy + signature rate, anti-harassment training completion, documented progressive discipline, ER case management, and multi-state wage & hour compliance coverage.',
+      'Broker-attested checklist (45%): the five underwriting asks Matcha has no data source for — pay-transparency compliance, biometric/BIPA controls, pay equity, AI hiring-tool bias audit, and DEI posture. Mark each In place / Partial / Gap during a client review and the score updates live.',
+      'Broker dashboard gains an EPL band-distribution strip (average score + Strong/Adequate/Developing/Exposed counts) across the whole book.',
+    ],
+    howToUse: [
+      'Broker → Book of Business → open a client → “EPL Readiness” tab.',
+      'Read the derived factors (filled in automatically from that client’s Matcha data), then set the attested items as you confirm them with the client.',
+      'Use the score + top-gap as the consultative pitch — what to shore up before the EPL renewal.',
+    ],
+    setup: [
+      'DB: migration epldeep01 (company_epl_attestations) is applied on dev; apply to prod with ./scripts/migrate-prod.sh.',
+    ],
+    tag: 'action-needed',
+  },
+  {
+    id: 'broker-wc-depth',
+    date: '2026-06-20',
+    category: 'Broker',
+    title: 'Workers’ Comp depth — experience mod, claim taxonomy, NCCI rates, return-to-work',
+    summary:
+      'The broker Workers’ Comp view goes deeper to match how carriers actually underwrite WC: an experience-mod (EMR) trajectory, cumulative-trauma vs acute + post-termination claim tracking, per-state NCCI rate trends, and return-to-work metrics. HR classifies each recordable on the incident screen; the broker sees the rolled-up analytics. (WTW Insurance Marketplace Realities 2026.)',
+    whatsNew: [
+      'New “Workers’ Comp” tab on the broker client detail: TRIR/DART header, claim mix (cumulative trauma vs acute), post-termination count, return-to-work (open vs resolved + avg days), NCCI rate trend per operating state, and an experience-mod trajectory.',
+      'Experience mod (EMR) entry: record each policy period’s mod (+ carrier/premium) — debit/credit coloring; it’s the single number carriers price WC on.',
+      'NCCI per-state loss-cost trends seeded from the 2026 filings (e.g. NV +21.9%, MD −12.3%), auto-matched to each client’s business-location states.',
+      'Incident screen: an OSHA-recordable incident now has a “WC Classification” control — claim type (acute / cumulative trauma), post-termination flag, return-to-work date — which feeds the broker analytics.',
+      'Broker dashboard: a WC-depth strip (cumulative-trauma, post-termination, open lost-time, and clients operating in rate-increase states) across the book.',
+    ],
+    howToUse: [
+      'HR/admin: open an OSHA-recordable incident → Overview → “WC Classification” → set claim type, post-termination, and return-to-work date.',
+      'Broker → Book of Business → open a client → “Workers’ Comp” tab → review claim mix / RTW / state rate trend.',
+      'On that tab, click “Record mod” to log the client’s experience mod each policy period and build the trajectory.',
+    ],
+    setup: [
+      'DB: migration wcdeep01 (ir_incidents claim fields + wc_state_rates + company_wc_mods) is applied on dev; apply to prod with ./scripts/migrate-prod.sh.',
+    ],
+    tag: 'action-needed',
+  },
+  {
     id: 'werk-ios-chat',
     date: '2026-06-19',
     category: 'Werk',
