@@ -22,14 +22,19 @@ final class WorkDetailVMStore {
     /// between a handful of tabs; 6 covers that without unbounded growth.
     private let cap = 6
 
+    // Project/thread detail VMs are macOS-only surfaces (their VMs import
+    // AppKit). The channel chat VM cache is cross-platform — iOS reuses it.
+    #if os(macOS)
     private var projectVMs: [String: ProjectDetailViewModel] = [:]
     private var threadVMs: [String: ThreadDetailViewModel] = [:]
+    #endif
     private var channelVMs: [String: ChannelChatViewModel] = [:]
     /// MRU-first list of keys ("p:<id>" / "t:<id>" / "c:<id>").
     private var lru: [String] = []
 
     // MARK: - Vend
 
+    #if os(macOS)
     func projectVM(_ id: String) -> ProjectDetailViewModel {
         let key = "p:\(id)"
         if let vm = projectVMs[id] { touch(key); return vm }
@@ -47,6 +52,7 @@ final class WorkDetailVMStore {
         touch(key)
         return vm
     }
+    #endif
 
     func channelVM(_ id: String) -> ChannelChatViewModel {
         let key = "c:\(id)"
@@ -87,8 +93,10 @@ final class WorkDetailVMStore {
         let kind = key[..<sep]
         let id = String(key[key.index(after: sep)...])
         switch kind {
+        #if os(macOS)
         case "p": projectVMs[id] = nil
         case "t": threadVMs[id] = nil
+        #endif
         case "c": channelVMs[id] = nil
         default: break
         }

@@ -45,7 +45,9 @@ final class ChannelsWebSocket: NSObject {
     /// otherwise silently stops message delivery (and thus notifications) until
     /// the app is reactivated. `.userInitiatedAllowingIdleSystemSleep` keeps us
     /// un-napped while awake but still lets the Mac sleep when idle.
+    #if os(macOS)
     private var napAssertion: NSObjectProtocol?
+    #endif
 
     // ── Per-view event subscribers ──────────────────────────────────────────
     // Each live channel view registers a ChannelSubscriber; inbound events fan
@@ -107,18 +109,24 @@ final class ChannelsWebSocket: NSObject {
     }
 
     private func beginNoNap() {
+        // macOS App Nap only. iOS suspends backgrounded sockets by design;
+        // background delivery comes from APNs, not a kept-alive socket.
+        #if os(macOS)
         guard napAssertion == nil else { return }
         napAssertion = ProcessInfo.processInfo.beginActivity(
             options: [.userInitiatedAllowingIdleSystemSleep],
             reason: "Realtime channel messaging"
         )
+        #endif
     }
 
     private func endNoNap() {
+        #if os(macOS)
         if let a = napAssertion {
             ProcessInfo.processInfo.endActivity(a)
             napAssertion = nil
         }
+        #endif
     }
 
     func connect() {

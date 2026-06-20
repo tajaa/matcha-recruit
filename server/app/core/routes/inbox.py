@@ -272,6 +272,21 @@ async def _send_message_notification(
                         continue
                 to_notify.append({"user_id": p["user_id"], "email": p["email"], "name": p["name"]})
 
+        # Immediate APNs push (no email cooldown) to offline, non-muted
+        # participants. DMs aren't on the channels socket, so push is the only
+        # realtime signal once the recipient's app is backgrounded.
+        try:
+            from ..services import apns_service
+            for p in participants:
+                if not await apns_service.is_user_online(p["user_id"]):
+                    await apns_service.send_to_user(
+                        p["user_id"], sender_name, preview[:200],
+                        {"type": "inbox_message",
+                         "metadata": {"conversation_id": str(conversation_id)}},
+                    )
+        except Exception:
+            logger.warning("Inbox APNs push failed", exc_info=True)
+
         # Send emails outside DB connection
         for recipient in to_notify:
             try:

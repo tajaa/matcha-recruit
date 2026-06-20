@@ -118,6 +118,14 @@ class Settings:
     aws_secret_access_key: Optional[str] = None
     cloudfront_domain: Optional[str] = None
 
+    # APNs (iOS push) — token-based .p8 auth. All optional: unset ⇒ push is a
+    # no-op (see core/services/apns_service.py).
+    apns_key_id: Optional[str] = None
+    apns_team_id: Optional[str] = None
+    apns_auth_key_path: Optional[str] = None
+    apns_bundle_id: Optional[str] = None
+    apns_use_sandbox: bool = True
+
     # Cappe (website builder) — base domain for tenant subdomains
     # (<sub>.<cappe_base_domain> serves the published site). MVP reuses the
     # main apex (site-x.hey-matcha.com); set CAPPE_BASE_DOMAIN to a dedicated
@@ -300,6 +308,11 @@ def load_settings() -> Settings:
         aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         cloudfront_domain=os.getenv("CLOUDFRONT_DOMAIN"),
+        apns_key_id=os.getenv("APNS_KEY_ID"),
+        apns_team_id=os.getenv("APNS_TEAM_ID"),
+        apns_auth_key_path=os.getenv("APNS_AUTH_KEY_PATH"),
+        apns_bundle_id=os.getenv("APNS_BUNDLE_ID", "com.matchawork.app"),
+        apns_use_sandbox=os.getenv("APNS_USE_SANDBOX", "true").lower() == "true",
         cappe_base_domain=os.getenv("CAPPE_BASE_DOMAIN", "hey-matcha.com"),
         gmail_token_path=os.getenv("GMAIL_TOKEN_PATH", "agent/workspace/token.json"),
         gmail_from_email=os.getenv("GMAIL_FROM_EMAIL", ""),

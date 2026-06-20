@@ -876,6 +876,7 @@ async def channel_websocket(
                                                 title=f"#{_ch_name}",
                                                 body=f"{user.name}: {_preview}",
                                                 link="/work",
+                                                metadata={"channel_id": str(ch_uuid)},
                                             ))
                                 except Exception:
                                     pass

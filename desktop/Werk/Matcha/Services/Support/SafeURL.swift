@@ -1,5 +1,9 @@
 import Foundation
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 
 /// Gatekeeper for handing URLs to `NSWorkspace.shared.open(...)`.
 ///
@@ -31,13 +35,23 @@ enum SafeURL {
     @discardableResult
     static func open(_ raw: String?) -> Bool {
         guard let raw, let url = URL(string: raw), isSafe(url) else { return false }
+        #if os(macOS)
         return NSWorkspace.shared.open(url)
+        #else
+        UIApplication.shared.open(url)
+        return true
+        #endif
     }
 
     /// Open a pre-parsed external URL only if its scheme is http/https.
     @discardableResult
     static func open(_ url: URL?) -> Bool {
         guard let url, isSafe(url) else { return false }
+        #if os(macOS)
         return NSWorkspace.shared.open(url)
+        #else
+        UIApplication.shared.open(url)
+        return true
+        #endif
     }
 }

@@ -99,6 +99,22 @@ async def create_notification(
     except Exception as e:
         logger.warning("Failed to push notification to %s: %s", user_id, e)
 
+    # Best-effort APNs push to the user's iOS devices. No-op if APNs isn't
+    # configured / aioapns isn't installed. Covers channel messages, DMs,
+    # mentions, calls — anything that creates a bell notification.
+    try:
+        from ...core.services import apns_service
+        # Only push when the user has no live socket — if their app is open
+        # they get the in-app WS notification above, so a phone push would
+        # double up. Backgrounded iOS drops the socket, so push reaches them.
+        if not await apns_service.is_user_online(user_id):
+            await apns_service.send_to_user(
+                user_id, title, body,
+                {"type": type, "link": link, "metadata": metadata or {}},
+            )
+    except Exception as e:
+        logger.warning("Failed to push APNs to %s: %s", user_id, e)
+
     if send_email:
         try:
             await _send_notification_email(user_id, email_subject or title, title, body, link)

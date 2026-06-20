@@ -29,6 +29,7 @@ from .credential_templates import router as credential_templates_router
 from .inbox import router as inbox_router
 from .channels import router as channels_router
 from .channels_ws import router as channels_ws_router
+from .push import router as push_router
 from .channel_job_postings import router as channel_job_postings_router
 from .channel_broadcasts import router as channel_broadcasts_router, webhook_router as livekit_webhook_router
 from .channel_calls import router as channel_calls_router
@@ -82,6 +83,7 @@ core_router.include_router(credential_templates_router, prefix="/credential-temp
                            tags=["credential-templates"],
                            dependencies=[Depends(require_feature("credential_templates"))])
 core_router.include_router(inbox_router, prefix="/inbox", tags=["inbox"])
+core_router.include_router(push_router, prefix="/push", tags=["push"])
 core_router.include_router(channels_router, prefix="/channels", tags=["channels"])
 core_router.include_router(channel_job_postings_router, prefix="/channels", tags=["channel-job-postings"])
 core_router.include_router(channel_broadcasts_router, prefix="/channels", tags=["channel-broadcasts"])
@@ -125,6 +127,7 @@ __all__ = [
     "inbox_router",
     "channels_router",
     "channels_ws_router",
+    "push_router",
     "channel_job_postings_router",
     "channel_broadcasts_router",
     "livekit_webhook_router",
