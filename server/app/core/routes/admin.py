@@ -310,6 +310,7 @@ KNOWN_FEATURES = {
     "training", "i9", "cobra", "separation_agreements", "credential_templates",
     "hris_import", "hris_gusto", "hris_finch", "hris_deductions",
     "paid_channel_creator", "discipline", "inventory",
+    "werk_lite", "werk_lite_calls_all_members",
 }
 
 

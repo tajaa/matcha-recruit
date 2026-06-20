@@ -26,6 +26,8 @@ const FEATURE_LABELS: Record<string, string> = {
   hris_deductions: 'HRIS — Deductions/benefits write (Finch)',
   hris_import: 'HRIS Import (legacy — enables both)',
   inventory: 'Inventory',
+  werk_lite: 'Werk Lite (work-chat surface — needs Matcha Work too)',
+  werk_lite_calls_all_members: 'Werk Lite — any member can start calls',
 }
 
 type CompanyFeatures = {
