@@ -21,6 +21,7 @@ from .ir_incidents import compute_wc_metrics
 from ..services.wc_benchmarks import SEVERITY_BAND_RANK
 from ..services import benefits_eligibility as be
 from ..services import wc_depth
+from ..services import epl_readiness
 from ..models.broker_action_center import MilestonesResponse, OutreachResponse
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,12 @@ class WcModCreate(BaseModel):
     experience_mod: float = Field(..., gt=0, le=10)
     carrier: Optional[str] = None
     annual_premium: Optional[float] = Field(default=None, ge=0)
+    note: Optional[str] = None
+
+
+class EplAttestationUpdate(BaseModel):
+    """Broker-recorded status for an EPL underwriting ask Matcha can't derive."""
+    status: str = Field(..., pattern="^(in_place|partial|gap|unknown)$")
     note: Optional[str] = None
 
 
@@ -267,6 +274,85 @@ async def get_wc_state_rates(current_user=Depends(require_broker)):
     async with get_connection() as conn:
         rates = await wc_depth.list_state_rates(conn)
     return {"rates": rates}
+
+
+# ---------------------------------------------------------------------------
+# EPL readiness (epldeep01): turn HR hygiene into an EPL underwriting-readiness
+# score + a "what underwriters will ask" checklist the broker takes to market.
+# ---------------------------------------------------------------------------
+
+_EPL_BAND_RANK = {"exposed": 0, "developing": 1, "adequate": 2, "strong": 3}
+
+
+@router.get("/epl-portfolio")
+async def get_epl_portfolio(current_user=Depends(require_broker)):
+    """EPL-readiness rollup across the broker's active book — one row per client."""
+    async with get_connection() as conn:
+        _, clients = await _broker_clients(conn, current_user.id)
+        results = []
+        for company_id, meta in clients.items():
+            try:
+                a = await epl_readiness.compute_epl_readiness(conn, company_id)
+            except Exception as exc:
+                logger.warning("epl-portfolio: compute failed for %s: %s", company_id, exc)
+                continue
+            results.append({
+                "company_id": str(company_id),
+                "company_name": meta["name"],
+                "industry": meta["industry"],
+                "score": a["score"],
+                "band": a["band"],
+                "derived_score": a["derived_score"],
+                "attested_score": a["attested_score"],
+                "top_gap": epl_readiness.top_gap(a),
+            })
+
+    # Worst readiness first.
+    results.sort(key=lambda r: (_EPL_BAND_RANK.get(r["band"], 9), r["score"]))
+    summary = {
+        "client_count": len(results),
+        "strong": sum(1 for r in results if r["band"] == "strong"),
+        "adequate": sum(1 for r in results if r["band"] == "adequate"),
+        "developing": sum(1 for r in results if r["band"] == "developing"),
+        "exposed": sum(1 for r in results if r["band"] == "exposed"),
+        "avg_score": round(sum(r["score"] for r in results) / len(results)) if results else 0,
+    }
+    return {"summary": summary, "companies": results}
+
+
+@router.get("/epl-portfolio/{company_id}")
+async def get_epl_client_detail(company_id: UUID, current_user=Depends(require_broker)):
+    """Full EPL-readiness breakdown for one client: score + per-factor checklist."""
+    async with get_connection() as conn:
+        meta = await _assert_broker_owns_company(conn, current_user.id, company_id)
+        assessment = await epl_readiness.compute_epl_readiness(conn, company_id)
+    return {"company_name": meta["name"], **assessment}
+
+
+@router.put("/epl-portfolio/{company_id}/attestations/{item_key}")
+async def upsert_epl_attestation(company_id: UUID, item_key: str,
+                                 body: EplAttestationUpdate,
+                                 current_user=Depends(require_broker)):
+    """Record the broker's status for one non-derivable EPL underwriting ask."""
+    if item_key not in epl_readiness.ATTESTED_KEYS:
+        raise HTTPException(status_code=400, detail="Unknown EPL attestation item")
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        broker_id, _ = await _broker_clients(conn, current_user.id)
+        await conn.execute(
+            """
+            INSERT INTO company_epl_attestations
+                (company_id, broker_id, item_key, status, note, updated_by, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, NOW())
+            ON CONFLICT ON CONSTRAINT uq_company_epl_attestation DO UPDATE SET
+                status = EXCLUDED.status, note = EXCLUDED.note,
+                broker_id = EXCLUDED.broker_id, updated_by = EXCLUDED.updated_by,
+                updated_at = NOW()
+            """,
+            company_id, broker_id, item_key, body.status, body.note, current_user.id,
+        )
+        assessment = await epl_readiness.compute_epl_readiness(conn, company_id)
+    return assessment
 
 
 # ===========================================================================

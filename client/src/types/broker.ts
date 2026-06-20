@@ -444,6 +444,72 @@ export interface WcClientDetailResponse {
   mods: WcMod[]
 }
 
+// --- EPL readiness (epldeep01) ---
+
+export type EplBand = 'strong' | 'adequate' | 'developing' | 'exposed'
+export type EplFactorStatus = 'strong' | 'partial' | 'gap'
+export type EplAttestationStatus = 'in_place' | 'partial' | 'gap' | 'unknown'
+
+export interface EplAttestation {
+  item_key: string
+  status: EplAttestationStatus
+  note: string | null
+  updated_at: string | null
+}
+
+export interface EplFactor {
+  key: string
+  label: string
+  kind: 'derived' | 'attested'
+  weight: number
+  score: number
+  status: EplFactorStatus
+  contribution: number
+  detail: string
+  attestation: EplAttestation | null
+}
+
+export interface EplReadiness {
+  company_id: string
+  company_name?: string
+  score: number
+  band: EplBand
+  derived_score: number
+  attested_score: number
+  factors: EplFactor[]
+}
+
+export interface EplTopGap {
+  key: string
+  label: string
+  score: number
+}
+
+export interface EplPortfolioRow {
+  company_id: string
+  company_name: string
+  industry: string | null
+  score: number
+  band: EplBand
+  derived_score: number
+  attested_score: number
+  top_gap: EplTopGap | null
+}
+
+export interface EplPortfolioSummary {
+  client_count: number
+  strong: number
+  adequate: number
+  developing: number
+  exposed: number
+  avg_score: number
+}
+
+export interface EplPortfolioResponse {
+  summary: EplPortfolioSummary
+  companies: EplPortfolioRow[]
+}
+
 // --- Action Center: positive milestones ---
 
 export type MilestoneFamily = 'incident_free' | 'dart_free' | 'trir_below_benchmark'

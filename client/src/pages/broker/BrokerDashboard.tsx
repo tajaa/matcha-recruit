@@ -3,13 +3,14 @@ import { Users, AlertTriangle, Building2, Loader2, AlertCircle } from 'lucide-re
 import { StatCard } from '../../components/dashboard'
 import { ClientTable, HandbookCoverageList, SetupStatusGrid } from '../../components/broker-dashboard'
 import OutreachDrawer from '../../components/broker/action-center/OutreachDrawer'
-import { fetchBrokerPortfolio, fetchBrokerHandbookCoverage, fetchWcPortfolio } from '../../api/broker'
+import { fetchBrokerPortfolio, fetchBrokerHandbookCoverage, fetchWcPortfolio, fetchEplPortfolio } from '../../api/broker'
 import { fmtMoney } from '../../utils/brokerFormat'
 import type {
   BrokerPortfolioResponse,
   BrokerHandbookCoverage,
   WcPortfolioResponse,
   WcPortfolioRow,
+  EplPortfolioResponse,
 } from '../../types/broker'
 
 const SAFETY_BANDS: Array<{ key: keyof WcPortfolioResponse['summary']; label: string; tone: string }> = [
@@ -22,6 +23,7 @@ const SAFETY_BANDS: Array<{ key: keyof WcPortfolioResponse['summary']; label: st
 export default function BrokerDashboard() {
   const [portfolio, setPortfolio] = useState<BrokerPortfolioResponse | null>(null)
   const [wc, setWc] = useState<WcPortfolioResponse | null>(null)
+  const [epl, setEpl] = useState<EplPortfolioResponse | null>(null)
   const [handbooks, setHandbooks] = useState<BrokerHandbookCoverage[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -31,6 +33,7 @@ export default function BrokerDashboard() {
     Promise.allSettled([
       fetchBrokerPortfolio().then(setPortfolio),
       fetchWcPortfolio().then(setWc),
+      fetchEplPortfolio().then(setEpl),
       fetchBrokerHandbookCoverage().then(setHandbooks),
     ]).then((results) => {
       // Only hard-fail if the core portfolio fetch (first) rejected.
@@ -129,6 +132,27 @@ export default function BrokerDashboard() {
             { label: 'Post-Termination', value: wc.summary.total_post_termination ?? 0, tone: 'text-red-400' },
             { label: 'Open Lost-Time', value: wc.summary.total_open_lost_time ?? 0, tone: 'text-orange-400' },
             { label: 'Clients · Rate ↑ States', value: wc.summary.clients_in_rate_increase_states ?? 0, tone: 'text-amber-400' },
+          ] as const).map((c) => (
+            <div key={c.label} className="bg-zinc-900 px-4 py-4">
+              <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{c.label}</div>
+              <div className={`text-2xl font-light font-mono mt-1.5 ${c.value > 0 ? c.tone : 'text-zinc-700'}`}>{c.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* EPL readiness strip (avg score + band distribution across the book) */}
+      {epl && epl.summary.client_count > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+          <div className="bg-zinc-900 px-4 py-4">
+            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">EPL Avg</div>
+            <div className="text-2xl font-light font-mono mt-1.5 text-zinc-200">{epl.summary.avg_score}</div>
+          </div>
+          {([
+            { label: 'EPL Strong', value: epl.summary.strong, tone: 'text-emerald-400' },
+            { label: 'Adequate', value: epl.summary.adequate, tone: 'text-amber-400' },
+            { label: 'Developing', value: epl.summary.developing, tone: 'text-orange-400' },
+            { label: 'Exposed', value: epl.summary.exposed, tone: 'text-red-400' },
           ] as const).map((c) => (
             <div key={c.label} className="bg-zinc-900 px-4 py-4">
               <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{c.label}</div>

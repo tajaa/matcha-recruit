@@ -15,6 +15,9 @@ import type {
   WcClientDetailResponse,
   WcMod,
   WcStateRate,
+  EplPortfolioResponse,
+  EplReadiness,
+  EplAttestationStatus,
   BrokerMilestonesResponse,
   OutreachResponse,
   BrokerSeatsResponse,
@@ -58,6 +61,24 @@ export function deleteWcMod(companyId: string, modId: string) {
 
 export function fetchWcStateRates() {
   return api.get<{ rates: WcStateRate[] }>('/broker/wc-state-rates')
+}
+
+// --- EPL readiness ---
+
+export function fetchEplPortfolio() {
+  return api.get<EplPortfolioResponse>('/broker/epl-portfolio')
+}
+
+export function fetchEplClientDetail(companyId: string) {
+  return api.get<EplReadiness>(`/broker/epl-portfolio/${companyId}`)
+}
+
+export function recordEplAttestation(
+  companyId: string,
+  itemKey: string,
+  payload: { status: EplAttestationStatus; note?: string },
+) {
+  return api.put<EplReadiness>(`/broker/epl-portfolio/${companyId}/attestations/${itemKey}`, payload)
 }
 
 // --- Action Center: milestones + outreach ---
