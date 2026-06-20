@@ -121,6 +121,23 @@ export default function BrokerDashboard() {
         </div>
       )}
 
+      {/* WC claim-depth strip (cumulative trauma, post-term, open lost-time, rate pressure) */}
+      {wc && wc.summary.client_count > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+          {([
+            { label: 'Cumulative Trauma', value: wc.summary.total_ct_cases ?? 0, tone: 'text-red-400' },
+            { label: 'Post-Termination', value: wc.summary.total_post_termination ?? 0, tone: 'text-red-400' },
+            { label: 'Open Lost-Time', value: wc.summary.total_open_lost_time ?? 0, tone: 'text-orange-400' },
+            { label: 'Clients · Rate ↑ States', value: wc.summary.clients_in_rate_increase_states ?? 0, tone: 'text-amber-400' },
+          ] as const).map((c) => (
+            <div key={c.label} className="bg-zinc-900 px-4 py-4">
+              <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{c.label}</div>
+              <div className={`text-2xl font-light font-mono mt-1.5 ${c.value > 0 ? c.tone : 'text-zinc-700'}`}>{c.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Main content: table + sidebar widgets */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">

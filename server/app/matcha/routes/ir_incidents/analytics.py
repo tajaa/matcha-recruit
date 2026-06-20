@@ -312,7 +312,18 @@ async def compute_wc_metrics(conn, company_id: UUID, period_days: int = 365) -> 
                               THEN 1 ELSE 0 END), 0) AS dart_cases,
             COALESCE(SUM(COALESCE(days_away_from_work, 0)), 0) AS lost_days,
             COALESCE(SUM(COALESCE(days_restricted_duty, 0)), 0) AS restricted_days,
-            COALESCE(SUM(CASE WHEN osha_classification = 'death' THEN 1 ELSE 0 END), 0) AS deaths
+            COALESCE(SUM(CASE WHEN osha_classification = 'death' THEN 1 ELSE 0 END), 0) AS deaths,
+            -- WC claim-depth (wcdeep01): taxonomy + post-term + return-to-work.
+            COALESCE(SUM(CASE WHEN wc_claim_type = 'cumulative_trauma' THEN 1 ELSE 0 END), 0) AS ct_cases,
+            COALESCE(SUM(CASE WHEN wc_claim_type = 'acute' THEN 1 ELSE 0 END), 0) AS acute_cases,
+            COALESCE(SUM(CASE WHEN COALESCE(post_termination, false) THEN 1 ELSE 0 END), 0) AS post_term_cases,
+            COALESCE(SUM(CASE WHEN COALESCE(days_away_from_work, 0) > 0 THEN 1 ELSE 0 END), 0) AS lost_time_cases,
+            COALESCE(SUM(CASE WHEN COALESCE(days_away_from_work, 0) > 0
+                               AND return_to_work_date IS NULL THEN 1 ELSE 0 END), 0) AS lost_time_open,
+            COALESCE(SUM(CASE WHEN COALESCE(days_away_from_work, 0) > 0
+                               AND return_to_work_date IS NOT NULL THEN 1 ELSE 0 END), 0) AS lost_time_resolved,
+            AVG(CASE WHEN return_to_work_date IS NOT NULL AND COALESCE(days_away_from_work, 0) > 0
+                     THEN (return_to_work_date - occurred_at::date) END) AS avg_days_to_rtw
         FROM ir_incidents
         WHERE company_id = $1
           AND osha_recordable = true
@@ -364,6 +375,19 @@ async def compute_wc_metrics(conn, company_id: UUID, period_days: int = 365) -> 
     prior_recordable = _g(prv, "recordable_cases")
     prior_dart = _g(prv, "dart_cases")
     prior_lost_days = _g(prv, "lost_days")
+
+    # WC claim-depth (wcdeep01) — current period only.
+    ct_cases = _g(cur, "ct_cases")
+    acute_cases = _g(cur, "acute_cases")
+    unknown_type_cases = max(recordable_cases - ct_cases - acute_cases, 0)
+    post_term_cases = _g(cur, "post_term_cases")
+    lost_time_cases = _g(cur, "lost_time_cases")
+    lost_time_open = _g(cur, "lost_time_open")
+    lost_time_resolved = _g(cur, "lost_time_resolved")
+    avg_days_to_rtw = (
+        round(float(cur["avg_days_to_rtw"]), 1)
+        if cur and cur["avg_days_to_rtw"] is not None else None
+    )
 
     # Approximate hours worked over the period.
     hours_worked = float(headcount) * 2000.0 / annualization if headcount > 0 else 0.0
@@ -428,6 +452,19 @@ async def compute_wc_metrics(conn, company_id: UUID, period_days: int = 365) -> 
         "benchmark": benchmark,
         "premium_impact": premium_impact,
         "severity_band": severity_band(trir, bench_trir),
+        # WC claim-depth (wcdeep01) — taxonomy, post-termination, return-to-work.
+        "claim_breakdown": {
+            "cumulative_trauma": ct_cases,
+            "acute": acute_cases,
+            "unknown": unknown_type_cases,
+        },
+        "post_termination_cases": post_term_cases,
+        "rtw": {
+            "lost_time_cases": lost_time_cases,
+            "open": lost_time_open,
+            "resolved": lost_time_resolved,
+            "avg_days_to_rtw": avg_days_to_rtw,
+        },
         "quarterly": quarterly,
         "prior": {
             "recordable_cases": prior_recordable,

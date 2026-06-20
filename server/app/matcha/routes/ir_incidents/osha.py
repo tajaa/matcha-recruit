@@ -1150,6 +1150,12 @@ async def update_osha_recordability(
             detail=f"Invalid OSHA classification. Must be one of: {', '.join(sorted(VALID_OSHA_CLASSIFICATIONS))}",
         )
 
+    if update.wc_claim_type is not None and update.wc_claim_type not in ("acute", "cumulative_trauma", "unknown"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid wc_claim_type. Must be one of: acute, cumulative_trauma, unknown",
+        )
+
     async with get_connection() as conn:
         row = await conn.fetchrow(
             "SELECT id FROM ir_incidents WHERE id = $1 AND company_id = $2",
@@ -1177,6 +1183,19 @@ async def update_osha_recordability(
         if update.days_restricted_duty is not None:
             sets.append(f"days_restricted_duty = ${idx}")
             params.append(update.days_restricted_duty)
+            idx += 1
+        # WC claim depth (wcdeep01).
+        if update.wc_claim_type is not None:
+            sets.append(f"wc_claim_type = ${idx}")
+            params.append(update.wc_claim_type)
+            idx += 1
+        if update.post_termination is not None:
+            sets.append(f"post_termination = ${idx}")
+            params.append(update.post_termination)
+            idx += 1
+        if update.return_to_work_date is not None:
+            sets.append(f"return_to_work_date = ${idx}")
+            params.append(update.return_to_work_date)
             idx += 1
 
         updated = await conn.fetchrow(

@@ -325,6 +325,42 @@ export interface WcPremiumImpact {
   direction: 'increase' | 'decrease' | 'neutral'
 }
 
+// WC claim-depth (wcdeep01): taxonomy, return-to-work, NCCI rate, experience mod.
+
+export interface WcClaimBreakdown {
+  cumulative_trauma: number
+  acute: number
+  unknown: number
+}
+
+export interface WcRtw {
+  lost_time_cases: number
+  open: number
+  resolved: number
+  avg_days_to_rtw: number | null
+}
+
+export interface WcStateRate {
+  state: string
+  loss_cost_change_pct: number
+  effective_date: string | null
+  trend: 'increase' | 'decrease' | 'flat'
+  source: string | null
+  note: string | null
+}
+
+export interface WcMod {
+  id: string
+  company_id: string
+  policy_period_start: string | null
+  policy_period_end: string | null
+  experience_mod: number
+  carrier: string | null
+  annual_premium: number | null
+  note: string | null
+  created_at: string | null
+}
+
 export interface WcPortfolioRow {
   company_id: string
   company_name: string
@@ -341,6 +377,13 @@ export interface WcPortfolioRow {
   premium_impact: WcPremiumImpact | null
   severity_band: WcSeverityBand
   data_quality: { insufficient_population: boolean; headcount_missing: boolean }
+  // WC depth (optional — older shapes/merges tolerate absence).
+  claim_breakdown?: WcClaimBreakdown
+  post_termination_cases?: number
+  rtw?: WcRtw
+  primary_state?: string | null
+  state_rate?: WcStateRate | null
+  latest_mod?: WcMod | null
 }
 
 export interface WcPortfolioSummary {
@@ -352,11 +395,53 @@ export interface WcPortfolioSummary {
   unknown: number
   total_recordable_cases: number
   total_lost_days: number
+  total_ct_cases?: number
+  total_post_termination?: number
+  total_open_lost_time?: number
+  clients_in_rate_increase_states?: number
 }
 
 export interface WcPortfolioResponse {
   summary: WcPortfolioSummary
   companies: WcPortfolioRow[]
+}
+
+// Full per-client WC view — GET /broker/wc-portfolio/{company_id}
+
+export interface WcMetrics {
+  headcount: number | null
+  recordable_cases: number
+  dart_cases: number
+  lost_days: number
+  trir: number | null
+  dart_rate: number | null
+  days_since_last_recordable: number | null
+  benchmark: WcBenchmark | null
+  premium_impact: WcPremiumImpact | null
+  severity_band: WcSeverityBand
+  claim_breakdown: WcClaimBreakdown
+  post_termination_cases: number
+  rtw: WcRtw
+  prior: {
+    trir_delta_pct: number | null
+    dart_delta_pct: number | null
+    lost_days_delta_pct: number | null
+  }
+  data_quality: { insufficient_population: boolean; headcount_missing: boolean }
+}
+
+export interface WcStateEntry {
+  state: string
+  rate: WcStateRate | null
+}
+
+export interface WcClientDetailResponse {
+  company_id: string
+  company_name: string
+  metrics: WcMetrics
+  states: WcStateEntry[]
+  primary_state: string | null
+  mods: WcMod[]
 }
 
 // --- Action Center: positive milestones ---

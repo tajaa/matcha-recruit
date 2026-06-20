@@ -564,6 +564,10 @@ class OshaRecordabilityUpdate(BaseModel):
     days_away_from_work: Optional[int] = 0
     days_restricted_duty: Optional[int] = 0
     date_of_death: Optional[date] = None
+    # WC claim depth (wcdeep01) — feeds the broker WC analytics.
+    wc_claim_type: Optional[str] = None  # acute | cumulative_trauma | unknown
+    post_termination: Optional[bool] = None
+    return_to_work_date: Optional[date] = None
 
 
 class Osha300LogEntry(BaseModel):

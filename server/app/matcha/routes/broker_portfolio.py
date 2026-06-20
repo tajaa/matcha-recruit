@@ -8,17 +8,19 @@ sort clients by deterioration to know who needs loss-control attention.
 
 import json
 import logging
+from datetime import date
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ...database import get_connection
 from ..dependencies import require_broker
 from .ir_incidents import compute_wc_metrics
 from ..services.wc_benchmarks import SEVERITY_BAND_RANK
 from ..services import benefits_eligibility as be
+from ..services import wc_depth
 from ..models.broker_action_center import MilestonesResponse, OutreachResponse
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,16 @@ _BAND_RANK = {"critical": 0, "elevated": 1, "stable": 2}
 
 
 class _ResolveBody(BaseModel):
+    note: Optional[str] = None
+
+
+class WcModCreate(BaseModel):
+    """Broker-recorded experience-modification-rate (EMR) for a client policy period."""
+    policy_period_start: date
+    policy_period_end: Optional[date] = None
+    experience_mod: float = Field(..., gt=0, le=10)
+    carrier: Optional[str] = None
+    annual_premium: Optional[float] = Field(default=None, ge=0)
     note: Optional[str] = None
 
 
@@ -99,12 +111,15 @@ async def get_wc_portfolio(current_user=Depends(require_broker)):
         )
 
         results = []
+        all_states: set[str] = set()
         for client in clients:
             try:
                 m = await compute_wc_metrics(conn, client["company_id"], period_days=365)
             except Exception as exc:
                 logger.warning("wc-portfolio: compute failed for %s: %s", client["company_id"], exc)
                 continue
+            states = await wc_depth.resolve_company_states(conn, client["company_id"])
+            all_states.update(states)
             results.append({
                 "company_id": str(client["company_id"]),
                 "company_name": client["company_name"],
@@ -121,7 +136,20 @@ async def get_wc_portfolio(current_user=Depends(require_broker)):
                 "premium_impact": m["premium_impact"],
                 "severity_band": m["severity_band"],
                 "data_quality": m["data_quality"],
+                # WC depth (wcdeep01): claim taxonomy, post-term, RTW, jurisdiction, mod.
+                "claim_breakdown": m["claim_breakdown"],
+                "post_termination_cases": m["post_termination_cases"],
+                "rtw": m["rtw"],
+                "primary_state": states[0] if states else None,
             })
+
+        # Batch the jurisdiction + mod lookups across the whole book (1 query each).
+        state_rates = await wc_depth.get_state_rates(conn, all_states)
+        latest_mods = await wc_depth.latest_mods(conn, [c["company_id"] for c in clients])
+
+    for r in results:
+        r["state_rate"] = state_rates.get(r["primary_state"]) if r["primary_state"] else None
+        r["latest_mod"] = latest_mods.get(r["company_id"])
 
     # Sort: critical → at_risk → fair → good → unknown. Within band, worst TRIR first.
     results.sort(key=lambda r: (
@@ -138,9 +166,107 @@ async def get_wc_portfolio(current_user=Depends(require_broker)):
         "unknown": sum(1 for r in results if r["severity_band"] == "unknown"),
         "total_recordable_cases": sum(r["recordable_cases"] for r in results),
         "total_lost_days": sum(r["lost_days"] for r in results),
+        # WC depth aggregates.
+        "total_ct_cases": sum(r["claim_breakdown"]["cumulative_trauma"] for r in results),
+        "total_post_termination": sum(r["post_termination_cases"] for r in results),
+        "total_open_lost_time": sum(r["rtw"]["open"] for r in results),
+        "clients_in_rate_increase_states": sum(
+            1 for r in results if r["state_rate"] and r["state_rate"]["trend"] == "increase"
+        ),
     }
 
     return {"summary": summary, "companies": results}
+
+
+# ---------------------------------------------------------------------------
+# WC depth (wcdeep01): per-client detail + experience-mod entry + NCCI overlay
+# ---------------------------------------------------------------------------
+
+@router.get("/wc-portfolio/{company_id}")
+async def get_wc_client_detail(company_id: UUID, current_user=Depends(require_broker)):
+    """Deep WC view for one client: full metrics (incl. quarterly + claim depth),
+    experience-mod trajectory, and the NCCI rate trend for each operating state."""
+    async with get_connection() as conn:
+        meta = await _assert_broker_owns_company(conn, current_user.id, company_id)
+        metrics = await compute_wc_metrics(conn, company_id, period_days=365)
+        states = await wc_depth.resolve_company_states(conn, company_id)
+        state_rates = await wc_depth.get_state_rates(conn, states)
+        mods = await wc_depth.mod_trajectory(conn, company_id)
+
+    return {
+        "company_id": str(company_id),
+        "company_name": meta["name"],
+        "metrics": metrics,
+        "states": [
+            {"state": s, "rate": state_rates.get(s)} for s in states
+        ],
+        "primary_state": states[0] if states else None,
+        "mods": mods,
+    }
+
+
+@router.get("/wc-portfolio/{company_id}/mods")
+async def list_wc_mods(company_id: UUID, current_user=Depends(require_broker)):
+    """Experience-mod (EMR) trajectory for a client, oldest period first."""
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        mods = await wc_depth.mod_trajectory(conn, company_id)
+    return {"company_id": str(company_id), "mods": mods}
+
+
+@router.post("/wc-portfolio/{company_id}/mods")
+async def record_wc_mod(company_id: UUID, body: WcModCreate,
+                        current_user=Depends(require_broker)):
+    """Record (or update) a client's experience mod for a policy period.
+
+    Upserts on (company_id, policy_period_start) so re-entering a period corrects
+    rather than duplicates."""
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        broker_id, _ = await _broker_clients(conn, current_user.id)
+        row = await conn.fetchrow(
+            """
+            INSERT INTO company_wc_mods
+                (company_id, broker_id, policy_period_start, policy_period_end,
+                 experience_mod, carrier, annual_premium, note, recorded_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT ON CONSTRAINT uq_company_wc_mod DO UPDATE SET
+                policy_period_end = EXCLUDED.policy_period_end,
+                experience_mod    = EXCLUDED.experience_mod,
+                carrier           = EXCLUDED.carrier,
+                annual_premium    = EXCLUDED.annual_premium,
+                note              = EXCLUDED.note,
+                recorded_by       = EXCLUDED.recorded_by
+            RETURNING id, company_id, policy_period_start, policy_period_end,
+                      experience_mod, carrier, annual_premium, note, created_at
+            """,
+            company_id, broker_id, body.policy_period_start, body.policy_period_end,
+            body.experience_mod, body.carrier, body.annual_premium, body.note,
+            current_user.id,
+        )
+    return wc_depth._serialize_mod(row)
+
+
+@router.delete("/wc-portfolio/{company_id}/mods/{mod_id}")
+async def delete_wc_mod(company_id: UUID, mod_id: UUID,
+                        current_user=Depends(require_broker)):
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        result = await conn.execute(
+            "DELETE FROM company_wc_mods WHERE id = $1 AND company_id = $2",
+            mod_id, company_id,
+        )
+    if result.split()[-1] == "0":
+        raise HTTPException(status_code=404, detail="Mod entry not found")
+    return {"status": "deleted"}
+
+
+@router.get("/wc-state-rates")
+async def get_wc_state_rates(current_user=Depends(require_broker)):
+    """NCCI loss-cost rate trend by state — reference panel + jurisdiction lens."""
+    async with get_connection() as conn:
+        rates = await wc_depth.list_state_rates(conn)
+    return {"rates": rates}
 
 
 # ===========================================================================

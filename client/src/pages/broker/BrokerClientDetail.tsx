@@ -1,13 +1,16 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type FormEvent, type ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, MapPin, FileText, Shield, AlertTriangle,
   Clock, Building2, Users, Loader2, AlertCircle,
+  TrendingUp, TrendingDown, Minus, Plus, Trash2, Gauge, HeartPulse,
 } from 'lucide-react'
 import { Card } from '../../components/ui'
 import { StatCard } from '../../components/dashboard'
-import { fetchBrokerClientDetail } from '../../api/broker'
-import type { BrokerClientDetailResponse } from '../../types/broker'
+import {
+  fetchBrokerClientDetail, fetchWcClientDetail, recordWcMod, deleteWcMod,
+} from '../../api/broker'
+import type { BrokerClientDetailResponse, WcClientDetailResponse } from '../../types/broker'
 
 const riskColors: Record<string, string> = {
   healthy: 'bg-zinc-500',
@@ -28,13 +31,14 @@ const severityColors: Record<string, string> = {
   low: 'bg-zinc-800 text-zinc-400',
 }
 
-type Tab = 'overview' | 'compliance' | 'policies' | 'ir_er' | 'activity'
+type Tab = 'overview' | 'compliance' | 'policies' | 'ir_er' | 'wc' | 'activity'
 
 const tabs: { key: Tab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'compliance', label: 'Compliance' },
   { key: 'policies', label: 'Policies & Handbooks' },
   { key: 'ir_er', label: 'IR / ER' },
+  { key: 'wc', label: "Workers' Comp" },
   { key: 'activity', label: 'Activity' },
 ]
 
@@ -159,6 +163,7 @@ export default function BrokerClientDetail() {
       {activeTab === 'compliance' && <ComplianceTab compliance={compliance} />}
       {activeTab === 'policies' && <PoliciesTab policies={policies} handbooks={handbooks} />}
       {activeTab === 'ir_er' && <IRERTab ir={ir_summary} er={er_summary} />}
+      {activeTab === 'wc' && companyId && <WcTab companyId={companyId} />}
       {activeTab === 'activity' && <ActivityTab activity={recent_activity} />}
     </div>
   )
@@ -473,5 +478,306 @@ function ActivityTab({ activity }: { activity: BrokerClientDetailResponse['recen
         ))}
       </div>
     </Card>
+  )
+}
+
+/* ──────────────────── Workers' Comp Tab ──────────────────── */
+
+const WC_BAND_TONE: Record<string, string> = {
+  critical: 'text-red-400',
+  at_risk: 'text-orange-400',
+  fair: 'text-amber-400',
+  good: 'text-emerald-400',
+  unknown: 'text-zinc-500',
+}
+
+function pct(n: number | null | undefined, digits = 1) {
+  if (n === null || n === undefined) return '—'
+  return `${n > 0 ? '+' : ''}${n.toFixed(digits)}%`
+}
+
+function rateTone(trend: string) {
+  // Rate increase = premiums up = bad for the client.
+  return trend === 'increase' ? 'text-red-400' : trend === 'decrease' ? 'text-emerald-400' : 'text-zinc-400'
+}
+
+function DeltaPill({ value }: { value: number | null }) {
+  if (value === null || value === undefined) return <span className="text-zinc-600 text-[11px]">{'—'}</span>
+  const flat = value === 0
+  // Up is worse for TRIR/DART/lost-days.
+  const tone = flat ? 'text-zinc-500' : value > 0 ? 'text-red-400' : 'text-emerald-400'
+  const Icon = flat ? Minus : value > 0 ? TrendingUp : TrendingDown
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-[11px] font-mono ${tone}`}>
+      <Icon className="h-3 w-3" />{Math.abs(value).toFixed(1)}%
+    </span>
+  )
+}
+
+function MetricCell({ label, value, sub, delta, tone }: {
+  label: string; value: ReactNode; sub?: string; delta?: ReactNode; tone?: string
+}) {
+  return (
+    <div className="bg-zinc-900 px-4 py-3">
+      <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{label}</div>
+      <div className={`text-xl font-light font-mono mt-1 ${tone ?? 'text-zinc-200'}`}>{value}</div>
+      <div className="flex items-center gap-2 mt-0.5">
+        {delta}
+        {sub && <span className="text-[10px] text-zinc-600">{sub}</span>}
+      </div>
+    </div>
+  )
+}
+
+function TaxCell({ label, value, tone }: { label: string; value: number; tone: string }) {
+  return (
+    <div className="rounded-lg bg-zinc-900/60 py-2">
+      <div className={`text-lg font-mono ${tone}`}>{value}</div>
+      <div className="text-[10px] text-zinc-500 mt-0.5">{label}</div>
+    </div>
+  )
+}
+
+function WcTab({ companyId }: { companyId: string }) {
+  const [detail, setDetail] = useState<WcClientDetailResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState({ policy_period_start: '', experience_mod: '', carrier: '', annual_premium: '', note: '' })
+  const [saving, setSaving] = useState(false)
+  const [formErr, setFormErr] = useState<string | null>(null)
+
+  const load = () => {
+    setLoading(true)
+    setError(false)
+    fetchWcClientDetail(companyId)
+      .then(setDetail)
+      .catch(() => setError(true))
+      .finally(() => setLoading(false))
+  }
+  useEffect(load, [companyId])
+
+  const submitMod = async (e: FormEvent) => {
+    e.preventDefault()
+    const mod = parseFloat(form.experience_mod)
+    if (!form.policy_period_start || !mod || mod <= 0) {
+      setFormErr('Enter a policy start date and a positive experience mod.')
+      return
+    }
+    setSaving(true)
+    setFormErr(null)
+    try {
+      await recordWcMod(companyId, {
+        policy_period_start: form.policy_period_start,
+        experience_mod: mod,
+        carrier: form.carrier || undefined,
+        annual_premium: form.annual_premium ? parseFloat(form.annual_premium) : undefined,
+        note: form.note || undefined,
+      })
+      setForm({ policy_period_start: '', experience_mod: '', carrier: '', annual_premium: '', note: '' })
+      setShowForm(false)
+      load()
+    } catch {
+      setFormErr('Could not save. Try again.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const removeMod = async (id: string) => {
+    try {
+      await deleteWcMod(companyId, id)
+      load()
+    } catch { /* leave list as-is on failure */ }
+  }
+
+  if (loading) {
+    return <div className="flex items-center justify-center h-40"><Loader2 className="h-5 w-5 text-zinc-500 animate-spin" /></div>
+  }
+  if (error || !detail) {
+    return <Card className="p-5"><p className="text-sm text-zinc-500">Unable to load Workers&rsquo; Comp data.</p></Card>
+  }
+
+  const m = detail.metrics
+  const benchRatio = m.trir && m.benchmark && m.benchmark.trir > 0 ? m.trir / m.benchmark.trir : null
+  const latestMod = detail.mods.length ? detail.mods[detail.mods.length - 1] : null
+  const cb = m.claim_breakdown
+  const typed = cb.cumulative_trauma + cb.acute
+  const totalForMix = Math.max(cb.cumulative_trauma + cb.acute + cb.unknown, 1)
+  const inputCls = 'w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500'
+
+  return (
+    <div className="space-y-4">
+      {/* Metric header */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+        <MetricCell
+          label="TRIR"
+          value={m.trir ?? '—'}
+          sub={benchRatio ? `${benchRatio.toFixed(1)}× bench` : (m.benchmark ? `bench ${m.benchmark.trir}` : 'no benchmark')}
+          delta={<DeltaPill value={m.prior.trir_delta_pct} />}
+          tone={WC_BAND_TONE[m.severity_band]}
+        />
+        <MetricCell label="DART" value={m.dart_rate ?? '—'} sub={m.benchmark ? `bench ${m.benchmark.dart}` : undefined} delta={<DeltaPill value={m.prior.dart_delta_pct} />} />
+        <MetricCell label="Recordables" value={m.recordable_cases} sub={`${m.dart_cases} DART`} />
+        <MetricCell label="Lost days" value={m.lost_days} delta={<DeltaPill value={m.prior.lost_days_delta_pct} />} />
+        <MetricCell
+          label="Exp. Mod"
+          value={latestMod ? latestMod.experience_mod.toFixed(2) : '—'}
+          sub={latestMod ? (latestMod.experience_mod > 1 ? 'debit' : latestMod.experience_mod < 1 ? 'credit' : 'unity') : 'none on file'}
+          tone={latestMod ? (latestMod.experience_mod > 1 ? 'text-red-400' : latestMod.experience_mod < 1 ? 'text-emerald-400' : 'text-zinc-300') : 'text-zinc-600'}
+        />
+        <MetricCell label="Days since" value={m.days_since_last_recordable ?? '—'} sub="last recordable" />
+      </div>
+
+      {m.data_quality.insufficient_population && (
+        <p className="text-[11px] text-amber-400/80">Low exposure base &mdash; TRIR/DART are directional only.</p>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Claim taxonomy */}
+        <Card className="p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <AlertTriangle className="h-4 w-4 text-zinc-500" />
+            <h3 className="text-sm font-medium text-zinc-200 tracking-wide">Claim mix</h3>
+          </div>
+          <div className="flex h-2 rounded-full overflow-hidden bg-zinc-800 mb-3">
+            <div className="bg-red-500/70" style={{ width: `${(cb.cumulative_trauma / totalForMix) * 100}%` }} />
+            <div className="bg-amber-500/70" style={{ width: `${(cb.acute / totalForMix) * 100}%` }} />
+            <div className="bg-zinc-600" style={{ width: `${(cb.unknown / totalForMix) * 100}%` }} />
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <TaxCell label="Cumulative trauma" value={cb.cumulative_trauma} tone="text-red-400" />
+            <TaxCell label="Acute" value={cb.acute} tone="text-amber-400" />
+            <TaxCell label="Untyped" value={cb.unknown} tone="text-zinc-400" />
+          </div>
+          <div className="mt-4 pt-3 border-t border-zinc-800/60 flex items-center justify-between">
+            <span className="text-xs text-zinc-500">Post-termination claims</span>
+            <span className={`text-sm font-mono ${m.post_termination_cases > 0 ? 'text-red-400' : 'text-zinc-400'}`}>{m.post_termination_cases}</span>
+          </div>
+          {typed === 0 && (
+            <p className="text-[11px] text-zinc-600 mt-2">Type recordables (acute vs cumulative trauma) on each incident to populate this.</p>
+          )}
+        </Card>
+
+        {/* Return to work */}
+        <Card className="p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <HeartPulse className="h-4 w-4 text-zinc-500" />
+            <h3 className="text-sm font-medium text-zinc-200 tracking-wide">Return to work</h3>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <TaxCell label="Lost-time" value={m.rtw.lost_time_cases} tone="text-zinc-300" />
+            <TaxCell label="Open" value={m.rtw.open} tone={m.rtw.open > 0 ? 'text-orange-400' : 'text-zinc-400'} />
+            <TaxCell label="Resolved" value={m.rtw.resolved} tone="text-emerald-400" />
+          </div>
+          <div className="mt-4 pt-3 border-t border-zinc-800/60 flex items-center justify-between">
+            <span className="text-xs text-zinc-500">Avg days to RTW</span>
+            <span className="text-sm font-mono text-zinc-300">{m.rtw.avg_days_to_rtw ?? '—'}</span>
+          </div>
+        </Card>
+      </div>
+
+      {/* NCCI jurisdiction overlay */}
+      <Card className="p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <MapPin className="h-4 w-4 text-zinc-500" />
+          <h3 className="text-sm font-medium text-zinc-200 tracking-wide">NCCI rate trend by state</h3>
+          <span className="text-[11px] text-zinc-600">2026 loss-cost filings</span>
+        </div>
+        {detail.states.length === 0 ? (
+          <p className="text-sm text-zinc-500">No operating states on file (add business locations to enable the jurisdiction overlay).</p>
+        ) : (
+          <div className="space-y-2">
+            {detail.states.map((s) => (
+              <div key={s.state} className="flex items-center justify-between py-1.5 border-b border-zinc-800/30 last:border-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-zinc-200 w-8">{s.state}</span>
+                  {s.rate?.note && <span className="text-[11px] text-zinc-600">{s.rate.note}</span>}
+                </div>
+                {s.rate ? (
+                  <span className={`inline-flex items-center gap-1 text-sm font-mono ${rateTone(s.rate.trend)}`}>
+                    {s.rate.trend === 'increase' ? <TrendingUp className="h-3.5 w-3.5" /> : s.rate.trend === 'decrease' ? <TrendingDown className="h-3.5 w-3.5" /> : <Minus className="h-3.5 w-3.5" />}
+                    {pct(s.rate.loss_cost_change_pct)}
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-zinc-600">no NCCI data</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* Experience-mod trajectory */}
+      <Card className="p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Gauge className="h-4 w-4 text-zinc-500" />
+            <h3 className="text-sm font-medium text-zinc-200 tracking-wide">Experience mod trajectory</h3>
+          </div>
+          <button onClick={() => setShowForm((v) => !v)} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500 transition-colors">
+            <Plus className="h-3.5 w-3.5" /> Record mod
+          </button>
+        </div>
+
+        {showForm && (
+          <form onSubmit={submitMod} className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800">
+            <div>
+              <label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Policy start</label>
+              <input type="date" value={form.policy_period_start} onChange={(e) => setForm({ ...form, policy_period_start: e.target.value })} className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Exp. mod</label>
+              <input type="number" step="0.001" placeholder="1.05" value={form.experience_mod} onChange={(e) => setForm({ ...form, experience_mod: e.target.value })} className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Carrier</label>
+              <input type="text" placeholder="optional" value={form.carrier} onChange={(e) => setForm({ ...form, carrier: e.target.value })} className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Annual premium</label>
+              <input type="number" step="1" placeholder="optional" value={form.annual_premium} onChange={(e) => setForm({ ...form, annual_premium: e.target.value })} className={inputCls} />
+            </div>
+            <div className="flex items-end">
+              <button type="submit" disabled={saving} className="w-full bg-zinc-100 text-zinc-900 text-sm font-medium rounded-lg px-3 py-1.5 hover:bg-white disabled:opacity-50 transition-colors">
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+            {formErr && <p className="col-span-full text-[11px] text-red-400">{formErr}</p>}
+          </form>
+        )}
+
+        {detail.mods.length === 0 ? (
+          <p className="text-sm text-zinc-500">No experience mods recorded. The mod is the number carriers price WC on &mdash; record it each policy period to track the trajectory.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-zinc-800/60">
+                  <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Policy period</th>
+                  <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">Mod</th>
+                  <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Carrier</th>
+                  <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">Premium</th>
+                  <th className="pb-2 w-8" />
+                </tr>
+              </thead>
+              <tbody>
+                {detail.mods.map((mod) => (
+                  <tr key={mod.id} className="border-b border-zinc-800/30 last:border-0">
+                    <td className="py-2.5 pr-4 text-zinc-300">{mod.policy_period_start}</td>
+                    <td className={`py-2.5 pr-4 text-right font-mono ${mod.experience_mod > 1 ? 'text-red-400' : mod.experience_mod < 1 ? 'text-emerald-400' : 'text-zinc-300'}`}>{mod.experience_mod.toFixed(3)}</td>
+                    <td className="py-2.5 pr-4 text-zinc-400 text-xs">{mod.carrier ?? '—'}</td>
+                    <td className="py-2.5 pr-4 text-right text-zinc-400 tabular-nums">{mod.annual_premium != null ? `$${mod.annual_premium.toLocaleString()}` : '—'}</td>
+                    <td className="py-2.5 text-right">
+                      <button onClick={() => removeMod(mod.id)} className="text-zinc-600 hover:text-red-400 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
   )
 }

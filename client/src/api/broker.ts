@@ -12,6 +12,9 @@ import type {
   RenewalRadarResponse,
   RenewalRadarDetail,
   WcPortfolioResponse,
+  WcClientDetailResponse,
+  WcMod,
+  WcStateRate,
   BrokerMilestonesResponse,
   OutreachResponse,
   BrokerSeatsResponse,
@@ -30,6 +33,31 @@ export function fetchBrokerPortfolio() {
 
 export function fetchWcPortfolio() {
   return api.get<WcPortfolioResponse>('/broker/wc-portfolio')
+}
+
+// --- WC depth: per-client detail + experience-mod entry + NCCI overlay ---
+
+export function fetchWcClientDetail(companyId: string) {
+  return api.get<WcClientDetailResponse>(`/broker/wc-portfolio/${companyId}`)
+}
+
+export function recordWcMod(companyId: string, payload: {
+  policy_period_start: string
+  policy_period_end?: string
+  experience_mod: number
+  carrier?: string
+  annual_premium?: number
+  note?: string
+}) {
+  return api.post<WcMod>(`/broker/wc-portfolio/${companyId}/mods`, payload)
+}
+
+export function deleteWcMod(companyId: string, modId: string) {
+  return api.delete<{ status: string }>(`/broker/wc-portfolio/${companyId}/mods/${modId}`)
+}
+
+export function fetchWcStateRates() {
+  return api.get<{ rates: WcStateRate[] }>('/broker/wc-state-rates')
 }
 
 // --- Action Center: milestones + outreach ---
