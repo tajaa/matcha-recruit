@@ -45,6 +45,8 @@ celery_app = Celery(
         "app.workers.tasks.benefit_eligibility_sync",
         "app.workers.tasks.cappe_booking_reminders",
         "app.workers.tasks.cappe_campaign_send",
+        "app.workers.tasks.cba_clause_extraction",
+        "app.workers.tasks.grievance_deadline_alerts",
     ],
 )
 
@@ -190,6 +192,13 @@ def on_worker_ready(**kwargs):
         run_discipline_expiry.delay()
     else:
         print("[Worker] Discipline expiry scheduler is disabled, skipping.")
+
+    from app.workers.tasks.grievance_deadline_alerts import run_grievance_deadline_alerts
+
+    if _is_scheduler_enabled("grievance_deadline_alerts"):
+        run_grievance_deadline_alerts.delay()
+    else:
+        print("[Worker] Grievance deadline alerts scheduler is disabled, skipping.")
 
     from app.workers.tasks.auto_archive import run_auto_archive
 

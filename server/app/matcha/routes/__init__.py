@@ -37,6 +37,7 @@ from .benefits import router as benefits_router
 from .separation import router as separation_router
 from .fake_hris import router as fake_hris_router
 from .twilio_webhook import router as twilio_webhook_router
+from .labor_relations import router as labor_relations_router
 from ..dependencies import require_feature, require_any_feature
 from ...core.dependencies import require_admin
 
@@ -81,6 +82,10 @@ matcha_router.include_router(ir_surveys_router, prefix="/ir/surveys", tags=["ir-
                              dependencies=[Depends(require_feature("incidents"))])
 matcha_router.include_router(accommodations_router, prefix="/accommodations", tags=["accommodations"],
                              dependencies=[Depends(require_feature("accommodations"))])
+# Labor Relations — union / CBA admin (Pro-bundled). CBA store + clause library
+# + grievance workflow live under /labor.
+matcha_router.include_router(labor_relations_router, prefix="/labor", tags=["labor-relations"],
+                             dependencies=[Depends(require_feature("labor_relations"))])
 matcha_router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
 matcha_router.include_router(brokers_router, prefix="/brokers", tags=["brokers"])
 # Fractional HR — internal master-admin engagement tooling (admin-gated, not feature-flagged)

@@ -34,6 +34,9 @@ import CompanySettings from '../pages/app/CompanySettings'
 import Discipline from '../pages/app/Discipline'
 import DisciplineDetail from '../pages/app/DisciplineDetail'
 import DisciplineSettings from '../pages/app/DisciplineSettings'
+import LaborRelations from '../pages/app/LaborRelations'
+import CBADetail from '../pages/app/CBADetail'
+import GrievanceDetail from '../pages/app/GrievanceDetail'
 import Training from '../pages/app/Training'
 import TrainingDetail from '../pages/app/TrainingDetail'
 import AppResources from '../pages/app/AppResources'
@@ -79,6 +82,9 @@ export default function AppRoutes() {
         <Route path="discipline" element={<FeatureGate feature="discipline" label="Performance Action"><Discipline /></FeatureGate>} />
         <Route path="discipline/:recordId" element={<FeatureGate feature="discipline" label="Performance Action"><DisciplineDetail /></FeatureGate>} />
         <Route path="discipline-settings" element={<FeatureGate feature="discipline" label="Performance Action"><DisciplineSettings /></FeatureGate>} />
+        <Route path="labor" element={<FeatureGate feature="labor_relations" label="Labor Relations"><LaborRelations /></FeatureGate>} />
+        <Route path="labor/cbas/:cbaId" element={<FeatureGate feature="labor_relations" label="Labor Relations"><CBADetail /></FeatureGate>} />
+        <Route path="labor/grievances/:grievanceId" element={<FeatureGate feature="labor_relations" label="Labor Relations"><GrievanceDetail /></FeatureGate>} />
         <Route path="policies" element={<FeatureGate feature="policies" label="Policies"><Policies /></FeatureGate>} />
         <Route path="handbooks" element={<FeatureGate feature="handbooks" label="Handbooks"><Handbooks /></FeatureGate>} />
         <Route path="handbook/new" element={<FeatureGate feature="handbooks" label="Handbooks"><HandbookForm /></FeatureGate>} />

@@ -66,6 +66,16 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # renewal-risk radar. Gates the company-facing /benefits/* router; the
     # broker-portal rollups live under /broker/benefits/* (broker-role gated).
     "benefits_admin": False,
+    # Labor Relations — union / collective-bargaining-agreement admin (CBA
+    # document store + clause library, grievance workflow with contractual
+    # step-deadlines, just-cause/Weingarten on discipline, bargaining units +
+    # seniority, arbitration/ULP). Gates the /labor/* router + the /app/labor
+    # surface. Default off; BUNDLED INTO PRO — stored True at bespoke signup
+    # (auth.py) + the admin 'bespoke' tier preset (admin.py), exactly like
+    # handbook_audit / credential_templates. Deliberately NOT in any
+    # TIER_REQUIRED overlay, so it never leaks to personal Werk (which shares
+    # signup_source='bespoke' with is_personal=true).
+    "labor_relations": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,
