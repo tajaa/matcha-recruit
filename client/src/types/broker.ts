@@ -510,6 +510,73 @@ export interface EplPortfolioResponse {
   companies: EplPortfolioRow[]
 }
 
+// --- Off-platform broker clients (Broker Pro) ---
+
+export interface ExternalClient {
+  id: string
+  broker_id: string
+  name: string
+  industry: string | null
+  headcount: number | null
+  primary_state: string | null
+  note: string | null
+  status: string
+  created_at: string | null
+}
+
+export interface ExternalClientRow extends ExternalClient {
+  wc_severity_band: WcSeverityBand
+  wc_trir: number | null
+  wc_current_emr: number | null
+  epl_score: number
+  epl_band: EplBand
+}
+
+export interface ExternalWc {
+  has_data: boolean
+  period_label: string | null
+  headcount: number | null
+  recordable_cases: number
+  dart_cases: number
+  lost_days: number
+  trir: number | null
+  dart_rate: number | null
+  benchmark: WcBenchmark | null
+  severity_band: WcSeverityBand
+  premium_impact: WcPremiumImpact | null
+  claim_breakdown: WcClaimBreakdown
+  post_termination_cases: number
+  rtw: WcRtw
+  current_emr: number | null
+  carrier: string | null
+  annual_premium: number | null
+  state_rate: WcStateRate | null
+}
+
+export interface ExternalEplFactor {
+  key: string
+  label: string
+  kind: 'derived' | 'attested'
+  weight: number
+  score: number
+  status: EplFactorStatus
+  contribution: number
+  attest_status: EplAttestationStatus
+  note: string | null
+}
+
+export interface ExternalEpl {
+  score: number
+  band: EplBand
+  factors: ExternalEplFactor[]
+}
+
+export interface ExternalClientDetail {
+  client: ExternalClient
+  wc: ExternalWc
+  epl: ExternalEpl
+}
+
 // --- Action Center: positive milestones ---
 
 export type MilestoneFamily = 'incident_free' | 'dart_free' | 'trir_below_benchmark'

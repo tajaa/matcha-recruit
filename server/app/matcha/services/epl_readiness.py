@@ -285,6 +285,37 @@ async def compute_epl_readiness(conn, company_id: UUID) -> dict:
     }
 
 
+def assess_from_statuses(statuses: dict) -> dict:
+    """EPL assessment where EVERY factor is a broker-attested status.
+
+    For off-platform clients (no Matcha data to derive from). Reuses the same
+    factor catalog, weights, and bands as the tenant path so scores are
+    directly comparable. ``statuses`` maps item_key -> status; missing factors
+    default to 'unknown'.
+    """
+    factors: list[dict] = []
+    composite = 0.0
+    for f in FACTORS:
+        status = statuses.get(f["key"]) or "unknown"
+        if status not in ATTESTATION_STATUSES:
+            status = "unknown"
+        sub = _ATTEST_SCORE.get(status, 0)
+        contribution = f["weight"] * sub / 100.0
+        composite += contribution
+        factors.append({
+            "key": f["key"],
+            "label": f["label"],
+            "kind": f["kind"],
+            "weight": f["weight"],
+            "score": sub,
+            "status": _factor_band(sub),
+            "contribution": round(contribution, 1),
+            "attest_status": status,
+        })
+    score = round(composite)
+    return {"score": score, "band": readiness_band(score), "factors": factors}
+
+
 def top_gap(assessment: dict) -> Optional[dict]:
     """The factor losing the most points (weight × shortfall) — the headline gap."""
     worst = None

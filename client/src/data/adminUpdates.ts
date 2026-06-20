@@ -22,6 +22,32 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'broker-pro-off-platform',
+    date: '2026-06-20',
+    category: 'Broker',
+    title: 'Broker Pro — score off-platform clients (not on Matcha)',
+    summary:
+      'Brokers can now manage clients who aren’t Matcha tenants. Flip a broker to the new "Broker Pro" plan in admin and they get an "External Book": add a non-tenant client, key in their carrier loss-run summary + an EPL questionnaire, and get the same Workers’ Comp + EPL readiness scores as on-platform clients. This turns the scoring engine from a pass-through add-on into a standalone broker tool for the whole book.',
+    whatsNew: [
+      'New per-broker "Broker Pro" entitlement (lives on the broker, not a company feature flag) — toggle it in Admin → Brokers → edit → Plan.',
+      'Pro brokers get an "External Book" sidebar entry; add off-platform clients (name, industry, headcount, state).',
+      'Per client, enter the carrier loss-run summary (recordables, DART, lost days, cumulative-trauma/acute, post-termination, return-to-work, experience mod, premium) → WC TRIR/DART/severity/EMR + the NCCI state-rate overlay compute automatically.',
+      'EPL: the broker grades all 10 underwriting factors from the questionnaire → a 0–100 readiness score + band.',
+      'Off-platform scores use the exact same weights/bands as on-platform clients, so they’re directly comparable across the book.',
+      'Standard brokers are unaffected — they never see the section until upgraded.',
+    ],
+    howToUse: [
+      'Admin → Brokers → edit a broker → set Plan = "Pro".',
+      'That broker logs in → "External Book" → "Add client".',
+      'Open the client → "Enter loss run" (key the carrier figures) and set each EPL factor from the underwriting questionnaire. Scores update live.',
+    ],
+    setup: [
+      'DB: migration brokerpro01 (brokers.plan + broker_external_clients / _wc / _epl_attestations) is applied on dev; apply to prod with ./scripts/migrate-prod.sh.',
+      'v1 is broker-keyed. Loss-run PDF auto-parse + a client-fills-it intake link are the planned v2.',
+    ],
+    tag: 'action-needed',
+  },
+  {
     id: 'broker-epl-readiness',
     date: '2026-06-20',
     category: 'Broker',

@@ -23,6 +23,28 @@ require_broker = require_roles("broker")
 # employee still only ever sees/touches their own company's rows.
 require_company_member = require_roles("admin", "client", "individual", "employee")
 
+
+async def require_broker_pro(current_user=Depends(require_broker)):
+    """Gate a route to Broker Pro brokers (off-platform features). 403 otherwise.
+
+    The Pro entitlement lives on ``brokers.plan`` (admin-toggleable), not on
+    company feature flags — brokers aren't tenants.
+    """
+    async with get_connection() as conn:
+        plan = await conn.fetchval(
+            """
+            SELECT b.plan FROM brokers b
+            JOIN broker_members bm ON bm.broker_id = b.id
+            WHERE bm.user_id = $1 AND bm.is_active = true
+            ORDER BY bm.created_at ASC LIMIT 1
+            """,
+            current_user.id,
+        )
+    if plan != "pro":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Broker Pro plan required")
+    return current_user
+
 BROKER_ACTIVE_LINK_STATUSES = ("active", "grace")
 
 

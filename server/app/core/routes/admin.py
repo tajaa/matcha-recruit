@@ -1134,6 +1134,7 @@ class BrokerCreateRequest(BaseModel):
     invoice_owner: str = Field(default="matcha")
     terms_required_version: str = Field(default="v1", min_length=1, max_length=50)
     allocated_seats: int = Field(default=0, ge=0, le=1_000_000)
+    plan: str = Field(default="standard", pattern="^(standard|pro)$")
 
 
 class BrokerUpdateRequest(BaseModel):
@@ -1144,6 +1145,7 @@ class BrokerUpdateRequest(BaseModel):
     grace_until: Optional[datetime] = None
     post_termination_mode: Optional[str] = None
     allocated_seats: Optional[int] = Field(default=None, ge=0, le=1_000_000)
+    plan: Optional[str] = Field(default=None, pattern="^(standard|pro)$")
 
 
 class BrokerContractRequest(BaseModel):
@@ -1317,10 +1319,10 @@ async def create_broker(
                 """
                 INSERT INTO brokers (
                     name, slug, status, support_routing, billing_mode, invoice_owner,
-                    terms_required_version, allocated_seats, created_by
+                    terms_required_version, allocated_seats, plan, created_by
                 )
-                VALUES ($1, $2, 'active', $3, $4, $5, $6, $7, $8)
-                RETURNING id, name, slug, status, support_routing, billing_mode, invoice_owner, terms_required_version, allocated_seats, created_at
+                VALUES ($1, $2, 'active', $3, $4, $5, $6, $7, $8, $9)
+                RETURNING id, name, slug, status, support_routing, billing_mode, invoice_owner, terms_required_version, allocated_seats, plan, created_at
                 """,
                 request.broker_name.strip(),
                 slug,
@@ -1329,6 +1331,7 @@ async def create_broker(
                 request.invoice_owner,
                 request.terms_required_version.strip(),
                 request.allocated_seats,
+                request.plan,
                 current_user.id,
             )
 
@@ -1396,6 +1399,7 @@ async def create_broker(
             "invoice_owner": broker["invoice_owner"],
             "terms_required_version": broker["terms_required_version"],
             "allocated_seats": broker["allocated_seats"],
+            "plan": broker["plan"],
             "created_at": broker["created_at"].isoformat() if broker["created_at"] else None,
         },
         "owner": {
@@ -1418,7 +1422,7 @@ async def list_brokers():
             """
             SELECT
                 b.id, b.name, b.slug, b.status, b.support_routing, b.billing_mode,
-                b.invoice_owner, b.terms_required_version, b.allocated_seats, b.created_at,
+                b.invoice_owner, b.terms_required_version, b.allocated_seats, b.plan, b.created_at,
                 COALESCE(bb.branding_mode, 'direct') as branding_mode,
                 COUNT(DISTINCT bm.user_id) FILTER (WHERE bm.is_active = true) AS active_member_count,
                 COUNT(DISTINCT bcl.company_id) FILTER (WHERE bcl.status IN ('active', 'grace')) AS active_company_count,
@@ -1453,7 +1457,7 @@ async def list_brokers():
             ) bc ON true
             GROUP BY
                 b.id, b.name, b.slug, b.status, b.support_routing, b.billing_mode,
-                b.invoice_owner, b.terms_required_version, b.allocated_seats, b.created_at, bb.branding_mode,
+                b.invoice_owner, b.terms_required_version, b.allocated_seats, b.plan, b.created_at, bb.branding_mode,
                 bc.id, bc.currency, bc.base_platform_fee, bc.pepm_rate, bc.minimum_monthly_commit
             ORDER BY b.created_at DESC
             """
@@ -1471,6 +1475,7 @@ async def list_brokers():
                     "invoice_owner": row["invoice_owner"],
                     "terms_required_version": row["terms_required_version"],
                     "allocated_seats": row["allocated_seats"],
+                    "plan": row["plan"],
                     "seats_used": int(row["seats_used"] or 0),
                     "branding_mode": row["branding_mode"],
                     "active_member_count": row["active_member_count"],
@@ -1522,6 +1527,9 @@ async def update_broker(broker_id: UUID, request: BrokerUpdateRequest):
     if request.allocated_seats is not None:
         updates.append(f"allocated_seats = ${len(values) + 1}")
         values.append(request.allocated_seats)
+    if request.plan is not None:
+        updates.append(f"plan = ${len(values) + 1}")
+        values.append(request.plan)
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields provided for update")
@@ -1536,7 +1544,7 @@ async def update_broker(broker_id: UUID, request: BrokerUpdateRequest):
             SET {', '.join(updates)}
             WHERE id = ${len(values)}
             RETURNING id, name, slug, status, support_routing, billing_mode, invoice_owner, terms_required_version,
-                     allocated_seats, terminated_at, grace_until, post_termination_mode, updated_at
+                     allocated_seats, plan, terminated_at, grace_until, post_termination_mode, updated_at
             """,
             *values,
         )
@@ -1555,6 +1563,7 @@ async def update_broker(broker_id: UUID, request: BrokerUpdateRequest):
             "invoice_owner": row["invoice_owner"],
             "terms_required_version": row["terms_required_version"],
             "allocated_seats": row["allocated_seats"],
+            "plan": row["plan"],
             "terminated_at": row["terminated_at"].isoformat() if row["terminated_at"] else None,
             "grace_until": row["grace_until"].isoformat() if row["grace_until"] else None,
             "post_termination_mode": row["post_termination_mode"],

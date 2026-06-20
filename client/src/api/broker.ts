@@ -18,6 +18,9 @@ import type {
   EplPortfolioResponse,
   EplReadiness,
   EplAttestationStatus,
+  ExternalClient,
+  ExternalClientRow,
+  ExternalClientDetail,
   BrokerMilestonesResponse,
   OutreachResponse,
   BrokerSeatsResponse,
@@ -79,6 +82,48 @@ export function recordEplAttestation(
   payload: { status: EplAttestationStatus; note?: string },
 ) {
   return api.put<EplReadiness>(`/broker/epl-portfolio/${companyId}/attestations/${itemKey}`, payload)
+}
+
+// --- Off-platform broker clients (Broker Pro) ---
+
+export type ExternalClientPayload = {
+  name: string
+  industry?: string | null
+  headcount?: number | null
+  primary_state?: string | null
+  note?: string | null
+}
+
+export function fetchExternalClients() {
+  return api.get<{ clients: ExternalClientRow[] }>('/broker/external-clients')
+}
+
+export function createExternalClient(payload: ExternalClientPayload) {
+  return api.post<ExternalClient>('/broker/external-clients', payload)
+}
+
+export function fetchExternalClientDetail(id: string) {
+  return api.get<ExternalClientDetail>(`/broker/external-clients/${id}`)
+}
+
+export function updateExternalClient(id: string, payload: ExternalClientPayload) {
+  return api.put<ExternalClient>(`/broker/external-clients/${id}`, payload)
+}
+
+export function deleteExternalClient(id: string) {
+  return api.delete<{ status: string }>(`/broker/external-clients/${id}`)
+}
+
+export function saveExternalWc(id: string, payload: Record<string, unknown>) {
+  return api.put<ExternalClientDetail>(`/broker/external-clients/${id}/wc`, payload)
+}
+
+export function saveExternalEplAttestation(
+  id: string,
+  itemKey: string,
+  payload: { status: EplAttestationStatus; note?: string },
+) {
+  return api.put<ExternalClientDetail>(`/broker/external-clients/${id}/epl/${itemKey}`, payload)
 }
 
 // --- Action Center: milestones + outreach ---

@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react'
-import { LayoutDashboard, Building2, Link2, Settings, Zap, Workflow, Ticket, UserPlus } from 'lucide-react'
+import { LayoutDashboard, Building2, Link2, Settings, Zap, Workflow, Ticket, UserPlus, Globe } from 'lucide-react'
 import SidebarShell, { type NavItem, type NavGroup } from './SidebarShell'
 import BrokerThemeToggle from './BrokerThemeToggle'
 import { fetchBrokerRiskAlerts, fetchActionCenterMilestones } from '../api/broker'
+import { useMe } from '../hooks/useMe'
 
 export default function BrokerSidebar() {
+  const { me } = useMe()
+  const isPro = me?.profile?.plan === 'pro'
   const [actionCount, setActionCount] = useState(0)
 
   useEffect(() => {
@@ -21,6 +24,8 @@ export default function BrokerSidebar() {
   const nav: (NavItem | NavGroup)[] = [
     { to: '/broker', icon: LayoutDashboard, label: 'Book of Business' },
     { to: '/broker/action-center', icon: Zap, label: 'Action Center', badge: actionCount },
+    // Broker Pro: off-platform clients (not Matcha tenants). Admin-toggled entitlement.
+    ...(isPro ? [{ to: '/broker/external', icon: Globe, label: 'External Book' } as NavItem] : []),
     {
       label: 'Administration',
       items: [

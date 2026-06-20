@@ -339,6 +339,8 @@ export interface MeClientProfile {
   created_at: string
   headcount?: number
   jurisdiction_count?: number
+  // Broker profile rides on this same `profile` slot; Pro entitlement gates off-platform.
+  plan?: 'standard' | 'pro'
 }
 
 export interface MeResponse {

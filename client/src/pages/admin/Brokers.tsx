@@ -24,6 +24,7 @@ type Broker = {
   active_company_count: number
   allocated_seats?: number
   seats_used?: number
+  plan?: string
   active_contract: BrokerContract | null
   created_at: string
 }
@@ -60,6 +61,7 @@ type EditForm = {
   status: string
   support_routing: string
   allocated_seats: string
+  plan: string
 }
 
 type CreateResult = {
@@ -88,7 +90,7 @@ export default function Brokers() {
 
   // Edit state
   const [editBroker, setEditBroker] = useState<Broker | null>(null)
-  const [editForm, setEditForm] = useState<EditForm>({ status: '', support_routing: '', allocated_seats: '' })
+  const [editForm, setEditForm] = useState<EditForm>({ status: '', support_routing: '', allocated_seats: '', plan: 'standard' })
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
 
@@ -163,7 +165,7 @@ export default function Brokers() {
 
   function openEdit(b: Broker) {
     setEditBroker(b)
-    setEditForm({ status: b.status, support_routing: b.support_routing, allocated_seats: String(b.allocated_seats ?? 0) })
+    setEditForm({ status: b.status, support_routing: b.support_routing, allocated_seats: String(b.allocated_seats ?? 0), plan: b.plan ?? 'standard' })
     setEditError('')
   }
 
@@ -177,6 +179,7 @@ export default function Brokers() {
         status: editForm.status,
         support_routing: editForm.support_routing,
         allocated_seats: parseInt(editForm.allocated_seats, 10) || 0,
+        plan: editForm.plan,
       })
       setEditBroker(null)
       fetchBrokers()
@@ -482,6 +485,19 @@ export default function Brokers() {
               {editBroker && (editBroker.seats_used ?? 0) > 0 && (
                 <p className="mt-1 text-xs text-zinc-500">{editBroker.seats_used} seats currently apportioned.</p>
               )}
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-zinc-300 mb-1">Plan</label>
+              <select
+                value={editForm.plan}
+                onChange={(e) => setEditForm({ ...editForm, plan: e.target.value })}
+                className="w-40 bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
+              >
+                <option value="standard">Standard</option>
+                <option value="pro">Pro (off-platform clients)</option>
+              </select>
+              <p className="mt-1 text-xs text-zinc-500">Pro unlocks the off-platform "External Book" (non-tenant clients).</p>
             </div>
 
             {editForm.status === 'terminated' && (
