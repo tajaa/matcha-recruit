@@ -195,6 +195,12 @@ class IRIncidentResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     resolved_at: Optional[datetime] = None
+    # OSHA recordability + WC claim depth (wcdeep01) — lets the incident UI
+    # classify a recordable so the broker WC analytics populate.
+    osha_recordable: Optional[bool] = None
+    wc_claim_type: Optional[str] = None
+    post_termination: Optional[bool] = None
+    return_to_work_date: Optional[date] = None
 
 
 class IRIncidentListResponse(BaseModel):

@@ -1596,4 +1596,8 @@ def row_to_response(row, document_count: int = 0) -> IRIncidentResponse:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         resolved_at=row["resolved_at"],
+        osha_recordable=row.get("osha_recordable"),
+        wc_claim_type=row.get("wc_claim_type"),
+        post_termination=row.get("post_termination"),
+        return_to_work_date=row.get("return_to_work_date"),
     )

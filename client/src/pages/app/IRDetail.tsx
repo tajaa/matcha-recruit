@@ -35,6 +35,13 @@ const STATUS_OPTIONS = [
   { value: 'closed', label: 'Closed' },
 ]
 
+const WC_CLAIM_TYPE_OPTIONS = [
+  { value: '', label: '— Not classified —' },
+  { value: 'acute', label: 'Acute (single event)' },
+  { value: 'cumulative_trauma', label: 'Cumulative trauma (CT)' },
+  { value: 'unknown', label: 'Unknown' },
+]
+
 type Tab = 'copilot' | 'overview' | 'documents' | 'analysis' | 'interviews'
 
 const FULL_TABS = ['copilot', 'overview', 'documents', 'analysis', 'interviews'] as const
@@ -61,6 +68,12 @@ export default function IRDetail() {
   const [savingEmployees, setSavingEmployees] = useState(false)
   const [initialized, setInitialized] = useState(false)
 
+  // WC classification (wcdeep01) — feeds the broker WC analytics.
+  const [wcClaimType, setWcClaimType] = useState('')
+  const [wcPostTerm, setWcPostTerm] = useState(false)
+  const [wcRtwDate, setWcRtwDate] = useState('')
+  const [savingWc, setSavingWc] = useState(false)
+
   // Persist AI analysis results across tab switches
   const [categorizationResult, setCategorizationResult] = useState<IRCategorizationAnalysis | null>(null)
   const [rootCauseResult, setRootCauseResult] = useState<IRRootCauseAnalysis | null>(null)
@@ -76,6 +89,9 @@ export default function IRDetail() {
     setRootCause(incident.root_cause || '')
     setCorrectiveActions(incident.corrective_actions || '')
     setInvolvedEmpIds(incident.involved_employee_ids || [])
+    setWcClaimType(incident.wc_claim_type || '')
+    setWcPostTerm(incident.post_termination || false)
+    setWcRtwDate(incident.return_to_work_date || '')
     setInitialized(true)
   }
 
@@ -96,6 +112,21 @@ export default function IRDetail() {
     setSavingFields(true)
     try { await updateIncident({ [field]: value } as never) }
     finally { setSavingFields(false) }
+  }
+
+  // WC classification goes through the dedicated OSHA endpoint (not the generic
+  // incident update). Keeps osha_recordable true while typing the claim.
+  async function saveWcClassification() {
+    setSavingWc(true)
+    try {
+      await api.put(`/ir/incidents/${incidentId}/osha`, {
+        osha_recordable: true,
+        wc_claim_type: wcClaimType || undefined,
+        post_termination: wcPostTerm,
+        return_to_work_date: wcRtwDate || undefined,
+      })
+      await refetch()
+    } finally { setSavingWc(false) }
   }
 
   async function handleDelete() {
@@ -273,6 +304,49 @@ export default function IRDetail() {
                     </Button>
                   )}
                 </div>
+
+                {/* WC Classification — only for OSHA-recordable injuries; feeds broker WC analytics. */}
+                {incident.osha_recordable && (
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+                    <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1">WC Classification</h3>
+                    <p className="text-[11px] text-zinc-600 mb-3">
+                      Feeds your broker&rsquo;s Workers&rsquo; Comp analytics &mdash; claim mix, post-termination, and return-to-work.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-medium uppercase tracking-wide text-zinc-500 mb-1.5">Claim type</label>
+                        <Select label="" options={WC_CLAIM_TYPE_OPTIONS} value={wcClaimType} onChange={(e) => setWcClaimType(e.target.value)} />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium uppercase tracking-wide text-zinc-500 mb-1.5">Return to work</label>
+                        <input
+                          type="date"
+                          value={wcRtwDate}
+                          onChange={(e) => setWcRtwDate(e.target.value)}
+                          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-zinc-200 px-3 py-2 focus:outline-none focus:border-zinc-600"
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <label className="inline-flex items-center gap-2 text-sm text-zinc-300 pb-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={wcPostTerm}
+                            onChange={(e) => setWcPostTerm(e.target.checked)}
+                            className="h-4 w-4 rounded border-zinc-700 bg-zinc-900"
+                          />
+                          Post-termination claim
+                        </label>
+                      </div>
+                    </div>
+                    {((wcClaimType || '') !== (incident.wc_claim_type || '') ||
+                      wcPostTerm !== (incident.post_termination || false) ||
+                      (wcRtwDate || '') !== (incident.return_to_work_date || '')) && (
+                      <Button size="sm" className="mt-3" disabled={savingWc} onClick={saveWcClassification}>
+                        {savingWc ? 'Saving...' : 'Save classification'}
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

@@ -47,6 +47,11 @@ export type IRIncident = {
   location_id: string | null
   created_at: string
   updated_at: string
+  // OSHA recordability + WC claim depth (wcdeep01). Populated by single GET.
+  osha_recordable?: boolean | null
+  wc_claim_type?: 'acute' | 'cumulative_trauma' | 'unknown' | null
+  post_termination?: boolean | null
+  return_to_work_date?: string | null
 }
 
 // The submit form is now slim — only the fields the reporter actually
