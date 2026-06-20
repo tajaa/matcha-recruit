@@ -38,5 +38,7 @@ fi
 echo "Connecting as: $(echo "$DEV_DATABASE_URL" | sed 's|://[^:]*:[^@]*@|://***:***@|')"
 echo "Running Alembic upgrade on dev..."
 cd "$REPO_ROOT/server"
-DATABASE_URL="$DEV_DATABASE_URL" ./venv/bin/alembic upgrade head
+# `heads` (plural): the history has two permanent branch heads — the matcha
+# line and the cappe line (no branch labels), so `upgrade head` is ambiguous.
+DATABASE_URL="$DEV_DATABASE_URL" ./venv/bin/alembic upgrade heads
 echo "Done."

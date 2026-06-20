@@ -56,5 +56,7 @@ fi
 
 echo "Running Alembic upgrade on prod..."
 cd "$REPO_ROOT/server"
-DATABASE_URL="$URL" ./venv/bin/alembic upgrade head
+# `heads` (plural): two permanent branch heads (matcha + cappe, no branch
+# labels) make `upgrade head` ambiguous.
+DATABASE_URL="$URL" ./venv/bin/alembic upgrade heads
 echo "Done."
