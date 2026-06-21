@@ -22,8 +22,7 @@ def audit_dates(last_audit_date: Optional[date], cadence_days: int) -> tuple[Opt
     if not last_audit_date:
         return None, True  # never audited → overdue
     nxt = last_audit_date + timedelta(days=cadence_days or 365)
-    from datetime import datetime
-    return nxt, nxt < datetime.utcnow().date()
+    return nxt, nxt < date.today()
 
 
 # --- pay transparency ------------------------------------------------------

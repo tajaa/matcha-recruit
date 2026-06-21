@@ -37,6 +37,9 @@ FACTORS: list[dict[str, Any]] = [
     {"key": "dei_posture",            "label": "DEI policy & posture",         "weight": 9,  "kind": "attested"},
 ]
 ATTESTED_KEYS = {f["key"] for f in FACTORS if f["kind"] == "attested"}
+# Attested factors that flip to DERIVED on the tenant path when the business
+# tracks them via the Workforce Compliance feature (see compute_epl_readiness).
+BUSINESS_DERIVABLE = {"pay_transparency", "ai_hiring_audit", "biometrics_bipa"}
 ATTESTATION_STATUSES = ("in_place", "partial", "gap", "unknown")
 _ATTEST_SCORE = {"in_place": 100, "partial": 50, "gap": 0, "unknown": 0}
 
@@ -318,7 +321,7 @@ def assess_from_statuses(statuses: dict) -> dict:
         factors.append({
             "key": f["key"],
             "label": f["label"],
-            "kind": f["kind"],
+            "kind": "attested",  # off-platform: every factor is broker-attested
             "weight": f["weight"],
             "score": sub,
             "status": _factor_band(sub),
