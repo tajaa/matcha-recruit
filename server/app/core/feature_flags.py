@@ -76,6 +76,14 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # TIER_REQUIRED overlay, so it never leaks to personal Werk (which shares
     # signup_source='bespoke' with is_personal=true).
     "labor_relations": False,
+    # Workforce Compliance — business-first employment-practices risk trackers:
+    # pay-transparency (per-state posting compliance), AI hiring-tool bias-audit
+    # register (cadence/overdue), and biometric/BIPA consent inventory. Each is a
+    # legal obligation the business tracks for itself; together they flip the
+    # corresponding broker EPL factors from attested → derived. Gates the
+    # /workforce-compliance router + the /app/workforce-compliance surface.
+    # Default off; admin-toggle per company. NOT in any tier overlay.
+    "workforce_compliance": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,

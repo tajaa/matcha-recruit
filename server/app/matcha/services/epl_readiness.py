@@ -236,42 +236,53 @@ async def compute_epl_readiness(conn, company_id: UUID) -> dict:
     derived = await _derived_scores(conn, company_id, features)
     attestations = await get_attestations(conn, company_id)
 
+    # Workforce-Compliance flip: when the BUSINESS tracks these directly (feature
+    # on + data declared), the 3 normally-attested factors derive from that data.
+    # A None result falls back to the broker attestation (today's behavior).
+    wf_derived: dict = {}
+    if features.get("workforce_compliance"):
+        from . import workforce_compliance as wf
+        for key, fn in (
+            ("pay_transparency", wf.derive_pay_transparency),
+            ("ai_hiring_audit", wf.derive_ai_audit),
+            ("biometrics_bipa", wf.derive_biometric),
+        ):
+            res = await fn(conn, company_id)
+            if res is not None:
+                wf_derived[key] = res  # (score, detail)
+
     factors: list[dict] = []
     composite = 0.0
-    derived_total = 0.0
-    attested_total = 0.0
+    derived_total = attested_total = 0.0
+    derived_max = attested_max = 0.0
     for f in FACTORS:
+        key = f["key"]
         if f["kind"] == "derived":
-            sub = derived[f["key"]]["score"]
-            detail = derived[f["key"]]["detail"]
-            att = None
+            sub, detail, att, actual = derived[key]["score"], derived[key]["detail"], None, "derived"
+        elif key in wf_derived:
+            sub, detail, att, actual = wf_derived[key][0], wf_derived[key][1], None, "derived"
         else:
-            a = attestations.get(f["key"])
+            a = attestations.get(key)
             status = a["status"] if a else "unknown"
             sub = _ATTEST_SCORE.get(status, 0)
             detail = {
-                "in_place": "Attested: in place",
-                "partial": "Attested: partial",
-                "gap": "Attested: gap",
-                "unknown": "Not yet reviewed",
+                "in_place": "Attested: in place", "partial": "Attested: partial",
+                "gap": "Attested: gap", "unknown": "Not yet reviewed",
             }[status]
-            att = a or {"item_key": f["key"], "status": "unknown", "note": None, "updated_at": None}
+            att = a or {"item_key": key, "status": "unknown", "note": None, "updated_at": None}
+            actual = "attested"
         contribution = f["weight"] * sub / 100.0
         composite += contribution
-        if f["kind"] == "derived":
+        if actual == "derived":
             derived_total += contribution
+            derived_max += f["weight"]
         else:
             attested_total += contribution
+            attested_max += f["weight"]
         factors.append({
-            "key": f["key"],
-            "label": f["label"],
-            "kind": f["kind"],
-            "weight": f["weight"],
-            "score": sub,
-            "status": _factor_band(sub),
-            "contribution": round(contribution, 1),
-            "detail": detail,
-            "attestation": att,
+            "key": key, "label": f["label"], "kind": actual, "weight": f["weight"],
+            "score": sub, "status": _factor_band(sub), "contribution": round(contribution, 1),
+            "detail": detail, "attestation": att,
         })
 
     score = round(composite)
@@ -281,6 +292,8 @@ async def compute_epl_readiness(conn, company_id: UUID) -> dict:
         "band": readiness_band(score),
         "derived_score": round(derived_total),
         "attested_score": round(attested_total),
+        "derived_max": round(derived_max),
+        "attested_max": round(attested_max),
         "factors": factors,
     }
 
@@ -313,7 +326,9 @@ def assess_from_statuses(statuses: dict) -> dict:
             "attest_status": status,
         })
     score = round(composite)
-    return {"score": score, "band": readiness_band(score), "factors": factors}
+    # Off-platform = fully attested → no derived portion.
+    return {"score": score, "band": readiness_band(score),
+            "derived_max": 0, "attested_max": 100, "factors": factors}
 
 
 def top_gap(assessment: dict) -> Optional[dict]:

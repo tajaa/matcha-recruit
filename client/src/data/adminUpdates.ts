@@ -22,6 +22,30 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'workforce-compliance',
+    date: '2026-06-20',
+    category: 'Compliance',
+    title: 'Workforce Compliance — pay transparency · AI-audit · biometric (also feeds broker EPL)',
+    summary:
+      'New business-facing feature tracking three employment-practices compliance obligations: per-state pay-transparency posting compliance, an AI hiring-tool bias-audit register, and a biometric/BIPA consent inventory. Each is a legal obligation the business must meet anyway (so it’s genuinely useful to the tenant), and — for companies served by a broker — it flips the matching broker EPL-readiness factors from broker-attested to data-derived automatically.',
+    whatsNew: [
+      'New "Workforce Compliance" page under the Compliance group with 3 sections.',
+      'Pay transparency: lists the states in the company’s footprint that require salary ranges in postings; mark each compliant.',
+      'AI hiring-tool audits: register each automated hiring tool + its last bias-audit date; overdue flags by cadence (NYC LL144 / IL / CO require regular audits).',
+      'Biometric/BIPA consent: inventory each collection point (time clocks, access control) + whether written consent is on file ($1–5k statutory damages per violation).',
+      'Broker tie-in: when a client has this on, the broker’s EPL detail shows pay-transparency / AI-audit / biometric factors as "derived" (from the real data) instead of broker yes/no, and the derived/attested split shifts accordingly.',
+    ],
+    howToUse: [
+      'Admin → Business Features → turn on "Workforce Compliance" for a company.',
+      'That company → Compliance → Workforce Compliance → set pay-transparency states, register AI tools, log biometric points.',
+    ],
+    setup: [
+      'DB: migration wfcomp01 (hiring_ai_audits, biometric_consent_points, pay_transparency_status) is applied on dev; apply to prod with ./scripts/migrate-prod.sh.',
+      'Pay-transparency states are a built-in static list (CA, CO, WA, NY, IL, …) — extend in services/workforce_compliance.py as laws change.',
+    ],
+    tag: 'action-needed',
+  },
+  {
     id: 'broker-submission-packet',
     date: '2026-06-20',
     category: 'Broker',

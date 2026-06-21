@@ -910,8 +910,8 @@ function EplTab({ companyId }: { companyId: string }) {
               <div className="h-full bg-emerald-500/70" style={{ width: `${data.score}%` }} />
             </div>
             <div className="flex gap-4 mt-2 text-[11px] text-zinc-500">
-              <span>From data <span className="font-mono text-zinc-300">{data.derived_score}</span>/55</span>
-              <span>Attested <span className="font-mono text-zinc-300">{data.attested_score}</span>/45</span>
+              <span>From data <span className="font-mono text-zinc-300">{data.derived_score}</span>/{data.derived_max ?? 55}</span>
+              <span>Attested <span className="font-mono text-zinc-300">{data.attested_score}</span>/{data.attested_max ?? 45}</span>
             </div>
           </div>
         </div>

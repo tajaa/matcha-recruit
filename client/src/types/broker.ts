@@ -476,6 +476,8 @@ export interface EplReadiness {
   band: EplBand
   derived_score: number
   attested_score: number
+  derived_max?: number
+  attested_max?: number
   factors: EplFactor[]
 }
 

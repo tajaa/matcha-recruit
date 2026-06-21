@@ -24,6 +24,7 @@ import AskExpert from '../pages/app/AskExpert'
 import Policies from '../pages/app/Policies'
 import RiskAssessment from '../pages/app/RiskAssessment'
 import CredentialTemplates from '../pages/app/CredentialTemplates'
+import WorkforceCompliance from '../pages/app/WorkforceCompliance'
 import Inbox from '../pages/app/Inbox'
 import UserSettings from '../pages/app/UserSettings'
 import Notifications from '../pages/app/Notifications'
@@ -95,6 +96,7 @@ export default function AppRoutes() {
         <Route path="ask-expert" element={<AskExpert />} />
         <Route path="risk-assessment" element={<FeatureGate feature="risk_assessment" label="Risk Assessment"><RiskAssessment /></FeatureGate>} />
         <Route path="credential-templates" element={<FeatureGate feature="credential_templates" label="Credential Templates"><CredentialTemplates /></FeatureGate>} />
+        <Route path="workforce-compliance" element={<FeatureGate feature="workforce_compliance" label="Workforce Compliance"><WorkforceCompliance /></FeatureGate>} />
         <Route path="resources" element={<AppResources />} />
         <Route path="resources/templates" element={<RequireBusinessAccount><ResourcesTemplates embedded /></RequireBusinessAccount>} />
         <Route path="resources/templates/job-descriptions" element={<ResourcesJobDescriptions embedded />} />

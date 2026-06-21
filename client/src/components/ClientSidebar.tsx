@@ -2,7 +2,7 @@ import {
   LayoutDashboard, Users, Shield, FileText, ClipboardCheck, Scale,
   AlertTriangle, BookOpen, BarChart2, Sparkles, Building2, Accessibility,
   BadgeCheck, MessageSquareWarning, Mail, Bell, Gavel, MapPin, CalendarDays,
-  GraduationCap, TrendingUp, ClipboardList, ShieldAlert, MessagesSquare, Handshake,
+  GraduationCap, TrendingUp, ClipboardList, ShieldAlert, MessagesSquare, Handshake, ShieldCheck,
 } from 'lucide-react'
 import SidebarShell from './SidebarShell'
 import type { NavGroup, NavItem } from './SidebarShell'
@@ -32,6 +32,7 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/resources/handbook-audit', icon: ShieldAlert, label: 'Handbook Audit', feature: 'handbook_audit' },
       { to: '/app/training', icon: GraduationCap, label: 'Training', feature: 'training' },
       { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credentialing', feature: 'credential_templates' },
+      { to: '/app/workforce-compliance', icon: ShieldCheck, label: 'Workforce Compliance', feature: 'workforce_compliance' },
     ],
   },
   {
