@@ -1,6 +1,6 @@
 import { useState, useEffect, type FormEvent, type ChangeEvent, type ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Loader2, AlertCircle, Gauge, Shield, TrendingUp, TrendingDown, Minus, Upload, Link2 as LinkIcon } from 'lucide-react'
+import { ArrowLeft, Loader2, AlertCircle, Gauge, Shield, Upload, Link2 as LinkIcon } from 'lucide-react'
 import { Card } from '../../components/ui'
 import { HelpHint } from '../../components/broker/HelpHint'
 import { SubmissionPanel } from '../../components/broker/SubmissionPanel'

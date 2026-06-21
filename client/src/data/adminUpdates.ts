@@ -33,6 +33,11 @@ export const ADMIN_UPDATES: AdminUpdate[] = [
       'Feeds EPL: a current study (within cadence, gap remediated) scores high; overdue scores low; none falls back to the broker attestation.',
       'API: /workforce-compliance/pay-equity (CRUD); summary now includes pay_equity counts.',
     ],
+    howToUse: [
+      'Admin → Business Features → turn on "Workforce Compliance" for the company.',
+      'That company → Workforce Compliance → "Pay-equity studies" → log study date, scope, adjusted gap %, and remediation.',
+      'A current study (within cadence, gap remediated) auto-flips the broker EPL pay_equity factor from attested → derived.',
+    ],
     setup: [
       'DB: migration payequity01 (pay_equity_reviews) applied on dev; prod via ./scripts/migrate-prod.sh.',
     ],
@@ -70,6 +75,10 @@ export const ADMIN_UPDATES: AdminUpdate[] = [
       'New "Class-code exposures" section on the broker client Workers’ Comp tab — add/remove payroll by NCCI class, with per-class and total estimated manual premium.',
       'Reference class codes seeded (clerical, carpentry, masonry, trucking, home-health, hospital, restaurant, retail, …) flagged source="seed (demo)".',
       'API: GET /broker/wc-class-codes, GET/POST/DELETE /broker/wc-portfolio/{id}/class-exposures.',
+    ],
+    howToUse: [
+      'Broker → a client → Workers’ Comp tab → "Class-code exposures".',
+      'Add payroll/headcount by NCCI class code; per-class and total estimated manual premium (payroll ÷ 100 × rate) show automatically.',
     ],
     setup: [
       'DB: migration wcclass01 (wc_class_codes, company_wc_class_exposures) applied on dev; prod via ./scripts/migrate-prod.sh.',
