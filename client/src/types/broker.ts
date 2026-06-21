@@ -361,6 +361,26 @@ export interface WcMod {
   created_at: string | null
 }
 
+export interface WcClassCode {
+  state: string
+  class_code: string
+  description: string
+  base_rate: number | null
+  source: string
+}
+
+export interface WcClassExposure {
+  id: string
+  class_code: string
+  state: string
+  description: string | null
+  payroll: number | null
+  headcount: number | null
+  base_rate: number | null
+  est_manual_premium: number | null
+  note: string | null
+}
+
 export interface WcPortfolioRow {
   company_id: string
   company_name: string

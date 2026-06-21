@@ -22,6 +22,24 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'wc-class-codes',
+    date: '2026-06-20',
+    category: 'Broker',
+    title: 'Workers’-Comp class-code exposures',
+    summary:
+      'Class-level WC underwriting (WTW p.32–33). Brokers can record a client’s payroll/headcount by NCCI class code; each class is matched to a reference rate and an estimated manual premium (payroll ÷ 100 × rate) is shown. Reference rates are an illustrative seed pending a licensed NCCI feed.',
+    whatsNew: [
+      'New "Class-code exposures" section on the broker client Workers’ Comp tab — add/remove payroll by NCCI class, with per-class and total estimated manual premium.',
+      'Reference class codes seeded (clerical, carpentry, masonry, trucking, home-health, hospital, restaurant, retail, …) flagged source="seed (demo)".',
+      'API: GET /broker/wc-class-codes, GET/POST/DELETE /broker/wc-portfolio/{id}/class-exposures.',
+    ],
+    setup: [
+      'DB: migration wcclass01 (wc_class_codes, company_wc_class_exposures) applied on dev; prod via ./scripts/migrate-prod.sh.',
+      'Replace the seeded reference rates with a licensed NCCI/state-bureau feed when available.',
+    ],
+    tag: 'new',
+  },
+  {
     id: 'composite-risk-index',
     date: '2026-06-20',
     category: 'Broker',

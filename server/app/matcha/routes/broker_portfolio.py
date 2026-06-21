@@ -52,6 +52,15 @@ class EplAttestationUpdate(BaseModel):
     note: Optional[str] = None
 
 
+class WcClassExposureCreate(BaseModel):
+    """Broker-recorded WC class-code exposure for a client (payroll/headcount)."""
+    class_code: str = Field(..., min_length=1, max_length=8)
+    state: str = Field(default="US", min_length=2, max_length=2)
+    payroll: Optional[float] = Field(default=None, ge=0)
+    headcount: Optional[int] = Field(default=None, ge=0)
+    note: Optional[str] = None
+
+
 async def _broker_clients(conn, user_id) -> tuple[UUID, dict]:
     """Resolve the broker_id + active client companies for the caller.
 
@@ -275,6 +284,54 @@ async def get_wc_state_rates(current_user=Depends(require_broker)):
     async with get_connection() as conn:
         rates = await wc_depth.list_state_rates(conn)
     return {"rates": rates}
+
+
+@router.get("/wc-class-codes")
+async def get_wc_class_codes(current_user=Depends(require_broker)):
+    """Reference NCCI class codes (illustrative seed pending a licensed feed)."""
+    async with get_connection() as conn:
+        return {"class_codes": await wc_depth.list_class_codes(conn)}
+
+
+@router.get("/wc-portfolio/{company_id}/class-exposures")
+async def list_class_exposures(company_id: UUID, current_user=Depends(require_broker)):
+    """A client's WC class-code exposures + estimated manual premium per class."""
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        return {"exposures": await wc_depth.class_exposures(conn, company_id)}
+
+
+@router.post("/wc-portfolio/{company_id}/class-exposures")
+async def record_class_exposure(company_id: UUID, body: WcClassExposureCreate,
+                                current_user=Depends(require_broker)):
+    """Record a client's payroll/headcount for one WC class code."""
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        broker_id, _ = await _broker_clients(conn, current_user.id)
+        await conn.execute(
+            """
+            INSERT INTO company_wc_class_exposures
+                (company_id, broker_id, class_code, state, payroll, headcount, note, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            """,
+            company_id, broker_id, body.class_code.strip(), body.state.upper(),
+            body.payroll, body.headcount, body.note, current_user.id,
+        )
+        return {"exposures": await wc_depth.class_exposures(conn, company_id)}
+
+
+@router.delete("/wc-portfolio/{company_id}/class-exposures/{exposure_id}")
+async def delete_class_exposure(company_id: UUID, exposure_id: UUID,
+                                current_user=Depends(require_broker)):
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        result = await conn.execute(
+            "DELETE FROM company_wc_class_exposures WHERE id = $1 AND company_id = $2",
+            exposure_id, company_id,
+        )
+    if result.split()[-1] == "0":
+        raise HTTPException(status_code=404, detail="Class exposure not found")
+    return {"status": "deleted"}
 
 
 # ---------------------------------------------------------------------------

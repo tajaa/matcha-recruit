@@ -15,6 +15,8 @@ import type {
   WcClientDetailResponse,
   WcMod,
   WcStateRate,
+  WcClassCode,
+  WcClassExposure,
   EplPortfolioResponse,
   EplReadiness,
   EplAttestationStatus,
@@ -65,6 +67,23 @@ export function deleteWcMod(companyId: string, modId: string) {
 
 export function fetchWcStateRates() {
   return api.get<{ rates: WcStateRate[] }>('/broker/wc-state-rates')
+}
+
+// --- WC class codes (wcclass01) ---
+
+export function fetchWcClassCodes() {
+  return api.get<{ class_codes: WcClassCode[] }>('/broker/wc-class-codes')
+}
+export function fetchWcClassExposures(companyId: string) {
+  return api.get<{ exposures: WcClassExposure[] }>(`/broker/wc-portfolio/${companyId}/class-exposures`)
+}
+export function recordWcClassExposure(companyId: string, payload: {
+  class_code: string; state?: string; payroll?: number | null; headcount?: number | null; note?: string | null
+}) {
+  return api.post<{ exposures: WcClassExposure[] }>(`/broker/wc-portfolio/${companyId}/class-exposures`, payload)
+}
+export function deleteWcClassExposure(companyId: string, exposureId: string) {
+  return api.delete<{ status: string }>(`/broker/wc-portfolio/${companyId}/class-exposures/${exposureId}`)
 }
 
 // --- EPL readiness ---

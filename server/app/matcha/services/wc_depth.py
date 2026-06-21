@@ -169,3 +169,49 @@ async def latest_mods(conn, company_ids: Iterable[UUID]) -> dict[str, dict]:
         ids,
     )
     return {str(r["company_id"]): _serialize_mod(r) for r in rows}
+
+
+# --- WC class codes (wcclass01) --------------------------------------------
+
+async def list_class_codes(conn) -> list[dict]:
+    """Reference NCCI class codes (illustrative seed pending a licensed feed)."""
+    rows = await conn.fetch(
+        "SELECT state, class_code, description, base_rate, source FROM wc_class_codes ORDER BY class_code"
+    )
+    return [{
+        "state": r["state"], "class_code": r["class_code"], "description": r["description"],
+        "base_rate": float(r["base_rate"]) if r["base_rate"] is not None else None,
+        "source": r["source"],
+    } for r in rows]
+
+
+async def class_exposures(conn, company_id: UUID) -> list[dict]:
+    """A client's class-code exposures, joined to the best-matching reference rate
+    (state-specific if present, else the national 'US' row) + an estimated manual
+    premium (payroll / 100 × rate)."""
+    rows = await conn.fetch(
+        """
+        SELECT e.id, e.class_code, e.state, e.payroll, e.headcount, e.note, e.created_at,
+               c.description, c.base_rate
+        FROM company_wc_class_exposures e
+        LEFT JOIN LATERAL (
+            SELECT description, base_rate FROM wc_class_codes wc
+            WHERE wc.class_code = e.class_code AND wc.state IN (e.state, 'US')
+            ORDER BY (wc.state = e.state) DESC LIMIT 1
+        ) c ON true
+        WHERE e.company_id = $1
+        ORDER BY e.payroll DESC NULLS LAST, e.class_code
+        """,
+        company_id,
+    )
+    out: list[dict] = []
+    for r in rows:
+        payroll = float(r["payroll"]) if r["payroll"] is not None else None
+        rate = float(r["base_rate"]) if r["base_rate"] is not None else None
+        est = round(payroll / 100 * rate) if (payroll and rate) else None
+        out.append({
+            "id": str(r["id"]), "class_code": r["class_code"], "state": r["state"],
+            "description": r["description"], "payroll": payroll, "headcount": r["headcount"],
+            "base_rate": rate, "est_manual_premium": est, "note": r["note"],
+        })
+    return out

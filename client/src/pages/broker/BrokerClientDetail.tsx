@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, MapPin, FileText, Shield, AlertTriangle,
   Clock, Building2, Users, Loader2, AlertCircle,
-  TrendingUp, TrendingDown, Minus, Plus, Trash2, Gauge, HeartPulse,
+  TrendingUp, TrendingDown, Minus, Plus, Trash2, Gauge, HeartPulse, Boxes,
 } from 'lucide-react'
 import { Card } from '../../components/ui'
 import { StatCard } from '../../components/dashboard'
@@ -11,11 +11,13 @@ import {
   fetchBrokerClientDetail, fetchWcClientDetail, recordWcMod, deleteWcMod,
   fetchEplClientDetail, recordEplAttestation,
   downloadTenantSubmission, fetchTenantCoverageGap,
+  fetchWcClassCodes, fetchWcClassExposures, recordWcClassExposure, deleteWcClassExposure,
 } from '../../api/broker'
 import { SubmissionPanel } from '../../components/broker/SubmissionPanel'
 import type {
   BrokerClientDetailResponse, WcClientDetailResponse,
   EplReadiness, EplFactor, EplAttestationStatus,
+  WcClassCode, WcClassExposure,
 } from '../../types/broker'
 
 const riskColors: Record<string, string> = {
@@ -793,7 +795,115 @@ function WcTab({ companyId }: { companyId: string }) {
           </div>
         )}
       </Card>
+
+      {/* WC class-code exposures (wcclass01) */}
+      <WcClassExposures companyId={companyId} />
     </div>
+  )
+}
+
+function WcClassExposures({ companyId }: { companyId: string }) {
+  const [exposures, setExposures] = useState<WcClassExposure[]>([])
+  const [codes, setCodes] = useState<WcClassCode[]>([])
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState({ class_code: '', state: '', payroll: '', headcount: '', note: '' })
+  const [saving, setSaving] = useState(false)
+  const inputCls = 'w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500'
+
+  const load = () => { fetchWcClassExposures(companyId).then((r) => setExposures(r.exposures)).catch(() => {}) }
+  useEffect(() => {
+    load()
+    fetchWcClassCodes().then((r) => setCodes(r.class_codes)).catch(() => {})
+  }, [companyId])
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!form.class_code) return
+    setSaving(true)
+    try {
+      const r = await recordWcClassExposure(companyId, {
+        class_code: form.class_code, state: form.state || undefined,
+        payroll: form.payroll ? parseFloat(form.payroll) : undefined,
+        headcount: form.headcount ? parseInt(form.headcount, 10) : undefined,
+        note: form.note || undefined,
+      })
+      setExposures(r.exposures)
+      setForm({ class_code: '', state: '', payroll: '', headcount: '', note: '' }); setShowForm(false)
+    } catch { /* leave as-is */ } finally { setSaving(false) }
+  }
+  const remove = async (id: string) => { try { await deleteWcClassExposure(companyId, id); load() } catch { /* noop */ } }
+
+  const totalPremium = exposures.reduce((s, e) => s + (e.est_manual_premium ?? 0), 0)
+
+  return (
+    <Card className="p-5">
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <Boxes className="h-4 w-4 text-zinc-500" />
+          <h3 className="text-sm font-medium text-zinc-200 tracking-wide">Class-code exposures</h3>
+        </div>
+        <button onClick={() => setShowForm((v) => !v)} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500 transition-colors">
+          <Plus className="h-3.5 w-3.5" /> Add class
+        </button>
+      </div>
+      <p className="text-[11px] text-zinc-500 mb-3">Payroll by NCCI class drives class-level underwriting. Rates are an illustrative reference seed (pending a licensed NCCI feed); estimated manual premium = payroll ÷ 100 × rate.</p>
+
+      {showForm && (
+        <form onSubmit={submit} className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800">
+          <div className="md:col-span-2">
+            <label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Class code</label>
+            <select value={form.class_code} onChange={(e) => setForm({ ...form, class_code: e.target.value })} className={inputCls}>
+              <option value="">Select…</option>
+              {codes.map((c) => <option key={c.class_code} value={c.class_code}>{c.class_code} — {c.description}</option>)}
+            </select>
+          </div>
+          <div><label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">State</label><input maxLength={2} placeholder="US" value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value.toUpperCase() })} className={inputCls} /></div>
+          <div><label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Payroll</label><input type="number" step="1000" placeholder="$" value={form.payroll} onChange={(e) => setForm({ ...form, payroll: e.target.value })} className={inputCls} /></div>
+          <div><label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Headcount</label><input type="number" placeholder="optional" value={form.headcount} onChange={(e) => setForm({ ...form, headcount: e.target.value })} className={inputCls} /></div>
+          <div className="md:col-span-5">
+            <button type="submit" disabled={saving} className="bg-zinc-100 text-zinc-900 text-sm font-medium rounded-lg px-4 py-1.5 hover:bg-white disabled:opacity-50 transition-colors">{saving ? 'Saving…' : 'Save'}</button>
+          </div>
+        </form>
+      )}
+
+      {exposures.length === 0 ? (
+        <p className="text-sm text-zinc-500">No class-code exposures recorded. Add the client's payroll by NCCI class for class-level underwriting detail.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-zinc-800/60">
+                <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Class</th>
+                <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">State</th>
+                <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">Payroll</th>
+                <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">Rate</th>
+                <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">Est. premium</th>
+                <th className="pb-2 w-8" />
+              </tr>
+            </thead>
+            <tbody>
+              {exposures.map((e) => (
+                <tr key={e.id} className="border-b border-zinc-800/30 last:border-0">
+                  <td className="py-2.5 pr-4 text-zinc-300"><span className="font-mono">{e.class_code}</span>{e.description && <span className="text-xs text-zinc-600 ml-2">{e.description}</span>}</td>
+                  <td className="py-2.5 pr-4 text-zinc-400">{e.state}</td>
+                  <td className="py-2.5 pr-4 text-right text-zinc-400 tabular-nums">{e.payroll != null ? `$${e.payroll.toLocaleString()}` : '—'}</td>
+                  <td className="py-2.5 pr-4 text-right text-zinc-400 tabular-nums">{e.base_rate != null ? e.base_rate.toFixed(2) : '—'}</td>
+                  <td className="py-2.5 pr-4 text-right font-mono text-zinc-200">{e.est_manual_premium != null ? `$${e.est_manual_premium.toLocaleString()}` : '—'}</td>
+                  <td className="py-2.5 text-right"><button onClick={() => remove(e.id)} className="text-zinc-600 hover:text-red-400 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button></td>
+                </tr>
+              ))}
+              {totalPremium > 0 && (
+                <tr className="border-t border-zinc-700/60">
+                  <td className="py-2.5 pr-4 text-zinc-500 text-xs uppercase tracking-wider" colSpan={4}>Estimated manual premium</td>
+                  <td className="py-2.5 pr-4 text-right font-mono text-zinc-100">${totalPremium.toLocaleString()}</td>
+                  <td />
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
   )
 }
 
