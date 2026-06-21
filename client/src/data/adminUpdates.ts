@@ -22,6 +22,50 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'broker-offplatform-automation',
+    date: '2026-06-20',
+    category: 'Broker',
+    title: 'Off-platform automation — loss-run PDF parse + client-intake link',
+    summary:
+      'Removes the data-entry tax for off-platform (Broker Pro) clients. Upload a carrier loss-run PDF and Gemini extracts the WC figures into a draft to review; or send the prospect a shareable link to self-complete the EPL questionnaire — no account. Both feed the same WC + EPL + risk-index engines.',
+    whatsNew: [
+      'Loss-run PDF auto-parse: "Parse loss-run PDF" on an external client → Gemini reads the PDF → prefills the WC editor for review (never auto-saves; low-confidence parses flag a warning).',
+      'Client-intake link: "Generate intake link" → shareable public URL; the prospect rates the 10 EPL factors in ~2 min; answers save (attributed to the broker) and rescore automatically. Link locks once completed or after 14 days.',
+      'API: POST /broker/external-clients/{id}/loss-run (PDF) + /intake-link; public GET/POST /external-intake/{token}.',
+    ],
+    howToUse: [
+      'Broker → External Book → a client → "Parse loss-run PDF" (upload the carrier PDF) → review the prefilled fields → Save.',
+      'Or click "Generate intake link" → copy → send to the prospect; their answers populate the EPL score when they submit.',
+    ],
+    setup: [
+      'DB: migration extintake01 (broker_external_intake_tokens) applied on dev; prod via ./scripts/migrate-prod.sh.',
+      'Requires the Broker Pro plan (brokers.plan=\'pro\') — same gate as the rest of the External Book.',
+    ],
+    tag: 'new',
+  },
+  {
+    id: 'wc-rate-feed-import',
+    date: '2026-06-20',
+    category: 'Broker',
+    title: 'WC rate data — admin NCCI/state-bureau CSV import',
+    summary:
+      'Admin pipeline to load a licensed NCCI or public state-bureau WC rate feed via CSV, replacing the illustrative demo seed the broker Workers’-Comp surfaces read. The rate data is licensed/external (not buildable) — this is the ingestion that consumes it. Real public 2026 state loss-cost filings are pre-loaded for the demo book.',
+    whatsNew: [
+      'New Admin → Compliance Data → "WC Rate Data" page: upload state loss-cost CSV + class-code CSV, with templates, per-source row counts (seed vs import), and per-row error reporting.',
+      'Idempotent upsert (state+effective-date / state+class-code), source-labeled so public + licensed rows coexist.',
+      'Pre-loaded real public 2026 filings for 10 states (CA, IL, NV, FL, CT, NH, WV, GA, TN + national) via server/scripts/seed_wc_state_rates_public.sql.',
+      'API: /admin/wc-rates/state-rates, /class-codes (CSV), /summary, /template/{kind}.',
+    ],
+    howToUse: [
+      'Admin → WC Rate Data → download a CSV template → fill from a purchased NCCI feed or a public state filing → upload.',
+      'The broker WC tab + NCCI overlay immediately read the imported rates (latest effective date per state wins).',
+    ],
+    setup: [
+      'No migration (reuses wc_state_rates / wc_class_codes). Licensed NCCI manual data must be purchased + uploaded; public state loss-cost % filings are free to load.',
+    ],
+    tag: 'new',
+  },
+  {
     id: 'pay-equity-tracker',
     date: '2026-06-20',
     category: 'Compliance',
@@ -98,6 +142,7 @@ export const ADMIN_UPDATES: AdminUpdate[] = [
       'Broker API: GET /broker/risk-index (rollup) + /broker/risk-index/{id} (per client with component breakdown).',
       'Client-facing "Risk Profile" page (gated by the new risk_profile flag): the business’s own index, the 3 component bars, and a "how to improve your terms" fix list.',
       'Index = WC (wt 40, from severity band + experience mod) + EPL readiness (wt 35) + compliance coverage (wt 25); components with no data drop out and weights renormalize.',
+      'Also scores off-platform (Broker Pro) clients (WC + EPL only) — a "Risk" column on the External Book + an index chip on each external client.',
     ],
     howToUse: [
       'Broker: open the dashboard — the Risk index strip sits under EPL readiness.',
