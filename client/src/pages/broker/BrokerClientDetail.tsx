@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, MapPin, FileText, Shield, AlertTriangle,
   Clock, Building2, Users, Loader2, AlertCircle,
-  TrendingUp, TrendingDown, Minus, Plus, Trash2, Gauge, HeartPulse, Boxes,
+  TrendingUp, TrendingDown, Minus, Plus, Trash2, Gauge, HeartPulse, Boxes, Sparkles,
 } from 'lucide-react'
 import { Card } from '../../components/ui'
 import { StatCard } from '../../components/dashboard'
@@ -12,6 +12,7 @@ import {
   fetchEplClientDetail, recordEplAttestation,
   downloadTenantSubmission, fetchTenantCoverageGap,
   fetchWcClassCodes, fetchWcClassExposures, recordWcClassExposure, deleteWcClassExposure,
+  autoMapClassExposures, type ClassAutoMap,
 } from '../../api/broker'
 import { SubmissionPanel } from '../../components/broker/SubmissionPanel'
 import type {
@@ -808,6 +809,9 @@ function WcClassExposures({ companyId }: { companyId: string }) {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ class_code: '', state: '', payroll: '', headcount: '', note: '' })
   const [saving, setSaving] = useState(false)
+  const [autoProps, setAutoProps] = useState<ClassAutoMap | null>(null)
+  const [autoBusy, setAutoBusy] = useState(false)
+  const [savingAll, setSavingAll] = useState(false)
   const inputCls = 'w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500'
 
   const load = () => { fetchWcClassExposures(companyId).then((r) => setExposures(r.exposures)).catch(() => {}) }
@@ -833,6 +837,21 @@ function WcClassExposures({ companyId }: { companyId: string }) {
   }
   const remove = async (id: string) => { try { await deleteWcClassExposure(companyId, id); load() } catch { /* noop */ } }
 
+  const runAutoMap = async () => {
+    setAutoBusy(true); setAutoProps(null)
+    try { setAutoProps(await autoMapClassExposures(companyId)) } catch { /* noop */ } finally { setAutoBusy(false) }
+  }
+  const saveAll = async () => {
+    if (!autoProps?.proposed.length) return
+    setSavingAll(true)
+    try {
+      for (const p of autoProps.proposed) {
+        await recordWcClassExposure(companyId, { class_code: p.class_code, state: p.state, payroll: p.payroll, headcount: p.headcount })
+      }
+      setAutoProps(null); load()
+    } catch { /* leave */ } finally { setSavingAll(false) }
+  }
+
   const totalPremium = exposures.reduce((s, e) => s + (e.est_manual_premium ?? 0), 0)
 
   return (
@@ -842,11 +861,41 @@ function WcClassExposures({ companyId }: { companyId: string }) {
           <Boxes className="h-4 w-4 text-zinc-500" />
           <h3 className="text-sm font-medium text-zinc-200 tracking-wide">Class-code exposures</h3>
         </div>
-        <button onClick={() => setShowForm((v) => !v)} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500 transition-colors">
-          <Plus className="h-3.5 w-3.5" /> Add class
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={runAutoMap} disabled={autoBusy} className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 px-2 py-1 rounded-lg border border-emerald-900/60 hover:border-emerald-700 transition-colors disabled:opacity-50">
+            <Sparkles className="h-3.5 w-3.5" /> {autoBusy ? 'Mapping…' : 'Auto-map from employees'}
+          </button>
+          <button onClick={() => setShowForm((v) => !v)} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500 transition-colors">
+            <Plus className="h-3.5 w-3.5" /> Add class
+          </button>
+        </div>
       </div>
       <p className="text-[11px] text-zinc-500 mb-3">Payroll by NCCI class drives class-level underwriting. Rates are an illustrative reference seed (pending a licensed NCCI feed); estimated manual premium = payroll ÷ 100 × rate.</p>
+
+      {autoProps && (
+        <div className="mb-4 p-3 rounded-xl bg-emerald-950/20 border border-emerald-900/40">
+          {autoProps.proposed.length === 0 ? (
+            <p className="text-xs text-zinc-400">{autoProps.employee_count === 0 ? 'No employees on file to map.' : 'Could not map any titles to class codes — add manually.'}</p>
+          ) : (
+            <>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] text-emerald-400 font-medium">AI mapped {autoProps.employee_count} employees → {autoProps.proposed.length} class code(s). Review &amp; save.</span>
+                <button onClick={saveAll} disabled={savingAll} className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg px-3 py-1 disabled:opacity-50">{savingAll ? 'Saving…' : 'Save all'}</button>
+              </div>
+              <div className="space-y-1">
+                {autoProps.proposed.map((p) => (
+                  <div key={p.class_code} className="flex items-center gap-3 text-xs py-1 border-b border-zinc-800/30 last:border-0">
+                    <span className="font-mono text-zinc-200">{p.class_code}</span>
+                    <span className="text-zinc-400 flex-1 truncate">{p.description}</span>
+                    <span className="text-zinc-500">{p.headcount} ppl · ${p.payroll.toLocaleString()}</span>
+                  </div>
+                ))}
+                {autoProps.unmapped.length > 0 && <p className="text-[11px] text-amber-400/80 mt-1">{autoProps.unmapped.length} title(s) unmapped — add manually if needed.</p>}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {showForm && (
         <form onSubmit={submit} className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800">

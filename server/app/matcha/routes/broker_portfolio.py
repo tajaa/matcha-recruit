@@ -23,6 +23,7 @@ from ..services import benefits_eligibility as be
 from ..services import wc_depth
 from ..services import epl_readiness
 from ..services import risk_index
+from ..services import wc_classmap
 from ..models.broker_action_center import MilestonesResponse, OutreachResponse
 
 logger = logging.getLogger(__name__)
@@ -318,6 +319,15 @@ async def record_class_exposure(company_id: UUID, body: WcClassExposureCreate,
             body.payroll, body.headcount, body.note, current_user.id,
         )
         return {"exposures": await wc_depth.class_exposures(conn, company_id)}
+
+
+@router.post("/wc-portfolio/{company_id}/class-exposures/auto")
+async def auto_map_class_exposures(company_id: UUID, current_user=Depends(require_broker)):
+    """Derive proposed class exposures from the client's employees (AI title→class map).
+    Returns proposals only — the broker reviews and saves via the normal create route."""
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        return await wc_classmap.auto_map(conn, company_id)
 
 
 @router.delete("/wc-portfolio/{company_id}/class-exposures/{exposure_id}")

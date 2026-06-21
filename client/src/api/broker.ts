@@ -86,6 +86,15 @@ export function deleteWcClassExposure(companyId: string, exposureId: string) {
   return api.delete<{ status: string }>(`/broker/wc-portfolio/${companyId}/class-exposures/${exposureId}`)
 }
 
+export interface ClassAutoMap {
+  proposed: Array<{ class_code: string; description: string | null; state: string; payroll: number; headcount: number }>
+  unmapped: string[]
+  employee_count: number
+}
+export function autoMapClassExposures(companyId: string) {
+  return api.post<ClassAutoMap>(`/broker/wc-portfolio/${companyId}/class-exposures/auto`, {})
+}
+
 // --- EPL readiness ---
 
 export function fetchEplPortfolio() {
