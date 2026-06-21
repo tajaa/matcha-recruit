@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Optional, Literal
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # Type aliases
@@ -26,6 +26,39 @@ SeverityLevel = Literal["high", "medium", "low"]
 ViolationSeverity = Literal["major", "minor"]
 GuidancePriority = Literal["high", "medium", "low"]
 GuidanceActionType = Literal["run_analysis", "open_tab", "search_evidence", "upload_document"]
+
+
+# ===========================================
+# Tolerant read-path normalization
+# ===========================================
+# `er_cases.category` / `.outcome` are free text in the DB (no CHECK constraint),
+# and legacy rows + the AI categorizer have written values outside the canonical
+# enums (e.g. 'leave', 'termination', 'wage'). Request models stay strict, but
+# RESPONSE models must never 500 the whole list because one row drifted — so we
+# coerce on read: map known aliases, fold anything unrecognized to 'other'.
+
+_CATEGORY_ALIASES = {"wage": "wage_hour"}
+_ALLOWED_CATEGORIES = {"harassment", "discrimination", "safety", "retaliation", "policy_violation", "misconduct", "wage_hour", "other"}
+_ALLOWED_OUTCOMES = {"termination", "disciplinary_action", "retraining", "no_action", "resignation", "other"}
+
+
+class _TolerantCaseFields(BaseModel):
+    """Base for response models that read category/outcome straight from the DB."""
+
+    @field_validator("category", mode="before", check_fields=False)
+    @classmethod
+    def _normalize_category(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        v = _CATEGORY_ALIASES.get(v, v)
+        return v if v in _ALLOWED_CATEGORIES else "other"
+
+    @field_validator("outcome", mode="before", check_fields=False)
+    @classmethod
+    def _normalize_outcome(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        return v if v in _ALLOWED_OUTCOMES else "other"
 
 
 # ===========================================
@@ -53,7 +86,7 @@ class ERCaseUpdate(BaseModel):
     involved_employees: Optional[list[ERInvolvedEmployee]] = None
 
 
-class ERCaseResponse(BaseModel):
+class ERCaseResponse(_TolerantCaseFields):
     """Response model for an ER case."""
     id: UUID
     case_number: str
@@ -383,7 +416,7 @@ class ERCaseScoreBreakdown(BaseModel):
     investigation_pattern_similarity: float
 
 
-class ERSimilarCaseMatch(BaseModel):
+class ERSimilarCaseMatch(_TolerantCaseFields):
     """A single similar case match."""
     case_id: str
     case_number: str
