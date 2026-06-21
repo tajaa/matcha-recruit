@@ -98,6 +98,8 @@ export type BrokerRiskMetricKey =
   | 'claim_free_broken'
   | 'premium_increase'
   | 'behavioral_friction'
+  // qualitative risk-theme alerts use dynamic 'theme:*' keys
+  | (string & {})
 
 export interface BrokerRiskAlert {
   id: string
@@ -110,6 +112,10 @@ export interface BrokerRiskAlert {
   delta_pct: number | null
   message: string
   is_read: boolean
+  // theme alerts only (null for quantitative trend alerts)
+  kind?: string | null
+  suggestion?: string | null
+  location_name?: string | null
   first_alerted_at: string | null
   last_alerted_at: string | null
   resolved_at: string | null

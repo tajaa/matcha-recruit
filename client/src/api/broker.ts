@@ -289,6 +289,10 @@ export function fetchBrokerRiskAlerts(includeResolved = false) {
   )
 }
 
+export function scanBrokerThemeAlerts() {
+  return api.post<{ clients_scanned: number; theme_alerts: number }>('/brokers/risk-alerts/scan-themes', {})
+}
+
 export function markBrokerRiskAlertRead(alertId: string) {
   return api.post<{ status: string }>(`/brokers/risk-alerts/${alertId}/read`, {})
 }

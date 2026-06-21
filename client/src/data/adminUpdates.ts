@@ -22,6 +22,26 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'broker-theme-alerts',
+    date: '2026-06-21',
+    category: 'Broker',
+    title: 'Risk-theme alerts + broker suggestions (Action Center)',
+    summary:
+      'The Action Center Alerts tab now surfaces the qualitative incident themes from each client’s "Themes & People" analysis — e.g. "catastrophic forklift maintenance failures at Sherman Oaks" — each with a prescriptive, broker-voiced suggestion, alongside the existing TRIR/DART/lost-day trend alerts.',
+    whatsNew: [
+      'Theme alerts: high/critical incident hotspots per client (location-attributed) pulled from the IR risk-insights themes over the trailing 90 days.',
+      'Each carries an AI broker-voiced "Suggested:" action (e.g. "Offer materials for retraining staff on proper high-density storage procedures").',
+      'Shown with a ✨ Risk theme tag next to the quantitative trend alerts; deduped, severity-mapped, and auto-resolved when a theme stops recurring.',
+    ],
+    howToUse: [
+      'Broker → Action Center → Alerts. Theme alerts generate when the tab opens (a brief "Scanning risk themes…") and appear with their suggested broker action.',
+    ],
+    setup: [
+      'No migration (reuses broker_risk_alerts + its metadata jsonb). Themes derive from each client’s incident data; generation runs in FastAPI (the alert worker is pool-free) and reuses the 24h risk-insights cache.',
+    ],
+    tag: 'new',
+  },
+  {
     id: 'agentic-derive-upgrades',
     date: '2026-06-21',
     category: 'Broker',

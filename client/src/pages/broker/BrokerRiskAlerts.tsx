@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, Loader2, Check, CheckCircle2 } from 'lucide-react'
-import { fetchBrokerRiskAlerts, markBrokerRiskAlertRead } from '../../api/broker'
+import { AlertTriangle, Loader2, Check, CheckCircle2, Lightbulb, Sparkles } from 'lucide-react'
+import { fetchBrokerRiskAlerts, markBrokerRiskAlertRead, scanBrokerThemeAlerts } from '../../api/broker'
 import TabHeader from '../../components/broker/action-center/TabHeader'
 import type { BrokerRiskAlert, BrokerRiskMetricKey } from '../../types/broker'
+
+const isTheme = (a: BrokerRiskAlert) => a.kind === 'theme' || a.metric_key.startsWith('theme:')
+function metricLabel(a: BrokerRiskAlert): string {
+  if (isTheme(a)) return 'Risk theme'
+  return METRIC_LABEL[a.metric_key] ?? a.metric_key
+}
+function metricCategory(a: BrokerRiskAlert): string | undefined {
+  if (isTheme(a)) return 'Safety theme'
+  return CATEGORY[a.metric_key]
+}
 
 // behavioral_friction intentionally omitted — the Behavioral Friction & Retention
 // Risk section was retired 2026-06-08 (EB-broker feature, low value). Those alerts
@@ -40,6 +50,7 @@ export default function BrokerRiskAlerts() {
   const [loading, setLoading] = useState(true)
   const [includeResolved, setIncludeResolved] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [scanning, setScanning] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -54,6 +65,18 @@ export default function BrokerRiskAlerts() {
       setLoading(false)
     }
   }
+
+  // On mount, (re)generate qualitative risk-theme alerts from the clients' IR
+  // themes (runs in FastAPI), then reload so they appear alongside trend alerts.
+  useEffect(() => {
+    let cancelled = false
+    setScanning(true)
+    scanBrokerThemeAlerts()
+      .catch(() => {})
+      .finally(() => { if (!cancelled) { setScanning(false); load() } })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     load()
@@ -95,15 +118,22 @@ export default function BrokerRiskAlerts() {
           </span>
         ) : null}
         actions={
-          <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={includeResolved}
-              onChange={(e) => setIncludeResolved(e.target.checked)}
-              className="accent-emerald-500"
-            />
-            Show resolved
-          </label>
+          <div className="flex items-center gap-3">
+            {scanning && (
+              <span className="flex items-center gap-1 text-[11px] text-emerald-400/80">
+                <Loader2 className="w-3 h-3 animate-spin" /> Scanning risk themes…
+              </span>
+            )}
+            <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={includeResolved}
+                onChange={(e) => setIncludeResolved(e.target.checked)}
+                className="accent-emerald-500"
+              />
+              Show resolved
+            </label>
+          </div>
         }
       />
 
@@ -144,12 +174,13 @@ export default function BrokerRiskAlerts() {
                       </span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-medium text-zinc-300">
-                            {METRIC_LABEL[a.metric_key] ?? a.metric_key}
+                          <span className="text-xs font-medium text-zinc-300 inline-flex items-center gap-1">
+                            {isTheme(a) && <Sparkles className="w-3 h-3 text-emerald-400" />}
+                            {metricLabel(a)}
                           </span>
-                          {CATEGORY[a.metric_key] && (
+                          {metricCategory(a) && (
                             <span className="px-1.5 py-0.5 rounded bg-white/5 text-[9px] uppercase tracking-wider text-zinc-500">
-                              {CATEGORY[a.metric_key]}
+                              {metricCategory(a)}
                             </span>
                           )}
                           {!a.is_read && !a.resolved_at && (
@@ -157,6 +188,12 @@ export default function BrokerRiskAlerts() {
                           )}
                         </div>
                         <p className="text-sm text-zinc-400 mt-0.5">{a.message}</p>
+                        {a.suggestion && (
+                          <p className="text-[11px] text-emerald-300/90 mt-1 flex items-start gap-1">
+                            <Lightbulb className="w-3 h-3 mt-0.5 shrink-0" />
+                            <span><span className="text-emerald-400 font-medium">Suggested:</span> {a.suggestion}</span>
+                          </p>
+                        )}
                         <p className="text-[11px] text-zinc-600 mt-1">
                           {a.resolved_at ? `Resolved ${fmtDate(a.resolved_at)}` : `Flagged ${fmtDate(a.last_alerted_at)}`}
                         </p>

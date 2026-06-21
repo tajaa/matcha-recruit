@@ -2017,7 +2017,7 @@ async def list_broker_risk_alerts(
             """
             SELECT ra.id, ra.company_id, c.name AS company_name,
                    ra.metric_key, ra.severity, ra.current_value, ra.prior_value,
-                   ra.delta_pct, ra.message, ra.is_read,
+                   ra.delta_pct, ra.message, ra.is_read, ra.metadata,
                    ra.first_alerted_at, ra.last_alerted_at, ra.resolved_at
             FROM broker_risk_alerts ra
             JOIN companies c ON c.id = ra.company_id
@@ -2033,8 +2033,16 @@ async def list_broker_risk_alerts(
             include_resolved,
         )
 
-        alerts = [
-            {
+        alerts = []
+        for r in rows:
+            meta = r["metadata"]
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except Exception:
+                    meta = None
+            meta = meta if isinstance(meta, dict) else {}
+            alerts.append({
                 "id": str(r["id"]),
                 "company_id": str(r["company_id"]),
                 "company_name": r["company_name"],
@@ -2045,14 +2053,29 @@ async def list_broker_risk_alerts(
                 "delta_pct": float(r["delta_pct"]) if r["delta_pct"] is not None else None,
                 "message": r["message"],
                 "is_read": r["is_read"],
+                # theme-alert extras (null for quantitative trend alerts)
+                "kind": meta.get("kind"),
+                "suggestion": meta.get("suggestion"),
+                "location_name": meta.get("location_name"),
                 "first_alerted_at": r["first_alerted_at"].isoformat() if r["first_alerted_at"] else None,
                 "last_alerted_at": r["last_alerted_at"].isoformat() if r["last_alerted_at"] else None,
                 "resolved_at": r["resolved_at"].isoformat() if r["resolved_at"] else None,
-            }
-            for r in rows
-        ]
+            })
         unread = sum(1 for a in alerts if not a["is_read"] and a["resolved_at"] is None)
         return {"alerts": alerts, "active_unread": unread}
+
+
+@router.post("/risk-alerts/scan-themes")
+async def scan_broker_theme_alerts_endpoint(current_user: CurrentUser = Depends(require_broker)):
+    """(Re)generate qualitative risk-theme alerts for the broker's clients from the
+    IR Themes & People analysis. Runs in FastAPI (the theme detection needs the DB
+    pool, which the alert worker doesn't have). The FE calls this when the Alerts
+    tab opens; results land in the same broker_risk_alerts table as trend alerts."""
+    from app.matcha.services.broker_theme_alerts import scan_broker_theme_alerts
+    async with get_connection() as conn:
+        membership = await _get_broker_membership(conn, user_id=current_user.id)
+        broker_id = membership["broker_id"]
+    return await scan_broker_theme_alerts(broker_id)
 
 
 @router.post("/risk-alerts/{alert_id}/read")
