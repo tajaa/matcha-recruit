@@ -1,3 +1,5 @@
+import type { RiskIndex } from './riskIndex'
+
 // --- Employee Benefits: eligibility exceptions ---
 
 export type BenefitExceptionType = 'new_hire_enrollment_gap' | 'termination_premium_leak'
@@ -552,6 +554,8 @@ export interface ExternalClientRow extends ExternalClient {
   wc_current_emr: number | null
   epl_score: number
   epl_band: EplBand
+  risk_index: number | null
+  risk_band: string | null
 }
 
 export interface ExternalWc {
@@ -597,6 +601,7 @@ export interface ExternalClientDetail {
   client: ExternalClient
   wc: ExternalWc
   epl: ExternalEpl
+  risk_index: RiskIndex
 }
 
 // --- Submission packet / coverage-gap ---

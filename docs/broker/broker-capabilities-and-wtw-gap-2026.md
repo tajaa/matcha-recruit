@@ -97,7 +97,7 @@ Only the report sections relevant to an HR/compliance broker are tracked. **The 
 | Report need | Matcha | Status |
 |---|---|---|
 | Data-driven consultative broking | risk alerts + AI outreach + WC/EPL scoring | ✅ (inward) |
-| Proprietary jurisdiction+hazard risk index | `services/risk_index.py` composite (WC+EPL+compliance) | ✅ NEW — one 0–100 index per client |
+| Proprietary jurisdiction+hazard risk index | `services/risk_index.py` composite (WC+EPL+compliance) | ✅ NEW — one 0–100 index per client, **on- and off-platform** (external = WC+EPL, no compliance) |
 | AI coverage-gap analysis | `services/submission_packet.py` (best-effort Gemini) | ✅ NEW |
 | Carrier-ready submission packet | `submission_packet.py` + `broker_submission` (tenant + off-platform) | ✅ NEW underwriting submission PDF |
 | Client-facing self-serve risk portal | `risk_profile` feature + `/app/risk-profile` | ✅ NEW — own composite index + fixes |

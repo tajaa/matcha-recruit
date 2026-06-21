@@ -18,6 +18,7 @@ from uuid import UUID
 
 from . import wc_depth
 from . import epl_readiness
+from . import risk_index
 from .wc_benchmarks import lookup_benchmark, estimate_premium_impact, severity_band
 
 
@@ -211,7 +212,7 @@ async def client_detail(conn, broker_id: UUID, client_id: UUID) -> Optional[dict
     rates = await wc_depth.get_state_rates(conn, [state]) if state else {}
     wc = _compute_wc(client, snap, rates.get(state) if state else None)
     epl = await _epl_for_client(conn, client_id)
-    return {"client": client, "wc": wc, "epl": epl}
+    return {"client": client, "wc": wc, "epl": epl, "risk_index": risk_index.external_risk_index(wc, epl)}
 
 
 async def list_with_scores(conn, broker_id: UUID) -> list[dict]:
@@ -223,6 +224,7 @@ async def list_with_scores(conn, broker_id: UUID) -> list[dict]:
         snap = await conn.fetchrow("SELECT * FROM broker_external_wc WHERE external_client_id = $1", cid)
         wc = _compute_wc(c, snap, None)
         epl = await _epl_for_client(conn, cid)
+        ri = risk_index.external_risk_index(wc, epl)
         out.append({
             **c,
             "wc_severity_band": wc["severity_band"],
@@ -230,5 +232,7 @@ async def list_with_scores(conn, broker_id: UUID) -> list[dict]:
             "wc_current_emr": wc["current_emr"],
             "epl_score": epl["score"],
             "epl_band": epl["band"],
+            "risk_index": ri["index"],
+            "risk_band": ri["band"],
         })
     return out

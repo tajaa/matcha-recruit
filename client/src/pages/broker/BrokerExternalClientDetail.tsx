@@ -9,6 +9,7 @@ import {
   downloadExternalSubmission, fetchExternalCoverageGap,
 } from '../../api/broker'
 import type { ExternalClientDetail, ExternalEplFactor, EplAttestationStatus } from '../../types/broker'
+import { RISK_BAND_TONE } from '../../types/riskIndex'
 
 const WC_TONE: Record<string, string> = {
   critical: 'text-red-400', at_risk: 'text-orange-400', fair: 'text-amber-400',
@@ -111,7 +112,7 @@ export default function BrokerExternalClientDetail() {
     </div>
   )
 
-  const { client, wc, epl } = data
+  const { client, wc, epl, risk_index: risk } = data
   const benchRatio = wc.trir && wc.benchmark && wc.benchmark.trir > 0 ? wc.trir / wc.benchmark.trir : null
 
   return (
@@ -129,6 +130,12 @@ export default function BrokerExternalClientDetail() {
           </p>
           {client.note && <p className="text-xs text-zinc-600 mt-1">{client.note}</p>}
         </div>
+        {risk?.index != null && (
+          <div className="text-right shrink-0">
+            <div className={`text-4xl font-light font-mono ${risk.band ? RISK_BAND_TONE[risk.band] ?? 'text-zinc-300' : 'text-zinc-300'}`}>{risk.index}</div>
+            <div className="text-[9px] uppercase tracking-widest font-bold text-zinc-600">Risk index{risk.band ? ` · ${risk.band}` : ''}</div>
+          </div>
+        )}
       </div>
 
       {/* Workers' Comp */}

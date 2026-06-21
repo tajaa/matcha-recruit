@@ -5,6 +5,7 @@ import { Card } from '../../components/ui'
 import { HelpHint } from '../../components/broker/HelpHint'
 import { fetchExternalClients, createExternalClient } from '../../api/broker'
 import type { ExternalClientRow } from '../../types/broker'
+import { RISK_BAND_TONE } from '../../types/riskIndex'
 
 const WC_TONE: Record<string, string> = {
   critical: 'text-red-400', at_risk: 'text-orange-400', fair: 'text-amber-400',
@@ -128,6 +129,9 @@ export default function BrokerExternalClients() {
                 <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">
                   <span className="inline-flex items-center gap-1 justify-end">EPL <HelpHint align="right" text="Employment-practices-liability readiness, 0–100 with a band (Strong→Exposed). How insurable the client looks + what to fix before renewal." /></span>
                 </th>
+                <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">
+                  <span className="inline-flex items-center gap-1 justify-end">Risk <HelpHint align="right" text="Composite risk index, 0–100 (higher = lower risk). Blends WC + EPL into one benchmarkable number per prospect — the same index on-platform clients get." /></span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -144,6 +148,9 @@ export default function BrokerExternalClients() {
                   <td className="px-4 py-3 text-right font-mono text-zinc-300">{c.wc_current_emr != null ? c.wc_current_emr.toFixed(2) : '—'}</td>
                   <td className={`px-4 py-3 text-right font-mono ${EPL_TONE[c.epl_band] ?? 'text-zinc-600'}`}>
                     {c.epl_score} <span className="text-[10px] uppercase">{c.epl_band}</span>
+                  </td>
+                  <td className={`px-4 py-3 text-right font-mono ${c.risk_band ? RISK_BAND_TONE[c.risk_band] ?? 'text-zinc-600' : 'text-zinc-600'}`}>
+                    {c.risk_index ?? '—'} {c.risk_band && <span className="text-[10px] uppercase">{c.risk_band}</span>}
                   </td>
                 </tr>
               ))}

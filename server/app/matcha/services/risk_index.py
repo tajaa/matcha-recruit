@@ -21,19 +21,17 @@ _WEIGHTS = {"wc": 40, "epl": 35, "compliance": 25}
 band = epl_readiness.readiness_band
 
 
-async def _wc_component(conn, company_id: UUID):
-    """(score, detail) from WC posture, or None when it can't be assessed."""
-    from ..routes.ir_incidents.analytics import compute_wc_metrics  # lazy: route module
-    m = await compute_wc_metrics(conn, company_id)
-    sb = m.get("severity_band")
-    if sb in _WC_BAND_SCORE:
-        base = float(_WC_BAND_SCORE[sb])
-        detail = f"TRIR {m.get('trir')} ({sb.replace('_', ' ')} vs benchmark)"
-    elif m.get("ever_recordable") is False:
+def _wc_score(severity_band, emr, ever_recordable, trir=None):
+    """Pure WC sub-score (score, detail) from band + mod, or None when it can't
+    be assessed. Shared by the tenant and off-platform paths."""
+    if severity_band in _WC_BAND_SCORE:
+        base = float(_WC_BAND_SCORE[severity_band])
+        detail = f"TRIR {trir} ({severity_band.replace('_', ' ')} vs benchmark)" if trir is not None \
+            else f"{severity_band.replace('_', ' ')} vs benchmark"
+    elif ever_recordable is False:
         base, detail = 85.0, "No recordable injuries on file"
     else:
         return None  # has injuries but no benchmark → can't band
-    emr = (await wc_depth.latest_mods(conn, [company_id])).get(str(company_id), {}).get("experience_mod")
     if emr is not None:
         if emr > 1.0:
             base -= min(40.0, (emr - 1.0) * 50)
@@ -41,6 +39,14 @@ async def _wc_component(conn, company_id: UUID):
             base += min(10.0, (1.0 - emr) * 20)
         detail += f"; EMR {emr:.2f}"
     return max(0, min(100, round(base))), detail
+
+
+async def _wc_component(conn, company_id: UUID):
+    """Tenant WC sub-score — pulls metrics + latest mod, then scores."""
+    from ..routes.ir_incidents.analytics import compute_wc_metrics  # lazy: route module
+    m = await compute_wc_metrics(conn, company_id)
+    emr = (await wc_depth.latest_mods(conn, [company_id])).get(str(company_id), {}).get("experience_mod")
+    return _wc_score(m.get("severity_band"), emr, m.get("ever_recordable"), trir=m.get("trir"))
 
 
 async def _compliance_component(conn, company_id: UUID):
@@ -74,8 +80,25 @@ def _top_fixes(components: list[dict], epl: dict) -> list[str]:
     return fixes[:4]
 
 
+def _assemble(components: list[dict], epl: dict) -> dict:
+    """Renormalize whichever components have data into a composite + band + fixes."""
+    total_w = sum(c["weight"] for c in components)
+    index = round(sum(c["score"] * c["weight"] for c in components) / total_w) if total_w else None
+    return {
+        "index": index,
+        "band": band(index) if index is not None else None,
+        "components": components,
+        "top_fixes": _top_fixes(components, epl),
+    }
+
+
+def _epl_component(epl: dict) -> dict:
+    return {"key": "epl", "label": "EPL readiness", "weight": _WEIGHTS["epl"],
+            "score": epl["score"], "detail": f"{epl['score']}/100 ({epl['band']})"}
+
+
 async def compute_risk_index(conn, company_id: UUID) -> dict:
-    """Composite 0–100 index + band + component breakdown + top fixes."""
+    """Composite 0–100 index for an on-platform (tenant) client: WC + EPL + compliance."""
     components: list[dict] = []
 
     wc = await _wc_component(conn, company_id)
@@ -84,20 +107,26 @@ async def compute_risk_index(conn, company_id: UUID) -> dict:
                            "score": wc[0], "detail": wc[1]})
 
     epl = await epl_readiness.compute_epl_readiness(conn, company_id)
-    components.append({"key": "epl", "label": "EPL readiness", "weight": _WEIGHTS["epl"],
-                       "score": epl["score"], "detail": f"{epl['score']}/100 ({epl['band']})"})
+    components.append(_epl_component(epl))
 
     comp = await _compliance_component(conn, company_id)
     if comp is not None:
         components.append({"key": "compliance", "label": "Compliance coverage", "weight": _WEIGHTS["compliance"],
                            "score": comp[0], "detail": comp[1]})
 
-    total_w = sum(c["weight"] for c in components)
-    index = round(sum(c["score"] * c["weight"] for c in components) / total_w) if total_w else None
-    return {
-        "company_id": str(company_id),
-        "index": index,
-        "band": band(index) if index is not None else None,
-        "components": components,
-        "top_fixes": _top_fixes(components, epl),
-    }
+    return {"company_id": str(company_id), **_assemble(components, epl)}
+
+
+def external_risk_index(wc: dict, epl: dict) -> dict:
+    """Composite index for an off-platform (Broker Pro) client from the broker-keyed
+    WC snapshot + EPL questionnaire. WC + EPL only — no compliance component (no
+    location data for non-tenant clients); weights renormalize over the two."""
+    components: list[dict] = []
+    ever_recordable = (wc.get("recordable_cases") or 0) > 0
+    s = _wc_score(wc.get("severity_band"), wc.get("current_emr"), ever_recordable,
+                  trir=wc.get("trir")) if wc.get("has_data") else None
+    if s is not None:
+        components.append({"key": "wc", "label": "Workers' Comp", "weight": _WEIGHTS["wc"],
+                           "score": s[0], "detail": s[1]})
+    components.append(_epl_component(epl))
+    return _assemble(components, epl)

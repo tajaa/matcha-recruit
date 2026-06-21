@@ -34,3 +34,20 @@ def test_top_fixes_empty_when_all_strong():
     comps = [{"key": "wc", "label": "Workers' Comp", "weight": 40, "score": 90, "detail": ""}]
     epl = epl_readiness.assess_from_statuses({f["key"]: "in_place" for f in epl_readiness.FACTORS})
     assert risk_index._top_fixes(comps, epl) == []
+
+
+# --- external_risk_index (off-platform) ------------------------------------
+
+def test_external_risk_index_has_no_compliance_component():
+    wc = {"has_data": True, "severity_band": "good", "current_emr": 0.9, "recordable_cases": 1, "trir": 1.0}
+    epl = epl_readiness.assess_from_statuses({f["key"]: "in_place" for f in epl_readiness.FACTORS})
+    r = risk_index.external_risk_index(wc, epl)
+    assert {c["key"] for c in r["components"]} == {"wc", "epl"}  # off-platform = no locations
+    assert r["index"] is not None and r["band"]
+
+
+def test_external_risk_index_drops_wc_without_data():
+    epl = epl_readiness.assess_from_statuses({})
+    r = risk_index.external_risk_index({"has_data": False, "recordable_cases": 0}, epl)
+    assert [c["key"] for c in r["components"]] == ["epl"]
+    assert r["index"] == epl["score"]  # single component → index equals it
