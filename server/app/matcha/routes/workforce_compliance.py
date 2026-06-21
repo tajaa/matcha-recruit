@@ -17,6 +17,7 @@ from ..models.workforce_compliance import (
     HiringAiAuditCreate, HiringAiAuditUpdate, HiringAiAuditResponse,
     BiometricPointCreate, BiometricPointUpdate, BiometricPointResponse,
     PayTransparencyStateRow, PayTransparencyUpdate,
+    PayEquityReviewCreate, PayEquityReviewUpdate,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,8 @@ _AI_COLS = ("id, company_id, tool_name, vendor, purpose, last_audit_date, cadenc
             f"next_due_date, {_OVERDUE_EXPR} AS is_overdue, notes, created_at")
 _BIO_COLS = ("id, company_id, location_id, collection_type, purpose, consent_obtained, "
              "consent_obtained_date, consent_method, retention_policy, is_active, notes, created_at")
+_PE_COLS = ("id, company_id, review_date, scope, methodology, gap_pct, remediation, cadence_days, "
+            f"next_due_date, {_OVERDUE_EXPR} AS is_overdue, notes, created_at")
 
 
 # --- AI hiring-tool audits --------------------------------------------------
@@ -194,6 +197,76 @@ async def set_pay_transparency(state: str, body: PayTransparencyUpdate,
         return await wf.get_pay_transparency(conn, company_id)
 
 
+# --- Pay-equity study register ----------------------------------------------
+
+@router.get("/pay-equity")
+async def list_pay_equity(current_user=Depends(require_admin_or_client)):
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            f"SELECT {_PE_COLS} FROM pay_equity_reviews WHERE company_id = $1 "
+            "ORDER BY review_date DESC NULLS LAST, created_at DESC",
+            company_id,
+        )
+    return [dict(r) for r in rows]
+
+
+@router.post("/pay-equity")
+async def create_pay_equity(body: PayEquityReviewCreate, current_user=Depends(require_admin_or_client)):
+    company_id = await get_client_company_id(current_user)
+    next_due, _ = wf.audit_dates(body.review_date, body.cadence_days)
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            f"""
+            INSERT INTO pay_equity_reviews
+                (company_id, review_date, scope, methodology, gap_pct, remediation,
+                 cadence_days, next_due_date, notes, created_by)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING {_PE_COLS}
+            """,
+            company_id, body.review_date, body.scope, body.methodology, body.gap_pct,
+            body.remediation, body.cadence_days, next_due, body.notes, current_user.id,
+        )
+    return dict(row)
+
+
+@router.put("/pay-equity/{review_id}")
+async def update_pay_equity(review_id: UUID, body: PayEquityReviewUpdate,
+                            current_user=Depends(require_admin_or_client)):
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        cur = await conn.fetchrow(
+            "SELECT review_date, cadence_days FROM pay_equity_reviews WHERE id=$1 AND company_id=$2",
+            review_id, company_id,
+        )
+        if not cur:
+            raise HTTPException(status_code=404, detail="Review not found")
+        review_date = body.review_date if body.review_date is not None else cur["review_date"]
+        cadence = body.cadence_days if body.cadence_days is not None else cur["cadence_days"]
+        next_due, _ = wf.audit_dates(review_date, cadence)
+        row = await conn.fetchrow(
+            f"""
+            UPDATE pay_equity_reviews SET
+                review_date = $3, scope = COALESCE($4, scope), methodology = COALESCE($5, methodology),
+                gap_pct = COALESCE($6, gap_pct), remediation = COALESCE($7, remediation),
+                cadence_days = $8, next_due_date = $9, notes = COALESCE($10, notes), updated_at = NOW()
+            WHERE id = $1 AND company_id = $2 RETURNING {_PE_COLS}
+            """,
+            review_id, company_id, review_date, body.scope, body.methodology, body.gap_pct,
+            body.remediation, cadence, next_due, body.notes,
+        )
+    return dict(row)
+
+
+@router.delete("/pay-equity/{review_id}")
+async def delete_pay_equity(review_id: UUID, current_user=Depends(require_admin_or_client)):
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        res = await conn.execute("DELETE FROM pay_equity_reviews WHERE id=$1 AND company_id=$2", review_id, company_id)
+    if res.split()[-1] == "0":
+        raise HTTPException(status_code=404, detail="Review not found")
+    return {"status": "deleted"}
+
+
 # --- Summary (business dashboard) -------------------------------------------
 
 @router.get("/summary")
@@ -211,11 +284,17 @@ async def summary(current_user=Depends(require_admin_or_client)):
             "FROM biometric_consent_points WHERE company_id=$1",
             company_id,
         )
+        pe = await conn.fetchrow(
+            f"SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE {_OVERDUE_EXPR}) AS overdue "
+            "FROM pay_equity_reviews WHERE company_id=$1",
+            company_id,
+        )
         pt = await wf.get_pay_transparency(conn, company_id)
     pt_required = [r for r in pt if r["required"]]
     return {
         "ai_audits": {"total": int(ai["total"] or 0), "overdue": int(ai["overdue"] or 0)},
         "biometric": {"active": int(bio["active"] or 0), "missing_consent": int(bio["missing_consent"] or 0)},
+        "pay_equity": {"total": int(pe["total"] or 0), "overdue": int(pe["overdue"] or 0)},
         "pay_transparency": {
             "required_states": len(pt_required),
             "action_needed": sum(1 for r in pt_required if r["status"] != "compliant"),

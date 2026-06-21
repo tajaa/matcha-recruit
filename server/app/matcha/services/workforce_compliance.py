@@ -124,3 +124,23 @@ async def derive_biometric(conn, company_id: UUID) -> Optional[tuple[int, str]]:
         return 100, "No active biometric collection on file"
     consented = sum(1 for r in active if r["consent_obtained"])
     return round(100 * consented / len(active)), f"{consented}/{len(active)} collection points with consent"
+
+
+async def derive_pay_equity(conn, company_id: UUID) -> Optional[tuple[int, str]]:
+    """Score from the most recent pay-equity study: current & remediated → high,
+    current but a sizeable unremediated gap → mid, overdue → low, none → fall back."""
+    row = await conn.fetchrow(
+        "SELECT review_date, gap_pct, remediation, "
+        "(next_due_date IS NOT NULL AND next_due_date < CURRENT_DATE) AS overdue "
+        "FROM pay_equity_reviews WHERE company_id = $1 "
+        "ORDER BY review_date DESC NULLS LAST, created_at DESC LIMIT 1",
+        company_id,
+    )
+    if not row:
+        return None  # no study on file → fall back to broker attestation
+    if row["overdue"]:
+        return 40, f"Pay-equity study {row['review_date']} — overdue for refresh"
+    gap = float(row["gap_pct"]) if row["gap_pct"] is not None else None
+    if gap is not None and gap > 5 and not (row["remediation"] or "").strip():
+        return 70, f"Pay-equity study current — {gap:.1f}% gap, remediation pending"
+    return 100, f"Pay-equity study current ({row['review_date']})"

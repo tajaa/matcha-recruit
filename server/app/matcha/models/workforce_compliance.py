@@ -100,3 +100,25 @@ class PayTransparencyUpdate(BaseModel):
     status: Literal["compliant", "action_needed", "na"]
     postings_include_ranges: bool = False
     note: Optional[str] = None
+
+
+# --- Pay-equity study register ---
+
+class PayEquityReviewCreate(BaseModel):
+    review_date: Optional[date] = None
+    scope: Optional[str] = None
+    methodology: Optional[str] = None
+    gap_pct: Optional[float] = Field(default=None, ge=0, le=100)
+    remediation: Optional[str] = None
+    cadence_days: int = Field(default=365, ge=1)
+    notes: Optional[str] = None
+
+
+class PayEquityReviewUpdate(BaseModel):
+    review_date: Optional[date] = None
+    scope: Optional[str] = None
+    methodology: Optional[str] = None
+    gap_pct: Optional[float] = Field(default=None, ge=0, le=100)
+    remediation: Optional[str] = None
+    cadence_days: Optional[int] = Field(default=None, ge=1)
+    notes: Optional[str] = None

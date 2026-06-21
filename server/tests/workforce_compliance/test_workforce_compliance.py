@@ -62,7 +62,7 @@ def test_business_derivable_are_attested_factor_keys():
     stays attested; only the tenant path with the feature on flips them)."""
     attested = {f["key"] for f in epl.FACTORS if f["kind"] == "attested"}
     assert epl.BUSINESS_DERIVABLE <= attested
-    assert epl.BUSINESS_DERIVABLE == {"pay_transparency", "ai_hiring_audit", "biometrics_bipa"}
+    assert epl.BUSINESS_DERIVABLE == {"pay_transparency", "ai_hiring_audit", "biometrics_bipa", "pay_equity"}
 
 
 # --- band thresholds -------------------------------------------------------

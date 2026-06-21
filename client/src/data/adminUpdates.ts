@@ -22,6 +22,23 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'pay-equity-tracker',
+    date: '2026-06-20',
+    category: 'Compliance',
+    title: 'Pay-equity study register (Workforce Compliance)',
+    summary:
+      'Fourth Workforce Compliance tracker: log each pay-equity audit + remediation with an annual cadence. A current study flips the broker EPL pay_equity factor from attested → derived — same pattern as the AI-audit register.',
+    whatsNew: [
+      'New "Pay-equity studies" section on the Workforce Compliance page — log study date, scope, adjusted gap %, and remediation; overdue flags by cadence.',
+      'Feeds EPL: a current study (within cadence, gap remediated) scores high; overdue scores low; none falls back to the broker attestation.',
+      'API: /workforce-compliance/pay-equity (CRUD); summary now includes pay_equity counts.',
+    ],
+    setup: [
+      'DB: migration payequity01 (pay_equity_reviews) applied on dev; prod via ./scripts/migrate-prod.sh.',
+    ],
+    tag: 'new',
+  },
+  {
     id: 'resident-care-risk',
     date: '2026-06-20',
     category: 'Compliance',

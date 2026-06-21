@@ -1,7 +1,7 @@
 import { api } from './client'
 import type {
   AiAudit, BiometricPoint, PayTransparencyRow, PayTransparencyStatus, WorkforceSummary,
-  CollectionType, ConsentMethod,
+  CollectionType, ConsentMethod, PayEquityReview,
 } from '../types/workforceCompliance'
 
 // --- summary ---
@@ -42,6 +42,23 @@ export function updateBiometricPoint(id: string, payload: Record<string, unknown
 }
 export function deleteBiometricPoint(id: string) {
   return api.delete<{ status: string }>(`/workforce-compliance/biometric-points/${id}`)
+}
+
+// --- pay-equity study register ---
+export function fetchPayEquityReviews() {
+  return api.get<PayEquityReview[]>('/workforce-compliance/pay-equity')
+}
+export function createPayEquityReview(payload: {
+  review_date?: string | null; scope?: string | null; methodology?: string | null
+  gap_pct?: number | null; remediation?: string | null; cadence_days?: number; notes?: string | null
+}) {
+  return api.post<PayEquityReview>('/workforce-compliance/pay-equity', payload)
+}
+export function updatePayEquityReview(id: string, payload: Record<string, unknown>) {
+  return api.put<PayEquityReview>(`/workforce-compliance/pay-equity/${id}`, payload)
+}
+export function deletePayEquityReview(id: string) {
+  return api.delete<{ status: string }>(`/workforce-compliance/pay-equity/${id}`)
 }
 
 // --- pay transparency ---

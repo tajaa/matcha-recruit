@@ -39,7 +39,7 @@ FACTORS: list[dict[str, Any]] = [
 ATTESTED_KEYS = {f["key"] for f in FACTORS if f["kind"] == "attested"}
 # Attested factors that flip to DERIVED on the tenant path when the business
 # tracks them via the Workforce Compliance feature (see compute_epl_readiness).
-BUSINESS_DERIVABLE = {"pay_transparency", "ai_hiring_audit", "biometrics_bipa"}
+BUSINESS_DERIVABLE = {"pay_transparency", "ai_hiring_audit", "biometrics_bipa", "pay_equity"}
 ATTESTATION_STATUSES = ("in_place", "partial", "gap", "unknown")
 _ATTEST_SCORE = {"in_place": 100, "partial": 50, "gap": 0, "unknown": 0}
 
@@ -249,6 +249,7 @@ async def compute_epl_readiness(conn, company_id: UUID) -> dict:
             ("pay_transparency", wf.derive_pay_transparency),
             ("ai_hiring_audit", wf.derive_ai_audit),
             ("biometrics_bipa", wf.derive_biometric),
+            ("pay_equity", wf.derive_pay_equity),
         ):
             res = await fn(conn, company_id)
             if res is not None:

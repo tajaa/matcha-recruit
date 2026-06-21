@@ -43,8 +43,24 @@ export interface PayTransparencyRow {
   updated_at: string | null
 }
 
+export interface PayEquityReview {
+  id: string
+  company_id: string
+  review_date: string | null
+  scope: string | null
+  methodology: string | null
+  gap_pct: number | null
+  remediation: string | null
+  cadence_days: number
+  next_due_date: string | null
+  is_overdue: boolean
+  notes: string | null
+  created_at: string
+}
+
 export interface WorkforceSummary {
   ai_audits: { total: number; overdue: number }
   biometric: { active: number; missing_consent: number }
+  pay_equity: { total: number; overdue: number }
   pay_transparency: { required_states: number; action_needed: number }
 }

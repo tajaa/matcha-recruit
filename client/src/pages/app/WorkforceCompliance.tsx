@@ -1,13 +1,14 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { ShieldCheck, Bot, Fingerprint, Plus, Trash2, Loader2, AlertTriangle, Check } from 'lucide-react'
+import { ShieldCheck, Bot, Fingerprint, Plus, Trash2, Loader2, AlertTriangle, Check, Scale } from 'lucide-react'
 import { Card } from '../../components/ui'
 import {
   fetchAiAudits, createAiAudit, updateAiAudit, deleteAiAudit,
   fetchBiometricPoints, createBiometricPoint, updateBiometricPoint, deleteBiometricPoint,
   fetchPayTransparency, setPayTransparency,
+  fetchPayEquityReviews, createPayEquityReview, deletePayEquityReview,
 } from '../../api/workforceCompliance'
 import type {
-  AiAudit, BiometricPoint, PayTransparencyRow, PayTransparencyStatus, CollectionType,
+  AiAudit, BiometricPoint, PayTransparencyRow, PayTransparencyStatus, CollectionType, PayEquityReview,
 } from '../../types/workforceCompliance'
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -19,6 +20,7 @@ export default function WorkforceCompliance() {
   const [audits, setAudits] = useState<AiAudit[]>([])
   const [points, setPoints] = useState<BiometricPoint[]>([])
   const [pt, setPt] = useState<PayTransparencyRow[]>([])
+  const [payEquity, setPayEquity] = useState<PayEquityReview[]>([])
   const [loading, setLoading] = useState(true)
 
   function load() {
@@ -27,6 +29,7 @@ export default function WorkforceCompliance() {
       fetchAiAudits().then(setAudits),
       fetchBiometricPoints().then(setPoints),
       fetchPayTransparency().then(setPt),
+      fetchPayEquityReviews().then(setPayEquity),
     ]).finally(() => setLoading(false))
   }
   useEffect(load, [])
@@ -38,6 +41,8 @@ export default function WorkforceCompliance() {
   const ptAction = pt.filter((r) => r.required && r.status !== 'compliant').length
   const overdue = audits.filter((a) => a.is_overdue).length
   const missingConsent = points.filter((p) => p.is_active && !p.consent_obtained).length
+  const peOverdue = payEquity.filter((r) => r.is_overdue).length
+  const peNone = payEquity.length === 0
 
   return (
     <div className="space-y-6">
@@ -45,19 +50,20 @@ export default function WorkforceCompliance() {
         <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">
           <ShieldCheck className="h-5 w-5 text-zinc-400" /> Workforce Compliance
         </h1>
-        <p className="text-sm text-zinc-500 mt-1">Employment-practices risk controls — pay transparency, AI hiring-tool audits, and biometric consent. Tracked for your own compliance; also strengthens your EPL insurance profile.</p>
+        <p className="text-sm text-zinc-500 mt-1">Employment-practices risk controls — pay transparency, AI hiring-tool audits, biometric consent, and pay-equity studies. Tracked for your own compliance; also strengthens your EPL insurance profile.</p>
       </div>
 
       {/* Summary strip */}
-      <div className="grid grid-cols-3 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
         {[
-          { label: 'Pay-Transparency · Action', value: ptAction },
-          { label: 'AI Audits · Overdue', value: overdue },
-          { label: 'Biometric · Missing Consent', value: missingConsent },
+          { label: 'Pay-Transparency · Action', value: ptAction, warn: ptAction > 0 },
+          { label: 'AI Audits · Overdue', value: overdue, warn: overdue > 0 },
+          { label: 'Biometric · Missing Consent', value: missingConsent, warn: missingConsent > 0 },
+          { label: 'Pay-Equity · Overdue', value: peNone ? '—' : peOverdue, warn: peOverdue > 0 || peNone },
         ].map((c) => (
           <div key={c.label} className="bg-zinc-900 px-4 py-4">
             <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{c.label}</div>
-            <div className={`text-2xl font-light font-mono mt-1.5 ${c.value > 0 ? 'text-red-400' : 'text-emerald-400'}`}>{c.value}</div>
+            <div className={`text-2xl font-light font-mono mt-1.5 ${c.warn ? 'text-red-400' : 'text-emerald-400'}`}>{c.value}</div>
           </div>
         ))}
       </div>
@@ -65,6 +71,7 @@ export default function WorkforceCompliance() {
       <PayTransparencySection rows={pt} onChange={setPt} />
       <AiAuditSection audits={audits} reload={load} />
       <BiometricSection points={points} reload={load} />
+      <PayEquitySection reviews={payEquity} reload={load} />
     </div>
   )
 }
@@ -199,6 +206,56 @@ function BiometricSection({ points, reload }: { points: BiometricPoint[]; reload
               {p.consent_obtained ? <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400"><Check className="h-3 w-3" /> consent</span>
                 : <button onClick={() => updateBiometricPoint(p.id, { consent_obtained: true, consent_obtained_date: today() }).then(reload)} className="text-[11px] text-red-400 hover:text-emerald-400 px-2 py-1 rounded-lg border border-zinc-700">mark consent</button>}
               <button onClick={() => deleteBiometricPoint(p.id).then(reload)} className="text-zinc-600 hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+}
+
+/* ── pay-equity study register ── */
+function PayEquitySection({ reviews, reload }: { reviews: PayEquityReview[]; reload: () => void }) {
+  const [show, setShow] = useState(false)
+  const [form, setForm] = useState({ review_date: today(), scope: '', gap_pct: '', remediation: '' })
+  const [busy, setBusy] = useState(false)
+  async function add(e: FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      await createPayEquityReview({
+        review_date: form.review_date || null, scope: form.scope || null,
+        gap_pct: form.gap_pct ? parseFloat(form.gap_pct) : null, remediation: form.remediation || null,
+      })
+      setForm({ review_date: today(), scope: '', gap_pct: '', remediation: '' }); setShow(false); reload()
+    } finally { setBusy(false) }
+  }
+  return (
+    <Card className="p-5">
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2"><Scale className="h-4 w-4 text-zinc-500" /><h3 className="text-sm font-medium text-zinc-200 tracking-wide">Pay-equity studies</h3></div>
+        <button onClick={() => setShow((v) => !v)} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500"><Plus className="h-3.5 w-3.5" /> Log study</button>
+      </div>
+      <p className="text-[11px] text-zinc-500 mb-3">Log each pay-equity audit + any remediation. A current study (within cadence) is a named EPL underwriting control; default cadence is annual.</p>
+      {show && (
+        <form onSubmit={add} className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800 items-end">
+          <div><label className="block text-[10px] text-zinc-500 uppercase mb-1">Study date</label><input type="date" className={inputCls} value={form.review_date} onChange={(e) => setForm({ ...form, review_date: e.target.value })} /></div>
+          <input className={inputCls} placeholder="Scope (e.g. all US staff)" value={form.scope} onChange={(e) => setForm({ ...form, scope: e.target.value })} />
+          <input className={inputCls} type="number" step="0.1" placeholder="Adj. gap %" value={form.gap_pct} onChange={(e) => setForm({ ...form, gap_pct: e.target.value })} />
+          <button type="submit" disabled={busy} className="bg-zinc-100 text-zinc-900 text-sm font-medium rounded-lg px-3 py-1.5 hover:bg-white disabled:opacity-50">{busy ? '…' : 'Add'}</button>
+          <input className={`${inputCls} md:col-span-4`} placeholder="Remediation taken (optional)" value={form.remediation} onChange={(e) => setForm({ ...form, remediation: e.target.value })} />
+        </form>
+      )}
+      {reviews.length === 0 ? <p className="text-sm text-zinc-500">No pay-equity studies logged. Logging one flips this from broker-attested to data-derived in your EPL profile.</p> : (
+        <div className="space-y-1">
+          {reviews.map((r) => (
+            <div key={r.id} className="flex items-center gap-3 py-1.5 border-b border-zinc-800/30 last:border-0">
+              <span className="text-sm text-zinc-200 w-28 shrink-0">{r.review_date ?? '—'}</span>
+              <span className="text-sm text-zinc-400 flex-1 min-w-0 truncate">{r.scope || 'Pay-equity study'}{r.gap_pct != null && <span className="text-[11px] text-zinc-600 ml-2">{r.gap_pct}% gap</span>}</span>
+              <span className="text-[11px] text-zinc-500">due {r.next_due_date ?? '—'}</span>
+              {r.is_overdue && <span className="inline-flex items-center gap-1 text-[11px] text-red-400"><AlertTriangle className="h-3 w-3" /> overdue</span>}
+              {!r.is_overdue && <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400"><Check className="h-3 w-3" /> current</span>}
+              <button onClick={() => deletePayEquityReview(r.id).then(reload)} className="text-zinc-600 hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
             </div>
           ))}
         </div>
