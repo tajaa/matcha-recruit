@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id
 from ..services import risk_index
+from ..services import risk_narrative
 
 router = APIRouter()
 
@@ -20,3 +21,14 @@ async def get_risk_profile(current_user=Depends(require_admin_or_client)):
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
         return await risk_index.compute_risk_index(conn, company_id)
+
+
+@router.post("/narrative")
+async def get_risk_narrative(current_user=Depends(require_admin_or_client)):
+    """AI explanation of the index + prioritized moves to improve terms."""
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        result = await risk_index.compute_risk_index(conn, company_id)
+        company = await conn.fetchrow("SELECT name FROM companies WHERE id = $1", company_id)
+    return await risk_narrative.narrative(result, company_name=company["name"] if company else None,
+                                          audience="business")

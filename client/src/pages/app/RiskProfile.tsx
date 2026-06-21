@@ -1,17 +1,25 @@
 import { useEffect, useState } from 'react'
-import { Gauge, Loader2, ArrowUpRight } from 'lucide-react'
+import { Gauge, Loader2, ArrowUpRight, Sparkles } from 'lucide-react'
 import { Card } from '../../components/ui'
-import { fetchRiskProfile } from '../../api/riskIndex'
+import { fetchRiskProfile, fetchRiskNarrative } from '../../api/riskIndex'
+import type { RiskNarrative } from '../../api/riskIndex'
 import type { RiskIndex } from '../../types/riskIndex'
 import { RISK_BAND_TONE } from '../../types/riskIndex'
 
 export default function RiskProfile() {
   const [data, setData] = useState<RiskIndex | null>(null)
   const [loading, setLoading] = useState(true)
+  const [narrative, setNarrative] = useState<RiskNarrative | null>(null)
+  const [explaining, setExplaining] = useState(false)
 
   useEffect(() => {
     fetchRiskProfile().then(setData).finally(() => setLoading(false))
   }, [])
+
+  async function explain() {
+    setExplaining(true)
+    try { setNarrative(await fetchRiskNarrative()) } catch { /* noop */ } finally { setExplaining(false) }
+  }
 
   if (loading) {
     return <div className="flex items-center justify-center h-64"><Loader2 className="h-6 w-6 text-zinc-500 animate-spin" /></div>
@@ -52,10 +60,28 @@ export default function RiskProfile() {
         </div>
       </Card>
 
-      {/* Top fixes */}
-      {data.top_fixes.length > 0 && (
-        <Card className="p-5">
-          <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-3">How to improve your terms</h3>
+      {/* How to improve — AI narrative (falls back to the static fixes) */}
+      <Card className="p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-zinc-200 tracking-wide">How to improve your terms</h3>
+          {!narrative && (
+            <button onClick={explain} disabled={explaining} className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 px-2 py-1 rounded-lg border border-emerald-900/60 hover:border-emerald-700 disabled:opacity-50">
+              {explaining ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} {explaining ? 'Thinking…' : 'Explain my risk'}
+            </button>
+          )}
+        </div>
+        {narrative ? (
+          <div className="space-y-3">
+            {narrative.summary && <p className="text-sm text-zinc-300 leading-relaxed">{narrative.summary}</p>}
+            <ul className="space-y-2">
+              {narrative.actions.map((a, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-zinc-300">
+                  <ArrowUpRight className="h-4 w-4 text-emerald-400 mt-0.5 shrink-0" /><span>{a}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : data.top_fixes.length > 0 ? (
           <ul className="space-y-2">
             {data.top_fixes.map((f, i) => (
               <li key={i} className="flex items-start gap-2 text-sm text-zinc-300">
@@ -64,8 +90,10 @@ export default function RiskProfile() {
               </li>
             ))}
           </ul>
-        </Card>
-      )}
+        ) : (
+          <p className="text-sm text-zinc-500">You're in good shape — no priority fixes flagged.</p>
+        )}
+      </Card>
     </div>
   )
 }

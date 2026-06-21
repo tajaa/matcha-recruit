@@ -438,6 +438,16 @@ async def get_risk_index_client(company_id: UUID, current_user=Depends(require_b
     return {"company_name": meta["name"], **result}
 
 
+@router.post("/risk-index/{company_id}/narrative")
+async def get_risk_index_narrative(company_id: UUID, current_user=Depends(require_broker)):
+    """AI explanation + prioritized moves for one client, written for the broker."""
+    from ..services import risk_narrative
+    async with get_connection() as conn:
+        meta = await _assert_broker_owns_company(conn, current_user.id, company_id)
+        result = await risk_index.compute_risk_index(conn, company_id)
+    return await risk_narrative.narrative(result, company_name=meta["name"], audience="broker")
+
+
 @router.put("/epl-portfolio/{company_id}/attestations/{item_key}")
 async def upsert_epl_attestation(company_id: UUID, item_key: str,
                                  body: EplAttestationUpdate,

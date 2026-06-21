@@ -6,6 +6,15 @@ export function fetchRiskProfile() {
   return api.get<RiskIndex>('/risk-profile')
 }
 
+export interface RiskNarrative {
+  summary: string
+  actions: string[]
+  available: boolean
+}
+export function fetchRiskNarrative() {
+  return api.post<RiskNarrative>('/risk-profile/narrative', {})
+}
+
 // Broker views
 export function fetchRiskIndexPortfolio() {
   return api.get<RiskIndexPortfolio>('/broker/risk-index')
