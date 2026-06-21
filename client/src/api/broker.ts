@@ -149,6 +149,15 @@ export function parseExternalLossRun(id: string, file: File) {
   return api.upload<ParsedLossRun>(`/broker/external-clients/${id}/loss-run`, fd)
 }
 
+export interface IntakeLink {
+  token: string
+  expires_at: string
+  path: string
+}
+export function createExternalIntakeLink(id: string) {
+  return api.post<IntakeLink>(`/broker/external-clients/${id}/intake-link`, {})
+}
+
 export function saveExternalEplAttestation(
   id: string,
   itemKey: string,

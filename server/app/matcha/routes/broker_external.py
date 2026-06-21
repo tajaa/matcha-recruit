@@ -156,6 +156,18 @@ async def parse_external_loss_run(client_id: UUID, file: UploadFile = File(...),
     return await loss_run_parser.parse_loss_run(data)
 
 
+@router.post("/external-clients/{client_id}/intake-link")
+async def create_intake_link(client_id: UUID, current_user=Depends(require_broker_pro)):
+    """Mint a shareable link the prospect uses to self-complete the EPL questionnaire."""
+    async with get_connection() as conn:
+        broker_id = await _broker_id(conn, current_user.id)
+        res = await ext.create_intake_token(conn, broker_id, client_id, current_user.id)
+        if not res:
+            raise HTTPException(status_code=404, detail="External client not found")
+    return {"token": res["token"], "expires_at": res["expires_at"],
+            "path": f"/intake/external/{res['token']}"}
+
+
 @router.put("/external-clients/{client_id}/epl/{item_key}")
 async def upsert_external_epl(client_id: UUID, item_key: str, body: ExternalEplBody,
                              current_user=Depends(require_broker_pro)):

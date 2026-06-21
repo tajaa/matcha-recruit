@@ -1,12 +1,13 @@
 import { useState, useEffect, type FormEvent, type ChangeEvent, type ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Loader2, AlertCircle, Gauge, Shield, TrendingUp, TrendingDown, Minus, Upload } from 'lucide-react'
+import { ArrowLeft, Loader2, AlertCircle, Gauge, Shield, TrendingUp, TrendingDown, Minus, Upload, Link2 as LinkIcon } from 'lucide-react'
 import { Card } from '../../components/ui'
 import { HelpHint } from '../../components/broker/HelpHint'
 import { SubmissionPanel } from '../../components/broker/SubmissionPanel'
 import {
   fetchExternalClientDetail, saveExternalWc, saveExternalEplAttestation,
   downloadExternalSubmission, fetchExternalCoverageGap, parseExternalLossRun,
+  createExternalIntakeLink,
 } from '../../api/broker'
 import type { ExternalClientDetail, ExternalEplFactor, EplAttestationStatus } from '../../types/broker'
 import { RISK_BAND_TONE } from '../../types/riskIndex'
@@ -59,6 +60,9 @@ export default function BrokerExternalClientDetail() {
   const [savingEpl, setSavingEpl] = useState<string | null>(null)
   const [parsing, setParsing] = useState(false)
   const [parseErr, setParseErr] = useState<string | null>(null)
+  const [intakeUrl, setIntakeUrl] = useState<string | null>(null)
+  const [intakeBusy, setIntakeBusy] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     if (!clientId) return
@@ -79,6 +83,15 @@ export default function BrokerExternalClientDetail() {
       annual_premium: w.annual_premium != null ? String(w.annual_premium) : '',
     })
     setEditWc(true)
+  }
+
+  async function genIntakeLink() {
+    if (!clientId) return
+    setIntakeBusy(true); setCopied(false)
+    try {
+      const res = await createExternalIntakeLink(clientId)
+      setIntakeUrl(`${window.location.origin}${res.path}`)
+    } catch { /* noop */ } finally { setIntakeBusy(false) }
   }
 
   async function onLossRunFile(e: ChangeEvent<HTMLInputElement>) {
@@ -164,6 +177,27 @@ export default function BrokerExternalClientDetail() {
           </div>
         )}
       </div>
+
+      {/* Client-intake link */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <LinkIcon className="h-4 w-4 text-zinc-500" />
+            <span className="text-sm text-zinc-300">Client-intake link</span>
+            <HelpHint text="Generate a shareable link the prospect opens to self-complete the EPL questionnaire — no account needed. Their answers feed this client's EPL score automatically." />
+          </div>
+          {!intakeUrl ? (
+            <button onClick={genIntakeLink} disabled={intakeBusy} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2.5 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 disabled:opacity-50">
+              {intakeBusy ? 'Generating…' : 'Generate intake link'}
+            </button>
+          ) : (
+            <div className="flex items-center gap-2 flex-1 min-w-[260px] justify-end">
+              <input readOnly value={intakeUrl} className="flex-1 max-w-md bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 font-mono" onFocus={(e) => e.target.select()} />
+              <button onClick={() => { navigator.clipboard?.writeText(intakeUrl); setCopied(true) }} className="text-xs text-zinc-300 hover:text-emerald-400 px-2 py-1.5 rounded-lg border border-zinc-700">{copied ? 'Copied' : 'Copy'}</button>
+            </div>
+          )}
+        </div>
+      </Card>
 
       {/* Workers' Comp */}
       <Card className="p-5">

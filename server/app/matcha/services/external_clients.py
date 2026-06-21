@@ -13,6 +13,7 @@ Scores stay directly comparable to on-platform (pass-through) clients. Caller
 owns the asyncpg connection; all reads are broker-scoped by broker_id.
 """
 
+import secrets
 from typing import Optional
 from uuid import UUID
 
@@ -236,3 +237,65 @@ async def list_with_scores(conn, broker_id: UUID) -> list[dict]:
             "risk_band": ri["band"],
         })
     return out
+
+
+# --- client-intake links (extintake01) -------------------------------------
+
+INTAKE_TTL_DAYS = 14
+_EPL_STATUSES = {"in_place", "partial", "gap", "unknown"}
+
+
+async def create_intake_token(conn, broker_id: UUID, client_id: UUID, created_by,
+                              ttl_days: int = INTAKE_TTL_DAYS) -> Optional[dict]:
+    """Mint a shareable intake token for an owned external client. None if not owned."""
+    if not await get_client(conn, broker_id, client_id):
+        return None
+    token = secrets.token_urlsafe(24)
+    row = await conn.fetchrow(
+        """
+        INSERT INTO broker_external_intake_tokens
+            (token, external_client_id, broker_id, created_by, expires_at)
+        VALUES ($1, $2, $3, $4, NOW() + make_interval(days => $5))
+        RETURNING token, expires_at
+        """,
+        token, client_id, broker_id, created_by, ttl_days,
+    )
+    return {"token": row["token"], "expires_at": row["expires_at"]}
+
+
+async def get_intake(conn, token: str) -> Optional[dict]:
+    """Token row + client name + is_open (active & unexpired). None if no such token."""
+    row = await conn.fetchrow(
+        """
+        SELECT t.id, t.external_client_id, t.broker_id, t.created_by, t.status,
+               t.expires_at, t.completed_at, c.name AS client_name, c.industry,
+               (t.status = 'active' AND t.expires_at > NOW()) AS is_open
+        FROM broker_external_intake_tokens t
+        JOIN broker_external_clients c ON c.id = t.external_client_id
+        WHERE t.token = $1
+        """,
+        token,
+    )
+    return dict(row) if row else None
+
+
+def intake_factors() -> list[dict]:
+    """The questionnaire shown to the prospect — every EPL factor, self-attested."""
+    return [{"key": f["key"], "label": f["label"]} for f in epl_readiness.FACTORS]
+
+
+async def complete_intake(conn, token_row: dict, epl: dict, wc: Optional[dict]) -> None:
+    """Persist the prospect's answers, attributed to the broker who sent the link,
+    then lock the token."""
+    cid = token_row["external_client_id"]
+    by = token_row["created_by"]
+    valid_keys = {f["key"] for f in epl_readiness.FACTORS}
+    for key, status in (epl or {}).items():
+        if key in valid_keys and status in _EPL_STATUSES:
+            await upsert_epl_attestation(conn, cid, key, status, None, by)
+    if wc:
+        await upsert_wc_snapshot(conn, cid, by, wc)
+    await conn.execute(
+        "UPDATE broker_external_intake_tokens SET status = 'completed', completed_at = NOW() WHERE id = $1",
+        token_row["id"],
+    )
