@@ -22,6 +22,29 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'broker-submission-packet',
+    date: '2026-06-20',
+    category: 'Broker',
+    title: 'Carrier submission packet + AI coverage-gap (+ 50-state WC rates)',
+    summary:
+      'The "outward" layer the WTW report calls the terms-winning move: brokers can generate a carrier-ready underwriting submission PDF from a client’s Workers’-Comp + EPL posture, plus an AI coverage-gap read of where the client may be under-protected. Works for both on-platform clients and off-platform Broker-Pro clients. Also backfilled headline WC rate trends for all 50 states so the rate overlay is no longer blank outside the report’s named states.',
+    whatsNew: [
+      'New "Submission" tab on the client detail (and a "Carrier submission" card on external clients): one-click branded PDF with the client’s WC metrics (TRIR/DART/experience-mod/claim-mix/state trend) + the EPL readiness breakdown + a loss-mitigation narrative.',
+      '"Coverage-gap analysis": Gemini reads the client’s posture (plus any current coverage the broker enters) and flags likely gaps — e.g. EPL limit light for the headcount/claim profile, or no cyber despite employee PII — with concrete pre-renewal actions. Best-effort; the PDF renders regardless.',
+      'WC state-rate overlay now covers all 50 states + DC. The states beyond the report’s filing table are headline estimates, clearly flagged "pending licensed feed".',
+    ],
+    howToUse: [
+      'Broker → open a client → "Submission" tab (on-platform) or scroll to "Carrier submission" (off-platform).',
+      'Click "Download submission PDF" for the carrier-ready packet, and/or "Coverage-gap analysis" for the AI read.',
+    ],
+    setup: [
+      'DB: migration wcstates01 (50-state WC rate seed) is applied on dev; apply to prod with ./scripts/migrate-prod.sh.',
+      'Coverage-gap uses the existing Gemini key (LIVE_API / GEMINI_API_KEY) — if unset, the button degrades gracefully and the PDF still works.',
+      'Replace the headline state estimates with a licensed NCCI / state-bureau feed when one is contracted (data task, not code).',
+    ],
+    tag: 'action-needed',
+  },
+  {
     id: 'broker-pro-off-platform',
     date: '2026-06-20',
     category: 'Broker',

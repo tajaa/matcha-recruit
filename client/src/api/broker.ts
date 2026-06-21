@@ -21,6 +21,7 @@ import type {
   ExternalClient,
   ExternalClientRow,
   ExternalClientDetail,
+  CoverageGap,
   BrokerMilestonesResponse,
   OutreachResponse,
   BrokerSeatsResponse,
@@ -124,6 +125,24 @@ export function saveExternalEplAttestation(
   payload: { status: EplAttestationStatus; note?: string },
 ) {
   return api.put<ExternalClientDetail>(`/broker/external-clients/${id}/epl/${itemKey}`, payload)
+}
+
+// --- Submission packet + coverage-gap ---
+
+export function downloadTenantSubmission(companyId: string) {
+  return api.download(`/broker/clients/${companyId}/submission.pdf`, `submission-${companyId}.pdf`)
+}
+
+export function fetchTenantCoverageGap(companyId: string, currentCoverage?: Record<string, unknown>) {
+  return api.post<CoverageGap>(`/broker/clients/${companyId}/coverage-gap`, { current_coverage: currentCoverage ?? null })
+}
+
+export function downloadExternalSubmission(clientId: string) {
+  return api.download(`/broker/external-clients/${clientId}/submission.pdf`, `submission-${clientId}.pdf`)
+}
+
+export function fetchExternalCoverageGap(clientId: string, currentCoverage?: Record<string, unknown>) {
+  return api.post<CoverageGap>(`/broker/external-clients/${clientId}/coverage-gap`, { current_coverage: currentCoverage ?? null })
 }
 
 // --- Action Center: milestones + outreach ---

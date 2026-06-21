@@ -13,6 +13,7 @@ from .er_copilot import router as er_copilot_router, public_router as er_copilot
 from .ir_incidents import router as ir_incidents_router
 from .broker_portfolio import router as broker_portfolio_router
 from .broker_external import router as broker_external_router
+from .broker_submission import router as broker_submission_router
 from .ir_onboarding import router as ir_onboarding_router
 from .matcha_x_onboarding import router as matcha_x_onboarding_router
 from .ir_surveys import router as ir_surveys_router
@@ -95,6 +96,8 @@ matcha_router.include_router(fractional_hr_router, prefix="/fractional-hr", tags
 matcha_router.include_router(broker_portfolio_router, prefix="/broker", tags=["broker-portfolio"])
 # Off-platform broker clients (Broker Pro) — each endpoint is require_broker_pro gated.
 matcha_router.include_router(broker_external_router, prefix="/broker", tags=["broker-external"])
+# Submission packet + AI coverage-gap (outward layer) — gated per-endpoint.
+matcha_router.include_router(broker_submission_router, prefix="/broker", tags=["broker-submission"])
 matcha_router.include_router(provisioning_router, prefix="/provisioning", tags=["provisioning"])
 matcha_router.include_router(
     matcha_work_router,

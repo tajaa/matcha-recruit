@@ -577,6 +577,22 @@ export interface ExternalClientDetail {
   epl: ExternalEpl
 }
 
+// --- Submission packet / coverage-gap ---
+
+export interface CoverageGapItem {
+  line: string
+  concern: string
+  suggestion: string
+}
+
+export interface CoverageGap {
+  summary: string
+  gaps: CoverageGapItem[]
+  actions: string[]
+  model: string
+  available: boolean
+}
+
 // --- Action Center: positive milestones ---
 
 export type MilestoneFamily = 'incident_free' | 'dart_free' | 'trir_below_benchmark'

@@ -10,7 +10,9 @@ import { StatCard } from '../../components/dashboard'
 import {
   fetchBrokerClientDetail, fetchWcClientDetail, recordWcMod, deleteWcMod,
   fetchEplClientDetail, recordEplAttestation,
+  downloadTenantSubmission, fetchTenantCoverageGap,
 } from '../../api/broker'
+import { SubmissionPanel } from '../../components/broker/SubmissionPanel'
 import type {
   BrokerClientDetailResponse, WcClientDetailResponse,
   EplReadiness, EplFactor, EplAttestationStatus,
@@ -35,7 +37,7 @@ const severityColors: Record<string, string> = {
   low: 'bg-zinc-800 text-zinc-400',
 }
 
-type Tab = 'overview' | 'compliance' | 'policies' | 'ir_er' | 'wc' | 'epl' | 'activity'
+type Tab = 'overview' | 'compliance' | 'policies' | 'ir_er' | 'wc' | 'epl' | 'submission' | 'activity'
 
 const tabs: { key: Tab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
@@ -44,6 +46,7 @@ const tabs: { key: Tab; label: string }[] = [
   { key: 'ir_er', label: 'IR / ER' },
   { key: 'wc', label: "Workers' Comp" },
   { key: 'epl', label: 'EPL Readiness' },
+  { key: 'submission', label: 'Submission' },
   { key: 'activity', label: 'Activity' },
 ]
 
@@ -170,6 +173,12 @@ export default function BrokerClientDetail() {
       {activeTab === 'ir_er' && <IRERTab ir={ir_summary} er={er_summary} />}
       {activeTab === 'wc' && companyId && <WcTab companyId={companyId} />}
       {activeTab === 'epl' && companyId && <EplTab companyId={companyId} />}
+      {activeTab === 'submission' && companyId && (
+        <SubmissionPanel
+          onDownload={() => downloadTenantSubmission(companyId)}
+          onAnalyze={() => fetchTenantCoverageGap(companyId)}
+        />
+      )}
       {activeTab === 'activity' && <ActivityTab activity={recent_activity} />}
     </div>
   )

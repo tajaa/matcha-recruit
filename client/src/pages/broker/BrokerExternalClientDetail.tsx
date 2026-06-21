@@ -3,7 +3,11 @@ import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Loader2, AlertCircle, Gauge, Shield, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import { Card } from '../../components/ui'
 import { HelpHint } from '../../components/broker/HelpHint'
-import { fetchExternalClientDetail, saveExternalWc, saveExternalEplAttestation } from '../../api/broker'
+import { SubmissionPanel } from '../../components/broker/SubmissionPanel'
+import {
+  fetchExternalClientDetail, saveExternalWc, saveExternalEplAttestation,
+  downloadExternalSubmission, fetchExternalCoverageGap,
+} from '../../api/broker'
 import type { ExternalClientDetail, ExternalEplFactor, EplAttestationStatus } from '../../types/broker'
 
 const WC_TONE: Record<string, string> = {
@@ -206,6 +210,11 @@ export default function BrokerExternalClientDetail() {
           ))}
         </div>
       </Card>
+
+      <SubmissionPanel
+        onDownload={() => downloadExternalSubmission(clientId!)}
+        onAnalyze={() => fetchExternalCoverageGap(clientId!)}
+      />
     </div>
   )
 }
