@@ -2,195 +2,190 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Matcha for Brokers — Capabilities, Examples & Gaps vs WTW 2026</title>
+<title>Matcha for Brokers — Sourced Capabilities & Gaps vs WTW 2026</title>
 <style>
   @page {
-    size: Letter; margin: 14mm 15mm 16mm 15mm;
+    size: Letter; margin: 13mm 15mm 15mm 15mm;
     @bottom-center { content: "Matcha for Brokers · Product Brief · " counter(page) " / " counter(pages);
       font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; font-size: 7.5pt; color: #9aa3b2; }
   }
   * { box-sizing: border-box; }
-  body { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; color: #20242e; font-size: 10pt; line-height: 1.5; margin: 0; }
-  h1 { font-size: 23pt; font-weight: 800; color: #14182a; margin: 0 0 4px; letter-spacing: -0.4px; }
-  h2 { font-size: 13pt; font-weight: 800; color: #14182a; margin: 20px 0 9px; padding-bottom: 5px; border-bottom: 2px solid #1f8a5b; }
-  h3 { font-size: 10.5pt; font-weight: 700; color: #14182a; margin: 12px 0 3px; }
-  p { margin: 0 0 8px; }
-  .sub { color: #5c6573; font-size: 10pt; margin-bottom: 2px; }
+  body { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; color: #20242e; font-size: 9.5pt; line-height: 1.46; margin: 0; }
+  h1 { font-size: 22pt; font-weight: 800; color: #14182a; margin: 0 0 4px; letter-spacing: -0.4px; }
+  h2 { font-size: 12.5pt; font-weight: 800; color: #14182a; margin: 18px 0 8px; padding-bottom: 5px; border-bottom: 2px solid #1f8a5b; }
+  h3 { font-size: 10pt; font-weight: 700; color: #14182a; margin: 13px 0 3px; }
+  p { margin: 0 0 7px; }
+  .sub { color: #5c6573; font-size: 9.5pt; margin-bottom: 2px; }
   .meta { color: #9aa3b2; font-size: 8.5pt; }
-  .lede { font-size: 10pt; color: #2c3340; background: #f3f7f4; border-left: 3px solid #1f8a5b; padding: 11px 14px; border-radius: 0 6px 6px 0; margin: 13px 0 4px; }
   .mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
-  .glabel { font-size: 8pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.9px; color: #1f8a5b; margin: 16px 0 4px; }
-  .lead { font-size: 10pt; }
+  .lede { font-size: 9.5pt; color: #2c3340; background: #f3f7f4; border-left: 3px solid #1f8a5b; padding: 10px 13px; border-radius: 0 6px 6px 0; margin: 12px 0 4px; }
+  .glabel { font-size: 8pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.9px; color: #1f8a5b; margin: 15px 0 3px; }
   .lead b { color: #14182a; }
-  .example { background: #f1f6f3; border: 1px solid #d5e5dc; border-radius: 8px; padding: 10px 13px; margin: 8px 0 4px; font-size: 9.5pt; break-inside: avoid; }
-  .example .elab { font-size: 7pt; font-weight: 800; letter-spacing: 1px; color: #1f8a5b; text-transform: uppercase; margin-bottom: 5px; }
-  .example b { color: #14182a; }
-  .example .num { font-family: ui-monospace, Menlo, monospace; font-weight: 700; color: #14182a; }
-  .example .say { display: block; margin-top: 6px; padding-left: 10px; border-left: 2px solid #1f8a5b; color: #2c3340; font-style: italic; }
-  .card { border: 1px solid #e3e7ee; border-radius: 9px; padding: 12px 15px; background: #fcfdfe; break-inside: avoid; margin-bottom: 10px; }
-  .card.miss { border-color: #f0dada; background: #fdf8f8; }
-  .card .lab { font-size: 7.5pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.9px; color: #b23b3b; margin-bottom: 4px; }
-  .card .why { color: #4a5260; font-size: 9.5pt; margin-top: 5px; }
-  .card .why b { color: #20242e; }
-  .ba { font-size: 9pt; margin-top: 6px; }
-  .ba .t { font-weight: 700; }
-  .ba .today { color: #a93434; } .ba .with { color: #1f8a5b; }
-  table { width: 100%; border-collapse: collapse; margin: 8px 0 4px; font-size: 9pt; }
-  th { text-align: left; font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.6px; color: #6b7383; border-bottom: 1.5px solid #d7dce5; padding: 5px 8px; }
-  td { padding: 5px 8px; border-bottom: 1px solid #eef1f6; vertical-align: middle; }
-  tr { break-inside: avoid; }
+  /* sourced quote from the report */
+  .cite { font-size: 8.8pt; color: #4a443a; background: #f7f4ec; border-left: 3px solid #b8902f; padding: 6px 11px; border-radius: 0 5px 5px 0; margin: 5px 0; }
+  .cite .pg { font-weight: 800; color: #8a6a12; font-size: 7pt; letter-spacing: 0.6px; text-transform: uppercase; margin-right: 5px; }
+  .cite i { color: #3a4250; }
+  /* what we have / data source */
+  .have { font-size: 9pt; background: #f1f6f3; border-radius: 6px; padding: 6px 11px; margin: 5px 0; color: #2c4a3c; }
+  .have .lab { font-weight: 800; font-size: 7pt; text-transform: uppercase; letter-spacing: 0.6px; color: #1f8a5b; margin-right: 5px; }
+  .have b { color: #14402e; }
+  .ex { font-size: 8.8pt; color: #2c3340; margin: 5px 0; padding-left: 11px; border-left: 2px solid #cdd5e0; }
+  .ex .lab { font-weight: 800; font-size: 7pt; text-transform: uppercase; letter-spacing: 0.6px; color: #6b7383; margin-right: 5px; }
+  .ex .num { font-family: ui-monospace, Menlo, monospace; font-weight: 700; color: #14182a; }
+  .grp { break-inside: avoid; margin-bottom: 11px; }
+  table { width: 100%; border-collapse: collapse; margin: 7px 0 4px; font-size: 8.8pt; }
+  th { text-align: left; font-size: 7.2pt; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7383; border-bottom: 1.5px solid #d7dce5; padding: 4px 7px; }
+  td { padding: 4px 7px; border-bottom: 1px solid #eef1f6; vertical-align: middle; }
   td.r, th.r { text-align: right; font-family: ui-monospace, Menlo, monospace; }
-  .chip { display: inline-block; font-size: 7.5pt; font-weight: 800; letter-spacing: 0.4px; padding: 2px 8px; border-radius: 20px; white-space: nowrap; }
+  tr { break-inside: avoid; }
+  .chip { display: inline-block; font-size: 7.2pt; font-weight: 800; letter-spacing: 0.4px; padding: 2px 7px; border-radius: 20px; white-space: nowrap; }
   .c-new { background: #1f8a5b; color: #fff; } .c-have { background: #e7edf6; color: #2b4c7e; }
   .c-part { background: #fbeecf; color: #8a6a12; } .c-miss { background: #f7dede; color: #a93434; }
   .d-have { color: #2b4c7e; font-weight: 700; } .d-part { color: #8a6a12; font-weight: 700; } .d-gap { color: #a93434; font-weight: 700; }
-  .legend { font-size: 8.5pt; color: #6b7383; margin-top: 6px; }
-  .legend .chip { margin-right: 5px; }
-  .seq { counter-reset: step; padding-left: 0; list-style: none; margin: 6px 0; }
-  .seq li { position: relative; padding: 4px 0 4px 30px; margin-bottom: 4px; }
-  .seq li::before { counter-increment: step; content: counter(step); position: absolute; left: 0; top: 3px; width: 19px; height: 19px; background: #1f8a5b; color: #fff; border-radius: 50%; text-align: center; font-size: 9pt; font-weight: 800; line-height: 19px; }
-  .foot { margin-top: 16px; padding-top: 8px; border-top: 1px solid #e3e7ee; color: #9aa3b2; font-size: 8pt; }
-  .note { font-size: 8pt; color: #9aa3b2; font-style: italic; }
+  .legend { font-size: 8pt; color: #6b7383; margin-top: 5px; } .legend .chip { margin-right: 5px; }
+  .card { border: 1px solid #f0dada; border-radius: 9px; padding: 11px 14px; background: #fdf8f8; break-inside: avoid; margin-bottom: 9px; }
+  .card .lab { font-size: 7.2pt; font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px; color: #b23b3b; margin-bottom: 3px; }
+  .src { font-size: 9pt; background: #eef2f8; border-radius: 6px; padding: 6px 11px; margin: 5px 0; color: #2b3a52; }
+  .src .lab { font-weight: 800; font-size: 7pt; text-transform: uppercase; letter-spacing: 0.6px; color: #2b4c7e; margin-right: 5px; }
+  .ba { font-size: 8.8pt; margin-top: 5px; }
+  .ba .today { color: #a93434; font-weight: 700; } .ba .with { color: #1f8a5b; font-weight: 700; }
+  .seq { counter-reset: step; padding-left: 0; list-style: none; margin: 5px 0; }
+  .seq li { position: relative; padding: 3px 0 3px 28px; margin-bottom: 3px; }
+  .seq li::before { counter-increment: step; content: counter(step); position: absolute; left: 0; top: 2px; width: 18px; height: 18px; background: #1f8a5b; color: #fff; border-radius: 50%; text-align: center; font-size: 8.5pt; font-weight: 800; line-height: 18px; }
+  .foot { margin-top: 14px; padding-top: 7px; border-top: 1px solid #e3e7ee; color: #9aa3b2; font-size: 7.8pt; }
 </style>
 </head>
 <body>
 
   <div class="meta">PRODUCT BRIEF · 2026-06-20</div>
   <h1>Matcha for Brokers</h1>
-  <div class="sub">How it works, with worked examples — and what's still missing. Mapped to WTW's <i>Insurance Marketplace Realities 2026</i>.</div>
+  <div class="sub">Every capability and gap, sourced to WTW's <i>Insurance Marketplace Realities 2026</i> — what the industry asks for, why it matters, and what data we use.</div>
 
   <div class="lede">
-    <b>The opportunity.</b> WTW's 2026 report says brokers win not by shopping policies but by turning a client's <b>data</b> into a credible risk story that earns better terms at renewal. That data — workplace safety, HR practices, compliance — is exactly what Matcha runs. So Matcha can hand a broker an underwriting-grade risk picture for clients on the platform, <b>and run the same scoring on a broker's off-platform book</b> from a loss run + a questionnaire. The rest of this brief shows the mechanics and walks real examples (using our seeded demo book).
-    <span class="note">All numbers below are from the live demo data, not illustrations.</span>
+    <b>The thesis.</b> WTW's report is explicit that the modern broker competes on data, not price. <span class="cite" style="display:block;margin-top:6px;"><span class="pg">WTW p.5</span><i>"…your competitive edge depends on harnessing data, analytics, and technology — not just to keep pace, but to stay ahead."</i></span> And carriers reward it: <span class="cite" style="display:block;"><span class="pg">WTW p.4</span><i>"…a buyers' market in many lines of business for risks with favorable loss history, risk mitigation plans, redundancies and quality data."</i></span> That data — safety, HR, compliance — is exactly what Matcha runs. So we can hand a broker an underwriting-grade picture for free, and score a broker's off-platform book from a loss run + questionnaire. <span class="mono" style="font-size:8pt;color:#9aa3b2;">Examples below use Matcha's seeded demo book.</span>
   </div>
 
-  <h2>How the scoring works (the mechanics)</h2>
-
-  <p class="lead"><b>Workers' Comp.</b> From a client's recordable injuries we compute the same metrics carriers price on:</p>
-  <div class="example">
-    <div class="elab">The math</div>
-    <b>TRIR</b> (injury rate) <span class="mono">= recordable cases × 200,000 ÷ (headcount × 2,000 hrs)</span>. We band it against the client's <b>industry</b> benchmark (BLS): below 0.75× = <span class="d-have">good</span>, up to 1.5× = <span class="d-part">at-risk</span>, ≥1.5× = <span class="d-gap">critical</span>. We also track the <b>experience mod (EMR)</b> over time, split claims into <b>cumulative-trauma vs acute</b> + a <b>post-termination</b> flag, measure <b>return-to-work</b>, and overlay the <b>state's NCCI rate trend</b>.
-  </div>
-
-  <p class="lead"><b>EPL readiness.</b> A composite <b>0–100</b> score over 10 factors — 55% computed from HR data Matcha already holds, 45% broker-attested from the underwriting questionnaire. Band: <span class="mono">≥80 Strong · ≥60 Adequate · ≥35 Developing · &lt;35 Exposed</span>.</p>
+  <h2>How the scoring works</h2>
+  <p class="lead"><b>Workers' Comp:</b> <span class="mono">TRIR = recordable cases × 200,000 ÷ (headcount × 2,000 hrs)</span>, banded vs the client's BLS industry benchmark (≥1.5× = critical). Plus experience-mod trajectory, cumulative-trauma/acute + post-termination split, return-to-work, and a per-state NCCI rate overlay.</p>
+  <p class="lead"><b>EPL readiness:</b> composite <b>0–100</b> over 10 factors (band <span class="mono">≥80 Strong · ≥60 Adequate · ≥35 Developing · &lt;35 Exposed</span>):</p>
   <table>
-    <thead><tr><th>Factor</th><th>Source</th><th class="r">Weight</th></tr></thead>
+    <thead><tr><th>EPL factor</th><th>Source</th><th class="r">Wt</th><th>Where the data comes from</th></tr></thead>
     <tbody>
-      <tr><td>Anti-harassment / EEO policy + signature rate</td><td class="d-have">derived</td><td class="r">15</td></tr>
-      <tr><td>Anti-harassment training completion</td><td class="d-have">derived</td><td class="r">12</td></tr>
-      <tr><td>Multi-state wage &amp; hour compliance</td><td class="d-have">derived</td><td class="r">10</td></tr>
-      <tr><td>Documented progressive discipline</td><td class="d-have">derived</td><td class="r">10</td></tr>
-      <tr><td>ER-case management</td><td class="d-have">derived</td><td class="r">8</td></tr>
-      <tr><td>Pay transparency · Biometric/BIPA · Pay equity · AI-hiring audit · DEI</td><td class="d-part">attested</td><td class="r">9 ea (45)</td></tr>
+      <tr><td>Anti-harassment / EEO policy + signatures</td><td class="d-have">derived</td><td class="r">15</td><td><span class="mono" style="font-size:8pt">policies · policy_signatures</span></td></tr>
+      <tr><td>Anti-harassment training completion</td><td class="d-have">derived</td><td class="r">12</td><td><span class="mono" style="font-size:8pt">training_records</span></td></tr>
+      <tr><td>Multi-state wage &amp; hour compliance</td><td class="d-have">derived</td><td class="r">10</td><td><span class="mono" style="font-size:8pt">compliance_requirements · business_locations</span></td></tr>
+      <tr><td>Documented progressive discipline</td><td class="d-have">derived</td><td class="r">10</td><td><span class="mono" style="font-size:8pt">progressive_discipline</span></td></tr>
+      <tr><td>ER-case management</td><td class="d-have">derived</td><td class="r">8</td><td><span class="mono" style="font-size:8pt">er_cases</span></td></tr>
+      <tr><td>Pay transparency · BIPA · pay equity · AI-hiring · DEI</td><td class="d-part">attested</td><td class="r">45</td><td>broker questionnaire <span class="mono" style="font-size:8pt">(company_epl_attestations)</span></td></tr>
     </tbody>
   </table>
-  <p class="note">Off-platform clients have no HR data to derive from, so all 10 factors are broker-attested — same weights, so scores stay directly comparable to on-platform clients.</p>
 
-  <h2>What we have today — with examples</h2>
+  <h2>What we have — sourced</h2>
 
-  <div class="glabel">A · Run the whole book — the cockpit <span class="chip c-have">HAVE</span></div>
-  <p class="lead">Book of Business dashboard (every client banded healthy/watch/at-risk), onboarding pipeline, seats + referral links, multi-user team with roles, white-label branding, automated risk alerts + milestones, and AI outreach talking points grounded in each client's own data.</p>
-  <div class="example">
-    <div class="elab">Example — Monday morning</div>
-    The broker opens <b>Book of Business</b>. Of 9 clients, the strip shows <span class="num">1 critical · 1 fair · 1 good</span> and <span class="num">$—</span> net premium exposure. An <b>alert</b> fires: <b>Bags</b> broke a claims-free streak. The broker clicks <b>AI outreach</b> → gets a drafted talking-track citing Bags' own numbers, and calls them — <span class="say">before the client even knows there's a problem.</span>
+  <div class="grp">
+    <div class="glabel">A · The broker cockpit <span class="chip c-have">HAVE</span></div>
+    <p class="lead">Book of Business (clients banded healthy/watch/at-risk), onboarding pipeline, seats, team, white-label, automated risk alerts + milestones, and AI outreach.</p>
+    <div class="cite"><span class="pg">WTW p.10</span><i>"Risk Intelligence Central… gives clients easy and efficient access to their risk information… so clients can optimize their risk and insurance."</i></div>
+    <p><b>Why it matters:</b> the report's whole "tomorrow's broker" thesis is proactive, data-driven service — knowing which client to call before they do.</p>
+    <div class="have"><span class="lab">Have / data</span> Built on <b>broker_company_links</b> (the book) + a Celery job that scans each client's incident/compliance trend into <b>broker_risk_alerts</b>; AI outreach is Gemini grounded in that client's own metrics.</div>
+    <div class="ex"><span class="lab">Example</span> Of 9 clients the strip shows <span class="num">1 critical · 1 fair · 1 good</span>; an alert fires that <b>Bags</b> broke its claims-free streak → broker clicks AI outreach and calls, prepared.</div>
   </div>
 
-  <div class="glabel">B · Workers' Comp depth <span class="chip c-new">NEW</span></div>
-  <p class="lead">Experience-mod trajectory, cumulative-trauma / post-termination claim taxonomy, return-to-work, and a per-state NCCI rate overlay — on the client-detail "Workers' Comp" tab.</p>
-  <div class="example">
-    <div class="elab">Example — Bags (construction · 25 employees · California)</div>
-    The tab shows <b>TRIR <span class="num">20.0</span></b> — <span class="num">8×</span> the construction benchmark (~2.5) → <span class="d-gap">critical</span>. Claim mix: <b><span class="num">5</span> cumulative-trauma</b>, <span class="num">2</span> filed <b>post-termination</b>, <span class="num">3</span> still-open lost-time. Experience mod climbing <span class="num">1.05 → 1.18 → 1.32</span> (a 32% surcharge). California loss-costs <span class="num">−2.0%</span>.
-    <span class="say">"Your premium is rising because of cumulative-trauma claims — not base rates, which are actually down 2%. Here's an ergonomics + return-to-work plan to bend the mod before renewal."</span>
+  <div class="grp">
+    <div class="glabel">B · Workers' Comp depth <span class="chip c-new">NEW</span></div>
+    <p class="lead">Experience-mod trajectory, cumulative-trauma / post-termination claim taxonomy, return-to-work, and a per-state NCCI rate overlay.</p>
+    <div class="cite"><span class="pg">WTW p.29</span><i>"Willis has developed and deployed a Workers' Compensation Risk Index Model, helping clients to evaluate their year-over-year jurisdiction and hazard risk changes."</i> &nbsp;·&nbsp; <span class="pg">p.29</span><i>"…from 'windfall' to 'managed' profitability — where … claim and medical management and state-by-state execution will matter more."</i></div>
+    <div class="cite"><span class="pg">WTW p.29</span><i>"40% of all CT claims are filed on a post-employment or post-termination basis. These claims tend to be more litigious…"</i> &nbsp;·&nbsp; <span class="pg">p.33</span><i>"…even in states where rates are decreasing, some employers may see their experience modification factors increase."</i></div>
+    <p><b>Why it matters:</b> the mod is the multiplier on WC premium, CT/post-term claims are the rising cost driver, and rate moves are now state-by-state — exactly what our tab surfaces.</p>
+    <div class="have"><span class="lab">Have / data</span> OSHA recordables already captured in Matcha's incident product (<b>ir_incidents</b>: recordable flag, days-away, classification); we added claim-type + post-termination + return-to-work on each incident; EMR is broker-entered (<b>company_wc_mods</b>); state from <b>business_locations</b>; NCCI trend seeded in <b>wc_state_rates</b> from the report's p.32 filing table.</div>
+    <div class="ex"><span class="lab">Example — Bags (construction · 25)</span> TRIR <span class="num">20.0</span> = 8× benchmark → critical; <span class="num">5</span> CT, <span class="num">2</span> post-term; mod <span class="num">1.05→1.18→1.32</span>; CA <span class="num">−2.0%</span>. <i>"Your premium's rising from cumulative-trauma claims, not base rates — here's the plan to bend the mod."</i></div>
   </div>
 
-  <div class="glabel">C · EPL readiness <span class="chip c-new">NEW</span></div>
-  <p class="lead">A 0–100 insurability score per client, with the single biggest gap surfaced — half from HR data, half from a quick broker checklist.</p>
-  <div class="example">
-    <div class="elab">Example — Gretchin Weiners (retail · 150 employees · CA + IL)</div>
-    Score <b><span class="num">69</span> — <span class="d-part">Adequate</span></b> (derived <span class="num">33</span>/55 + attested <span class="num">36</span>/45). Strong points: anti-harassment policy in place with <span class="num">92%</span> signed; pay-transparency &amp; DEI attested in place. <b>Top gaps:</b> no anti-harassment <b>training</b> and no documented <b>discipline</b> process.
-    <span class="say">"Two fixes — roll out harassment training and document your discipline steps — move you from Adequate to Strong, and that's a better EPL renewal."</span>
+  <div class="grp">
+    <div class="glabel">C · EPL readiness <span class="chip c-new">NEW</span></div>
+    <p class="lead">A 0–100 insurability score with the top gap surfaced — half from HR data, half from a quick broker checklist.</p>
+    <div class="cite"><span class="pg">WTW p.85</span><i>"Underwriters are also focusing on AI usage in the workplace, company approaches to DEI, … EEOC enforcement priorities … and compliance with state pay transparency laws. Many markets have separate questionnaires for biometrics, sexual harassment and pay equity."</i></div>
+    <div class="cite"><span class="pg">WTW p.87</span><i>"The risk of wage and hour claims applies to all U.S. employers. As laws … vary from state to state (and sometimes county to county), compliance has become extremely difficult for multi-state employers."</i> (DOL recovered <b>$184M</b> in back wages FY2025.)</div>
+    <p><b>Why it matters:</b> the report literally lists the EPL underwriting questionnaire — and Matcha already holds most of the answers, so we convert a blank application into a one-screen score.</p>
+    <div class="have"><span class="lab">Have / data</span> Derived from <b>policies/policy_signatures</b>, <b>training_records</b>, <b>progressive_discipline</b>, <b>er_cases</b>, and <b>compliance_requirements</b> per location; the 5 items no system tracks (pay transparency, biometrics/BIPA, pay equity, AI-hiring audit, DEI) are broker-attested.</div>
+    <div class="ex"><span class="lab">Example — Gretchin (retail · 150 · CA+IL)</span> <span class="num">69</span> Adequate (derived <span class="num">33</span>/55 + attested <span class="num">36</span>/45); top gaps = no harassment <b>training</b>, no documented <b>discipline</b>. <i>"Two fixes move you to Strong — a better EPL renewal."</i></div>
   </div>
 
-  <div class="glabel">D · Off-platform clients — "Broker Pro" <span class="chip c-new">NEW</span></div>
-  <p class="lead">Score clients who aren't on Matcha. Admin flips the broker to the Pro plan; an "External Book" appears. The broker adds a non-tenant client, keys the carrier loss-run summary + a short EPL questionnaire, and the same engines score them.</p>
-  <div class="example">
-    <div class="elab">Example — Northwind Trucking (prospect, not a Matcha client · transportation · 60 employees · IL)</div>
-    Broker pastes the loss run: <span class="num">9</span> recordables, <span class="num">5</span> DART, <span class="num">4</span> cumulative-trauma, <span class="num">1</span> post-term, mod <b><span class="num">1.24</span></b>, premium <span class="num">$210k</span>. Instantly: <b>TRIR <span class="num">15.0</span></b> → <span class="d-gap">critical</span>, IL rates <span class="num">+1.5%</span>, and a questionnaire-driven <b>EPL <span class="num">26</span> — <span class="d-gap">Exposed</span></b>.
-    <span class="say">"You're a prospect, not even my client yet — but here's exactly where your WC and EPL risk sits and the plan to fix it before your renewal." That's how the broker wins the account.</span>
+  <div class="grp">
+    <div class="glabel">D · Off-platform clients — "Broker Pro" <span class="chip c-new">NEW</span></div>
+    <p class="lead">Score clients who aren't on Matcha — broker keys the carrier loss-run summary + a short EPL questionnaire; the same engines run.</p>
+    <div class="cite"><span class="pg">WTW p.11</span><i>"…if you can capture exposure data, you can help clients make a better case to the market, which drives better experiences for carriers too."</i></div>
+    <p><b>Why it matters:</b> most of a broker's book never onboards. Capturing their exposure data is exactly the "better case to the market" the report describes — and turns our scoring engine into a standalone broker tool.</p>
+    <div class="have"><span class="lab">Have / data</span> <b>broker_external_*</b> tables (non-tenant clients); data from the carrier <b>loss run</b> + an underwriting <b>questionnaire</b> the broker keys. Same WC math + EPL weights, so scores compare to on-platform clients.</div>
+    <div class="ex"><span class="lab">Example — Northwind (prospect · transportation · 60 · IL)</span> loss run: <span class="num">9</span> recordable, <span class="num">4</span> CT, mod <span class="num">1.24</span>, $<span class="num">210k</span> → TRIR <span class="num">15.0</span> critical, IL <span class="num">+1.5%</span>, EPL <span class="num">26</span> Exposed. Wins the account before they're even a client.</div>
   </div>
 
-  <h2>Coverage snapshot — the report's needs vs. what we have</h2>
+  <h2>Coverage snapshot</h2>
   <table>
-    <thead><tr><th style="width:64%">What the 2026 report says brokers need</th><th>Status</th></tr></thead>
+    <thead><tr><th style="width:54%">What the report says brokers need</th><th>Report</th><th>Status</th></tr></thead>
     <tbody>
-      <tr><td>Data-driven consultative broking (alerts, AI outreach, scoring)</td><td><span class="chip c-have">HAVE</span></td></tr>
-      <tr><td>Workers' Comp loss metrics (TRIR / DART / severity)</td><td><span class="chip c-have">HAVE</span></td></tr>
-      <tr><td>WC — experience-mod · CT &amp; post-termination · return-to-work</td><td><span class="chip c-new">NEW</span></td></tr>
-      <tr><td>EPL — insurability score + underwriter checklist</td><td><span class="chip c-new">NEW</span></td></tr>
-      <tr><td><b>Serve off-platform clients (not on Matcha)</b></td><td><span class="chip c-new">NEW</span></td></tr>
-      <tr><td>WC — full 50-state NCCI coverage + class codes</td><td><span class="chip c-part">PARTIAL</span></td></tr>
-      <tr><td>EPL — pay transparency / BIPA / pay equity / AI-hiring / DEI as tracked tools</td><td><span class="chip c-part">PARTIAL</span></td></tr>
-      <tr><td>Off-platform — loss-run PDF auto-parse + client intake link</td><td><span class="chip c-miss">MISSING</span></td></tr>
-      <tr><td>Carrier-ready underwriting submission packet</td><td><span class="chip c-miss">MISSING</span></td></tr>
-      <tr><td>AI coverage-gap analysis</td><td><span class="chip c-miss">MISSING</span></td></tr>
-      <tr><td>Client-facing self-serve risk portal · composite risk index</td><td><span class="chip c-miss">MISSING</span></td></tr>
-      <tr><td>Healthcare / senior-living resident-care risk asset</td><td><span class="chip c-miss">MISSING</span></td></tr>
+      <tr><td>Data-driven consultative broking</td><td class="mono" style="font-size:8pt">p.4–5,10</td><td><span class="chip c-have">HAVE</span></td></tr>
+      <tr><td>WC loss metrics (TRIR/DART/severity)</td><td class="mono" style="font-size:8pt">p.28–34</td><td><span class="chip c-have">HAVE</span></td></tr>
+      <tr><td>WC mod · CT/post-term · return-to-work · state rates</td><td class="mono" style="font-size:8pt">p.29–33</td><td><span class="chip c-new">NEW</span></td></tr>
+      <tr><td>EPL insurability score + underwriter checklist</td><td class="mono" style="font-size:8pt">p.85–87</td><td><span class="chip c-new">NEW</span></td></tr>
+      <tr><td><b>Serve off-platform clients</b></td><td class="mono" style="font-size:8pt">p.11</td><td><span class="chip c-new">NEW</span></td></tr>
+      <tr><td>Full 50-state NCCI rates + class codes</td><td class="mono" style="font-size:8pt">p.32–33</td><td><span class="chip c-part">PARTIAL</span></td></tr>
+      <tr><td>EPL items as tracked tools (pay transp., BIPA, pay equity…)</td><td class="mono" style="font-size:8pt">p.85–86</td><td><span class="chip c-part">PARTIAL</span></td></tr>
+      <tr><td>Loss-run PDF auto-parse + client intake link</td><td class="mono" style="font-size:8pt">p.11</td><td><span class="chip c-miss">MISSING</span></td></tr>
+      <tr><td>Carrier-ready submission packet</td><td class="mono" style="font-size:8pt">p.4,11</td><td><span class="chip c-miss">MISSING</span></td></tr>
+      <tr><td>AI coverage-gap analysis</td><td class="mono" style="font-size:8pt">p.11</td><td><span class="chip c-miss">MISSING</span></td></tr>
+      <tr><td>Client self-serve risk portal · composite risk index</td><td class="mono" style="font-size:8pt">p.10,29</td><td><span class="chip c-miss">MISSING</span></td></tr>
+      <tr><td>Healthcare / senior-living resident-care asset</td><td class="mono" style="font-size:8pt">p.175–76</td><td><span class="chip c-miss">MISSING</span></td></tr>
     </tbody>
   </table>
-  <div class="legend">
-    <span class="chip c-new">NEW</span>shipped this cycle &nbsp; <span class="chip c-have">HAVE</span>already existed &nbsp;
-    <span class="chip c-part">PARTIAL</span>works, needs depth &nbsp; <span class="chip c-miss">MISSING</span>not built
-  </div>
+  <div class="legend"><span class="chip c-new">NEW</span>shipped &nbsp; <span class="chip c-have">HAVE</span>existed &nbsp; <span class="chip c-part">PARTIAL</span>needs depth &nbsp; <span class="chip c-miss">MISSING</span>not built</div>
 
-  <h2>What's still missing — and why, with examples</h2>
+  <h2>What's missing — sourced, with the data path</h2>
 
-  <div class="card miss">
-    <div class="lab">✦ Biggest remaining — the terms-winning layer (the report's actual thesis)</div>
+  <div class="card">
+    <div class="lab">✦ #1 — the terms-winning layer (the report's thesis)</div>
     <h3>Carrier-ready submission packet + AI coverage-gap analysis</h3>
-    <div class="why">We hold the risk picture <b>inward</b> (dashboards + WC/EPL scores). We don't yet package it <b>outward</b> for carriers, or flag where a client is under-covered.</div>
-    <div class="ba">
-      <span class="t today">Today:</span> the broker re-types Bags' TRIR, mod history (1.05→1.32), claim mix and loss-mitigation notes into a Word doc, then emails 6 carriers individually.<br>
-      <span class="t with">With it:</span> one click → a branded PDF submission per carrier from the data already on file, plus an AI flag like <span class="mono">"Bags carries $1M EPL; a 25-person construction crew with 2 post-term CT claims supports $2M — and there's no cyber despite employee PII."</span>
-    </div>
-    <div class="why" style="margin-top:6px;"><b>Why it's #1:</b> this is what literally wins better pricing at renewal, and it sits directly on top of the scoring we just shipped.</div>
+    <div class="cite"><span class="pg">WTW p.11</span><i>"…an AI product we've built delivers highly accurate coverage gap analysis"</i> &nbsp;·&nbsp; <span class="pg">p.11</span><i>"[a tool that] organizes insurance and benefits information … in a single platform."</i></div>
+    <p><b>Why:</b> this is what actually wins better pricing at renewal — WTW/Newfront name it as their flagship AI product.</p>
+    <div class="src"><span class="lab">Data path</span> Submission needs <b>no new data</b> — it's our existing WC/EPL scores rendered through the WeasyPrint PDF pipeline we already use for the renewal "stabilization kit." Coverage-gap needs the client's <b>current policy limits</b> (not in Matcha): broker enters them, or we parse the dec page with Gemini.</div>
+    <div class="ba"><span class="today">Today:</span> broker re-types Bags' TRIR + mod history into Word for 6 carriers. &nbsp; <span class="with">With it:</span> one-click branded submission + a flag like <span class="mono" style="font-size:8pt">"$1M EPL on a 25-person construction crew w/ 2 post-term CT claims → supports $2M; no cyber despite PII."</span></div>
   </div>
 
-  <div class="card miss">
+  <div class="card">
     <div class="lab">✦ Off-platform v2 — remove the manual keying</div>
-    <h3>Loss-run PDF auto-parse + a client-fills-it intake link</h3>
-    <div class="why">Today the broker hand-keys the Northwind loss-run figures and questionnaire.</div>
-    <div class="ba">
-      <span class="t today">Today:</span> broker reads a 12-page carrier PDF and types 14 numbers per prospect; the EPL answers require a separate call with the client.<br>
-      <span class="t with">With it:</span> drop the PDF → fields auto-fill; send the client a link they complete themselves (no onboarding) → the book scales from a handful of prospects to dozens.
-    </div>
+    <h3>Loss-run PDF auto-parse + client-fills-it intake link</h3>
+    <div class="cite"><span class="pg">WTW p.11</span><i>"How do we bring data back to our brokers as quickly as possible? How do we digitize more of the value chain?"</i></div>
+    <p><b>Why:</b> the data-entry tax caps how many off-platform prospects a broker can run.</p>
+    <div class="src"><span class="lab">Data path</span> Loss runs are carrier <b>PDFs</b> → parse with Gemini (already our AI stack) into the <b>broker_external_wc</b> fields. EPL answers live with the client → a shareable <b>intake link</b> they complete without onboarding. Headcount can auto-fill via the existing <b>Finch/Gusto HRIS</b> connector.</div>
+    <div class="ba"><span class="today">Today:</span> read a 12-page PDF, type 14 numbers, call the client for EPL. &nbsp; <span class="with">With it:</span> drop PDF → fields fill; client self-completes → book scales to dozens.</div>
   </div>
 
-  <div class="card miss">
+  <div class="card">
     <div class="lab">✦ Year-round client value + one number</div>
     <h3>Client-facing risk portal + a single composite risk index</h3>
-    <div class="why">Everything is broker-only today, and risk lives in three separate scores (WC band, EPL number, compliance).</div>
-    <div class="ba">
-      <span class="t with">With it:</span> Bags' owner logs into a portal and sees <span class="mono">"Your risk index: 41/100 (peer avg 68). Top 3 fixes: ergonomics program, return-to-work policy, document discipline."</span> — one benchmarkable number, and the broker looks proactive every month, not just at renewal.
-    </div>
+    <div class="cite"><span class="pg">WTW p.10</span><i>"Risk Intelligence Central… gives clients easy and efficient access to their risk information."</i> &nbsp;·&nbsp; <span class="pg">p.29</span> the "Risk Index Model" that scores jurisdiction + hazard change.</div>
+    <p><b>Why:</b> a client-facing surface + one benchmarkable number makes the broker sticky beyond renewal season.</p>
+    <div class="src"><span class="lab">Data path</span> <b>No new data</b> — composite index = a weighted roll-up of the WC + EPL + compliance scores Matcha already computes; the portal is a client-auth view over the broker's existing client record.</div>
+    <div class="ba"><span class="with">With it:</span> Bags' owner sees <span class="mono" style="font-size:8pt">"Risk index 41/100 (peer avg 68); top 3 fixes…"</span> — proactive value every month.</div>
   </div>
 
-  <div class="card miss">
-    <div class="lab">✦ Depth where it's currently thin</div>
-    <h3>EPL factors as real tools · full WC data · healthcare vertical</h3>
-    <div class="why"><b>EPL "attested" → tracked tools:</b> pay transparency, BIPA, pay equity, AI-hiring audits, DEI are broker yes/no/partial today; e.g. a real pay-transparency checker that scans the client's job postings for the 5 states that require salary ranges. <b>WC data:</b> only the report's named states are seeded — needs full 50-state NCCI rates + class codes (so a Texas or Ohio client isn't "no data"). <b>Healthcare:</b> the report calls a strong resident-care program "a valuable asset to highlight for insurers" — package credentialing + incidents + fall-prevention for senior-living PL.</div>
+  <div class="card">
+    <div class="lab">✦ Depth where it's thin</div>
+    <h3>EPL items as real tools · full WC data · healthcare vertical</h3>
+    <div class="cite"><span class="pg">WTW p.86</span><i>"Companies should continue to test and audit their AI tools on a regular basis."</i> &nbsp;·&nbsp; <span class="pg">p.175</span><i>"A strong resident-care risk management program is a valuable asset to highlight for prospective insurers."</i> &nbsp;·&nbsp; <span class="pg">p.176</span><i>"Motor vehicle record (MVR) reviews — both upon hiring and annually thereafter."</i></div>
+    <div class="src"><span class="lab">Data path</span> <b>Pay transparency</b> → scan the client's job postings; <b>pay equity</b> → payroll via the <b>Finch/Gusto</b> connector; <b>AI-hiring audit</b> → ATS records. <b>WC completeness</b> → annual NCCI/state-bureau rate filings loaded into <b>wc_state_rates</b> (only the report's named states seeded today). <b>Healthcare</b> → package <b>credential_templates</b> + <b>ir_incidents</b> + new fall-prevention/MVR tracking into the resident-care asset.</div>
   </div>
 
-  <h2>Why this matters &amp; what's next</h2>
-  <p>The bet: <b>Matcha is the only HR platform that already sits on the exact data carriers underwrite on</b> — and now scores it for on- and off-platform clients alike. Each remaining step turns more of that data into something a broker can sell with.</p>
+  <h2>Sequence</h2>
   <ul class="seq">
-    <li><b>Outward submission packet + AI coverage-gap</b> — the terms-winning thesis; sits right on top of the scoring already shipped.</li>
-    <li><b>Off-platform v2</b> — loss-run PDF auto-parse + client intake link, so the External Book scales without manual keying.</li>
-    <li><b>Client portal + composite risk index</b> — year-round client value + one benchmarkable number.</li>
-    <li><b>Vertical + data depth</b> — healthcare resident-care asset, full state WC rates, EPL trackers.</li>
+    <li><b>Outward submission packet + AI coverage-gap</b> — the terms-winning thesis; sits on the scoring already shipped (data already on file).</li>
+    <li><b>Off-platform v2</b> — loss-run parse + client intake link, so the External Book scales.</li>
+    <li><b>Client portal + composite index</b> — year-round value, no new data.</li>
+    <li><b>Vertical + data depth</b> — healthcare asset, full state WC rates, EPL trackers.</li>
   </ul>
 
   <div class="foot">
-    Source: WTW <i>Insurance Marketplace Realities 2026 (Spring Update)</i> — Workers' Comp pp. 28–34, EPL &amp; Wage/Hour pp. 84–87, broker strategy pp. 4–13, healthcare pp. 142–145 &amp; 174–176. Examples use Matcha's seeded demo book. Deeper engineering reference: <i>broker-capabilities-and-wtw-gap-2026.md</i>.
+    Sources cited inline. WTW <i>Insurance Marketplace Realities 2026 (Spring Update)</i> — exec/strategy pp. 4–13, Workers' Comp pp. 28–34, EPL &amp; Wage/Hour pp. 84–87, healthcare/senior-living pp. 142–145 &amp; 174–176. Examples use Matcha's seeded demo book. Engineering reference: <i>broker-capabilities-and-wtw-gap-2026.md</i>.
   </div>
 
 </body>
