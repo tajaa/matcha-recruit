@@ -2,6 +2,7 @@ import { useState, useEffect, type FormEvent, type ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Loader2, AlertCircle, Gauge, Shield, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import { Card } from '../../components/ui'
+import { HelpHint } from '../../components/broker/HelpHint'
 import { fetchExternalClientDetail, saveExternalWc, saveExternalEplAttestation } from '../../api/broker'
 import type { ExternalClientDetail, ExternalEplFactor, EplAttestationStatus } from '../../types/broker'
 
@@ -129,7 +130,9 @@ export default function BrokerExternalClientDetail() {
       {/* Workers' Comp */}
       <Card className="p-5">
         <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2"><Gauge className="h-4 w-4 text-zinc-500" /><h3 className="text-sm font-medium text-zinc-200 tracking-wide">Workers' Comp</h3></div>
+          <div className="flex items-center gap-2"><Gauge className="h-4 w-4 text-zinc-500" /><h3 className="text-sm font-medium text-zinc-200 tracking-wide">Workers' Comp</h3>
+            <HelpHint text="Keyed from the client's carrier loss run. We compute TRIR/DART vs their industry, the claim mix (cumulative-trauma / post-term / open lost-time), and overlay the state's WC rate trend — so you can show what's driving their premium and what to fix." />
+          </div>
           <button onClick={() => (editWc ? setEditWc(false) : openWcEditor())} className="text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500 transition-colors">
             {editWc ? 'Cancel' : wc.has_data ? 'Edit loss run' : 'Enter loss run'}
           </button>
@@ -181,6 +184,7 @@ export default function BrokerExternalClientDetail() {
         <div className="flex items-center gap-3 mb-4">
           <Shield className="h-4 w-4 text-zinc-500" />
           <h3 className="text-sm font-medium text-zinc-200 tracking-wide">EPL Readiness</h3>
+          <HelpHint text="Employment-practices-liability readiness, scored 0–100. Off-platform clients are fully broker-assessed: set each factor (policy, training, wage-hour, pay transparency, BIPA, etc.) from the underwriting questionnaire and the score updates live." />
           <span className={`text-2xl font-light font-mono ml-auto ${EPL_TONE[epl.band]}`}>{epl.score}</span>
           <span className={`text-[10px] uppercase tracking-widest font-bold ${EPL_TONE[epl.band]}`}>{EPL_BAND_LABEL[epl.band]}</span>
         </div>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Users, Plus, Loader2, Copy, Check, Trash2, Building2 } from 'lucide-react'
+import { HelpHint } from '../../components/broker/HelpHint'
 import { fetchBrokerSeats, createClientInvite, revokeClientInvite } from '../../api/broker'
 import type { BrokerClientInvite, BrokerSeatsResponse, ClientInviteTier } from '../../types/broker'
 
@@ -97,7 +98,7 @@ export default function BrokerClientSeats() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight">Client Seats</h1>
+        <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">Client Seats <HelpHint text="Your seat pool — licenses allocated to you, used, and remaining. Issue company-pinned invites that draw from it; the client signs up with seats pre-set, no Stripe checkout." /></h1>
         <p className="text-sm text-zinc-500 mt-1">
           Apportion your seat allocation across your book. Each client gets a ready-to-send signup
           link with their company name and seats pre-set — no Stripe checkout.

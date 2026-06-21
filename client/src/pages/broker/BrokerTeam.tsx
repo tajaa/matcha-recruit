@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Users, Plus, Loader2, Trash2, Check, ShieldCheck } from 'lucide-react'
+import { HelpHint } from '../../components/broker/HelpHint'
 import { fetchBrokerMembers, createBrokerMember, deactivateBrokerMember } from '../../api/broker'
 import type { BrokerMember, BrokerMemberCreateResponse } from '../../types/broker'
 
@@ -67,7 +68,7 @@ export default function BrokerTeam() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight">Team</h1>
+        <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">Team <HelpHint text="Your broker users and their permissions — admins manage clients, seats and the team; members manage clients only. Add or deactivate colleagues here." /></h1>
         <p className="text-sm text-zinc-500 mt-1">
           Add broker users to your account. Admins can manage clients, seats, and the team; members
           manage clients only.

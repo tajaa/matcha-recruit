@@ -3,6 +3,7 @@ import { AlertTriangle, Award } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import BrokerRiskAlerts from './BrokerRiskAlerts'
 import MilestonesTab from '../../components/broker/action-center/MilestonesTab'
+import { HelpHint } from '../../components/broker/HelpHint'
 
 // Renewals + Eligibility tabs paused 2026-06-08 — geared to EB brokers, low value.
 // Page components (BrokerRenewalRiskRadar / BrokerEligibilityExceptions) kept; just
@@ -31,7 +32,10 @@ export default function BrokerActionCenter() {
     <div className="space-y-6">
       {/* Header + tabs */}
       <div>
-        <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight">Action Center</h1>
+        <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">
+          Action Center
+          <HelpHint text="Your daily worklist across the book. Alerts flag clients trending worse (rising injury rates, premium pressure); Milestones surface wins worth a proactive call. Work the list to stay ahead of renewals." />
+        </h1>
         <p className="text-sm text-zinc-500 mt-1">
           Proactive signals across your book — from real-time risk alerts to consultative outreach.
         </p>

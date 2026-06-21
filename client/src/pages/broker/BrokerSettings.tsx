@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Button, Input, Card } from '../../components/ui'
+import { HelpHint } from '../../components/broker/HelpHint'
 import { api } from '../../api/client'
 import { Lock, Check } from 'lucide-react'
 
@@ -44,7 +45,7 @@ export default function BrokerSettings() {
 
   return (
     <div className="max-w-lg">
-      <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight mb-2">Settings</h1>
+      <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight mb-2 flex items-center gap-2">Settings <HelpHint text="Your broker account preferences — login, password, and account-level options." /></h1>
       <p className="text-sm text-zinc-500 mb-6">Manage your broker account settings.</p>
 
       <Card className="p-5">

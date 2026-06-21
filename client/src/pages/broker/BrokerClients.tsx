@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { Building2, Plus, Loader2, Send, AlertCircle, FileCheck, Upload, X, MapPin } from 'lucide-react'
 import { Button, Input, Modal, Badge } from '../../components/ui'
+import { HelpHint } from '../../components/broker/HelpHint'
 import { api } from '../../api/client'
 import { createBatchClientSetups } from '../../api/broker'
 import type { BrokerBatchCreateResponse } from '../../types/broker'
@@ -367,7 +368,7 @@ export default function BrokerClients() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight">Client Onboarding</h1>
+          <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">Client Onboarding <HelpHint text="Bring a company onto Matcha — create the setup, pre-configure their features, and send the invite. Track each one through the pipeline to live." /></h1>
           <p className="text-sm text-zinc-500 mt-1">Create and manage client setups for your referred companies.</p>
         </div>
         <div className="flex items-center gap-2">

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Loader2, AlertCircle, ChevronLeft, ChevronRight, Send, Workflow, MapPin } from 'lucide-react'
 import { Badge } from '../../components/ui'
+import { HelpHint } from '../../components/broker/HelpHint'
 import { api } from '../../api/client'
 
 type OnboardingStage = 'submitted' | 'under_review' | 'configuring' | 'live'
@@ -129,6 +130,7 @@ export default function BrokerPipeline() {
         <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">
           <Workflow className="w-5 h-5 text-zinc-500" />
           Pipeline
+          <HelpHint text="Every in-flight onboarding by stage (submitted → under review → configuring → live). Spot what's stuck and nudge it before invites expire." />
         </h1>
         <p className="text-sm text-zinc-500 mt-1">Onboarding stages across your referred clients.</p>
       </div>

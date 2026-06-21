@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { Link2, Plus, Loader2, Copy, Check, Trash2 } from 'lucide-react'
+import { HelpHint } from '../../components/broker/HelpHint'
 import { fetchLiteReferralTokens, createLiteReferralToken, deactivateLiteReferralToken } from '../../api/broker'
 import type { BrokerLiteReferralToken } from '../../types/broker'
 
@@ -86,7 +87,7 @@ export default function BrokerReferralLinks() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight">Referral Links</h1>
+        <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">Referral Links <HelpHint text="Shareable Matcha-Lite signup links. Prospects who sign up via your link auto-attribute to you — a low-friction way to grow your book. Set who pays and track usage." /></h1>
         <p className="text-sm text-zinc-500 mt-1">
           Generate shareable Matcha Lite signup links. Companies that sign up via your link are automatically attributed to your account.
         </p>

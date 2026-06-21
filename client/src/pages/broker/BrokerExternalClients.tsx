@@ -2,6 +2,7 @@ import { useState, useEffect, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { Globe, Plus, Loader2, AlertCircle } from 'lucide-react'
 import { Card } from '../../components/ui'
+import { HelpHint } from '../../components/broker/HelpHint'
 import { fetchExternalClients, createExternalClient } from '../../api/broker'
 import type { ExternalClientRow } from '../../types/broker'
 
@@ -56,6 +57,7 @@ export default function BrokerExternalClients() {
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">
             <Globe className="h-5 w-5 text-zinc-400" /> External Book
+            <HelpHint text="Your off-platform book — clients who aren't on Matcha. Add one, key in their carrier loss run + a short EPL questionnaire, and the same WC + EPL engine scores them. Lets you advise prospects and renewals across your whole book, not just onboarded clients." />
           </h1>
           <p className="text-sm text-zinc-500 mt-1">Clients not on Matcha — key in their loss run + EPL questionnaire to score them.</p>
         </div>
@@ -117,9 +119,15 @@ export default function BrokerExternalClients() {
                 <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Client</th>
                 <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Industry</th>
                 <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">State</th>
-                <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">WC</th>
-                <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">EMR</th>
-                <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">EPL</th>
+                <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">
+                  <span className="inline-flex items-center gap-1 justify-end">WC <HelpHint align="right" text="Workers' Comp injury rate (TRIR) vs the client's industry, colored worst→best. Lower is better. Dash = no loss run entered yet." /></span>
+                </th>
+                <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">
+                  <span className="inline-flex items-center gap-1 justify-end">EMR <HelpHint align="right" text="Experience modification rate — the multiplier carriers apply to WC premium. Above 1.00 = surcharge (debit); below = credit." /></span>
+                </th>
+                <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">
+                  <span className="inline-flex items-center gap-1 justify-end">EPL <HelpHint align="right" text="Employment-practices-liability readiness, 0–100 with a band (Strong→Exposed). How insurable the client looks + what to fix before renewal." /></span>
+                </th>
               </tr>
             </thead>
             <tbody>
