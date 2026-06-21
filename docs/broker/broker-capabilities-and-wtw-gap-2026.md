@@ -4,7 +4,7 @@ _Last updated: 2026-06-20_
 
 A single reference for the broker product: **(A)** everything Matcha gives brokers today, **(B)** how that maps to the needs in WTW's _Insurance Marketplace Realities 2026 (Spring Update)_, and **(C)** what's still missing. Source report: `~/Desktop/insurance-marketplace-realities-2026-spring-update-1805.pdf` (184 pp).
 
-> **Status 2026-06-20 — the report's macro needs A (strategic, pp.4–13) + B (HR-adjacent lines) + the off-platform layer (D) are implemented.** Shipped since this doc was first written: submission packet + AI coverage-gap (`3942146`), composite risk index + client portal (`1e2ef44`), WC class-code dimension (`7c67877`), resident-care risk asset (`00e4faa`), EPL pay-transparency/BIPA/AI-hiring trackers (`5472281`), composite index extended to off-platform clients (`979948f`), and off-platform v2 — loss-run PDF auto-parse (`8813634`) + client-intake link (`249bc08`). **Still open (by design):** pay-equity/DEI as tools (need payroll/demographics) and a *licensed* NCCI rate/class feed (rates are an illustrative seed). C-list lines (cyber/fiduciary/P&C) remain out of scope.
+> **Status 2026-06-20 — the report's macro needs A (strategic, pp.4–13) + B (HR-adjacent lines) + the off-platform layer (D) are implemented.** Shipped since this doc was first written: submission packet + AI coverage-gap (`3942146`), composite risk index + client portal (`1e2ef44`), WC class-code dimension (`7c67877`), resident-care risk asset (`00e4faa`), EPL pay-transparency/BIPA/AI-hiring trackers (`5472281`), composite index extended to off-platform clients (`979948f`), off-platform v2 — loss-run PDF auto-parse (`8813634`) + client-intake link (`249bc08`), the pay-equity study register (`ef10c2c`), and an admin NCCI CSV import (`46ae4c7`). **Still open:** DEI as a tool (needs demographics; deferred per request) and loading *licensed* NCCI data into the import we built (the rate data is purchased, not buildable; demo seed in place). C-list lines (cyber/fiduciary/P&C) remain out of scope.
 
 ---
 
@@ -90,8 +90,8 @@ Only the report sections relevant to an HR/compliance broker are tracked. **The 
 | Pay-transparency compliance | `workforce_compliance` tracker → derives EPL factor | ✅ NEW tool |
 | Biometric / BIPA controls | `workforce_compliance` tracker → derives EPL factor | ✅ NEW tool |
 | AI hiring-tool bias audit | `workforce_compliance` tracker → derives EPL factor | ✅ NEW tool |
-| Pay-equity analysis | attested only | ⚠️ attested, no tool (needs payroll/demographics) |
-| DEI posture / EEOC-priority alignment | attested only | ⚠️ attested, no tool (needs demographics) |
+| Pay-equity analysis | `workforce_compliance` pay-equity study register → derives EPL factor | ✅ NEW tool |
+| DEI posture / EEOC-priority alignment | attested only | ⚠️ attested, no tool (needs demographics; deferred) |
 
 ### B3. Strategic / platform thesis (report pp. 4–13)
 | Report need | Matcha | Status |
@@ -158,7 +158,7 @@ Package credentialing + incidents + safety/fall-prevention/MVR/RTW programs into
 ---
 
 ## Appendix — verification & references
-- **Status**: WC depth + EPL (`e45f2b2`, `3d3553a`, `dd4df42`); submission packet + coverage-gap + 50-state seed (`3942146`); workforce-compliance EPL trackers (`5472281`); composite risk index + client portal (`1e2ef44`); WC class-codes (`7c67877`); resident-care asset (`00e4faa`). Applied to **dev**; **prod pending** `./scripts/migrate-prod.sh` — migration chain now `wcdeep01 · epldeep01 · brokerpro01 · wcstates01 · wfcomp01 · wcclass01 · rescare01`.
+- **Status**: WC depth + EPL (`e45f2b2`, `3d3553a`, `dd4df42`); submission packet + coverage-gap + 50-state seed (`3942146`); workforce-compliance EPL trackers (`5472281`); composite risk index + client portal (`1e2ef44`); WC class-codes (`7c67877`); resident-care asset (`00e4faa`); risk index → off-platform (`979948f`); off-platform v2 loss-run parse (`8813634`) + intake link (`249bc08`); pay-equity register (`ef10c2c`); NCCI CSV import (`46ae4c7`). Applied to **dev**; **prod pending** `./scripts/migrate-prod.sh` — migration chain now `wcdeep01 · epldeep01 · brokerpro01 · wcstates01 · wfcomp01 · wcclass01 · rescare01 · extintake01 · payequity01`.
 - **Demo data**: `server/scripts/seed_broker_demo.sql` (test broker "Regina George LLC" / `ashVidales+regina@gmail.com`).
 - **Key code**: `server/app/matcha/services/{wc_benchmarks,wc_depth,epl_readiness,risk_index,submission_packet,resident_care,workforce_compliance,broker_outreach}.py`; `routes/{broker_portfolio,broker_submission,risk_profile,resident_care,workforce_compliance}.py`; `client/src/pages/{broker/*,app/RiskProfile.tsx,app/ResidentCare.tsx,app/WorkforceCompliance.tsx}`, `client/src/api/{broker,riskIndex,residentCare,workforceCompliance}.ts`.
 - **Admin changelog**: entries live at `/admin/updates` (`client/src/data/adminUpdates.ts`).
