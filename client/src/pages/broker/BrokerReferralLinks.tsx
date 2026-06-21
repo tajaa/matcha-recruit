@@ -33,7 +33,9 @@ function CopyButton({ url }: { url: string }) {
   )
 }
 
-export default function BrokerReferralLinks() {
+const inputCls = 'min-w-0 px-3 h-9 rounded-lg text-sm bg-zinc-900/60 border border-zinc-700 text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-600/50 transition-colors'
+
+export default function BrokerReferralLinks({ embedded = false }: { embedded?: boolean }) {
   const [tokens, setTokens] = useState<BrokerLiteReferralToken[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -86,22 +88,24 @@ export default function BrokerReferralLinks() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">Referral Links <HelpHint text="Shareable Matcha-Lite signup links. Prospects who sign up via your link auto-attribute to you — a low-friction way to grow your book. Set who pays and track usage." /></h1>
-        <p className="text-sm text-zinc-500 mt-1">
-          Generate shareable Matcha Lite signup links. Companies that sign up via your link are automatically attributed to your account.
-        </p>
-      </div>
+      {!embedded && (
+        <div className="mb-6">
+          <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-zinc-100">Referral Links <HelpHint text="Shareable Matcha-Lite signup links. Prospects who sign up via your link auto-attribute to you — a low-friction way to grow your book. Set who pays and track usage." /></h1>
+          <p className="mt-1 text-sm text-zinc-500">
+            Generate shareable Matcha Lite signup links. Companies that sign up via your link are automatically attributed to your account.
+          </p>
+        </div>
+      )}
 
-      <form onSubmit={handleCreate} className="mb-8 max-w-3xl p-5 border border-zinc-800 rounded-xl flex flex-col gap-4">
-        <p className="text-sm font-medium text-zinc-300">Generate new link</p>
+      <form onSubmit={handleCreate} className="mb-6 flex max-w-3xl flex-col gap-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
+        <p className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">Generate new link</p>
         <div className="flex gap-3 flex-wrap">
           <input
             type="text"
             placeholder="Label (optional — e.g. 'Q2 Campaign')"
             value={label}
             onChange={e => setLabel(e.target.value)}
-            className="flex-1 min-w-0 px-3 h-9 rounded-lg text-sm bg-transparent border border-zinc-700 text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
+            className={`flex-1 ${inputCls}`}
           />
           <input
             type="number"
@@ -109,12 +113,12 @@ export default function BrokerReferralLinks() {
             min={1}
             value={expiresDays}
             onChange={e => setExpiresDays(e.target.value)}
-            className="w-44 px-3 h-9 rounded-lg text-sm bg-transparent border border-zinc-700 text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
+            className={`w-44 ${inputCls}`}
           />
           <button
             type="submit"
             disabled={creating}
-            className="flex items-center gap-2 px-4 h-9 rounded-lg text-sm font-medium bg-zinc-700 text-zinc-100 hover:bg-zinc-600 disabled:opacity-50 transition-colors"
+            className="flex items-center gap-2 px-4 h-9 rounded-lg text-sm font-medium bg-emerald-700 text-white hover:bg-emerald-600 disabled:opacity-50 transition-colors"
           >
             {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
             Generate

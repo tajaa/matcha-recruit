@@ -36,7 +36,9 @@ const STATUS_TONE: Record<string, { bg: string; text: string; label: string }> =
   revoked: { bg: 'rgba(127,29,29,0.15)', text: '#f87171', label: 'Revoked' },
 }
 
-export default function BrokerClientSeats() {
+const inputCls = 'px-3 h-9 rounded-lg text-sm bg-zinc-900/60 border border-zinc-700 text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-600/50 transition-colors'
+
+export default function BrokerClientSeats({ embedded = false }: { embedded?: boolean }) {
   const [data, setData] = useState<BrokerSeatsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -97,16 +99,18 @@ export default function BrokerClientSeats() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">Client Seats <HelpHint text="Your seat pool — licenses allocated to you, used, and remaining. Issue company-pinned invites that draw from it; the client signs up with seats pre-set, no Stripe checkout." /></h1>
-        <p className="text-sm text-zinc-500 mt-1">
-          Apportion your seat allocation across your book. Each client gets a ready-to-send signup
-          link with their company name and seats pre-set — no Stripe checkout.
-        </p>
-      </div>
+      {!embedded && (
+        <div className="mb-6">
+          <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-zinc-100">Client Seats <HelpHint text="Your seat pool — licenses allocated to you, used, and remaining. Issue company-pinned invites that draw from it; the client signs up with seats pre-set, no Stripe checkout." /></h1>
+          <p className="mt-1 text-sm text-zinc-500">
+            Apportion your seat allocation across your book. Each client gets a ready-to-send signup
+            link with their company name and seats pre-set — no Stripe checkout.
+          </p>
+        </div>
+      )}
 
       {/* Pool meter */}
-      <div className="mb-8 max-w-3xl p-5 border border-zinc-800 rounded-xl">
+      <div className="mb-6 max-w-3xl p-5 rounded-2xl border border-zinc-800 bg-zinc-900/40">
         <div className="flex items-end justify-between mb-3">
           <div className="flex gap-6">
             <div>
@@ -134,15 +138,15 @@ export default function BrokerClientSeats() {
       </div>
 
       {/* Create form */}
-      <form onSubmit={handleCreate} className="mb-8 max-w-3xl p-5 border border-zinc-800 rounded-xl flex flex-col gap-4">
-        <p className="text-sm font-medium text-zinc-300">New client signup link</p>
+      <form onSubmit={handleCreate} className="mb-6 flex max-w-3xl flex-col gap-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
+        <p className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">New client signup link</p>
         <div className="flex gap-3 flex-wrap">
           <input
             type="text"
             placeholder="Client company name"
             value={companyName}
             onChange={e => setCompanyName(e.target.value)}
-            className="flex-1 min-w-0 px-3 h-9 rounded-lg text-sm bg-transparent border border-zinc-700 text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
+            className={`flex-1 min-w-0 ${inputCls}`}
           />
           <input
             type="number"
@@ -150,7 +154,7 @@ export default function BrokerClientSeats() {
             min={1}
             value={seatCount}
             onChange={e => setSeatCount(e.target.value)}
-            className="w-28 px-3 h-9 rounded-lg text-sm bg-transparent border border-zinc-700 text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
+            className={`w-28 ${inputCls}`}
           />
           <button
             type="submit"

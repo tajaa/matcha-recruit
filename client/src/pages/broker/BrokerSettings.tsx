@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { Button, Input, Card } from '../../components/ui'
+import { Button, Input } from '../../components/ui'
 import { HelpHint } from '../../components/broker/HelpHint'
 import { api } from '../../api/client'
 import { Lock, Check } from 'lucide-react'
 
-export default function BrokerSettings() {
+export default function BrokerSettings({ embedded = false }: { embedded?: boolean }) {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -44,17 +44,21 @@ export default function BrokerSettings() {
   }
 
   return (
-    <div className="max-w-lg">
-      <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight mb-2 flex items-center gap-2">Settings <HelpHint text="Your broker account preferences — login, password, and account-level options." /></h1>
-      <p className="text-sm text-zinc-500 mb-6">Manage your broker account settings.</p>
+    <div className="max-w-xl">
+      {!embedded && (
+        <>
+          <h1 className="mb-2 flex items-center gap-2 text-xl font-semibold tracking-tight text-zinc-100">Settings <HelpHint text="Your broker account preferences — login, password, and account-level options." /></h1>
+          <p className="mb-6 text-sm text-zinc-500">Manage your broker account settings.</p>
+        </>
+      )}
 
-      <Card className="p-5">
-        <div className="flex items-center gap-2 mb-4">
-          <Lock size={16} className="text-zinc-400" />
-          <h2 className="text-sm font-medium text-zinc-200">Change Password</h2>
+      <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/50">
+        <div className="flex items-center gap-2 border-b border-zinc-800/60 px-5 py-3.5">
+          <Lock size={15} className="text-zinc-500" />
+          <h2 className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">Change password</h2>
         </div>
 
-        <form onSubmit={handleChangePassword} className="space-y-3">
+        <form onSubmit={handleChangePassword} className="space-y-3 p-5">
           <Input
             label="Current Password"
             type="password"
@@ -89,7 +93,7 @@ export default function BrokerSettings() {
             {saving ? 'Changing...' : 'Change Password'}
           </Button>
         </form>
-      </Card>
+      </div>
     </div>
   )
 }

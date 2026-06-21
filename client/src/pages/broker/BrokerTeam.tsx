@@ -11,7 +11,9 @@ function fmtDate(iso: string | null) {
 
 const ROLE_LABEL: Record<string, string> = { owner: 'Owner', admin: 'Admin', member: 'Member' }
 
-export default function BrokerTeam() {
+const inputCls = 'min-w-0 px-3 h-9 rounded-lg text-sm bg-zinc-900/60 border border-zinc-700 text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-600/50 transition-colors'
+
+export default function BrokerTeam({ embedded = false }: { embedded?: boolean }) {
   const [members, setMembers] = useState<BrokerMember[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -67,30 +69,32 @@ export default function BrokerTeam() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">Team <HelpHint text="Your broker users and their permissions — admins manage clients, seats and the team; members manage clients only. Add or deactivate colleagues here." /></h1>
-        <p className="text-sm text-zinc-500 mt-1">
-          Add broker users to your account. Admins can manage clients, seats, and the team; members
-          manage clients only.
-        </p>
-      </div>
+      {!embedded && (
+        <div className="mb-6">
+          <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-zinc-100">Team <HelpHint text="Your broker users and their permissions — admins manage clients, seats and the team; members manage clients only. Add or deactivate colleagues here." /></h1>
+          <p className="mt-1 text-sm text-zinc-500">
+            Add broker users to your account. Admins can manage clients, seats, and the team; members
+            manage clients only.
+          </p>
+        </div>
+      )}
 
-      <form onSubmit={handleCreate} className="mb-8 max-w-3xl p-5 border border-zinc-800 rounded-xl flex flex-col gap-4">
-        <p className="text-sm font-medium text-zinc-300">Add a teammate</p>
+      <form onSubmit={handleCreate} className="mb-6 flex max-w-3xl flex-col gap-4 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
+        <p className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">Add a teammate</p>
         <div className="flex gap-3 flex-wrap">
           <input
             type="text"
             placeholder="Full name"
             value={name}
             onChange={e => setName(e.target.value)}
-            className="flex-1 min-w-0 px-3 h-9 rounded-lg text-sm bg-transparent border border-zinc-700 text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
+            className={`flex-1 ${inputCls}`}
           />
           <input
             type="email"
             placeholder="Work email"
             value={email}
             onChange={e => setEmail(e.target.value)}
-            className="flex-1 min-w-0 px-3 h-9 rounded-lg text-sm bg-transparent border border-zinc-700 text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
+            className={`flex-1 ${inputCls}`}
           />
           <button
             type="submit"
@@ -141,7 +145,11 @@ export default function BrokerTeam() {
       ) : error ? (
         <p className="text-sm text-red-400">{error}</p>
       ) : (
-        <div className="max-w-3xl border border-zinc-800 rounded-xl divide-y divide-zinc-800/60">
+        <div className="max-w-3xl overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/40">
+          <div className="border-b border-zinc-800/60 px-4 py-3">
+            <span className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">Team members</span>
+          </div>
+          <div className="divide-y divide-zinc-800/60">
           {members.map(m => (
             <div key={m.id} className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="flex items-center gap-3 min-w-0">
@@ -173,6 +181,7 @@ export default function BrokerTeam() {
               </div>
             </div>
           ))}
+          </div>
         </div>
       )}
     </div>

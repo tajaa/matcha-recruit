@@ -201,7 +201,7 @@ function parseCsv(text: string): CsvRow[] {
   })
 }
 
-export default function BrokerClients() {
+export default function BrokerClients({ embedded = false }: { embedded?: boolean }) {
   const [setups, setSetups] = useState<ClientSetup[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -366,11 +366,13 @@ export default function BrokerClients() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight flex items-center gap-2">Client Onboarding <HelpHint text="Bring a company onto Matcha — create the setup, pre-configure their features, and send the invite. Track each one through the pipeline to live." /></h1>
-          <p className="text-sm text-zinc-500 mt-1">Create and manage client setups for your referred companies.</p>
-        </div>
+      <div className={`flex items-center ${embedded ? 'justify-end' : 'justify-between'}`}>
+        {!embedded && (
+          <div>
+            <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight text-zinc-100">Client Onboarding <HelpHint text="Bring a company onto Matcha — create the setup, pre-configure their features, and send the invite. Track each one through the pipeline to live." /></h1>
+            <p className="mt-1 text-sm text-zinc-500">Create and manage client setups for your referred companies.</p>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <Button size="sm" variant="ghost" onClick={() => setShowCsvUpload(true)}>
             <Upload size={14} className="mr-1" />

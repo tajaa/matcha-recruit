@@ -4,14 +4,10 @@ import { applyBrokerTheme, getBrokerTheme, clearBrokerThemeAttr } from '../utils
 import AppLayout from '../layouts/AppLayout'
 import BrokerSidebar from '../components/BrokerSidebar'
 import BrokerDashboard from '../pages/broker/BrokerDashboard'
-import BrokerClients from '../pages/broker/BrokerClients'
-import BrokerPipeline from '../pages/broker/BrokerPipeline'
-import BrokerSettings from '../pages/broker/BrokerSettings'
+import BrokerClientsHub from '../pages/broker/BrokerClientsHub'
+import BrokerAccount from '../pages/broker/BrokerAccount'
 import BrokerClientDetail from '../pages/broker/BrokerClientDetail'
-import BrokerReferralLinks from '../pages/broker/BrokerReferralLinks'
 import BrokerActionCenter from '../pages/broker/BrokerActionCenter'
-import BrokerClientSeats from '../pages/broker/BrokerClientSeats'
-import BrokerTeam from '../pages/broker/BrokerTeam'
 import BrokerExternalClients from '../pages/broker/BrokerExternalClients'
 import BrokerExternalClientDetail from '../pages/broker/BrokerExternalClientDetail'
 
@@ -32,20 +28,23 @@ export default function BrokerRoutes() {
         {/* Module 2 — Action Center (tabbed: alerts / renewals / eligibility / milestones) */}
         <Route path="action-center" element={<BrokerActionCenter />} />
 
-        {/* Module 3 — Administration */}
-        <Route path="clients" element={<BrokerClients />} />
-        <Route path="seats" element={<BrokerClientSeats />} />
-        <Route path="team" element={<BrokerTeam />} />
-        <Route path="pipeline" element={<BrokerPipeline />} />
-        <Route path="referrals" element={<BrokerReferralLinks />} />
-        <Route path="settings" element={<BrokerSettings />} />
+        {/* Module 3 — Clients hub (tabbed: onboarding / pipeline / seats / referrals) */}
+        <Route path="clients" element={<BrokerClientsHub />} />
         <Route path="clients/:companyId" element={<BrokerClientDetail />} />
+
+        {/* Module 4 — Account hub (tabbed: team / settings) */}
+        <Route path="account" element={<BrokerAccount />} />
 
         {/* Broker Pro — off-platform (non-tenant) clients */}
         <Route path="external" element={<BrokerExternalClients />} />
         <Route path="external/:clientId" element={<BrokerExternalClientDetail />} />
 
-        {/* Legacy routes → new homes (preserve emailed links + bookmarks) */}
+        {/* Legacy routes → new tabbed homes (preserve emailed links + bookmarks) */}
+        <Route path="seats" element={<Navigate to="/broker/clients?tab=seats" replace />} />
+        <Route path="pipeline" element={<Navigate to="/broker/clients?tab=pipeline" replace />} />
+        <Route path="referrals" element={<Navigate to="/broker/clients?tab=referrals" replace />} />
+        <Route path="team" element={<Navigate to="/broker/account?tab=team" replace />} />
+        <Route path="settings" element={<Navigate to="/broker/account?tab=settings" replace />} />
         <Route path="wc-portfolio" element={<Navigate to="/broker" replace />} />
         <Route path="risk-alerts" element={<Navigate to="/broker/action-center?tab=alerts" replace />} />
         {/* benefits/* (Renewals + Eligibility) redirects removed 2026-06-08 — those
