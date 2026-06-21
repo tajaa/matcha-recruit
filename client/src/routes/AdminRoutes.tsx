@@ -6,6 +6,7 @@ import AdminCompanyDetail from '../pages/admin/AdminCompanyDetail'
 import Features from '../pages/admin/Features'
 import Settings from '../pages/admin/Settings'
 import JurisdictionData from '../pages/admin/JurisdictionData'
+import WcRateData from '../pages/admin/WcRateData'
 import PayerData from '../pages/admin/PayerData'
 import Jurisdictions from '../pages/admin/Jurisdictions'
 import IndustryRequirements from '../pages/admin/IndustryRequirements'
@@ -56,6 +57,7 @@ export default function AdminRoutes() {
         <Route path="features" element={<Features />} />
         <Route path="settings" element={<Settings />} />
         <Route path="jurisdiction-data" element={<JurisdictionData />} />
+        <Route path="wc-rate-data" element={<WcRateData />} />
         <Route path="jurisdiction-data/category/:slug" element={<CategoryDetailPage />} />
         <Route path="jurisdiction-data/policy/:id" element={<PolicyDetailPage />} />
         <Route path="payer-data" element={<PayerData />} />

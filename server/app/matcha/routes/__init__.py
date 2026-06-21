@@ -36,6 +36,7 @@ from .discipline import router as discipline_router, public_router as discipline
 from .flight_risk import router as flight_risk_router
 from .inbound_email import router as anonymous_report_router
 from .external_intake import router as external_intake_router
+from .wc_rates_admin import router as wc_rates_admin_router
 from .training import router as training_router
 from .i9 import router as i9_router
 from .cobra import router as cobra_router
@@ -218,6 +219,8 @@ matcha_router.include_router(
 matcha_router.include_router(anonymous_report_router, tags=["anonymous-reporting"])
 # Public off-platform client-intake — no auth, token-validated internally
 matcha_router.include_router(external_intake_router, prefix="/external-intake", tags=["external-intake-public"])
+# Admin WC rate-data import (require_admin per-endpoint)
+matcha_router.include_router(wc_rates_admin_router, prefix="/admin/wc-rates", tags=["wc-rates-admin"])
 # Fake HRIS (simulates ADP Workforce Now API) — no auth gate
 matcha_router.include_router(fake_hris_router, prefix="/fake-hris", tags=["fake-hris"])
 matcha_router.include_router(twilio_webhook_router, prefix="/twilio", tags=["twilio"])
