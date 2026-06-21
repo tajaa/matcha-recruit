@@ -137,53 +137,34 @@
       <tr><td>Healthcare resident-care asset (safety programs · MVR · PDF)</td><td class="mono" style="font-size:8pt">p.175–76</td><td><span class="chip c-new">NEW</span></td></tr>
       <tr><td>Full 50-state NCCI <i>rates</i> + class-code rate table (licensed feed)</td><td class="mono" style="font-size:8pt">p.32–33</td><td><span class="chip c-part">PARTIAL</span></td></tr>
       <tr><td>EPL pay-equity + DEI as tracked tools (need payroll/demographics)</td><td class="mono" style="font-size:8pt">p.85–86</td><td><span class="chip c-part">PARTIAL</span></td></tr>
-      <tr><td>Loss-run PDF auto-parse + client intake link</td><td class="mono" style="font-size:8pt">p.11</td><td><span class="chip c-miss">MISSING</span></td></tr>
+      <tr><td>Loss-run PDF auto-parse + client-intake link</td><td class="mono" style="font-size:8pt">p.11</td><td><span class="chip c-new">NEW</span></td></tr>
     </tbody>
   </table>
   <div class="legend"><span class="chip c-new">NEW</span>shipped &nbsp; <span class="chip c-have">HAVE</span>existed &nbsp; <span class="chip c-part">PARTIAL</span>needs depth &nbsp; <span class="chip c-miss">MISSING</span>not built</div>
 
-  <h2>What's missing — sourced, with the data path</h2>
-
-  <div class="card">
-    <div class="lab">✦ #1 — the terms-winning layer (the report's thesis)</div>
-    <h3>Carrier-ready submission packet + AI coverage-gap analysis</h3>
-    <div class="cite"><span class="pg">WTW p.11</span><i>"…an AI product we've built delivers highly accurate coverage gap analysis"</i> &nbsp;·&nbsp; <span class="pg">p.11</span><i>"[a tool that] organizes insurance and benefits information … in a single platform."</i></div>
-    <p><b>Why:</b> this is what actually wins better pricing at renewal — WTW/Newfront name it as their flagship AI product.</p>
-    <div class="src"><span class="lab">Data path</span> Submission needs <b>no new data</b> — it's our existing WC/EPL scores rendered through the WeasyPrint PDF pipeline we already use for the renewal "stabilization kit." Coverage-gap needs the client's <b>current policy limits</b> (not in Matcha): broker enters them, or we parse the dec page with Gemini.</div>
-    <div class="ba"><span class="today">Today:</span> broker re-types Bags' TRIR + mod history into Word for 6 carriers. &nbsp; <span class="with">With it:</span> one-click branded submission + a flag like <span class="mono" style="font-size:8pt">"$1M EPL on a 25-person construction crew w/ 2 post-term CT claims → supports $2M; no cyber despite PII."</span></div>
-  </div>
-
-  <div class="card">
-    <div class="lab">✦ Off-platform v2 — remove the manual keying</div>
-    <h3>Loss-run PDF auto-parse + client-fills-it intake link</h3>
+  <div class="grp">
+    <div class="glabel">E · Off-platform v2 — no more manual keying <span class="chip c-new">NEW</span></div>
+    <p class="lead">Loss-run PDF auto-parse + a client-fills-it intake link, so the External Book scales without the data-entry tax.</p>
     <div class="cite"><span class="pg">WTW p.11</span><i>"How do we bring data back to our brokers as quickly as possible? How do we digitize more of the value chain?"</i></div>
-    <p><b>Why:</b> the data-entry tax caps how many off-platform prospects a broker can run.</p>
-    <div class="src"><span class="lab">Data path</span> Loss runs are carrier <b>PDFs</b> → parse with Gemini (already our AI stack) into the <b>broker_external_wc</b> fields. EPL answers live with the client → a shareable <b>intake link</b> they complete without onboarding. Headcount can auto-fill via the existing <b>Finch/Gusto HRIS</b> connector.</div>
-    <div class="ba"><span class="today">Today:</span> read a 12-page PDF, type 14 numbers, call the client for EPL. &nbsp; <span class="with">With it:</span> drop PDF → fields fill; client self-completes → book scales to dozens.</div>
+    <p><b>Why it matters:</b> the data-entry tax caps how many off-platform prospects a broker can run — removing it turns the External Book into a high-volume prospecting tool.</p>
+    <div class="have"><span class="lab">Have / data</span> Carrier loss-run <b>PDF → Gemini parse</b> into the <b>broker_external_wc</b> fields (broker reviews the draft before saving). EPL answers come from a shareable <b>intake link</b> the prospect self-completes (public, token-gated) → writes <b>broker_external_epl_attestations</b> and rescoring runs automatically.</div>
+    <div class="ex"><span class="lab">Example</span> Broker drops a 12-page loss run → claim counts + mod prefill; texts the prospect the intake link → they answer 10 questions in 2 min → the client's EPL + risk index populate with zero keying.</div>
   </div>
 
-  <div class="card">
-    <div class="lab">✦ Year-round client value + one number</div>
-    <h3>Client-facing risk portal + a single composite risk index</h3>
-    <div class="cite"><span class="pg">WTW p.10</span><i>"Risk Intelligence Central… gives clients easy and efficient access to their risk information."</i> &nbsp;·&nbsp; <span class="pg">p.29</span> the "Risk Index Model" that scores jurisdiction + hazard change.</div>
-    <p><b>Why:</b> a client-facing surface + one benchmarkable number makes the broker sticky beyond renewal season.</p>
-    <div class="src"><span class="lab">Data path</span> <b>No new data</b> — composite index = a weighted roll-up of the WC + EPL + compliance scores Matcha already computes; the portal is a client-auth view over the broker's existing client record.</div>
-    <div class="ba"><span class="with">With it:</span> Bags' owner sees <span class="mono" style="font-size:8pt">"Risk index 41/100 (peer avg 68); top 3 fixes…"</span> — proactive value every month.</div>
-  </div>
-
-  <div class="card">
-    <div class="lab">✦ Depth where it's thin</div>
-    <h3>EPL items as real tools · full WC data · healthcare vertical</h3>
-    <div class="cite"><span class="pg">WTW p.86</span><i>"Companies should continue to test and audit their AI tools on a regular basis."</i> &nbsp;·&nbsp; <span class="pg">p.175</span><i>"A strong resident-care risk management program is a valuable asset to highlight for prospective insurers."</i> &nbsp;·&nbsp; <span class="pg">p.176</span><i>"Motor vehicle record (MVR) reviews — both upon hiring and annually thereafter."</i></div>
-    <div class="src"><span class="lab">Data path</span> <b>Pay transparency</b> → scan the client's job postings; <b>pay equity</b> → payroll via the <b>Finch/Gusto</b> connector; <b>AI-hiring audit</b> → ATS records. <b>WC completeness</b> → annual NCCI/state-bureau rate filings loaded into <b>wc_state_rates</b> (only the report's named states seeded today). <b>Healthcare</b> → package <b>credential_templates</b> + <b>ir_incidents</b> + new fall-prevention/MVR tracking into the resident-care asset.</div>
+  <h2>What's still open</h2>
+  <div class="card" style="border-color:#dde3ec; background:#f7f9fc;">
+    <div class="lab" style="color:#2b4c7e;">✦ The remaining gaps (everything else in A/B/D is shipped)</div>
+    <h3>Pay-equity + DEI as tracked tools · a licensed WC rate/class feed</h3>
+    <div class="cite"><span class="pg">WTW p.85</span><i>"…compliance with state pay transparency laws. Many markets have separate questionnaires for biometrics, sexual harassment and pay equity."</i></div>
+    <p><b>Shipped this round:</b> carrier submission packet, AI coverage-gap, composite risk index + client portal, WC class-code exposures, the EPL pay-transparency / BIPA / AI-hiring trackers, the healthcare resident-care asset, and off-platform loss-run parse + intake link. <b>What's left:</b> two items that need data Matcha doesn't yet hold, plus a licensed data feed.</p>
+    <div class="src"><span class="lab">Data path</span> <b>Pay equity</b> → payroll via the <b>Finch/Gusto</b> connector; <b>DEI</b> → workforce demographics — both attested today, no analysis tool. <b>WC rates &amp; class codes</b> ship as an illustrative <b>seed</b>; a licensed <b>NCCI / state-bureau</b> feed replaces it. Loss-run intake could add <b>HRIS headcount</b> auto-fill.</div>
   </div>
 
   <h2>Sequence</h2>
   <ul class="seq">
-    <li><b>Outward submission packet + AI coverage-gap</b> — the terms-winning thesis; sits on the scoring already shipped (data already on file).</li>
-    <li><b>Off-platform v2</b> — loss-run parse + client intake link, so the External Book scales.</li>
-    <li><b>Client portal + composite index</b> — year-round value, no new data.</li>
-    <li><b>Vertical + data depth</b> — healthcare asset, full state WC rates, EPL trackers.</li>
+    <li><b>Done</b> — submission packet + AI coverage-gap, composite risk index + client portal, WC class-codes, EPL pay-transparency/BIPA/AI-hiring trackers, healthcare resident-care asset, off-platform loss-run parse + intake link.</li>
+    <li><b>Next</b> — a licensed NCCI rate / class-code feed to replace the headline seed.</li>
+    <li><b>Later</b> — pay-equity + DEI as tools, once payroll + demographics are wired via Finch/Gusto.</li>
   </ul>
 
   <div class="foot">

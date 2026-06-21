@@ -4,7 +4,7 @@ _Last updated: 2026-06-20_
 
 A single reference for the broker product: **(A)** everything Matcha gives brokers today, **(B)** how that maps to the needs in WTW's _Insurance Marketplace Realities 2026 (Spring Update)_, and **(C)** what's still missing. Source report: `~/Desktop/insurance-marketplace-realities-2026-spring-update-1805.pdf` (184 pp).
 
-> **Status 2026-06-20 — the report's macro needs A (strategic, pp.4–13) + B (HR-adjacent lines) are implemented.** Shipped since this doc was first written: submission packet + AI coverage-gap (`3942146`), composite risk index + client portal (`1e2ef44`), WC class-code dimension (`7c67877`), resident-care risk asset (`00e4faa`), and the EPL pay-transparency/BIPA/AI-hiring trackers (`5472281`). **Still open (by design):** pay-equity/DEI as tools (need payroll/demographics), a *licensed* NCCI rate/class feed, loss-run PDF auto-parse + client-intake link. C-list lines (cyber/fiduciary/P&C) remain out of scope.
+> **Status 2026-06-20 — the report's macro needs A (strategic, pp.4–13) + B (HR-adjacent lines) + the off-platform layer (D) are implemented.** Shipped since this doc was first written: submission packet + AI coverage-gap (`3942146`), composite risk index + client portal (`1e2ef44`), WC class-code dimension (`7c67877`), resident-care risk asset (`00e4faa`), EPL pay-transparency/BIPA/AI-hiring trackers (`5472281`), composite index extended to off-platform clients (`979948f`), and off-platform v2 — loss-run PDF auto-parse (`8813634`) + client-intake link (`249bc08`). **Still open (by design):** pay-equity/DEI as tools (need payroll/demographics) and a *licensed* NCCI rate/class feed (rates are an illustrative seed). C-list lines (cyber/fiduciary/P&C) remain out of scope.
 
 ---
 
