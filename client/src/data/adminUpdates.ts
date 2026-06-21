@@ -22,6 +22,29 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'agentic-derive-upgrades',
+    date: '2026-06-21',
+    category: 'Broker',
+    title: 'Agentic upgrades — derive from data instead of manual entry',
+    summary:
+      'The newer broker/compliance features now pull from existing data + AI, matching the rest of the platform, instead of starting empty and hand-typed. Four additions: WC class-code auto-map from employees, pay-equity analysis from payroll, AI scan-&-suggest on the registers, and a risk-profile AI narrative. Manual entry stays as a fallback everywhere.',
+    whatsNew: [
+      'WC class-codes: "Auto-map from employees" — Gemini maps job titles → NCCI classes and aggregates headcount + payroll; broker reviews + saves.',
+      'Pay-equity: "Run analysis from payroll" — computes within-role pay dispersion from employee pay_rate (flags roles with excess spread) and logs it as the study that flips the EPL factor on real data. (Protected-class gap still needs HRIS demographics — noted in the result.)',
+      'AI scan & suggest on the AI-hiring-tool, biometric, and resident-care safety-program registers — Gemini proposes starter rows from your industry/roles/incidents; review checkboxes → add selected.',
+      'Risk Profile: "Explain my risk" — AI narrative of why your index is what it is + a prioritized action plan to improve insurance terms (client + broker views).',
+    ],
+    howToUse: [
+      'Broker → client → Workers’ Comp tab → "Auto-map from employees".',
+      'Company → Workforce Compliance → "Run analysis from payroll" (pay-equity) and "AI suggest" on the AI-audit / biometric registers.',
+      'Company → Resident-Care Risk → "AI suggest" on safety programs; Compliance → Risk Profile → "Explain my risk".',
+    ],
+    setup: [
+      'No migrations (reuses existing tables). Needs employee data (job_title, pay_rate) for the WC/pay-equity auto paths. Dev: seed_demo_employee_roles.sql gives a demo client realistic roles.',
+    ],
+    tag: 'new',
+  },
+  {
     id: 'broker-offplatform-automation',
     date: '2026-06-20',
     category: 'Broker',
