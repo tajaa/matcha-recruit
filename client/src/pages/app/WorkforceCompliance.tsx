@@ -1,11 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { ShieldCheck, Bot, Fingerprint, Plus, Trash2, Loader2, AlertTriangle, Check, Scale } from 'lucide-react'
+import { ShieldCheck, Bot, Fingerprint, Plus, Trash2, Loader2, AlertTriangle, Check, Scale, Sparkles } from 'lucide-react'
 import { Card } from '../../components/ui'
 import {
   fetchAiAudits, createAiAudit, updateAiAudit, deleteAiAudit,
   fetchBiometricPoints, createBiometricPoint, updateBiometricPoint, deleteBiometricPoint,
   fetchPayTransparency, setPayTransparency,
-  fetchPayEquityReviews, createPayEquityReview, deletePayEquityReview,
+  fetchPayEquityReviews, createPayEquityReview, deletePayEquityReview, analyzePayEquity,
 } from '../../api/workforceCompliance'
 import type {
   AiAudit, BiometricPoint, PayTransparencyRow, PayTransparencyStatus, CollectionType, PayEquityReview,
@@ -219,6 +219,8 @@ function PayEquitySection({ reviews, reload }: { reviews: PayEquityReview[]; rel
   const [show, setShow] = useState(false)
   const [form, setForm] = useState({ review_date: today(), scope: '', gap_pct: '', remediation: '' })
   const [busy, setBusy] = useState(false)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [analyzeNote, setAnalyzeNote] = useState<string | null>(null)
   async function add(e: FormEvent) {
     e.preventDefault()
     setBusy(true)
@@ -230,13 +232,28 @@ function PayEquitySection({ reviews, reload }: { reviews: PayEquityReview[]; rel
       setForm({ review_date: today(), scope: '', gap_pct: '', remediation: '' }); setShow(false); reload()
     } finally { setBusy(false) }
   }
+  async function runAnalysis() {
+    setAnalyzing(true); setAnalyzeNote(null)
+    try {
+      const res = await analyzePayEquity()
+      const a = res.analysis
+      setAnalyzeNote(`Analyzed ${a.employee_count} employees across ${a.analyzed_roles} roles — ${a.flagged_roles} with excess spread${a.worst ? ` (widest: ${a.worst.title} ${a.worst.spread_pct}%)` : ''}.`)
+      reload()
+    } catch {
+      setAnalyzeNote('Not enough comp data to analyze (need ≥2 employees sharing a role).')
+    } finally { setAnalyzing(false) }
+  }
   return (
     <Card className="p-5">
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2"><Scale className="h-4 w-4 text-zinc-500" /><h3 className="text-sm font-medium text-zinc-200 tracking-wide">Pay-equity studies</h3></div>
-        <button onClick={() => setShow((v) => !v)} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500"><Plus className="h-3.5 w-3.5" /> Log study</button>
+        <div className="flex items-center gap-2">
+          <button onClick={runAnalysis} disabled={analyzing} className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 px-2 py-1 rounded-lg border border-emerald-900/60 hover:border-emerald-700 disabled:opacity-50"><Sparkles className="h-3.5 w-3.5" /> {analyzing ? 'Analyzing…' : 'Run analysis from payroll'}</button>
+          <button onClick={() => setShow((v) => !v)} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500"><Plus className="h-3.5 w-3.5" /> Log study</button>
+        </div>
       </div>
-      <p className="text-[11px] text-zinc-500 mb-3">Log each pay-equity audit + any remediation. A current study (within cadence) is a named EPL underwriting control; default cadence is annual.</p>
+      <p className="text-[11px] text-zinc-500 mb-3">Run a pay-dispersion analysis from your payroll, or log an external audit. A current study (within cadence) is a named EPL underwriting control; default cadence is annual.</p>
+      {analyzeNote && <p className="text-[11px] text-emerald-400/90 mb-3">{analyzeNote}</p>}
       {show && (
         <form onSubmit={add} className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800 items-end">
           <div><label className="block text-[10px] text-zinc-500 uppercase mb-1">Study date</label><input type="date" className={inputCls} value={form.review_date} onChange={(e) => setForm({ ...form, review_date: e.target.value })} /></div>

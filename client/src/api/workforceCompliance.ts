@@ -60,6 +60,17 @@ export function updatePayEquityReview(id: string, payload: Record<string, unknow
 export function deletePayEquityReview(id: string) {
   return api.delete<{ status: string }>(`/workforce-compliance/pay-equity/${id}`)
 }
+export interface PayEquityAnalysis {
+  analysis: {
+    employee_count: number; analyzed_roles: number; flagged_roles: number
+    headline_gap_pct: number
+    worst: { title: string; spread_pct: number } | null
+  }
+  review: PayEquityReview
+}
+export function analyzePayEquity() {
+  return api.post<PayEquityAnalysis>('/workforce-compliance/pay-equity/analyze', {})
+}
 
 // --- pay transparency ---
 export function fetchPayTransparency() {

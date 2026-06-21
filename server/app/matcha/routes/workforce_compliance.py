@@ -6,12 +6,14 @@ factors attested → derived (see services/epl_readiness.py).
 """
 
 import logging
+from datetime import date
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id
+from ..services import pay_equity_analysis
 from ..services import workforce_compliance as wf
 from ..models.workforce_compliance import (
     HiringAiAuditCreate, HiringAiAuditUpdate, HiringAiAuditResponse,
@@ -255,6 +257,30 @@ async def update_pay_equity(review_id: UUID, body: PayEquityReviewUpdate,
             body.remediation, cadence, next_due, body.notes,
         )
     return dict(row)
+
+
+@router.post("/pay-equity/analyze")
+async def analyze_pay_equity(current_user=Depends(require_admin_or_client)):
+    """Compute within-role pay dispersion from employee comp data and log it as a
+    pay-equity study (flips the EPL factor on real data). Returns analysis + the row."""
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        a = await pay_equity_analysis.analyze(conn, company_id)
+        if a["analyzed_roles"] == 0:
+            raise HTTPException(status_code=400, detail="Not enough comp data (need ≥2 employees sharing a role)")
+        r = pay_equity_analysis.review_row(a)
+        next_due, _ = wf.audit_dates(date.today(), 365)
+        row = await conn.fetchrow(
+            f"""
+            INSERT INTO pay_equity_reviews
+                (company_id, review_date, scope, methodology, gap_pct, remediation,
+                 cadence_days, next_due_date, notes, created_by)
+            VALUES ($1,$2,$3,$4,$5,NULL,365,$6,$7,$8) RETURNING {_PE_COLS}
+            """,
+            company_id, date.today(), r["scope"], r["methodology"], r["gap_pct"],
+            next_due, r["note"], current_user.id,
+        )
+    return {"analysis": a, "review": dict(row)}
 
 
 @router.delete("/pay-equity/{review_id}")
