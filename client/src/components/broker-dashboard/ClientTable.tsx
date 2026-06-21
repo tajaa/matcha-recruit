@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { Sparkles } from 'lucide-react'
 import { Card } from '../ui'
 import { DeltaPill } from '../broker/DeltaPill'
+import { HelpHint } from '../broker/HelpHint'
 import { fmtMoney } from '../../utils/brokerFormat'
 import type { BrokerCompanyMetric, WcPortfolioRow } from '../../types/broker'
 
@@ -31,7 +32,7 @@ export function ClientTable({ companies, wcByCompany, onOutreach }: ClientTableP
   if (companies.length === 0) {
     return (
       <Card className="p-5">
-        <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-4">Accounts</h3>
+        <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-4 flex items-center gap-1.5">Accounts <HelpHint text="Every client with their key risk signals. Click a client to open their full WC + EPL detail, or start an AI-grounded outreach to them." /></h3>
         <p className="text-sm text-zinc-500">No linked clients yet.</p>
       </Card>
     )

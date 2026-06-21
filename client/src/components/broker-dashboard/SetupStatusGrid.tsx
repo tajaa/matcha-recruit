@@ -1,4 +1,5 @@
 import { Card } from '../ui'
+import { HelpHint } from '../broker/HelpHint'
 
 const statusConfig: { key: string; label: string; dot: string }[] = [
   { key: 'draft', label: 'Draft', dot: 'bg-zinc-600' },
@@ -22,7 +23,7 @@ interface SetupStatusGridProps {
 export function SetupStatusGrid({ counts }: SetupStatusGridProps) {
   return (
     <Card className="p-5">
-      <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-4">Setup Pipeline</h3>
+      <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-4 flex items-center gap-1.5">Setup Pipeline <HelpHint text="Where your in-flight client setups sit — from draft/invited through to live — so you can chase what's stalled before it expires." /></h3>
 
       <div className="space-y-2">
         {statusConfig.map(({ key, label, dot }) => {

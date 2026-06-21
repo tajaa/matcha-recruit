@@ -3,6 +3,7 @@ import { Users, AlertTriangle, Building2, Loader2, AlertCircle } from 'lucide-re
 import { StatCard } from '../../components/dashboard'
 import { ClientTable, HandbookCoverageList, SetupStatusGrid } from '../../components/broker-dashboard'
 import OutreachDrawer from '../../components/broker/action-center/OutreachDrawer'
+import { HelpHint } from '../../components/broker/HelpHint'
 import { fetchBrokerPortfolio, fetchBrokerHandbookCoverage, fetchWcPortfolio, fetchEplPortfolio } from '../../api/broker'
 import { fmtMoney } from '../../utils/brokerFormat'
 import type {
@@ -19,6 +20,15 @@ const SAFETY_BANDS: Array<{ key: keyof WcPortfolioResponse['summary']; label: st
   { key: 'fair',     label: 'Fair',     tone: 'text-amber-400' },
   { key: 'good',     label: 'Good',     tone: 'text-emerald-400' },
 ]
+
+function SectionHeader({ title, hint }: { title: string; hint: string }) {
+  return (
+    <div className="flex items-center gap-1.5 mb-2">
+      <h2 className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">{title}</h2>
+      <HelpHint text={hint} />
+    </div>
+  )
+}
 
 export default function BrokerDashboard() {
   const [portfolio, setPortfolio] = useState<BrokerPortfolioResponse | null>(null)
@@ -78,7 +88,12 @@ export default function BrokerDashboard() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div>
+        <SectionHeader
+          title="Portfolio at a glance"
+          hint="Your whole book in three numbers — clients you manage, total employees covered, and how many are trending at-risk. Start here, then drill into anyone flagged."
+        />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard
           label="Total Clients"
           value={summary?.total_linked_companies ?? 0}
@@ -95,10 +110,16 @@ export default function BrokerDashboard() {
           icon={AlertTriangle}
           urgent={(summary?.at_risk_companies ?? 0) > 0}
         />
+        </div>
       </div>
 
       {/* Safety posture strip (WC bands + net premium exposure) */}
       {wc && wc.summary.client_count > 0 && (
+        <div>
+        <SectionHeader
+          title="Workers' Comp posture"
+          hint="Each client's WC safety, banded worst→best (their injury rate vs their industry). 'Premium Δ' is the modeled annual premium swing across the book from those loss rates — your renewal-savings story."
+        />
         <div className="grid grid-cols-2 md:grid-cols-6 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
           {SAFETY_BANDS.map((b) => {
             const v = wc.summary[b.key] as number
@@ -122,10 +143,16 @@ export default function BrokerDashboard() {
             </div>
           </div>
         </div>
+        </div>
       )}
 
       {/* WC claim-depth strip (cumulative trauma, post-term, open lost-time, rate pressure) */}
       {wc && wc.summary.client_count > 0 && (
+        <div>
+        <SectionHeader
+          title="WC claim depth"
+          hint="The cost-drivers carriers actually price on: cumulative-trauma & post-termination claims (fastest-rising, most-litigated), still-open lost-time claims, and clients in states where WC rates are rising."
+        />
         <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
           {([
             { label: 'Cumulative Trauma', value: wc.summary.total_ct_cases ?? 0, tone: 'text-red-400' },
@@ -139,10 +166,16 @@ export default function BrokerDashboard() {
             </div>
           ))}
         </div>
+        </div>
       )}
 
       {/* EPL readiness strip (avg score + band distribution across the book) */}
       {epl && epl.summary.client_count > 0 && (
+        <div>
+        <SectionHeader
+          title="EPL readiness"
+          hint="Employment-practices-liability readiness across the book — average score and how many clients land Strong→Exposed. Spot who's hard to place and what to shore up before renewal."
+        />
         <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
           <div className="bg-zinc-900 px-4 py-4">
             <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">EPL Avg</div>
@@ -159,6 +192,7 @@ export default function BrokerDashboard() {
               <div className={`text-2xl font-light font-mono mt-1.5 ${c.value > 0 ? c.tone : 'text-zinc-700'}`}>{c.value}</div>
             </div>
           ))}
+        </div>
         </div>
       )}
 
