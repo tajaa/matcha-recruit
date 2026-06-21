@@ -22,6 +22,28 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'broker-portal-redesign',
+    date: '2026-06-21',
+    category: 'Broker',
+    title: 'Broker portal redesign — unified risk panel + tabbed hubs',
+    summary:
+      'A design pass on the broker portal: the Book of Business loses the five stacked stat-strips for one dense "Risk Posture" panel, the composite Risk Index becomes a headline KPI, and the six Administration nav rows fold into two tabbed hubs (Clients + Account). No data or behavior changed — same numbers, far less bulk.',
+    whatsNew: [
+      'Book of Business: the four near-identical band strips (WC posture, claim depth, EPL, Risk Index) collapse into one Risk Posture panel — each lens is a best→worst distribution bar with inline counts, WC claim-depth as a chip footer.',
+      'Composite Risk Index promoted to a hero KPI alongside Total Clients / Employees / At-Risk; flat KPI tiles replace the watermark-icon stat cards.',
+      'Nav: Onboarding · Pipeline · Seats · Referrals now live under a single Clients hub (tabs), and Team · Settings under an Account hub — sidebar drops from 9 rows to 5.',
+      'Forms on Seats / Referrals / Team / Settings get consistent panel header bands, finished inputs, and emerald CTAs; both broker light and dark themes intact.',
+    ],
+    howToUse: [
+      'Broker → Book of Business: the new KPI row + Risk Posture panel sit above the Accounts table.',
+      'Broker → Clients and Broker → Account: switch sub-pages with the tab bar. Old bookmarks (/broker/seats, /broker/pipeline, /broker/referrals, /broker/team, /broker/settings) auto-redirect to the matching tab.',
+    ],
+    setup: [
+      'None — frontend only, no migration or env change (commit 7e11dce). Deploy the client build.',
+    ],
+    tag: 'new',
+  },
+  {
     id: 'broker-theme-alerts',
     date: '2026-06-21',
     category: 'Broker',
