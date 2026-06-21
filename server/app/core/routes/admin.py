@@ -311,6 +311,7 @@ KNOWN_FEATURES = {
     "hris_import", "hris_gusto", "hris_finch", "hris_deductions",
     "paid_channel_creator", "discipline", "inventory",
     "werk_lite", "werk_lite_calls_all_members",
+    "workforce_compliance",
 }
 
 

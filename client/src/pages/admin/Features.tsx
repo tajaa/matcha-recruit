@@ -28,6 +28,7 @@ const FEATURE_LABELS: Record<string, string> = {
   inventory: 'Inventory',
   werk_lite: 'Werk Lite (work-chat surface — needs Matcha Work too)',
   werk_lite_calls_all_members: 'Werk Lite — any member can start calls',
+  workforce_compliance: 'Workforce Compliance (pay transparency · AI-audit · biometric)',
 }
 
 type CompanyFeatures = {

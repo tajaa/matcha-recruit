@@ -22,8 +22,11 @@ from ..models.workforce_compliance import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# is_overdue computed at read-time (the stored column is only fresh at write-time;
+# a tool crosses its due date later without a re-save).
+_OVERDUE_EXPR = "(next_due_date IS NULL OR next_due_date < CURRENT_DATE)"
 _AI_COLS = ("id, company_id, tool_name, vendor, purpose, last_audit_date, cadence_days, "
-            "next_due_date, is_overdue, notes, created_at")
+            f"next_due_date, {_OVERDUE_EXPR} AS is_overdue, notes, created_at")
 _BIO_COLS = ("id, company_id, location_id, collection_type, purpose, consent_obtained, "
              "consent_obtained_date, consent_method, retention_policy, is_active, notes, created_at")
 
@@ -179,6 +182,8 @@ async def get_pay_transparency(current_user=Depends(require_admin_or_client)):
 @router.put("/pay-transparency/{state}", response_model=list[PayTransparencyStateRow])
 async def set_pay_transparency(state: str, body: PayTransparencyUpdate,
                                current_user=Depends(require_admin_or_client)):
+    if len(state) != 2 or not state.isalpha():
+        raise HTTPException(status_code=400, detail="state must be a 2-letter code")
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
         await wf.set_pay_transparency(
@@ -196,7 +201,8 @@ async def summary(current_user=Depends(require_admin_or_client)):
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
         ai = await conn.fetchrow(
-            "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE is_overdue) AS overdue FROM hiring_ai_audits WHERE company_id=$1",
+            f"SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE {_OVERDUE_EXPR}) AS overdue "
+            "FROM hiring_ai_audits WHERE company_id=$1",
             company_id,
         )
         bio = await conn.fetchrow(

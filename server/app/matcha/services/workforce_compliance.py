@@ -100,7 +100,8 @@ async def derive_pay_transparency(conn, company_id: UUID) -> Optional[tuple[int,
 
 async def derive_ai_audit(conn, company_id: UUID) -> Optional[tuple[int, str]]:
     row = await conn.fetchrow(
-        "SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE is_overdue) AS overdue "
+        "SELECT COUNT(*) AS total, "
+        "COUNT(*) FILTER (WHERE next_due_date IS NULL OR next_due_date < CURRENT_DATE) AS overdue "
         "FROM hiring_ai_audits WHERE company_id = $1",
         company_id,
     )
