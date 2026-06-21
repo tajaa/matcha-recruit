@@ -22,6 +22,27 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'resident-care-risk',
+    date: '2026-06-20',
+    category: 'Compliance',
+    title: 'Resident-Care Risk asset (healthcare / senior-living)',
+    summary:
+      'Packages the controls underwriters value in healthcare/senior-living (WTW p.175–176) into a documented program + insurer-facing PDF: safety-program register, MVR reviews (hire + annual), and credentialing currency (from existing employee_credentials). Gated by the new resident_care flag.',
+    whatsNew: [
+      'New "Resident-Care Risk" page (Safety group): safety-program register, MVR-review register with overdue flags, credentialing-currency readout, and summary strip.',
+      'One-click insurer asset PDF — a "resident-care risk management program" leave-behind to present alongside the loss run.',
+      'API: /resident-care/summary, /programs (CRUD), /mvr (CRUD), /asset.pdf.',
+    ],
+    howToUse: [
+      'Admin → Business Features → turn on "Resident-Care Risk" for a healthcare/senior-living company.',
+      'That company → Safety → Resident-Care Risk → log safety programs + MVR reviews → "Insurer asset" to download the PDF.',
+    ],
+    setup: [
+      'DB: migration rescare01 (safety_programs, mvr_reviews) applied on dev; prod via ./scripts/migrate-prod.sh.',
+    ],
+    tag: 'new',
+  },
+  {
     id: 'wc-class-codes',
     date: '2026-06-20',
     category: 'Broker',

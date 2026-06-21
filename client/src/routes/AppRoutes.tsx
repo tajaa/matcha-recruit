@@ -26,6 +26,7 @@ import RiskAssessment from '../pages/app/RiskAssessment'
 import CredentialTemplates from '../pages/app/CredentialTemplates'
 import WorkforceCompliance from '../pages/app/WorkforceCompliance'
 import RiskProfile from '../pages/app/RiskProfile'
+import ResidentCare from '../pages/app/ResidentCare'
 import Inbox from '../pages/app/Inbox'
 import UserSettings from '../pages/app/UserSettings'
 import Notifications from '../pages/app/Notifications'
@@ -99,6 +100,7 @@ export default function AppRoutes() {
         <Route path="credential-templates" element={<FeatureGate feature="credential_templates" label="Credential Templates"><CredentialTemplates /></FeatureGate>} />
         <Route path="workforce-compliance" element={<FeatureGate feature="workforce_compliance" label="Workforce Compliance"><WorkforceCompliance /></FeatureGate>} />
         <Route path="risk-profile" element={<FeatureGate feature="risk_profile" label="Risk Profile"><RiskProfile /></FeatureGate>} />
+        <Route path="resident-care" element={<FeatureGate feature="resident_care" label="Resident-Care Risk"><ResidentCare /></FeatureGate>} />
         <Route path="resources" element={<AppResources />} />
         <Route path="resources/templates" element={<RequireBusinessAccount><ResourcesTemplates embedded /></RequireBusinessAccount>} />
         <Route path="resources/templates/job-descriptions" element={<ResourcesJobDescriptions embedded />} />
