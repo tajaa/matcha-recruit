@@ -2,11 +2,12 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { HeartPulse, ShieldPlus, Car, Plus, Trash2, Loader2, AlertTriangle, Check, FileDown } from 'lucide-react'
 import { Card } from '../../components/ui'
 import {
-  fetchResidentCareSummary, fetchSafetyPrograms, createSafetyProgram, deleteSafetyProgram,
+  fetchResidentCareSummary, fetchSafetyPrograms, createSafetyProgram, deleteSafetyProgram, suggestSafetyPrograms,
   fetchMvrReviews, createMvrReview, updateMvrReview, deleteMvrReview, downloadResidentCareAsset,
 } from '../../api/residentCare'
 import type { SafetyProgram, MvrReview, ResidentCareSummary, ProgramType, MvrStatus } from '../../types/residentCare'
 import { PROGRAM_LABELS, PROGRAM_TYPES } from '../../types/residentCare'
+import { AiSuggest } from '../../components/AiSuggest'
 
 const today = () => new Date().toISOString().slice(0, 10)
 const inputCls = 'w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500'
@@ -96,7 +97,15 @@ function SafetyProgramsSection({ programs, reload }: { programs: SafetyProgram[]
     <Card className="p-5">
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2"><ShieldPlus className="h-4 w-4 text-zinc-500" /><h3 className="text-sm font-medium text-zinc-200 tracking-wide">Safety &amp; risk-management programs</h3></div>
-        <button onClick={() => setShow((v) => !v)} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500"><Plus className="h-3.5 w-3.5" /> Add program</button>
+        <div className="flex items-center gap-2">
+          <AiSuggest
+            fetchSuggestions={suggestSafetyPrograms}
+            itemLabel={(s) => `${PROGRAM_LABELS[s.program_type]} — ${s.name}`}
+            createItem={(s) => createSafetyProgram({ program_type: s.program_type, name: s.name })}
+            onDone={reload}
+          />
+          <button onClick={() => setShow((v) => !v)} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500"><Plus className="h-3.5 w-3.5" /> Add program</button>
+        </div>
       </div>
       <p className="text-[11px] text-zinc-500 mb-3">Document each formal program (fall-prevention, infection-control, abuse-prevention, …). Underwriters credit a strong documented program.</p>
       {show && (

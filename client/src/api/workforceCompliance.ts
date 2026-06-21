@@ -22,6 +22,10 @@ export function createAiAudit(payload: {
 export function updateAiAudit(id: string, payload: Record<string, unknown>) {
   return api.put<AiAudit>(`/workforce-compliance/ai-audits/${id}`, payload)
 }
+export interface AiAuditSuggestion { tool_name: string; vendor: string | null; purpose: string | null }
+export function suggestAiAudits() {
+  return api.post<{ suggestions: AiAuditSuggestion[]; available: boolean }>('/workforce-compliance/ai-audits/suggest', {})
+}
 export function deleteAiAudit(id: string) {
   return api.delete<{ status: string }>(`/workforce-compliance/ai-audits/${id}`)
 }
@@ -39,6 +43,10 @@ export function createBiometricPoint(payload: {
 }
 export function updateBiometricPoint(id: string, payload: Record<string, unknown>) {
   return api.put<BiometricPoint>(`/workforce-compliance/biometric-points/${id}`, payload)
+}
+export interface BiometricSuggestion { collection_type: CollectionType; purpose: string | null }
+export function suggestBiometricPoints() {
+  return api.post<{ suggestions: BiometricSuggestion[]; available: boolean }>('/workforce-compliance/biometric-points/suggest', {})
 }
 export function deleteBiometricPoint(id: string) {
   return api.delete<{ status: string }>(`/workforce-compliance/biometric-points/${id}`)

@@ -23,6 +23,10 @@ export function updateSafetyProgram(id: string, payload: Record<string, unknown>
 export function deleteSafetyProgram(id: string) {
   return api.delete<{ status: string }>(`/resident-care/programs/${id}`)
 }
+export interface ProgramSuggestion { program_type: ProgramType; name: string }
+export function suggestSafetyPrograms() {
+  return api.post<{ suggestions: ProgramSuggestion[]; available: boolean }>('/resident-care/programs/suggest', {})
+}
 
 // --- MVR reviews ---
 export function fetchMvrReviews() {

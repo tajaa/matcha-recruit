@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id
 from ..services import resident_care as rc
+from ..services import workforce_suggest
 from ..models.resident_care import (
     SafetyProgramCreate, SafetyProgramUpdate, MvrReviewCreate, MvrReviewUpdate,
 )
@@ -42,6 +43,14 @@ async def list_programs(current_user=Depends(require_admin_or_client)):
             company_id,
         )
     return [dict(r) for r in rows]
+
+
+@router.post("/programs/suggest")
+async def suggest_programs(current_user=Depends(require_admin_or_client)):
+    """AI-propose safety programs from the company's industry + incident history (no auto-commit)."""
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        return await workforce_suggest.suggest(conn, company_id, "safety_programs")
 
 
 @router.post("/programs")

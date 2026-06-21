@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id
 from ..services import pay_equity_analysis
+from ..services import workforce_suggest
 from ..services import workforce_compliance as wf
 from ..models.workforce_compliance import (
     HiringAiAuditCreate, HiringAiAuditUpdate, HiringAiAuditResponse,
@@ -48,6 +49,14 @@ async def list_ai_audits(current_user=Depends(require_admin_or_client)):
             company_id,
         )
     return [dict(r) for r in rows]
+
+
+@router.post("/ai-audits/suggest")
+async def suggest_ai_audits(current_user=Depends(require_admin_or_client)):
+    """AI-propose the hiring-tool register from the company's profile (no auto-commit)."""
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        return await workforce_suggest.suggest(conn, company_id, "ai_audits")
 
 
 @router.post("/ai-audits", response_model=HiringAiAuditResponse)
@@ -120,6 +129,14 @@ async def list_biometric_points(current_user=Depends(require_admin_or_client)):
             company_id,
         )
     return [dict(r) for r in rows]
+
+
+@router.post("/biometric-points/suggest")
+async def suggest_biometric_points(current_user=Depends(require_admin_or_client)):
+    """AI-propose biometric collection points from the company's profile (no auto-commit)."""
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        return await workforce_suggest.suggest(conn, company_id, "biometric")
 
 
 @router.post("/biometric-points", response_model=BiometricPointResponse)

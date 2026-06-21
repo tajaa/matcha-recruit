@@ -6,7 +6,9 @@ import {
   fetchBiometricPoints, createBiometricPoint, updateBiometricPoint, deleteBiometricPoint,
   fetchPayTransparency, setPayTransparency,
   fetchPayEquityReviews, createPayEquityReview, deletePayEquityReview, analyzePayEquity,
+  suggestAiAudits, suggestBiometricPoints,
 } from '../../api/workforceCompliance'
+import { AiSuggest } from '../../components/AiSuggest'
 import type {
   AiAudit, BiometricPoint, PayTransparencyRow, PayTransparencyStatus, CollectionType, PayEquityReview,
 } from '../../types/workforceCompliance'
@@ -137,7 +139,15 @@ function AiAuditSection({ audits, reload }: { audits: AiAudit[]; reload: () => v
     <Card className="p-5">
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2"><Bot className="h-4 w-4 text-zinc-500" /><h3 className="text-sm font-medium text-zinc-200 tracking-wide">AI hiring-tool audits</h3></div>
-        <button onClick={() => setShow((v) => !v)} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500"><Plus className="h-3.5 w-3.5" /> Add tool</button>
+        <div className="flex items-center gap-2">
+          <AiSuggest
+            fetchSuggestions={suggestAiAudits}
+            itemLabel={(s) => `${s.tool_name}${s.vendor ? ` · ${s.vendor}` : ''}${s.purpose ? ` — ${s.purpose}` : ''}`}
+            createItem={(s) => createAiAudit({ tool_name: s.tool_name, vendor: s.vendor, purpose: s.purpose })}
+            onDone={reload}
+          />
+          <button onClick={() => setShow((v) => !v)} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500"><Plus className="h-3.5 w-3.5" /> Add tool</button>
+        </div>
       </div>
       <p className="text-[11px] text-zinc-500 mb-3">Register every automated hiring tool + its last bias-audit date (NYC LL144 / IL / CO require regular audits).</p>
       {show && (
@@ -184,7 +194,15 @@ function BiometricSection({ points, reload }: { points: BiometricPoint[]; reload
     <Card className="p-5">
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2"><Fingerprint className="h-4 w-4 text-zinc-500" /><h3 className="text-sm font-medium text-zinc-200 tracking-wide">Biometric consent (BIPA)</h3></div>
-        <button onClick={() => setShow((v) => !v)} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500"><Plus className="h-3.5 w-3.5" /> Add</button>
+        <div className="flex items-center gap-2">
+          <AiSuggest
+            fetchSuggestions={suggestBiometricPoints}
+            itemLabel={(s) => `${s.collection_type.replace('_', ' ')}${s.purpose ? ` — ${s.purpose}` : ''}`}
+            createItem={(s) => createBiometricPoint({ collection_type: s.collection_type, purpose: s.purpose })}
+            onDone={reload}
+          />
+          <button onClick={() => setShow((v) => !v)} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500"><Plus className="h-3.5 w-3.5" /> Add</button>
+        </div>
       </div>
       <p className="text-[11px] text-zinc-500 mb-3">Every biometric collection point (time clocks, access control) + whether written consent is on file. BIPA carries $1–5k statutory damages per violation.</p>
       {show && (
