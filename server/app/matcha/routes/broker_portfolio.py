@@ -22,6 +22,7 @@ from ..services.wc_benchmarks import SEVERITY_BAND_RANK
 from ..services import benefits_eligibility as be
 from ..services import wc_depth
 from ..services import epl_readiness
+from ..services import risk_index
 from ..models.broker_action_center import MilestonesResponse, OutreachResponse
 
 logger = logging.getLogger(__name__)
@@ -327,6 +328,47 @@ async def get_epl_client_detail(company_id: UUID, current_user=Depends(require_b
         meta = await _assert_broker_owns_company(conn, current_user.id, company_id)
         assessment = await epl_readiness.compute_epl_readiness(conn, company_id)
     return {"company_name": meta["name"], **assessment}
+
+
+@router.get("/risk-index")
+async def get_risk_index_portfolio(current_user=Depends(require_broker)):
+    """Composite risk-index rollup across the book — one benchmarkable number per client."""
+    async with get_connection() as conn:
+        _, clients = await _broker_clients(conn, current_user.id)
+        results = []
+        for company_id, meta in clients.items():
+            try:
+                r = await risk_index.compute_risk_index(conn, company_id)
+            except Exception as exc:
+                logger.warning("risk-index: compute failed for %s: %s", company_id, exc)
+                continue
+            if r["index"] is None:
+                continue
+            results.append({
+                "company_id": str(company_id), "company_name": meta["name"],
+                "industry": meta["industry"], "index": r["index"], "band": r["band"],
+                "components": r["components"],
+            })
+    results.sort(key=lambda r: (_EPL_BAND_RANK.get(r["band"], 9), r["index"]))
+    scored = [r for r in results if r["index"] is not None]
+    summary = {
+        "client_count": len(results),
+        "strong": sum(1 for r in results if r["band"] == "strong"),
+        "adequate": sum(1 for r in results if r["band"] == "adequate"),
+        "developing": sum(1 for r in results if r["band"] == "developing"),
+        "exposed": sum(1 for r in results if r["band"] == "exposed"),
+        "avg_index": round(sum(r["index"] for r in scored) / len(scored)) if scored else 0,
+    }
+    return {"summary": summary, "companies": results}
+
+
+@router.get("/risk-index/{company_id}")
+async def get_risk_index_client(company_id: UUID, current_user=Depends(require_broker)):
+    """Composite risk index + component breakdown + top fixes for one client."""
+    async with get_connection() as conn:
+        meta = await _assert_broker_owns_company(conn, current_user.id, company_id)
+        result = await risk_index.compute_risk_index(conn, company_id)
+    return {"company_name": meta["name"], **result}
 
 
 @router.put("/epl-portfolio/{company_id}/attestations/{item_key}")

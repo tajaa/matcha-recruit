@@ -29,6 +29,8 @@ const FEATURE_LABELS: Record<string, string> = {
   werk_lite: 'Werk Lite (work-chat surface — needs Matcha Work too)',
   werk_lite_calls_all_members: 'Werk Lite — any member can start calls',
   workforce_compliance: 'Workforce Compliance (pay transparency · AI-audit · biometric)',
+  risk_profile: 'Risk Profile (client-facing composite risk index)',
+  resident_care: 'Resident-Care Risk (healthcare/senior-living asset)',
 }
 
 type CompanyFeatures = {

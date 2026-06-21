@@ -84,6 +84,13 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # /workforce-compliance router + the /app/workforce-compliance surface.
     # Default off; admin-toggle per company. NOT in any tier overlay.
     "workforce_compliance": False,
+    # Client-facing risk portal (composite WC+EPL+compliance index). Gates
+    # /risk-profile + /app/risk-profile. Default off; admin-toggle. Not bundled.
+    "risk_profile": False,
+    # Healthcare/senior-living resident-care risk asset (safety programs, MVR
+    # reviews, insurer-facing PDF). Gates /resident-care + /app/resident-care.
+    # Default off; admin-toggle (vertical). Not bundled.
+    "resident_care": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,

@@ -5,6 +5,8 @@ import { ClientTable, HandbookCoverageList, SetupStatusGrid } from '../../compon
 import OutreachDrawer from '../../components/broker/action-center/OutreachDrawer'
 import { HelpHint } from '../../components/broker/HelpHint'
 import { fetchBrokerPortfolio, fetchBrokerHandbookCoverage, fetchWcPortfolio, fetchEplPortfolio } from '../../api/broker'
+import { fetchRiskIndexPortfolio } from '../../api/riskIndex'
+import type { RiskIndexPortfolio } from '../../types/riskIndex'
 import { fmtMoney } from '../../utils/brokerFormat'
 import type {
   BrokerPortfolioResponse,
@@ -34,6 +36,7 @@ export default function BrokerDashboard() {
   const [portfolio, setPortfolio] = useState<BrokerPortfolioResponse | null>(null)
   const [wc, setWc] = useState<WcPortfolioResponse | null>(null)
   const [epl, setEpl] = useState<EplPortfolioResponse | null>(null)
+  const [riskIndex, setRiskIndex] = useState<RiskIndexPortfolio | null>(null)
   const [handbooks, setHandbooks] = useState<BrokerHandbookCoverage[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -44,6 +47,7 @@ export default function BrokerDashboard() {
       fetchBrokerPortfolio().then(setPortfolio),
       fetchWcPortfolio().then(setWc),
       fetchEplPortfolio().then(setEpl),
+      fetchRiskIndexPortfolio().then(setRiskIndex),
       fetchBrokerHandbookCoverage().then(setHandbooks),
     ]).then((results) => {
       // Only hard-fail if the core portfolio fetch (first) rejected.
@@ -186,6 +190,33 @@ export default function BrokerDashboard() {
             { label: 'Adequate', value: epl.summary.adequate, tone: 'text-amber-400' },
             { label: 'Developing', value: epl.summary.developing, tone: 'text-orange-400' },
             { label: 'Exposed', value: epl.summary.exposed, tone: 'text-red-400' },
+          ] as const).map((c) => (
+            <div key={c.label} className="bg-zinc-900 px-4 py-4">
+              <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{c.label}</div>
+              <div className={`text-2xl font-light font-mono mt-1.5 ${c.value > 0 ? c.tone : 'text-zinc-700'}`}>{c.value}</div>
+            </div>
+          ))}
+        </div>
+        </div>
+      )}
+
+      {/* Composite risk-index strip — one benchmarkable number per client */}
+      {riskIndex && riskIndex.summary.client_count > 0 && (
+        <div>
+        <SectionHeader
+          title="Risk index"
+          hint="One composite 0–100 per client (workers'-comp + EPL + compliance). The single benchmarkable number to lead a renewal conversation with — and the basis of the client-facing risk portal."
+        />
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+          <div className="bg-zinc-900 px-4 py-4">
+            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Index Avg</div>
+            <div className="text-2xl font-light font-mono mt-1.5 text-zinc-200">{riskIndex.summary.avg_index}</div>
+          </div>
+          {([
+            { label: 'Strong', value: riskIndex.summary.strong, tone: 'text-emerald-400' },
+            { label: 'Adequate', value: riskIndex.summary.adequate, tone: 'text-amber-400' },
+            { label: 'Developing', value: riskIndex.summary.developing, tone: 'text-orange-400' },
+            { label: 'Exposed', value: riskIndex.summary.exposed, tone: 'text-red-400' },
           ] as const).map((c) => (
             <div key={c.label} className="bg-zinc-900 px-4 py-4">
               <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{c.label}</div>

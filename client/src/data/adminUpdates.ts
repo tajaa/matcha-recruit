@@ -22,6 +22,25 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'composite-risk-index',
+    date: '2026-06-20',
+    category: 'Broker',
+    title: 'Composite risk index + client-facing risk portal',
+    summary:
+      'One 0–100 risk index per client (workers’-comp + EPL + compliance, weighted roll-up of scores already computed — no new data). The report’s "Risk Index Model" / "Risk Intelligence Central". Brokers see it as one benchmarkable number per client; businesses see their own via a new client-facing Risk Profile portal.',
+    whatsNew: [
+      'Broker dashboard: new "Risk index" strip (avg + Strong→Exposed distribution across the book).',
+      'Broker API: GET /broker/risk-index (rollup) + /broker/risk-index/{id} (per client with component breakdown).',
+      'Client-facing "Risk Profile" page (gated by the new risk_profile flag): the business’s own index, the 3 component bars, and a "how to improve your terms" fix list.',
+      'Index = WC (wt 40, from severity band + experience mod) + EPL readiness (wt 35) + compliance coverage (wt 25); components with no data drop out and weights renormalize.',
+    ],
+    howToUse: [
+      'Broker: open the dashboard — the Risk index strip sits under EPL readiness.',
+      'Client portal: Admin → Business Features → turn on "Risk Profile" for a company → that company sees Compliance → Risk Profile.',
+    ],
+    tag: 'new',
+  },
+  {
     id: 'workforce-compliance',
     date: '2026-06-20',
     category: 'Compliance',
