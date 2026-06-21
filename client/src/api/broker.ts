@@ -138,6 +138,17 @@ export function saveExternalWc(id: string, payload: Record<string, unknown>) {
   return api.put<ExternalClientDetail>(`/broker/external-clients/${id}/wc`, payload)
 }
 
+export interface ParsedLossRun {
+  fields: Record<string, number | string | null>
+  available: boolean
+  model: string
+}
+export function parseExternalLossRun(id: string, file: File) {
+  const fd = new FormData()
+  fd.append('file', file)
+  return api.upload<ParsedLossRun>(`/broker/external-clients/${id}/loss-run`, fd)
+}
+
 export function saveExternalEplAttestation(
   id: string,
   itemKey: string,

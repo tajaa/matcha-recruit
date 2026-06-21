@@ -1,12 +1,12 @@
-import { useState, useEffect, type FormEvent, type ReactNode } from 'react'
+import { useState, useEffect, type FormEvent, type ChangeEvent, type ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Loader2, AlertCircle, Gauge, Shield, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { ArrowLeft, Loader2, AlertCircle, Gauge, Shield, TrendingUp, TrendingDown, Minus, Upload } from 'lucide-react'
 import { Card } from '../../components/ui'
 import { HelpHint } from '../../components/broker/HelpHint'
 import { SubmissionPanel } from '../../components/broker/SubmissionPanel'
 import {
   fetchExternalClientDetail, saveExternalWc, saveExternalEplAttestation,
-  downloadExternalSubmission, fetchExternalCoverageGap,
+  downloadExternalSubmission, fetchExternalCoverageGap, parseExternalLossRun,
 } from '../../api/broker'
 import type { ExternalClientDetail, ExternalEplFactor, EplAttestationStatus } from '../../types/broker'
 import { RISK_BAND_TONE } from '../../types/riskIndex'
@@ -57,6 +57,8 @@ export default function BrokerExternalClientDetail() {
   const [wcForm, setWcForm] = useState<Record<string, string>>({})
   const [savingWc, setSavingWc] = useState(false)
   const [savingEpl, setSavingEpl] = useState<string | null>(null)
+  const [parsing, setParsing] = useState(false)
+  const [parseErr, setParseErr] = useState<string | null>(null)
 
   useEffect(() => {
     if (!clientId) return
@@ -77,6 +79,31 @@ export default function BrokerExternalClientDetail() {
       annual_premium: w.annual_premium != null ? String(w.annual_premium) : '',
     })
     setEditWc(true)
+  }
+
+  async function onLossRunFile(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''  // allow re-selecting the same file
+    if (!file || !clientId) return
+    setParsing(true); setParseErr(null)
+    try {
+      const res = await parseExternalLossRun(clientId, file)
+      const s = (k: string) => { const v = res.fields[k]; return v == null ? '' : String(v) }
+      setWcForm({
+        period_label: s('period_label'), recordable_cases: s('recordable_cases'), dart_cases: s('dart_cases'),
+        lost_days: s('lost_days'), restricted_days: s('restricted_days'), ct_cases: s('ct_cases'),
+        acute_cases: s('acute_cases'), post_termination_cases: s('post_termination_cases'),
+        lost_time_open: s('lost_time_open'), lost_time_resolved: s('lost_time_resolved'),
+        avg_days_to_rtw: s('avg_days_to_rtw'), current_emr: s('current_emr'),
+        carrier: s('carrier'), annual_premium: s('annual_premium'),
+      })
+      setEditWc(true)
+      if (!res.available) setParseErr('Could not read this PDF confidently — review every field before saving.')
+    } catch {
+      setParseErr('Parse failed. Enter the loss run manually.')
+    } finally {
+      setParsing(false)
+    }
   }
 
   async function submitWc(e: FormEvent) {
@@ -144,10 +171,17 @@ export default function BrokerExternalClientDetail() {
           <div className="flex items-center gap-2"><Gauge className="h-4 w-4 text-zinc-500" /><h3 className="text-sm font-medium text-zinc-200 tracking-wide">Workers' Comp</h3>
             <HelpHint text="Keyed from the client's carrier loss run. We compute TRIR/DART vs their industry, the claim mix (cumulative-trauma / post-term / open lost-time), and overlay the state's WC rate trend — so you can show what's driving their premium and what to fix." />
           </div>
-          <button onClick={() => (editWc ? setEditWc(false) : openWcEditor())} className="text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500 transition-colors">
-            {editWc ? 'Cancel' : wc.has_data ? 'Edit loss run' : 'Enter loss run'}
-          </button>
+          <div className="flex items-center gap-2">
+            <label className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg border transition-colors ${parsing ? 'text-zinc-500 border-zinc-800 cursor-wait' : 'text-zinc-300 hover:text-zinc-100 border-zinc-700 hover:border-zinc-500 cursor-pointer'}`}>
+              <Upload className="h-3.5 w-3.5" /> {parsing ? 'Parsing…' : 'Parse loss-run PDF'}
+              <input type="file" accept="application/pdf" className="hidden" disabled={parsing} onChange={onLossRunFile} />
+            </label>
+            <button onClick={() => (editWc ? setEditWc(false) : openWcEditor())} className="text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500 transition-colors">
+              {editWc ? 'Cancel' : wc.has_data ? 'Edit loss run' : 'Enter loss run'}
+            </button>
+          </div>
         </div>
+        {parseErr && <p className="text-[11px] text-amber-400 mb-3">{parseErr}</p>}
 
         {!editWc && (
           <>

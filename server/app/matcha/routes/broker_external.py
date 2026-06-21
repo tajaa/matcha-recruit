@@ -9,13 +9,14 @@ import logging
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile
 from pydantic import BaseModel, Field
 
 from ...database import get_connection
 from ..dependencies import require_broker_pro
 from ..services import external_clients as ext
 from ..services import epl_readiness
+from ..services import loss_run_parser
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -133,6 +134,26 @@ async def upsert_external_wc(client_id: UUID, body: ExternalWcBody,
             raise HTTPException(status_code=404, detail="External client not found")
         await ext.upsert_wc_snapshot(conn, client_id, current_user.id, body.model_dump())
         return await _detail_or_404(conn, broker_id, client_id)
+
+
+@router.post("/external-clients/{client_id}/loss-run")
+async def parse_external_loss_run(client_id: UUID, file: UploadFile = File(...),
+                                  current_user=Depends(require_broker_pro)):
+    """Parse an uploaded carrier loss-run PDF → draft WC fields for the broker to
+    review and save. Does NOT auto-commit — returns the extracted draft only."""
+    async with get_connection() as conn:
+        broker_id = await _broker_id(conn, current_user.id)
+        if not await ext.get_client(conn, broker_id, client_id):
+            raise HTTPException(status_code=404, detail="External client not found")
+    is_pdf = (file.content_type == "application/pdf") or (file.filename or "").lower().endswith(".pdf")
+    if not is_pdf:
+        raise HTTPException(status_code=400, detail="Upload a PDF loss run")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > 15_000_000:
+        raise HTTPException(status_code=413, detail="PDF too large (max 15 MB)")
+    return await loss_run_parser.parse_loss_run(data)
 
 
 @router.put("/external-clients/{client_id}/epl/{item_key}")
