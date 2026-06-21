@@ -135,9 +135,11 @@
       <tr><td>WC class-code exposures (payroll by NCCI class)</td><td class="mono" style="font-size:8pt">p.32–33</td><td><span class="chip c-new">NEW</span></td></tr>
       <tr><td>EPL tracked tools — pay transparency · BIPA · AI-hiring audit</td><td class="mono" style="font-size:8pt">p.85–86</td><td><span class="chip c-new">NEW</span></td></tr>
       <tr><td>Healthcare resident-care asset (safety programs · MVR · PDF)</td><td class="mono" style="font-size:8pt">p.175–76</td><td><span class="chip c-new">NEW</span></td></tr>
-      <tr><td>Full 50-state NCCI <i>rates</i> + class-code rate table (licensed feed)</td><td class="mono" style="font-size:8pt">p.32–33</td><td><span class="chip c-part">PARTIAL</span></td></tr>
-      <tr><td>EPL pay-equity + DEI as tracked tools (need payroll/demographics)</td><td class="mono" style="font-size:8pt">p.85–86</td><td><span class="chip c-part">PARTIAL</span></td></tr>
       <tr><td>Loss-run PDF auto-parse + client-intake link</td><td class="mono" style="font-size:8pt">p.11</td><td><span class="chip c-new">NEW</span></td></tr>
+      <tr><td><b>Agentic auto-fill</b> — derive from employees + AI (class-map · pay-equity · suggest · risk narrative)</td><td class="mono" style="font-size:8pt">p.5,11</td><td><span class="chip c-new">NEW</span></td></tr>
+      <tr><td>EPL pay-equity — tracker + payroll dispersion analysis</td><td class="mono" style="font-size:8pt">p.85</td><td><span class="chip c-new">NEW</span></td></tr>
+      <tr><td>NCCI rate import (CSV) + real public state loss-cost trends loaded</td><td class="mono" style="font-size:8pt">p.32–33</td><td><span class="chip c-new">NEW</span></td></tr>
+      <tr><td>Per-class NCCI base rates (licensed manual) · DEI posture as a tool</td><td class="mono" style="font-size:8pt">p.32,85</td><td><span class="chip c-part">PARTIAL</span></td></tr>
     </tbody>
   </table>
   <div class="legend"><span class="chip c-new">NEW</span>shipped &nbsp; <span class="chip c-have">HAVE</span>existed &nbsp; <span class="chip c-part">PARTIAL</span>needs depth &nbsp; <span class="chip c-miss">MISSING</span>not built</div>
@@ -151,20 +153,29 @@
     <div class="ex"><span class="lab">Example</span> Broker drops a 12-page loss run → claim counts + mod prefill; texts the prospect the intake link → they answer 10 questions in 2 min → the client's EPL + risk index populate with zero keying.</div>
   </div>
 
+  <div class="grp">
+    <div class="glabel">F · Agentic — derive from data, don't type <span class="chip c-new">NEW</span></div>
+    <p class="lead">Like the rest of the platform (onboarding wizard, compliance research), these features now pull from data already on file + AI instead of manual entry. Manual entry stays as a fallback.</p>
+    <div class="cite"><span class="pg">WTW p.5</span><i>"…your competitive edge depends on harnessing data, analytics, and technology."</i> &nbsp;·&nbsp; <span class="pg">p.11</span><i>"…digitize more of the value chain."</i></div>
+    <p><b>Why it matters:</b> the underwriting inputs already live in the tenant's HR/safety data — surfacing them automatically is the whole pitch. Hand-keyed registers don't scale and don't feel like the platform.</p>
+    <div class="have"><span class="lab">Have / data</span> <b>WC class-map</b>: Gemini maps <b>employees.job_title</b> → NCCI class + aggregates payroll. <b>Pay-equity</b>: computes within-role pay dispersion from <b>employees.pay_rate</b> (real analysis, not a logged date). <b>AI scan-&-suggest</b>: proposes the AI-hiring-tool / biometric / safety-program registers from industry + roles + incident history. <b>Risk narrative</b>: AI "why your index is X + top moves" over the composite score.</div>
+    <div class="ex"><span class="lab">Example — Sea Cafe</span> One click → 17 employees mapped to class <span class="num">9082</span> ($836k payroll); pay-equity flags Line Cook <span class="num">34.8%</span> + GM <span class="num">33.1%</span> spread; suggests fingerprint time-clocks + slip-and-fall program; narrative cites the 92 WC / 69 EPL scores with prioritized fixes.</div>
+  </div>
+
   <h2>What's still open</h2>
   <div class="card" style="border-color:#dde3ec; background:#f7f9fc;">
-    <div class="lab" style="color:#2b4c7e;">✦ The remaining gaps (everything else in A/B/D is shipped)</div>
-    <h3>DEI posture as a tool · the licensed NCCI rate data itself</h3>
-    <div class="cite"><span class="pg">WTW p.85</span><i>"…compliance with state pay transparency laws. Many markets have separate questionnaires for biometrics, sexual harassment and pay equity."</i></div>
-    <p><b>Shipped:</b> carrier submission packet, AI coverage-gap, composite risk index + client portal (on- and off-platform), WC class-code exposures, the EPL <b>pay-transparency / BIPA / AI-hiring / pay-equity</b> trackers, the healthcare resident-care asset, off-platform loss-run PDF auto-parse + client-intake link, and an <b>admin CSV import</b> for the NCCI feed. <b>What's left is small:</b> DEI as a tool, and loading licensed data into the import we built.</p>
-    <div class="src"><span class="lab">Data path</span> <b>DEI</b> → workforce demographics (attested today, no analysis tool). <b>NCCI rates/class codes</b> — the import pipeline is live (<b>/admin/wc-rate-data</b>); the data is licensed and must be purchased + uploaded to replace the demo seed. Loss-run intake could still add <b>HRIS headcount</b> auto-fill.</div>
+    <div class="lab" style="color:#2b4c7e;">✦ The remaining gaps (small — A/B/D shipped, and the manual features are now agentic)</div>
+    <h3>Licensed per-class NCCI base rates · DEI posture as a tool</h3>
+    <div class="cite"><span class="pg">WTW p.85</span><i>"…separate questionnaires for biometrics, sexual harassment and pay equity."</i> &nbsp;·&nbsp; <span class="pg">p.32</span> class-level rate detail.</div>
+    <p><b>Plugged since the last review:</b> real public <b>state loss-cost trends</b> loaded (NCCI 2026 filings); an admin <b>CSV import</b> for rate data; <b>pay-equity</b> upgraded from a logged date to a real payroll analysis; and the registers (class-codes, AI-tools, biometric, safety programs) now <b>auto-derive</b> from employees + AI. <b>What's left is genuinely small:</b></p>
+    <div class="src"><span class="lab">Data path</span> <b>Per-class NCCI base rates</b> — the only truly licensed piece; import pipeline is live at <b>/admin/wc-rate-data</b>, just needs a purchased manual uploaded (public state trends already in). <b>DEI</b> → workforce demographics (attested today; a real analysis needs gender/race data not in our schema, i.e. an HRIS /individual pull) — same gap that limits pay-equity to a within-role dispersion screen rather than a protected-class gap.</div>
   </div>
 
   <h2>Sequence</h2>
   <ul class="seq">
-    <li><b>Done</b> — submission packet + AI coverage-gap, composite risk index + client portal, WC class-codes, EPL pay-transparency/BIPA/AI-hiring/pay-equity trackers, healthcare resident-care asset, off-platform loss-run parse + intake link, NCCI CSV import.</li>
-    <li><b>Next (data, not build)</b> — purchase + upload a licensed NCCI rate/class feed via the admin import.</li>
-    <li><b>Optional</b> — DEI posture as a tool, once workforce demographics are wired.</li>
+    <li><b>Done</b> — submission packet + AI coverage-gap, composite risk index + client portal (on/off-platform), WC class-codes, EPL trackers incl. pay-equity, healthcare resident-care asset, off-platform loss-run parse + intake link, NCCI CSV import + public state trends, and the <b>agentic auto-fill</b> across all registers (derive from employees + AI).</li>
+    <li><b>Next (data, not build)</b> — purchase + upload a licensed per-class NCCI rate manual via the admin import (public state trends already loaded).</li>
+    <li><b>Optional</b> — DEI tool + protected-class pay-equity once HRIS demographics are wired (Finch /individual).</li>
   </ul>
 
   <div class="foot">
