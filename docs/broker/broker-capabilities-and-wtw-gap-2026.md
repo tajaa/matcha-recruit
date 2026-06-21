@@ -4,6 +4,8 @@ _Last updated: 2026-06-20_
 
 A single reference for the broker product: **(A)** everything Matcha gives brokers today, **(B)** how that maps to the needs in WTW's _Insurance Marketplace Realities 2026 (Spring Update)_, and **(C)** what's still missing. Source report: `~/Desktop/insurance-marketplace-realities-2026-spring-update-1805.pdf` (184 pp).
 
+> **Status 2026-06-20 — the report's macro needs A (strategic, pp.4–13) + B (HR-adjacent lines) are implemented.** Shipped since this doc was first written: submission packet + AI coverage-gap (`3942146`), composite risk index + client portal (`1e2ef44`), WC class-code dimension (`7c67877`), resident-care risk asset (`00e4faa`), and the EPL pay-transparency/BIPA/AI-hiring trackers (`5472281`). **Still open (by design):** pay-equity/DEI as tools (need payroll/demographics), a *licensed* NCCI rate/class feed, loss-run PDF auto-parse + client-intake link. C-list lines (cyber/fiduciary/P&C) remain out of scope.
+
 ---
 
 ## 0. The two broker models (read this first)
@@ -76,8 +78,8 @@ Only the report sections relevant to an HR/compliance broker are tracked. **The 
 | Experience mod (EMR) trajectory | `company_wc_mods` + WC tab | ✅ NEW |
 | Cumulative-trauma vs acute + post-termination | `ir_incidents` claim fields + classification control | ✅ NEW |
 | Return-to-work / medical management | `return_to_work_date` + RTW metrics | ✅ NEW (RTW; medical-mgmt detail not modeled) |
-| State NCCI loss-cost rate trends | `wc_state_rates` overlay | ⚠️ PARTIAL — only ~16 states seeded; needs full 50-state data |
-| Class-code (NCCI class) breakdown | — | ❌ |
+| State NCCI loss-cost rate trends | `wc_state_rates` overlay | ✅ NEW — 50-state headline seed (licensed feed pending) |
+| Class-code (NCCI class) breakdown | `company_wc_class_exposures` + WC tab | ✅ NEW — payroll by NCCI class + est. manual premium (rate feed pending) |
 
 ### B2. EPL + Wage & Hour (report pp. 84–87)
 | Report need | Matcha | Status |
@@ -85,29 +87,29 @@ Only the report sections relevant to an HR/compliance broker are tracked. **The 
 | EPL insurability lens (score + checklist) | `epl_readiness` + EPL tab | ✅ NEW |
 | Harassment handling / policy / training hygiene | IR/ER + discipline + handbook + training (derived factors) | ✅ |
 | Multi-state wage & hour exposure | compliance coverage factor | ⚠️ PARTIAL — coverage signal, not a min-wage/exempt-threshold/misclassification tracker |
-| Pay-transparency compliance | attested only | ⚠️ attested, no tool |
-| Biometric / BIPA controls | attested only | ⚠️ attested, no tool |
-| Pay-equity analysis | attested only | ⚠️ attested, no tool |
-| AI hiring-tool bias audit | attested only | ⚠️ attested, no tool |
-| DEI posture / EEOC-priority alignment | attested only | ⚠️ attested, no tool |
+| Pay-transparency compliance | `workforce_compliance` tracker → derives EPL factor | ✅ NEW tool |
+| Biometric / BIPA controls | `workforce_compliance` tracker → derives EPL factor | ✅ NEW tool |
+| AI hiring-tool bias audit | `workforce_compliance` tracker → derives EPL factor | ✅ NEW tool |
+| Pay-equity analysis | attested only | ⚠️ attested, no tool (needs payroll/demographics) |
+| DEI posture / EEOC-priority alignment | attested only | ⚠️ attested, no tool (needs demographics) |
 
 ### B3. Strategic / platform thesis (report pp. 4–13)
 | Report need | Matcha | Status |
 |---|---|---|
 | Data-driven consultative broking | risk alerts + AI outreach + WC/EPL scoring | ✅ (inward) |
-| Proprietary jurisdiction+hazard risk index | WC severity band + NCCI overlay + EPL score | ⚠️ PARTIAL — per-line scores exist; no single composite client risk index |
-| AI coverage-gap analysis | — | ❌ |
-| Carrier-ready submission packet | `stabilization-kit.pdf` only (renewal summary) | ❌ no underwriting submission |
-| Client-facing self-serve risk portal | broker-only views | ❌ |
+| Proprietary jurisdiction+hazard risk index | `services/risk_index.py` composite (WC+EPL+compliance) | ✅ NEW — one 0–100 index per client |
+| AI coverage-gap analysis | `services/submission_packet.py` (best-effort Gemini) | ✅ NEW |
+| Carrier-ready submission packet | `submission_packet.py` + `broker_submission` (tenant + off-platform) | ✅ NEW underwriting submission PDF |
+| Client-facing self-serve risk portal | `risk_profile` feature + `/app/risk-profile` | ✅ NEW — own composite index + fixes |
 
 ### B4. Healthcare PL / Senior Living (report pp. 142–145, 174–176) — Matcha's vertical
 | Report need | Matcha | Status |
 |---|---|---|
-| Credentialing / license currency | `credential_templates` | ⚠️ have data, not packaged for insurers |
-| Resident-care risk-management program record | — | ❌ (report calls this "a valuable asset to highlight for insurers") |
-| Fall-prevention / safety-program tracking | — | ❌ |
-| MVR reviews (hire + annual) | — | ❌ |
-| Abuse-incident control narrative | IR captures incidents | ⚠️ not packaged |
+| Credentialing / license currency | `credential_templates` → currency in resident-care asset | ✅ NEW — packaged in asset PDF |
+| Resident-care risk-management program record | `resident_care` feature + asset PDF | ✅ NEW |
+| Fall-prevention / safety-program tracking | `safety_programs` (fall_prevention type) | ✅ NEW |
+| MVR reviews (hire + annual) | `mvr_reviews` + currency/overdue | ✅ NEW |
+| Abuse-incident control narrative | `safety_programs` (abuse_prevention) + asset PDF | ✅ NEW — packaged |
 
 ### B5. Out of scope (documented, with reason)
 - **Cyber / privacy** (pp. 73–76) — Matcha holds PII but isn't a cyber-posture tool.
@@ -156,8 +158,8 @@ Package credentialing + incidents + safety/fall-prevention/MVR/RTW programs into
 ---
 
 ## Appendix — verification & references
-- **Status**: steps 1–2 (WC depth, EPL) committed on `main` (`e45f2b2`, `3d3553a`, `dd4df42`, `d2ed191`); seed `b0f1e7e`. Applied to **dev**; **prod pending** `./scripts/migrate-prod.sh` (covers `wcdeep01` + `epldeep01`) + deploy.
+- **Status**: WC depth + EPL (`e45f2b2`, `3d3553a`, `dd4df42`); submission packet + coverage-gap + 50-state seed (`3942146`); workforce-compliance EPL trackers (`5472281`); composite risk index + client portal (`1e2ef44`); WC class-codes (`7c67877`); resident-care asset (`00e4faa`). Applied to **dev**; **prod pending** `./scripts/migrate-prod.sh` — migration chain now `wcdeep01 · epldeep01 · brokerpro01 · wcstates01 · wfcomp01 · wcclass01 · rescare01`.
 - **Demo data**: `server/scripts/seed_broker_demo.sql` (test broker "Regina George LLC" / `ashVidales+regina@gmail.com`).
-- **Key code**: `server/app/matcha/services/{wc_benchmarks,wc_depth,epl_readiness,broker_outreach,benefits_eligibility}.py`; `routes/broker_portfolio.py`, `routes/brokers.py`; `client/src/pages/broker/*`, `client/src/api/broker.ts`, `client/src/types/broker.ts`.
+- **Key code**: `server/app/matcha/services/{wc_benchmarks,wc_depth,epl_readiness,risk_index,submission_packet,resident_care,workforce_compliance,broker_outreach}.py`; `routes/{broker_portfolio,broker_submission,risk_profile,resident_care,workforce_compliance}.py`; `client/src/pages/{broker/*,app/RiskProfile.tsx,app/ResidentCare.tsx,app/WorkforceCompliance.tsx}`, `client/src/api/{broker,riskIndex,residentCare,workforceCompliance}.ts`.
 - **Admin changelog**: entries live at `/admin/updates` (`client/src/data/adminUpdates.ts`).
 - **Source report**: WTW _Insurance Marketplace Realities 2026 Spring Update_ — WC pp. 28–34, EPL/wage-hour pp. 84–87, thesis pp. 4–13, healthcare pp. 142–145 + 174–176.
