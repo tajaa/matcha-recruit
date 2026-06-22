@@ -11,6 +11,7 @@ import pytest
 
 from app.matcha.services import workforce_compliance as wf
 from app.matcha.services import epl_readiness as epl
+from app.matcha.services import pay_equity_analysis as pe
 
 
 # --- audit_dates (AI-audit cadence / overdue math) -------------------------
@@ -130,3 +131,27 @@ def test_top_gap_none_when_all_strong():
     statuses = {f["key"]: "in_place" for f in epl.FACTORS}
     a = epl.assess_from_statuses(statuses)
     assert epl.top_gap(a) is None
+
+
+# --- pay-equity role_stats (within-role dispersion math) -------------------
+
+def test_pay_equity_role_stats_clean_role():
+    s = pe.role_stats("Analyst", [100_000, 100_000])
+    assert s["spread_pct"] == 0.0 and s["severity"] == "ok"
+    assert s["below_band_n"] == 0 and s["remediation_cost"] == 0
+
+
+def test_pay_equity_role_stats_flagged_with_remediation():
+    s = pe.role_stats("Engineer", [50_000, 100_000, 150_000])
+    assert s["median"] == 100_000
+    assert s["spread_pct"] == 100.0          # (150k-50k)/100k
+    assert s["severity"] == "flag"           # ≥30% spread
+    assert s["range_ratio"] == 3.0
+    # one person below 80% of the 100k median (80k floor); lift cost = 30k
+    assert s["below_band_n"] == 1 and s["remediation_cost"] == 30_000
+
+
+def test_pay_equity_role_stats_watch_tier():
+    s = pe.role_stats("Manager", [100_000, 120_000])
+    assert 15.0 <= s["spread_pct"] < 30.0 and s["severity"] == "watch"
+    assert s["below_band_n"] == 0            # 100k is above the 0.8*110k band floor

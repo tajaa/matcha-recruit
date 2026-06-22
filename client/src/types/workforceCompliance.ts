@@ -58,6 +58,40 @@ export interface PayEquityReview {
   created_at: string
 }
 
+export type PayEquitySeverity = 'flag' | 'watch' | 'ok'
+
+export interface PayEquityRole {
+  title: string
+  n: number
+  median: number
+  min: number
+  max: number
+  p25: number
+  p75: number
+  spread_pct: number
+  iqr_pct: number
+  range_ratio: number | null
+  below_band_n: number
+  remediation_cost: number
+  severity: PayEquitySeverity
+}
+
+// Full result of the within-role dispersion engine (pay_equity_analysis.analyze).
+export interface PayEquityAnalysisResult {
+  employee_count: number
+  analyzed_roles: number
+  flagged_roles: number
+  headline_gap_pct: number
+  worst: PayEquityRole | null
+  roles: PayEquityRole[]
+  total_payroll: number
+  median_spread_pct: number
+  employees_below_band: number
+  flagged_payroll_pct: number
+  remediation_estimate: number
+  band_floor_pct: number
+}
+
 export interface WorkforceSummary {
   ai_audits: { total: number; overdue: number }
   biometric: { active: number; missing_consent: number }

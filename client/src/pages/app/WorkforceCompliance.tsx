@@ -5,18 +5,28 @@ import {
   fetchAiAudits, createAiAudit, updateAiAudit, deleteAiAudit,
   fetchBiometricPoints, createBiometricPoint, updateBiometricPoint, deleteBiometricPoint,
   fetchPayTransparency, setPayTransparency,
-  fetchPayEquityReviews, createPayEquityReview, deletePayEquityReview, analyzePayEquity,
+  fetchPayEquityReviews, createPayEquityReview, deletePayEquityReview, analyzePayEquity, fetchPayEquityAnalysis,
   suggestAiAudits, suggestBiometricPoints,
 } from '../../api/workforceCompliance'
 import { AiSuggest } from '../../components/AiSuggest'
 import type {
   AiAudit, BiometricPoint, PayTransparencyRow, PayTransparencyStatus, CollectionType, PayEquityReview,
+  PayEquityAnalysisResult, PayEquityRole,
 } from '../../types/workforceCompliance'
 
 const today = () => new Date().toISOString().slice(0, 10)
 const inputCls = 'w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500'
 const PT_TONE: Record<string, string> = { compliant: 'text-emerald-400', action_needed: 'text-red-400', na: 'text-zinc-500' }
 const COLLECTION_TYPES: CollectionType[] = ['fingerprint', 'face', 'iris', 'voice', 'hand_geometry', 'other']
+const PE_TONE: Record<string, string> = { flag: 'text-red-400', watch: 'text-amber-400', ok: 'text-emerald-400' }
+const PE_LABEL: Record<string, string> = { flag: 'Flag', watch: 'Watch', ok: 'OK' }
+const PE_BAR: Record<string, string> = { flag: 'bg-red-400', watch: 'bg-amber-400', ok: 'bg-emerald-400' }
+function fmtUsd(n: number | null): string {
+  if (n == null) return '—'
+  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`
+  if (Math.abs(n) >= 1_000) return `$${Math.round(n / 1000)}K`
+  return `$${Math.round(n).toLocaleString()}`
+}
 
 export default function WorkforceCompliance() {
   const [audits, setAudits] = useState<AiAudit[]>([])
@@ -232,6 +242,76 @@ function BiometricSection({ points, reload }: { points: BiometricPoint[]; reload
   )
 }
 
+/* min–max range bar with a median tick, coloured by severity */
+function SpreadBar({ r }: { r: PayEquityRole }) {
+  const span = Math.max(1, r.max - r.min)
+  const medPct = Math.min(100, Math.max(0, ((r.median - r.min) / span) * 100))
+  return (
+    <div className="relative h-1.5 rounded-full bg-zinc-800" title={`${fmtUsd(r.min)} – ${fmtUsd(r.max)} (median ${fmtUsd(r.median)})`}>
+      <div className={`absolute inset-0 rounded-full opacity-25 ${PE_BAR[r.severity]}`} />
+      <div className="absolute top-[-2px] bottom-[-2px] w-0.5 bg-zinc-100" style={{ left: `${medPct}%` }} />
+    </div>
+  )
+}
+
+/* deep within-role dispersion report (rollups + per-role table) */
+function PayEquityReport({ a }: { a: PayEquityAnalysisResult }) {
+  if (!a.analyzed_roles) {
+    return <p className="text-[11px] text-zinc-500 mb-3">Not enough comp data to analyze — need ≥2 employees sharing a job title with pay on file.</p>
+  }
+  const stats: { label: string; value: string | number; warn?: boolean }[] = [
+    { label: 'Employees', value: a.employee_count },
+    { label: 'Roles analyzed', value: a.analyzed_roles },
+    { label: 'Median role spread', value: `${a.median_spread_pct}%` },
+    { label: `Below ${a.band_floor_pct}% band`, value: a.employees_below_band, warn: a.employees_below_band > 0 },
+    { label: 'Est. remediation', value: fmtUsd(a.remediation_estimate), warn: a.remediation_estimate > 0 },
+    { label: 'Pay in flagged roles', value: `${a.flagged_payroll_pct}%`, warn: a.flagged_payroll_pct > 0 },
+  ]
+  return (
+    <div className="mb-4">
+      <div className="grid grid-cols-3 md:grid-cols-6 gap-px bg-white/10 border border-white/10 rounded-xl overflow-hidden mb-3">
+        {stats.map((s) => (
+          <div key={s.label} className="bg-zinc-900 px-3 py-2.5">
+            <div className="text-[8px] text-zinc-600 uppercase tracking-widest font-bold leading-tight">{s.label}</div>
+            <div className={`text-lg font-light font-mono mt-1 ${s.warn ? 'text-amber-400' : 'text-zinc-200'}`}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-[9px] text-zinc-600 uppercase tracking-wide border-b border-zinc-800">
+              <th className="text-left py-1.5 pr-2">Role</th>
+              <th className="text-right px-2">n</th>
+              <th className="text-right px-2">Median</th>
+              <th className="text-left px-2 w-36">Range</th>
+              <th className="text-right px-2">Spread</th>
+              <th className="text-right px-2">IQR</th>
+              <th className="text-right px-2">Below</th>
+              <th className="text-right pl-2">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {a.roles.map((r) => (
+              <tr key={r.title} className="border-b border-zinc-800/30">
+                <td className="py-1.5 pr-2 text-zinc-200 truncate max-w-[180px]" title={r.title}>{r.title}</td>
+                <td className="px-2 text-right font-mono text-zinc-400">{r.n}</td>
+                <td className="px-2 text-right font-mono text-zinc-300">{fmtUsd(r.median)}</td>
+                <td className="px-2"><SpreadBar r={r} /></td>
+                <td className={`px-2 text-right font-mono ${PE_TONE[r.severity]}`}>{r.spread_pct}%</td>
+                <td className="px-2 text-right font-mono text-zinc-500">{r.iqr_pct}%</td>
+                <td className="px-2 text-right font-mono text-zinc-400">{r.below_band_n || '—'}</td>
+                <td className="pl-2 text-right"><span className={`text-[10px] font-semibold ${PE_TONE[r.severity]}`}>{PE_LABEL[r.severity]}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[10px] text-zinc-600 mt-2">Within-role pay dispersion (annualized) — a screen, not a protected-class audit. “Below band” = paid under {a.band_floor_pct}% of the role median; est. remediation lifts them to that floor.</p>
+    </div>
+  )
+}
+
 /* ── pay-equity study register ── */
 function PayEquitySection({ reviews, reload }: { reviews: PayEquityReview[]; reload: () => void }) {
   const [show, setShow] = useState(false)
@@ -239,6 +319,9 @@ function PayEquitySection({ reviews, reload }: { reviews: PayEquityReview[]; rel
   const [busy, setBusy] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
   const [analyzeNote, setAnalyzeNote] = useState<string | null>(null)
+  const [analysis, setAnalysis] = useState<PayEquityAnalysisResult | null>(null)
+  // live compute-only preview on mount (no study row written)
+  useEffect(() => { fetchPayEquityAnalysis().then(setAnalysis).catch(() => setAnalysis(null)) }, [])
   async function add(e: FormEvent) {
     e.preventDefault()
     setBusy(true)
@@ -255,7 +338,8 @@ function PayEquitySection({ reviews, reload }: { reviews: PayEquityReview[]; rel
     try {
       const res = await analyzePayEquity()
       const a = res.analysis
-      setAnalyzeNote(`Analyzed ${a.employee_count} employees across ${a.analyzed_roles} roles — ${a.flagged_roles} with excess spread${a.worst ? ` (widest: ${a.worst.title} ${a.worst.spread_pct}%)` : ''}.`)
+      setAnalysis(a)
+      setAnalyzeNote(`Logged a study — analyzed ${a.employee_count} employees across ${a.analyzed_roles} roles, ${a.flagged_roles} with excess spread${a.remediation_estimate ? `; ~${fmtUsd(a.remediation_estimate)} to lift ${a.employees_below_band} below-band` : ''}.`)
       reload()
     } catch {
       setAnalyzeNote('Not enough comp data to analyze (need ≥2 employees sharing a role).')
@@ -272,6 +356,7 @@ function PayEquitySection({ reviews, reload }: { reviews: PayEquityReview[]; rel
       </div>
       <p className="text-[11px] text-zinc-500 mb-3">Run a pay-dispersion analysis from your payroll, or log an external audit. A current study (within cadence) is a named EPL underwriting control; default cadence is annual.</p>
       {analyzeNote && <p className="text-[11px] text-emerald-400/90 mb-3">{analyzeNote}</p>}
+      {analysis && <PayEquityReport a={analysis} />}
       {show && (
         <form onSubmit={add} className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800 items-end">
           <div><label className="block text-[10px] text-zinc-500 uppercase mb-1">Study date</label><input type="date" className={inputCls} value={form.review_date} onChange={(e) => setForm({ ...form, review_date: e.target.value })} /></div>

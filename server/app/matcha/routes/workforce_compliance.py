@@ -276,6 +276,15 @@ async def update_pay_equity(review_id: UUID, body: PayEquityReviewUpdate,
     return dict(row)
 
 
+@router.get("/pay-equity/analyze")
+async def preview_pay_equity(current_user=Depends(require_admin_or_client)):
+    """Compute the deep within-role pay-dispersion analysis WITHOUT logging a study
+    row — powers the live client report. POST to the same path runs AND persists it."""
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        return await pay_equity_analysis.analyze(conn, company_id)
+
+
 @router.post("/pay-equity/analyze")
 async def analyze_pay_equity(current_user=Depends(require_admin_or_client)):
     """Compute within-role pay dispersion from employee comp data and log it as a
