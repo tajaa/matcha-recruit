@@ -111,7 +111,7 @@ async def _gather_signals(conn, company_id: UUID, states: list[str]) -> dict:
             return 0
 
     bio = await cnt("SELECT count(*) FROM biometric_consent_points WHERE company_id = $1 AND COALESCE(is_active, true)")
-    bio_consent = await cnt("SELECT count(*) FROM biometric_consent_points WHERE company_id = $1 AND consent_obtained = true")
+    bio_consent = await cnt("SELECT count(*) FROM biometric_consent_points WHERE company_id = $1 AND COALESCE(is_active, true) AND consent_obtained = true")
     abuse = await cnt("SELECT count(*) FROM safety_programs WHERE company_id = $1 AND program_type = 'abuse_prevention' AND status = 'active'")
     infection = await cnt("SELECT count(*) FROM safety_programs WHERE company_id = $1 AND program_type = 'infection_control' AND status = 'active'")
     ai = await cnt("SELECT count(*) FROM hiring_ai_audits WHERE company_id = $1")

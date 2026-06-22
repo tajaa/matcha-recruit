@@ -117,7 +117,7 @@ export default function RiskProfile() {
           </div>
           <div className="space-y-1">
             {venue.locations.map((l, i) => (
-              <div key={i} className="flex items-center gap-3 py-1.5 border-b border-zinc-800/30 last:border-0">
+              <div key={`${l.state}-${l.county || ''}-${l.city || ''}-${i}`} className="flex items-center gap-3 py-1.5 border-b border-zinc-800/30 last:border-0">
                 <span className="text-sm text-zinc-200 flex-1">
                   {l.city || l.county || l.state}
                   {l.county && <span className="text-[11px] text-zinc-600 ml-2">{l.county}, {l.state}</span>}

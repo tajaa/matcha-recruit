@@ -28,6 +28,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+async def _safe(coro, default, label: str):
+    """Best-effort optional context builder. A single feature failing (e.g. a
+    missing column from a lagging migration, or a transient AI/DB error) must not
+    sink the whole submission packet — it degrades to ``default``, which the PDF
+    section renderers already treat as "omit this section"."""
+    try:
+        return await coro
+    except Exception as exc:  # noqa: BLE001 - intentionally broad; isolates one section
+        logger.warning("submission: %s builder failed: %s", label, exc)
+        return default
+
+
 class CoverageGapBody(BaseModel):
     current_coverage: Optional[dict] = None
 
@@ -41,12 +53,16 @@ async def _tenant_context(conn, user_id, company_id: UUID) -> dict:
     rates = await wc_depth.get_state_rates(conn, states)
     mods = await wc_depth.latest_mods(conn, [company_id])
     epl = await epl_readiness.compute_epl_readiness(conn, company_id)
-    controls = await ce.build_register(conn, company_id, epl=epl)
-    readiness = await sr.compute_readiness(conn, company_id, wc=m, epl=epl, controls=controls)
-    venue = await vs.company_venue_exposure(conn, company_id)
-    exclusions = await eg.company_exclusions(conn, company_id)
-    limits = await la.build_review(conn, company_id, venue=venue)
-    loss_dev = await ld.build_development(conn, broker_id, "company", company_id, subject_name=meta["name"])
+    # Optional sections — each isolated so one feature can't 500 the whole packet.
+    controls = await _safe(ce.build_register(conn, company_id, epl=epl), {}, "controls")
+    readiness = await _safe(
+        sr.compute_readiness(conn, company_id, wc=m, epl=epl, controls=controls), None, "readiness")
+    venue = await _safe(vs.company_venue_exposure(conn, company_id), {}, "venue")
+    exclusions = await _safe(eg.company_exclusions(conn, company_id), {}, "exclusions")
+    limits = await _safe(la.build_review(conn, company_id, venue=venue), {}, "limits")
+    loss_dev = await _safe(
+        ld.build_development(conn, broker_id, "company", company_id, subject_name=meta["name"]),
+        {}, "loss_development")
     primary = states[0] if states else None
     latest = mods.get(str(company_id)) or {}
     return {
@@ -80,9 +96,15 @@ async def _external_context(conn, user_id, client_id: UUID) -> dict:
     if not detail:
         raise HTTPException(status_code=404, detail="External client not found")
     c, wc, epl = detail["client"], detail["wc"], detail["epl"]
-    venue = await vs.state_venue(conn, c["primary_state"])
-    exclusions = eg.external_exclusions(c["industry"], c["primary_state"])
-    loss_dev = await ld.build_development(conn, broker_id, "external", client_id, subject_name=c["name"])
+    venue = await _safe(vs.state_venue(conn, c["primary_state"]), {}, "venue")
+    try:
+        exclusions = eg.external_exclusions(c["industry"], c["primary_state"])
+    except Exception as exc:  # noqa: BLE001 - isolates one section
+        logger.warning("submission: external exclusions builder failed: %s", exc)
+        exclusions = {}
+    loss_dev = await _safe(
+        ld.build_development(conn, broker_id, "external", client_id, subject_name=c["name"]),
+        {}, "loss_development")
     return {
         "name": c["name"], "industry": c["industry"], "headcount": c["headcount"],
         "state": c["primary_state"],

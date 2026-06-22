@@ -168,8 +168,10 @@ async def build_register(conn, company_id: UUID, *, epl: dict | None = None) -> 
                 feat = item.get("feature")
                 if feat and not features.get(feat) and (f.get("score") or 0) == 0:
                     status = "na"
-                auto = {"status": status, "score": f.get("score"),
-                        "metric": f.get("detail"), "detail": f.get("detail")}
+                score = f.get("score")
+                auto = {"status": status, "score": score,
+                        "metric": (f"{score}/100" if score is not None else "—"),
+                        "detail": f.get("detail")}
         else:
             auto = computed.get(key, {"status": "na", "score": None, "metric": "—", "detail": "No data"})
 
