@@ -22,6 +22,30 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'loss-run-triangulation',
+    date: '2026-06-22',
+    category: 'Broker',
+    title: 'Loss-run triangulation (development factors + projected ultimate losses)',
+    summary:
+      'A single loss run is one snapshot — claims grow after they’re reported. This lines up the same policy years valued at multiple dates into a triangle, computes age-to-age development factors (chain-ladder), and projects ULTIMATE losses per policy year. The gap from reported-incurred to ultimate is adverse development — the reserve-adequacy signal underwriters price on. Built from the client’s own loss runs; no licensed benchmark data needed.',
+    whatsNew: [
+      'New "Loss Triangle" tab on the broker client detail: incurred-development triangle (policy year × valuation age), age-to-age factors, projected ultimate + adverse development per year and in total.',
+      'Add loss runs by uploading the carrier PDF (Gemini extracts valuation date + per-policy-year paid/reserved/claims for you to confirm) or by keying them manually. Each upload = one valuation date; two+ valuations of the same years build the triangle.',
+      'Works for on-platform (tenant) clients and off-platform Broker Pro clients; line field carries WC / GL / auto (GL & auto schemas supported).',
+      'A Loss-Development section now rides the broker submission packet PDF, plus a standalone loss-development.pdf per client.',
+      'New wc_loss_runs table (migration lossdev01); chain-ladder engine in services/loss_development.py (9 unit tests).',
+    ],
+    howToUse: [
+      'Broker → client detail → Loss Triangle tab → "Add loss run": upload each historical carrier loss run (or enter manually), set its as-of date, confirm the policy-year figures, Commit.',
+      'After two+ valuations the triangle, factors, and projected ultimates appear; download the Loss-dev packet, or generate the full submission PDF (it now includes the section).',
+    ],
+    setup: [
+      'Apply migration lossdev01 to prod (wc_loss_runs).',
+      'Deploy backend + frontend.',
+    ],
+    tag: 'action-needed',
+  },
+  {
     id: 'limit-adequacy-contract-review',
     date: '2026-06-21',
     category: 'Broker',

@@ -78,6 +78,73 @@ def _coerce(payload: dict) -> dict:
     return out
 
 
+_DEV_PROMPT = """You are an insurance analyst. From the attached carrier LOSS RUN, extract the figures needed to build a loss-development triangle.
+
+A loss run is valued "as of" a date and lists claims grouped by policy period / policy year. Return ONLY valid JSON:
+{"valuation_date": "<the as-of / valued-through date of this report, YYYY-MM-DD, or null>",
+ "line": "<wc | gl | auto — the coverage line, default wc>",
+ "periods": [
+   {"policy_period_label": "<e.g. 2022 or 2022-2023>",
+    "policy_period_start": "<policy effective date YYYY-MM-DD if shown, else null>",
+    "claim_count": <int total claims in this period>,
+    "open_count": <int open claims>,
+    "paid": <total paid losses in dollars>,
+    "reserved": <total outstanding reserves in dollars>}
+ ]}
+
+One row per policy period the report shows. `paid` + `reserved` should equal incurred for that period. Convert "$1,234,567" to 1234567. Do not invent periods or amounts not in the document."""
+
+
+def _coerce_development(payload: dict) -> dict:
+    line = str(payload.get("line") or "wc").strip().lower()
+    if line not in ("wc", "gl", "auto"):
+        line = "wc"
+    periods = []
+    for p in payload.get("periods") or []:
+        if not isinstance(p, dict) or not p.get("policy_period_label"):
+            continue
+        def _f(k):
+            try:
+                return float(p.get(k)) if p.get(k) is not None else 0.0
+            except (TypeError, ValueError):
+                return 0.0
+        def _i(k):
+            try:
+                return max(0, int(p.get(k) or 0))
+            except (TypeError, ValueError):
+                return 0
+        periods.append({
+            "policy_period_label": str(p["policy_period_label"])[:40],
+            "policy_period_start": p.get("policy_period_start") or None,
+            "claim_count": _i("claim_count"), "open_count": _i("open_count"),
+            "paid": max(0.0, _f("paid")), "reserved": max(0.0, _f("reserved")),
+        })
+    return {"valuation_date": payload.get("valuation_date") or None, "line": line, "periods": periods}
+
+
+async def parse_loss_run_development(pdf_bytes: bytes) -> dict:
+    """Best-effort parse of a loss run into a per-policy-period valuation snapshot
+    (for triangulation). Never raises. Returns {valuation_date, line, periods, available}."""
+    analyzer = _get_analyzer()
+    payload: dict = {}
+    try:
+        from google.genai import types
+        part = types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
+        response = await asyncio.wait_for(
+            analyzer.client.aio.models.generate_content(model=analyzer.model, contents=[_DEV_PROMPT, part]),
+            timeout=90,
+        )
+        raw = (getattr(response, "text", None) or "").strip()
+        payload = analyzer._parse_json_response(raw) or {}
+    except (asyncio.TimeoutError, json.JSONDecodeError, Exception) as exc:
+        logger.warning("Loss-run development parse failed: %s", exc)
+        payload = {}
+    out = _coerce_development(payload)
+    out["available"] = bool(payload and out["periods"])
+    out["model"] = analyzer.model
+    return out
+
+
 async def parse_loss_run(pdf_bytes: bytes) -> dict:
     """Best-effort parse → {"fields": {...ExternalWc...}, "available": bool}.
     Never raises; on failure returns zeroed fields with available=False."""

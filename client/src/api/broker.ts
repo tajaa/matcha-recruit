@@ -35,6 +35,7 @@ import type {
 } from '../types/broker'
 import type { ControlsRegister } from '../types/controlsEvidence'
 import type { LimitReview } from '../types/limitAdequacy'
+import type { LossDevelopment, LossRunDraft, LossRunCommit } from '../types/lossDevelopment'
 
 export function fetchBrokerPortfolio() {
   return api.get<BrokerPortfolioResponse>('/brokers/reporting/portfolio')
@@ -234,6 +235,26 @@ export function fetchClientLimitAdequacy(companyId: string) {
 }
 export function downloadClientLimits(companyId: string) {
   return api.download(`/broker/clients/${companyId}/limits.pdf`, `limit-adequacy-${companyId}.pdf`)
+}
+
+// --- loss-run triangulation / development for a client ----------------------
+
+export function fetchClientLossDevelopment(companyId: string) {
+  return api.get<LossDevelopment>(`/broker/clients/${companyId}/loss-development`)
+}
+export function parseClientLossRun(companyId: string, file: File) {
+  const fd = new FormData()
+  fd.append('file', file)
+  return api.upload<LossRunDraft>(`/broker/clients/${companyId}/loss-runs/parse`, fd)
+}
+export function commitClientLossRun(companyId: string, body: LossRunCommit) {
+  return api.post<LossDevelopment>(`/broker/clients/${companyId}/loss-runs`, body)
+}
+export function deleteClientLossRunSnapshot(companyId: string, snapshotId: string) {
+  return api.delete<LossDevelopment>(`/broker/clients/${companyId}/loss-runs/${snapshotId}`)
+}
+export function downloadClientLossDevelopment(companyId: string) {
+  return api.download(`/broker/clients/${companyId}/loss-development.pdf`, `loss-development-${companyId}.pdf`)
 }
 
 // --- Action Center: milestones + outreach ---

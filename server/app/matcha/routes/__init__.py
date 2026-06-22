@@ -14,6 +14,7 @@ from .ir_incidents import router as ir_incidents_router
 from .broker_portfolio import router as broker_portfolio_router
 from .broker_external import router as broker_external_router
 from .broker_submission import router as broker_submission_router
+from .broker_loss_runs import router as broker_loss_runs_router
 from .workforce_compliance import router as workforce_compliance_router
 from .risk_profile import router as risk_profile_router
 from .resident_care import router as resident_care_router
@@ -105,6 +106,8 @@ matcha_router.include_router(broker_portfolio_router, prefix="/broker", tags=["b
 matcha_router.include_router(broker_external_router, prefix="/broker", tags=["broker-external"])
 # Submission packet + AI coverage-gap (outward layer) — gated per-endpoint.
 matcha_router.include_router(broker_submission_router, prefix="/broker", tags=["broker-submission"])
+# Loss-run triangulation / development — gated per-endpoint (require_broker / _pro).
+matcha_router.include_router(broker_loss_runs_router, prefix="/broker", tags=["broker-loss-runs"])
 # Workforce Compliance — business-first EPL risk trackers (pay transparency, AI-audit, biometric).
 matcha_router.include_router(workforce_compliance_router, prefix="/workforce-compliance",
                              tags=["workforce-compliance"],

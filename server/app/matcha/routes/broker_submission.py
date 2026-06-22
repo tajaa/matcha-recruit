@@ -18,6 +18,7 @@ from ..services import (
     wc_depth, epl_readiness, external_clients as ext, submission_packet as sp,
     controls_evidence as ce, claims_readiness as cr, submission_readiness as sr,
     venue_severity as vs, exclusion_gap as eg, limit_adequacy as la,
+    loss_development as ld,
 )
 from .ir_incidents import compute_wc_metrics
 from .broker_portfolio import _assert_broker_owns_company
@@ -34,6 +35,7 @@ class CoverageGapBody(BaseModel):
 async def _tenant_context(conn, user_id, company_id: UUID) -> dict:
     """Common submission context for an on-platform (tenant) client."""
     meta = await _assert_broker_owns_company(conn, user_id, company_id)
+    broker_id = await _broker_id(conn, user_id)
     m = await compute_wc_metrics(conn, company_id)
     states = await wc_depth.resolve_company_states(conn, company_id)
     rates = await wc_depth.get_state_rates(conn, states)
@@ -44,6 +46,7 @@ async def _tenant_context(conn, user_id, company_id: UUID) -> dict:
     venue = await vs.company_venue_exposure(conn, company_id)
     exclusions = await eg.company_exclusions(conn, company_id)
     limits = await la.build_review(conn, company_id, venue=venue)
+    loss_dev = await ld.build_development(conn, broker_id, "company", company_id, subject_name=meta["name"])
     primary = states[0] if states else None
     latest = mods.get(str(company_id)) or {}
     return {
@@ -66,6 +69,7 @@ async def _tenant_context(conn, user_id, company_id: UUID) -> dict:
         "venue": venue,
         "exclusions": exclusions,
         "limits": limits,
+        "loss_development": loss_dev,
     }
 
 
@@ -78,6 +82,7 @@ async def _external_context(conn, user_id, client_id: UUID) -> dict:
     c, wc, epl = detail["client"], detail["wc"], detail["epl"]
     venue = await vs.state_venue(conn, c["primary_state"])
     exclusions = eg.external_exclusions(c["industry"], c["primary_state"])
+    loss_dev = await ld.build_development(conn, broker_id, "external", client_id, subject_name=c["name"])
     return {
         "name": c["name"], "industry": c["industry"], "headcount": c["headcount"],
         "state": c["primary_state"],
@@ -85,6 +90,7 @@ async def _external_context(conn, user_id, client_id: UUID) -> dict:
         "epl": {"score": epl["score"], "band": epl["band"], "factors": epl["factors"]},
         "venue": venue,
         "exclusions": exclusions,
+        "loss_development": loss_dev,
     }
 
 

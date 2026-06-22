@@ -267,6 +267,40 @@ def _limit_section_html(review: Optional[dict]) -> str:
     )
 
 
+def _loss_section_html(tri: Optional[dict]) -> str:
+    """Optional loss-development section: per policy period, latest reported
+    incurred vs chain-ladder ultimate + adverse development. Shows reserve
+    adequacy — claims that develop upward read as higher ultimate cost."""
+    lines = [ln for ln in ((tri or {}).get("lines") or []) if ln.get("periods")]
+    if not lines:
+        return ""
+    out = ""
+    for ln in lines:
+        s = ln["summary"]
+        if s.get("valuations", 0) < 2 and s.get("total_adverse_development", 0) == 0:
+            # single valuation — show reported only, no projection
+            rows = "".join(
+                f"<tr><td>{_esc(p['period_label'])}</td><td class='r'>{_money(p['latest_incurred'])}</td>"
+                f"<td class='r'>—</td><td class='r'>—</td></tr>" for p in ln["periods"]
+            )
+        else:
+            rows = "".join(
+                f"<tr><td>{_esc(p['period_label'])}</td><td class='r'>{_money(p['latest_incurred'])}</td>"
+                f"<td class='r'>{_money(p['ultimate'])}</td>"
+                f"<td class='r {'lim-bad' if p['adverse_development'] > 0 else 'lim-good'}'>"
+                f"{('+' if p['adverse_development'] > 0 else '')}{_money(p['adverse_development'])}</td></tr>"
+                for p in ln["periods"]
+            )
+        head = (f"{_esc(ln['label'])} — reported incurred → projected ultimate "
+                f"({'+' if s['total_adverse_development'] > 0 else ''}{_money(s['total_adverse_development'])} "
+                f"adverse, {s['adverse_pct']}% over {s['valuations']} valuation(s))")
+        out += (f"<h2>Loss Development — {head}</h2>"
+                f"<table><thead><tr><th>Policy period</th><th class='r'>Reported incurred</th>"
+                f"<th class='r'>Projected ultimate</th><th class='r'>Adverse dev.</th></tr></thead>"
+                f"<tbody>{rows}</tbody></table>")
+    return out
+
+
 def _packet_html(ctx: dict) -> str:
     wc = ctx.get("wc") or {}
     epl = ctx.get("epl") or {}
@@ -329,6 +363,8 @@ def _packet_html(ctx: dict) -> str:
       {_exclusions_section_html(ctx.get('exclusions'))}
 
       {_limit_section_html(ctx.get('limits'))}
+
+      {_loss_section_html(ctx.get('loss_development'))}
 
       <div class="foot">Prepared by Matcha for broker submission. Risk metrics derived from the client's safety/HR records;
       state WC rate trends are headline estimates pending a licensed NCCI feed. Present alongside the carrier loss run.</div>
