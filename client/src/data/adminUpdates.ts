@@ -22,6 +22,26 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'exclusion-gap-registry',
+    date: '2026-06-21',
+    category: 'Broker',
+    title: 'Grounded exclusion-gap analysis (PFAS, A&M, biometric, silent-cyber/AI…)',
+    summary:
+      'Replaces the old free-gen coverage-gap (which invented Cyber/Umbrella gaps with no backing data) with a curated registry of REAL emerging casualty exclusions, matched to the client from data we own — industry, operating states, and mitigation signals (biometric consent, abuse-prevention/infection-control programs, AI-hiring audits, MVR data).',
+    whatsNew: [
+      '9-exclusion registry (PFAS, abuse & molestation, biometric/BIPA, TBI, wildfire, silent-cyber, silent-AI, communicable disease, assault & battery) — each mapped to the lines it hits, why it’s hardening, and the mitigation.',
+      'Grounded matcher: relevance from industry keywords + operating state (wildfire) + owned signals; status exposed / monitor / mitigated (mitigated = the control is documented).',
+      'Surfaced as a "Coverage Exclusion Exposure" section in the broker submission packet PDF + a card on the Risk Profile portal (GET /risk-profile/exclusions). Off-platform Broker Pro uses industry + state.',
+      'Over-build fix: the AI coverage-gap prompt is now grounded on this registry and told not to invent coverage lines with no supporting data.',
+    ],
+    howToUse: [
+      'Company → Risk Profile: the Coverage exclusion exposure card lists each emerging exclusion + status + mitigation.',
+      'Broker → generate a client submission PDF: the Coverage Exclusion Exposure section appears with the venue + controls sections.',
+    ],
+    setup: ['None — no migration, no new flag (rides risk_profile + broker submission). Deploy backend + client build.'],
+    tag: 'new',
+  },
+  {
     id: 'venue-severity',
     date: '2026-06-21',
     category: 'Broker',

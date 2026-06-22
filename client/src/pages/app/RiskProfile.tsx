@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Gauge, Loader2, ArrowUpRight, Sparkles, ListChecks, Check, Circle, MapPin } from 'lucide-react'
+import { Gauge, Loader2, ArrowUpRight, Sparkles, ListChecks, Check, Circle, MapPin, Ban } from 'lucide-react'
 import { Card } from '../../components/ui'
-import { fetchRiskProfile, fetchRiskNarrative, fetchSubmissionReadiness, fetchVenueExposure } from '../../api/riskIndex'
+import { fetchRiskProfile, fetchRiskNarrative, fetchSubmissionReadiness, fetchVenueExposure, fetchExclusionGap } from '../../api/riskIndex'
 import type { RiskNarrative } from '../../api/riskIndex'
-import type { RiskIndex, SubmissionReadiness, VenueExposure } from '../../types/riskIndex'
-import { RISK_BAND_TONE, READINESS_BAND_TONE, VENUE_TIER_TONE } from '../../types/riskIndex'
+import type { RiskIndex, SubmissionReadiness, VenueExposure, ExclusionGap } from '../../types/riskIndex'
+import { RISK_BAND_TONE, READINESS_BAND_TONE, VENUE_TIER_TONE, EXCLUSION_TONE } from '../../types/riskIndex'
 
 export default function RiskProfile() {
   const [data, setData] = useState<RiskIndex | null>(null)
@@ -13,11 +13,13 @@ export default function RiskProfile() {
   const [explaining, setExplaining] = useState(false)
   const [readiness, setReadiness] = useState<SubmissionReadiness | null>(null)
   const [venue, setVenue] = useState<VenueExposure | null>(null)
+  const [exclusions, setExclusions] = useState<ExclusionGap | null>(null)
 
   useEffect(() => {
     fetchRiskProfile().then(setData).finally(() => setLoading(false))
     fetchSubmissionReadiness().then(setReadiness).catch(() => { /* noop */ })
     fetchVenueExposure().then(setVenue).catch(() => { /* noop */ })
+    fetchExclusionGap().then(setExclusions).catch(() => { /* noop */ })
   }, [])
 
   async function explain() {
@@ -125,6 +127,37 @@ export default function RiskProfile() {
             ))}
           </div>
           <p className="text-[10px] text-zinc-600 mt-2">Source: ATRA Judicial Hellholes / US Chamber ILR / nuclear-verdict reporting — directional reputational flag.</p>
+        </Card>
+      )}
+
+      {/* Coverage exclusion exposure — emerging casualty exclusions */}
+      {exclusions && exclusions.exclusions.length > 0 && (
+        <Card className="p-5">
+          <div className="flex items-start justify-between mb-3">
+            <div>
+              <h3 className="text-sm font-medium text-zinc-200 tracking-wide flex items-center gap-2">
+                <Ban className="h-4 w-4 text-zinc-500" /> Coverage exclusion exposure
+              </h3>
+              <p className="text-[11px] text-zinc-500 mt-0.5 max-w-xl">Emerging exclusions carriers are adding to GL / umbrella / auto. "Mitigated" means you have the controls documented; "exposed" means address it before renewal.</p>
+            </div>
+            <div className="text-right shrink-0">
+              <div className="text-sm font-bold text-red-400">{exclusions.summary.exposed} exposed</div>
+              <div className="text-[10px] text-zinc-600">{exclusions.summary.total} relevant</div>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {exclusions.exclusions.map((e) => (
+              <div key={e.key} className="border-b border-zinc-800/30 last:border-0 pb-2">
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] font-semibold uppercase w-16 shrink-0 ${EXCLUSION_TONE[e.status] ?? 'text-zinc-500'}`}>{e.status}</span>
+                  <span className="text-sm text-zinc-200 flex-1">{e.label}</span>
+                  <span className="text-[10px] text-zinc-600">{e.lines.join(' · ')}</span>
+                </div>
+                {e.status !== 'mitigated' && <p className="text-[11px] text-zinc-500 mt-0.5 ml-[4.5rem]">{e.mitigation}</p>}
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-zinc-600 mt-2">Directional underwriting flag — which exclusions a risk like this typically faces, not a coverage determination.</p>
         </Card>
       )}
 

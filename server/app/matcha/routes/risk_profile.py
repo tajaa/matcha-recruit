@@ -14,6 +14,7 @@ from ..services import risk_index
 from ..services import risk_narrative
 from ..services import submission_readiness
 from ..services import venue_severity
+from ..services import exclusion_gap
 
 router = APIRouter()
 
@@ -39,6 +40,14 @@ async def get_venue_exposure(current_user=Depends(require_admin_or_client)):
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
         return await venue_severity.company_venue_exposure(conn, company_id)
+
+
+@router.get("/exclusions")
+async def get_exclusion_gap(current_user=Depends(require_admin_or_client)):
+    """Grounded emerging-exclusion exposure (PFAS, A&M, biometric, silent-cyber/AI…)."""
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        return await exclusion_gap.company_exclusions(conn, company_id)
 
 
 @router.post("/narrative")

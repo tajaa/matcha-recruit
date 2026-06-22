@@ -95,3 +95,22 @@ export const VENUE_TIER_TONE: Record<string, string> = {
   severe: 'text-red-400', high: 'text-red-400', elevated: 'text-amber-400',
   moderate: 'text-emerald-400', low: 'text-emerald-400', unknown: 'text-zinc-500',
 }
+
+// Grounded emerging-exclusion exposure (casualty).
+export interface ExclusionItem {
+  key: string
+  label: string
+  lines: string[]
+  creep: string
+  mitigation: string
+  status: string
+}
+
+export interface ExclusionGap {
+  exclusions: ExclusionItem[]
+  summary: { exposed: number; monitor: number; mitigated: number; total: number }
+}
+
+export const EXCLUSION_TONE: Record<string, string> = {
+  exposed: 'text-red-400', monitor: 'text-amber-400', mitigated: 'text-emerald-400',
+}

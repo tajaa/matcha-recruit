@@ -67,6 +67,8 @@ def _epl_narrative(ctx: dict) -> str:
 
 _GAP_PROMPT = """You are an insurance broker's risk advisor. Given a client's profile and risk posture, identify likely coverage gaps and concrete recommendations. Be specific and concise; use the numbers given.
 
+Ground every gap in the provided profile, posture, or the `exclusions` list in the context (a curated read of emerging exclusions this risk faces). Do NOT assert a gap for a coverage line that has no supporting data in the context — prefer the flagged exclusions over speculation.
+
 Client profile + posture (JSON):
 {context}
 
@@ -187,6 +189,29 @@ def _venue_section_html(venue: Optional[dict]) -> str:
     )
 
 
+_EXCL_TONE = {"exposed": "ex-exposed", "monitor": "ex-monitor", "mitigated": "ex-mitigated"}
+
+
+def _exclusions_section_html(ex: Optional[dict]) -> str:
+    """Grounded emerging-exclusion exposure (PFAS, A&M, biometric, silent-cyber…)."""
+    items = (ex or {}).get("exclusions") or []
+    if not items:
+        return ""
+    s = ex.get("summary") or {}
+    rows = "".join(
+        f"<tr><td>{_esc(e.get('label'))}</td><td>{_esc(', '.join(e.get('lines') or []))}</td>"
+        f"<td class='{_EXCL_TONE.get(e.get('status'), 'vt-unk')}'>{_esc((e.get('status') or '').upper())}</td>"
+        f"<td>{_esc(e.get('mitigation'))}</td></tr>"
+        for e in items
+    )
+    headline = f"{s.get('exposed', 0)} exposed / {s.get('total', 0)} relevant exclusion(s)"
+    return (
+        f"<h2>Coverage Exclusion Exposure — {_esc(headline)}</h2>"
+        f"<table><thead><tr><th>Emerging exclusion</th><th>Lines</th><th>Status</th><th>Mitigation</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+    )
+
+
 def _packet_html(ctx: dict) -> str:
     wc = ctx.get("wc") or {}
     epl = ctx.get("epl") or {}
@@ -217,6 +242,7 @@ def _packet_html(ctx: dict) -> str:
       .ready {{ background:#fff8ec; border-left:3px solid #b8902f; padding:8px 12px; border-radius:0 6px 6px 0; margin:10px 0; font-size:10px; }}
       .ready ul {{ margin:4px 0 0; padding-left:16px; }} .rfix {{ color:#666; margin-top:4px; }}
       .vt {{ font-size:8px; font-weight:700; }} .vt-severe,.vt-high{{color:#b23b3b}} .vt-elev{{color:#b8902f}} .vt-mod,.vt-low{{color:#1f8a5b}} .vt-unk{{color:#999}}
+      .ex-exposed{{color:#b23b3b;font-weight:700}} .ex-monitor{{color:#b8902f;font-weight:700}} .ex-mitigated{{color:#1f8a5b;font-weight:700}}
       .foot {{ margin-top:24px; color:#999; font-size:8px; border-top:1px solid #eee; padding-top:6px; }}
     </style></head><body>
       <h1>Underwriting Submission</h1>
@@ -242,6 +268,8 @@ def _packet_html(ctx: dict) -> str:
       {_controls_section_html(ctx.get('controls'))}
 
       {_venue_section_html(ctx.get('venue'))}
+
+      {_exclusions_section_html(ctx.get('exclusions'))}
 
       <div class="foot">Prepared by Matcha for broker submission. Risk metrics derived from the client's safety/HR records;
       state WC rate trends are headline estimates pending a licensed NCCI feed. Present alongside the carrier loss run.</div>

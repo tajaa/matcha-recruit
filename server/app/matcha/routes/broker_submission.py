@@ -17,7 +17,7 @@ from ..dependencies import require_broker, require_broker_pro
 from ..services import (
     wc_depth, epl_readiness, external_clients as ext, submission_packet as sp,
     controls_evidence as ce, claims_readiness as cr, submission_readiness as sr,
-    venue_severity as vs,
+    venue_severity as vs, exclusion_gap as eg,
 )
 from .ir_incidents import compute_wc_metrics
 from .broker_portfolio import _assert_broker_owns_company
@@ -42,6 +42,7 @@ async def _tenant_context(conn, user_id, company_id: UUID) -> dict:
     controls = await ce.build_register(conn, company_id, epl=epl)
     readiness = await sr.compute_readiness(conn, company_id, wc=m, epl=epl, controls=controls)
     venue = await vs.company_venue_exposure(conn, company_id)
+    exclusions = await eg.company_exclusions(conn, company_id)
     primary = states[0] if states else None
     latest = mods.get(str(company_id)) or {}
     return {
@@ -62,6 +63,7 @@ async def _tenant_context(conn, user_id, company_id: UUID) -> dict:
         "controls": controls,
         "readiness": readiness,
         "venue": venue,
+        "exclusions": exclusions,
     }
 
 
@@ -73,12 +75,14 @@ async def _external_context(conn, user_id, client_id: UUID) -> dict:
         raise HTTPException(status_code=404, detail="External client not found")
     c, wc, epl = detail["client"], detail["wc"], detail["epl"]
     venue = await vs.state_venue(conn, c["primary_state"])
+    exclusions = eg.external_exclusions(c["industry"], c["primary_state"])
     return {
         "name": c["name"], "industry": c["industry"], "headcount": c["headcount"],
         "state": c["primary_state"],
         "wc": wc,
         "epl": {"score": epl["score"], "band": epl["band"], "factors": epl["factors"]},
         "venue": venue,
+        "exclusions": exclusions,
     }
 
 
