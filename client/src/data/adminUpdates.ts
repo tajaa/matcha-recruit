@@ -22,6 +22,26 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'wc-rates-viewer',
+    date: '2026-06-21',
+    category: 'Admin',
+    title: 'WC rate data — by-state viewer + real CA/NY rates',
+    summary:
+      'The admin WC Rate Data page now shows what is actually loaded: a by-state table of loss-cost trends (Δ%, trend, effective date, source) + a class-code base-rate table, with a state/code filter and color-coded provenance (demo seed vs real filing). Seeded the first real figures — CA +8.7% (WCIRB 9/1/2025) and NY -4.4% (NYCIRB 10/1/2025).',
+    whatsNew: [
+      'Admin → WC Rate Data: "Rates by state" table (state, Δ loss cost, trend, effective date, source, note) + class-code base-rate table; filter by state or class code.',
+      'Source coloring: demo/seed rows render amber, real filings emerald — at-a-glance provenance across all loaded states.',
+      'Real free data seeded for CA (WCIRB +8.7%, eff 9/1/2025) and NY (NYCIRB -4.4%, eff 10/1/2025), replacing the demo placeholders. CA/NY are independent rating bureaus, not NCCI.',
+    ],
+    howToUse: [
+      'Admin → WC Rate Data: the viewer tables sit above the CSV importers. Type a state code to filter both tables.',
+    ],
+    setup: [
+      'CA/NY real rates already applied to RDS + dev (server/scripts/seed_wc_state_rates_real.sql). New GET endpoints /admin/wc-rates/state-rates + /class-codes — deploy backend + client build.',
+    ],
+    tag: 'new',
+  },
+  {
     id: 'submission-readiness-score',
     date: '2026-06-21',
     category: 'Broker',

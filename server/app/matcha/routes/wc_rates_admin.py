@@ -53,6 +53,44 @@ async def summary(current_user=Depends(require_admin)):
     }
 
 
+@router.get("/state-rates")
+async def list_state_rates(current_user=Depends(require_admin)):
+    """All WC state loss-cost rate rows (the by-state viewer)."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT state, loss_cost_change_pct, effective_date, trend, source, note, updated_at "
+            "FROM wc_state_rates ORDER BY state, effective_date DESC NULLS LAST"
+        )
+    return {"rows": [
+        {
+            "state": r["state"],
+            "loss_cost_change_pct": float(r["loss_cost_change_pct"]) if r["loss_cost_change_pct"] is not None else None,
+            "effective_date": r["effective_date"].isoformat() if r["effective_date"] else None,
+            "trend": r["trend"], "source": r["source"], "note": r["note"],
+            "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+        }
+        for r in rows
+    ]}
+
+
+@router.get("/class-codes")
+async def list_class_codes(current_user=Depends(require_admin)):
+    """All WC class-code base-rate rows."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            "SELECT state, class_code, description, base_rate, source "
+            "FROM wc_class_codes ORDER BY state, class_code"
+        )
+    return {"rows": [
+        {
+            "state": r["state"], "class_code": r["class_code"], "description": r["description"],
+            "base_rate": float(r["base_rate"]) if r["base_rate"] is not None else None,
+            "source": r["source"],
+        }
+        for r in rows
+    ]}
+
+
 @router.post("/state-rates")
 async def import_state_rates(file: UploadFile = File(...), source: str = Form("ncci-import"),
                              current_user=Depends(require_admin)):
