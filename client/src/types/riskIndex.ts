@@ -67,3 +67,31 @@ export const READINESS_BAND_TONE: Record<string, string> = {
   developing: 'text-amber-400',
   thin: 'text-red-400',
 }
+
+// Venue / nuclear-verdict severity — casualty exposure dimension.
+export interface VenueLocation {
+  city: string | null
+  state: string
+  county: string | null
+  tier: string
+  score: number | null
+  source: string | null
+  note: string | null
+}
+
+export interface VenueExposure {
+  locations: VenueLocation[]
+  summary: {
+    worst_tier: string
+    worst_score: number | null
+    severe_high_count: number
+    rated_locations: number
+    total_locations: number
+    tier_counts: Record<string, number>
+  }
+}
+
+export const VENUE_TIER_TONE: Record<string, string> = {
+  severe: 'text-red-400', high: 'text-red-400', elevated: 'text-amber-400',
+  moderate: 'text-emerald-400', low: 'text-emerald-400', unknown: 'text-zinc-500',
+}

@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Gauge, Loader2, ArrowUpRight, Sparkles, ListChecks, Check, Circle } from 'lucide-react'
+import { Gauge, Loader2, ArrowUpRight, Sparkles, ListChecks, Check, Circle, MapPin } from 'lucide-react'
 import { Card } from '../../components/ui'
-import { fetchRiskProfile, fetchRiskNarrative, fetchSubmissionReadiness } from '../../api/riskIndex'
+import { fetchRiskProfile, fetchRiskNarrative, fetchSubmissionReadiness, fetchVenueExposure } from '../../api/riskIndex'
 import type { RiskNarrative } from '../../api/riskIndex'
-import type { RiskIndex, SubmissionReadiness } from '../../types/riskIndex'
-import { RISK_BAND_TONE, READINESS_BAND_TONE } from '../../types/riskIndex'
+import type { RiskIndex, SubmissionReadiness, VenueExposure } from '../../types/riskIndex'
+import { RISK_BAND_TONE, READINESS_BAND_TONE, VENUE_TIER_TONE } from '../../types/riskIndex'
 
 export default function RiskProfile() {
   const [data, setData] = useState<RiskIndex | null>(null)
@@ -12,10 +12,12 @@ export default function RiskProfile() {
   const [narrative, setNarrative] = useState<RiskNarrative | null>(null)
   const [explaining, setExplaining] = useState(false)
   const [readiness, setReadiness] = useState<SubmissionReadiness | null>(null)
+  const [venue, setVenue] = useState<VenueExposure | null>(null)
 
   useEffect(() => {
     fetchRiskProfile().then(setData).finally(() => setLoading(false))
     fetchSubmissionReadiness().then(setReadiness).catch(() => { /* noop */ })
+    fetchVenueExposure().then(setVenue).catch(() => { /* noop */ })
   }, [])
 
   async function explain() {
@@ -93,6 +95,36 @@ export default function RiskProfile() {
               </div>
             ))}
           </div>
+        </Card>
+      )}
+
+      {/* Venue exposure — casualty severity dimension (where you operate) */}
+      {venue && venue.locations.length > 0 && (
+        <Card className="p-5">
+          <div className="flex items-start justify-between mb-3">
+            <div>
+              <h3 className="text-sm font-medium text-zinc-200 tracking-wide flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-zinc-500" /> Venue exposure
+              </h3>
+              <p className="text-[11px] text-zinc-500 mt-0.5 max-w-xl">Where you operate drives casualty severity — underwriters weigh nuclear-verdict / plaintiff-friendly venues heavily. A directional flag, not a price.</p>
+            </div>
+            <div className="text-right shrink-0">
+              <div className={`text-sm uppercase tracking-widest font-bold ${VENUE_TIER_TONE[venue.summary.worst_tier] ?? 'text-zinc-500'}`}>{venue.summary.worst_tier}</div>
+              <div className="text-[10px] text-zinc-600">{venue.summary.severe_high_count} high-severity / {venue.summary.total_locations} loc</div>
+            </div>
+          </div>
+          <div className="space-y-1">
+            {venue.locations.map((l, i) => (
+              <div key={i} className="flex items-center gap-3 py-1.5 border-b border-zinc-800/30 last:border-0">
+                <span className="text-sm text-zinc-200 flex-1">
+                  {l.city || l.county || l.state}
+                  {l.county && <span className="text-[11px] text-zinc-600 ml-2">{l.county}, {l.state}</span>}
+                </span>
+                <span className={`text-[10px] font-semibold uppercase ${VENUE_TIER_TONE[l.tier] ?? 'text-zinc-500'}`}>{l.tier}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-zinc-600 mt-2">Source: ATRA Judicial Hellholes / US Chamber ILR / nuclear-verdict reporting — directional reputational flag.</p>
         </Card>
       )}
 

@@ -160,6 +160,33 @@ def _readiness_section_html(readiness: Optional[dict]) -> str:
     return f"<div class='ready'>{head}</div>"
 
 
+_VENUE_TONE = {"severe": "vt-severe", "high": "vt-high", "elevated": "vt-elev",
+               "moderate": "vt-mod", "low": "vt-low", "unknown": "vt-unk"}
+
+
+def _venue_section_html(venue: Optional[dict]) -> str:
+    """Optional venue-exposure section: client locations vs nuclear-verdict /
+    plaintiff-friendly venue severity. Exposure context, not a controllable score."""
+    locs = (venue or {}).get("locations") or []
+    if not locs:
+        return ""
+    s = venue.get("summary") or {}
+    rows = "".join(
+        f"<tr><td>{_esc(l.get('city') or '—')}</td><td>{_esc(l.get('county') or '—')}</td>"
+        f"<td>{_esc(l.get('state'))}</td>"
+        f"<td class='vt {_VENUE_TONE.get(l.get('tier'), 'vt-unk')}'>{_esc((l.get('tier') or '').upper())}</td></tr>"
+        for l in locs
+    )
+    hi = s.get("severe_high_count") or 0
+    headline = (f"{hi} of {s.get('total_locations')} location(s) in high-severity venues"
+                if hi else f"{s.get('total_locations')} location(s) — no high-severity venues flagged")
+    return (
+        f"<h2>Venue Exposure — {_esc(headline)}</h2>"
+        f"<table><thead><tr><th>Location</th><th>County</th><th>State</th><th>Venue severity</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+    )
+
+
 def _packet_html(ctx: dict) -> str:
     wc = ctx.get("wc") or {}
     epl = ctx.get("epl") or {}
@@ -189,6 +216,7 @@ def _packet_html(ctx: dict) -> str:
       .narr {{ background:#f1f6f3; border-left:3px solid #1f8a5b; padding:10px 14px; border-radius:0 6px 6px 0; margin:8px 0; }}
       .ready {{ background:#fff8ec; border-left:3px solid #b8902f; padding:8px 12px; border-radius:0 6px 6px 0; margin:10px 0; font-size:10px; }}
       .ready ul {{ margin:4px 0 0; padding-left:16px; }} .rfix {{ color:#666; margin-top:4px; }}
+      .vt {{ font-size:8px; font-weight:700; }} .vt-severe,.vt-high{{color:#b23b3b}} .vt-elev{{color:#b8902f}} .vt-mod,.vt-low{{color:#1f8a5b}} .vt-unk{{color:#999}}
       .foot {{ margin-top:24px; color:#999; font-size:8px; border-top:1px solid #eee; padding-top:6px; }}
     </style></head><body>
       <h1>Underwriting Submission</h1>
@@ -212,6 +240,8 @@ def _packet_html(ctx: dict) -> str:
       <div class="narr">{_esc(_epl_narrative(ctx))}</div>
 
       {_controls_section_html(ctx.get('controls'))}
+
+      {_venue_section_html(ctx.get('venue'))}
 
       <div class="foot">Prepared by Matcha for broker submission. Risk metrics derived from the client's safety/HR records;
       state WC rate trends are headline estimates pending a licensed NCCI feed. Present alongside the carrier loss run.</div>

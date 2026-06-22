@@ -22,6 +22,29 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'venue-severity',
+    date: '2026-06-21',
+    category: 'Broker',
+    title: 'Venue / nuclear-verdict severity — casualty exposure dimension',
+    summary:
+      'Where a company operates is the single biggest severity lever in casualty (nuclear verdicts, social inflation). We already hold the exposure geography (business_locations); this adds the severity side — a curated venue_severity reference seeded from FREE public sources (ATRA Judicial Hellholes, US Chamber ILR, nuclear-verdict reporting) — joined to client locations and surfaced in the submission packet + risk profile.',
+    whatsNew: [
+      'New venue_severity reference (state + county → tier severe/high/elevated/moderate/low), seeded ~24 rows incl. county overrides (Cook, Philadelphia, LA, Harris, Fulton, Orleans, St. Louis City, Madison, Midland, Bronx).',
+      'Risk Profile page: a "Venue exposure" card — worst tier + per-location severity, source-labeled (directional flag, not a price).',
+      'Broker submission packet PDF gains a "Venue Exposure" section (tenant uses full locations; off-platform Broker Pro uses primary-state baseline).',
+      'Exposure not posture: deliberately NOT folded into the composite risk index (you can’t move out of a hellhole) — surfaced as its own dimension.',
+    ],
+    howToUse: [
+      'Company → Risk Profile: the Venue exposure card sits alongside the readiness + composite cards.',
+      'Broker → generate a client submission PDF: the Venue Exposure section lists each location’s venue severity.',
+      'Refresh annually from the same free reports by editing the venue_severity table (or via a future web-grounded refresh agent).',
+    ],
+    setup: [
+      'Migration venuesev01 (table + curated seed) — applied to dev; run ./scripts/migrate-prod.sh before prod deploy. No new feature flag (rides risk_profile + broker submission). Deploy backend + client build.',
+    ],
+    tag: 'action-needed',
+  },
+  {
     id: 'wc-rates-viewer',
     date: '2026-06-21',
     category: 'Admin',

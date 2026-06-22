@@ -13,6 +13,7 @@ from ..dependencies import require_admin_or_client, get_client_company_id
 from ..services import risk_index
 from ..services import risk_narrative
 from ..services import submission_readiness
+from ..services import venue_severity
 
 router = APIRouter()
 
@@ -30,6 +31,14 @@ async def get_submission_readiness(current_user=Depends(require_admin_or_client)
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
         return await submission_readiness.compute_readiness(conn, company_id)
+
+
+@router.get("/venue")
+async def get_venue_exposure(current_user=Depends(require_admin_or_client)):
+    """Per-location venue / nuclear-verdict severity exposure (casualty severity lens)."""
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        return await venue_severity.company_venue_exposure(conn, company_id)
 
 
 @router.post("/narrative")

@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { RiskIndex, RiskIndexPortfolio, SubmissionReadiness } from '../types/riskIndex'
+import type { RiskIndex, RiskIndexPortfolio, SubmissionReadiness, VenueExposure } from '../types/riskIndex'
 
 // Client-facing portal (own company)
 export function fetchRiskProfile() {
@@ -8,6 +8,10 @@ export function fetchRiskProfile() {
 
 export function fetchSubmissionReadiness() {
   return api.get<SubmissionReadiness>('/risk-profile/readiness')
+}
+
+export function fetchVenueExposure() {
+  return api.get<VenueExposure>('/risk-profile/venue')
 }
 
 export interface RiskNarrative {
