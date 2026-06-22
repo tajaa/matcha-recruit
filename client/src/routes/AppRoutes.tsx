@@ -29,6 +29,7 @@ import RiskProfile from '../pages/app/RiskProfile'
 import ResidentCare from '../pages/app/ResidentCare'
 import ControlsEvidence from '../pages/app/ControlsEvidence'
 import LimitAdequacy from '../pages/app/LimitAdequacy'
+import DriverRisk from '../pages/app/DriverRisk'
 import Inbox from '../pages/app/Inbox'
 import UserSettings from '../pages/app/UserSettings'
 import Notifications from '../pages/app/Notifications'
@@ -105,6 +106,7 @@ export default function AppRoutes() {
         <Route path="resident-care" element={<FeatureGate feature="resident_care" label="Resident-Care Risk"><ResidentCare /></FeatureGate>} />
         <Route path="controls-evidence" element={<FeatureGate feature="controls_evidence" label="Proof of Controls"><ControlsEvidence /></FeatureGate>} />
         <Route path="limit-adequacy" element={<FeatureGate feature="limit_adequacy" label="Limit Adequacy"><LimitAdequacy /></FeatureGate>} />
+        <Route path="driver-risk" element={<FeatureGate feature="driver_risk" label="Driver Risk"><DriverRisk /></FeatureGate>} />
         <Route path="resources" element={<AppResources />} />
         <Route path="resources/templates" element={<RequireBusinessAccount><ResourcesTemplates embedded /></RequireBusinessAccount>} />
         <Route path="resources/templates/job-descriptions" element={<ResourcesJobDescriptions embedded />} />

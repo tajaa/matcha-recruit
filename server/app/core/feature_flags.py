@@ -103,6 +103,12 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # /limit-adequacy + /app/limit-adequacy + the broker limits surfaces.
     # Default off; admin-toggle. Not bundled.
     "limit_adequacy": False,
+    # Driver-risk / MVR (gap-analysis #15) — standalone fleet driver-risk surface
+    # for any employer with drivers (commercial-auto entry). Scores each driver
+    # (clean/marginal/high-risk) from employer-recorded MVR data; reuses the
+    # mvr_reviews table shared with resident_care. Gates /driver-risk +
+    # /app/driver-risk. Default off; admin-toggle. Not bundled.
+    "driver_risk": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,

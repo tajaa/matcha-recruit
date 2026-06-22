@@ -33,6 +33,7 @@ const FEATURE_LABELS: Record<string, string> = {
   resident_care: 'Resident-Care Risk (healthcare/senior-living asset)',
   controls_evidence: 'Proof of Controls (controls-evidence register + packet)',
   limit_adequacy: 'Limit Adequacy & Contract Review (limits vs contracts)',
+  driver_risk: 'Driver Risk (fleet MVR scoring — commercial auto)',
 }
 
 type CompanyFeatures = {

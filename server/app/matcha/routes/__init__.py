@@ -20,6 +20,7 @@ from .risk_profile import router as risk_profile_router
 from .resident_care import router as resident_care_router
 from .controls_evidence import router as controls_evidence_router
 from .limit_adequacy import router as limit_adequacy_router
+from .driver_risk import router as driver_risk_router
 from .ir_onboarding import router as ir_onboarding_router
 from .matcha_x_onboarding import router as matcha_x_onboarding_router
 from .ir_surveys import router as ir_surveys_router
@@ -120,6 +121,8 @@ matcha_router.include_router(controls_evidence_router, prefix="/controls-evidenc
                              dependencies=[Depends(require_feature("controls_evidence"))])
 matcha_router.include_router(limit_adequacy_router, prefix="/limit-adequacy", tags=["limit-adequacy"],
                              dependencies=[Depends(require_feature("limit_adequacy"))])
+matcha_router.include_router(driver_risk_router, prefix="/driver-risk", tags=["driver-risk"],
+                             dependencies=[Depends(require_feature("driver_risk"))])
 matcha_router.include_router(provisioning_router, prefix="/provisioning", tags=["provisioning"])
 matcha_router.include_router(
     matcha_work_router,

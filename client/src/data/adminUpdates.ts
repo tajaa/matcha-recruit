@@ -23,6 +23,33 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'driver-risk-fleet-mvr',
+    date: '2026-06-22',
+    category: 'Broker',
+    title: 'Driver Risk — fleet MVR scoring (commercial-auto entry)',
+    summary:
+      'Lifts MVR tracking out of the healthcare-only Resident-Care vertical into a standalone Driver Risk surface any employer with drivers can use, and adds scoring: each driver is graded clean / marginal / high-risk from license status + moving violations + at-fault accidents + major violations, rolled up to an A–D fleet grade. Driver/fleet risk is the #1 commercial-auto underwriting input — this is the cheapest beachhead into the auto line.',
+    whatsNew: [
+      'New /app/driver-risk page: add/track drivers, per-driver risk tier + points, fleet grade (A–D), tier counts, and overdue-MVR flags.',
+      'Scoring engine: suspended/expired license, a major violation, 2+ at-fault accidents, or 4+ moving violations = high-risk; any accident/violation/flag/unknown-license = marginal; else clean.',
+      'Insurer-facing Driver-Risk PDF for the commercial-auto application.',
+      'Reuses (does not duplicate) the existing mvr_reviews table — migration driverrisk01 adds the scoring columns; Resident-Care keeps its MVR currency view on the same rows.',
+    ],
+    howToUse: [
+      'Enable the driver_risk feature for the company in /admin/features.',
+      'Company → Driver Risk → "Add driver": record license status, last MVR date + next-due, moving violations, at-fault accidents, and whether there was a major violation.',
+      'Read the fleet grade + high-risk count; download the Driver-Risk PDF for the auto submission.',
+    ],
+    notes: [
+      'Directional — tiers come from employer-recorded MVR data, not a pulled motor-vehicle record (an automated MVR pull needs a paid provider like Checkr/Samba; possible future integration). The scoring + tracking is the moat-cheap core; the auto line is otherwise un-served by the app.',
+    ],
+    setup: [
+      'Apply migration driverrisk01 to prod (adds scoring columns to mvr_reviews).',
+      'Deploy backend + frontend; enable driver_risk per company.',
+    ],
+    tag: 'action-needed',
+  },
+  {
     id: 'bls-injury-rate-benchmark',
     date: '2026-06-22',
     category: 'Broker',
