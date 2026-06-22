@@ -312,6 +312,7 @@ KNOWN_FEATURES = {
     "paid_channel_creator", "discipline", "inventory",
     "werk_lite", "werk_lite_calls_all_members",
     "workforce_compliance", "risk_profile", "resident_care", "controls_evidence",
+    "limit_adequacy",
 }
 
 

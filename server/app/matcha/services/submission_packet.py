@@ -212,6 +212,61 @@ def _exclusions_section_html(ex: Optional[dict]) -> str:
     )
 
 
+_LIM_LABEL = {"no_coverage": "NO COVER", "shortfall": "SHORTFALL",
+              "directional_low": "LOW", "not_carried": "NOT CARRIED", "ok": "OK"}
+_LIM_CLASS = {"no_coverage": "lim-bad", "shortfall": "lim-bad", "directional_low": "lim-warn",
+              "not_carried": "lim-muted", "ok": "lim-good"}
+
+
+def _money(v) -> str:
+    if v is None:
+        return "—"
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return "—"
+    if v >= 1_000_000:
+        n = v / 1_000_000
+        return f"${n:.0f}M" if n == int(n) else f"${n:.1f}M"
+    if v >= 1_000:
+        return f"${v / 1_000:.0f}K"
+    return f"${v:.0f}"
+
+
+def _limit_section_html(review: Optional[dict]) -> str:
+    """Optional limit-adequacy section: carried limits vs contract requirements +
+    a directional baseline. Tenant clients only (needs carried/contract data)."""
+    lines = (review or {}).get("lines") or []
+    # only render lines that carry data or a requirement — skip empty noise
+    rows_data = [l for l in lines if l.get("carried") or l.get("contract_required") or l.get("status") == "directional_low"]
+    if not rows_data:
+        return ""
+    s = review.get("summary") or {}
+    rows = ""
+    for l in rows_data:
+        c = l.get("carried") or {}
+        req = l.get("contract_required") or {}
+        base = l.get("baseline") or {}
+        carried_s = (_money(c.get("per_occurrence")) + (f" / {_money(c.get('aggregate'))}" if c.get("aggregate") else "")) if l.get("carried") else "—"
+        req_s = (_money(req.get("per_occurrence")) + (f" / {_money(req.get('aggregate'))}" if req.get("aggregate") else "")) if req else "—"
+        rows += (
+            f"<tr><td>{_esc(l.get('label'))}</td><td class='r'>{carried_s}</td>"
+            f"<td class='r'>{req_s}</td><td class='r'>{_money(base.get('per_occurrence')) if base else '—'}</td>"
+            f"<td class='{_LIM_CLASS.get(l.get('status'), 'lim-muted')}'>{_LIM_LABEL.get(l.get('status'), '')}</td>"
+            f"<td>{_esc(l.get('gap'))}</td></tr>"
+        )
+        eg = l.get("endorsement_gaps") or []
+        if eg:
+            rows += (f"<tr class='note'><td colspan='6'>Required endorsements to confirm: "
+                     f"{_esc(', '.join(e['label'] for e in eg))}</td></tr>")
+    headline = f"{s.get('contract_shortfalls', 0)} contract shortfall(s) / {s.get('contracts', 0)} contract(s) reviewed"
+    return (
+        f"<h2>Limit Adequacy &amp; Contract Review — {_esc(headline)}</h2>"
+        f"<table><thead><tr><th>Line</th><th class='r'>Carried</th><th class='r'>Contract req.</th>"
+        f"<th class='r'>Baseline</th><th>Status</th><th>Gap</th></tr></thead><tbody>{rows}</tbody></table>"
+    )
+
+
 def _packet_html(ctx: dict) -> str:
     wc = ctx.get("wc") or {}
     epl = ctx.get("epl") or {}
@@ -243,6 +298,8 @@ def _packet_html(ctx: dict) -> str:
       .ready ul {{ margin:4px 0 0; padding-left:16px; }} .rfix {{ color:#666; margin-top:4px; }}
       .vt {{ font-size:8px; font-weight:700; }} .vt-severe,.vt-high{{color:#b23b3b}} .vt-elev{{color:#b8902f}} .vt-mod,.vt-low{{color:#1f8a5b}} .vt-unk{{color:#999}}
       .ex-exposed{{color:#b23b3b;font-weight:700}} .ex-monitor{{color:#b8902f;font-weight:700}} .ex-mitigated{{color:#1f8a5b;font-weight:700}}
+      .lim-good{{color:#1f8a5b;font-weight:700;font-size:8px}} .lim-warn{{color:#b8902f;font-weight:700;font-size:8px}} .lim-bad{{color:#b23b3b;font-weight:700;font-size:8px}} .lim-muted{{color:#999;font-weight:700;font-size:8px}}
+      tr.note td {{ font-size:9px; color:#666; background:#fafafa; }}
       .foot {{ margin-top:24px; color:#999; font-size:8px; border-top:1px solid #eee; padding-top:6px; }}
     </style></head><body>
       <h1>Underwriting Submission</h1>
@@ -270,6 +327,8 @@ def _packet_html(ctx: dict) -> str:
       {_venue_section_html(ctx.get('venue'))}
 
       {_exclusions_section_html(ctx.get('exclusions'))}
+
+      {_limit_section_html(ctx.get('limits'))}
 
       <div class="foot">Prepared by Matcha for broker submission. Risk metrics derived from the client's safety/HR records;
       state WC rate trends are headline estimates pending a licensed NCCI feed. Present alongside the carrier loss run.</div>

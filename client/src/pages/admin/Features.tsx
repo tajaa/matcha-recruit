@@ -31,6 +31,8 @@ const FEATURE_LABELS: Record<string, string> = {
   workforce_compliance: 'Workforce Compliance (pay transparency · AI-audit · biometric)',
   risk_profile: 'Risk Profile (client-facing composite risk index)',
   resident_care: 'Resident-Care Risk (healthcare/senior-living asset)',
+  controls_evidence: 'Proof of Controls (controls-evidence register + packet)',
+  limit_adequacy: 'Limit Adequacy & Contract Review (limits vs contracts)',
 }
 
 type CompanyFeatures = {

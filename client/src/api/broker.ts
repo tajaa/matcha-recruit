@@ -34,6 +34,7 @@ import type {
   BrokerMemberCreateResponse,
 } from '../types/broker'
 import type { ControlsRegister } from '../types/controlsEvidence'
+import type { LimitReview } from '../types/limitAdequacy'
 
 export function fetchBrokerPortfolio() {
   return api.get<BrokerPortfolioResponse>('/brokers/reporting/portfolio')
@@ -224,6 +225,15 @@ export function fetchClientDefenseErCases(companyId: string) {
 }
 export function downloadDefenseErCase(companyId: string, caseId: string, num?: string | null) {
   return api.download(`/broker/clients/${companyId}/defense/er-cases/${caseId}.pdf`, `claims-readiness-${num ?? caseId}.pdf`)
+}
+
+// --- limit-adequacy / contract review for a client --------------------------
+
+export function fetchClientLimitAdequacy(companyId: string) {
+  return api.get<LimitReview>(`/broker/clients/${companyId}/limit-adequacy`)
+}
+export function downloadClientLimits(companyId: string) {
+  return api.download(`/broker/clients/${companyId}/limits.pdf`, `limit-adequacy-${companyId}.pdf`)
 }
 
 // --- Action Center: milestones + outreach ---

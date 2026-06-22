@@ -96,6 +96,13 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # gates /controls-evidence + /app/controls-evidence. Default off;
     # admin-toggle. Not bundled.
     "controls_evidence": False,
+    # Limit-adequacy + contract review (gap-analysis #6/#28 — "benchmarking +
+    # contractual-limit review"). Company records carried limits + uploads
+    # contracts (Gemini extracts required limits); the engine diffs them →
+    # grounded shortfalls + a directional size/venue baseline. Gates
+    # /limit-adequacy + /app/limit-adequacy + the broker limits surfaces.
+    # Default off; admin-toggle. Not bundled.
+    "limit_adequacy": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,

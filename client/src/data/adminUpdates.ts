@@ -22,6 +22,33 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'limit-adequacy-contract-review',
+    date: '2026-06-21',
+    category: 'Broker',
+    title: 'Limit adequacy & contract review (carried limits vs. what contracts require)',
+    summary:
+      'Turns two owned inputs — the limits a company carries + the insurance requirements its contracts impose — into a concrete deliverable: "you carry $1M GL but a customer contract requires $2M." Contracts are uploaded as PDFs; Gemini extracts the required limits + endorsements for the company to confirm (the PDF itself isn’t stored). Where no contract speaks, a directional size/venue baseline flags lines that look light — labelled a starting point, not a peer benchmark or quote.',
+    whatsNew: [
+      'New "Limit Adequacy" surface (/app/limit-adequacy): record carried limits per casualty line (GL, auto, umbrella, WC/EL, EPL, professional, cyber) incl. additional-insured / waiver-of-subrogation / primary-&-noncontributory.',
+      'Upload a contract PDF → Gemini extracts the required limits + endorsements into an editable draft you confirm; or add a contract manually. Requirements stored as JSONB; the PDF is parsed and discarded.',
+      'Adequacy engine diffs carried vs. the highest contract requirement vs. a heuristic baseline → status per line (No coverage / Shortfall / Low / OK) + endorsement-gap flags.',
+      'Broker: a "Limits" tab on the client detail + a Limit-Adequacy section in the submission packet PDF + GET /broker/clients/{id}/limits.pdf|limit-adequacy. Tenant clients only (needs carried/contract data).',
+      'Export a standalone Limit-Adequacy review PDF from the company page.',
+    ],
+    howToUse: [
+      'Enable the limit_adequacy feature for the company in /admin/features.',
+      'Company → Limit Adequacy: under "Your coverage" enter the limits you carry per line; under "Contracts" upload a contract PDF (or add one manually) and confirm the extracted requirements.',
+      'Review the "Coverage line adequacy" table for shortfalls; download the Review PDF.',
+      'Broker → client detail → Limits tab: see the same diff + download the Limits packet; it also rides the main submission PDF.',
+    ],
+    setup: [
+      'Apply migration limadq01 to prod (company_coverage_lines + company_contracts).',
+      'Deploy backend + frontend (new services/routes/pages).',
+      'Enable limit_adequacy per company in /admin/features.',
+    ],
+    tag: 'action-needed',
+  },
+  {
     id: 'exclusion-gap-registry',
     date: '2026-06-21',
     category: 'Broker',

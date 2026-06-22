@@ -17,7 +17,7 @@ from ..dependencies import require_broker, require_broker_pro
 from ..services import (
     wc_depth, epl_readiness, external_clients as ext, submission_packet as sp,
     controls_evidence as ce, claims_readiness as cr, submission_readiness as sr,
-    venue_severity as vs, exclusion_gap as eg,
+    venue_severity as vs, exclusion_gap as eg, limit_adequacy as la,
 )
 from .ir_incidents import compute_wc_metrics
 from .broker_portfolio import _assert_broker_owns_company
@@ -43,6 +43,7 @@ async def _tenant_context(conn, user_id, company_id: UUID) -> dict:
     readiness = await sr.compute_readiness(conn, company_id, wc=m, epl=epl, controls=controls)
     venue = await vs.company_venue_exposure(conn, company_id)
     exclusions = await eg.company_exclusions(conn, company_id)
+    limits = await la.build_review(conn, company_id, venue=venue)
     primary = states[0] if states else None
     latest = mods.get(str(company_id)) or {}
     return {
@@ -64,6 +65,7 @@ async def _tenant_context(conn, user_id, company_id: UUID) -> dict:
         "readiness": readiness,
         "venue": venue,
         "exclusions": exclusions,
+        "limits": limits,
     }
 
 
@@ -212,3 +214,21 @@ async def tenant_defense_er_case_pdf(company_id: UUID, case_id: UUID,
     pdf = await cr.render_er_packet_pdf(data)
     num = str(data["case"].get("case_number") or case_id)
     return _named_pdf(num, "claims-readiness", pdf)
+
+
+# --- limit-adequacy / contract review for an on-platform client -------------
+
+@router.get("/clients/{company_id}/limit-adequacy")
+async def tenant_limit_adequacy(company_id: UUID, current_user=Depends(require_broker)):
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        return await la.build_review(conn, company_id)
+
+
+@router.get("/clients/{company_id}/limits.pdf")
+async def tenant_limits_pdf(company_id: UUID, current_user=Depends(require_broker)):
+    async with get_connection() as conn:
+        meta = await _assert_broker_owns_company(conn, current_user.id, company_id)
+        review = await la.build_review(conn, company_id)
+    pdf = await la.render_review_pdf(meta["name"], review)
+    return _named_pdf(meta["name"], "limit-adequacy", pdf)
