@@ -21,6 +21,7 @@ from .ir_incidents import compute_wc_metrics
 from ..services.wc_benchmarks import SEVERITY_BAND_RANK
 from ..services import benefits_eligibility as be
 from ..services import wc_depth
+from ..services import wc_mod_parser
 from ..services import epl_readiness
 from ..services import risk_index
 from ..services import wc_classmap
@@ -45,6 +46,8 @@ class WcModCreate(BaseModel):
     carrier: Optional[str] = None
     annual_premium: Optional[float] = Field(default=None, ge=0)
     note: Optional[str] = None
+    # 'manual' = keyed; 'worksheet' = confirmed from a parsed bureau worksheet PDF.
+    source: str = Field(default="manual", pattern="^(manual|worksheet)$")
 
 
 class EplAttestationUpdate(BaseModel):
@@ -210,6 +213,7 @@ async def get_wc_client_detail(company_id: UUID, current_user=Depends(require_br
         states = await wc_depth.resolve_company_states(conn, company_id)
         state_rates = await wc_depth.get_state_rates(conn, states)
         mods = await wc_depth.mod_trajectory(conn, company_id)
+        mod_proxy = await wc_depth.mod_proxy_trajectory(conn, company_id)
 
     return {
         "company_id": str(company_id),
@@ -220,16 +224,38 @@ async def get_wc_client_detail(company_id: UUID, current_user=Depends(require_br
         ],
         "primary_state": states[0] if states else None,
         "mods": mods,
+        "mod_proxy": mod_proxy,
     }
 
 
 @router.get("/wc-portfolio/{company_id}/mods")
 async def list_wc_mods(company_id: UUID, current_user=Depends(require_broker)):
-    """Experience-mod (EMR) trajectory for a client, oldest period first."""
+    """Experience-mod (EMR) trajectory for a client, oldest period first — recorded
+    real mods (manual + parsed worksheet) plus the auto directional proxy series."""
     async with get_connection() as conn:
         await _assert_broker_owns_company(conn, current_user.id, company_id)
         mods = await wc_depth.mod_trajectory(conn, company_id)
-    return {"company_id": str(company_id), "mods": mods}
+        mod_proxy = await wc_depth.mod_proxy_trajectory(conn, company_id)
+    return {"company_id": str(company_id), "mods": mods, "mod_proxy": mod_proxy}
+
+
+@router.post("/wc-portfolio/{company_id}/mods/parse")
+async def parse_wc_mod_worksheet(company_id: UUID, file: UploadFile = File(...),
+                                 current_user=Depends(require_broker)):
+    """Auto-extract the real experience mod from an uploaded bureau experience-rating
+    worksheet PDF (no manual keying). Returns a draft the broker confirms via POST
+    /mods (source='worksheet'); never auto-commits. The PDF is parsed and discarded."""
+    is_pdf = (file.content_type == "application/pdf") or (file.filename or "").lower().endswith(".pdf")
+    if not is_pdf:
+        raise HTTPException(status_code=400, detail="Upload a PDF experience-rating worksheet")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > 15_000_000:
+        raise HTTPException(status_code=413, detail="PDF too large (max 15 MB)")
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+    return await wc_mod_parser.parse_mod_worksheet(data)
 
 
 @router.post("/wc-portfolio/{company_id}/mods")
@@ -246,20 +272,21 @@ async def record_wc_mod(company_id: UUID, body: WcModCreate,
             """
             INSERT INTO company_wc_mods
                 (company_id, broker_id, policy_period_start, policy_period_end,
-                 experience_mod, carrier, annual_premium, note, recorded_by)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 experience_mod, carrier, annual_premium, note, source, recorded_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT ON CONSTRAINT uq_company_wc_mod DO UPDATE SET
                 policy_period_end = EXCLUDED.policy_period_end,
                 experience_mod    = EXCLUDED.experience_mod,
                 carrier           = EXCLUDED.carrier,
                 annual_premium    = EXCLUDED.annual_premium,
                 note              = EXCLUDED.note,
+                source            = EXCLUDED.source,
                 recorded_by       = EXCLUDED.recorded_by
             RETURNING id, company_id, policy_period_start, policy_period_end,
-                      experience_mod, carrier, annual_premium, note, created_at
+                      experience_mod, carrier, annual_premium, note, source, created_at
             """,
             company_id, broker_id, body.policy_period_start, body.policy_period_end,
-            body.experience_mod, body.carrier, body.annual_premium, body.note,
+            body.experience_mod, body.carrier, body.annual_premium, body.note, body.source,
             current_user.id,
         )
     return wc_depth._serialize_mod(row)

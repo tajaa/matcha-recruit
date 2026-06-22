@@ -13,7 +13,7 @@ import type {
   RenewalRadarDetail,
   WcPortfolioResponse,
   WcClientDetailResponse,
-  WcMod,
+  WcMod, WcModWorksheetDraft,
   WcStateRate,
   WcClassCode,
   WcClassExposure,
@@ -60,8 +60,17 @@ export function recordWcMod(companyId: string, payload: {
   carrier?: string
   annual_premium?: number
   note?: string
+  source?: 'manual' | 'worksheet'
 }) {
   return api.post<WcMod>(`/broker/wc-portfolio/${companyId}/mods`, payload)
+}
+
+// Upload the bureau experience-rating worksheet PDF → auto-extract the real mod
+// (a draft the broker confirms via recordWcMod with source='worksheet').
+export function parseWcModWorksheet(companyId: string, file: File) {
+  const fd = new FormData()
+  fd.append('file', file)
+  return api.upload<WcModWorksheetDraft>(`/broker/wc-portfolio/${companyId}/mods/parse`, fd)
 }
 
 export function deleteWcMod(companyId: string, modId: string) {

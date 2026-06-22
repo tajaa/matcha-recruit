@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FormEvent, type ReactNode } from 'react'
+import { useState, useEffect, useRef, type FormEvent, type ChangeEvent, type ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, MapPin, FileText, Shield, AlertTriangle,
@@ -8,7 +8,7 @@ import {
 import { Card } from '../../components/ui'
 import { StatCard } from '../../components/dashboard'
 import {
-  fetchBrokerClientDetail, fetchWcClientDetail, recordWcMod, deleteWcMod,
+  fetchBrokerClientDetail, fetchWcClientDetail, recordWcMod, deleteWcMod, parseWcModWorksheet,
   fetchEplClientDetail, recordEplAttestation,
   downloadTenantSubmission, fetchTenantCoverageGap,
   fetchWcClassCodes, fetchWcClassExposures, recordWcClassExposure, deleteWcClassExposure,
@@ -576,14 +576,63 @@ function TaxCell({ label, value, tone }: { label: string; value: number; tone: s
   )
 }
 
+function proxyTone(v: number): string {
+  return v > 1 ? 'text-red-400' : v < 1 ? 'text-emerald-400' : 'text-zinc-300'
+}
+
+/* tiny no-dependency sparkline for the proxy mod trajectory (dashed 1.0 baseline) */
+function ModSparkline({ values }: { values: number[] }) {
+  if (values.length < 2) return null
+  const w = 220, h = 40, pad = 4, baseline = 1.0
+  const lo = Math.min(baseline, ...values), hi = Math.max(baseline, ...values)
+  const span = Math.max(0.001, hi - lo)
+  const x = (i: number) => pad + (i / (values.length - 1)) * (w - 2 * pad)
+  const y = (v: number) => pad + (1 - (v - lo) / span) * (h - 2 * pad)
+  const d = values.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ')
+  return (
+    <svg width={w} height={h} className="overflow-visible">
+      <line x1={pad} y1={y(baseline)} x2={w - pad} y2={y(baseline)} className="stroke-zinc-700" strokeDasharray="2 2" />
+      <path d={d} fill="none" className="stroke-sky-400" strokeWidth="1.5" />
+      {values.map((v, i) => <circle key={i} cx={x(i)} cy={y(v)} r="1.8" className="fill-sky-400" />)}
+    </svg>
+  )
+}
+
 function WcTab({ companyId }: { companyId: string }) {
   const [detail, setDetail] = useState<WcClientDetailResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ policy_period_start: '', experience_mod: '', carrier: '', annual_premium: '', note: '' })
+  const [source, setSource] = useState<'manual' | 'worksheet'>('manual')
   const [saving, setSaving] = useState(false)
   const [formErr, setFormErr] = useState<string | null>(null)
+  const [parsing, setParsing] = useState(false)
+  const [parseMsg, setParseMsg] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const onWorksheet = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''  // allow re-selecting the same file
+    if (!file) return
+    setParsing(true); setParseMsg(null)
+    try {
+      const res = await parseWcModWorksheet(companyId, file)
+      if (!res.available || res.fields.experience_mod == null) {
+        setParseMsg('Could not read a mod from that PDF — enter it manually below.'); setShowForm(true); return
+      }
+      const f = res.fields
+      const mod = res.fields.experience_mod
+      setForm({
+        policy_period_start: f.policy_period_start ?? '', experience_mod: String(mod),
+        carrier: f.carrier ?? '', annual_premium: '', note: 'Auto-extracted from experience-rating worksheet',
+      })
+      setSource('worksheet'); setShowForm(true)
+      setParseMsg(`Extracted mod ${mod.toFixed(2)} from the worksheet — review and save.`)
+    } catch {
+      setParseMsg('Worksheet parse failed — enter the mod manually below.'); setShowForm(true)
+    } finally { setParsing(false) }
+  }
 
   const load = () => {
     setLoading(true)
@@ -611,8 +660,10 @@ function WcTab({ companyId }: { companyId: string }) {
         carrier: form.carrier || undefined,
         annual_premium: form.annual_premium ? parseFloat(form.annual_premium) : undefined,
         note: form.note || undefined,
+        source,
       })
       setForm({ policy_period_start: '', experience_mod: '', carrier: '', annual_premium: '', note: '' })
+      setSource('manual'); setParseMsg(null)
       setShowForm(false)
       load()
     } catch {
@@ -753,10 +804,17 @@ function WcTab({ companyId }: { companyId: string }) {
             <Gauge className="h-4 w-4 text-zinc-500" />
             <h3 className="text-sm font-medium text-zinc-200 tracking-wide">Experience mod trajectory</h3>
           </div>
-          <button onClick={() => setShowForm((v) => !v)} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500 transition-colors">
-            <Plus className="h-3.5 w-3.5" /> Record mod
-          </button>
+          <div className="flex items-center gap-2">
+            <input ref={fileRef} type="file" accept="application/pdf" onChange={onWorksheet} className="hidden" />
+            <button onClick={() => fileRef.current?.click()} disabled={parsing} className="inline-flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 px-2 py-1 rounded-lg border border-emerald-900/60 hover:border-emerald-700 disabled:opacity-50 transition-colors">
+              {parsing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} {parsing ? 'Reading…' : 'Upload worksheet'}
+            </button>
+            <button onClick={() => { setSource('manual'); setParseMsg(null); setShowForm((v) => !v) }} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500 transition-colors">
+              <Plus className="h-3.5 w-3.5" /> Record mod
+            </button>
+          </div>
         </div>
+        {parseMsg && <p className="text-[11px] text-emerald-400/90 mb-3">{parseMsg}</p>}
 
         {showForm && (
           <form onSubmit={submitMod} className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-4 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800">
@@ -796,6 +854,7 @@ function WcTab({ companyId }: { companyId: string }) {
                   <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">Mod</th>
                   <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Carrier</th>
                   <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">Premium</th>
+                  <th className="pb-2 pr-4 text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Source</th>
                   <th className="pb-2 w-8" />
                 </tr>
               </thead>
@@ -806,6 +865,9 @@ function WcTab({ companyId }: { companyId: string }) {
                     <td className={`py-2.5 pr-4 text-right font-mono ${mod.experience_mod > 1 ? 'text-red-400' : mod.experience_mod < 1 ? 'text-emerald-400' : 'text-zinc-300'}`}>{mod.experience_mod.toFixed(3)}</td>
                     <td className="py-2.5 pr-4 text-zinc-400 text-xs">{mod.carrier ?? '—'}</td>
                     <td className="py-2.5 pr-4 text-right text-zinc-400 tabular-nums">{mod.annual_premium != null ? `$${mod.annual_premium.toLocaleString()}` : '—'}</td>
+                    <td className="py-2.5 pr-4">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${mod.source === 'worksheet' ? 'text-sky-300 border-sky-900/60' : 'text-zinc-500 border-zinc-700'}`}>{mod.source === 'worksheet' ? 'worksheet' : 'manual'}</span>
+                    </td>
                     <td className="py-2.5 text-right">
                       <button onClick={() => removeMod(mod.id)} className="text-zinc-600 hover:text-red-400 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>
                     </td>
@@ -813,6 +875,20 @@ function WcTab({ companyId }: { companyId: string }) {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {detail.mod_proxy && detail.mod_proxy.points.length > 0 && (
+          <div className="mt-5 pt-4 border-t border-zinc-800/60">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-xs font-medium text-zinc-300 flex items-center gap-1.5">
+                Directional proxy <span className="text-[10px] font-normal text-zinc-600">auto · incurred ÷ expected losses</span>
+              </h4>
+              <span className={`text-sm font-mono ${proxyTone(detail.mod_proxy.points[detail.mod_proxy.points.length - 1].experience_mod)}`}>
+                {detail.mod_proxy.points[detail.mod_proxy.points.length - 1].experience_mod.toFixed(2)}
+              </span>
+            </div>
+            <ModSparkline values={detail.mod_proxy.points.map((p) => p.experience_mod)} />
+            <p className="text-[10px] text-zinc-600 mt-1.5">{detail.mod_proxy.basis}</p>
           </div>
         )}
       </Card>

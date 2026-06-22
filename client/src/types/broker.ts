@@ -366,7 +366,37 @@ export interface WcMod {
   carrier: string | null
   annual_premium: number | null
   note: string | null
+  source: 'manual' | 'worksheet'
   created_at: string | null
+}
+
+// Directional experience-mod proxy (auto from loss-runs + class payroll).
+export interface WcModProxyPoint {
+  valuation_date: string | null
+  experience_mod: number
+  actual_losses: number
+  expected_losses: number
+  periods: number
+  source: 'proxy'
+}
+export interface WcModProxy {
+  points: WcModProxyPoint[]
+  expected_annual_losses: number
+  basis: string
+}
+
+// Draft returned by the worksheet-parse endpoint (broker confirms before saving).
+export interface WcModWorksheetDraft {
+  fields: {
+    experience_mod: number | null
+    policy_period_start: string | null
+    carrier: string | null
+    expected_losses: number | null
+    actual_losses: number | null
+    state: string | null
+  }
+  available: boolean
+  model: string
 }
 
 export interface WcClassCode {
@@ -470,6 +500,7 @@ export interface WcClientDetailResponse {
   states: WcStateEntry[]
   primary_state: string | null
   mods: WcMod[]
+  mod_proxy: WcModProxy
 }
 
 // --- EPL readiness (epldeep01) ---

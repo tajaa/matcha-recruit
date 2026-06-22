@@ -121,6 +121,7 @@ async def list_state_rates(conn) -> list[dict]:
 
 
 def _serialize_mod(r) -> dict:
+    d = dict(r)
     return {
         "id": str(r["id"]),
         "company_id": str(r["company_id"]),
@@ -130,6 +131,7 @@ def _serialize_mod(r) -> dict:
         "carrier": r["carrier"],
         "annual_premium": float(r["annual_premium"]) if r["annual_premium"] is not None else None,
         "note": r["note"],
+        "source": d.get("source") or "manual",  # 'manual' | 'worksheet'
         "created_at": r["created_at"].isoformat() if r["created_at"] else None,
     }
 
@@ -139,7 +141,7 @@ async def mod_trajectory(conn, company_id: UUID) -> list[dict]:
     rows = await conn.fetch(
         """
         SELECT id, company_id, policy_period_start, policy_period_end,
-               experience_mod, carrier, annual_premium, note, created_at
+               experience_mod, carrier, annual_premium, note, source, created_at
         FROM company_wc_mods
         WHERE company_id = $1
         ORDER BY policy_period_start ASC
@@ -161,7 +163,7 @@ async def latest_mods(conn, company_ids: Iterable[UUID]) -> dict[str, dict]:
         """
         SELECT DISTINCT ON (company_id)
                id, company_id, policy_period_start, policy_period_end,
-               experience_mod, carrier, annual_premium, note, created_at
+               experience_mod, carrier, annual_premium, note, source, created_at
         FROM company_wc_mods
         WHERE company_id = ANY($1::uuid[])
         ORDER BY company_id, policy_period_start DESC
@@ -215,3 +217,66 @@ async def class_exposures(conn, company_id: UUID) -> list[dict]:
             "base_rate": rate, "est_manual_premium": est, "note": r["note"],
         })
     return out
+
+
+# --- experience-mod proxy (directional, auto from loss-runs + class payroll) ----
+
+def proxy_mod(actual_losses: float, expected_losses: float) -> Optional[float]:
+    """Directional experience proxy = actual incurred ÷ expected losses (~1.0 = on
+    plan, >1 adverse). None when there's no expected-loss base. Pure (unit-tested)."""
+    if not expected_losses or expected_losses <= 0:
+        return None
+    return round(actual_losses / expected_losses, 3)
+
+
+async def expected_annual_losses(conn, company_id: UUID) -> float:
+    """One policy year's expected losses at current exposure: Σ(payroll/100 × base_rate)
+    across the client's class exposures. WCIRB/NCCI pure-premium rates ARE expected
+    losses per $100 payroll, so this is an expected-loss base (not premium). 0 if none."""
+    exposures = await class_exposures(conn, company_id)
+    return float(sum(e["est_manual_premium"] for e in exposures if e.get("est_manual_premium")))
+
+
+async def mod_proxy_trajectory(conn, company_id: UUID) -> dict:
+    """Directional experience-mod proxy per loss-run valuation date — automatic, no
+    manual entry, no licensed bureau parameters.
+
+    Per valuation: actual = total WC incurred (paid+reserved) across the policy
+    periods reported as of that date; expected = one year's expected losses × the
+    number of policy periods in that valuation (so multi-year actuals meet multi-year
+    expected). Reuses ``wc_loss_runs`` + class payroll already on file. Directional —
+    NOT the bureau's published mod."""
+    expected_annual = await expected_annual_losses(conn, company_id)
+    if expected_annual <= 0:
+        return {"points": [], "expected_annual_losses": 0.0,
+                "basis": "Add WC class payroll exposures to enable the proxy trajectory."}
+    rows = await conn.fetch(
+        """
+        SELECT valuation_date,
+               COUNT(DISTINCT policy_period_label) AS periods,
+               SUM(COALESCE(paid, 0) + COALESCE(reserved, 0)) AS incurred
+        FROM wc_loss_runs
+        WHERE subject_kind = 'company' AND subject_id = $1 AND line = 'wc'
+        GROUP BY valuation_date
+        ORDER BY valuation_date ASC
+        """,
+        company_id,
+    )
+    points: list[dict] = []
+    for r in rows:
+        periods = int(r["periods"]) or 1
+        actual = float(r["incurred"] or 0)
+        expected = expected_annual * periods
+        pm = proxy_mod(actual, expected)
+        if pm is None:
+            continue
+        points.append({
+            "valuation_date": r["valuation_date"].isoformat() if r["valuation_date"] else None,
+            "experience_mod": pm, "actual_losses": round(actual), "expected_losses": round(expected),
+            "periods": periods, "source": "proxy",
+        })
+    return {
+        "points": points,
+        "expected_annual_losses": round(expected_annual),
+        "basis": "actual incurred ÷ expected losses (pure-premium rate × payroll); directional, not the bureau mod.",
+    }
