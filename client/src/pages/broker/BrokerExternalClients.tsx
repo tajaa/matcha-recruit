@@ -1,6 +1,6 @@
 import { useState, useEffect, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { Globe, Plus, Loader2, AlertCircle } from 'lucide-react'
+import { Globe, Plus, Loader2, AlertCircle, CheckCircle2, Clock } from 'lucide-react'
 import { Card } from '../../components/ui'
 import { HelpHint } from '../../components/broker/HelpHint'
 import { fetchExternalClients, createExternalClient } from '../../api/broker'
@@ -15,6 +15,30 @@ const EPL_TONE: Record<string, string> = {
   strong: 'text-emerald-400', adequate: 'text-amber-400', developing: 'text-orange-400', exposed: 'text-red-400',
 }
 const inputCls = 'w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500'
+
+function fmtShortDate(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+function IntakeCell({ status, submittedAt }: { status: ExternalClientRow['intake_status']; submittedAt: string | null }) {
+  if (status === 'submitted') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-emerald-400" title={submittedAt ? `Client submitted ${submittedAt}` : 'Client submitted'}>
+        <CheckCircle2 className="h-3.5 w-3.5" /> {fmtShortDate(submittedAt) || 'Submitted'}
+      </span>
+    )
+  }
+  if (status === 'pending') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-amber-400" title="Intake link sent — awaiting client response">
+        <Clock className="h-3.5 w-3.5" /> Pending
+      </span>
+    )
+  }
+  return <span className="text-xs text-zinc-600">—</span>
+}
 
 export default function BrokerExternalClients() {
   const [clients, setClients] = useState<ExternalClientRow[]>([])
@@ -132,6 +156,9 @@ export default function BrokerExternalClients() {
                 <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">
                   <span className="inline-flex items-center gap-1 justify-end">Risk <HelpHint align="right" text="Composite risk index, 0–100 (higher = lower risk). Blends WC + EPL into one benchmarkable number per prospect — the same index on-platform clients get." /></span>
                 </th>
+                <th className="px-4 py-2.5 text-[11px] font-medium text-zinc-500 uppercase tracking-wider text-right">
+                  <span className="inline-flex items-center gap-1 justify-end">Intake <HelpHint align="right" text="Whether the client self-completed the EPL intake link, and when. 'Pending' = link sent, awaiting their response. Confirms the EPL answers are the client's own and current." /></span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -151,6 +178,9 @@ export default function BrokerExternalClients() {
                   </td>
                   <td className={`px-4 py-3 text-right font-mono ${c.risk_band ? RISK_BAND_TONE[c.risk_band] ?? 'text-zinc-600' : 'text-zinc-600'}`}>
                     {c.risk_index ?? '—'} {c.risk_band && <span className="text-[10px] uppercase">{c.risk_band}</span>}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <IntakeCell status={c.intake_status} submittedAt={c.intake_submitted_at} />
                   </td>
                 </tr>
               ))}

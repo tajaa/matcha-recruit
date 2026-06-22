@@ -213,12 +213,15 @@ async def client_detail(conn, broker_id: UUID, client_id: UUID) -> Optional[dict
     rates = await wc_depth.get_state_rates(conn, [state]) if state else {}
     wc = _compute_wc(client, snap, rates.get(state) if state else None)
     epl = await _epl_for_client(conn, client_id)
-    return {"client": client, "wc": wc, "epl": epl, "risk_index": risk_index.external_risk_index(wc, epl)}
+    intake = await intake_status(conn, client_id)
+    return {"client": client, "wc": wc, "epl": epl,
+            "risk_index": risk_index.external_risk_index(wc, epl), "intake": intake}
 
 
 async def list_with_scores(conn, broker_id: UUID) -> list[dict]:
     """List view: identity + WC band + EPL score/band per external client."""
     clients = await list_clients(conn, broker_id)
+    intakes = await intake_status_map(conn, [UUID(c["id"]) for c in clients])
     out = []
     for c in clients:
         cid = UUID(c["id"])
@@ -226,6 +229,7 @@ async def list_with_scores(conn, broker_id: UUID) -> list[dict]:
         wc = _compute_wc(c, snap, None)
         epl = await _epl_for_client(conn, cid)
         ri = risk_index.external_risk_index(wc, epl)
+        intake = intakes.get(c["id"], {"status": "not_sent", "is_submitted": False, "submitted_at": None})
         out.append({
             **c,
             "wc_severity_band": wc["severity_band"],
@@ -235,6 +239,8 @@ async def list_with_scores(conn, broker_id: UUID) -> list[dict]:
             "epl_band": epl["band"],
             "risk_index": ri["index"],
             "risk_band": ri["band"],
+            "intake_status": intake["status"],
+            "intake_submitted_at": intake["submitted_at"],
         })
     return out
 
@@ -286,7 +292,8 @@ def intake_factors() -> list[dict]:
 
 async def complete_intake(conn, token_row: dict, epl: dict, wc: Optional[dict]) -> None:
     """Persist the prospect's answers, attributed to the broker who sent the link,
-    then lock the token."""
+    then lock the token + stamp the completion time (the submission timestamp the
+    broker reads back to confirm the EPL data is current)."""
     cid = token_row["external_client_id"]
     by = token_row["created_by"]
     valid_keys = {f["key"] for f in epl_readiness.FACTORS}
@@ -299,3 +306,79 @@ async def complete_intake(conn, token_row: dict, epl: dict, wc: Optional[dict]) 
         "UPDATE broker_external_intake_tokens SET status = 'completed', completed_at = NOW() WHERE id = $1",
         token_row["id"],
     )
+
+
+# --- intake submission status (derived from the token ledger; no extra column) ---
+
+def _intake_state(submitted_at, pending_at) -> str:
+    """Classify a client's intake state from the token ledger. Pure (unit-tested).
+
+    'submitted' = the client self-completed a link at least once; 'pending' = a
+    live (active, unexpired) link is outstanding and awaiting the client; 'not_sent'
+    = no link minted yet. A past submission outranks a newer pending link so the
+    broker always sees that current answers exist."""
+    if submitted_at:
+        return "submitted"
+    if pending_at:
+        return "pending"
+    return "not_sent"
+
+
+def _intake_payload(submitted_at, pending_at, pending_expires_at) -> dict:
+    return {
+        "status": _intake_state(submitted_at, pending_at),
+        "is_submitted": submitted_at is not None,
+        "submitted_at": submitted_at.isoformat() if submitted_at else None,
+        "pending_sent_at": pending_at.isoformat() if pending_at else None,
+        "pending_expires_at": pending_expires_at.isoformat() if pending_expires_at else None,
+    }
+
+
+async def intake_status(conn, client_id: UUID) -> dict:
+    """One client's intake submission state, derived from its intake tokens.
+
+    ``submitted_at`` is the most recent client self-completion (``completed_at`` on
+    a completed token) — the timestamp the broker reads to verify the EPL answers
+    are current. No schema change: the token table already records all of it."""
+    row = await conn.fetchrow(
+        """
+        SELECT
+            MAX(completed_at) FILTER (WHERE status = 'completed')                       AS submitted_at,
+            MAX(created_at)   FILTER (WHERE status = 'active' AND expires_at > NOW())    AS pending_at,
+            MAX(expires_at)   FILTER (WHERE status = 'active' AND expires_at > NOW())    AS pending_expires_at
+        FROM broker_external_intake_tokens
+        WHERE external_client_id = $1
+        """,
+        client_id,
+    )
+    return _intake_payload(
+        row["submitted_at"] if row else None,
+        row["pending_at"] if row else None,
+        row["pending_expires_at"] if row else None,
+    )
+
+
+async def intake_status_map(conn, client_ids) -> dict[str, dict]:
+    """Batched ``intake_status`` for a roster → {client_id_str: payload}. One query
+    over the whole book for the list/dashboard rollup."""
+    ids = list({c for c in client_ids})
+    if not ids:
+        return {}
+    rows = await conn.fetch(
+        """
+        SELECT external_client_id,
+            MAX(completed_at) FILTER (WHERE status = 'completed')                    AS submitted_at,
+            MAX(created_at)   FILTER (WHERE status = 'active' AND expires_at > NOW()) AS pending_at,
+            MAX(expires_at)   FILTER (WHERE status = 'active' AND expires_at > NOW()) AS pending_expires_at
+        FROM broker_external_intake_tokens
+        WHERE external_client_id = ANY($1::uuid[])
+        GROUP BY external_client_id
+        """,
+        ids,
+    )
+    return {
+        str(r["external_client_id"]): _intake_payload(
+            r["submitted_at"], r["pending_at"], r["pending_expires_at"]
+        )
+        for r in rows
+    }

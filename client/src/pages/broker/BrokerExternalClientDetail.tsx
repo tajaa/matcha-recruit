@@ -1,6 +1,6 @@
 import { useState, useEffect, type FormEvent, type ChangeEvent, type ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Loader2, AlertCircle, Gauge, Shield, Upload, Link2 as LinkIcon } from 'lucide-react'
+import { ArrowLeft, Loader2, AlertCircle, Gauge, Shield, Upload, Link2 as LinkIcon, CheckCircle2, Clock, CircleDashed } from 'lucide-react'
 import { Card } from '../../components/ui'
 import { HelpHint } from '../../components/broker/HelpHint'
 import { SubmissionPanel } from '../../components/broker/SubmissionPanel'
@@ -48,6 +48,37 @@ const WC_FIELDS: { k: string; label: string; type?: string }[] = [
 ]
 
 function rateTone(t: string) { return t === 'increase' ? 'text-red-400' : t === 'decrease' ? 'text-emerald-400' : 'text-zinc-400' }
+
+function fmtDate(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+// Submission-status pill on the intake card — lets the broker confirm the EPL
+// answers are the client's own and how current they are.
+function IntakeStatusBadge({ intake }: { intake: ExternalClientDetail['intake'] }) {
+  if (intake.status === 'submitted') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-emerald-400">
+        <CheckCircle2 className="h-3.5 w-3.5" /> Client submitted {fmtDate(intake.submitted_at)}
+      </span>
+    )
+  }
+  if (intake.status === 'pending') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-amber-400">
+        <Clock className="h-3.5 w-3.5" /> Awaiting client response
+        {intake.pending_expires_at && <span className="text-zinc-600">· link expires {fmtDate(intake.pending_expires_at)}</span>}
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-zinc-500">
+      <CircleDashed className="h-3.5 w-3.5" /> No intake link sent yet
+    </span>
+  )
+}
 
 export default function BrokerExternalClientDetail() {
   const { clientId } = useParams<{ clientId: string }>()
@@ -152,7 +183,7 @@ export default function BrokerExternalClientDetail() {
     </div>
   )
 
-  const { client, wc, epl, risk_index: risk } = data
+  const { client, wc, epl, risk_index: risk, intake } = data
   const benchRatio = wc.trir && wc.benchmark && wc.benchmark.trir > 0 ? wc.trir / wc.benchmark.trir : null
 
   return (
@@ -185,6 +216,7 @@ export default function BrokerExternalClientDetail() {
             <LinkIcon className="h-4 w-4 text-zinc-500" />
             <span className="text-sm text-zinc-300">Client-intake link</span>
             <HelpHint text="Generate a shareable link the prospect opens to self-complete the EPL questionnaire — no account needed. Their answers feed this client's EPL score automatically." />
+            <span className="ml-1 pl-3 border-l border-zinc-800"><IntakeStatusBadge intake={intake} /></span>
           </div>
           {!intakeUrl ? (
             <button onClick={genIntakeLink} disabled={intakeBusy} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-zinc-100 px-2.5 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 disabled:opacity-50">

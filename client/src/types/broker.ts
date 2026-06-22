@@ -585,6 +585,17 @@ export interface ExternalClient {
   created_at: string | null
 }
 
+// Client-intake submission state, derived from the intake-token ledger.
+export type ExternalIntakeState = 'submitted' | 'pending' | 'not_sent'
+
+export interface ExternalIntakeStatus {
+  status: ExternalIntakeState
+  is_submitted: boolean
+  submitted_at: string | null
+  pending_sent_at: string | null
+  pending_expires_at: string | null
+}
+
 export interface ExternalClientRow extends ExternalClient {
   wc_severity_band: WcSeverityBand
   wc_trir: number | null
@@ -593,6 +604,8 @@ export interface ExternalClientRow extends ExternalClient {
   epl_band: EplBand
   risk_index: number | null
   risk_band: string | null
+  intake_status: ExternalIntakeState
+  intake_submitted_at: string | null
 }
 
 export interface ExternalWc {
@@ -639,6 +652,7 @@ export interface ExternalClientDetail {
   wc: ExternalWc
   epl: ExternalEpl
   risk_index: RiskIndex
+  intake: ExternalIntakeStatus
 }
 
 // --- Submission packet / coverage-gap ---
