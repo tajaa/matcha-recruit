@@ -23,6 +23,56 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'emr-trajectory-automation',
+    date: '2026-06-22',
+    category: 'Broker',
+    title: 'Experience-Mod trajectory — auto worksheet capture + directional proxy',
+    summary:
+      'Automates the experience-mod (EMR) trajectory that brokers used to hand-key on the WC tab. Two free data sources replace manual entry: the broker uploads the bureau experience-rating worksheet PDF and we extract the REAL mod, and we auto-compute a directional proxy from loss-runs ÷ expected losses so the trend fills in even between worksheets. No licensed feed required.',
+    whatsNew: [
+      '"Upload worksheet" on the WC tab → Gemini extracts the published mod (+ effective date, carrier) from the NCCI / state-bureau worksheet; the broker confirms, and it saves tagged source="worksheet".',
+      'Directional proxy trajectory: incurred (wc_loss_runs) ÷ expected losses (Σ class payroll × pure-premium rate), one point per loss-run valuation, drawn as a sparkline with a dashed 1.0 baseline.',
+      'Every mod row is now tagged manual / worksheet (with the proxy series tagged proxy) so real vs estimated is never ambiguous to carriers.',
+      'Reuses the loss-run PDF-parser pattern + the class-exposure expected-loss math already on file — no new external integration.',
+    ],
+    howToUse: [
+      'Broker → client → Workers’ Comp tab → "Upload worksheet": drop the bureau experience-rating worksheet PDF, review the extracted mod, Save (lands as a worksheet-sourced point).',
+      'The directional-proxy panel appears automatically once the client has WC class-payroll exposures + loss-runs on file; the manual "Record mod" entry still works.',
+    ],
+    notes: [
+      'The proxy is directional (actual-vs-expected losses), NOT the bureau’s published mod — labeled as such. A true auto-calculated mod needs licensed NCCI rating tables (ELRs/D-ratios/ballast); a live feed needs NCCI CertiFlex / a carrier API / an aggregator (Verisk, LexisNexis) — both are paid follow-ons. Worksheet-parse + proxy get most of the value for $0.',
+    ],
+    setup: [
+      'Apply migration wcmodsrc01 (adds company_wc_mods.source) — load-bearing: mod_trajectory/latest_mods now SELECT it, so the WC detail + submission + risk-index 500 without it.',
+      'To see the proxy, a client needs WC class-payroll exposures + loss-runs (seed_emr_payequity_demo.sql seeds Bags for the demo book).',
+    ],
+    tag: 'action-needed',
+  },
+  {
+    id: 'pay-equity-report-depth',
+    date: '2026-06-22',
+    category: 'Workforce Compliance',
+    title: 'Pay-equity study — deeper, actionable client report',
+    summary:
+      'The within-role pay-dispersion study used to surface only a headline "% of roles flagged." It now returns the full per-role breakdown and a concrete remediation dollar figure, so the client report is something a business can act on — without any new data (it reads the payroll already on file).',
+    whatsNew: [
+      'Per role: median, min–max with a distribution bar, quartile spread (IQR, robust to one outlier), count paid below the role’s pay band, a per-role remediation cost, and an ok/watch/flag severity tier.',
+      'Company rollups: total annualized payroll, median role spread, employees below band, share of payroll in flagged roles, and a headline remediation estimate (the $ to lift everyone below 80% of their role median up to it).',
+      'Live compute-only preview (GET /pay-equity/analyze) renders the deep report on load WITHOUT logging a study row; "Run analysis" still logs one and now records the remediation figure in the note.',
+    ],
+    howToUse: [
+      'Company → Workforce Compliance → Pay-equity studies: the deep report renders automatically from payroll (rollup strip + per-role table + distribution bars).',
+      'Click "Run analysis from payroll" to also log it as a dated study (flips the EPL pay-equity factor to data-derived).',
+    ],
+    notes: [
+      'This is a within-role dispersion screen, not a protected-class pay-gap audit — true adjusted/regression gaps need gender/race/tenure demographics we don’t hold (an HRIS pull would unlock them). No new schema; reads employees.pay_rate.',
+    ],
+    setup: [
+      'Enable the workforce_compliance feature for the company; needs ≥2 employees sharing a job title with pay on file (seed_emr_payequity_demo.sql enables it + seeds dispersion for Sea Cafe).',
+    ],
+    tag: 'new',
+  },
+  {
     id: 'driver-risk-fleet-mvr',
     date: '2026-06-22',
     category: 'Broker',
