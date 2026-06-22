@@ -58,6 +58,44 @@ def role_stats(title: str, pays: list[float]) -> dict:
     }
 
 
+def posture_band(roles: list[dict], employees_below_band: int) -> dict:
+    """Overall pay-equity posture headline from the per-role severities. Pure.
+
+    'action' when anyone sits below their role's pay band or a quarter-plus of
+    roles show excess dispersion; 'watch' when some dispersion exists but no one
+    is below band; 'equitable' when every role is within range."""
+    if not roles:
+        return {"band": "insufficient", "label": "Insufficient data"}
+    flagged = sum(1 for r in roles if r["severity"] == "flag")
+    watch = sum(1 for r in roles if r["severity"] == "watch")
+    if employees_below_band > 0 or flagged / len(roles) >= 0.25:
+        return {"band": "action", "label": "Action recommended"}
+    if flagged or watch:
+        return {"band": "watch", "label": "Monitor"}
+    return {"band": "equitable", "label": "Within range"}
+
+
+def priority_actions(roles: list[dict], limit: int = 5) -> list[dict]:
+    """Ranked 'fix first' list — the roles to act on, biggest remediation dollars
+    first. Pure (unit-tested). Roles with employees below band rank ahead of merely
+    high-spread roles, since those carry real dollars to close."""
+    candidates = [r for r in roles if r["below_band_n"] > 0 or r["severity"] == "flag"]
+    candidates.sort(key=lambda r: (r["below_band_n"] == 0, -r["remediation_cost"], -r["spread_pct"]))
+    out: list[dict] = []
+    for r in candidates[:limit]:
+        if r["below_band_n"] > 0:
+            people = f"{r['below_band_n']} employee{'' if r['below_band_n'] == 1 else 's'}"
+            action = f"Lift {people} in {r['title']} to the pay floor (~${r['remediation_cost']:,})"
+        else:
+            action = f"Review {r['spread_pct']}% spread across {r['n']} {r['title']} — document drivers or compress"
+        out.append({
+            "title": r["title"], "severity": r["severity"],
+            "below_band_n": r["below_band_n"], "remediation_cost": r["remediation_cost"],
+            "spread_pct": r["spread_pct"], "action": action,
+        })
+    return out
+
+
 async def analyze(conn, company_id: UUID) -> dict:
     """Within-role pay dispersion. Returns per-role stats (≥2 employees) plus
     company-wide actionable rollups — the excess-dispersion headline (% of roles
@@ -85,6 +123,7 @@ async def analyze(conn, company_id: UUID) -> dict:
     total_payroll = round(sum(p for pays in by_role.values() for p in pays))
     flagged_titles = {r["title"] for r in flagged}
     flagged_payroll = sum(p for t, pays in by_role.items() for p in pays if t in flagged_titles)
+    employees_below_band = sum(r["below_band_n"] for r in roles)
     return {
         "employee_count": len(rows),
         "analyzed_roles": len(roles),
@@ -95,10 +134,13 @@ async def analyze(conn, company_id: UUID) -> dict:
         # --- company-wide actionable rollups (client report depth) ---
         "total_payroll": total_payroll,
         "median_spread_pct": round(statistics.median([r["spread_pct"] for r in roles]), 1) if roles else 0.0,
-        "employees_below_band": sum(r["below_band_n"] for r in roles),
+        "employees_below_band": employees_below_band,
         "flagged_payroll_pct": round(100 * flagged_payroll / total_payroll, 1) if total_payroll else 0.0,
         "remediation_estimate": round(sum(r["remediation_cost"] for r in roles)),
         "band_floor_pct": int(_BAND_FLOOR * 100),
+        # --- actionable layer: overall posture + ranked fixes ---
+        "posture": posture_band(roles, employees_below_band),
+        "priority_actions": priority_actions(roles),
     }
 
 

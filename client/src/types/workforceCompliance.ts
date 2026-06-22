@@ -76,6 +76,23 @@ export interface PayEquityRole {
   severity: PayEquitySeverity
 }
 
+export type PayEquityPostureBand = 'equitable' | 'watch' | 'action' | 'insufficient'
+
+export interface PayEquityPosture {
+  band: PayEquityPostureBand
+  label: string
+}
+
+// One ranked "fix first" item — the actionable layer over the per-role table.
+export interface PayEquityPriorityAction {
+  title: string
+  severity: PayEquitySeverity
+  below_band_n: number
+  remediation_cost: number
+  spread_pct: number
+  action: string
+}
+
 // Full result of the within-role dispersion engine (pay_equity_analysis.analyze).
 export interface PayEquityAnalysisResult {
   employee_count: number
@@ -90,6 +107,8 @@ export interface PayEquityAnalysisResult {
   flagged_payroll_pct: number
   remediation_estimate: number
   band_floor_pct: number
+  posture: PayEquityPosture
+  priority_actions: PayEquityPriorityAction[]
 }
 
 export interface WorkforceSummary {

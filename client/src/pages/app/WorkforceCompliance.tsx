@@ -11,7 +11,7 @@ import {
 import { AiSuggest } from '../../components/AiSuggest'
 import type {
   AiAudit, BiometricPoint, PayTransparencyRow, PayTransparencyStatus, CollectionType, PayEquityReview,
-  PayEquityAnalysisResult, PayEquityRole,
+  PayEquityAnalysisResult, PayEquityRole, PayEquityPriorityAction,
 } from '../../types/workforceCompliance'
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -21,6 +21,12 @@ const COLLECTION_TYPES: CollectionType[] = ['fingerprint', 'face', 'iris', 'voic
 const PE_TONE: Record<string, string> = { flag: 'text-red-400', watch: 'text-amber-400', ok: 'text-emerald-400' }
 const PE_LABEL: Record<string, string> = { flag: 'Flag', watch: 'Watch', ok: 'OK' }
 const PE_BAR: Record<string, string> = { flag: 'bg-red-400', watch: 'bg-amber-400', ok: 'bg-emerald-400' }
+const PE_POSTURE: Record<string, { tone: string; dot: string }> = {
+  equitable: { tone: 'text-emerald-400', dot: 'bg-emerald-400' },
+  watch: { tone: 'text-amber-400', dot: 'bg-amber-400' },
+  action: { tone: 'text-red-400', dot: 'bg-red-400' },
+  insufficient: { tone: 'text-zinc-500', dot: 'bg-zinc-600' },
+}
 function fmtUsd(n: number | null): string {
   if (n == null) return '—'
   if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`
@@ -247,7 +253,7 @@ function SpreadBar({ r }: { r: PayEquityRole }) {
   const span = Math.max(1, r.max - r.min)
   const medPct = Math.min(100, Math.max(0, ((r.median - r.min) / span) * 100))
   return (
-    <div className="relative h-1.5 rounded-full bg-zinc-800" title={`${fmtUsd(r.min)} – ${fmtUsd(r.max)} (median ${fmtUsd(r.median)})`}>
+    <div className="relative h-1.5 rounded-full bg-zinc-800" title={`${fmtUsd(r.min)} – ${fmtUsd(r.max)} (median ${fmtUsd(r.median)})${r.range_ratio ? ` · ${r.range_ratio}× high-to-low` : ''}`}>
       <div className={`absolute inset-0 rounded-full opacity-25 ${PE_BAR[r.severity]}`} />
       <div className="absolute top-[-2px] bottom-[-2px] w-0.5 bg-zinc-100" style={{ left: `${medPct}%` }} />
     </div>
@@ -267,8 +273,15 @@ function PayEquityReport({ a }: { a: PayEquityAnalysisResult }) {
     { label: 'Est. remediation', value: fmtUsd(a.remediation_estimate), warn: a.remediation_estimate > 0 },
     { label: 'Pay in flagged roles', value: `${a.flagged_payroll_pct}%`, warn: a.flagged_payroll_pct > 0 },
   ]
+  const posture = PE_POSTURE[a.posture.band] ?? PE_POSTURE.insufficient
   return (
     <div className="mb-4">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Pay-equity posture</span>
+        <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${posture.tone}`}>
+          <span className={`h-2 w-2 rounded-full ${posture.dot}`} /> {a.posture.label}
+        </span>
+      </div>
       <div className="grid grid-cols-3 md:grid-cols-6 gap-px bg-white/10 border border-white/10 rounded-xl overflow-hidden mb-3">
         {stats.map((s) => (
           <div key={s.label} className="bg-zinc-900 px-3 py-2.5">
@@ -277,6 +290,21 @@ function PayEquityReport({ a }: { a: PayEquityAnalysisResult }) {
           </div>
         ))}
       </div>
+      {a.priority_actions.length > 0 && (
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] px-3 py-2.5 mb-3">
+          <div className="text-[9px] text-amber-400/80 uppercase tracking-widest font-bold mb-1.5">Priority fixes</div>
+          <ol className="space-y-1">
+            {a.priority_actions.map((p: PayEquityPriorityAction, i) => (
+              <li key={p.title} className="flex items-start gap-2 text-[12px] text-zinc-300">
+                <span className="text-zinc-600 font-mono mt-px">{i + 1}.</span>
+                <span className={`h-2 w-2 rounded-full mt-1.5 flex-shrink-0 ${PE_BAR[p.severity]}`} />
+                <span className="flex-1">{p.action}</span>
+                {p.remediation_cost > 0 && <span className="font-mono text-amber-400 whitespace-nowrap">{fmtUsd(p.remediation_cost)}</span>}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -288,6 +316,7 @@ function PayEquityReport({ a }: { a: PayEquityAnalysisResult }) {
               <th className="text-right px-2">Spread</th>
               <th className="text-right px-2">IQR</th>
               <th className="text-right px-2">Below</th>
+              <th className="text-right px-2">$ Fix</th>
               <th className="text-right pl-2">Status</th>
             </tr>
           </thead>
@@ -301,6 +330,7 @@ function PayEquityReport({ a }: { a: PayEquityAnalysisResult }) {
                 <td className={`px-2 text-right font-mono ${PE_TONE[r.severity]}`}>{r.spread_pct}%</td>
                 <td className="px-2 text-right font-mono text-zinc-500">{r.iqr_pct}%</td>
                 <td className="px-2 text-right font-mono text-zinc-400">{r.below_band_n || '—'}</td>
+                <td className={`px-2 text-right font-mono ${r.remediation_cost > 0 ? 'text-amber-400' : 'text-zinc-600'}`}>{r.remediation_cost > 0 ? fmtUsd(r.remediation_cost) : '—'}</td>
                 <td className="pl-2 text-right"><span className={`text-[10px] font-semibold ${PE_TONE[r.severity]}`}>{PE_LABEL[r.severity]}</span></td>
               </tr>
             ))}

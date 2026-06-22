@@ -155,3 +155,67 @@ def test_pay_equity_role_stats_watch_tier():
     s = pe.role_stats("Manager", [100_000, 120_000])
     assert 15.0 <= s["spread_pct"] < 30.0 and s["severity"] == "watch"
     assert s["below_band_n"] == 0            # 100k is above the 0.8*110k band floor
+
+
+# --- pay-equity posture_band (overall headline) ----------------------------
+
+def test_posture_band_insufficient_when_no_roles():
+    assert pe.posture_band([], 0)["band"] == "insufficient"
+
+
+def test_posture_band_equitable_when_all_ok():
+    roles = [{"severity": "ok"}, {"severity": "ok"}]
+    assert pe.posture_band(roles, 0)["band"] == "equitable"
+
+
+def test_posture_band_watch_on_dispersion_but_nobody_below():
+    roles = [{"severity": "ok"}, {"severity": "watch"}, {"severity": "ok"}, {"severity": "ok"}]
+    assert pe.posture_band(roles, 0)["band"] == "watch"
+
+
+def test_posture_band_action_when_anyone_below_band():
+    roles = [{"severity": "ok"}, {"severity": "ok"}]
+    assert pe.posture_band(roles, 1)["band"] == "action"
+
+
+def test_posture_band_action_when_quarter_of_roles_flagged():
+    roles = [{"severity": "flag"}, {"severity": "ok"}, {"severity": "ok"}, {"severity": "ok"}]
+    # 1/4 = 0.25 → action even with nobody below band
+    assert pe.posture_band(roles, 0)["band"] == "action"
+
+
+# --- pay-equity priority_actions (ranked fixes) ----------------------------
+
+def _role(title, *, below=0, cost=0, spread=0.0, severity="ok", n=2):
+    return {"title": title, "below_band_n": below, "remediation_cost": cost,
+            "spread_pct": spread, "severity": severity, "n": n}
+
+
+def test_priority_actions_empty_when_clean():
+    roles = [_role("A"), _role("B", spread=10.0, severity="watch")]
+    assert pe.priority_actions(roles) == []
+
+
+def test_priority_actions_below_band_outranks_high_spread():
+    roles = [
+        _role("HighSpread", spread=80.0, severity="flag"),               # flagged, nobody below
+        _role("BelowBand", below=2, cost=20_000, spread=40.0, severity="flag"),
+    ]
+    out = pe.priority_actions(roles)
+    assert [p["title"] for p in out] == ["BelowBand", "HighSpread"]
+    assert "Lift 2 employees" in out[0]["action"] and "$20,000" in out[0]["action"]
+    assert "Review 80.0% spread" in out[1]["action"]
+
+
+def test_priority_actions_ranks_below_band_by_cost_desc():
+    roles = [
+        _role("Cheap", below=1, cost=5_000, spread=35.0, severity="flag"),
+        _role("Pricey", below=3, cost=50_000, spread=35.0, severity="flag"),
+    ]
+    out = pe.priority_actions(roles)
+    assert [p["title"] for p in out] == ["Pricey", "Cheap"]
+
+
+def test_priority_actions_caps_at_limit():
+    roles = [_role(f"R{i}", below=1, cost=1000 * (i + 1), severity="flag") for i in range(8)]
+    assert len(pe.priority_actions(roles)) == 5
