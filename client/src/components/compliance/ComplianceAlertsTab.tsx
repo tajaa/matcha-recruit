@@ -3,6 +3,19 @@ import { Badge } from '../ui'
 import type { ComplianceAlert, ComplianceActionPlanUpdate } from '../../types/compliance'
 import { CATEGORY_LABELS } from '../../types/compliance'
 
+// Casualty-insurance legislation categories (tracked by legislation_watch #3/#24).
+// CATEGORY_LABELS is generated from the compliance taxonomy and doesn't carry
+// these, so label them here. Falls back to the generated map, then the raw key.
+const CASUALTY_CATEGORY_LABELS: Record<string, string> = {
+  tort_reform: 'Tort reform',
+  wc_presumption: 'WC presumption',
+  auto_liability: 'Auto liability',
+}
+
+function categoryLabel(category: string): string {
+  return CASUALTY_CATEGORY_LABELS[category] || CATEGORY_LABELS[category] || category
+}
+
 type Props = {
   alerts: ComplianceAlert[]
   loading: boolean
@@ -78,7 +91,7 @@ export function ComplianceAlertsTab({ alerts, loading, onMarkRead, onDismiss, on
                         <span className="text-[10px] text-zinc-600">{alert.alert_type.replace(/_/g, ' ')}</span>
                       )}
                       {alert.category && (
-                        <Badge variant="neutral">{CATEGORY_LABELS[alert.category] || alert.category}</Badge>
+                        <Badge variant="neutral">{categoryLabel(alert.category)}</Badge>
                       )}
                       {confidence && (
                         <span className={`text-[10px] font-mono ${confidence.color}`}>{confidence.label}</span>

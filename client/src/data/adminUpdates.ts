@@ -17,10 +17,41 @@ export type AdminUpdate = {
   whatsNew: string[] // what changed / what you can now do
   howToUse: string[] // user-facing steps in the app
   setup?: string[] // operator prerequisites before it works (optional)
+  notes?: string[] // plain-language context / why it matters (optional)
   tag?: AdminUpdateTag
 }
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
+  {
+    id: 'tort-wc-presumption-tracker',
+    date: '2026-06-22',
+    category: 'Broker',
+    title: 'Tort-reform & WC-presumption legislation tracker',
+    summary:
+      'Extends the existing Legislation Watch engine (RSS → Gemini → per-account alerts) beyond labor law to the casualty-relevant legal changes that move loss costs: tort reform, workers’-comp presumptions, and commercial-auto liability. Affected clients get a proactive alert in their state before the change shows up in claims.',
+    whatsNew: [
+      'Three new tracked categories: tort_reform (damage caps, non-economic/punitive damages, litigation funding, joint-and-several liability, premises/negligence standards), wc_presumption (firefighter cancer, first-responder/healthcare PTSD or COVID, occupational-disease presumptions), and auto_liability (commercial-auto minimum limits, negligent entrustment, vicarious liability).',
+      'RSS relevance scorer + the Gemini classifier now recognize these — items on existing state DOL/L&I/legislature feeds that touch them are caught, classified, and routed to companies operating in that state (reuses compliance_alerts + per-location targeting).',
+      'Alerts surface on the company Compliance → Alerts tab with friendly category labels (Tort reform / WC presumption / Auto liability).',
+      'Pure engine extension — no new tables; runs on the existing legislation_watch scheduler.',
+    ],
+    howToUse: [
+      'Enable the "Legislation Watch (RSS)" scheduler in admin (it’s default-off) so the cycle runs.',
+      'Company → Compliance → Alerts: tort/WC-presumption/auto items appear alongside labor-law alerts, tagged by category and state, with a "what to do" action line.',
+      '(Optional) Add state legislature RSS feeds in the feed sources for fuller tort/auto coverage — WC-presumption items already flow from existing L&I/DOL feeds.',
+    ],
+    notes: [
+      'Why this exists — two kinds of legal change swing casualty exposure: (1) Tort reform: laws that raise or lower how easily plaintiffs win and how big verdicts get (repealing damage caps, expanding who can be sued) → bigger GL/auto/umbrella claims; the engine behind "nuclear verdicts." (2) WC presumptions: laws that auto-presume certain injuries/illnesses are work-related (firefighter cancer, first-responder PTSD/COVID) so WC pays without the worker proving it → more compensable claims, higher loss costs.',
+      'Why it matters — a broker’s value is partly "I saw this coming." A new presumption or a damage-cap repeal in a state where the client operates changes their loss cost months before it hits claims. Surfacing it first lets the broker advise before renewal (raise limits, tighten controls, re-reserve) and proves ongoing value between renewals. Alerts are per-account: only states the client actually operates in (we have their locations).',
+      'Honest caveat — this is an intelligence feed, not a data-moat deliverable like Proof-of-Controls / Limit-Adequacy / Loss-Dev. It doesn’t turn our owned HR data into terms; any broker could read the same laws. Its edge is aggregation + per-account targeting + that it’s free to build on rails we already had. It’s the forward-looking complement to the backward-looking loss-development triangles.',
+    ],
+    setup: [
+      'Deploy backend + frontend.',
+      'Enable the legislation_watch scheduler_settings row (default off).',
+      '(Optional) Curate additional state legislature RSS feed sources for tort/auto bills.',
+    ],
+    tag: 'action-needed',
+  },
   {
     id: 'loss-run-triangulation',
     date: '2026-06-22',

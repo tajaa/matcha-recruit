@@ -61,7 +61,7 @@ Title: {item.get('title', 'N/A')}
 Link: {item.get('link', 'N/A')}
 Description: {item.get('description', 'N/A')[:1000]}
 
-Determine if this represents an actual legislative change or upcoming change to employment law.
+Determine if this represents an actual legislative change or upcoming change to EITHER employment law OR casualty-insurance-relevant law (tort reform, workers'-comp presumptions, commercial-auto liability).
 
 Focus on these categories:
 - minimum_wage: Changes to minimum wage rates
@@ -72,21 +72,24 @@ Focus on these categories:
 - final_pay: Changes to final paycheck timing and payout rules
 - minor_work_permit: Changes to youth employment/work permit requirements
 - scheduling_reporting: Changes to fair workweek, predictive scheduling, or reporting-time pay
+- tort_reform: Changes to civil-liability exposure — damage caps (or their repeal), non-economic/punitive damages, third-party litigation funding, joint-and-several liability, statutes of limitation, premises-liability or negligence standards. Raises or lowers GL/auto/umbrella claim severity.
+- wc_presumption: New or expanded workers'-comp presumptions that auto-deem an injury/illness work-related (firefighter cancer, first-responder/healthcare PTSD or COVID, occupational disease). Raises WC loss costs.
+- auto_liability: Changes to commercial-auto/motor-carrier minimum limits, negligent-entrustment or vicarious-liability standards, financial-responsibility law.
 
 Respond with JSON:
 {{
   "is_relevant": true/false,
-  "category": "minimum_wage" | "sick_leave" | "overtime" | "meal_breaks" | "pay_frequency" | "final_pay" | "minor_work_permit" | "scheduling_reporting" | null,
+  "category": "minimum_wage" | "sick_leave" | "overtime" | "meal_breaks" | "pay_frequency" | "final_pay" | "minor_work_permit" | "scheduling_reporting" | "tort_reform" | "wc_presumption" | "auto_liability" | null,
   "change_type": "enacted" | "proposed" | "effective_soon" | "informational" | null,
   "summary": "Brief summary of the change (1-2 sentences)",
   "effective_date": "YYYY-MM-DD" or null,
   "value_change": "Description of specific value change if applicable" or null,
   "confidence": 0.0 to 1.0,
-  "action_required": "Brief description of what employers should do" or null
+  "action_required": "Brief description of what employers (or their broker) should do" or null
 }}
 
-If this is just a press release, general news, or not directly about employment law changes, set is_relevant to false.
-Be conservative - only mark as relevant if there's a clear legislative change.
+If this is just a press release, general news, or not directly about a legal change, set is_relevant to false.
+Be conservative - only mark as relevant if there's a clear legislative/regulatory change.
 """
 
     try:

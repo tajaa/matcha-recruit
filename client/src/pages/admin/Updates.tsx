@@ -1,4 +1,4 @@
-import { Rocket, Sparkles, ListChecks, Wrench, AlertCircle } from 'lucide-react'
+import { Rocket, Sparkles, ListChecks, Wrench, AlertCircle, BookOpen } from 'lucide-react'
 import { ADMIN_UPDATES, type AdminUpdate } from '../../data/adminUpdates'
 
 const fmtDate = (iso: string) =>
@@ -21,6 +21,22 @@ function UpdateCard({ u }: { u: AdminUpdate }) {
 
       <h2 className="text-lg font-semibold text-zinc-50">{u.title}</h2>
       <p className="mt-1 text-sm leading-relaxed text-zinc-400">{u.summary}</p>
+
+      {u.notes && u.notes.length > 0 && (
+        <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
+          <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+            <BookOpen className="h-3.5 w-3.5" /> Context
+          </div>
+          <ul className="space-y-2 text-sm leading-relaxed text-zinc-400">
+            {u.notes.map((n, i) => (
+              <li key={i} className="flex gap-2">
+                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-zinc-600" />
+                {n}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="mt-4 grid gap-5 sm:grid-cols-2">
         <div>

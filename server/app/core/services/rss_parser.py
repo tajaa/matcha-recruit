@@ -84,6 +84,41 @@ RELEVANCE_KEYWORDS = {
         "advance notice schedule",
         "spread of hours",
     ],
+    # --- casualty-insurance-relevant legislation (#3/#24) ---
+    "tort_reform": [
+        "tort reform",
+        "damage cap",
+        "noneconomic damages",
+        "non-economic damages",
+        "punitive damages",
+        "third party litigation funding",
+        "litigation funding",
+        "joint and several liability",
+        "statute of limitations",
+        "premises liability",
+        "negligence standard",
+        "civil liability",
+    ],
+    "wc_presumption": [
+        "workers compensation presumption",
+        "workers' compensation presumption",
+        "presumption of compensability",
+        "occupational disease presumption",
+        "firefighter cancer",
+        "first responder ptsd",
+        "mental health presumption",
+        "covid presumption",
+        "presumptive eligibility",
+    ],
+    "auto_liability": [
+        "commercial auto",
+        "motor carrier liability",
+        "minimum auto liability",
+        "auto insurance minimum",
+        "negligent entrustment",
+        "vicarious liability",
+        "financial responsibility law",
+    ],
 }
 
 
