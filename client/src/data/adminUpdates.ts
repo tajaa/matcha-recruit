@@ -23,6 +23,31 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'real-ca-wc-class-codes',
+    date: '2026-06-22',
+    category: 'Broker',
+    title: 'Real California WC class codes + advisory pure premium rates (~494)',
+    summary:
+      'Replaces the ~10 illustrative demo class codes with the full California WC classification list (~494 codes) and their WCIRB advisory pure premium rates. The WC class-code viewer + the job-title→class-code mapper (wc_classmap) now run on real CA data instead of placeholders.',
+    whatsNew: [
+      '~494 CA class codes with descriptions + advisory pure premium rate per $100 of payroll (state=CA, source="WCIRB 9/1/2026 advisory pure premium"); demo US rows left intact.',
+      'Sourced free + public: descriptions from the CA DIR/DWC class-code mirror (no login), rates from the WCIRB Sep 1 2026 Pure Premium Rate Filing (advisory pure premium delimited file).',
+      'Reproducible tooling: server/scripts/wc_data/ holds the raw sources, a build script (join → combined CSV), a seed script, and a README. No schema/migration — table + admin import endpoint already existed.',
+    ],
+    howToUse: [
+      'Admin → WC Rate Data: filter by state = CA to see the real codes + rates (the viewer you flagged as thin now has ~494 rows).',
+      'These feed the broker WC class-exposure mapper (job titles → NCCI/CA codes) and per-class payroll exposure.',
+    ],
+    notes: [
+      'California only. CA has its own rating bureau (WCIRB), independent of NCCI — its codes/rates are publishable. NCCI (most other states) is licensed/paid and is NOT included; other independent-bureau states (NY/NJ/PA/MI/WI) publish their own files if we expand.',
+      'base_rate here is WCIRB’s advisory pure premium rate (loss cost, no expense loading) — directional for the viewer, not a quote; labelled via the source field, distinct from an NCCI manual rate.',
+    ],
+    setup: [
+      'Prod: upload server/scripts/wc_data/ca_wc_class_codes_2026.csv via Admin → WC rates → import class codes (POST /admin/wc-rates/class-codes). No deploy needed — data only.',
+    ],
+    tag: 'action-needed',
+  },
+  {
     id: 'tort-wc-presumption-tracker',
     date: '2026-06-22',
     category: 'Broker',
