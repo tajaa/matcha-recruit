@@ -33,6 +33,7 @@ import type {
   BrokerMemberListResponse,
   BrokerMemberCreateResponse,
 } from '../types/broker'
+import type { ControlsRegister } from '../types/controlsEvidence'
 
 export function fetchBrokerPortfolio() {
   return api.get<BrokerPortfolioResponse>('/brokers/reporting/portfolio')
@@ -191,6 +192,38 @@ export function downloadExternalSubmission(clientId: string) {
 
 export function fetchExternalCoverageGap(clientId: string, currentCoverage?: Record<string, unknown>) {
   return api.post<CoverageGap>(`/broker/external-clients/${clientId}/coverage-gap`, { current_coverage: currentCoverage ?? null })
+}
+
+// --- controls-evidence (proof-of-controls) + claims-readiness for a client --
+
+export function fetchClientControls(companyId: string) {
+  return api.get<ControlsRegister>(`/broker/clients/${companyId}/controls-evidence`)
+}
+
+export function downloadClientControls(companyId: string) {
+  return api.download(`/broker/clients/${companyId}/controls.pdf`, `proof-of-controls-${companyId}.pdf`)
+}
+
+export interface DefenseIncident {
+  id: string; incident_number: string | null; title: string | null
+  incident_type: string | null; severity: string | null; status: string | null; occurred_at: string | null
+}
+export interface DefenseErCase {
+  id: string; case_number: string | null; title: string | null
+  status: string | null; category: string | null; outcome: string | null; created_at: string | null
+}
+
+export function fetchClientDefenseIncidents(companyId: string) {
+  return api.get<{ incidents: DefenseIncident[] }>(`/broker/clients/${companyId}/defense/incidents`)
+}
+export function downloadDefenseIncident(companyId: string, incidentId: string, num?: string | null) {
+  return api.download(`/broker/clients/${companyId}/defense/incidents/${incidentId}.pdf`, `claims-readiness-${num ?? incidentId}.pdf`)
+}
+export function fetchClientDefenseErCases(companyId: string) {
+  return api.get<{ cases: DefenseErCase[] }>(`/broker/clients/${companyId}/defense/er-cases`)
+}
+export function downloadDefenseErCase(companyId: string, caseId: string, num?: string | null) {
+  return api.download(`/broker/clients/${companyId}/defense/er-cases/${caseId}.pdf`, `claims-readiness-${num ?? caseId}.pdf`)
 }
 
 // --- Action Center: milestones + outreach ---

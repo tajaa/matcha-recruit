@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, MapPin, FileText, Shield, AlertTriangle,
   Clock, Building2, Users, Loader2, AlertCircle,
-  TrendingUp, TrendingDown, Minus, Plus, Trash2, Gauge, HeartPulse, Boxes, Sparkles,
+  TrendingUp, TrendingDown, Minus, Plus, Trash2, Gauge, HeartPulse, Boxes, Sparkles, FileDown, Download,
 } from 'lucide-react'
 import { Card } from '../../components/ui'
 import { StatCard } from '../../components/dashboard'
@@ -13,6 +13,10 @@ import {
   downloadTenantSubmission, fetchTenantCoverageGap,
   fetchWcClassCodes, fetchWcClassExposures, recordWcClassExposure, deleteWcClassExposure,
   autoMapClassExposures, type ClassAutoMap,
+  fetchClientControls, downloadClientControls,
+  fetchClientDefenseIncidents, downloadDefenseIncident,
+  fetchClientDefenseErCases, downloadDefenseErCase,
+  type DefenseIncident, type DefenseErCase,
 } from '../../api/broker'
 import { SubmissionPanel } from '../../components/broker/SubmissionPanel'
 import type {
@@ -20,6 +24,7 @@ import type {
   EplReadiness, EplFactor, EplAttestationStatus,
   WcClassCode, WcClassExposure,
 } from '../../types/broker'
+import type { ControlsRegister } from '../../types/controlsEvidence'
 
 const riskColors: Record<string, string> = {
   healthy: 'bg-zinc-500',
@@ -40,7 +45,7 @@ const severityColors: Record<string, string> = {
   low: 'bg-zinc-800 text-zinc-400',
 }
 
-type Tab = 'overview' | 'compliance' | 'policies' | 'ir_er' | 'wc' | 'epl' | 'submission' | 'activity'
+type Tab = 'overview' | 'compliance' | 'policies' | 'ir_er' | 'wc' | 'epl' | 'controls' | 'defense' | 'submission' | 'activity'
 
 const tabs: { key: Tab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
@@ -49,6 +54,8 @@ const tabs: { key: Tab; label: string }[] = [
   { key: 'ir_er', label: 'IR / ER' },
   { key: 'wc', label: "Workers' Comp" },
   { key: 'epl', label: 'EPL Readiness' },
+  { key: 'controls', label: 'Controls' },
+  { key: 'defense', label: 'Defense Files' },
   { key: 'submission', label: 'Submission' },
   { key: 'activity', label: 'Activity' },
 ]
@@ -176,6 +183,8 @@ export default function BrokerClientDetail() {
       {activeTab === 'ir_er' && <IRERTab ir={ir_summary} er={er_summary} />}
       {activeTab === 'wc' && companyId && <WcTab companyId={companyId} />}
       {activeTab === 'epl' && companyId && <EplTab companyId={companyId} />}
+      {activeTab === 'controls' && companyId && <ControlsTab companyId={companyId} />}
+      {activeTab === 'defense' && companyId && <DefenseTab companyId={companyId} />}
       {activeTab === 'submission' && companyId && (
         <SubmissionPanel
           onDownload={() => downloadTenantSubmission(companyId)}
@@ -1099,6 +1108,106 @@ function EplTab({ companyId }: { companyId: string }) {
             <EplAttestedRow key={f.key} f={f} saving={savingKey === f.key} onSet={(s) => setAttestation(f.key, s)} />
           ))}
         </div>
+      </Card>
+    </div>
+  )
+}
+
+/* ──────────────────── Controls (Proof of Controls) Tab ──────────────────── */
+
+function ControlsTab({ companyId }: { companyId: string }) {
+  const [reg, setReg] = useState<ControlsRegister | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [dl, setDl] = useState(false)
+
+  useEffect(() => {
+    fetchClientControls(companyId).then(setReg).catch(() => setReg(null)).finally(() => setLoading(false))
+  }, [companyId])
+
+  const tone = (s: string) =>
+    s === 'strong' ? 'text-emerald-400' : s === 'partial' ? 'text-amber-400' : s === 'gap' ? 'text-red-400' : 'text-zinc-500'
+
+  if (loading) return <Loader2 className="h-5 w-5 text-zinc-500 animate-spin" />
+  if (!reg) return <Card className="p-5"><p className="text-sm text-zinc-500">No controls data.</p></Card>
+
+  return (
+    <Card className="p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-medium text-zinc-200">Proof of Controls</h3>
+          <p className="text-[11px] text-zinc-500">Auto-derived risk controls. {reg.summary.strong} strong · {reg.summary.gap} gap · {reg.summary.verified}/{reg.summary.total} verified.</p>
+        </div>
+        <button
+          onClick={async () => { setDl(true); try { await downloadClientControls(companyId) } finally { setDl(false) } }}
+          disabled={dl}
+          className="inline-flex items-center gap-1.5 text-xs text-zinc-900 bg-zinc-100 hover:bg-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50 shrink-0"
+        >
+          {dl ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDown className="h-3.5 w-3.5" />} Controls packet
+        </button>
+      </div>
+      <div className="space-y-1">
+        {reg.controls.map((c) => (
+          <div key={c.key} className="flex items-center gap-3 py-1.5 border-b border-zinc-800/30 last:border-0">
+            <span className={`text-[10px] font-semibold uppercase w-16 shrink-0 ${tone(c.status)}`}>{c.status}</span>
+            <span className="text-sm text-zinc-200 flex-1">{c.label}</span>
+            <span className="text-[11px] text-zinc-500 truncate max-w-[40%]">{c.metric ?? '—'}</span>
+            {c.verified && <span className="text-[10px] text-emerald-400 shrink-0">verified</span>}
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+/* ──────────────────── Defense Files (claims-readiness) Tab ──────────────────── */
+
+function DefenseTab({ companyId }: { companyId: string }) {
+  const [incidents, setIncidents] = useState<DefenseIncident[]>([])
+  const [cases, setCases] = useState<DefenseErCase[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    Promise.allSettled([
+      fetchClientDefenseIncidents(companyId).then((r) => setIncidents(r.incidents)),
+      fetchClientDefenseErCases(companyId).then((r) => setCases(r.cases)),
+    ]).finally(() => setLoading(false))
+  }, [companyId])
+
+  if (loading) return <Loader2 className="h-5 w-5 text-zinc-500 animate-spin" />
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-5">
+        <h3 className="text-sm font-medium text-zinc-200 mb-1">Incident defense files</h3>
+        <p className="text-[11px] text-zinc-500 mb-3">Per-incident claims-readiness packets — timeline, witnesses, policy map, corrective actions.</p>
+        {incidents.length === 0 ? <p className="text-sm text-zinc-500">No incidents on file.</p> : (
+          <div className="space-y-1">
+            {incidents.map((i) => (
+              <div key={i.id} className="flex items-center gap-3 py-1.5 border-b border-zinc-800/30 last:border-0">
+                <span className="text-[11px] text-zinc-500 w-24 shrink-0">{i.incident_number ?? '—'}</span>
+                <span className="text-sm text-zinc-200 flex-1 truncate">{i.title ?? 'Incident'}</span>
+                <span className="text-[11px] text-zinc-500">{i.severity ?? ''}</span>
+                <button onClick={() => downloadDefenseIncident(companyId, i.id, i.incident_number)} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-emerald-400 px-2 py-1 rounded-lg border border-zinc-700"><Download className="h-3.5 w-3.5" /> PDF</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+      <Card className="p-5">
+        <h3 className="text-sm font-medium text-zinc-200 mb-1">ER case defense files</h3>
+        <p className="text-[11px] text-zinc-500 mb-3">Per-case defense packets — timeline, notes, documents, determination.</p>
+        {cases.length === 0 ? <p className="text-sm text-zinc-500">No ER cases on file.</p> : (
+          <div className="space-y-1">
+            {cases.map((c) => (
+              <div key={c.id} className="flex items-center gap-3 py-1.5 border-b border-zinc-800/30 last:border-0">
+                <span className="text-[11px] text-zinc-500 w-24 shrink-0">{c.case_number ?? '—'}</span>
+                <span className="text-sm text-zinc-200 flex-1 truncate">{c.title ?? 'Case'}</span>
+                <span className="text-[11px] text-zinc-500">{c.status ?? ''}</span>
+                <button onClick={() => downloadDefenseErCase(companyId, c.id, c.case_number)} className="inline-flex items-center gap-1 text-xs text-zinc-300 hover:text-emerald-400 px-2 py-1 rounded-lg border border-zinc-700"><Download className="h-3.5 w-3.5" /> PDF</button>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
     </div>
   )

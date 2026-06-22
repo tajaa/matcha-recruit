@@ -91,6 +91,11 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # reviews, insurer-facing PDF). Gates /resident-care + /app/resident-care.
     # Default off; admin-toggle (vertical). Not bundled.
     "resident_care": False,
+    # Universal controls-evidence register + "Proof of Controls" underwriter
+    # packet (WTW p.85). Auto-fills from existing HR/safety/compliance data;
+    # gates /controls-evidence + /app/controls-evidence. Default off;
+    # admin-toggle. Not bundled.
+    "controls_evidence": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,

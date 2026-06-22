@@ -17,6 +17,7 @@ from .broker_submission import router as broker_submission_router
 from .workforce_compliance import router as workforce_compliance_router
 from .risk_profile import router as risk_profile_router
 from .resident_care import router as resident_care_router
+from .controls_evidence import router as controls_evidence_router
 from .ir_onboarding import router as ir_onboarding_router
 from .matcha_x_onboarding import router as matcha_x_onboarding_router
 from .ir_surveys import router as ir_surveys_router
@@ -111,6 +112,8 @@ matcha_router.include_router(risk_profile_router, prefix="/risk-profile", tags=[
                              dependencies=[Depends(require_feature("risk_profile"))])
 matcha_router.include_router(resident_care_router, prefix="/resident-care", tags=["resident-care"],
                              dependencies=[Depends(require_feature("resident_care"))])
+matcha_router.include_router(controls_evidence_router, prefix="/controls-evidence", tags=["controls-evidence"],
+                             dependencies=[Depends(require_feature("controls_evidence"))])
 matcha_router.include_router(provisioning_router, prefix="/provisioning", tags=["provisioning"])
 matcha_router.include_router(
     matcha_work_router,

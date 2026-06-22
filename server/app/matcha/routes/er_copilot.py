@@ -38,6 +38,7 @@ from ..services.er_guidance import (
     _normalize_suggested_guidance_payload,
 )
 from ..services.er_export import extract_analysis_export_text
+from ..services import claims_readiness
 from ..models.er_case import (
     ERCaseCreate,
     ERCaseUpdate,
@@ -4108,3 +4109,24 @@ async def get_case_linked_incidents(
             }
             for row in rows
         ]
+
+
+@router.get("/{case_id}/claims-readiness.pdf")
+async def er_case_claims_readiness_pdf(
+    case_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Claims-readiness / defense packet (PDF) for an ER case."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+    async with get_connection() as conn:
+        data = await claims_readiness.build_er_packet(conn, case_id, company_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+    pdf = await claims_readiness.render_er_packet_pdf(data)
+    num = str(data["case"].get("case_number") or case_id).replace("/", "-").replace('"', "")
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="claims-readiness-{num}.pdf"'},
+    )

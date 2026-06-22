@@ -122,6 +122,27 @@ def _esc(v) -> str:
     return html.escape(str(v)) if v is not None else "—"
 
 
+def _controls_section_html(register: Optional[dict]) -> str:
+    """Optional Proof-of-Controls section appended to the submission PDF (tenant
+    clients only — off-platform context has no controls register)."""
+    controls = (register or {}).get("controls") or []
+    if not controls:
+        return ""
+    rows = "".join(
+        f"<tr><td>{_esc(c.get('label'))}</td>"
+        f"<td class='st {c.get('status')}'>{_esc((c.get('status') or '').upper())}</td>"
+        f"<td>{_esc(c.get('metric'))}</td></tr>"
+        for c in controls
+    )
+    s = register.get("summary") or {}
+    return (
+        f"<h2>Risk Controls — Proof of Controls "
+        f"({_esc(s.get('strong'))} strong / {_esc(s.get('gap'))} gap)</h2>"
+        f"<table><thead><tr><th>Control</th><th>Status</th><th>Evidence</th></tr></thead>"
+        f"<tbody>{rows}</tbody></table>"
+    )
+
+
 def _packet_html(ctx: dict) -> str:
     wc = ctx.get("wc") or {}
     epl = ctx.get("epl") or {}
@@ -147,7 +168,7 @@ def _packet_html(ctx: dict) -> str:
       th {{ text-align:left; font-size:8px; text-transform:uppercase; color:#888; border-bottom:1px solid #ddd; padding:4px 6px; }}
       td {{ padding:4px 6px; border-bottom:1px solid #f0f0f0; }}
       td.r {{ text-align:right; font-family:monospace; }}
-      .st {{ font-size:8px; font-weight:700; }} .st.strong{{color:#1f8a5b}} .st.partial{{color:#b8902f}} .st.gap{{color:#b23b3b}}
+      .st {{ font-size:8px; font-weight:700; }} .st.strong{{color:#1f8a5b}} .st.partial{{color:#b8902f}} .st.gap{{color:#b23b3b}} .st.na{{color:#999}}
       .narr {{ background:#f1f6f3; border-left:3px solid #1f8a5b; padding:10px 14px; border-radius:0 6px 6px 0; margin:8px 0; }}
       .foot {{ margin-top:24px; color:#999; font-size:8px; border-top:1px solid #eee; padding-top:6px; }}
     </style></head><body>
@@ -168,6 +189,8 @@ def _packet_html(ctx: dict) -> str:
       <h2>EPL Readiness — {_esc(epl.get('score'))}/100 ({_esc((epl.get('band') or '').title())})</h2>
       <table><thead><tr><th>Factor</th><th class="r">Score</th><th>Status</th></tr></thead><tbody>{epl_rows or '<tr><td>No EPL data</td><td></td><td></td></tr>'}</tbody></table>
       <div class="narr">{_esc(_epl_narrative(ctx))}</div>
+
+      {_controls_section_html(ctx.get('controls'))}
 
       <div class="foot">Prepared by Matcha for broker submission. Risk metrics derived from the client's safety/HR records;
       state WC rate trends are headline estimates pending a licensed NCCI feed. Present alongside the carrier loss run.</div>

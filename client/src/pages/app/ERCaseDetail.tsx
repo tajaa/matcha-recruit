@@ -399,6 +399,17 @@ export default function ERCaseDetail() {
 
                 <div className="border-t border-zinc-800" />
 
+                {/* Claims-readiness / defense packet (no password) */}
+                <div className="space-y-2">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Claims-readiness packet</p>
+                  <Button size="sm" variant="secondary"
+                    onClick={() => api.download(`/er/cases/${caseId}/claims-readiness.pdf`, `claims-readiness-${case_?.case_number ?? 'case'}.pdf`)}>
+                    Download defense file
+                  </Button>
+                </div>
+
+                <div className="border-t border-zinc-800" />
+
                 {/* Share link */}
                 <div className="space-y-2">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Create Share Link</p>

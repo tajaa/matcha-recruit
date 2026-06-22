@@ -428,6 +428,10 @@ export default function IRDetail() {
             <Button size="sm" variant="secondary" className="w-full" onClick={handleExport}>
               <Download size={12} className="mr-1.5" /> Export PDF
             </Button>
+            <Button size="sm" variant="secondary" className="w-full"
+              onClick={() => api.download(`/ir/incidents/${incidentId}/claims-readiness.pdf`, `claims-readiness-${incident?.incident_number}.pdf`)}>
+              <Download size={12} className="mr-1.5" /> Claims-readiness packet
+            </Button>
             {showERFeatures && (
               <IREscalationForm incidentId={incidentId!} incident={incident} onEscalated={(id) => navigate(`/app/er-copilot/${id}`)} />
             )}

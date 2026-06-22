@@ -22,6 +22,31 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'controls-evidence-and-claims-readiness',
+    date: '2026-06-21',
+    category: 'Broker',
+    title: 'Proof of Controls packet + Claims-readiness defense files',
+    summary:
+      'Two underwriter-facing artifacts built from data Matcha already holds (WTW "Insurance Marketplace Realities 2026" thesis: clean, documented risk wins better terms). (1) A universal "Proof of Controls" register that auto-compiles 8 risk controls and exports a packet — generalizing the healthcare resident-care asset to any employer. (2) A per-incident / per-ER-case "Claims-readiness" defense file (timeline + witnesses + investigation docs + policy-violation map + corrective actions).',
+    whatsNew: [
+      'Proof of Controls (new feature `controls_evidence`): 8 controls auto-derived — anti-harassment policy+signatures, training, discipline, ER cases, multi-state wage-hour (reusing the EPL-readiness engine), plus IR/OSHA incident response, credentialing currency, and safety programs.',
+      'Each control can be verified/annotated (status override + note); export a single "Proof-of-Controls" PDF. The broker submission PDF now also carries a Risk Controls section.',
+      'Claims-readiness packets (no new flag — rides Incidents + ER): a defensible PDF per IR incident and per ER case, repackaging existing timeline/witness/document/policy-mapping/corrective-action data.',
+      'Broker surface: new Controls + Defense Files tabs on the client detail page, plus the controls section folded into the carrier submission packet.',
+    ],
+    howToUse: [
+      'Company → Compliance → Proof of Controls (when `controls_evidence` is enabled): review the auto-filled controls, mark any verified with a note, then "Proof-of-Controls packet" to download.',
+      'Company → an IR incident or ER case → the export panel now has a "Claims-readiness packet" download.',
+      'Broker → a client → Controls tab (register + packet) and Defense Files tab (per-incident / per-case PDFs).',
+    ],
+    setup: [
+      'Migration `ctrlev01` (table `company_control_evidence`) — applied to dev; run `./scripts/migrate-prod.sh` before prod deploy.',
+      'Toggle the `controls_evidence` feature per company in Admin → Features (the claims-readiness packets need no flag).',
+      'Deploy backend + client build.',
+    ],
+    tag: 'action-needed',
+  },
+  {
     id: 'broker-portal-redesign',
     date: '2026-06-21',
     category: 'Broker',
