@@ -12,6 +12,7 @@ from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id
 from ..services import risk_index
 from ..services import risk_narrative
+from ..services import submission_readiness
 
 router = APIRouter()
 
@@ -21,6 +22,14 @@ async def get_risk_profile(current_user=Depends(require_admin_or_client)):
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
         return await risk_index.compute_risk_index(conn, company_id)
+
+
+@router.get("/readiness")
+async def get_submission_readiness(current_user=Depends(require_admin_or_client)):
+    """Submission-readiness completeness score + the 'finish these → tighter terms' checklist."""
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        return await submission_readiness.compute_readiness(conn, company_id)
 
 
 @router.post("/narrative")

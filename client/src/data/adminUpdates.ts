@@ -22,6 +22,27 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'submission-readiness-score',
+    date: '2026-06-21',
+    category: 'Broker',
+    title: 'Submission-readiness score — the data→price proof loop',
+    summary:
+      'A completeness score on the Risk Profile portal: "your WC + EPL data is X% underwriter-ready — finish these N items → tighter terms." Distinct from the risk index (how good the risk is); this measures how well-articulated the data is, the report\'s core causal claim that clean data wins better pricing. Ties HRIS/incident data → submission packet → risk index into one loop.',
+    whatsNew: [
+      'Risk Profile page gains a "Submission readiness" card: a 0–100 completeness score + a 10-item checklist (operating locations, headcount, industry, experience mod, claim classification, return-to-work, class codes, EPL questionnaire, anti-harassment policy, verified controls), each missing item showing the exact fix.',
+      'Reuses the same inputs the submission packet is built from — no new data entry, no new feature flag (rides the existing risk_profile portal).',
+      'The broker submission packet PDF now carries a "Submission readiness: X%" pre-flight banner listing what to complete before going to market.',
+    ],
+    howToUse: [
+      'Company → Risk Profile (risk_profile feature): the Submission readiness card sits under the risk-index hero. Each unchecked item links to the work that completes it.',
+      'Broker → generate a client submission PDF: the readiness banner appears at the top.',
+    ],
+    setup: [
+      'None — no migration, no new flag. Deploy backend + client build.',
+    ],
+    tag: 'new',
+  },
+  {
     id: 'controls-evidence-and-claims-readiness',
     date: '2026-06-21',
     category: 'Broker',

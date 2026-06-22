@@ -16,7 +16,7 @@ from ...database import get_connection
 from ..dependencies import require_broker, require_broker_pro
 from ..services import (
     wc_depth, epl_readiness, external_clients as ext, submission_packet as sp,
-    controls_evidence as ce, claims_readiness as cr,
+    controls_evidence as ce, claims_readiness as cr, submission_readiness as sr,
 )
 from .ir_incidents import compute_wc_metrics
 from .broker_portfolio import _assert_broker_owns_company
@@ -39,6 +39,7 @@ async def _tenant_context(conn, user_id, company_id: UUID) -> dict:
     mods = await wc_depth.latest_mods(conn, [company_id])
     epl = await epl_readiness.compute_epl_readiness(conn, company_id)
     controls = await ce.build_register(conn, company_id, epl=epl)
+    readiness = await sr.compute_readiness(conn, company_id, wc=m, epl=epl, controls=controls)
     primary = states[0] if states else None
     latest = mods.get(str(company_id)) or {}
     return {
@@ -57,6 +58,7 @@ async def _tenant_context(conn, user_id, company_id: UUID) -> dict:
         },
         "epl": {"score": epl["score"], "band": epl["band"], "factors": epl["factors"]},
         "controls": controls,
+        "readiness": readiness,
     }
 
 

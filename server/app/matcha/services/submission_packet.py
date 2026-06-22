@@ -143,6 +143,23 @@ def _controls_section_html(register: Optional[dict]) -> str:
     )
 
 
+def _readiness_section_html(readiness: Optional[dict]) -> str:
+    """Optional pre-flight banner: how underwriter-ready the client's data is."""
+    if not readiness:
+        return ""
+    summ = readiness.get("summary") or {}
+    fixes = readiness.get("top_fixes") or []
+    head = (
+        f"<b>Submission readiness: {_esc(readiness.get('score'))}% "
+        f"({_esc((readiness.get('band') or '').title())})</b> — "
+        f"{_esc(summ.get('done'))}/{_esc(summ.get('total'))} underwriting inputs complete."
+    )
+    if fixes:
+        lis = "".join(f"<li>{_esc(f)}</li>" for f in fixes)
+        head += f"<div class='rfix'>Before marketing, complete:</div><ul>{lis}</ul>"
+    return f"<div class='ready'>{head}</div>"
+
+
 def _packet_html(ctx: dict) -> str:
     wc = ctx.get("wc") or {}
     epl = ctx.get("epl") or {}
@@ -170,10 +187,14 @@ def _packet_html(ctx: dict) -> str:
       td.r {{ text-align:right; font-family:monospace; }}
       .st {{ font-size:8px; font-weight:700; }} .st.strong{{color:#1f8a5b}} .st.partial{{color:#b8902f}} .st.gap{{color:#b23b3b}} .st.na{{color:#999}}
       .narr {{ background:#f1f6f3; border-left:3px solid #1f8a5b; padding:10px 14px; border-radius:0 6px 6px 0; margin:8px 0; }}
+      .ready {{ background:#fff8ec; border-left:3px solid #b8902f; padding:8px 12px; border-radius:0 6px 6px 0; margin:10px 0; font-size:10px; }}
+      .ready ul {{ margin:4px 0 0; padding-left:16px; }} .rfix {{ color:#666; margin-top:4px; }}
       .foot {{ margin-top:24px; color:#999; font-size:8px; border-top:1px solid #eee; padding-top:6px; }}
     </style></head><body>
       <h1>Underwriting Submission</h1>
       <p class="sub">{_esc(ctx.get('name'))} — {_esc(ctx.get('industry'))} · {_esc(ctx.get('headcount'))} employees · {_esc(ctx.get('state'))}</p>
+
+      {_readiness_section_html(ctx.get('readiness'))}
 
       <h2>Workers' Compensation</h2>
       <div class="grid">

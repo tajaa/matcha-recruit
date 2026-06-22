@@ -1,19 +1,21 @@
 import { useEffect, useState } from 'react'
-import { Gauge, Loader2, ArrowUpRight, Sparkles } from 'lucide-react'
+import { Gauge, Loader2, ArrowUpRight, Sparkles, ListChecks, Check, Circle } from 'lucide-react'
 import { Card } from '../../components/ui'
-import { fetchRiskProfile, fetchRiskNarrative } from '../../api/riskIndex'
+import { fetchRiskProfile, fetchRiskNarrative, fetchSubmissionReadiness } from '../../api/riskIndex'
 import type { RiskNarrative } from '../../api/riskIndex'
-import type { RiskIndex } from '../../types/riskIndex'
-import { RISK_BAND_TONE } from '../../types/riskIndex'
+import type { RiskIndex, SubmissionReadiness } from '../../types/riskIndex'
+import { RISK_BAND_TONE, READINESS_BAND_TONE } from '../../types/riskIndex'
 
 export default function RiskProfile() {
   const [data, setData] = useState<RiskIndex | null>(null)
   const [loading, setLoading] = useState(true)
   const [narrative, setNarrative] = useState<RiskNarrative | null>(null)
   const [explaining, setExplaining] = useState(false)
+  const [readiness, setReadiness] = useState<SubmissionReadiness | null>(null)
 
   useEffect(() => {
     fetchRiskProfile().then(setData).finally(() => setLoading(false))
+    fetchSubmissionReadiness().then(setReadiness).catch(() => { /* noop */ })
   }, [])
 
   async function explain() {
@@ -59,6 +61,40 @@ export default function RiskProfile() {
           ))}
         </div>
       </Card>
+
+      {/* Submission readiness — data→price completeness loop */}
+      {readiness && (
+        <Card className="p-5">
+          <div className="flex items-start justify-between mb-3">
+            <div>
+              <h3 className="text-sm font-medium text-zinc-200 tracking-wide flex items-center gap-2">
+                <ListChecks className="h-4 w-4 text-zinc-500" /> Submission readiness
+              </h3>
+              <p className="text-[11px] text-zinc-500 mt-0.5 max-w-xl">How underwriter-ready your WC + EPL data is. Completing these doesn't change your risk — it lets your broker articulate it, which is what wins tighter terms.</p>
+            </div>
+            <div className="text-right shrink-0">
+              <div className={`text-3xl font-light font-mono ${READINESS_BAND_TONE[readiness.band] ?? 'text-zinc-200'}`}>{readiness.score}%</div>
+              <div className={`text-[10px] uppercase tracking-widest font-bold ${READINESS_BAND_TONE[readiness.band] ?? 'text-zinc-500'}`}>{readiness.band}</div>
+            </div>
+          </div>
+          <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden mb-3">
+            <div className={`h-full ${readiness.score >= 80 ? 'bg-emerald-500' : readiness.score >= 50 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${readiness.score}%` }} />
+          </div>
+          <div className="space-y-1">
+            {readiness.items.map((it) => (
+              <div key={it.key} className="flex items-start gap-2 py-1 border-b border-zinc-800/30 last:border-0">
+                {it.done
+                  ? <Check className="h-4 w-4 text-emerald-400 mt-0.5 shrink-0" />
+                  : <Circle className="h-4 w-4 text-zinc-600 mt-0.5 shrink-0" />}
+                <div className="flex-1 min-w-0">
+                  <span className={`text-sm ${it.done ? 'text-zinc-400' : 'text-zinc-200'}`}>{it.label}</span>
+                  {!it.done && <p className="text-[11px] text-amber-400/80">{it.fix}</p>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/* How to improve — AI narrative (falls back to the static fixes) */}
       <Card className="p-5">
