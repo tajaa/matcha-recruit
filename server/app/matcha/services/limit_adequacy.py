@@ -191,14 +191,28 @@ def analyze(carried: list[dict], contracts: list[dict], *, headcount: Optional[i
                 gap = f"Contract requires {_money(req_po or req_agg)} {_LINE_LABEL[line]} — none on file"
                 contract_shortfalls += 1
             else:
-                po_short = req_po is not None and (have_po is None or have_po < req_po)
-                agg_short = req_agg is not None and (have_agg is None or have_agg < req_agg)
+                # A RECORDED limit below the requirement is a hard shortfall. A
+                # limit the carried line simply doesn't record (None) is NOT proof
+                # of a $0 limit — so don't treat a missing value as "carry —".
+                po_short = req_po is not None and have_po is not None and have_po < req_po
+                agg_short = req_agg is not None and have_agg is not None and have_agg < req_agg
                 if po_short or agg_short:
                     status = "shortfall"
                     need = _money(req_po) if po_short else _money(req_agg)
                     has = _money(have_po) if po_short else _money(have_agg)
                     gap = f"Carry {has}, contract requires {need}"
                     contract_shortfalls += 1
+                elif req_po is not None and have_po is None:
+                    # primary (per-occ) limit required but not on file — a real gap to
+                    # close, but phrased as "not recorded" rather than implying $0.
+                    status = "shortfall"
+                    gap = f"Contract requires {_money(req_po)} per-occurrence — none recorded on the carried line"
+                    contract_shortfalls += 1
+                elif req_agg is not None and have_agg is None:
+                    # only the secondary aggregate is unrecorded (per-occ satisfies the
+                    # contract): a data-completeness nudge, NOT a hard shortfall. Recording
+                    # only per-occ must not false-flag every aggregate-naming contract line.
+                    gap = f"Aggregate not on file — confirm it meets {_money(req_agg)}"
         elif not have:
             status = "not_carried"
         elif baseline and have_po is not None and have_po < baseline["per_occurrence"]:

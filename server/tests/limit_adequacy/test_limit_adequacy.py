@@ -73,6 +73,30 @@ def test_meets_contract_is_ok():
     assert r["summary"]["contract_shortfalls"] == 0
 
 
+def test_missing_carried_aggregate_is_not_a_shortfall():
+    # per-occ meets the contract; the aggregate simply isn't recorded → a data nudge,
+    # NOT a hard gap (recording only per-occ must not false-flag every agg-naming line).
+    carried = [{"line": "gl", "per_occurrence": 5 * M}]  # no aggregate keyed
+    contracts = [_contract("MSA", [{"line": "gl", "per_occurrence": 1 * M, "aggregate": 2 * M}])]
+    r = la.analyze(carried, contracts, headcount=100, venue_tier=None)
+    gl = _line(r, "gl")
+    assert gl["status"] == "ok"
+    assert r["summary"]["contract_shortfalls"] == 0
+    assert "Aggregate not on file" in (gl["gap"] or "")
+
+
+def test_missing_carried_per_occurrence_is_a_shortfall():
+    # the carried line records only an aggregate; contract requires a per-occ limit →
+    # real gap, phrased as "none recorded" rather than implying $0 carried.
+    carried = [{"line": "gl", "aggregate": 4 * M}]  # no per_occurrence keyed
+    contracts = [_contract("MSA", [{"line": "gl", "per_occurrence": 2 * M}])]
+    r = la.analyze(carried, contracts, headcount=100, venue_tier=None)
+    gl = _line(r, "gl")
+    assert gl["status"] == "shortfall"
+    assert "none recorded" in (gl["gap"] or "")
+    assert r["summary"]["contract_shortfalls"] == 1
+
+
 def test_max_required_across_contracts():
     contracts = [
         _contract("A", [{"line": "gl", "per_occurrence": 1 * M}]),

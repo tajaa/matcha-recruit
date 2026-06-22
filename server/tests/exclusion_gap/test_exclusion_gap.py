@@ -57,4 +57,6 @@ def test_external_only_industry_and_state():
     keys = _by_key(r)
     assert "assault_battery" in keys
     assert "wildfire" in keys  # CA
-    assert keys["biometric_bipa"]["status"] if "biometric_bipa" in keys else True  # hospitality keyword
+    # "hospitality" is a biometric_bipa keyword; external path has no DB signal, so
+    # it can only ever be keyword-exposed (never mitigated).
+    assert keys["biometric_bipa"]["status"] == "exposed"

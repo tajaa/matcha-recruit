@@ -38,6 +38,8 @@ def test_period_start_derivation():
     assert ld._period_start("PY2020", None) == date(2020, 1, 1)
     assert ld._period_start("no year", None) is None
     assert ld._period_start("2021", date(2021, 7, 1)) == date(2021, 7, 1)  # explicit wins
+    # a stray year in a claim number must not beat the explicit policy-year token
+    assert ld._period_start("Claim 2019-00042 PY2021", None) == date(2021, 1, 1)
 
 
 def test_maturity_bucketing():
@@ -100,6 +102,25 @@ def test_single_valuation_no_projection():
     p = _period(line, "2023")
     assert p["ultimate"] == 300_000.0 and p["adverse_development"] == 0.0
     assert line["summary"]["valuations"] == 1
+
+
+def test_maturity_gap_excluded_from_link_ratios():
+    # 2021 valued at 12mo and 36mo but NOT 24mo (a skipped valuation); 2022 at 12/24mo.
+    snaps = [
+        _snap("2021", date(2021, 12, 31), 100_000),
+        _snap("2021", date(2023, 12, 31), 160_000),  # 36mo — its 24mo valuation missing
+        _snap("2022", date(2022, 12, 31), 200_000),
+        _snap("2022", date(2023, 12, 31), 240_000),  # 24mo
+    ]
+    line = _wc(ld.build_triangle(snaps))
+    fac = {f["from_maturity"]: f for f in line["factors"]}
+    # the 12→36 span from 2021 must NOT pollute the 12→24 bucket — only 2022's
+    # consecutive 12→24 (240/200=1.2) counts (pre-fix this averaged in 1.6 → 1.4).
+    assert fac[12]["factor"] == 1.2 and fac[12]["n"] == 1
+    # the gap is surfaced, not silent
+    assert _period(line, "2021")["maturity_gap"] is True
+    assert line["summary"]["has_maturity_gap"] is True
+    assert _period(line, "2022")["maturity_gap"] is False
 
 
 def test_empty():

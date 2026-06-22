@@ -111,7 +111,13 @@ Be conservative - only mark as relevant if there's a clear legislative/regulator
             timeout=45,
         )
 
-        raw_text = response.text.strip()
+        # google-genai returns text=None for safety-blocked or pure grounding/tool-call
+        # turns (grounding is enabled above) — guard before .strip() to avoid an
+        # AttributeError that would otherwise fall through to the bare except.
+        raw_text = (response.text or "").strip()
+        if not raw_text:
+            print(f"[Legislation Watch] Gemini returned no text for: {item.get('title', '?')[:50]}")
+            return None
 
         # Clean JSON
         if raw_text.startswith("```json"):

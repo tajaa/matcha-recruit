@@ -26,12 +26,15 @@ LINE_LABELS = {"wc": "Workers' Comp", "gl": "General Liability", "auto": "Commer
 
 
 def _period_start(label: str, explicit) -> date | None:
-    """Use the explicit policy_period_start, else derive Jan-1 of the first
-    4-digit year in the label (e.g. '2021', '2021-2022', 'PY2021')."""
+    """Use the explicit policy_period_start, else derive Jan-1 of the period year
+    from the label. Prefer an explicit policy-year token (``PY2021``) so a stray
+    year inside a claim number (e.g. 'Claim 2019-00042 PY2021') doesn't mis-age the
+    whole period; else fall back to the first 4-digit year ('2021', '2021-2022')."""
     if explicit:
         return explicit
-    m = re.search(r"(19|20)\d{2}", str(label or ""))
-    return date(int(m.group(0)), 1, 1) if m else None
+    s = str(label or "")
+    m = re.search(r"PY\s*((?:19|20)\d{2})", s, re.I) or re.search(r"((?:19|20)\d{2})", s)
+    return date(int(m.group(1)), 1, 1) if m else None
 
 
 def _age_months(start: date | None, val: date) -> int | None:
@@ -86,16 +89,25 @@ def _build_line(line: str, rows: list[dict]) -> dict:
             if prev is None or (point["valuation_date"] or "") >= (prev["valuation_date"] or ""):
                 pts[mat] = point
         ordered = [pts[m] for m in sorted(pts)]
+        # non-consecutive maturities (a missing intermediate valuation) mean some
+        # development steps can't be measured — flag it so the projection isn't
+        # silently presented as fully credible.
+        maturity_gap = any(b["maturity"] != a["maturity"] + 12 for a, b in zip(ordered, ordered[1:]))
         periods.append({"period_label": label,
                         "period_start": start.isoformat() if start else None,
-                        "points": ordered})
+                        "points": ordered, "maturity_gap": maturity_gap})
 
-    # age-to-age link ratios grouped by from-maturity (simple average across periods)
+    # age-to-age link ratios grouped by from-maturity (simple average across periods).
+    # Only pair CONSECUTIVE 12-month maturities: a period valued at e.g. 12mo and
+    # 36mo (its 24mo valuation missing) must not book that 24-month-span ratio into
+    # the 12->24 bucket — doing so both inflates the 12->24 factor and loses the
+    # 24->36 evidence, silently mis-projecting ultimates for every period that
+    # chains through it.
     ratios: dict[int, list[float]] = {}
     for p in periods:
         pts = p["points"]
         for a, b in zip(pts, pts[1:]):
-            if a["incurred"] > 0:
+            if a["incurred"] > 0 and b["maturity"] == a["maturity"] + 12:
                 ratios.setdefault(a["maturity"], []).append(b["incurred"] / a["incurred"])
     atf = {m: round(sum(rs) / len(rs), 4) for m, rs in ratios.items() if rs}
 
@@ -134,6 +146,7 @@ def _build_line(line: str, rows: list[dict]) -> dict:
             "total_adverse_development": round(tot_ult - tot_latest, 2),
             "adverse_pct": round(100 * (tot_ult - tot_latest) / tot_latest, 1) if tot_latest > 0 else 0.0,
             "periods": len(periods), "valuations": valuations, "max_maturity": max_mat,
+            "has_maturity_gap": any(p["maturity_gap"] for p in periods),
         },
     }
 
@@ -219,13 +232,19 @@ def _line_section_html(ln: dict) -> str:
                  f"<td class='r'>{_money(p['ultimate'])}</td>"
                  f"<td class='r {'bad' if adv > 0 else 'good'}'>{('+' if adv > 0 else '')}{_money(adv)}</td></tr>")
     factors = ", ".join(f"{f['from_maturity']}→{f['to_maturity']}mo: {f['factor']}" for f in ln["factors"]) or "—"
+    gap_note = (
+        " Note: some policy periods are missing an intermediate valuation "
+        "(non-consecutive maturities), so those development steps can't be measured "
+        "and default to a 1.0 tail — read the projected ultimate as a floor."
+        if s.get("has_maturity_gap") else ""
+    )
     return (
         f"<h2>{_esc(ln['label'])} — incurred development triangle</h2>"
         f"<table><thead><tr><th>Policy period</th>{head}<th class='r'>Ultimate</th><th class='r'>Adverse dev.</th></tr></thead>"
         f"<tbody>{body}</tbody></table>"
         f"<p class='fac'>Age-to-age factors (simple avg): {_esc(factors)}. "
         f"Total latest incurred {_money(s['total_latest_incurred'])} → projected ultimate {_money(s['total_ultimate'])} "
-        f"({'+' if s['total_adverse_development'] > 0 else ''}{_money(s['total_adverse_development'])}, {s['adverse_pct']}%).</p>"
+        f"({'+' if s['total_adverse_development'] > 0 else ''}{_money(s['total_adverse_development'])}, {s['adverse_pct']}%).{gap_note}</p>"
     )
 
 
