@@ -15,6 +15,8 @@ rate tables — none of which we have.
 
 from typing import Optional, Dict, Any
 
+from .bls_injury_rates_2024 import BLS_INJURY_RATES, BLS_META
+
 # BLS 2023 private-industry incident rate medians by NAICS 2-digit sector.
 SECTOR_BENCHMARKS: Dict[str, Dict[str, Any]] = {
     "11": {"label": "Agriculture",                  "trir": 5.5, "dart": 3.2},
@@ -59,6 +61,44 @@ INDUSTRY_TO_SECTOR: Dict[str, str] = {
     "arts": "71", "entertainment": "71",
 }
 
+# Finer industry-text → detailed NAICS (subsector) for verticals where the
+# 2-digit sector hides big swings — e.g. nursing care (6231, TRC ~6.3) vs the
+# health-care sector (62, ~4.4). Tried before INDUSTRY_TO_SECTOR; bls_rate walks
+# up to the sector if a code isn't in the BLS table, so over-specifying is safe.
+INDUSTRY_TO_NAICS: Dict[str, str] = {
+    "hospital": "622", "hospitals": "622",
+    "nursing": "6231", "skilled_nursing": "6231", "nursing_home": "6231",
+    "senior_living": "623", "assisted_living": "6233", "residential_care": "623",
+    "home_health": "6216", "home_care": "6216",
+    "clinic": "621", "outpatient": "621", "medical": "621", "physician": "621",
+    "social_services": "624", "social_assistance": "624", "childcare": "6244",
+    "restaurant": "722", "restaurants": "722", "food_service": "722", "food": "722",
+    "hotel": "721", "hotels": "721",
+    "trucking": "484", "freight": "484",
+    "warehouse": "493", "warehousing": "493", "logistics": "493",
+    "grocery": "4451", "supermarket": "4451",
+    "software": "5415", "saas": "5415", "tech": "5415", "technology": "5415",
+    "biotech": "5417", "pharma": "3254", "pharmaceutical": "3254",
+    "banking": "522", "fintech": "522",
+}
+
+
+def bls_rate(naics: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Most-detailed BLS SOII rate for a NAICS, walking up to the 2-digit sector.
+
+    Returns {naics, label, trc, dart} or None. Resolution: try the full code,
+    then trim a digit at a time (6→5→4→3→2) until a published rate is found.
+    """
+    if not naics:
+        return None
+    n = str(naics).strip()
+    while len(n) >= 2:
+        hit = BLS_INJURY_RATES.get(n)
+        if hit:
+            return {"naics": n, **hit}
+        n = n[:-1]
+    return None
+
 # US average annual Workers Comp premium per FTE by NAICS sector. Very rough
 # — actual depends on state, NCCI class, payroll, mod, etc.
 SECTOR_AVG_PREMIUM_PER_FTE: Dict[str, int] = {
@@ -79,20 +119,35 @@ def _normalize(industry: Optional[str]) -> str:
     )
 
 
-def lookup_benchmark(industry: Optional[str]) -> Optional[Dict[str, Any]]:
-    """Return {sector, label, trir, dart} for the company's industry, else None.
+def lookup_benchmark(industry: Optional[str], naics: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Return {sector, naics, label, trir, dart, source} for the company, else None.
 
-    Falls back to None when industry is missing or unrecognized — caller
-    should display the national fallback (TRIR 2.7 / DART 1.7) and label it.
+    Prefers real BLS SOII rates at the most detailed NAICS available:
+      1. an explicit ``naics`` (e.g. captured from HRIS), else
+      2. a finer industry-text → subsector map (INDUSTRY_TO_NAICS), else
+      3. the 2-digit sector from INDUSTRY_TO_SECTOR.
+    ``sector`` stays the 2-digit code (used by the premium estimator); ``naics``
+    is the detailed code the rate actually came from. Falls back to the static
+    SECTOR_BENCHMARKS only if BLS has no row. None when industry is unrecognized.
     """
     key = _normalize(industry)
+    code = naics or INDUSTRY_TO_NAICS.get(key) or INDUSTRY_TO_SECTOR.get(key)
+    r = bls_rate(code)
+    if r:
+        sector2 = r["naics"][:2]
+        # PDF labels for multi-word sector names wrap/truncate ("Health care and
+        # social"); prefer our clean 2-digit label, keep the BLS label for subsectors.
+        clean = SECTOR_BENCHMARKS.get(sector2, {}).get("label") if len(r["naics"]) == 2 else None
+        return {
+            "sector": sector2, "naics": r["naics"], "label": clean or r["label"],
+            "trir": r["trc"], "dart": r["dart"], "source": BLS_META["source"],
+        }
+    # legacy static fallback (only if BLS has nothing for this sector)
     sector = INDUSTRY_TO_SECTOR.get(key)
-    if not sector:
-        return None
-    bench = SECTOR_BENCHMARKS.get(sector)
-    if not bench:
-        return None
-    return {"sector": sector, **bench}
+    bench = SECTOR_BENCHMARKS.get(sector) if sector else None
+    if bench:
+        return {"sector": sector, "naics": sector, "source": "static (BLS 2023)", **bench}
+    return None
 
 
 def estimate_premium_impact(

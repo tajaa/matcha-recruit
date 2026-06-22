@@ -23,6 +23,32 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'bls-injury-rate-benchmark',
+    date: '2026-06-22',
+    category: 'Broker',
+    title: 'Real BLS injury-rate benchmarks by detailed NAICS (#22)',
+    summary:
+      'Replaces the 17 hardcoded 2-digit sector injury-rate medians with ~1,000 real BLS SOII (2024) rates at 2–6 digit NAICS granularity. A client’s TRIR/DART now benchmarks against its actual industry, not a coarse bucket — e.g. nursing care (NAICS 6231, TRC 6.3) instead of the whole health-care sector (62, ~4.4). Sharpens the benchmark across WC metrics, the risk index, and the submission packet.',
+    whatsNew: [
+      'BLS SOII Table 1 (2024) parsed into a static rate table — ~1,000 NAICS codes with total-recordable (TRC) + days-away/restricted/transfer (DART) rates per 100 FTE.',
+      'wc_benchmarks.lookup_benchmark now resolves the most detailed NAICS available (explicit code → finer industry-text map → 2-digit sector) and walks up to the sector if a code has no published rate; results carry a "source" of the real BLS year.',
+      'Premium-impact + severity-band math unchanged (sector stays 2-digit); benchmark numbers are now real + sourced instead of approximate hardcoded medians.',
+      'Free/public source (BLS), parsed offline; no new tables, no migration, no access risk.',
+    ],
+    howToUse: [
+      'Automatic — WC benchmarking (broker WC tab, risk index, submission packet) uses the BLS-backed numbers once deployed.',
+      'For verticals with big intra-sector swings (nursing, hospitals, trucking, restaurants) the benchmark is now materially more accurate.',
+    ],
+    notes: [
+      'Today the finer NAICS comes from mapping the company’s industry text to a subsector (INDUSTRY_TO_NAICS) plus the 2-digit sector fallback. Capturing a company’s real NAICS (e.g. from HRIS) would unlock full 6-digit precision automatically — the lookup already accepts an explicit naics.',
+      'BLS data is free + public but its site bot-blocks scraping, so the Table 1 file is downloaded by hand and parsed offline into a generated module (committed); re-run scripts/wc_data/build_bls_rates.py to refresh each year.',
+    ],
+    setup: [
+      'Deploy backend (the generated BLS rate module ships in the image — no DB seed needed).',
+    ],
+    tag: 'action-needed',
+  },
+  {
     id: 'real-ca-wc-class-codes',
     date: '2026-06-22',
     category: 'Broker',

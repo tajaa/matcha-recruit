@@ -1,3 +1,27 @@
+# WC data (class codes + BLS injury-rate benchmark)
+
+## BLS injury-rate benchmark (#22)
+
+Real BLS SOII injury/illness incidence rates (TRC + DART) by NAICS — replaces the
+17 hardcoded 2-digit sector medians in `wc_benchmarks.py` with ~1,000 codes at
+2–6 digit granularity, so a client's TRIR/DART benchmarks against its *actual*
+industry (e.g. nursing care `6231` TRC 6.3 vs the health-care sector `62` ~4.4).
+
+- **Source (free/public, no login — bot-blocked so downloaded by hand):**
+  BLS Table 1 — incidence rates by industry & case type
+  ([page](https://www.bls.gov/web/osh/table-1-industry-rates-national.htm)).
+  Saved here as `bls_table1_industry_rates_2024.pdf` (gitignored; re-download to refresh).
+- **Build:** `cd server && ./venv/bin/python scripts/wc_data/build_bls_rates.py`
+  → regenerates `app/matcha/services/bls_injury_rates_2024.py` (GENERATED static
+  dict; needs `pdftotext`/poppler). 2-digit ranges (31-33/44-45/48-49) expanded
+  to each member code.
+- **Use:** `wc_benchmarks.lookup_benchmark(industry, naics=None)` prefers the most
+  detailed NAICS (explicit `naics` → `INDUSTRY_TO_NAICS` subsector → 2-digit
+  sector), walking up to the sector if a code has no row. No DB/migration — it's
+  a static module compiled into the image; nothing to seed in prod.
+
+---
+
 # WC class-code data (California, real)
 
 Real California WC class codes + advisory pure premium rates, replacing the
