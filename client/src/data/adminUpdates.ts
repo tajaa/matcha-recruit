@@ -23,6 +23,35 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'ir-voice-intake',
+    date: '2026-06-23',
+    category: 'Incident Reporting',
+    title: 'Voice dictation — talk in an incident, AI fills the form',
+    summary:
+      'Optional "Dictate" on the incident-report form: the reporter speaks an account, one Gemini call transcribes it and extracts the fields, and the form is pre-filled for the reporter to review and edit before submitting. Never auto-creates (it stays a reviewed legal record). One shared form, so all IR products get it (full Matcha, Matcha-X, Matcha-lite).',
+    whatsNew: [
+      'A "Dictate" button on the Report-Incident form (shown only when the ir_voice_intake flag is on). Record → stop → one Gemini multimodal call transcribes + extracts.',
+      'Pre-fills description, reporter name, date/time text, witnesses, and the best-match location; shows a read-only suggested incident type & severity (the post-submit classifier still finalizes those).',
+      'Only fills fields the model actually heard — anything you already typed is preserved; you review/edit everything, then submit normally.',
+      'Audio is captured via the existing PCM worklet and assembled to WAV in the browser (Gemini accepts WAV; it rejects the webm/opus that the default recorder produces).',
+    ],
+    howToUse: [
+      'Enable: Admin → toggle the company\'s "ir_voice_intake" feature (off by default).',
+      'In the Report-Incident form → click "Dictate", allow the mic, speak the incident ("Yesterday around 3pm Jane Doe slipped on a wet floor in the main warehouse, Bob Smith saw it"), click Stop.',
+      'Review the pre-filled fields (edit anything), then Submit Report as usual.',
+    ],
+    setup: [
+      'Turn on the ir_voice_intake feature flag per company (admin toggle / enabled_features). No database migration — it\'s flag-only.',
+      'Uses the existing Gemini key (LIVE_API); no new integration. The reporter\'s browser must allow microphone access.',
+    ],
+    notes: [
+      'AI-assisted + best-effort: a failed/unclear recording degrades to "please type the details" and never blocks the form or 500s; nothing is ever auto-submitted.',
+      'Final incident type/severity are still decided by the existing post-insert classifier — the voice "suggested" badge is only a hint.',
+      'Works in any modern browser that grants getUserMedia + AudioWorklet (Chrome/Edge/Safari/Firefox).',
+    ],
+    tag: 'action-needed',
+  },
+  {
     id: 'commercial-property',
     date: '2026-06-22',
     category: 'Property',
