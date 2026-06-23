@@ -19,6 +19,7 @@ from .workforce_compliance import router as workforce_compliance_router
 from .risk_profile import router as risk_profile_router
 from .resident_care import router as resident_care_router
 from .controls_evidence import router as controls_evidence_router
+from .legal_defense import router as legal_defense_router, public_router as legal_defense_public_router
 from .limit_adequacy import router as limit_adequacy_router
 from .property import router as property_router
 from .driver_risk import router as driver_risk_router
@@ -120,6 +121,8 @@ matcha_router.include_router(resident_care_router, prefix="/resident-care", tags
                              dependencies=[Depends(require_feature("resident_care"))])
 matcha_router.include_router(controls_evidence_router, prefix="/controls-evidence", tags=["controls-evidence"],
                              dependencies=[Depends(require_feature("controls_evidence"))])
+matcha_router.include_router(legal_defense_router, prefix="/legal-defense", tags=["legal-defense"],
+                             dependencies=[Depends(require_feature("legal_defense"))])
 matcha_router.include_router(limit_adequacy_router, prefix="/limit-adequacy", tags=["limit-adequacy"],
                              dependencies=[Depends(require_feature("limit_adequacy"))])
 matcha_router.include_router(property_router, prefix="/property", tags=["property"],
@@ -232,6 +235,7 @@ matcha_router.include_router(
 )
 # Public anonymous incident reporting — no auth, no feature gate (token-validated internally)
 matcha_router.include_router(anonymous_report_router, tags=["anonymous-reporting"])
+matcha_router.include_router(legal_defense_public_router, tags=["legal-defense-public"])
 # Public off-platform client-intake — no auth, token-validated internally
 matcha_router.include_router(external_intake_router, prefix="/external-intake", tags=["external-intake-public"])
 # Admin WC rate-data import (require_admin per-endpoint)

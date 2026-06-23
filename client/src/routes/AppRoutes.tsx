@@ -31,6 +31,7 @@ import ControlsEvidence from '../pages/app/ControlsEvidence'
 import LimitAdequacy from '../pages/app/LimitAdequacy'
 import DriverRisk from '../pages/app/DriverRisk'
 import Property from '../pages/app/Property'
+import LegalDefense from '../pages/app/LegalDefense'
 import Inbox from '../pages/app/Inbox'
 import UserSettings from '../pages/app/UserSettings'
 import Notifications from '../pages/app/Notifications'
@@ -109,6 +110,7 @@ export default function AppRoutes() {
         <Route path="limit-adequacy" element={<FeatureGate feature="limit_adequacy" label="Limit Adequacy"><LimitAdequacy /></FeatureGate>} />
         <Route path="driver-risk" element={<FeatureGate feature="driver_risk" label="Driver Risk"><DriverRisk /></FeatureGate>} />
         <Route path="property" element={<FeatureGate feature="property" label="Commercial Property"><Property /></FeatureGate>} />
+        <Route path="legal-defense" element={<FeatureGate feature="legal_defense" label="Legal Defense"><LegalDefense /></FeatureGate>} />
         <Route path="resources" element={<AppResources />} />
         <Route path="resources/templates" element={<RequireBusinessAccount><ResourcesTemplates embedded /></RequireBusinessAccount>} />
         <Route path="resources/templates/job-descriptions" element={<ResourcesJobDescriptions embedded />} />

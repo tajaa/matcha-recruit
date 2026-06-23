@@ -123,6 +123,16 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # only POST /ir/incidents/voice/parse + the "Dictate" button (stacks on the
     # incidents gate). Default off; admin-toggle; NOT in any tier overlay.
     "ir_voice_intake": False,
+    # Legal Defense builder (full Matcha / Pro). An admin opens a legal matter
+    # (subpoena / class action / EEOC / audit), converses with a GROUNDED AI that
+    # pulls the company's own records across every enabled subsystem (IR/OSHA, ER,
+    # compliance, discipline, training, handbooks, accommodations + audit logs),
+    # and exports an attorney-facing evidence packet (defense-memo PDF that cites
+    # only real records + a ZIP bundle of the underlying source documents). Read-
+    # only over evidence; every generation/download is audit-logged. Gates the
+    # /legal-defense router + the /app/legal-defense page. Default off; admin-
+    # toggle; NOT bundled (paid full-platform asset).
+    "legal_defense": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,
