@@ -24,7 +24,7 @@ const DISCLAIMER =
   'This organizes your own records to help your attorney — it is an evidence-assembly aid, not legal advice, and renders no legal conclusion. Have counsel review before relying on it.'
 
 export default function LegalDefense() {
-  const toast = useToast()
+  const { toast } = useToast()
   const [matters, setMatters] = useState<Matter[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [matter, setMatter] = useState<Matter | null>(null)
@@ -102,7 +102,7 @@ export default function LegalDefense() {
 
 function MatterDetail({ matter, evidence, onRefresh, toast }: {
   matter: Matter; evidence: EvidencePreview | null; onRefresh: () => void
-  toast: ReturnType<typeof useToast>
+  toast: ReturnType<typeof useToast>['toast']
 }) {
   const [messages, setMessages] = useState<MatterMessage[]>(matter.messages ?? [])
   const [input, setInput] = useState('')
@@ -131,7 +131,7 @@ function MatterDetail({ matter, evidence, onRefresh, toast }: {
           metadata: { evidence_map: data.evidence_map, open_questions: data.open_questions, dropped_citations: data.dropped_citations },
         }])
       },
-      onError: (m) => toast.error?.(m),
+      onError: (m) => toast(m, 'error'),
     })
     setStatus(null)
     setSending(false)
@@ -141,10 +141,10 @@ function MatterDetail({ matter, evidence, onRefresh, toast }: {
     setGenKind(kind)
     try {
       const { packets } = await generatePacket(matter.id, kind)
-      toast.success?.(`Generated ${packets.length} file(s).`)
+      toast(`Generated ${packets.length} file(s).`, 'success')
       onRefresh()
     } catch (e) {
-      toast.error?.(e instanceof Error ? e.message : 'Generation failed')
+      toast(e instanceof Error ? e.message : 'Generation failed', 'error')
     } finally {
       setGenKind(null)
     }
@@ -201,7 +201,7 @@ function MatterDetail({ matter, evidence, onRefresh, toast }: {
 
         {/* Composer */}
         <div className="mt-3 flex items-end gap-2">
-          <Textarea value={input} onChange={(e) => setInput(e.target.value)} rows={2}
+          <Textarea label="" value={input} onChange={(e) => setInput(e.target.value)} rows={2}
             placeholder="Describe the matter or ask what the records show…"
             onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void send() } }}
             className="flex-1" />
@@ -330,9 +330,8 @@ function NewMatterModal({ onClose, onCreated }: { onClose: () => void; onCreated
     <Modal open onClose={onClose} title="New legal matter">
       <div className="space-y-3">
         <Input label="Title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Doe v. Acme — class action" />
-        <Select label="Type" value={type} onChange={(e) => setType(e.target.value as MatterType)}>
-          {MATTER_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-        </Select>
+        <Select label="Type" value={type} options={MATTER_TYPES}
+          onChange={(e) => setType(e.target.value as MatterType)} />
         <Textarea label="What's being alleged?" value={allegation} onChange={(e) => setAllegation(e.target.value)} rows={2}
           placeholder="The claim as you understand it." />
         <Textarea label="Factual context (optional)" value={context} onChange={(e) => setContext(e.target.value)} rows={2}
@@ -362,7 +361,7 @@ function NewMatterModal({ onClose, onCreated }: { onClose: () => void; onCreated
 }
 
 function ShareModal({ matterId, packet, onClose, toast }: {
-  matterId: string; packet: Packet; onClose: () => void; toast: ReturnType<typeof useToast>
+  matterId: string; packet: Packet; onClose: () => void; toast: ReturnType<typeof useToast>['toast']
 }) {
   const [email, setEmail] = useState('')
   const [days, setDays] = useState(14)
@@ -375,7 +374,7 @@ function ShareModal({ matterId, packet, onClose, toast }: {
       const res = await sharePacket(matterId, packet.id, { recipient_email: email.trim() || undefined, expires_days: days })
       setLink(`${window.location.origin}${res.path}`)
     } catch (e) {
-      toast.error?.(e instanceof Error ? e.message : 'Failed to create link')
+      toast(e instanceof Error ? e.message : 'Failed to create link', 'error')
     } finally {
       setBusy(false)
     }
@@ -394,7 +393,7 @@ function ShareModal({ matterId, packet, onClose, toast }: {
             <div className="text-[11px] uppercase tracking-wide text-emerald-400/80">Share link</div>
             <div className="mt-1 flex items-center gap-2">
               <code className="flex-1 truncate text-xs text-zinc-200">{link}</code>
-              <Button size="sm" variant="secondary" onClick={() => { void navigator.clipboard.writeText(link); toast.success?.('Copied') }}>Copy</Button>
+              <Button size="sm" variant="secondary" onClick={() => { void navigator.clipboard.writeText(link); toast('Copied', 'success') }}>Copy</Button>
             </div>
           </div>
         ) : (
