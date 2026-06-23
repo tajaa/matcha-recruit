@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Loader2, CheckCircle2, XCircle, AlertTriangle, ShieldCheck } from 'lucide-react'
+import { IRPublicDictate } from '../../components/ir/IRPublicDictate'
 import { SubmissionDisclaimer } from '../../components/ir/SubmissionDisclaimer'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
@@ -17,6 +18,7 @@ export default function AnonymousReport() {
   const [involvedParties, setInvolvedParties] = useState('')
   const [contactInfo, setContactInfo] = useState('')
   const [honeypot, setHoneypot] = useState('')
+  const [voiceEnabled, setVoiceEnabled] = useState(false)
 
   useEffect(() => {
     if (!token) {
@@ -26,6 +28,8 @@ export default function AnonymousReport() {
     fetch(`${BASE}/report/${token}`)
       .then(async (res) => {
         if (res.ok) {
+          const data = (await res.json().catch(() => null)) as { voice_enabled?: boolean } | null
+          setVoiceEnabled(Boolean(data?.voice_enabled))
           setStage('form')
           return
         }
@@ -118,6 +122,20 @@ export default function AnonymousReport() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4 text-left">
+        {voiceEnabled && (
+          <IRPublicDictate
+            parseUrl={`${BASE}/report/${token}/voice/parse`}
+            onPrefill={(p) => {
+              if (p.description) setDescription(p.description)
+              if (p.occurred_at_text) setOccurredAt(p.occurred_at_text)
+              if (p.witnesses?.length) {
+                const names = p.witnesses.map((x) => x.name).join(', ')
+                setInvolvedParties((cur) => (cur.trim() ? `${cur}, ${names}` : names))
+              }
+            }}
+          />
+        )}
+
         <Field label="Description">
           <textarea
             value={description}

@@ -11,11 +11,13 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from ...database import get_connection
+from app.core.services.redis_cache import check_rate_limit, client_ip
 from app.matcha.models.ir_incident import Witness
+from app.matcha.services.ir_voice_parser import parse_voice_incident
 from .ir_incidents import (
     _location_label,
     _parse_occurred_at,
@@ -27,6 +29,32 @@ from .ir_incidents import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["anonymous-reporting"])
+
+# Voice dictation on the public intake forms. Mirrors the authed endpoint
+# (ir_incidents/voice.py) — same WAV-only contract + size cap. The Gemini parse is
+# auth-agnostic; these public handlers resolve the company from the link token
+# instead of a JWT, and honor the same ir_voice_intake admin-toggle.
+_ALLOWED_AUDIO_MIME = {"audio/wav", "audio/x-wav", "audio/wave"}
+_MAX_AUDIO_BYTES = 25 * 1024 * 1024  # ~13 min of 16kHz mono 16-bit WAV
+
+
+def _features_dict(raw) -> dict:
+    """Coerce the companies.enabled_features column (JSONB → dict, or text)."""
+    if isinstance(raw, str):
+        raw = json.loads(raw)
+    return raw or {}
+
+
+async def _read_audio_or_400(file: UploadFile) -> bytes:
+    """Validate the upload content-type/size and return the bytes (mirrors voice.py)."""
+    if (file.content_type or "").lower() not in _ALLOWED_AUDIO_MIME:
+        raise HTTPException(status_code=400, detail="Unsupported audio format — expected WAV.")
+    audio = await file.read()
+    if not audio:
+        raise HTTPException(status_code=400, detail="Empty audio upload.")
+    if len(audio) > _MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="Audio too large (max 25MB).")
+    return audio
 
 # ---------------------------------------------------------------------------
 # Rate limiting: max 5 submissions per IP per hour
@@ -105,7 +133,7 @@ async def validate_report_token(token: str):
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            SELECT report_token_used_at FROM companies
+            SELECT report_token_used_at, enabled_features FROM companies
             WHERE report_email_token = $1
               AND COALESCE((enabled_features->>'incidents')::boolean, false) = true
             """,
@@ -115,7 +143,8 @@ async def validate_report_token(token: str):
         raise HTTPException(status_code=404, detail="Invalid reporting link")
     if row["report_token_used_at"] is not None:
         raise HTTPException(status_code=410, detail="This reporting link has already been used")
-    return {"valid": True}
+    voice_enabled = bool(_features_dict(row["enabled_features"]).get("ir_voice_intake", False))
+    return {"valid": True, "voice_enabled": voice_enabled}
 
 
 @router.post("/report/{token}")
@@ -241,6 +270,39 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
     return {"submitted": True}
 
 
+@router.post("/report/{token}/voice/parse")
+async def parse_report_voice(token: str, request: Request, file: UploadFile = File(...)):
+    """Public voice-dictation parse for the anonymous /report form.
+
+    No JWT — the company is resolved from the token, exactly like GET/POST
+    /report/{token}. Parsing is pre-submit, so it does NOT consult/burn the
+    single-use token; only POST /report/{token} burns it. Returns the same
+    prefill shape as the authed endpoint (never creates an incident).
+    """
+    # Expensive Gemini multimodal call — throttle per IP before reading the upload.
+    ip = client_ip(request)
+    await check_rate_limit(ip, "ir_voice_parse_public_burst", 5, 60)
+    await check_rate_limit(ip, "ir_voice_parse_public", 40, 3600)
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT enabled_features FROM companies WHERE report_email_token = $1",
+            token.lower(),
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Invalid reporting link")
+    features = _features_dict(row["enabled_features"])
+    if not features.get("incidents", False):
+        raise HTTPException(status_code=404, detail="Invalid reporting link")
+    if not features.get("ir_voice_intake", False):
+        raise HTTPException(status_code=403, detail="Voice dictation is not enabled.")
+
+    audio = await _read_audio_or_400(file)
+    # Anonymous form has no structured location picker — no options to pin to.
+    return await parse_voice_incident(audio, (file.content_type or "audio/wav").lower(),
+                                      location_options=[])
+
+
 # ---------------------------------------------------------------------------
 # Location magic links — /intake/{token}
 #
@@ -307,9 +369,11 @@ async def validate_location_intake_token(token: str):
                 "SELECT name, city, state FROM business_locations WHERE id = $1",
                 row["location_id"],
             )
+    voice_enabled = bool(_features_dict(features).get("ir_voice_intake", False))
     return {
         "valid": True,
         "company_name": row["company_name"],
+        "voice_enabled": voice_enabled,
         "location": {
             "id": str(row["location_id"]) if row["location_id"] else None,
             "name": loc["name"] if loc else None,
@@ -450,3 +514,41 @@ async def submit_location_report(
         response_row.get("incident_number"), company_id,
     )
     return {"submitted": True}
+
+
+@router.post("/intake/{token}/voice/parse")
+async def parse_location_intake_voice(token: str, request: Request, file: UploadFile = File(...)):
+    """Public voice-dictation parse for the per-location /intake form.
+
+    No JWT — company + usability resolved from the token like GET/POST
+    /intake/{token}. Parsing does NOT increment use_count (parse ≠ submit).
+    The location is locked by the token, so no options are passed (voice must
+    not override it). Returns the same prefill shape as the authed endpoint.
+    """
+    ip = client_ip(request)
+    await check_rate_limit(ip, "ir_voice_parse_public_burst", 5, 60)
+    await check_rate_limit(ip, "ir_voice_parse_public", 40, 3600)
+
+    async with get_connection() as conn:
+        link = await conn.fetchrow(
+            """
+            SELECT rl.is_active, rl.expires_at, rl.max_uses, rl.use_count,
+                   c.enabled_features
+            FROM ir_report_links rl
+            JOIN companies c ON c.id = rl.company_id
+            WHERE rl.token = $1
+            """,
+            token.lower(),
+        )
+    if not link:
+        raise HTTPException(status_code=404, detail="Invalid reporting link")
+    features = _features_dict(link["enabled_features"])
+    if not features.get("incidents", False):
+        raise HTTPException(status_code=404, detail="Invalid reporting link")
+    _check_link_usable(link)
+    if not features.get("ir_voice_intake", False):
+        raise HTTPException(status_code=403, detail="Voice dictation is not enabled.")
+
+    audio = await _read_audio_or_400(file)
+    return await parse_voice_incident(audio, (file.content_type or "audio/wav").lower(),
+                                      location_options=[])

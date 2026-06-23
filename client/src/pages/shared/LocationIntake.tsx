@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Loader2, CheckCircle2, XCircle, AlertTriangle, MapPin } from 'lucide-react'
 import { IRPersonMultiSelect } from '../../components/ir/IRPersonMultiSelect'
+import { IRPublicDictate } from '../../components/ir/IRPublicDictate'
 import { SubmissionDisclaimer } from '../../components/ir/SubmissionDisclaimer'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
@@ -13,6 +14,7 @@ type Stage = 'validating' | 'invalid' | 'used' | 'form' | 'submitting' | 'submit
 
 type IntakeInfo = {
   company_name: string | null
+  voice_enabled?: boolean
   location: { id: string | null; name: string | null; label: string }
 }
 
@@ -143,6 +145,20 @@ export default function LocationIntake() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4 text-left">
+        {info?.voice_enabled && (
+          <IRPublicDictate
+            parseUrl={`${BASE}/intake/${token}/voice/parse`}
+            onPrefill={(p) => {
+              if (p.description) setDescription(p.description)
+              if (p.reported_by_name) setReportedByName(p.reported_by_name)
+              if (p.occurred_at_text) setOccurredAt(p.occurred_at_text)
+              if (p.witnesses?.length) {
+                setWitnesses((w) => Array.from(new Set([...w, ...p.witnesses.map((x) => x.name)])))
+              }
+            }}
+          />
+        )}
+
         <Field label="Your name">
           <input
             type="text"
