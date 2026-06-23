@@ -88,6 +88,56 @@ def evaluate(
     }
 
 
+def evaluate_property(*, building_count: int, valued_count: int, cope_known_count: int,
+                      itv_known: bool, cat_geocoded_count: int) -> dict:
+    """Property submission completeness — a SEPARATE block from the WC/EPL ``evaluate``
+    so adding it never re-tunes or dilutes the casualty readiness score. Weights sum
+    to 100. Pure (unit-tested)."""
+    items = [
+        {"key": "sov", "label": "Buildings on the Statement of Values", "weight": 30,
+         "done": building_count > 0,
+         "fix": "Add your buildings (the Statement of Values)."},
+        {"key": "values", "label": "Building / contents / BI values", "weight": 20,
+         "done": valued_count > 0,
+         "fix": "Enter the building, contents, and business-interruption values per building."},
+        {"key": "cope", "label": "COPE construction details", "weight": 20,
+         "done": cope_known_count > 0,
+         "fix": "Record construction type, year built, sprinklers, and protection class."},
+        {"key": "itv", "label": "Replacement cost (insurance-to-value)", "weight": 15,
+         "done": itv_known,
+         "fix": "Add replacement cost + insured value so insurance-to-value can be checked."},
+        {"key": "cat", "label": "Geocoded catastrophe exposure", "weight": 15,
+         "done": cat_geocoded_count > 0,
+         "fix": "Provide full street addresses so flood/quake/wildfire/wind exposure can be geocoded."},
+    ]
+    score = sum(i["weight"] for i in items if i["done"])
+    missing = sorted([i for i in items if not i["done"]], key=lambda i: i["weight"], reverse=True)
+    return {
+        "score": score,
+        "band": readiness_band(score),
+        "items": items,
+        "top_fixes": [i["fix"] for i in missing[:5]],
+        "summary": {"done": sum(1 for i in items if i["done"]), "total": len(items)},
+    }
+
+
+async def compute_property_readiness(conn, company_id: UUID, *, sov=None) -> dict:
+    """Gather property completeness signals + score. Accepts a precomputed SOV."""
+    from . import property_sov
+    if sov is None:
+        sov = await property_sov.build_sov(conn, company_id)
+    buildings = sov.get("buildings") or []
+    rollup = sov.get("rollup") or {}
+    valued = sum(1 for b in buildings if (b.get("building_value") or b.get("contents_value")))
+    cope_known = sum(1 for b in buildings if b.get("construction_type"))
+    geocoded = sum(1 for b in buildings if b.get("lat") is not None)
+    itv_known = ((rollup.get("itv") or {}).get("rated_count") or 0) > 0
+    return evaluate_property(
+        building_count=len(buildings), valued_count=valued, cope_known_count=cope_known,
+        itv_known=itv_known, cat_geocoded_count=geocoded,
+    )
+
+
 async def compute_readiness(conn, company_id: UUID, *, wc=None, epl=None, controls=None) -> dict:
     """Gather the completeness signals + score. Accepts precomputed wc/epl/controls."""
     if wc is None:

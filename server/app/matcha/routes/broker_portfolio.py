@@ -25,6 +25,8 @@ from ..services import wc_mod_parser
 from ..services import epl_readiness
 from ..services import risk_index
 from ..services import external_clients as ext
+from ..services import property_sov
+from ..services import property_cat
 from ..services import wc_classmap
 from ..models.broker_action_center import MilestonesResponse, OutreachResponse
 
@@ -455,6 +457,50 @@ async def get_risk_index_portfolio(current_user=Depends(require_broker)):
         "avg_index": round(sum(r["index"] for r in scored) / len(scored)) if scored else 0,
     }
     return {"summary": summary, "companies": results}
+
+
+@router.get("/property-portfolio")
+async def get_property_portfolio(current_user=Depends(require_broker)):
+    """Per-client commercial-property posture across the book — TIV, COPE grade,
+    insurance-to-value, and worst catastrophe tier. Batched (no per-client build_sov)."""
+    async with get_connection() as conn:
+        _, clients = await _broker_clients(conn, current_user.id)
+        ids = list(clients.keys())
+        rollups = await property_sov.book_sov_rollups(conn, ids)
+        cats = await property_cat.book_cat_exposure(conn, ids)
+    results = []
+    for cid, meta in clients.items():
+        r = rollups.get(str(cid))
+        if not r or not r["building_count"]:
+            continue
+        cat = cats.get(str(cid)) or {}
+        results.append({
+            "company_id": str(cid), "company_name": meta["name"], "industry": meta["industry"],
+            "building_count": r["building_count"], "tiv": r["tiv"],
+            "avg_cope_score": r["avg_cope_score"], "worst_cope_grade": r["worst_cope_grade"],
+            "itv_ratio": r["itv"]["portfolio_ratio"], "under_insured": r["itv"]["under_count"],
+            "worst_cat_tier": cat.get("worst_tier"),
+        })
+    # worst COPE + biggest TIV first (most underwriting attention)
+    _grade = {"D": 0, "C": 1, "B": 2, "A": 3, None: 4}
+    results.sort(key=lambda x: (_grade.get(x["worst_cope_grade"], 4), -(x["tiv"] or 0)))
+    summary = {
+        "client_count": len(results),
+        "total_tiv": round(sum(x["tiv"] or 0 for x in results)),
+        "under_insured_clients": sum(1 for x in results if x["under_insured"]),
+        "severe_cat_clients": sum(1 for x in results if x["worst_cat_tier"] in ("severe", "high")),
+    }
+    return {"summary": summary, "companies": results}
+
+
+@router.get("/property-portfolio/{company_id}")
+async def get_property_client_detail(company_id: UUID, current_user=Depends(require_broker)):
+    """Full SOV + catastrophe exposure for one owned client."""
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        sov = await property_sov.build_sov(conn, company_id)
+        cat = await property_cat.company_cat_exposure(conn, company_id)
+    return {**sov, "cat": cat}
 
 
 @router.get("/risk-curve")

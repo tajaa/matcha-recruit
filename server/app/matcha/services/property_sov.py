@@ -249,3 +249,20 @@ async def build_sov(conn, company_id: UUID) -> dict:
         "buildings": buildings,
         "rollup": rollup(buildings, date.today().year),
     }
+
+
+async def book_sov_rollups(conn, company_ids: list) -> dict[str, dict]:
+    """Batched SOV rollup per company → {company_id_str: rollup}. One query over the
+    whole broker book (avoids per-client build_sov in the portfolio loop)."""
+    ids = list({c for c in company_ids})
+    if not ids:
+        return {}
+    rows = await conn.fetch(
+        f"SELECT {_COLS} FROM company_property_buildings WHERE company_id = ANY($1::uuid[])",
+        ids,
+    )
+    yr = date.today().year
+    by: dict[str, list[dict]] = {}
+    for r in rows:
+        by.setdefault(str(r["company_id"]), []).append(_serialize(r, yr))
+    return {cid: rollup(bs, yr) for cid, bs in by.items()}

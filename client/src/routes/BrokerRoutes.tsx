@@ -9,6 +9,7 @@ import BrokerAccount from '../pages/broker/BrokerAccount'
 import BrokerClientDetail from '../pages/broker/BrokerClientDetail'
 import BrokerActionCenter from '../pages/broker/BrokerActionCenter'
 import BrokerRiskCurve from '../pages/broker/BrokerRiskCurve'
+import BrokerPropertyPortfolio from '../pages/broker/BrokerPropertyPortfolio'
 import BrokerExternalClients from '../pages/broker/BrokerExternalClients'
 import BrokerExternalClientDetail from '../pages/broker/BrokerExternalClientDetail'
 
@@ -31,6 +32,9 @@ export default function BrokerRoutes() {
 
         {/* Book-wide analytics — interactive exposure-weighted risk curve */}
         <Route path="risk-curve" element={<BrokerRiskCurve />} />
+
+        {/* Commercial-property book — per-client TIV / COPE / cat */}
+        <Route path="property" element={<BrokerPropertyPortfolio />} />
 
         {/* Module 3 — Clients hub (tabbed: onboarding / pipeline / seats / referrals) */}
         <Route path="clients" element={<BrokerClientsHub />} />

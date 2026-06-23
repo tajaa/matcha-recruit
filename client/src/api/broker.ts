@@ -23,6 +23,7 @@ import type {
   ExternalClient,
   ExternalClientRow,
   ExternalClientDetail,
+  PropertyPortfolioResponse,
   CoverageGap,
   BrokerMilestonesResponse,
   OutreachResponse,
@@ -36,6 +37,10 @@ import type {
 import type { ControlsRegister } from '../types/controlsEvidence'
 import type { LimitReview } from '../types/limitAdequacy'
 import type { LossDevelopment, LossRunDraft, LossRunCommit } from '../types/lossDevelopment'
+
+export function fetchPropertyPortfolio() {
+  return api.get<PropertyPortfolioResponse>('/broker/property-portfolio')
+}
 
 export function fetchBrokerPortfolio() {
   return api.get<BrokerPortfolioResponse>('/brokers/reporting/portfolio')

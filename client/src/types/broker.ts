@@ -573,6 +573,25 @@ export interface EplPortfolioResponse {
 
 // --- Off-platform broker clients (Broker Pro) ---
 
+// --- Broker property portfolio ---
+export interface PropertyPortfolioRow {
+  company_id: string
+  company_name: string
+  industry: string | null
+  building_count: number
+  tiv: number
+  avg_cope_score: number | null
+  worst_cope_grade: string | null
+  itv_ratio: number | null
+  under_insured: number
+  worst_cat_tier: string | null
+}
+
+export interface PropertyPortfolioResponse {
+  summary: { client_count: number; total_tiv: number; under_insured_clients: number; severe_cat_clients: number }
+  companies: PropertyPortfolioRow[]
+}
+
 export interface ExternalClient {
   id: string
   broker_id: string

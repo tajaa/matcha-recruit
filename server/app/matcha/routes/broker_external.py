@@ -54,6 +54,20 @@ class ExternalEplBody(BaseModel):
     note: Optional[str] = None
 
 
+class ExternalPropertyBody(BaseModel):
+    """Broker-keyed property summary for an off-platform client."""
+    period_label: Optional[str] = None
+    building_count: int = Field(default=0, ge=0)
+    total_tiv: Optional[float] = Field(default=None, ge=0)
+    worst_construction: Optional[str] = None
+    sprinklered_pct: Optional[int] = Field(default=None, ge=0, le=100)
+    worst_cat_tier: Optional[str] = Field(default=None, pattern="^(severe|high|elevated|moderate|low)$")
+    insured_to_value_pct: Optional[int] = Field(default=None, ge=0, le=1000)
+    carrier: Optional[str] = None
+    annual_premium: Optional[float] = Field(default=None, ge=0)
+    note: Optional[str] = None
+
+
 async def _broker_id(conn, user_id) -> UUID:
     bid = await conn.fetchval(
         "SELECT broker_id FROM broker_members WHERE user_id = $1 AND is_active = true "
@@ -133,6 +147,17 @@ async def upsert_external_wc(client_id: UUID, body: ExternalWcBody,
         if not await ext.get_client(conn, broker_id, client_id):
             raise HTTPException(status_code=404, detail="External client not found")
         await ext.upsert_wc_snapshot(conn, client_id, current_user.id, body.model_dump())
+        return await _detail_or_404(conn, broker_id, client_id)
+
+
+@router.put("/external-clients/{client_id}/property")
+async def upsert_external_property(client_id: UUID, body: ExternalPropertyBody,
+                                  current_user=Depends(require_broker_pro)):
+    async with get_connection() as conn:
+        broker_id = await _broker_id(conn, current_user.id)
+        if not await ext.get_client(conn, broker_id, client_id):
+            raise HTTPException(status_code=404, detail="External client not found")
+        await ext.upsert_property_snapshot(conn, client_id, current_user.id, body.model_dump())
         return await _detail_or_404(conn, broker_id, client_id)
 
 

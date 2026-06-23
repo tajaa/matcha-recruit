@@ -18,7 +18,7 @@ from ..services import (
     wc_depth, epl_readiness, external_clients as ext, submission_packet as sp,
     controls_evidence as ce, claims_readiness as cr, submission_readiness as sr,
     venue_severity as vs, exclusion_gap as eg, limit_adequacy as la,
-    loss_development as ld,
+    loss_development as ld, property_sov, property_cat,
 )
 from .ir_incidents import compute_wc_metrics
 from .broker_portfolio import _assert_broker_owns_company
@@ -63,6 +63,9 @@ async def _tenant_context(conn, user_id, company_id: UUID) -> dict:
     loss_dev = await _safe(
         ld.build_development(conn, broker_id, "company", company_id, subject_name=meta["name"]),
         {}, "loss_development")
+    sov = await _safe(property_sov.build_sov(conn, company_id), {}, "property_sov")
+    cat = await _safe(property_cat.company_cat_exposure(conn, company_id), {}, "property_cat")
+    property_ctx = {**sov, "cat": cat} if sov else None
     primary = states[0] if states else None
     latest = mods.get(str(company_id)) or {}
     return {
@@ -85,6 +88,7 @@ async def _tenant_context(conn, user_id, company_id: UUID) -> dict:
         "venue": venue,
         "exclusions": exclusions,
         "limits": limits,
+        "property": property_ctx,
         "loss_development": loss_dev,
     }
 
@@ -112,6 +116,7 @@ async def _external_context(conn, user_id, client_id: UUID) -> dict:
         "epl": {"score": epl["score"], "band": epl["band"], "factors": epl["factors"]},
         "venue": venue,
         "exclusions": exclusions,
+        "property": detail.get("property"),
         "loss_development": loss_dev,
     }
 

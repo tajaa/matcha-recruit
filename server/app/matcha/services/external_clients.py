@@ -202,6 +202,66 @@ async def _epl_for_client(conn, client_id: UUID) -> dict:
     return assessment
 
 
+# --- property snapshot (broker-keyed summary; mirror of broker_external_wc) ----
+
+async def upsert_property_snapshot(conn, client_id: UUID, updated_by, data: dict) -> None:
+    await conn.execute(
+        """
+        INSERT INTO broker_external_property
+            (external_client_id, period_label, building_count, total_tiv, worst_construction,
+             sprinklered_pct, worst_cat_tier, insured_to_value_pct, carrier, annual_premium, note,
+             updated_by, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW())
+        ON CONFLICT (external_client_id) DO UPDATE SET
+            period_label=EXCLUDED.period_label, building_count=EXCLUDED.building_count,
+            total_tiv=EXCLUDED.total_tiv, worst_construction=EXCLUDED.worst_construction,
+            sprinklered_pct=EXCLUDED.sprinklered_pct, worst_cat_tier=EXCLUDED.worst_cat_tier,
+            insured_to_value_pct=EXCLUDED.insured_to_value_pct, carrier=EXCLUDED.carrier,
+            annual_premium=EXCLUDED.annual_premium, note=EXCLUDED.note,
+            updated_by=EXCLUDED.updated_by, updated_at=NOW()
+        """,
+        client_id, data.get("period_label"), data.get("building_count", 0), data.get("total_tiv"),
+        data.get("worst_construction"), data.get("sprinklered_pct"), data.get("worst_cat_tier"),
+        data.get("insured_to_value_pct"), data.get("carrier"), data.get("annual_premium"),
+        data.get("note"), updated_by,
+    )
+
+
+def _compute_property(snap) -> dict:
+    """Property metrics from the broker-entered summary snapshot. Builds a synthetic
+    rollup (coarse COPE from construction + sprinkler%, ITV from insured-to-value%)
+    so the shared ``risk_index.external_risk_index`` property component can score it."""
+    if not snap:
+        return {"has_data": False, "building_count": 0, "total_tiv": None,
+                "worst_construction": None, "sprinklered_pct": None, "worst_cat_tier": None,
+                "insured_to_value_pct": None, "carrier": None, "annual_premium": None,
+                "rollup": {"building_count": 0}, "cat": None}
+    from . import property_sov
+    bc = int(snap["building_count"] or 0)
+    cope_base = property_sov.CONSTRUCTION_GRADE.get((snap["worst_construction"] or "").strip().lower(), 50)
+    spr = int(snap["sprinklered_pct"]) if snap["sprinklered_pct"] is not None else 0
+    cope_score = round(min(100, max(0, cope_base * 0.7 + spr * 0.3)))
+    itv_pct = snap["insured_to_value_pct"]
+    ratio = (itv_pct / 100.0) if itv_pct is not None else None
+    rollup = {
+        "building_count": bc,
+        "avg_cope_score": cope_score if bc else None,
+        "itv": {"portfolio_ratio": ratio, "under_count": 1 if (ratio is not None and ratio < 0.90) else 0,
+                "rated_count": bc},
+    }
+    cat = {"worst_tier": snap["worst_cat_tier"]} if snap["worst_cat_tier"] else None
+    return {
+        "has_data": True, "building_count": bc,
+        "total_tiv": float(snap["total_tiv"]) if snap["total_tiv"] is not None else None,
+        "worst_construction": snap["worst_construction"], "sprinklered_pct": spr,
+        "worst_cat_tier": snap["worst_cat_tier"], "insured_to_value_pct": itv_pct,
+        "carrier": snap["carrier"],
+        "annual_premium": float(snap["annual_premium"]) if snap["annual_premium"] is not None else None,
+        "period_label": snap["period_label"], "cope_score": cope_score,
+        "rollup": rollup, "cat": cat,
+    }
+
+
 # --- assembled views -------------------------------------------------------
 
 async def client_detail(conn, broker_id: UUID, client_id: UUID) -> Optional[dict]:
@@ -213,13 +273,15 @@ async def client_detail(conn, broker_id: UUID, client_id: UUID) -> Optional[dict
     rates = await wc_depth.get_state_rates(conn, [state]) if state else {}
     wc = _compute_wc(client, snap, rates.get(state) if state else None)
     epl = await _epl_for_client(conn, client_id)
+    prop_snap = await conn.fetchrow("SELECT * FROM broker_external_property WHERE external_client_id = $1", client_id)
+    prop = _compute_property(prop_snap)
     intake = await intake_status(conn, client_id)
-    return {"client": client, "wc": wc, "epl": epl,
-            "risk_index": risk_index.external_risk_index(wc, epl), "intake": intake}
+    return {"client": client, "wc": wc, "epl": epl, "property": prop,
+            "risk_index": risk_index.external_risk_index(wc, epl, prop), "intake": intake}
 
 
 async def list_with_scores(conn, broker_id: UUID) -> list[dict]:
-    """List view: identity + WC band + EPL score/band per external client."""
+    """List view: identity + WC band + EPL score/band + property per external client."""
     clients = await list_clients(conn, broker_id)
     intakes = await intake_status_map(conn, [UUID(c["id"]) for c in clients])
     out = []
@@ -228,7 +290,9 @@ async def list_with_scores(conn, broker_id: UUID) -> list[dict]:
         snap = await conn.fetchrow("SELECT * FROM broker_external_wc WHERE external_client_id = $1", cid)
         wc = _compute_wc(c, snap, None)
         epl = await _epl_for_client(conn, cid)
-        ri = risk_index.external_risk_index(wc, epl)
+        prop_snap = await conn.fetchrow("SELECT * FROM broker_external_property WHERE external_client_id = $1", cid)
+        prop = _compute_property(prop_snap)
+        ri = risk_index.external_risk_index(wc, epl, prop)
         intake = intakes.get(c["id"], {"status": "not_sent", "is_submitted": False, "submitted_at": None})
         out.append({
             **c,
@@ -238,6 +302,9 @@ async def list_with_scores(conn, broker_id: UUID) -> list[dict]:
             "annual_premium": wc["annual_premium"],
             "epl_score": epl["score"],
             "epl_band": epl["band"],
+            "property_building_count": prop["building_count"],
+            "property_tiv": prop["total_tiv"],
+            "property_cat_tier": prop["worst_cat_tier"],
             "risk_index": ri["index"],
             "risk_band": ri["band"],
             "intake_status": intake["status"],

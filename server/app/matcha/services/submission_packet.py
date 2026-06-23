@@ -301,6 +301,42 @@ def _loss_section_html(tri: Optional[dict]) -> str:
     return out
 
 
+_CAT_CLASS = {"severe": "vt-severe", "high": "vt-high", "elevated": "vt-elev",
+              "moderate": "vt-mod", "low": "vt-low"}
+
+
+def _property_section_html(prop: Optional[dict]) -> str:
+    """Optional commercial-property section: TIV, COPE grade, insurance-to-value, and
+    worst catastrophe tier. Renders nothing when there are no buildings."""
+    if not prop:
+        return ""
+    rollup = prop.get("rollup") or {}
+    bc = rollup.get("building_count") or prop.get("building_count") or 0
+    if not bc:
+        return ""
+    tiv = rollup.get("tiv") if rollup.get("tiv") is not None else prop.get("total_tiv")
+    cope = rollup.get("avg_cope_score")
+    worst_cope = rollup.get("worst_cope_grade")
+    itv = rollup.get("itv") or {}
+    ratio = itv.get("portfolio_ratio")
+    under = itv.get("under_count") or 0
+    worst_cat = (prop.get("cat") or {}).get("worst_tier") or prop.get("worst_cat_tier")
+    cat_cls = _CAT_CLASS.get(worst_cat or "", "vt-unk")
+    itv_s = f"{round(ratio * 100)}%" if ratio is not None else "—"
+    cope_s = f"{cope}{' / ' + worst_cope if worst_cope else ''}" if cope is not None else "—"
+    under_note = (f"<div class='narr'>{under} building(s) below the 90% insurance-to-value floor — "
+                  f"coinsurance-penalty exposure.</div>" if under else "")
+    return (
+        f"<h2>Commercial Property — {bc} building(s), {_money(tiv) if tiv else '—'} TIV</h2>"
+        f"<div class='grid'>"
+        f"<div class='cell'><div class='l'>TIV</div><div class='v'>{_money(tiv) if tiv else '—'}</div></div>"
+        f"<div class='cell'><div class='l'>COPE</div><div class='v'>{_esc(cope_s)}</div></div>"
+        f"<div class='cell'><div class='l'>Ins-to-value</div><div class='v'>{itv_s}</div></div>"
+        f"<div class='cell'><div class='l'>Cat exposure</div><div class='v {cat_cls}'>{_esc((worst_cat or '—').upper())}</div></div>"
+        f"</div>{under_note}"
+    )
+
+
 def _packet_html(ctx: dict) -> str:
     wc = ctx.get("wc") or {}
     epl = ctx.get("epl") or {}
@@ -363,6 +399,8 @@ def _packet_html(ctx: dict) -> str:
       {_exclusions_section_html(ctx.get('exclusions'))}
 
       {_limit_section_html(ctx.get('limits'))}
+
+      {_property_section_html(ctx.get('property'))}
 
       {_loss_section_html(ctx.get('loss_development'))}
 

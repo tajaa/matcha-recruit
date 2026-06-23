@@ -316,3 +316,25 @@ async def company_cat_exposure(conn, company_id: UUID) -> dict:
         company_id,
     )
     return summarize([dict(r) for r in rows])
+
+
+async def book_cat_exposure(conn, company_ids: list) -> dict[str, dict]:
+    """Batched catastrophe rollup per company → {company_id_str: summary}. One query
+    across the whole broker book for the property-portfolio."""
+    ids = list({c for c in company_ids})
+    if not ids:
+        return {}
+    rows = await conn.fetch(
+        """
+        SELECT b.company_id, b.id AS building_id, b.lat, p.peril, p.tier, p.score
+        FROM company_property_buildings b
+        LEFT JOIN property_building_perils p
+          ON p.building_id = b.id AND p.error IS NULL
+        WHERE b.company_id = ANY($1::uuid[])
+        """,
+        ids,
+    )
+    by: dict[str, list[dict]] = {}
+    for r in rows:
+        by.setdefault(str(r["company_id"]), []).append(dict(r))
+    return {cid: summarize(rs) for cid, rs in by.items()}
