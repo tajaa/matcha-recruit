@@ -61,28 +61,47 @@ def _tier_of(perils: list[dict], peril: str) -> Optional[str]:
     return None
 
 
+def _peril_deductible(b: dict, peril: str, tiv: float) -> float:
+    """Applicable deductible $ for a peril: percentage deductibles (wind / named-storm /
+    quake) apply to TIV; everything else falls to the flat AOP deductible. Pure."""
+    pct = None
+    if peril == "wind":
+        pct = b.get("named_storm_deductible_pct") or b.get("wind_deductible_pct")
+    elif peril == "quake":
+        pct = b.get("quake_deductible_pct")
+    if pct:
+        return float(tiv) * float(pct) / 100.0
+    aop = b.get("aop_deductible")
+    return float(aop) if aop else 0.0
+
+
 def building_exposure(b: dict) -> dict:
     """Per-building exposure from a serialized SOV building (carries ``tiv``, ``perils``,
-    ``insured_value``, ``replacement_cost``). Pure.
+    ``insured_value``, ``replacement_cost``, + the propd01 policy fields). Pure.
 
-    AAL sums across perils (independent); worst_pml is the single worst peril event
-    (you don't lose to a flood and a quake the same instant)."""
+    PML is NET OF THE APPLICABLE DEDUCTIBLE (the insurable catastrophe loss above the
+    retention); AAL is netted by the same ratio. worst_pml is the single worst peril event.
+    Coinsurance shortfall uses the building's own coinsurance % when set."""
     tiv = b.get("tiv")
     if tiv is None:
         tiv = building_tiv(b)
     perils = b.get("perils") or []
+    coins = (float(b["coinsurance_pct"]) / 100.0) if b.get("coinsurance_pct") else _COINSURANCE_PCT
     by_peril: dict[str, dict] = {}
     for peril in _PML_SEVERE:
         tier = _tier_of(perils, peril)
         if not tier:
             continue
-        by_peril[peril] = {"aal": round(peril_aal(tiv, peril, tier)), "pml": round(peril_pml(tiv, peril, tier)), "tier": tier}
+        gross = peril_pml(tiv, peril, tier)
+        net = max(0.0, gross - _peril_deductible(b, peril, tiv))
+        factor = (net / gross) if gross > 0 else 0.0
+        by_peril[peril] = {"aal": round(peril_aal(tiv, peril, tier) * factor), "pml": round(net), "tier": tier}
     aal = round(sum(v["aal"] for v in by_peril.values()))
     worst_pml = max((v["pml"] for v in by_peril.values()), default=0)
     return {
         "aal": aal,
         "worst_pml": worst_pml,
-        "coinsurance_shortfall": coinsurance_shortfall(b.get("insured_value"), b.get("replacement_cost")),
+        "coinsurance_shortfall": coinsurance_shortfall(b.get("insured_value"), b.get("replacement_cost"), coins),
         "itv_ratio": itv_ratio(b.get("insured_value"), b.get("replacement_cost")),
         "by_peril": by_peril,
     }

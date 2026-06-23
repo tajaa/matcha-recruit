@@ -102,15 +102,43 @@ def build_plan(buildings: list[dict], rollup: Optional[dict] = None, cat: Option
                 "_rank": 0,
             })
 
-        # 5) Cooking occupancy → NFPA-96 hood/duct cleaning documentation.
+        # 5) Cooking occupancy → NFPA-96 hood/duct cleaning documentation (flag, or text hint).
         occ = (b.get("occupancy") or "").lower()
-        if any(h in occ for h in _COOKING_HINTS):
+        if b.get("cooking_nfpa96") or any(h in occ for h in _COOKING_HINTS):
             raw.append({
                 "key": "nfpa96", "building_id": bid, "building_name": name,
                 "label": f"Document hood/duct cleaning (NFPA-96) — {name}", "severity": "medium",
                 "detail": "Commercial cooking is a top fire cause; confirm a Type-I hood and a scheduled NFPA-96 hood/duct cleaning record.",
                 "impact": "fire control",
                 "_rank": 0,
+            })
+
+        # 6) ACV valuation → recommend replacement-cost.
+        if b.get("valuation_basis") == "ACV":
+            raw.append({
+                "key": "valuation", "building_id": bid, "building_name": name,
+                "label": f"Move to replacement-cost valuation — {name}", "severity": "medium",
+                "detail": "Building is insured on actual-cash-value (depreciated); a total loss pays out far below rebuild cost. Switch to replacement cost.",
+                "impact": "recovery gap", "_rank": 0,
+            })
+
+        # 7) No ordinance & law on an older building → rebuild-to-code gap.
+        age = (yr - int(b["year_built"])) if b.get("year_built") else None
+        if (b.get("ordinance_law") in (None, "", "none")) and age and age > 25:
+            raw.append({
+                "key": "ordinance_law", "building_id": bid, "building_name": name,
+                "label": f"Add ordinance & law coverage — {name}", "severity": "low",
+                "detail": f"~{age}-year-old building with no ordinance-&-law coverage; a code-driven rebuild would be uninsured. Add A/B/C.",
+                "impact": "code rebuild", "_rank": 0,
+            })
+
+        # 8) Combustible / no central-station alarm → protection upgrade.
+        if not b.get("central_station_alarm") and (b.get("construction_type") in _COMBUSTIBLE):
+            raw.append({
+                "key": "alarm", "building_id": bid, "building_name": name,
+                "label": f"Add central-station fire alarm — {name}", "severity": "low",
+                "detail": "Combustible construction without a monitored (central-station) fire alarm; a recognized protection credit that also cuts loss severity.",
+                "impact": "protection credit", "_rank": 0,
             })
 
     raw.sort(key=lambda f: (-_SEV_RANK.get(f["severity"], 0), -(f.get("_rank") or 0)))

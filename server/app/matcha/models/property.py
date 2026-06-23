@@ -38,6 +38,28 @@ class BuildingUpsert(BaseModel):
     replacement_cost: Optional[float] = Field(default=None, ge=0)
     insured_value: Optional[float] = Field(default=None, ge=0)
     note: Optional[str] = None
+    # --- deeper underwriting capture (propd01) ---
+    # valuation
+    valuation_basis: Optional[Literal["RCV", "ACV"]] = None
+    coinsurance_pct: Optional[float] = Field(default=None, ge=0, le=100)
+    ordinance_law: Optional[Literal["none", "A", "B", "C", "ABC"]] = None
+    bi_months: Optional[int] = Field(default=None, ge=0, le=120)
+    # policy structure
+    blanket: bool = False
+    aop_deductible: Optional[float] = Field(default=None, ge=0)
+    wind_deductible_pct: Optional[float] = Field(default=None, ge=0, le=100)
+    named_storm_deductible_pct: Optional[float] = Field(default=None, ge=0, le=100)
+    quake_deductible_pct: Optional[float] = Field(default=None, ge=0, le=100)
+    # COPE+
+    roof_type: Optional[str] = Field(default=None, max_length=40)
+    wiring_year: Optional[int] = Field(default=None, ge=1700, le=2100)
+    central_station_alarm: bool = False
+    # occupancy hazards
+    cooking_nfpa96: bool = False
+    hot_work: bool = False
+    hazmat: bool = False
+    # long-tail (distances, water supply, agreed value, inflation guard, sublimits, BI worksheet, …)
+    policy_detail: Optional[dict] = None
 
 
 class BuildingBulkInsert(BaseModel):

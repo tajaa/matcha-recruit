@@ -52,6 +52,23 @@ export interface PropertyBuilding {
   geocoded_at: string | null
   cat_refreshed_at: string | null
   note: string | null
+  // deeper capture (propd01)
+  valuation_basis: 'RCV' | 'ACV' | null
+  coinsurance_pct: number | null
+  ordinance_law: string | null
+  bi_months: number | null
+  blanket: boolean
+  aop_deductible: number | null
+  wind_deductible_pct: number | null
+  named_storm_deductible_pct: number | null
+  quake_deductible_pct: number | null
+  roof_type: string | null
+  wiring_year: number | null
+  central_station_alarm: boolean
+  cooking_nfpa96: boolean
+  hot_work: boolean
+  hazmat: boolean
+  policy_detail: Record<string, unknown> | null
   // computed
   cope_grade: string
   cope_score: number
@@ -196,6 +213,23 @@ export interface BuildingPayload {
   replacement_cost: number | null
   insured_value: number | null
   note: string | null
+  // deeper capture (propd01)
+  valuation_basis?: 'RCV' | 'ACV' | null
+  coinsurance_pct?: number | null
+  ordinance_law?: string | null
+  bi_months?: number | null
+  blanket?: boolean
+  aop_deductible?: number | null
+  wind_deductible_pct?: number | null
+  named_storm_deductible_pct?: number | null
+  quake_deductible_pct?: number | null
+  roof_type?: string | null
+  wiring_year?: number | null
+  central_station_alarm?: boolean
+  cooking_nfpa96?: boolean
+  hot_work?: boolean
+  hazmat?: boolean
+  policy_detail?: Record<string, unknown> | null
 }
 
 // SOV ingestion (CSV bulk upload + Gemini parse of an uploaded SOV file).

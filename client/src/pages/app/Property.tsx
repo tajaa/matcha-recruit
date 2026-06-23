@@ -351,16 +351,21 @@ function PerilDetail({ b }: { b: PropertyBuilding }) {
   )
 }
 
-const NUM_FIELDS = ['year_built', 'sq_ft', 'stories', 'roof_year', 'building_value', 'contents_value', 'bi_value', 'replacement_cost', 'insured_value'] as const
+const NUM_FIELDS = ['year_built', 'sq_ft', 'stories', 'roof_year', 'building_value', 'contents_value', 'bi_value', 'replacement_cost', 'insured_value', 'coinsurance_pct', 'bi_months', 'aop_deductible', 'wind_deductible_pct', 'named_storm_deductible_pct', 'quake_deductible_pct', 'wiring_year'] as const
 
 function BuildingModal({ building, onClose, onSaved }: { building: PropertyBuilding | null; onClose: () => void; onSaved: (s: PropertySov) => void }) {
   const [f, setF] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {}
-    const keys = ['name', 'address', 'city', 'state', 'zipcode', 'occupancy', 'construction_type', 'protection_class', 'note', ...NUM_FIELDS]
+    const keys = ['name', 'address', 'city', 'state', 'zipcode', 'occupancy', 'construction_type', 'protection_class', 'note', 'valuation_basis', 'ordinance_law', 'roof_type', ...NUM_FIELDS]
     keys.forEach((k) => { const v = building?.[k as keyof PropertyBuilding]; init[k] = v == null ? '' : String(v) })
     return init
   })
   const [sprinklered, setSprinklered] = useState(building?.sprinklered ?? false)
+  const [blanket, setBlanket] = useState(building?.blanket ?? false)
+  const [centralAlarm, setCentralAlarm] = useState(building?.central_station_alarm ?? false)
+  const [cooking, setCooking] = useState(building?.cooking_nfpa96 ?? false)
+  const [hotWork, setHotWork] = useState(building?.hot_work ?? false)
+  const [hazmat, setHazmat] = useState(building?.hazmat ?? false)
   const [saving, setSaving] = useState(false)
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }))
 
@@ -378,6 +383,24 @@ function BuildingModal({ building, onClose, onSaved }: { building: PropertyBuild
       building_value: numOrNull('building_value'), contents_value: numOrNull('contents_value'),
       bi_value: numOrNull('bi_value'), replacement_cost: numOrNull('replacement_cost'),
       insured_value: numOrNull('insured_value'), note: f.note || null,
+      // deeper capture (propd01)
+      valuation_basis: (f.valuation_basis || null) as 'RCV' | 'ACV' | null,
+      coinsurance_pct: numOrNull('coinsurance_pct'),
+      ordinance_law: f.ordinance_law || null,
+      bi_months: numOrNull('bi_months'),
+      blanket,
+      aop_deductible: numOrNull('aop_deductible'),
+      wind_deductible_pct: numOrNull('wind_deductible_pct'),
+      named_storm_deductible_pct: numOrNull('named_storm_deductible_pct'),
+      quake_deductible_pct: numOrNull('quake_deductible_pct'),
+      roof_type: f.roof_type || null,
+      wiring_year: numOrNull('wiring_year'),
+      central_station_alarm: centralAlarm,
+      cooking_nfpa96: cooking,
+      hot_work: hotWork,
+      hazmat,
+      // preserve the long-tail JSONB (set via CSV/parse) — the form doesn't edit it.
+      policy_detail: building?.policy_detail ?? null,
     }
     try {
       const sov = building ? await updateBuilding(building.id, payload) : await createBuilding(payload)
@@ -420,11 +443,19 @@ function BuildingModal({ building, onClose, onSaved }: { building: PropertyBuild
               <Field label="Stories" value={f.stories ?? ''} onChange={(v) => set('stories', v)} type="number" />
               <Field label="Roof year" value={f.roof_year ?? ''} onChange={(v) => set('roof_year', v)} type="number" />
               <Field label="ISO PPC (1-10)" value={f.protection_class ?? ''} onChange={(v) => set('protection_class', v)} />
+              <Field label="Roof type" value={f.roof_type ?? ''} onChange={(v) => set('roof_type', v)} placeholder="TPO / metal / shingle" />
+              <Field label="Wiring year" value={f.wiring_year ?? ''} onChange={(v) => set('wiring_year', v)} type="number" />
             </div>
-            <label className="inline-flex items-center gap-2 mt-2 text-sm text-zinc-300">
-              <input type="checkbox" checked={sprinklered} onChange={(e) => setSprinklered(e.target.checked)} className="rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500" />
-              Sprinklered
-            </label>
+            <div className="flex flex-wrap gap-x-5 gap-y-2 mt-2 text-sm text-zinc-300">
+              <label className="inline-flex items-center gap-2">
+                <input type="checkbox" checked={sprinklered} onChange={(e) => setSprinklered(e.target.checked)} className="rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500" />
+                Sprinklered
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <input type="checkbox" checked={centralAlarm} onChange={(e) => setCentralAlarm(e.target.checked)} className="rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500" />
+                Central-station fire alarm
+              </label>
+            </div>
           </div>
           <div>
             <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-2">Values</div>
@@ -436,6 +467,58 @@ function BuildingModal({ building, onClose, onSaved }: { building: PropertyBuild
               <Field label="Insured value $" value={f.insured_value ?? ''} onChange={(v) => set('insured_value', v)} type="number" />
             </div>
             <p className="text-[10px] text-zinc-600 mt-1">Insured-value vs replacement-cost drives the insurance-to-value (ITV) check.</p>
+          </div>
+          <div>
+            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-2">Valuation & policy structure</div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              <div>
+                <label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Valuation basis</label>
+                <select value={f.valuation_basis ?? ''} onChange={(e) => set('valuation_basis', e.target.value)} className={inputCls}>
+                  <option value="">—</option>
+                  <option value="RCV">Replacement cost</option>
+                  <option value="ACV">Actual cash value</option>
+                </select>
+              </div>
+              <Field label="Coinsurance %" value={f.coinsurance_pct ?? ''} onChange={(v) => set('coinsurance_pct', v)} type="number" placeholder="90" />
+              <div>
+                <label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Ordinance & law</label>
+                <select value={f.ordinance_law ?? ''} onChange={(e) => set('ordinance_law', e.target.value)} className={inputCls}>
+                  <option value="">—</option>
+                  <option value="none">None</option>
+                  <option value="A">Coverage A</option>
+                  <option value="B">Coverage B</option>
+                  <option value="C">Coverage C</option>
+                  <option value="ABC">A + B + C</option>
+                </select>
+              </div>
+              <Field label="BI period (months)" value={f.bi_months ?? ''} onChange={(v) => set('bi_months', v)} type="number" />
+              <Field label="AOP deductible $" value={f.aop_deductible ?? ''} onChange={(v) => set('aop_deductible', v)} type="number" />
+              <Field label="Wind ded %" value={f.wind_deductible_pct ?? ''} onChange={(v) => set('wind_deductible_pct', v)} type="number" />
+              <Field label="Named-storm ded %" value={f.named_storm_deductible_pct ?? ''} onChange={(v) => set('named_storm_deductible_pct', v)} type="number" />
+              <Field label="Quake ded %" value={f.quake_deductible_pct ?? ''} onChange={(v) => set('quake_deductible_pct', v)} type="number" />
+            </div>
+            <label className="inline-flex items-center gap-2 mt-2 text-sm text-zinc-300">
+              <input type="checkbox" checked={blanket} onChange={(e) => setBlanket(e.target.checked)} className="rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500" />
+              Blanket limit (vs scheduled)
+            </label>
+            <p className="text-[10px] text-zinc-600 mt-1">Deductibles + valuation feed the net PML and the risk score; coinsurance % drives the shortfall check.</p>
+          </div>
+          <div>
+            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-2">Occupancy hazards</div>
+            <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-zinc-300">
+              <label className="inline-flex items-center gap-2">
+                <input type="checkbox" checked={cooking} onChange={(e) => setCooking(e.target.checked)} className="rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500" />
+                Commercial cooking (NFPA-96)
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <input type="checkbox" checked={hotWork} onChange={(e) => setHotWork(e.target.checked)} className="rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500" />
+                Hot work
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <input type="checkbox" checked={hazmat} onChange={(e) => setHazmat(e.target.checked)} className="rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500" />
+                Hazardous materials stored
+              </label>
+            </div>
           </div>
           <Field label="Note" value={f.note ?? ''} onChange={(v) => set('note', v)} placeholder="optional" />
           <button type="submit" disabled={saving} className="bg-zinc-100 text-zinc-900 text-sm font-medium rounded-lg px-4 py-1.5 hover:bg-white disabled:opacity-50 transition-colors">

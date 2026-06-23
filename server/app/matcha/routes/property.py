@@ -34,7 +34,12 @@ _CSV_FIELDS = [
     "name", "address", "city", "state", "zipcode", "county", "occupancy",
     "construction_type", "year_built", "sq_ft", "stories", "roof_year", "sprinklered",
     "protection_class", "building_value", "contents_value", "bi_value",
-    "replacement_cost", "insured_value", "note",
+    "replacement_cost", "insured_value",
+    # deeper capture (propd01)
+    "valuation_basis", "coinsurance_pct", "ordinance_law", "bi_months", "blanket",
+    "aop_deductible", "wind_deductible_pct", "named_storm_deductible_pct", "quake_deductible_pct",
+    "roof_type", "wiring_year", "central_station_alarm", "cooking_nfpa96", "hot_work", "hazmat",
+    "note",
 ]
 _MAX_BULK_ROWS = 1000
 _MAX_CSV_BYTES = 10 * 1024 * 1024
@@ -120,7 +125,12 @@ async def buildings_template(current_user=Depends(require_admin_or_client)):
         "construction_type": "masonry_non_combustible", "year_built": "2008", "sq_ft": "40000",
         "stories": "1", "roof_year": "2015", "sprinklered": "true", "protection_class": "3",
         "building_value": "5000000", "contents_value": "1500000", "bi_value": "2000000",
-        "replacement_cost": "6000000", "insured_value": "6000000", "note": "example row — delete before upload",
+        "replacement_cost": "6000000", "insured_value": "6000000",
+        "valuation_basis": "RCV", "coinsurance_pct": "90", "ordinance_law": "ABC", "bi_months": "12",
+        "blanket": "false", "aop_deductible": "25000", "wind_deductible_pct": "5",
+        "named_storm_deductible_pct": "", "quake_deductible_pct": "", "roof_type": "TPO",
+        "wiring_year": "2015", "central_station_alarm": "true", "cooking_nfpa96": "false",
+        "hot_work": "false", "hazmat": "false", "note": "example row — delete before upload",
     })
     out.seek(0)
     return StreamingResponse(

@@ -15,6 +15,7 @@ unit-tested, no DB) + async CRUD wrappers that never raise. Catastrophe exposure
 is layered on in Phase 3 (``property_cat``); this module is network-free.
 """
 
+import json
 from datetime import date
 from typing import Optional
 from uuid import UUID
@@ -127,11 +128,20 @@ def rollup(buildings: list[dict], current_year: int) -> dict:
 
 # --- DB layer (async; callers own the connection) --------------------------
 
+# Deeper underwriting capture (propd01): COPE+ / valuation / policy structure / hazards.
+# Scalars feed the exposure + risk math; policy_detail JSONB holds the display/long-tail.
+_DEEP_COLS = (
+    "valuation_basis, coinsurance_pct, ordinance_law, bi_months, blanket, aop_deductible, "
+    "wind_deductible_pct, named_storm_deductible_pct, quake_deductible_pct, roof_type, "
+    "wiring_year, central_station_alarm, cooking_nfpa96, hot_work, hazmat, policy_detail"
+)
+
 _COLS = (
     "id, company_id, location_id, name, address, city, state, zipcode, county, occupancy, "
     "construction_type, year_built, sq_ft, stories, roof_year, sprinklered, protection_class, "
     "building_value, contents_value, bi_value, replacement_cost, insured_value, "
-    "lat, lng, geocoded_at, geocode_source, cat_refreshed_at, note, created_at, updated_at"
+    "lat, lng, geocoded_at, geocode_source, cat_refreshed_at, note, " + _DEEP_COLS + ", "
+    "created_at, updated_at"
 )
 
 
@@ -153,6 +163,18 @@ def _serialize(r, current_year: int) -> dict:
         "geocode_source": r["geocode_source"],
         "cat_refreshed_at": r["cat_refreshed_at"].isoformat() if r["cat_refreshed_at"] else None,
         "note": r["note"],
+        # deeper capture (propd01)
+        "valuation_basis": r["valuation_basis"], "coinsurance_pct": _num(r["coinsurance_pct"]),
+        "ordinance_law": r["ordinance_law"], "bi_months": r["bi_months"], "blanket": r["blanket"],
+        "aop_deductible": _num(r["aop_deductible"]),
+        "wind_deductible_pct": _num(r["wind_deductible_pct"]),
+        "named_storm_deductible_pct": _num(r["named_storm_deductible_pct"]),
+        "quake_deductible_pct": _num(r["quake_deductible_pct"]),
+        "roof_type": r["roof_type"], "wiring_year": r["wiring_year"],
+        "central_station_alarm": r["central_station_alarm"], "cooking_nfpa96": r["cooking_nfpa96"],
+        "hot_work": r["hot_work"], "hazmat": r["hazmat"],
+        "policy_detail": (json.loads(r["policy_detail"]) if isinstance(r["policy_detail"], str)
+                          else (r["policy_detail"] or None)),
         "created_at": r["created_at"].isoformat() if r["created_at"] else None,
         "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
     }
@@ -179,14 +201,32 @@ _FIELDS = [
     "construction_type", "year_built", "sq_ft", "stories", "roof_year", "sprinklered",
     "protection_class", "building_value", "contents_value", "bi_value", "replacement_cost",
     "insured_value", "note",
+    # deeper capture (propd01)
+    "valuation_basis", "coinsurance_pct", "ordinance_law", "bi_months", "blanket",
+    "aop_deductible", "wind_deductible_pct", "named_storm_deductible_pct", "quake_deductible_pct",
+    "roof_type", "wiring_year", "central_station_alarm", "cooking_nfpa96", "hot_work", "hazmat",
+    "policy_detail",
 ]
+# JSONB columns need an explicit ::jsonb cast + a json-encoded value.
+_JSON_FIELDS = {"policy_detail"}
+
+
+def _placeholder(field: str, n: int) -> str:
+    return f"${n}::jsonb" if field in _JSON_FIELDS else f"${n}"
+
+
+def _val(field: str, data: dict):
+    v = data.get(field)
+    if field in _JSON_FIELDS:
+        return json.dumps(v) if v else None
+    return v
 
 
 async def upsert_building(conn, company_id: UUID, building_id, data: dict, user_id) -> Optional[dict]:
     """Insert (building_id None) or update an owned building. Returns the row, or
     None when updating a building the company doesn't own. Geocode/cat columns are
     deliberately untouched here — the Phase-3 task owns them."""
-    vals = {k: data.get(k) for k in _FIELDS}
+    args = [_val(f, data) for f in _FIELDS]
     if building_id:
         owned = await conn.fetchval(
             "SELECT 1 FROM company_property_buildings WHERE id = $1 AND company_id = $2",
@@ -194,19 +234,19 @@ async def upsert_building(conn, company_id: UUID, building_id, data: dict, user_
         )
         if not owned:
             return None
-        sets = ", ".join(f"{f} = ${i + 3}" for i, f in enumerate(_FIELDS))
+        sets = ", ".join(f"{f} = {_placeholder(f, i + 3)}" for i, f in enumerate(_FIELDS))
         row = await conn.fetchrow(
             f"UPDATE company_property_buildings SET {sets}, updated_by = $2, updated_at = NOW() "
             f"WHERE id = $1 RETURNING {_COLS}",
-            building_id, user_id, *[vals[f] for f in _FIELDS],
+            building_id, user_id, *args,
         )
     else:
         cols = ", ".join(_FIELDS)
-        ph = ", ".join(f"${i + 3}" for i in range(len(_FIELDS)))
+        ph = ", ".join(_placeholder(f, i + 3) for i, f in enumerate(_FIELDS))
         row = await conn.fetchrow(
             f"INSERT INTO company_property_buildings (company_id, created_by, updated_by, {cols}) "
             f"VALUES ($1, $2, $2, {ph}) RETURNING {_COLS}",
-            company_id, user_id, *[vals[f] for f in _FIELDS],
+            company_id, user_id, *args,
         )
     return _serialize(row, date.today().year)
 

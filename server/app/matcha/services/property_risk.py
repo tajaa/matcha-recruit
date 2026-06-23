@@ -59,6 +59,30 @@ def building_risk(b: dict) -> dict:
             score -= pen
             drivers.append({"factor": "Catastrophe", "detail": f"worst peril {worst}", "delta": -pen})
 
+    # ACV valuation recovers depreciated value → weaker recovery posture.
+    if b.get("valuation_basis") == "ACV":
+        score -= 4
+        drivers.append({"factor": "Valuation", "detail": "ACV (not replacement cost)", "delta": -4})
+
+    # Occupancy fire-load hazards (capped).
+    haz_labels = []
+    haz = 0
+    if b.get("cooking_nfpa96"):
+        haz += 4; haz_labels.append("commercial cooking")
+    if b.get("hot_work"):
+        haz += 4; haz_labels.append("hot work")
+    if b.get("hazmat"):
+        haz += 6; haz_labels.append("hazmat")
+    haz = min(12, haz)
+    if haz:
+        score -= haz
+        drivers.append({"factor": "Occupancy hazard", "detail": ", ".join(haz_labels), "delta": -haz})
+
+    # Central-station fire alarm is a recognized protection credit.
+    if b.get("central_station_alarm"):
+        score += 3
+        drivers.append({"factor": "Protection", "detail": "central-station alarm", "delta": 3})
+
     s = max(0, min(100, round(score)))
     return {"score": s, "grade": _grade(s), "risk_level": _risk_level(s), "worst_cat": worst, "drivers": drivers}
 

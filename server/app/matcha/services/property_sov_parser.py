@@ -64,6 +64,21 @@ Return ONLY valid JSON with exactly this shape (use null for anything not presen
    "bi_value": <business-interruption / business-income value in whole dollars, or null>,
    "replacement_cost": <total replacement cost in whole dollars, or null>,
    "insured_value": <stated/insured value in whole dollars, or null>,
+   "valuation_basis": "<RCV or ACV, or null>",
+   "coinsurance_pct": <coinsurance percentage e.g. 90, or null>,
+   "ordinance_law": "<none/A/B/C/ABC if stated, or null>",
+   "bi_months": <business-interruption period of restoration in months, or null>,
+   "blanket": <true if a blanket limit (vs scheduled), else null>,
+   "aop_deductible": <all-other-perils deductible in whole dollars, or null>,
+   "wind_deductible_pct": <wind/hail deductible percent, or null>,
+   "named_storm_deductible_pct": <named-storm/hurricane deductible percent, or null>,
+   "quake_deductible_pct": <earthquake deductible percent, or null>,
+   "roof_type": "<roof covering e.g. TPO/EPDM/BUR/metal/shingle/tile, or null>",
+   "wiring_year": <year wiring last updated, or null>,
+   "central_station_alarm": <true if a central-station/monitored fire alarm, else null>,
+   "cooking_nfpa96": <true if commercial cooking / Type-I hood present, else null>,
+   "hot_work": <true if hot work performed on site, else null>,
+   "hazmat": <true if hazardous materials/flammables stored, else null>,
    "note": "<short note, or null>"}
 ]}
 
@@ -153,6 +168,9 @@ def coerce_building(raw: dict) -> Optional[dict]:
         return None
     spr = _bool(raw.get("sprinklered"))
     state = _str(raw.get("state"), 2)
+    valuation = _str(raw.get("valuation_basis"), 4)
+    valuation = valuation.upper() if valuation and valuation.upper() in ("RCV", "ACV") else None
+    ordl = _str(raw.get("ordinance_law"), 8)
     b = {
         "name": _str(raw.get("name"), 255),
         "address": _str(raw.get("address"), 500),
@@ -174,6 +192,22 @@ def coerce_building(raw: dict) -> Optional[dict]:
         "replacement_cost": _num(raw.get("replacement_cost")),
         "insured_value": _num(raw.get("insured_value")),
         "note": _str(raw.get("note"), 2000),
+        # deeper capture (propd01)
+        "valuation_basis": valuation,
+        "coinsurance_pct": _num(raw.get("coinsurance_pct")),
+        "ordinance_law": ordl,
+        "bi_months": _int(raw.get("bi_months"), 0, 120),
+        "blanket": bool(_bool(raw.get("blanket"))),
+        "aop_deductible": _num(raw.get("aop_deductible")),
+        "wind_deductible_pct": _num(raw.get("wind_deductible_pct")),
+        "named_storm_deductible_pct": _num(raw.get("named_storm_deductible_pct")),
+        "quake_deductible_pct": _num(raw.get("quake_deductible_pct")),
+        "roof_type": _str(raw.get("roof_type"), 40),
+        "wiring_year": _int(raw.get("wiring_year"), 1700, 2100),
+        "central_station_alarm": bool(_bool(raw.get("central_station_alarm"))),
+        "cooking_nfpa96": bool(_bool(raw.get("cooking_nfpa96"))),
+        "hot_work": bool(_bool(raw.get("hot_work"))),
+        "hazmat": bool(_bool(raw.get("hazmat"))),
     }
     has_identity = any(b[k] for k in ("name", "address", "city"))
     has_value = any(b[k] is not None for k in ("building_value", "contents_value", "bi_value", "replacement_cost", "insured_value"))

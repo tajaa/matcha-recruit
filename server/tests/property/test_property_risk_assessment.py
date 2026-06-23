@@ -57,3 +57,24 @@ def test_portfolio_is_tiv_weighted():
 def test_portfolio_empty():
     out = pr.portfolio_risk([])
     assert out["score"] is None and out["top_risks"] == [] and out["rated"] == 0
+
+
+# --- deeper capture (propd01): valuation / hazards / protection -----------
+
+def test_acv_valuation_penalizes():
+    r = pr.building_risk({**_b(cope_score=90, perils=[{"peril": "wind", "tier": "low"}]), "valuation_basis": "ACV"})
+    assert r["score"] == 86 and any(d["factor"] == "Valuation" for d in r["drivers"])
+
+
+def test_occupancy_hazards_capped_at_12():
+    r = pr.building_risk({**_b(cope_score=90, perils=[{"peril": "wind", "tier": "low"}]),
+                          "cooking_nfpa96": True, "hot_work": True, "hazmat": True})  # 4+4+6=14 → cap 12
+    assert any(d["factor"] == "Occupancy hazard" and d["delta"] == -12 for d in r["drivers"])
+    assert r["score"] == 78
+
+
+def test_central_station_alarm_credit():
+    base = pr.building_risk(_b(cope_score=80, perils=[{"peril": "wind", "tier": "low"}]))["score"]
+    boosted = pr.building_risk({**_b(cope_score=80, perils=[{"peril": "wind", "tier": "low"}]),
+                                "central_station_alarm": True})["score"]
+    assert boosted == base + 3

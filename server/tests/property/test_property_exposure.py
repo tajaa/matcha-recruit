@@ -73,3 +73,28 @@ def test_portfolio_empty_is_zeroed():
     out = ex.portfolio_exposure([])
     assert out["total_aal"] == 0 and out["worst_pml"] == 0 and out["coinsurance_shortfall"] == 0
     assert out["worst_pml_peril"] is None
+
+
+# --- deeper capture (propd01): deductibles + per-building coinsurance ------
+
+def test_pml_is_net_of_percentage_deductible():
+    b = _b(tiv=10_000_000, perils=[{"peril": "quake", "tier": "severe"}])
+    b["quake_deductible_pct"] = 10            # 10% of TIV = $1M retained
+    out = ex.building_exposure(b)
+    gross = ex.peril_pml(10_000_000, "quake", "severe")
+    assert out["by_peril"]["quake"]["pml"] == round(gross - 1_000_000)
+
+
+def test_named_storm_deductible_applies_to_wind():
+    b = _b(tiv=10_000_000, perils=[{"peril": "wind", "tier": "severe"}])
+    b["named_storm_deductible_pct"] = 5
+    out = ex.building_exposure(b)
+    gross = ex.peril_pml(10_000_000, "wind", "severe")
+    assert out["by_peril"]["wind"]["pml"] == round(gross - 500_000)
+
+
+def test_coinsurance_uses_building_pct():
+    # 80% clause + insured to 80% of replacement → compliant, no shortfall.
+    b = _b(tiv=5_000_000, insured=4_000_000, replacement=5_000_000)
+    b["coinsurance_pct"] = 80
+    assert ex.building_exposure(b)["coinsurance_shortfall"] == 0.0
