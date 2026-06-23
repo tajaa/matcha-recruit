@@ -23,6 +23,37 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'property-risk-tooling',
+    date: '2026-06-23',
+    category: 'Property',
+    title: 'Property risk tooling — import an SOV, see $ exposure + a risk score',
+    summary:
+      'Turns the Commercial Property page from a data table into business-facing risk tooling. A company imports its Statement of Values (CSV or by dropping a carrier PDF that AI parses), then sees a directional $ exposure (average annual loss, worst-case PML by peril, coinsurance shortfall), a prioritized risk-improvement plan, and a single composite Property Risk Score (0–100 / grade) it can hand to its broker and carrier. Also fixes the catastrophe data sources so seismic + wildfire actually compute.',
+    whatsNew: [
+      'Import a Statement of Values: download a CSV template + bulk-upload, OR upload a carrier SOV PDF/spreadsheet and Gemini extracts the buildings into a reviewable, editable list before import (lenient — it normalizes "$1.5M", "Wood Frame", "Yes", etc.).',
+      'Modeled $ exposure (directional, clearly labeled — not a cat model): average annual loss, worst-case PML accumulated by peril across buildings, and the coinsurance shortfall implied by under-insurance.',
+      'Risk-improvement plan: a prioritized, actionable fix list (sprinkler the combustible building → projected COPE lift, true up insurance-to-value → $ shortfall, review the named-storm deductible, refresh an aged roof, document NFPA-96 hood cleaning for kitchens).',
+      'Composite Property Risk Score: a per-building and TIV-weighted portfolio 0–100 score + grade + risk level, with the drivers that moved it and the top risk contributors — the underwriting headline. Also rendered in the broker submission packet.',
+      'Catastrophe sources fixed: the USGS seismic endpoint had relocated (it was silently returning ZERO quake for every property — now restored platform-wide); wildfire now resolves from a conservative state/county baseline because the free per-address WHP services are now access-blocked.',
+    ],
+    howToUse: [
+      'Company → Commercial Property → "Import": use the CSV tab (download template → fill → upload) or the "Parse a file (AI)" tab (drop a PDF/CSV → review/edit the parsed buildings → Import).',
+      'The page then shows the Property Risk Score headline (+ top contributors), a Modeled Exposure card (AAL / worst PML / coinsurance shortfall), the Risk-improvement plan, and a per-building Risk grade column — expand a row for that building\'s score, drivers, and the four perils.',
+      'Catastrophe (and therefore PML/AAL) populate once buildings are geocoded — provide full street addresses; the background refresh fills flood/quake/wildfire/wind.',
+      'Broker submission PDF now carries the property risk score + exposure + the top fixes automatically when the client has buildings.',
+    ],
+    setup: [
+      'No new migration for this milestone — it builds on the existing property feature (migration prop01) and the "property" feature flag. Apply prop01 in PROD if not already (still pending per the prior Property update).',
+      'Catastrophe geocoding uses free gov APIs (US Census + FEMA + USGS) — no key; wildfire is a built-in state/county baseline. The SOV PDF parse uses the existing Gemini key (LIVE_API).',
+    ],
+    notes: [
+      'Everything $-valued is a DIRECTIONAL estimate (coarse damage ratios + coarse wildfire/wind baselines), labeled as such — useful for relative risk + underwriting conversations, not a substitute for a licensed cat model. The ratios/baselines are tunable against real loss data later.',
+      'The quake fix is the high-impact one: any company with property in a seismic state was scoring zero earthquake exposure before — the composite risk index, exposure, and submission packet were all undercounting it.',
+      'Voice-style "best-effort" throughout: a failed parse or a down catastrophe source degrades gracefully (no data / pending) and never blocks the page or 500s.',
+    ],
+    tag: 'new',
+  },
+  {
     id: 'ir-voice-intake',
     date: '2026-06-23',
     category: 'Incident Reporting',
