@@ -85,11 +85,51 @@ export interface PropertyReadiness {
   summary: { done: number; total: number }
 }
 
+export interface PropertyBuildingExposure {
+  aal: number
+  worst_pml: number
+  coinsurance_shortfall: number
+  by_peril: Record<string, { aal: number; pml: number; tier: string }>
+}
+
+export interface PropertyExposure {
+  total_aal: number
+  worst_pml: number
+  worst_pml_peril: string | null
+  coinsurance_shortfall: number
+  by_peril: Record<string, { aal: number; pml: number }>
+  buildings: Record<string, PropertyBuildingExposure>
+  basis: string
+}
+
+export type FixSeverity = 'high' | 'medium' | 'low'
+
+export interface PropertyFix {
+  key: string
+  label: string
+  severity: FixSeverity
+  detail: string
+  impact?: string
+  building_id?: string | null
+  building_name?: string | null
+}
+
+export interface PropertyPlan {
+  fixes: PropertyFix[]
+  summary: { total: number; by_severity: Record<string, number>; shown: number }
+}
+
 export interface PropertySov {
   company_id: string
   buildings: PropertyBuilding[]
   rollup: PropertyRollup
   readiness?: PropertyReadiness
+  exposure?: PropertyExposure
+  plan?: PropertyPlan
+}
+
+export const FIX_SEVERITY_TONE: Record<string, string> = {
+  high: 'bg-red-500/15 text-red-300', medium: 'bg-amber-500/15 text-amber-300', low: 'bg-zinc-700/40 text-zinc-400',
 }
 
 export const READINESS_TONE: Record<string, string> = {
@@ -117,6 +157,21 @@ export interface BuildingPayload {
   replacement_cost: number | null
   insured_value: number | null
   note: string | null
+}
+
+// SOV ingestion (CSV bulk upload + Gemini parse of an uploaded SOV file).
+export interface BulkUploadResult {
+  total_rows: number
+  created: number
+  failed: number
+  errors: { row: number; name: string; error: string }[]
+  ids: string[]
+}
+
+export interface SovParseResult {
+  buildings: BuildingPayload[]
+  available: boolean
+  model: string
 }
 
 export const COPE_TONE: Record<string, string> = {

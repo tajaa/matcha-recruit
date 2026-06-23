@@ -19,6 +19,7 @@ from ..services import (
     controls_evidence as ce, claims_readiness as cr, submission_readiness as sr,
     venue_severity as vs, exclusion_gap as eg, limit_adequacy as la,
     loss_development as ld, property_sov, property_cat,
+    property_exposure as property_exp, property_recommendations as property_recs,
 )
 from .ir_incidents import compute_wc_metrics
 from .broker_portfolio import _assert_broker_owns_company
@@ -65,7 +66,11 @@ async def _tenant_context(conn, user_id, company_id: UUID) -> dict:
         {}, "loss_development")
     sov = await _safe(property_sov.build_sov(conn, company_id), {}, "property_sov")
     cat = await _safe(property_cat.company_cat_exposure(conn, company_id), {}, "property_cat")
-    property_ctx = {**sov, "cat": cat} if sov else None
+    property_ctx = None
+    if sov and (sov.get("buildings")):
+        exp = property_exp.portfolio_exposure(sov["buildings"])
+        plan = property_recs.build_plan(sov["buildings"], sov.get("rollup"), cat=cat, exposure=exp)
+        property_ctx = {**sov, "cat": cat, "exposure": exp, "plan": plan}
     primary = states[0] if states else None
     latest = mods.get(str(company_id)) or {}
     return {

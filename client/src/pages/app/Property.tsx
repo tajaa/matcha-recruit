@@ -1,9 +1,10 @@
 import { useState, useEffect, Fragment, type FormEvent } from 'react'
-import { Building2, Plus, Loader2, AlertCircle, Pencil, Trash2, X, ChevronDown, ChevronRight } from 'lucide-react'
+import { Building2, Plus, Loader2, AlertCircle, Pencil, Trash2, X, ChevronDown, ChevronRight, Upload } from 'lucide-react'
 import { Card } from '../../components/ui'
+import { SovImportModal } from '../../components/property/SovImportModal'
 import { fetchPropertySov, createBuilding, updateBuilding, deleteBuilding } from '../../api/property'
 import type { PropertySov, PropertyBuilding, BuildingPayload, ConstructionType } from '../../types/property'
-import { CONSTRUCTION_LABEL, COPE_TONE, PERIL_TONE, READINESS_TONE } from '../../types/property'
+import { CONSTRUCTION_LABEL, COPE_TONE, PERIL_TONE, READINESS_TONE, FIX_SEVERITY_TONE } from '../../types/property'
 
 const inputCls = 'w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500'
 const CONSTRUCTION_OPTS: ConstructionType[] = ['fire_resistive', 'modified_fire_resistive', 'masonry_non_combustible', 'non_combustible', 'joisted_masonry', 'frame']
@@ -39,6 +40,7 @@ export default function Property() {
   const [error, setError] = useState(false)
   const [editing, setEditing] = useState<PropertyBuilding | null>(null)
   const [showForm, setShowForm] = useState(false)
+  const [showImport, setShowImport] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   const load = () => {
@@ -65,7 +67,7 @@ export default function Property() {
     </div>
   )
 
-  const { rollup: r, buildings, readiness } = data
+  const { rollup: r, buildings, readiness, exposure, plan } = data
   const itvPct = r.itv.portfolio_ratio != null ? Math.round(r.itv.portfolio_ratio * 100) : null
 
   return (
@@ -77,9 +79,14 @@ export default function Property() {
           </h1>
           <p className="text-sm text-zinc-500 mt-1">Your Statement of Values — buildings, COPE, and insurance-to-value. Catastrophe exposure populates once buildings are geocoded.</p>
         </div>
-        <button onClick={openAdd} className="inline-flex items-center gap-1.5 text-sm text-zinc-200 px-3 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 transition-colors">
-          <Plus className="h-4 w-4" /> Add building
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowImport(true)} className="inline-flex items-center gap-1.5 text-sm text-zinc-300 px-3 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 transition-colors">
+            <Upload className="h-4 w-4" /> Import
+          </button>
+          <button onClick={openAdd} className="inline-flex items-center gap-1.5 text-sm text-zinc-200 px-3 py-1.5 rounded-lg border border-zinc-700 hover:border-zinc-500 transition-colors">
+            <Plus className="h-4 w-4" /> Add building
+          </button>
+        </div>
       </div>
 
       {/* Rollup */}
@@ -110,6 +117,31 @@ export default function Property() {
         </Card>
       </div>
 
+      {/* Modeled $ exposure (directional) */}
+      {exposure && buildings.length > 0 && (
+        <Card className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Modeled exposure</span>
+            <span className="text-[10px] text-zinc-600">directional estimate · not a cat model</span>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <div className="text-2xl font-light font-mono text-zinc-100">{fmtUsd(exposure.total_aal)}</div>
+              <div className="text-[10px] text-zinc-600 uppercase tracking-wider mt-0.5">Avg annual loss</div>
+            </div>
+            <div>
+              <div className="text-2xl font-light font-mono text-amber-400">{fmtUsd(exposure.worst_pml)}</div>
+              <div className="text-[10px] text-zinc-600 uppercase tracking-wider mt-0.5">Worst PML{exposure.worst_pml_peril ? ` · ${exposure.worst_pml_peril}` : ''}</div>
+            </div>
+            <div>
+              <div className={`text-2xl font-light font-mono ${exposure.coinsurance_shortfall > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>{fmtUsd(exposure.coinsurance_shortfall)}</div>
+              <div className="text-[10px] text-zinc-600 uppercase tracking-wider mt-0.5">Coinsurance shortfall</div>
+            </div>
+          </div>
+          <p className="text-[10px] text-zinc-600 mt-3">AAL = expected loss per year · PML = worst single catastrophe event (peril accumulated across buildings) · shortfall = added insured value to meet a 90% coinsurance clause.</p>
+        </Card>
+      )}
+
       {/* Submission readiness */}
       {readiness && buildings.length > 0 && (
         <Card className="p-4">
@@ -126,6 +158,30 @@ export default function Property() {
               ))}
             </ul>
           )}
+        </Card>
+      )}
+
+      {/* Risk-improvement plan */}
+      {plan && plan.fixes.length > 0 && (
+        <Card className="p-4">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Risk-improvement plan</span>
+            <span className="text-[10px] text-zinc-600">{plan.summary.total} item{plan.summary.total === 1 ? '' : 's'} · prioritized</span>
+          </div>
+          <ul className="space-y-2.5">
+            {plan.fixes.map((f, i) => (
+              <li key={f.key + i} className="flex items-start gap-2.5">
+                <span className={`mt-0.5 shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${FIX_SEVERITY_TONE[f.severity] ?? 'bg-zinc-800 text-zinc-400'}`}>{f.severity}</span>
+                <div className="min-w-0">
+                  <div className="text-[13px] text-zinc-200">
+                    {f.label}
+                    {f.impact && <span className="ml-2 text-[11px] font-mono text-emerald-400">{f.impact}</span>}
+                  </div>
+                  <div className="text-[11px] text-zinc-500">{f.detail}</div>
+                </div>
+              </li>
+            ))}
+          </ul>
         </Card>
       )}
 
@@ -184,6 +240,16 @@ export default function Property() {
                       <tr className="bg-zinc-900/40 border-b border-zinc-800/30">
                         <td></td>
                         <td colSpan={7} className="px-4 py-3">
+                          {exposure?.buildings[b.id] && (
+                            <div className="mb-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-zinc-500">
+                              <span>AAL <span className="font-mono text-zinc-300">{fmtUsd(exposure.buildings[b.id].aal)}</span></span>
+                              <span>worst PML <span className="font-mono text-amber-400">{fmtUsd(exposure.buildings[b.id].worst_pml)}</span></span>
+                              {exposure.buildings[b.id].coinsurance_shortfall > 0 && (
+                                <span>coinsurance shortfall <span className="font-mono text-amber-400">{fmtUsd(exposure.buildings[b.id].coinsurance_shortfall)}</span></span>
+                              )}
+                              <span className="text-zinc-700">directional</span>
+                            </div>
+                          )}
                           <PerilDetail b={b} />
                         </td>
                       </tr>
@@ -198,6 +264,9 @@ export default function Property() {
 
       {showForm && (
         <BuildingModal building={editing} onClose={() => setShowForm(false)} onSaved={(sov) => { setData(sov); setShowForm(false) }} />
+      )}
+      {showImport && (
+        <SovImportModal onClose={() => setShowImport(false)} onImported={load} />
       )}
     </div>
   )

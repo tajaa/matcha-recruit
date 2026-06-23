@@ -326,6 +326,27 @@ def _property_section_html(prop: Optional[dict]) -> str:
     cope_s = f"{cope}{' / ' + worst_cope if worst_cope else ''}" if cope is not None else "—"
     under_note = (f"<div class='narr'>{under} building(s) below the 90% insurance-to-value floor — "
                   f"coinsurance-penalty exposure.</div>" if under else "")
+
+    # Directional modeled exposure (best-effort; only when present).
+    exp = prop.get("exposure") or {}
+    exp_note = ""
+    if exp.get("worst_pml"):
+        peril = f" ({_esc(exp.get('worst_pml_peril'))})" if exp.get("worst_pml_peril") else ""
+        exp_note = (f"<div class='narr'>Directional modeled exposure — average annual loss "
+                    f"{_money(exp.get('total_aal'))}, worst PML {_money(exp.get('worst_pml'))}{peril}. Illustrative, not a catastrophe model.</div>")
+
+    # Risk-improvement plan (prioritized fixes).
+    fixes = (prop.get("plan") or {}).get("fixes") or []
+    recs_html = ""
+    if fixes:
+        items = "".join(
+            f"<li><b>{_esc(f.get('label'))}</b>"
+            f"{(' — ' + _esc(f.get('impact'))) if f.get('impact') else ''}"
+            f"<div class='narr'>{_esc(f.get('detail'))}</div></li>"
+            for f in fixes[:6]
+        )
+        recs_html = f"<h3>Risk-improvement plan</h3><ul>{items}</ul>"
+
     return (
         f"<h2>Commercial Property — {bc} building(s), {_money(tiv) if tiv else '—'} TIV</h2>"
         f"<div class='grid'>"
@@ -333,7 +354,7 @@ def _property_section_html(prop: Optional[dict]) -> str:
         f"<div class='cell'><div class='l'>COPE</div><div class='v'>{_esc(cope_s)}</div></div>"
         f"<div class='cell'><div class='l'>Ins-to-value</div><div class='v'>{itv_s}</div></div>"
         f"<div class='cell'><div class='l'>Cat exposure</div><div class='v {cat_cls}'>{_esc((worst_cat or '—').upper())}</div></div>"
-        f"</div>{under_note}"
+        f"</div>{under_note}{exp_note}{recs_html}"
     )
 
 

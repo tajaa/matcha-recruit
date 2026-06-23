@@ -38,3 +38,19 @@ class BuildingUpsert(BaseModel):
     replacement_cost: Optional[float] = Field(default=None, ge=0)
     insured_value: Optional[float] = Field(default=None, ge=0)
     note: Optional[str] = None
+
+
+class BuildingBulkInsert(BaseModel):
+    """A reviewed list of buildings to insert in one shot (parse → review → import)."""
+
+    buildings: list[BuildingUpsert] = Field(default_factory=list, max_length=1000)
+
+
+class BulkUploadResult(BaseModel):
+    """Per-row result of a CSV upload / bulk insert (mirrors BulkEmployeeCSVUpload)."""
+
+    total_rows: int
+    created: int
+    failed: int
+    errors: list[dict]   # [{row: int, name: str, error: str}]
+    ids: list[str]

@@ -32,8 +32,11 @@ FEMA_NFHL_URL = os.getenv(
     "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query",
 )
 USGS_DESIGNMAPS_URL = os.getenv(
+    # USGS relocated the ASCE7-16 service (the old designmaps/asce7-16.json now 301s
+    # here). Same response shape (response.data.sds). follow_redirects below also
+    # covers a stale env value still pointing at the old path.
     "USGS_DESIGNMAPS_URL",
-    "https://earthquake.usgs.gov/ws/designmaps/asce7-16.json",
+    "https://earthquake.usgs.gov/ws/building-codes/asce7-16/calculate",
 )
 USFS_WHP_URL = os.getenv(
     "USFS_WHP_URL",
@@ -241,7 +244,7 @@ async def enrich_building(conn, building_id: UUID) -> dict:
         return {"status": "not_found"}
 
     lat, lng = b["lat"], b["lng"]
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(follow_redirects=True) as client:
         if lat is None or lng is None:
             geo = await geocode(client, b["address"], b["city"], b["state"], b["zipcode"])
             if geo:
