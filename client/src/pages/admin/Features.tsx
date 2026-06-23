@@ -34,6 +34,7 @@ const FEATURE_LABELS: Record<string, string> = {
   controls_evidence: 'Proof of Controls (controls-evidence register + packet)',
   limit_adequacy: 'Limit Adequacy & Contract Review (limits vs contracts)',
   driver_risk: 'Driver Risk (fleet MVR scoring — commercial auto)',
+  ir_voice_intake: 'IR Voice Intake (dictate on create + magic-link forms)',
 }
 
 type CompanyFeatures = {
