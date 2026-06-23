@@ -46,7 +46,13 @@ def _features_dict(raw) -> dict:
 
 
 async def _read_audio_or_400(file: UploadFile) -> bytes:
-    """Validate the upload content-type/size and return the bytes (mirrors voice.py)."""
+    """Validate the upload content-type/size/structure and return the bytes.
+
+    Stricter than the authed voice.py because the caller is unauthenticated: we
+    verify the RIFF/WAVE magic bytes so a 25MB blob with a forged content-type
+    header can't reach the (expensive) Gemini call. content_type is
+    client-controlled, so it is a hint, not a guarantee.
+    """
     if (file.content_type or "").lower() not in _ALLOWED_AUDIO_MIME:
         raise HTTPException(status_code=400, detail="Unsupported audio format — expected WAV.")
     audio = await file.read()
@@ -54,7 +60,21 @@ async def _read_audio_or_400(file: UploadFile) -> bytes:
         raise HTTPException(status_code=400, detail="Empty audio upload.")
     if len(audio) > _MAX_AUDIO_BYTES:
         raise HTTPException(status_code=413, detail="Audio too large (max 25MB).")
+    # Cheap structural gate before spending a Gemini multimodal call.
+    if len(audio) < 12 or audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
+        raise HTTPException(status_code=400, detail="Unsupported audio format — expected WAV.")
     return audio
+
+
+async def _voice_parse_budget(ip: str, token: str, company_id: str) -> None:
+    """Per-link + per-company budget on top of the per-IP limits.
+
+    The per-IP cap (applied separately, before the DB lookup) is defeated by IP
+    rotation, so a single leaked public link could otherwise drive unlimited
+    Gemini spend. These two caps bound abuse of one link, and total spend across
+    all of a company's links, regardless of how many IPs the attacker rotates."""
+    await check_rate_limit(token.lower(), "ir_voice_parse_link", 15, 3600)
+    await check_rate_limit(company_id, "ir_voice_parse_co", 120, 3600)
 
 # ---------------------------------------------------------------------------
 # Rate limiting: max 5 submissions per IP per hour
@@ -286,7 +306,7 @@ async def parse_report_voice(token: str, request: Request, file: UploadFile = Fi
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT enabled_features FROM companies WHERE report_email_token = $1",
+            "SELECT id, report_token_used_at, enabled_features FROM companies WHERE report_email_token = $1",
             token.lower(),
         )
     if not row:
@@ -294,9 +314,14 @@ async def parse_report_voice(token: str, request: Request, file: UploadFile = Fi
     features = _features_dict(row["enabled_features"])
     if not features.get("incidents", False):
         raise HTTPException(status_code=404, detail="Invalid reporting link")
+    # Single-use link: once the report is filed the link is dead — so is its voice
+    # parse. Closes the post-burn "free Gemini proxy" window on a leaked link.
+    if row["report_token_used_at"] is not None:
+        raise HTTPException(status_code=410, detail="This reporting link has already been used")
     if not features.get("ir_voice_intake", False):
         raise HTTPException(status_code=403, detail="Voice dictation is not enabled.")
 
+    await _voice_parse_budget(ip, token, str(row["id"]))
     audio = await _read_audio_or_400(file)
     # Anonymous form has no structured location picker — no options to pin to.
     return await parse_voice_incident(audio, (file.content_type or "audio/wav").lower(),
@@ -533,7 +558,7 @@ async def parse_location_intake_voice(token: str, request: Request, file: Upload
         link = await conn.fetchrow(
             """
             SELECT rl.is_active, rl.expires_at, rl.max_uses, rl.use_count,
-                   c.enabled_features
+                   c.id AS company_id, c.enabled_features
             FROM ir_report_links rl
             JOIN companies c ON c.id = rl.company_id
             WHERE rl.token = $1
@@ -549,6 +574,7 @@ async def parse_location_intake_voice(token: str, request: Request, file: Upload
     if not features.get("ir_voice_intake", False):
         raise HTTPException(status_code=403, detail="Voice dictation is not enabled.")
 
+    await _voice_parse_budget(ip, token, str(link["company_id"]))
     audio = await _read_audio_or_400(file)
     return await parse_voice_incident(audio, (file.content_type or "audio/wav").lower(),
                                       location_options=[])
