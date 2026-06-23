@@ -162,9 +162,12 @@ async def fetch_flood(client, lat, lng) -> dict | None:
     try:
         feats = data.get("features") or []
         attrs = feats[0]["attributes"] if feats else {}
-        zone = attrs.get("FLD_ZONE") or attrs.get("ZONE_SUBTY") or "X"
-        tier, score = _flood_tier(zone if not str(attrs.get("ZONE_SUBTY") or "").startswith("0.2") else attrs["ZONE_SUBTY"])
-        return {"zone": str(zone), "tier": tier, "score": score, "source": "FEMA NFHL", "raw": attrs}
+        fld = attrs.get("FLD_ZONE") or "X"
+        subty = str(attrs.get("ZONE_SUBTY") or "")
+        # the 0.2%-annual-chance band lives in ZONE_SUBTY; score + store that when present
+        scored = subty if subty.startswith("0.2") else fld
+        tier, score = _flood_tier(scored)
+        return {"zone": str(scored), "tier": tier, "score": score, "source": "FEMA NFHL", "raw": attrs}
     except (AttributeError, KeyError, IndexError, TypeError):
         return None
 
@@ -282,20 +285,25 @@ def summarize(rows: list[dict]) -> dict:
     """Roll up (building_id, peril, tier, score, lat) rows → company cat exposure. Pure."""
     buildings = {}
     by_peril: dict[str, str] = {}
+    present_ranks: list[int] = []
     for r in rows:
         bid = r["building_id"]
         buildings.setdefault(bid, {"geocoded": r.get("lat") is not None, "worst": 0})
         tier = r.get("tier")
         if tier and tier in TIER_RANK:
-            buildings[bid]["worst"] = max(buildings[bid]["worst"], TIER_RANK[tier])
+            rank = TIER_RANK[tier]
+            present_ranks.append(rank)
+            buildings[bid]["worst"] = max(buildings[bid]["worst"], rank)
             peril = r.get("peril")
-            if peril and TIER_RANK[tier] > TIER_RANK.get(by_peril.get(peril, "low"), 0):
+            if peril and rank > TIER_RANK.get(by_peril.get(peril, "low"), 0):
                 by_peril[peril] = tier
     rank_to_tier = {v: k for k, v in TIER_RANK.items()}
-    worst_rank = max((b["worst"] for b in buildings.values()), default=0)
+    # worst_tier only from tiers actually fetched — un-geocoded buildings (no peril
+    # rows) report None, not a misleading "low".
+    worst_rank = max(present_ranks) if present_ranks else None
     severe_high = sum(1 for b in buildings.values() if b["worst"] >= TIER_RANK["high"])
     return {
-        "worst_tier": rank_to_tier.get(worst_rank) if buildings else None,
+        "worst_tier": rank_to_tier[worst_rank] if worst_rank is not None else None,
         "by_peril": by_peril,
         "severe_high_count": severe_high,
         "buildings_total": len(buildings),

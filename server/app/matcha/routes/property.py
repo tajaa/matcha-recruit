@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id
 from ..services import property_sov as sov
+from ..services import submission_readiness as sr
 from ..models.property import BuildingUpsert
 
 logger = logging.getLogger(__name__)
@@ -35,10 +36,13 @@ def _trigger_cat(building_id) -> None:
 
 @router.get("/sov")
 async def get_sov(current_user=Depends(require_admin_or_client)):
-    """Full Statement of Values: buildings (COPE/ITV/perils) + company rollup."""
+    """Full Statement of Values: buildings (COPE/ITV/perils) + company rollup +
+    submission-readiness completeness block."""
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
-        return await sov.build_sov(conn, company_id)
+        payload = await sov.build_sov(conn, company_id)
+        payload["readiness"] = await sr.compute_property_readiness(conn, company_id, sov=payload)
+    return payload
 
 
 @router.get("/buildings")

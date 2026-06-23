@@ -1,15 +1,15 @@
 import { useState, useEffect, type FormEvent, type ChangeEvent, type ReactNode } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Loader2, AlertCircle, Gauge, Shield, Upload, Link2 as LinkIcon, CheckCircle2, Clock, CircleDashed } from 'lucide-react'
+import { ArrowLeft, Loader2, AlertCircle, Gauge, Shield, Upload, Link2 as LinkIcon, CheckCircle2, Clock, CircleDashed, Building2 } from 'lucide-react'
 import { Card } from '../../components/ui'
 import { HelpHint } from '../../components/broker/HelpHint'
 import { SubmissionPanel } from '../../components/broker/SubmissionPanel'
 import {
   fetchExternalClientDetail, saveExternalWc, saveExternalEplAttestation,
   downloadExternalSubmission, fetchExternalCoverageGap, parseExternalLossRun,
-  createExternalIntakeLink,
+  createExternalIntakeLink, saveExternalProperty,
 } from '../../api/broker'
-import type { ExternalClientDetail, ExternalEplFactor, EplAttestationStatus } from '../../types/broker'
+import type { ExternalClientDetail, ExternalEplFactor, EplAttestationStatus, ExternalProperty, ExternalPropertyPayload } from '../../types/broker'
 import { RISK_BAND_TONE } from '../../types/riskIndex'
 
 const WC_TONE: Record<string, string> = {
@@ -183,7 +183,7 @@ export default function BrokerExternalClientDetail() {
     </div>
   )
 
-  const { client, wc, epl, risk_index: risk, intake } = data
+  const { client, wc, epl, risk_index: risk, intake, property } = data
   const benchRatio = wc.trir && wc.benchmark && wc.benchmark.trir > 0 ? wc.trir / wc.benchmark.trir : null
 
   return (
@@ -318,11 +318,120 @@ export default function BrokerExternalClientDetail() {
         </div>
       </Card>
 
+      <PropertyCard clientId={clientId!} property={property} onSaved={setData} />
+
       <SubmissionPanel
         onDownload={() => downloadExternalSubmission(clientId!)}
         onAnalyze={() => fetchExternalCoverageGap(clientId!)}
       />
     </div>
+  )
+}
+
+const PROP_CON_OPTS = ['fire_resistive', 'modified_fire_resistive', 'masonry_non_combustible', 'non_combustible', 'joisted_masonry', 'frame']
+const PROP_CON_LABEL: Record<string, string> = {
+  fire_resistive: 'Fire-Resistive', modified_fire_resistive: 'Modified Fire-Resistive',
+  masonry_non_combustible: 'Masonry Non-Comb.', non_combustible: 'Non-Combustible',
+  joisted_masonry: 'Joisted Masonry', frame: 'Frame',
+}
+const PROP_CAT_OPTS = ['severe', 'high', 'elevated', 'moderate', 'low']
+const PROP_CAT_TONE: Record<string, string> = {
+  severe: 'text-red-400', high: 'text-red-400', elevated: 'text-amber-400', moderate: 'text-emerald-400', low: 'text-emerald-400',
+}
+function _pmoney(n: number | null): string {
+  if (n == null) return '—'
+  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`
+  if (Math.abs(n) >= 1_000) return `$${Math.round(n / 1000)}K`
+  return `$${Math.round(n)}`
+}
+
+function PropertyCard({ clientId, property, onSaved }: { clientId: string; property: ExternalProperty; onSaved: (d: ExternalClientDetail) => void }) {
+  const [edit, setEdit] = useState(false)
+  const [f, setF] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
+  const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }))
+
+  function open() {
+    setF({
+      period_label: property.period_label ?? '', building_count: String(property.building_count ?? 0),
+      total_tiv: property.total_tiv != null ? String(property.total_tiv) : '',
+      worst_construction: property.worst_construction ?? '',
+      sprinklered_pct: property.sprinklered_pct != null ? String(property.sprinklered_pct) : '',
+      worst_cat_tier: property.worst_cat_tier ?? '',
+      insured_to_value_pct: property.insured_to_value_pct != null ? String(property.insured_to_value_pct) : '',
+      carrier: property.carrier ?? '', annual_premium: property.annual_premium != null ? String(property.annual_premium) : '',
+    })
+    setEdit(true)
+  }
+
+  async function save(e: FormEvent) {
+    e.preventDefault()
+    setSaving(true)
+    const intOrNull = (k: string) => { const v = parseInt(f[k], 10); return Number.isFinite(v) ? v : null }
+    const numOrNull = (k: string) => { const v = parseFloat(f[k]); return Number.isFinite(v) ? v : null }
+    const payload: ExternalPropertyPayload = {
+      period_label: f.period_label || null, building_count: intOrNull('building_count') ?? 0,
+      total_tiv: numOrNull('total_tiv'), worst_construction: f.worst_construction || null,
+      sprinklered_pct: intOrNull('sprinklered_pct'), worst_cat_tier: f.worst_cat_tier || null,
+      insured_to_value_pct: intOrNull('insured_to_value_pct'), carrier: f.carrier || null,
+      annual_premium: numOrNull('annual_premium'), note: null,
+    }
+    try { onSaved(await saveExternalProperty(clientId, payload)); setEdit(false) }
+    catch { /* keep */ } finally { setSaving(false) }
+  }
+
+  const itv = property.insured_to_value_pct
+  return (
+    <Card className="p-5">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Building2 className="h-4 w-4 text-zinc-500" />
+          <h3 className="text-sm font-medium text-zinc-200 tracking-wide">Commercial Property</h3>
+          <HelpHint text="Broker-keyed property summary for this off-platform client — total insured value, predominant construction, insurance-to-value, and worst catastrophe tier. Feeds the property component of the risk index + the submission packet." />
+        </div>
+        <button onClick={() => (edit ? setEdit(false) : open())} className="text-xs text-zinc-300 hover:text-zinc-100 px-2 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500 transition-colors">
+          {edit ? 'Cancel' : property.has_data ? 'Edit property' : 'Add property'}
+        </button>
+      </div>
+      {!edit ? (
+        property.has_data ? (
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
+            <Cell label="TIV" value={_pmoney(property.total_tiv)} sub={`${property.building_count} bldg`} />
+            <Cell label="Construction" value={property.worst_construction ? (PROP_CON_LABEL[property.worst_construction] ?? property.worst_construction) : '—'} sub={property.sprinklered_pct != null ? `${property.sprinklered_pct}% spr` : undefined} />
+            <Cell label="Ins-to-value" value={itv != null ? `${itv}%` : '—'} tone={itv == null ? 'text-zinc-600' : itv < 90 ? 'text-amber-400' : 'text-emerald-400'} />
+            <Cell label="Cat tier" value={(property.worst_cat_tier ?? '—').toUpperCase()} tone={property.worst_cat_tier ? PROP_CAT_TONE[property.worst_cat_tier] : 'text-zinc-600'} />
+            <Cell label="Premium" value={_pmoney(property.annual_premium)} sub={property.carrier ?? undefined} />
+          </div>
+        ) : <p className="text-sm text-zinc-500">No property on file. Key in the client's Statement-of-Values summary to score property risk.</p>
+      ) : (
+        <form onSubmit={save}>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+            <div><label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Period</label><input value={f.period_label ?? ''} onChange={(e) => set('period_label', e.target.value)} className={inputCls} placeholder="2026" /></div>
+            <div><label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Buildings</label><input type="number" value={f.building_count ?? ''} onChange={(e) => set('building_count', e.target.value)} className={inputCls} /></div>
+            <div><label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Total TIV $</label><input type="number" value={f.total_tiv ?? ''} onChange={(e) => set('total_tiv', e.target.value)} className={inputCls} /></div>
+            <div>
+              <label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Worst construction</label>
+              <select value={f.worst_construction ?? ''} onChange={(e) => set('worst_construction', e.target.value)} className={inputCls}>
+                <option value="">—</option>{PROP_CON_OPTS.map((c) => <option key={c} value={c}>{PROP_CON_LABEL[c]}</option>)}
+              </select>
+            </div>
+            <div><label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Sprinklered %</label><input type="number" value={f.sprinklered_pct ?? ''} onChange={(e) => set('sprinklered_pct', e.target.value)} className={inputCls} /></div>
+            <div>
+              <label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Worst cat tier</label>
+              <select value={f.worst_cat_tier ?? ''} onChange={(e) => set('worst_cat_tier', e.target.value)} className={inputCls}>
+                <option value="">—</option>{PROP_CAT_OPTS.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div><label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Ins-to-value %</label><input type="number" value={f.insured_to_value_pct ?? ''} onChange={(e) => set('insured_to_value_pct', e.target.value)} className={inputCls} /></div>
+            <div><label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Carrier</label><input value={f.carrier ?? ''} onChange={(e) => set('carrier', e.target.value)} className={inputCls} /></div>
+            <div><label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Annual premium $</label><input type="number" value={f.annual_premium ?? ''} onChange={(e) => set('annual_premium', e.target.value)} className={inputCls} /></div>
+          </div>
+          <button type="submit" disabled={saving} className="mt-3 bg-zinc-100 text-zinc-900 text-sm font-medium rounded-lg px-4 py-1.5 hover:bg-white disabled:opacity-50 transition-colors">
+            {saving ? 'Saving…' : 'Save property'}
+          </button>
+        </form>
+      )}
+    </Card>
   )
 }
 

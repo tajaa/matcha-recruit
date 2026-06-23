@@ -7,6 +7,7 @@ Used by the broker portfolio (one benchmarkable number per client) and the
 client-facing risk portal (the business's own insurability at a glance).
 """
 
+from datetime import date
 from typing import Optional
 from uuid import UUID
 
@@ -148,15 +149,17 @@ async def _property_component(conn, company_id: UUID):
     import asyncpg
     from . import property_sov  # lazy: avoid import cycle
     try:
-        sov = await property_sov.build_sov(conn, company_id)
+        # list_buildings (1 query) + pure rollup — skip build_sov's per-building peril
+        # fetch, which this composite path doesn't use (cat comes from the rollup query).
+        buildings = await property_sov.list_buildings(conn, company_id)
     except asyncpg.exceptions.UndefinedTableError:
         return None
-    rollup = sov.get("rollup") or {}
-    if not rollup.get("building_count"):
+    if not buildings:
         return None
+    rollup = property_sov.rollup(buildings, date.today().year)
     cat = None
     try:
-        from . import property_cat  # Phase 3 — optional until shipped
+        from . import property_cat
         cat = await property_cat.company_cat_exposure(conn, company_id)
     except (ImportError, AttributeError, asyncpg.exceptions.UndefinedTableError):
         cat = None

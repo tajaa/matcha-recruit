@@ -1,9 +1,9 @@
-import { useState, useEffect, type FormEvent } from 'react'
-import { Building2, Plus, Loader2, AlertCircle, Pencil, Trash2, X } from 'lucide-react'
+import { useState, useEffect, Fragment, type FormEvent } from 'react'
+import { Building2, Plus, Loader2, AlertCircle, Pencil, Trash2, X, ChevronDown, ChevronRight } from 'lucide-react'
 import { Card } from '../../components/ui'
 import { fetchPropertySov, createBuilding, updateBuilding, deleteBuilding } from '../../api/property'
 import type { PropertySov, PropertyBuilding, BuildingPayload, ConstructionType } from '../../types/property'
-import { CONSTRUCTION_LABEL, COPE_TONE, PERIL_TONE } from '../../types/property'
+import { CONSTRUCTION_LABEL, COPE_TONE, PERIL_TONE, READINESS_TONE } from '../../types/property'
 
 const inputCls = 'w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500'
 const CONSTRUCTION_OPTS: ConstructionType[] = ['fire_resistive', 'modified_fire_resistive', 'masonry_non_combustible', 'non_combustible', 'joisted_masonry', 'frame']
@@ -21,12 +21,25 @@ const WORST_PERIL = (b: PropertyBuilding) => {
   return tiers.sort((a, z) => order.indexOf(a) - order.indexOf(z))[0] ?? null
 }
 
+// Module-scope so it is NOT re-created on every parent render (a nested component
+// would remount its <input> each keystroke and drop focus).
+function Field({ label, value, onChange, type = 'text', placeholder }:
+  { label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string }) {
+  return (
+    <div>
+      <label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">{label}</label>
+      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className={inputCls} placeholder={placeholder} />
+    </div>
+  )
+}
+
 export default function Property() {
   const [data, setData] = useState<PropertySov | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
   const [editing, setEditing] = useState<PropertyBuilding | null>(null)
   const [showForm, setShowForm] = useState(false)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   const load = () => {
     setLoading(true); setError(false)
@@ -36,6 +49,9 @@ export default function Property() {
 
   function openAdd() { setEditing(null); setShowForm(true) }
   function openEdit(b: PropertyBuilding) { setEditing(b); setShowForm(true) }
+  function toggleExpand(id: string) {
+    setExpanded((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  }
 
   async function onDelete(b: PropertyBuilding) {
     if (!confirm(`Remove ${b.name || 'this building'} from the Statement of Values?`)) return
@@ -49,7 +65,7 @@ export default function Property() {
     </div>
   )
 
-  const { rollup: r, buildings } = data
+  const { rollup: r, buildings, readiness } = data
   const itvPct = r.itv.portfolio_ratio != null ? Math.round(r.itv.portfolio_ratio * 100) : null
 
   return (
@@ -94,6 +110,25 @@ export default function Property() {
         </Card>
       </div>
 
+      {/* Submission readiness */}
+      {readiness && buildings.length > 0 && (
+        <Card className="p-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Property submission readiness</span>
+            <span className={`text-sm font-semibold ${READINESS_TONE[readiness.band] ?? 'text-zinc-300'}`}>
+              {readiness.score}/100 · {readiness.band}
+            </span>
+          </div>
+          {readiness.top_fixes.length > 0 && (
+            <ul className="space-y-0.5">
+              {readiness.top_fixes.map((f) => (
+                <li key={f} className="text-[12px] text-zinc-400 flex items-start gap-1.5"><span className="text-zinc-600 mt-px">•</span>{f}</li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
+
       {/* Buildings table */}
       {buildings.length === 0 ? (
         <Card className="p-8 text-center">
@@ -105,6 +140,7 @@ export default function Property() {
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-zinc-800/60 bg-zinc-900/40 text-[11px] text-zinc-500 uppercase tracking-wider">
+                <th className="px-4 py-2.5 w-6"></th>
                 <th className="px-4 py-2.5">Building</th>
                 <th className="px-4 py-2.5">Construction</th>
                 <th className="px-4 py-2.5 text-right">TIV</th>
@@ -118,25 +154,41 @@ export default function Property() {
               {buildings.map((b) => {
                 const worst = WORST_PERIL(b)
                 const itv = b.itv_ratio != null ? Math.round(b.itv_ratio * 100) : null
+                const isOpen = expanded.has(b.id)
                 return (
-                  <tr key={b.id} className="border-b border-zinc-800/30 last:border-0 hover:bg-zinc-900/30">
-                    <td className="px-4 py-3">
-                      <div className="text-zinc-100">{b.name || '(unnamed)'}</div>
-                      <div className="text-[11px] text-zinc-600">{[b.city, b.state].filter(Boolean).join(', ') || '—'}</div>
-                    </td>
-                    <td className="px-4 py-3 text-zinc-400 text-xs">{b.construction_type ? CONSTRUCTION_LABEL[b.construction_type] : '—'}{b.sprinklered && <span className="ml-1 text-emerald-500">·spr</span>}</td>
-                    <td className="px-4 py-3 text-right font-mono text-zinc-300">{fmtUsd(b.tiv)}</td>
-                    <td className="px-4 py-3 text-center"><span className={`font-mono font-semibold ${COPE_TONE[b.cope_grade] ?? 'text-zinc-400'}`}>{b.cope_grade}</span></td>
-                    <td className={`px-4 py-3 text-right font-mono ${itv == null ? 'text-zinc-600' : itv < 90 ? 'text-amber-400' : 'text-emerald-400'}`}>{itv != null ? `${itv}%` : '—'}</td>
-                    <td className="px-4 py-3 text-center text-xs">
-                      {worst ? <span className={`uppercase font-semibold ${PERIL_TONE[worst] ?? 'text-zinc-400'}`}>{worst}</span>
-                        : <span className="text-zinc-600">{b.geocoded_at ? '—' : 'pending'}</span>}
-                    </td>
-                    <td className="px-4 py-3 text-right whitespace-nowrap">
-                      <button onClick={() => openEdit(b)} className="text-zinc-500 hover:text-zinc-200 mr-2"><Pencil className="h-3.5 w-3.5 inline" /></button>
-                      <button onClick={() => onDelete(b)} className="text-zinc-600 hover:text-red-400"><Trash2 className="h-3.5 w-3.5 inline" /></button>
-                    </td>
-                  </tr>
+                  <Fragment key={b.id}>
+                    <tr className="border-b border-zinc-800/30 last:border-0 hover:bg-zinc-900/30">
+                      <td className="px-4 py-3">
+                        <button onClick={() => toggleExpand(b.id)} className="text-zinc-600 hover:text-zinc-300" aria-label="Toggle catastrophe detail">
+                          {isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="text-zinc-100">{b.name || '(unnamed)'}</div>
+                        <div className="text-[11px] text-zinc-600">{[b.city, b.state].filter(Boolean).join(', ') || '—'}</div>
+                      </td>
+                      <td className="px-4 py-3 text-zinc-400 text-xs">{b.construction_type ? CONSTRUCTION_LABEL[b.construction_type] : '—'}{b.sprinklered && <span className="ml-1 text-emerald-500">·spr</span>}</td>
+                      <td className="px-4 py-3 text-right font-mono text-zinc-300">{fmtUsd(b.tiv)}</td>
+                      <td className="px-4 py-3 text-center"><span className={`font-mono font-semibold ${COPE_TONE[b.cope_grade] ?? 'text-zinc-400'}`}>{b.cope_grade}</span></td>
+                      <td className={`px-4 py-3 text-right font-mono ${itv == null ? 'text-zinc-600' : itv < 90 ? 'text-amber-400' : 'text-emerald-400'}`}>{itv != null ? `${itv}%` : '—'}</td>
+                      <td className="px-4 py-3 text-center text-xs">
+                        {worst ? <span className={`uppercase font-semibold ${PERIL_TONE[worst] ?? 'text-zinc-400'}`}>{worst}</span>
+                          : <span className="text-zinc-600">{b.geocoded_at ? '—' : 'pending'}</span>}
+                      </td>
+                      <td className="px-4 py-3 text-right whitespace-nowrap">
+                        <button onClick={() => openEdit(b)} className="text-zinc-500 hover:text-zinc-200 mr-2"><Pencil className="h-3.5 w-3.5 inline" /></button>
+                        <button onClick={() => onDelete(b)} className="text-zinc-600 hover:text-red-400"><Trash2 className="h-3.5 w-3.5 inline" /></button>
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr className="bg-zinc-900/40 border-b border-zinc-800/30">
+                        <td></td>
+                        <td colSpan={7} className="px-4 py-3">
+                          <PerilDetail b={b} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 )
               })}
             </tbody>
@@ -147,6 +199,38 @@ export default function Property() {
       {showForm && (
         <BuildingModal building={editing} onClose={() => setShowForm(false)} onSaved={(sov) => { setData(sov); setShowForm(false) }} />
       )}
+    </div>
+  )
+}
+
+const PERILS = ['flood', 'quake', 'wildfire', 'wind'] as const
+const PERIL_LABEL: Record<string, string> = { flood: 'Flood', quake: 'Earthquake', wildfire: 'Wildfire', wind: 'Wind' }
+
+function PerilDetail({ b }: { b: PropertyBuilding }) {
+  if (!b.geocoded_at) {
+    return <p className="text-[11px] text-zinc-500">Catastrophe exposure pending — add a full street address; geocoding runs in the background.</p>
+  }
+  const byPeril = Object.fromEntries(b.perils.map((p) => [p.peril, p]))
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+      {PERILS.map((k) => {
+        const p = byPeril[k]
+        return (
+          <div key={k} className="rounded-lg bg-zinc-950/60 border border-zinc-800/60 px-3 py-2">
+            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{PERIL_LABEL[k]}</div>
+            {p && p.tier ? (
+              <>
+                <div className={`text-sm font-semibold uppercase ${PERIL_TONE[p.tier] ?? 'text-zinc-300'}`}>{p.tier}</div>
+                <div className="text-[10px] text-zinc-600">{p.zone ?? '—'}{p.source ? ` · ${p.source}` : ''}</div>
+              </>
+            ) : p && p.error ? (
+              <div className="text-[10px] text-zinc-600">lookup failed</div>
+            ) : (
+              <div className="text-[10px] text-zinc-600">—</div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -185,13 +269,6 @@ function BuildingModal({ building, onClose, onSaved }: { building: PropertyBuild
     } catch { /* keep open */ } finally { setSaving(false) }
   }
 
-  const Lbl = ({ k, label, ph, type = 'text' }: { k: string; label: string; ph?: string; type?: string }) => (
-    <div>
-      <label className="block text-[10px] text-zinc-500 uppercase tracking-wider mb-1">{label}</label>
-      <input type={type} value={f[k] ?? ''} onChange={(e) => set(k, e.target.value)} className={inputCls} placeholder={ph} />
-    </div>
-  )
-
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
       <div className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-2xl max-h-[88vh] overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
@@ -203,12 +280,12 @@ function BuildingModal({ building, onClose, onSaved }: { building: PropertyBuild
           <div>
             <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-2">Identity</div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-              <Lbl k="name" label="Name" ph="HQ" />
-              <Lbl k="address" label="Address" />
-              <Lbl k="occupancy" label="Occupancy" ph="office" />
-              <Lbl k="city" label="City" />
-              <Lbl k="state" label="State" ph="CA" />
-              <Lbl k="zipcode" label="ZIP" />
+              <Field label="Name" value={f.name ?? ''} onChange={(v) => set('name', v)} placeholder="HQ" />
+              <Field label="Address" value={f.address ?? ''} onChange={(v) => set('address', v)} />
+              <Field label="Occupancy" value={f.occupancy ?? ''} onChange={(v) => set('occupancy', v)} placeholder="office" />
+              <Field label="City" value={f.city ?? ''} onChange={(v) => set('city', v)} />
+              <Field label="State" value={f.state ?? ''} onChange={(v) => set('state', v)} placeholder="CA" />
+              <Field label="ZIP" value={f.zipcode ?? ''} onChange={(v) => set('zipcode', v)} />
             </div>
             <p className="text-[10px] text-zinc-600 mt-1">A full street address enables catastrophe geocoding.</p>
           </div>
@@ -222,11 +299,11 @@ function BuildingModal({ building, onClose, onSaved }: { building: PropertyBuild
                   {CONSTRUCTION_OPTS.map((c) => <option key={c} value={c}>{CONSTRUCTION_LABEL[c]}</option>)}
                 </select>
               </div>
-              <Lbl k="year_built" label="Year built" type="number" />
-              <Lbl k="sq_ft" label="Sq ft" type="number" />
-              <Lbl k="stories" label="Stories" type="number" />
-              <Lbl k="roof_year" label="Roof year" type="number" />
-              <Lbl k="protection_class" label="ISO PPC (1-10)" />
+              <Field label="Year built" value={f.year_built ?? ''} onChange={(v) => set('year_built', v)} type="number" />
+              <Field label="Sq ft" value={f.sq_ft ?? ''} onChange={(v) => set('sq_ft', v)} type="number" />
+              <Field label="Stories" value={f.stories ?? ''} onChange={(v) => set('stories', v)} type="number" />
+              <Field label="Roof year" value={f.roof_year ?? ''} onChange={(v) => set('roof_year', v)} type="number" />
+              <Field label="ISO PPC (1-10)" value={f.protection_class ?? ''} onChange={(v) => set('protection_class', v)} />
             </div>
             <label className="inline-flex items-center gap-2 mt-2 text-sm text-zinc-300">
               <input type="checkbox" checked={sprinklered} onChange={(e) => setSprinklered(e.target.checked)} className="rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-emerald-500" />
@@ -236,14 +313,15 @@ function BuildingModal({ building, onClose, onSaved }: { building: PropertyBuild
           <div>
             <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-2">Values</div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-              <Lbl k="building_value" label="Building $" type="number" />
-              <Lbl k="contents_value" label="Contents $" type="number" />
-              <Lbl k="bi_value" label="Business interruption $" type="number" />
-              <Lbl k="replacement_cost" label="Replacement cost $" type="number" />
-              <Lbl k="insured_value" label="Insured value $" type="number" />
+              <Field label="Building $" value={f.building_value ?? ''} onChange={(v) => set('building_value', v)} type="number" />
+              <Field label="Contents $" value={f.contents_value ?? ''} onChange={(v) => set('contents_value', v)} type="number" />
+              <Field label="Business interruption $" value={f.bi_value ?? ''} onChange={(v) => set('bi_value', v)} type="number" />
+              <Field label="Replacement cost $" value={f.replacement_cost ?? ''} onChange={(v) => set('replacement_cost', v)} type="number" />
+              <Field label="Insured value $" value={f.insured_value ?? ''} onChange={(v) => set('insured_value', v)} type="number" />
             </div>
             <p className="text-[10px] text-zinc-600 mt-1">Insured-value vs replacement-cost drives the insurance-to-value (ITV) check.</p>
           </div>
+          <Field label="Note" value={f.note ?? ''} onChange={(v) => set('note', v)} placeholder="optional" />
           <button type="submit" disabled={saving} className="bg-zinc-100 text-zinc-900 text-sm font-medium rounded-lg px-4 py-1.5 hover:bg-white disabled:opacity-50 transition-colors">
             {saving ? 'Saving…' : building ? 'Save building' : 'Add building'}
           </button>

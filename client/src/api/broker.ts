@@ -23,6 +23,7 @@ import type {
   ExternalClient,
   ExternalClientRow,
   ExternalClientDetail,
+  ExternalPropertyPayload,
   PropertyPortfolioResponse,
   CoverageGap,
   BrokerMilestonesResponse,
@@ -162,6 +163,10 @@ export function deleteExternalClient(id: string) {
 
 export function saveExternalWc(id: string, payload: Record<string, unknown>) {
   return api.put<ExternalClientDetail>(`/broker/external-clients/${id}/wc`, payload)
+}
+
+export function saveExternalProperty(id: string, payload: ExternalPropertyPayload) {
+  return api.put<ExternalClientDetail>(`/broker/external-clients/${id}/property`, payload)
 }
 
 export interface ParsedLossRun {

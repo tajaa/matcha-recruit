@@ -41,9 +41,14 @@ async def _refresh(building_id=None, cap: int = _DEFAULT_CAP) -> dict:
             """,
             _STALE_DAYS, cap,
         )
+        ok = 0
         for r in rows:
-            await property_cat.enrich_building(conn, r["id"])
-        return {"processed": len(rows)}
+            try:
+                await property_cat.enrich_building(conn, r["id"])
+                ok += 1
+            except Exception as exc:  # noqa: BLE001 - one building must not abort the sweep
+                print(f"[Property Cat] building {r['id']} failed: {exc}")
+        return {"processed": ok, "selected": len(rows)}
     finally:
         await conn.close()
 

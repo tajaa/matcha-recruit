@@ -625,6 +625,36 @@ export interface ExternalClientRow extends ExternalClient {
   risk_band: string | null
   intake_status: ExternalIntakeState
   intake_submitted_at: string | null
+  property_building_count: number
+  property_tiv: number | null
+  property_cat_tier: string | null
+}
+
+// Broker-keyed property summary for an off-platform client.
+export interface ExternalProperty {
+  has_data: boolean
+  building_count: number
+  total_tiv: number | null
+  worst_construction: string | null
+  sprinklered_pct: number | null
+  worst_cat_tier: string | null
+  insured_to_value_pct: number | null
+  carrier: string | null
+  annual_premium: number | null
+  period_label: string | null
+}
+
+export interface ExternalPropertyPayload {
+  period_label: string | null
+  building_count: number
+  total_tiv: number | null
+  worst_construction: string | null
+  sprinklered_pct: number | null
+  worst_cat_tier: string | null
+  insured_to_value_pct: number | null
+  carrier: string | null
+  annual_premium: number | null
+  note: string | null
 }
 
 export interface ExternalWc {
@@ -670,6 +700,7 @@ export interface ExternalClientDetail {
   client: ExternalClient
   wc: ExternalWc
   epl: ExternalEpl
+  property: ExternalProperty
   risk_index: RiskIndex
   intake: ExternalIntakeStatus
 }

@@ -69,10 +69,31 @@ export interface PropertyRollup {
   itv: { portfolio_ratio: number | null; under_count: number; rated_count: number }
 }
 
+export interface PropertyReadinessItem {
+  key: string
+  label: string
+  weight: number
+  done: boolean
+  fix: string
+}
+
+export interface PropertyReadiness {
+  score: number
+  band: string
+  items: PropertyReadinessItem[]
+  top_fixes: string[]
+  summary: { done: number; total: number }
+}
+
 export interface PropertySov {
   company_id: string
   buildings: PropertyBuilding[]
   rollup: PropertyRollup
+  readiness?: PropertyReadiness
+}
+
+export const READINESS_TONE: Record<string, string> = {
+  ready: 'text-emerald-400', developing: 'text-amber-400', thin: 'text-red-400',
 }
 
 // create/edit payload

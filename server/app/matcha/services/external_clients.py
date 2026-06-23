@@ -227,6 +227,18 @@ async def upsert_property_snapshot(conn, client_id: UUID, updated_by, data: dict
     )
 
 
+async def _property_snap(conn, client_id: UUID):
+    """Fetch the broker-keyed property snapshot. Best-effort: returns None if the
+    table isn't present yet (code deployed before prop01) so the pre-existing
+    external-client + risk-curve endpoints don't 500 on migration lag."""
+    import asyncpg
+    try:
+        return await conn.fetchrow(
+            "SELECT * FROM broker_external_property WHERE external_client_id = $1", client_id)
+    except asyncpg.exceptions.UndefinedTableError:
+        return None
+
+
 def _compute_property(snap) -> dict:
     """Property metrics from the broker-entered summary snapshot. Builds a synthetic
     rollup (coarse COPE from construction + sprinkler%, ITV from insured-to-value%)
@@ -273,8 +285,7 @@ async def client_detail(conn, broker_id: UUID, client_id: UUID) -> Optional[dict
     rates = await wc_depth.get_state_rates(conn, [state]) if state else {}
     wc = _compute_wc(client, snap, rates.get(state) if state else None)
     epl = await _epl_for_client(conn, client_id)
-    prop_snap = await conn.fetchrow("SELECT * FROM broker_external_property WHERE external_client_id = $1", client_id)
-    prop = _compute_property(prop_snap)
+    prop = _compute_property(await _property_snap(conn, client_id))
     intake = await intake_status(conn, client_id)
     return {"client": client, "wc": wc, "epl": epl, "property": prop,
             "risk_index": risk_index.external_risk_index(wc, epl, prop), "intake": intake}
@@ -290,8 +301,7 @@ async def list_with_scores(conn, broker_id: UUID) -> list[dict]:
         snap = await conn.fetchrow("SELECT * FROM broker_external_wc WHERE external_client_id = $1", cid)
         wc = _compute_wc(c, snap, None)
         epl = await _epl_for_client(conn, cid)
-        prop_snap = await conn.fetchrow("SELECT * FROM broker_external_property WHERE external_client_id = $1", cid)
-        prop = _compute_property(prop_snap)
+        prop = _compute_property(await _property_snap(conn, cid))
         ri = risk_index.external_risk_index(wc, epl, prop)
         intake = intakes.get(c["id"], {"status": "not_sent", "is_submitted": False, "submitted_at": None})
         out.append({
