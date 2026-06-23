@@ -11,9 +11,11 @@ def test_band_reexports_epl_thresholds():
     assert risk_index.band(10) == "exposed"
 
 
-def test_weights_cover_three_components():
-    assert set(risk_index._WEIGHTS) == {"wc", "epl", "compliance"}
-    assert sum(risk_index._WEIGHTS.values()) == 100
+def test_weights_cover_components():
+    assert set(risk_index._WEIGHTS) == {"wc", "epl", "compliance", "property"}
+    # The casualty triple still sums to 100 → a casualty-only client's renormalized
+    # index is unchanged by adding the (optional, presence-gated) property component.
+    assert risk_index._WEIGHTS["wc"] + risk_index._WEIGHTS["epl"] + risk_index._WEIGHTS["compliance"] == 100
 
 
 def test_top_fixes_orders_weak_components_and_appends_epl_gap():

@@ -7,6 +7,7 @@ Used by the broker portfolio (one benchmarkable number per client) and the
 client-facing risk portal (the business's own insurability at a glance).
 """
 
+from typing import Optional
 from uuid import UUID
 
 from . import epl_readiness, wc_depth
@@ -15,7 +16,7 @@ from . import epl_readiness, wc_depth
 _WC_BAND_SCORE = {"good": 90, "fair": 70, "at_risk": 45, "critical": 20}
 
 # component weights (renormalized over whichever components have data)
-_WEIGHTS = {"wc": 40, "epl": 35, "compliance": 25}
+_WEIGHTS = {"wc": 40, "epl": 35, "compliance": 25, "property": 30}
 
 # re-export the EPL band thresholds (≥80 strong / ≥60 adequate / ≥35 developing / <35 exposed)
 band = epl_readiness.readiness_band
@@ -97,6 +98,71 @@ def _epl_component(epl: dict) -> dict:
             "score": epl["score"], "detail": f"{epl['score']}/100 ({epl['band']})"}
 
 
+# Catastrophe penalty is CAPPED (exposure leaking into posture) so a well-built
+# building in a flood zone isn't scored as uninsurable. COPE + ITV are the posture.
+_CAT_PENALTY = {"severe": 15, "high": 10, "elevated": 5, "moderate": 0, "low": 0}
+
+
+def _property_score(rollup: Optional[dict], cat: Optional[dict] = None,
+                    loss: Optional[dict] = None) -> Optional[tuple[int, str]]:
+    """Property sub-score (0-100, detail) from the SOV rollup. Pure (unit-tested).
+
+    Posture = COPE quality, penalized by under-insurance (ITV) and — capped — by
+    catastrophe tier and adverse property-loss development. None when there are no
+    buildings to assess."""
+    if not rollup or not rollup.get("building_count"):
+        return None
+    base = rollup.get("avg_cope_score")
+    if base is None:
+        return None
+    score = float(base)
+    bits = [f"COPE {base}/100"]
+
+    itv = rollup.get("itv") or {}
+    ratio = itv.get("portfolio_ratio")
+    if ratio is not None:
+        if ratio < 0.90:
+            score -= min(25, round((0.90 - ratio) * 100))
+        under = itv.get("under_count") or 0
+        bits.append(f"ITV {round(ratio * 100)}%" + (f", {under} under-insured" if under else ""))
+
+    worst = (cat or {}).get("worst_tier")
+    if worst:
+        score -= _CAT_PENALTY.get(worst, 0)
+        bits.append(f"cat {worst}")
+
+    if loss and loss.get("adverse_penalty"):
+        score -= min(15, loss["adverse_penalty"])
+        bits.append("adverse loss dev")
+
+    return max(0, min(100, round(score))), "; ".join(bits)
+
+
+async def _property_component(conn, company_id: UUID):
+    """Tenant property sub-score from the Statement of Values. None when no buildings.
+    Catastrophe is wired in Phase 3 (``property_cat.company_cat_exposure``).
+
+    Best-effort: degrades to None if the property tables aren't present yet (migration
+    lag on a server that has the code but not ``prop01``) so the composite index never
+    500s."""
+    import asyncpg
+    from . import property_sov  # lazy: avoid import cycle
+    try:
+        sov = await property_sov.build_sov(conn, company_id)
+    except asyncpg.exceptions.UndefinedTableError:
+        return None
+    rollup = sov.get("rollup") or {}
+    if not rollup.get("building_count"):
+        return None
+    cat = None
+    try:
+        from . import property_cat  # Phase 3 — optional until shipped
+        cat = await property_cat.company_cat_exposure(conn, company_id)
+    except (ImportError, AttributeError, asyncpg.exceptions.UndefinedTableError):
+        cat = None
+    return _property_score(rollup, cat, None)
+
+
 async def compute_risk_index(conn, company_id: UUID) -> dict:
     """Composite 0–100 index for an on-platform (tenant) client: WC + EPL + compliance."""
     components: list[dict] = []
@@ -113,6 +179,11 @@ async def compute_risk_index(conn, company_id: UUID) -> dict:
     if comp is not None:
         components.append({"key": "compliance", "label": "Compliance coverage", "weight": _WEIGHTS["compliance"],
                            "score": comp[0], "detail": comp[1]})
+
+    prop = await _property_component(conn, company_id)
+    if prop is not None:
+        components.append({"key": "property", "label": "Commercial Property", "weight": _WEIGHTS["property"],
+                           "score": prop[0], "detail": prop[1]})
 
     return {"company_id": str(company_id), **_assemble(components, epl)}
 
@@ -163,10 +234,11 @@ def weighted_book_risk(clients: list[dict], basis: str = "headcount") -> dict:
     }
 
 
-def external_risk_index(wc: dict, epl: dict) -> dict:
+def external_risk_index(wc: dict, epl: dict, prop: Optional[dict] = None) -> dict:
     """Composite index for an off-platform (Broker Pro) client from the broker-keyed
-    WC snapshot + EPL questionnaire. WC + EPL only — no compliance component (no
-    location data for non-tenant clients); weights renormalize over the two."""
+    WC snapshot + EPL questionnaire (+ optional property summary). Compliance is
+    omitted (no location data for non-tenant clients); weights renormalize over
+    whichever components have data. ``prop`` carries ``{rollup, cat}`` (Phase 4)."""
     components: list[dict] = []
     ever_recordable = (wc.get("recordable_cases") or 0) > 0
     s = _wc_score(wc.get("severity_band"), wc.get("current_emr"), ever_recordable,
@@ -175,4 +247,9 @@ def external_risk_index(wc: dict, epl: dict) -> dict:
         components.append({"key": "wc", "label": "Workers' Comp", "weight": _WEIGHTS["wc"],
                            "score": s[0], "detail": s[1]})
     components.append(_epl_component(epl))
+    if prop is not None:
+        ps = _property_score(prop.get("rollup"), prop.get("cat"), None)
+        if ps is not None:
+            components.append({"key": "property", "label": "Commercial Property",
+                               "weight": _WEIGHTS["property"], "score": ps[0], "detail": ps[1]})
     return _assemble(components, epl)
