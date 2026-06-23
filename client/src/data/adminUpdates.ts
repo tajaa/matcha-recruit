@@ -23,6 +23,38 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'commercial-property',
+    date: '2026-06-22',
+    category: 'Property',
+    title: 'Commercial Property — full P-side (SOV, geocoded catastrophe, broker parity)',
+    summary:
+      'Adds the property side of P&C at parity with casualty. A company keys its buildings (a Statement of Values); we compute total insured value, insurance-to-value, and a COPE construction grade, geocode each building for flood/quake/wildfire/wind exposure, fold a property component into the composite risk index, and give brokers a Property Book + a property section in the submission packet. Property limits + loss runs reuse the existing limit-adequacy and loss-development engines via a new "property" line — no new line tables.',
+    whatsNew: [
+      'Tenant Commercial Property page: per-building Statement of Values (COPE — construction / occupancy / protection class / year / roof / sprinklers — + building/contents/BI/replacement/insured values) → TIV, insurance-to-value (ITV underinsurance flag), and an A–D COPE grade per building + a company rollup.',
+      'Geocoded catastrophe per building: address → lat/lng (US Census) → flood zone (FEMA NFHL), seismic (USGS), wildfire (USFS), and a coarse coastal wind tier; expand any building row to see the four perils. Runs in the background, best-effort.',
+      'Property component in the composite risk index: COPE quality penalized by under-insurance and (capped) catastrophe tier. Presence-gated — a client with no buildings scores exactly as before.',
+      'Property limits ride Limit Adequacy and property loss runs ride Loss Development (line="property") — the same engines, no duplication.',
+      'Broker: a "Property Book" portfolio (TIV / COPE / ITV / worst-cat per client), an off-platform external-client property summary (view + edit on the external client), a Property section in the submission PDF, and a property submission-readiness checklist.',
+    ],
+    howToUse: [
+      'Enable: Admin → toggle the company\'s "property" feature (it\'s off by default, not bundled).',
+      'Company → Commercial Property → "Add building": enter the address + COPE + values. TIV / ITV / COPE compute immediately; the catastrophe column shows "pending" until the background geocode runs, then expand the row to see flood/quake/wildfire/wind.',
+      'Broker → "Property Book": per-client TIV / COPE / ITV / cat across the book (worst COPE + biggest TIV first). For off-platform clients, open the client → "Commercial Property" card → "Add property" to key a summary.',
+      'The broker submission PDF now carries a Property section automatically when the client has buildings.',
+    ],
+    setup: [
+      'Apply migration prop01 (company_property_buildings + property_building_perils + coastal_wind_tier seed + broker_external_property + the property_cat_refresh scheduler row). Applied to DEV; PROD still pending (run migrate-prod.sh).',
+      'Turn on the "property" feature flag per company (admin toggle).',
+      'For catastrophe to populate: enable the property_cat_refresh row in scheduler_settings (default off). Endpoints are free US-gov APIs (Census/FEMA/USGS/USFS); override via CENSUS_GEOCODER_URL / FEMA_NFHL_URL / USGS_DESIGNMAPS_URL / USFS_WHP_URL / CAT_FETCH_TIMEOUT_S / CAT_FETCH_ENABLED if needed.',
+    ],
+    notes: [
+      'Catastrophe is directional + best-effort: point-in-time reads of public hazard layers + a coarse state/county wind tier (no per-address wind API). A failed lookup writes an error row and the building still saves — it never 500s a page.',
+      'Property loss-development is a broker surface (the loss-run table is broker-keyed; a tenant has no broker_id).',
+      'Deferred (backend ready): a property tab inside the on-platform BrokerClientDetail and a standalone property.pdf — property already appears in the main submission packet.',
+    ],
+    tag: 'action-needed',
+  },
+  {
     id: 'emr-trajectory-automation',
     date: '2026-06-22',
     category: 'Broker',
