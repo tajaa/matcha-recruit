@@ -23,6 +23,36 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'property-deeper-capture',
+    date: '2026-06-23',
+    category: 'Property',
+    title: 'Property — full underwriting capture (deductibles, valuation, hazards)',
+    summary:
+      'Widens each building from a basic Statement of Values to the full underwriting input set, so property risk is measured on real inputs instead of estimated around the gaps. New fields feed the math directly: PML is now net of the applicable deductible, the coinsurance check uses the building\'s own coinsurance %, and ACV valuation + occupancy fire-hazards + a central-station-alarm credit move the risk score. The building editor, CSV template, and AI SOV parser all capture the new fields.',
+    whatsNew: [
+      'New per-building inputs: valuation basis (RCV/ACV), coinsurance %, ordinance & law (A/B/C), BI period (months), blanket-vs-scheduled, AOP + wind / named-storm / quake deductibles, roof type, wiring year, central-station fire alarm, and occupancy hazards (commercial cooking/NFPA-96, hot work, hazmat). A policy_detail JSONB holds the long tail (distances, water supply, sublimits, BI worksheet).',
+      'PML is now NET OF THE APPLICABLE DEDUCTIBLE (e.g. a 10% quake deductible drops a $5M gross PML to $4M) — the insurable catastrophe loss above the retention.',
+      'The coinsurance shortfall uses the building\'s own coinsurance % (not a fixed 90%).',
+      'The risk score absorbs ACV valuation (weaker recovery), occupancy fire-load hazards (cooking/hot-work/hazmat, capped), and a central-station-alarm protection credit.',
+      'New recommendations: move ACV → replacement cost, add ordinance & law on older buildings, and add a central-station alarm on combustible construction.',
+      'Captured everywhere: the building editor gains "Valuation & policy structure" and "Occupancy hazards" sections (plus roof type / wiring / alarm under COPE); the CSV template and the AI "parse a file" path extract all the new fields too.',
+    ],
+    howToUse: [
+      'Company → Commercial Property → ✏️ edit any building (or "Add building"): the modal now has COPE+ (roof type, wiring, central-station alarm), a "Valuation & policy structure" section (RCV/ACV, coinsurance %, ordinance & law, BI months, blanket, AOP/wind/named-storm/quake deductibles), and an "Occupancy hazards" section (cooking/NFPA-96, hot work, hazmat).',
+      'Import the same fields in bulk: the CSV template now includes the new columns, and the "Parse a file (AI)" path extracts them from a carrier SOV PDF.',
+      'As you fill them in, the Modeled Exposure (deductible-net PML), the coinsurance shortfall, the Property Risk Score, and the risk-improvement plan all update to reflect the real policy + hazard inputs.',
+    ],
+    setup: [
+      'Apply migration propd01 (additive ALTER on company_property_buildings — the new columns + policy_detail JSONB). Applied to DEV; PROD still pending — run migrate-prod.sh for prop01 then propd01.',
+      'No new integration or env. Existing buildings with the fields left blank score exactly as before (the new inputs only adjust the numbers once entered).',
+    ],
+    notes: [
+      'Still directional: the damage ratios + wildfire/wind baselines remain coarse estimates; the new inputs make the retained-vs-gross and recovery picture far more accurate, but it is not a licensed cat model.',
+      'Editing a building in the form preserves its policy_detail JSONB long-tail (set via CSV/parse) — the form intentionally doesn\'t blank it.',
+    ],
+    tag: 'action-needed',
+  },
+  {
     id: 'property-risk-tooling',
     date: '2026-06-23',
     category: 'Property',
