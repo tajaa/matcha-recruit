@@ -73,7 +73,7 @@ async def _voice_parse_budget(ip: str, token: str, company_id: str) -> None:
     rotation, so a single leaked public link could otherwise drive unlimited
     Gemini spend. These two caps bound abuse of one link, and total spend across
     all of a company's links, regardless of how many IPs the attacker rotates."""
-    await check_rate_limit(token.lower(), "ir_voice_parse_link", 15, 3600)
+    await check_rate_limit(token, "ir_voice_parse_link", 15, 3600)
     await check_rate_limit(company_id, "ir_voice_parse_co", 120, 3600)
 
 # ---------------------------------------------------------------------------
@@ -157,7 +157,7 @@ async def validate_report_token(token: str):
             WHERE report_email_token = $1
               AND COALESCE((enabled_features->>'incidents')::boolean, false) = true
             """,
-            token.lower(),
+            token,
         )
     if not row:
         raise HTTPException(status_code=404, detail="Invalid reporting link")
@@ -213,7 +213,7 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
     async with get_connection() as conn:
         company_id_row = await conn.fetchval(
             "SELECT id FROM companies WHERE report_email_token = $1",
-            token.lower(),
+            token,
         )
     if not company_id_row:
         raise HTTPException(status_code=404, detail="Invalid reporting link")
@@ -226,7 +226,7 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
             company = await conn.fetchrow(
                 """SELECT id, name, enabled_features, report_token_used_at
                    FROM companies WHERE report_email_token = $1 FOR UPDATE""",
-                token.lower(),
+                token,
             )
 
             if not company:
@@ -267,7 +267,7 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
 
             await conn.execute(
                 "UPDATE companies SET report_token_used_at = NOW() WHERE report_email_token = $1",
-                token.lower(),
+                token,
             )
 
     if row:
@@ -307,7 +307,7 @@ async def parse_report_voice(token: str, request: Request, file: UploadFile = Fi
     async with get_connection() as conn:
         row = await conn.fetchrow(
             "SELECT id, report_token_used_at, enabled_features FROM companies WHERE report_email_token = $1",
-            token.lower(),
+            token,
         )
     if not row:
         raise HTTPException(status_code=404, detail="Invalid reporting link")
@@ -373,7 +373,7 @@ async def validate_location_intake_token(token: str):
             JOIN companies c ON c.id = rl.company_id
             WHERE rl.token = $1
             """,
-            token.lower(),
+            token,
         )
     if not row:
         raise HTTPException(status_code=404, detail="Invalid reporting link")
@@ -451,7 +451,7 @@ async def submit_location_report(
             JOIN companies c ON c.id = rl.company_id
             WHERE rl.token = $1
             """,
-            token.lower(),
+            token,
         )
     if not link:
         raise HTTPException(status_code=404, detail="Invalid reporting link")
@@ -481,7 +481,7 @@ async def submit_location_report(
                 SELECT is_active, expires_at, max_uses, use_count
                 FROM ir_report_links WHERE token = $1 FOR UPDATE
                 """,
-                token.lower(),
+                token,
             )
             if not link_row:
                 raise HTTPException(status_code=404, detail="Invalid reporting link")
@@ -527,7 +527,7 @@ async def submit_location_report(
             # Reusable: bump the counter + last-used stamp instead of burning it.
             await conn.execute(
                 "UPDATE ir_report_links SET use_count = use_count + 1, used_at = NOW() WHERE token = $1",
-                token.lower(),
+                token,
             )
 
     # Schedule notifications + AI auto-classify + policy-map after the commit.
@@ -563,7 +563,7 @@ async def parse_location_intake_voice(token: str, request: Request, file: Upload
             JOIN companies c ON c.id = rl.company_id
             WHERE rl.token = $1
             """,
-            token.lower(),
+            token,
         )
     if not link:
         raise HTTPException(status_code=404, detail="Invalid reporting link")
