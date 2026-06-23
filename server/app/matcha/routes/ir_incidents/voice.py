@@ -9,9 +9,10 @@ Gated by BOTH the router-level ``incidents`` feature (parent mount) AND a per-ro
 shadowed by crud's ``/{incident_id}``.
 """
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
 from app.database import get_connection
+from app.core.services.redis_cache import check_rate_limit, client_ip
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id, require_feature
 from app.matcha.services.ir_voice_parser import parse_voice_incident
 
@@ -28,10 +29,19 @@ def _loc_label(r) -> str:
 
 @router.post("/voice/parse")
 async def parse_voice(
+    request: Request,
     file: UploadFile = File(...),
     current_user=Depends(require_admin_or_client),
     _gate=Depends(require_feature("ir_voice_intake")),
 ):
+    # Each parse is an expensive Gemini multimodal call. Throttle per client IP so a
+    # glitchy/retrying browser or a malicious authed user can't hammer it. Burst guard
+    # (5/min) catches retry loops; hourly cap (40/hr) bounds sustained abuse. Checked
+    # before reading the upload so a 429 short-circuits cheaply.
+    ip = client_ip(request)
+    await check_rate_limit(ip, "ir_voice_parse_burst", 5, 60)
+    await check_rate_limit(ip, "ir_voice_parse", 40, 3600)
+
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated with this account")
