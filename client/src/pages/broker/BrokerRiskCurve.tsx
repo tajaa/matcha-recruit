@@ -106,21 +106,21 @@ export default function BrokerRiskCurve() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Card className="p-4">
               <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold inline-flex items-center gap-1">Expected annual loss
-                <HelpHint text="The average loss you'd expect across the selected book in a typical year — the sum of each client's modeled expected loss (exposure × 65% loss ratio). It's the centre of gravity of the curve (the green line)." />
+                <HelpHint text="Expected loss = the AVERAGE yearly loss if you ran this book many times — a long-run average, not a forecast for this one year. Computed as each client's exposure × a 65% loss ratio, summed. It's where the curve is centred (the green line). Half of years come in under it, half over." />
               </div>
               <div className="text-3xl font-light font-mono mt-1 text-zinc-100">{loss.expected_loss > 0 ? fmtUsd(loss.expected_loss) : '—'}</div>
               <div className="text-[10px] text-zinc-600">{loss.modeled_count} client{loss.modeled_count === 1 ? '' : 's'} modeled · {basis}</div>
             </Card>
             <Card className="p-4">
               <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold inline-flex items-center gap-1">PML · 99th pct
-                <HelpHint text="Probable Maximum Loss at the 99th percentile — a 1-in-100 bad year. The right tail of the curve (red line). Risky clients push this far above expected loss; it's what reinsurers price the tail on." />
+                <HelpHint text="PML = Probable Maximum Loss: a realistic worst-case year, not the average. At the 99th percentile it's a roughly 1-in-100-year bad year — you'd expect to lose more than this only about 1 year in 100. It's the far-right tail of the curve (red line). Carriers set limits and price the tail off this number, so risky accounts that stretch it cost real premium." />
               </div>
               <div className="text-3xl font-light font-mono mt-1 text-amber-400">{loss.pml99 > 0 ? fmtUsd(loss.pml99) : '—'}</div>
               <div className="text-[10px] text-zinc-600">1-in-100-yr tail loss</div>
             </Card>
             <Card className="p-4">
               <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold inline-flex items-center gap-1">Book risk index · weighted
-                <HelpHint text="Exposure-weighted average of clients' 0–100 risk indices (higher = safer, the EPL/WC composite). Big accounts count more, so it tells you the risk quality of where your headcount/premium actually sits." />
+                <HelpHint text="Risk index = a 0–100 score of how insurable a client looks (higher = safer), rolled up from their Workers' Comp, EPL and compliance data. This is the exposure-weighted average across the selected book — big accounts count more — so it tells you the risk quality of where your headcount/premium actually sits, not just a simple client average." />
               </div>
               <div className={`text-3xl font-light font-mono mt-1 ${agg.weighted_band ? RISK_BAND_TONE[agg.weighted_band] ?? 'text-zinc-200' : 'text-zinc-600'}`}>
                 {agg.weighted_mean ?? '—'}
@@ -131,7 +131,7 @@ export default function BrokerRiskCurve() {
             </Card>
             <Card className="p-4">
               <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold inline-flex items-center gap-1">Selected exposure
-                <HelpHint text="Total size of the book you're modeling — headcount (or premium) summed across the checked clients. This is what scales the loss curve up or down." />
+                <HelpHint text="Exposure = the size measure that drives loss — total headcount (or annual premium) across the checked clients. More exposure means more potential loss, so this is what scales the whole loss curve up or down." />
               </div>
               <div className="text-3xl font-light font-mono mt-1 text-zinc-200">{fmtWeight(agg.total_weight, basis)}</div>
               <div className="text-[10px] text-zinc-600">{selectedClients.length} of {clients.length} clients</div>
@@ -233,10 +233,11 @@ export default function BrokerRiskCurve() {
                 </ResponsiveContainer>
               )}
             </div>
-            <p className="text-[10px] text-zinc-600 mt-2">
-              Modeled: expected loss ≈ {basis === 'premium' ? 'premium' : 'headcount × ~$1,200'} × 65% loss ratio; volatility scales with each client's risk index. Directional, not a priced estimate.
-              {excluded > 0 && ` · ${excluded} selected client${excluded === 1 ? '' : 's'} not modeled (no ${basis} on file).`}
-            </p>
+            <div className="text-[10px] text-zinc-600 mt-2 flex flex-wrap items-center gap-1">
+              <span>Modeled: expected loss ≈ {basis === 'premium' ? 'premium' : 'headcount × ~$1,200'} × 65% loss ratio; volatility scales with each client's risk index. Directional, not a priced estimate.</span>
+              <HelpHint text="Loss ratio = the share of premium expected to be paid out as claims; ~65% is a typical permissible Workers' Comp loss ratio, so expected loss ≈ premium × 0.65. Volatility = how much actual losses swing year to year — we scale it by each client's risk index, so exposed clients widen the tail and strong ones tighten it." />
+              {excluded > 0 && <span>· {excluded} selected client{excluded === 1 ? '' : 's'} not modeled (no {basis} on file).</span>}
+            </div>
           </Card>
 
           {/* Non-Pro upsell */}
