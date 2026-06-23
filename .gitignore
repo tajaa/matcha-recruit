@@ -144,6 +144,10 @@ deals/
 
 server/db.sqlite
 
+# Throwaway local demo seed SQL — dev-only data, keep out of git status
+# (force-add with `git add -f` if a specific one should be shared)
+seed_*_demo.sql
+
 # Security audit working docs (confidential, not tracked)
 security-audit-6-10.md
 docs/SECURITY_AUDIT_2026-06-10.md
