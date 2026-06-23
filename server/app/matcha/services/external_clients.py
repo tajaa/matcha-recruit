@@ -235,6 +235,7 @@ async def list_with_scores(conn, broker_id: UUID) -> list[dict]:
             "wc_severity_band": wc["severity_band"],
             "wc_trir": wc["trir"],
             "wc_current_emr": wc["current_emr"],
+            "annual_premium": wc["annual_premium"],
             "epl_score": epl["score"],
             "epl_band": epl["band"],
             "risk_index": ri["index"],

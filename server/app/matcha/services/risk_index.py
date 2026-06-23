@@ -117,6 +117,52 @@ async def compute_risk_index(conn, company_id: UUID) -> dict:
     return {"company_id": str(company_id), **_assemble(components, epl)}
 
 
+_BANDS = ("strong", "adequate", "developing", "exposed")
+
+
+def weighted_book_risk(clients: list[dict], basis: str = "headcount") -> dict:
+    """Exposure-weighted roll-up of a book's per-client risk indices. Pure (no DB).
+
+    Each ``clients`` dict carries ``index`` (0-100), ``band``, ``headcount`` and
+    ``annual_premium``. A client's weight is its ``basis`` field (``headcount`` or
+    ``premium``→annual_premium); a missing/zero basis means weight 0 — the client is
+    excluded from the weighted mean, band mix and curve width, but still counts in
+    the equal-weight mean and is reported via ``missing_basis_count``.
+
+    Canonical source of truth for the interactive book risk curve + any future
+    submission-packet PDF (the client-side TS port in ``utils/bookRisk.ts`` mirrors
+    this exactly — keep them in sync)."""
+    field = "annual_premium" if basis == "premium" else "headcount"
+    scored = [c for c in clients if c.get("index") is not None]
+    weights = [float(c.get(field) or 0) for c in scored]
+    total_weight = sum(weights)
+
+    weighted_mean = (
+        round(sum(c["index"] * w for c, w in zip(scored, weights)) / total_weight, 1)
+        if total_weight > 0 else None
+    )
+    equal_weight_mean = round(sum(c["index"] for c in scored) / len(scored), 1) if scored else None
+
+    band_mix = {b: 0.0 for b in _BANDS}
+    if total_weight > 0:
+        for c, w in zip(scored, weights):
+            if c.get("band") in band_mix:
+                band_mix[c["band"]] += w / total_weight
+        band_mix = {b: round(v, 4) for b, v in band_mix.items()}
+
+    return {
+        "basis": basis,
+        "weighted_mean": weighted_mean,
+        "equal_weight_mean": equal_weight_mean,
+        "weighted_band": band(round(weighted_mean)) if weighted_mean is not None else None,
+        "total_weight": round(total_weight, 2),
+        "scored_count": len(scored),
+        "weighted_count": sum(1 for w in weights if w > 0),
+        "missing_basis_count": sum(1 for w in weights if w <= 0),
+        "band_mix": band_mix,
+    }
+
+
 def external_risk_index(wc: dict, epl: dict) -> dict:
     """Composite index for an off-platform (Broker Pro) client from the broker-keyed
     WC snapshot + EPL questionnaire. WC + EPL only — no compliance component (no

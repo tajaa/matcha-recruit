@@ -45,6 +45,49 @@ export const RISK_BAND_TONE: Record<string, string> = {
   exposed: 'text-red-400',
 }
 
+// --- Book Risk Curve (broker, exposure-weighted) ---
+export type ExposureBasis = 'headcount' | 'premium'
+
+export interface BookRiskClient {
+  id: string
+  source: 'platform' | 'external'
+  name: string
+  industry: string | null
+  index: number
+  band: string
+  headcount: number | null
+  annual_premium: number | null
+}
+
+export interface WeightedBookRisk {
+  basis: ExposureBasis
+  weighted_mean: number | null
+  equal_weight_mean: number | null
+  weighted_band: string | null
+  total_weight: number
+  scored_count: number
+  weighted_count: number
+  missing_basis_count: number
+  band_mix: Record<string, number>
+}
+
+export interface BookRiskCurve {
+  is_pro: boolean
+  clients: BookRiskClient[]
+  default_aggregate: WeightedBookRisk
+  counts: { platform: number; external: number; missing_headcount: number; missing_premium: number }
+}
+
+export interface EplBandZone { key: string; min: number; max: number; label: string; color: string }
+// EPL band thresholds (mirror epl_readiness.readiness_band) — for the FE recompute
+// + the chart's shaded band zones.
+export const EPL_BANDS: EplBandZone[] = [
+  { key: 'exposed', min: 0, max: 35, label: 'Exposed', color: '#ef4444' },
+  { key: 'developing', min: 35, max: 60, label: 'Developing', color: '#f59e0b' },
+  { key: 'adequate', min: 60, max: 80, label: 'Adequate', color: '#a1a1aa' },
+  { key: 'strong', min: 80, max: 100, label: 'Strong', color: '#10b981' },
+]
+
 // Submission-readiness — data→price completeness loop (folded into the portal).
 export interface ReadinessItem {
   key: string

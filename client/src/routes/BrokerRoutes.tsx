@@ -8,6 +8,7 @@ import BrokerClientsHub from '../pages/broker/BrokerClientsHub'
 import BrokerAccount from '../pages/broker/BrokerAccount'
 import BrokerClientDetail from '../pages/broker/BrokerClientDetail'
 import BrokerActionCenter from '../pages/broker/BrokerActionCenter'
+import BrokerRiskCurve from '../pages/broker/BrokerRiskCurve'
 import BrokerExternalClients from '../pages/broker/BrokerExternalClients'
 import BrokerExternalClientDetail from '../pages/broker/BrokerExternalClientDetail'
 
@@ -27,6 +28,9 @@ export default function BrokerRoutes() {
 
         {/* Module 2 — Action Center (tabbed: alerts / renewals / eligibility / milestones) */}
         <Route path="action-center" element={<BrokerActionCenter />} />
+
+        {/* Book-wide analytics — interactive exposure-weighted risk curve */}
+        <Route path="risk-curve" element={<BrokerRiskCurve />} />
 
         {/* Module 3 — Clients hub (tabbed: onboarding / pipeline / seats / referrals) */}
         <Route path="clients" element={<BrokerClientsHub />} />

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { LayoutDashboard, Building2, Settings, Zap, Globe } from 'lucide-react'
+import { LayoutDashboard, Building2, Settings, Zap, Globe, Activity } from 'lucide-react'
 import SidebarShell, { type NavItem } from './SidebarShell'
 import BrokerThemeToggle from './BrokerThemeToggle'
 import { fetchBrokerRiskAlerts, fetchActionCenterMilestones } from '../api/broker'
@@ -24,6 +24,7 @@ export default function BrokerSidebar() {
   const nav: NavItem[] = [
     { to: '/broker', icon: LayoutDashboard, label: 'Book of Business' },
     { to: '/broker/action-center', icon: Zap, label: 'Action Center', badge: actionCount },
+    { to: '/broker/risk-curve', icon: Activity, label: 'Risk Curve' },
     // Broker Pro: off-platform clients (not Matcha tenants). Admin-toggled entitlement.
     ...(isPro ? [{ to: '/broker/external', icon: Globe, label: 'External Book' } as NavItem] : []),
     // Clients hub (onboarding · pipeline · seats · referrals) + Account hub (team · settings).

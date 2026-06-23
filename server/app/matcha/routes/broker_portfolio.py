@@ -24,6 +24,7 @@ from ..services import wc_depth
 from ..services import wc_mod_parser
 from ..services import epl_readiness
 from ..services import risk_index
+from ..services import external_clients as ext
 from ..services import wc_classmap
 from ..models.broker_action_center import MilestonesResponse, OutreachResponse
 
@@ -454,6 +455,87 @@ async def get_risk_index_portfolio(current_user=Depends(require_broker)):
         "avg_index": round(sum(r["index"] for r in scored) / len(scored)) if scored else 0,
     }
     return {"summary": summary, "companies": results}
+
+
+@router.get("/risk-curve")
+async def get_book_risk_curve(current_user=Depends(require_broker)):
+    """Whole-book data for the interactive exposure-weighted risk curve.
+
+    One row per client — on-platform tenants plus, for Broker Pro, off-platform
+    external clients — carrying the composite risk index + exposure (headcount,
+    annual premium). The curve and the weighted aggregate are recomputed client-side
+    as the broker selects/deselects clients; ``default_aggregate`` is the
+    all-selected headcount-weighted roll-up (also what a future packet PDF embeds)."""
+    async with get_connection() as conn:
+        broker_id, clients = await _broker_clients(conn, current_user.id)
+        company_ids = list(clients.keys())
+
+        # Batch the exposure signals to avoid N+1: headcount + latest WC premium.
+        headcount_by_id: dict = {}
+        if company_ids:
+            hc_rows = await conn.fetch(
+                "SELECT company_id, headcount FROM company_handbook_profiles "
+                "WHERE company_id = ANY($1::uuid[])",
+                company_ids,
+            )
+            headcount_by_id = {r["company_id"]: r["headcount"] for r in hc_rows}
+        mods = await wc_depth.latest_mods(conn, company_ids) if company_ids else {}
+
+        out: list[dict] = []
+        for company_id, meta in clients.items():
+            try:
+                r = await risk_index.compute_risk_index(conn, company_id)
+            except Exception as exc:
+                logger.warning("risk-curve: compute failed for %s: %s", company_id, exc)
+                continue
+            if r["index"] is None:
+                continue
+            out.append({
+                "id": str(company_id), "source": "platform",
+                "name": meta["name"], "industry": meta["industry"],
+                "index": r["index"], "band": r["band"],
+                "headcount": headcount_by_id.get(company_id),
+                "annual_premium": (mods.get(str(company_id)) or {}).get("annual_premium"),
+            })
+        platform_count = len(out)
+
+        # Off-platform external book — Broker Pro only. Inline the plan check (not the
+        # require_broker_pro dep, which raises 403) so non-Pro brokers degrade to their
+        # on-platform book instead of erroring.
+        plan = await conn.fetchval(
+            """
+            SELECT b.plan FROM brokers b
+            JOIN broker_members bm ON bm.broker_id = b.id
+            WHERE bm.user_id = $1 AND bm.is_active = true
+            ORDER BY bm.created_at ASC LIMIT 1
+            """,
+            current_user.id,
+        )
+        is_pro = plan == "pro"
+        if is_pro:
+            for c in await ext.list_with_scores(conn, broker_id):
+                if c.get("risk_index") is None:
+                    continue
+                out.append({
+                    "id": c["id"], "source": "external",
+                    "name": c["name"], "industry": c["industry"],
+                    "index": c["risk_index"], "band": c["risk_band"],
+                    "headcount": c["headcount"],
+                    "annual_premium": c.get("annual_premium"),
+                })
+
+    counts = {
+        "platform": platform_count,
+        "external": len(out) - platform_count,
+        "missing_headcount": sum(1 for c in out if not c["headcount"]),
+        "missing_premium": sum(1 for c in out if not c["annual_premium"]),
+    }
+    return {
+        "is_pro": is_pro,
+        "clients": out,
+        "default_aggregate": risk_index.weighted_book_risk(out, "headcount"),
+        "counts": counts,
+    }
 
 
 @router.get("/risk-index/{company_id}")
