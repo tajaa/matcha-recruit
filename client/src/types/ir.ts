@@ -6,6 +6,20 @@ import type { BadgeVariant } from '../components/ui'
 export type IRIncidentType = 'safety' | 'behavioral' | 'property' | 'near_miss' | 'other'
 export type IRSeverity = 'low' | 'medium' | 'high' | 'critical'
 export type IRStatus = 'reported' | 'investigating' | 'action_required' | 'resolved' | 'closed'
+
+// Voice-dictation parse result (optional "talk it in" prefill for the create form).
+export type VoicePrefill = {
+  transcript: string | null
+  description: string | null
+  reported_by_name: string | null
+  occurred_at_text: string | null
+  witnesses: { name: string }[]
+  location_id: string | null
+  incident_type: IRIncidentType | null
+  severity: IRSeverity | null
+  available: boolean
+  model: string
+}
 export type IRDocumentType = 'photo' | 'form' | 'statement' | 'other'
 
 // ── Core models ──

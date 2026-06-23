@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Mic, Square, Loader2 } from 'lucide-react'
 import { api } from '../../api/client'
 import { Button, Input, Modal, Select, Textarea } from '../ui'
 import { IRPersonMultiSelect } from './IRPersonMultiSelect'
 import { EmployeeMultiSelect } from '../employees/EmployeeMultiSelect'
 import { useMe } from '../../hooks/useMe'
-import type { IRIncident } from '../../types/ir'
+import { useVoiceDictation } from '../../hooks/ir/useVoiceDictation'
+import type { IRIncident, VoicePrefill } from '../../types/ir'
 
 type LocationRow = {
   id: string
@@ -40,13 +42,52 @@ type Props = {
   onCreated: (incident: IRIncident) => void
 }
 
+function fmtElapsed(s: number): string {
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
 export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
   const { hasFeature } = useMe()
   const hasRoster = hasFeature('employees')
+  const canDictate = hasFeature('ir_voice_intake')
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [locations, setLocations] = useState<LocationRow[] | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [transcribing, setTranscribing] = useState(false)
+  const [voiceMsg, setVoiceMsg] = useState<string | null>(null)
+  const [voiceHint, setVoiceHint] = useState<{ type?: string; severity?: string } | null>(null)
+
+  // declared before the hook so onMaxDuration can call it
+  async function finishDictation() {
+    const wav = await dictation.stop()
+    if (!wav) { setVoiceMsg('No audio captured — try again.'); return }
+    setTranscribing(true)
+    setVoiceMsg(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', wav, 'dictation.wav')
+      const p = await api.upload<VoicePrefill>('/ir/incidents/voice/parse', fd)
+      if (!p.available) { setVoiceMsg("Couldn't understand the audio — please type the details."); return }
+      setForm((f) => ({
+        ...f,
+        description: p.description ?? f.description,
+        reported_by_name: p.reported_by_name ?? f.reported_by_name,
+        date_text: p.occurred_at_text ?? f.date_text,
+        location_id: p.location_id && (locations || []).some((l) => l.id === p.location_id) ? p.location_id : f.location_id,
+        involved: p.witnesses?.length
+          ? Array.from(new Set([...f.involved, ...p.witnesses.map((w) => w.name)]))
+          : f.involved,
+      }))
+      setVoiceHint(p.incident_type || p.severity ? { type: p.incident_type ?? undefined, severity: p.severity ?? undefined } : null)
+    } catch {
+      setVoiceMsg('Transcription failed — please type the details.')
+    } finally {
+      setTranscribing(false)
+    }
+  }
+
+  const dictation = useVoiceDictation({ maxDurationSeconds: 120, onMaxDuration: () => { void finishDictation() } })
 
   useEffect(() => {
     if (!open) return
@@ -149,6 +190,34 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
             value={form.location_id}
             onChange={(e) => setForm({ ...form, location_id: e.target.value })}
           />
+        )}
+
+        {canDictate && (
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2.5 space-y-1.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              {dictation.status === 'recording' ? (
+                <button type="button" onClick={() => { void finishDictation() }}
+                  className="inline-flex items-center gap-1.5 text-sm text-red-400 px-2.5 py-1 rounded-lg border border-red-500/40 hover:border-red-400">
+                  <Square className="h-3.5 w-3.5 fill-current" /> Stop · {fmtElapsed(dictation.elapsedSeconds)}
+                </button>
+              ) : transcribing ? (
+                <span className="inline-flex items-center gap-1.5 text-sm text-zinc-400"><Loader2 className="h-4 w-4 animate-spin" /> Transcribing…</span>
+              ) : (
+                <button type="button" onClick={() => { setVoiceMsg(null); setVoiceHint(null); void dictation.start() }}
+                  className="inline-flex items-center gap-1.5 text-sm text-zinc-200 px-2.5 py-1 rounded-lg border border-zinc-700 hover:border-zinc-500">
+                  <Mic className="h-4 w-4" /> Dictate
+                </button>
+              )}
+              {dictation.status === 'recording' && <span className="text-xs text-red-400 animate-pulse">● recording</span>}
+            </div>
+            <p className="text-[11px] text-zinc-500">AI-assisted — review every field before submitting. This is a legal record.</p>
+            {dictation.status === 'denied' && <p className="text-[11px] text-amber-400">Microphone access denied — enable it in your browser settings, or just type the report.</p>}
+            {dictation.status === 'error' && <p className="text-[11px] text-amber-400">Couldn't start recording — please type the report.</p>}
+            {voiceMsg && <p className="text-[11px] text-amber-400">{voiceMsg}</p>}
+            {voiceHint && (
+              <p className="text-[11px] text-zinc-400">Suggested: {[voiceHint.type, voiceHint.severity].filter(Boolean).join(' · ')} <span className="text-zinc-600">(AI — finalized after submit)</span></p>
+            )}
+          </div>
         )}
 
         <Textarea

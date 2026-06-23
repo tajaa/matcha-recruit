@@ -117,6 +117,12 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # Gates /property + /app/property + the broker property surfaces. Default off;
     # admin-toggle. Not bundled.
     "property": False,
+    # Optional voice dictation on the IR create form (all IR products). The reporter
+    # records a spoken account; one Gemini multimodal call transcribes + extracts the
+    # form fields for the user to review before submitting (never auto-creates). Gates
+    # only POST /ir/incidents/voice/parse + the "Dictate" button (stacks on the
+    # incidents gate). Default off; admin-toggle; NOT in any tier overlay.
+    "ir_voice_intake": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,

@@ -61,6 +61,9 @@ router.include_router(_audit_log_router)
 from .claims_readiness import router as _claims_readiness_router
 router.include_router(_claims_readiness_router)
 
+from .voice import router as _voice_router
+router.include_router(_voice_router)
+
 # External re-exports. Keep `# noqa: F401` — these are package-level
 # re-exports, not local usages.
 from .analytics import compute_wc_metrics  # noqa: F401  (used by broker_portfolio.py)
