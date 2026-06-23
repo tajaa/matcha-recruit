@@ -21,6 +21,6 @@ class LossRunValuationCommit(BaseModel):
     """A loss run valued as of one date → one row per policy period it covers."""
 
     valuation_date: date
-    line: Literal["wc", "gl", "auto"] = "wc"
+    line: Literal["wc", "gl", "auto", "property"] = "wc"
     source: Optional[str] = Field(None, max_length=60)
     periods: List[LossRunPeriod] = Field(..., min_length=1)

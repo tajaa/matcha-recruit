@@ -22,7 +22,8 @@ from app.core.services.pdf import safe_url_fetcher
 
 logger = logging.getLogger(__name__)
 
-LINE_LABELS = {"wc": "Workers' Comp", "gl": "General Liability", "auto": "Commercial Auto"}
+LINE_LABELS = {"wc": "Workers' Comp", "gl": "General Liability", "auto": "Commercial Auto",
+               "property": "Commercial Property"}
 
 
 def _period_start(label: str, explicit) -> date | None:

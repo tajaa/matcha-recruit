@@ -97,7 +97,7 @@ One row per policy period the report shows. `paid` + `reserved` should equal inc
 
 def _coerce_development(payload: dict) -> dict:
     line = str(payload.get("line") or "wc").strip().lower()
-    if line not in ("wc", "gl", "auto"):
+    if line not in ("wc", "gl", "auto", "property"):
         line = "wc"
     periods = []
     for p in payload.get("periods") or []:

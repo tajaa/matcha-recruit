@@ -37,6 +37,7 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/controls-evidence', icon: FileCheck, label: 'Proof of Controls', feature: 'controls_evidence' },
       { to: '/app/limit-adequacy', icon: Scale, label: 'Limit Adequacy', feature: 'limit_adequacy' },
       { to: '/app/driver-risk', icon: Car, label: 'Driver Risk', feature: 'driver_risk' },
+      { to: '/app/property', icon: Building2, label: 'Commercial Property', feature: 'property' },
     ],
   },
   {

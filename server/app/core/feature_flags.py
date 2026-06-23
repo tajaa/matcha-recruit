@@ -109,6 +109,14 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # mvr_reviews table shared with resident_care. Gates /driver-risk +
     # /app/driver-risk. Default off; admin-toggle. Not bundled.
     "driver_risk": False,
+    # Commercial property (P-side). Tenant Statement of Values (per-building COPE +
+    # values), insurance-to-value + COPE grade, property limits via the limit-adequacy
+    # engine (line='property') and property loss runs via loss-development, a property
+    # component in the composite risk index, geocoded catastrophe exposure
+    # (flood/quake/wildfire/wind), and broker property-portfolio + submission section.
+    # Gates /property + /app/property + the broker property surfaces. Default off;
+    # admin-toggle. Not bundled.
+    "property": False,
 }
 
 # Tier-defining features that should always be on for a given signup_source,

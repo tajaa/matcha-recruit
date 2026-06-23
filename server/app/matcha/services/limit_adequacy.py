@@ -37,6 +37,7 @@ COVERAGE_LINES = [
     {"key": "epl", "label": "Employment Practices Liability", "endorsements": False},
     {"key": "professional", "label": "Professional Liability (E&O)", "endorsements": False},
     {"key": "cyber", "label": "Cyber Liability", "endorsements": False},
+    {"key": "property", "label": "Commercial Property", "endorsements": False},
 ]
 LINE_KEYS = {c["key"] for c in COVERAGE_LINES}
 _LINE_LABEL = {c["key"]: c["label"] for c in COVERAGE_LINES}
@@ -64,6 +65,9 @@ LINE_ALIASES = {
     "professional": "professional", "professional liability": "professional",
     "errors and omissions": "professional", "e&o": "professional", "eo": "professional",
     "cyber": "cyber", "cyber liability": "cyber", "data breach": "cyber",
+    "property": "property", "commercial property": "property", "building": "property",
+    "buildings and contents": "property", "property damage": "property",
+    "first party property": "property", "real property": "property",
 }
 
 
