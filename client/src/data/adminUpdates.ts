@@ -23,6 +23,91 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'broker-loss-ratio',
+    date: '2026-06-23',
+    category: 'Broker',
+    title: 'Loss Ratio tab — projected ultimate ÷ premium, per policy year',
+    summary:
+      'Adds the metric underwriters actually price on to the broker client view: the loss ratio (projected ultimate losses ÷ paid premium), per policy year. The projected ultimate is reused straight from the existing loss-run triangulation; the only new input is the premium the client paid the carrier, which the broker enters per line per year. Each ratio is flagged against the <60% profitability target, with a per-year account rollup across all lines. Works for on-platform and off-platform (Broker Pro) clients.',
+    whatsNew: [
+      'New "Loss Ratio" tab on the broker client view (next to Loss Triangle), and a Loss Ratio section on off-platform Broker Pro clients.',
+      'Loss ratio = projected ultimate ÷ premium paid, shown per (line, policy year) — the way underwriters read it (a WC ratio, a GL ratio…), not blended.',
+      'The broker enters the premium the client paid the carrier per line/year; the ratio recomputes instantly and is colored green (< 60%) or red (≥ 60%) against the underwriter target.',
+      'A per-year account rollup sums every line\'s ultimate ÷ total premium for that year.',
+      'Projected ultimate is read-only — it comes from the loss-run triangle already on file, so the ratio is grounded in the carrier loss runs, not re-keyed.',
+    ],
+    howToUse: [
+      'Broker → Clients → open a client → Loss Triangle tab first (upload/enter at least two valuations of the same policy years so projected ultimate exists).',
+      'Switch to the Loss Ratio tab → for each line/year, type the premium the client paid the carrier → the loss ratio + color flag update and persist.',
+      'Read the per-year "Account rollup" for the blended all-lines ratio. Repeat on off-platform Pro clients (the same section appears on their detail page).',
+    ],
+    setup: [
+      'Apply migration lossratio01 (new broker_loss_premiums table — the broker-entered premium). Applied to DEV; PROD pending — run migrate-prod.sh.',
+      'No new flag — broker surfaces are broker-role gated. No new integration or env.',
+    ],
+    notes: [
+      'Loss ratio is only as good as the projected ultimate — if a client has no loss runs on file the tab points back to the Loss Triangle tab.',
+      'Premium is stored per (line, policy year) keyed to the loss-run periods, so it lines up 1:1 with each line\'s ultimate.',
+    ],
+    tag: 'action-needed',
+  },
+  {
+    id: 'legal-defense',
+    date: '2026-06-23',
+    category: 'Legal Defense',
+    title: 'Legal Defense — turn your records into an attorney-ready evidence packet',
+    summary:
+      'For full-platform (Pro) companies — especially SMBs without in-house counsel — when a legal stressor hits (subpoena, class action, EEOC charge, audit). The admin opens a "matter", describes the allegation, and chats with a GROUNDED AI that pulls the company\'s own records across every enabled subsystem (incidents/OSHA, ER cases, compliance, discipline, training, policy acknowledgments, accommodations + the immutable audit trails) and organizes them against the matter. It exports an attorney-facing packet: a defense memo (PDF) that cites only real records + a ZIP bundle of the underlying source documents. Framing is deliberate: the AI organizes and surfaces what the records show and flags gaps — it renders no verdict.',
+    whatsNew: [
+      'New "Legal Defense" surface (Safety group) — create a matter, chat about it, export a packet.',
+      'Grounded AI: it cites only record IDs that exist in your data (a validator drops any hallucinated citation), and the PDF appendix is rendered straight from the database rows — nothing is fabricated.',
+      'Organizer, not advocate: states what the records show + flags open questions for counsel; renders no liability opinion (a company-authored "we did nothing wrong" memo would be discoverable + unprivileged).',
+      'Two exports: a defense-memo PDF (allegation → what the records show → cited evidence index + per-record appendix) and a ZIP bundle of the underlying uploaded documents.',
+      'Send to counsel: a token-gated, expiring share link delivers the packet to an outside attorney (no Matcha login). Optional "prepared at the direction of counsel" work-product header.',
+      'Read-only over evidence; every matter, chat turn, packet generation, download, and share is audit-logged.',
+    ],
+    howToUse: [
+      'Turn on the "Legal Defense" feature for the company (Admin → Business Features), then: Safety → Legal Defense → New matter (type, allegation, optional date range + counsel name).',
+      'Chat: describe what\'s being claimed → the assistant replies with what your records show, cites them, and lists open questions. The side panel shows which records are in scope.',
+      'Generate "Memo PDF" or "PDF + ZIP" → download, or "Send to counsel" for a private link.',
+    ],
+    setup: [
+      'Apply migration legaldef01 (legal_matters / messages / packets / audit_log / share_links). Applied to DEV; PROD pending — run migrate-prod.sh.',
+      'Admin-toggle the "legal_defense" feature per company (default off; full-platform / Pro). Uses the existing Gemini key (LIVE_API) for the chat and S3 for packet storage.',
+    ],
+    notes: [
+      'It assembles + organizes the factual record to cut the hourly cost of an attorney reconstructing it — it is not legal advice, and every export carries that disclaimer.',
+      'Sources degrade gracefully: a disabled or empty subsystem is simply skipped (noted), never a failure.',
+    ],
+    tag: 'action-needed',
+  },
+  {
+    id: 'ir-magic-link-voice',
+    date: '2026-06-23',
+    category: 'Incident Reporting',
+    title: 'Magic-link intake — voice dictation + invalid-link fix',
+    summary:
+      'Two changes to the public, token-scoped incident-intake forms (the anonymous /report link and the per-location /intake magic link). First, voice dictation now works there too — the same "Dictate" experience as the authed create form, so a reporter on a magic link can talk their account and the AI fills the form for them to review. Second, a fix for magic links returning "Invalid link": tokens are case-sensitive but were being matched lowercased, so any link with an uppercase letter (almost all of them) failed — now matched exactly.',
+    whatsNew: [
+      'Voice dictation on both public intake forms (anonymous /report + per-location /intake), gated by the same ir_voice_intake admin toggle as the authed form — the form only shows "Dictate" when the company has it on.',
+      'Token-scoped public parse endpoints (no login) with abuse guards: per-link + per-company rate limits (not just per-IP, which IP rotation defeats), WAV magic-byte validation before the AI call, and a burned single-use /report link no longer parses.',
+      'FIX: magic links no longer return "Invalid link" — the token is now matched exactly instead of lowercased (the casing mismatch broke any link containing an uppercase letter).',
+      'The ir_voice_intake and legal_defense features now appear as toggles in Admin → Business Features (they were missing from the toggle list).',
+    ],
+    howToUse: [
+      'Generate a reporting link as usual (IR → anonymous report token, or a per-location intake link).',
+      'Open the link logged-out: if the company has voice intake on, a "Dictate this report" button appears — record, and the description/date/witnesses prefill for review before submitting.',
+      'Existing links that previously showed "Invalid link" now work without regenerating.',
+    ],
+    setup: [
+      'No migration. The voice button honors the existing "ir_voice_intake" feature (admin-toggle, default off) — now visible in Business Features. The invalid-link fix is live with the deploy, no action needed.',
+    ],
+    notes: [
+      'Voice intake never auto-creates — the reporter reviews and edits every field before submitting (it becomes a legal record).',
+    ],
+    tag: 'new',
+  },
+  {
     id: 'property-deeper-capture',
     date: '2026-06-23',
     category: 'Property',
