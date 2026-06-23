@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import MarketingNav from './landing/MarketingNav'
@@ -195,7 +195,16 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
       </div>
 
       {/* Headline + supporting content */}
-      <div className="max-w-[1600px] mx-auto w-full px-6 sm:px-10 flex-1 flex flex-col justify-center py-8 sm:py-10">
+      <div className="relative max-w-[1600px] mx-auto w-full px-6 sm:px-10 flex-1 flex flex-col justify-center py-8 sm:py-10">
+        {/* Risk card — floats in upper-right dead space on large screens. Decorative. */}
+        <div
+          className="hidden lg:block absolute top-1/2 -translate-y-1/2 right-6 xl:right-10 w-[480px] xl:w-[560px] home-fade z-10"
+          style={{ animationDelay: '0.6s' }}
+          aria-hidden
+        >
+          <RiskCard />
+        </div>
+
         <span
           className="home-fade inline-flex items-center gap-2.5 self-start rounded-full px-3.5 py-1.5 mb-7"
           style={{ border: `1px solid ${LINE_D}`, animationDelay: '0.1s' }}
@@ -214,8 +223,11 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
           <br />
           <span style={{ animationDelay: '0.26s' }}>the whole</span>
           <br />
-          <span style={{ animationDelay: '0.36s', color: MATCHA, fontStyle: 'italic' }}>people</span>
-          <span style={{ animationDelay: '0.46s' }}>&nbsp;function.</span>
+          <span style={{ animationDelay: '0.36s', color: MATCHA, fontStyle: 'italic' }}>risk</span>
+          <span style={{ animationDelay: '0.44s' }}>&nbsp;&amp;</span>
+          <br />
+          <span style={{ animationDelay: '0.54s', color: MATCHA, fontStyle: 'italic' }}>people</span>
+          <span style={{ animationDelay: '0.62s' }}>&nbsp;function.</span>
         </h1>
 
         <div
@@ -294,6 +306,225 @@ function Marquee() {
             <span className="text-[0.7rem]" style={{ color: NOIR }}>✦</span>
           </span>
         ))}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Risk card — editorial "instrument" showing how we model risk. Composite
+// index readout + an animated lognormal loss-distribution curve. Palette-locked
+// to the hero (noir/bone/matcha/Fraunces); pure SVG + one rAF loop, no deps.
+// ---------------------------------------------------------------------------
+
+const RISK_BANDS = [
+  { max: 39, label: 'Exposed', color: '#ce5a4f' },
+  { max: 59, label: 'Developing', color: '#d98c4f' },
+  { max: 79, label: 'Adequate', color: '#d9b65f' },
+  { max: 100, label: 'Strong', color: '#86efac' },
+] as const
+
+function riskBand(score: number) {
+  return RISK_BANDS.find((b) => score <= b.max) ?? RISK_BANDS[RISK_BANDS.length - 1]
+}
+
+const CURVE_N = 48
+
+function lognormal(x: number, mu = Math.log(0.32), sigma = 0.62) {
+  const lnx = Math.log(Math.max(x, 0.001))
+  return Math.exp(-((lnx - mu) ** 2) / (2 * sigma * sigma)) / (x * sigma * Math.sqrt(2 * Math.PI))
+}
+
+const VBW = 320
+const VBH = 132
+
+// Curve heights for a given animation phase — the loss-distribution peak drifts
+// and its spread breathes over time so the curve is always in motion.
+function curveHeights(phase: number) {
+  const mu = Math.log(0.3) + 0.12 * Math.sin(phase)
+  const sigma = 0.6 + 0.08 * Math.sin(phase * 0.7 + 1)
+  const raw = Array.from({ length: CURVE_N }, (_, i) => lognormal((i + 0.5) / CURVE_N, mu, sigma))
+  const max = Math.max(...raw)
+  return raw.map((v) => v / max) // normalized 0..1
+}
+
+function curvePath(phase: number) {
+  const pts = curveHeights(phase).map((h, i) => {
+    const x = (i / (CURVE_N - 1)) * VBW
+    const y = VBH - h * (VBH - 14) - 6 // 6px floor padding, 14px headroom
+    return [x, y] as const
+  })
+  const line = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
+  const area = `${line} L${VBW},${VBH} L0,${VBH} Z`
+  return { line, area }
+}
+
+function RiskCard() {
+  const TARGET = 73
+  const reduce =
+    typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+
+  const [score, setScore] = useState(reduce ? TARGET : 0)
+  const [drawn, setDrawn] = useState(reduce ? 1 : 0) // 0..1 draw-on progress
+  const [scanX, setScanX] = useState(-1) // -1 hidden, else 0..1
+  const [phase, setPhase] = useState(0)
+  const raf = useRef(0)
+  const start = useRef(0)
+
+  useEffect(() => {
+    if (reduce) return
+    const DUR = 1500 // intro draw-on + count-up
+    const SCAN = 3400 // scan sweep period (loops forever)
+
+    const loop = (now: number) => {
+      if (!start.current) start.current = now
+      const e = now - start.current
+      const intro = Math.min(1, e / DUR)
+      const eased = 1 - Math.pow(1 - intro, 3)
+      setDrawn(eased)
+      setPhase(e / 1100) // curve perpetually drifts/breathes
+      // count up to target, then gentle ±1 live jitter
+      const jitter = intro >= 1 ? Math.round(Math.sin(e / 650) * 1.4) : 0
+      setScore(Math.round(eased * TARGET) + jitter)
+      setScanX((e % SCAN) / SCAN) // continuous left→right sweep
+      raf.current = requestAnimationFrame(loop)
+    }
+
+    raf.current = requestAnimationFrame(loop)
+    return () => cancelAnimationFrame(raf.current)
+  }, [reduce])
+
+  const { line, area } = curvePath(phase)
+  const band = riskBand(score)
+  const pathLen = VBW * 1.4 // generous over-estimate for dashoffset draw-on
+  const ticks = [0.5, 1]
+  const pMarkers = [
+    { f: 0.18, l: 'P50' },
+    { f: 0.46, l: 'P90' },
+    { f: 0.74, l: 'P99' },
+  ]
+
+  return (
+    <div
+      className="w-full rounded-2xl backdrop-blur-sm"
+      style={{ border: `1px solid ${LINE_D}`, backgroundColor: 'rgba(245,242,237,0.025)' }}
+    >
+      {/* header */}
+      <div
+        className="flex items-center justify-between px-5 pt-4 pb-3 border-b"
+        style={{ borderColor: LINE_D }}
+      >
+        <span className="text-[10px] font-mono uppercase tracking-[0.22em]" style={{ color: ASH }}>
+          Composite Risk Index
+        </span>
+        <span
+          className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.18em]"
+          style={{ color: ASH }}
+        >
+          <span className="home-pulse w-1.5 h-1.5 rounded-full" style={{ backgroundColor: MATCHA }} />
+          Modeled
+        </span>
+      </div>
+
+      {/* readout */}
+      <div className="px-5 pt-4 flex items-end justify-between">
+        <span
+          className="tabular-nums leading-none"
+          style={{ fontFamily: DISPLAY, fontWeight: 300, fontSize: '5.5rem', color: band.color }}
+        >
+          {score}
+          <span className="ml-1 align-top text-[1rem]" style={{ color: ASH }}>
+            /100
+          </span>
+        </span>
+        <div className="text-right">
+          <div
+            className="text-[11px] font-mono uppercase tracking-[0.2em]"
+            style={{ color: band.color }}
+          >
+            {band.label}
+          </div>
+          <div className="text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>
+            WC · EPL · Compliance
+          </div>
+        </div>
+      </div>
+
+      {/* curve */}
+      <div className="px-3 pb-3 pt-2">
+        <svg
+          viewBox={`0 0 ${VBW} ${VBH}`}
+          preserveAspectRatio="none"
+          className="w-full"
+          style={{ height: 230 }}
+        >
+          <defs>
+            <linearGradient id="riskStroke" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#86efac" />
+              <stop offset="44%" stopColor="#d9b65f" />
+              <stop offset="100%" stopColor="#ce5a4f" />
+            </linearGradient>
+            <linearGradient id="riskFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#d9b65f" stopOpacity="0.38" />
+              <stop offset="48%" stopColor="#c07a4a" stopOpacity="0.16" />
+              <stop offset="100%" stopColor="#ce5a4f" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          {ticks.map((f) => (
+            <line
+              key={f}
+              x1={0}
+              x2={VBW}
+              y1={VBH - f * (VBH - 14)}
+              y2={VBH - f * (VBH - 14)}
+              stroke={LINE_D}
+              strokeWidth={1}
+              strokeDasharray={f === 1 ? '0' : '2 4'}
+            />
+          ))}
+          <path d={area} fill="url(#riskFill)" opacity={drawn} />
+          <path
+            d={line}
+            fill="none"
+            stroke="url(#riskStroke)"
+            strokeWidth={2}
+            vectorEffect="non-scaling-stroke"
+            strokeDasharray={pathLen}
+            strokeDashoffset={pathLen * (1 - drawn)}
+          />
+          {pMarkers.map((m) => (
+            <line
+              key={m.l}
+              x1={m.f * VBW}
+              x2={m.f * VBW}
+              y1={6}
+              y2={VBH}
+              stroke={BONE}
+              strokeOpacity={0.18 * drawn}
+              strokeWidth={1}
+              strokeDasharray="2 3"
+            />
+          ))}
+          {scanX >= 0 && (
+            <line
+              x1={scanX * VBW}
+              x2={scanX * VBW}
+              y1={0}
+              y2={VBH}
+              stroke={MATCHA}
+              strokeWidth={1.5}
+              opacity={0.5}
+            />
+          )}
+        </svg>
+        <div
+          className="flex justify-between mt-1 px-1 text-[9px] font-mono uppercase tracking-[0.16em]"
+          style={{ color: ASH }}
+        >
+          <span>$0</span>
+          <span>Annual loss exposure →</span>
+          <span>PML</span>
+        </div>
       </div>
     </div>
   )
