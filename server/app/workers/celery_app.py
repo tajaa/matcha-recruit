@@ -138,6 +138,12 @@ def on_worker_ready(**kwargs):
     else:
         print("[Worker] Deadline escalation scheduler is disabled, skipping.")
 
+    if _is_scheduler_enabled("property_cat_refresh"):
+        from app.workers.tasks.property_cat_refresh import refresh_property_cat
+        refresh_property_cat.delay()
+    else:
+        print("[Worker] Property cat refresh scheduler is disabled, skipping.")
+
     if _is_scheduler_enabled("legislation_watch"):
         run_legislation_watch.delay()
     else:
