@@ -327,6 +327,14 @@ def _property_section_html(prop: Optional[dict]) -> str:
     under_note = (f"<div class='narr'>{under} building(s) below the 90% insurance-to-value floor — "
                   f"coinsurance-penalty exposure.</div>" if under else "")
 
+    # Composite property risk score (the underwriting headline).
+    risk = prop.get("risk") or {}
+    risk_note = ""
+    if risk.get("score") is not None:
+        risk_note = (f"<div class='narr'><b>Property risk score: {risk['score']}/100</b> "
+                     f"(grade {_esc(risk.get('grade'))} · {_esc(risk.get('risk_level'))} risk) — "
+                     f"COPE quality adjusted for insurance-to-value and catastrophe exposure.</div>")
+
     # Directional modeled exposure (best-effort; only when present).
     exp = prop.get("exposure") or {}
     exp_note = ""
@@ -354,7 +362,7 @@ def _property_section_html(prop: Optional[dict]) -> str:
         f"<div class='cell'><div class='l'>COPE</div><div class='v'>{_esc(cope_s)}</div></div>"
         f"<div class='cell'><div class='l'>Ins-to-value</div><div class='v'>{itv_s}</div></div>"
         f"<div class='cell'><div class='l'>Cat exposure</div><div class='v {cat_cls}'>{_esc((worst_cat or '—').upper())}</div></div>"
-        f"</div>{under_note}{exp_note}{recs_html}"
+        f"</div>{risk_note}{under_note}{exp_note}{recs_html}"
     )
 
 

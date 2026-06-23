@@ -4,7 +4,7 @@ import { Card } from '../../components/ui'
 import { SovImportModal } from '../../components/property/SovImportModal'
 import { fetchPropertySov, createBuilding, updateBuilding, deleteBuilding } from '../../api/property'
 import type { PropertySov, PropertyBuilding, BuildingPayload, ConstructionType } from '../../types/property'
-import { CONSTRUCTION_LABEL, COPE_TONE, PERIL_TONE, READINESS_TONE, FIX_SEVERITY_TONE } from '../../types/property'
+import { CONSTRUCTION_LABEL, COPE_TONE, PERIL_TONE, READINESS_TONE, FIX_SEVERITY_TONE, RISK_LEVEL_TONE } from '../../types/property'
 
 const inputCls = 'w-full bg-zinc-900 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-500'
 const CONSTRUCTION_OPTS: ConstructionType[] = ['fire_resistive', 'modified_fire_resistive', 'masonry_non_combustible', 'non_combustible', 'joisted_masonry', 'frame']
@@ -67,7 +67,7 @@ export default function Property() {
     </div>
   )
 
-  const { rollup: r, buildings, readiness, exposure, plan } = data
+  const { rollup: r, buildings, readiness, exposure, plan, risk } = data
   const itvPct = r.itv.portfolio_ratio != null ? Math.round(r.itv.portfolio_ratio * 100) : null
 
   return (
@@ -88,6 +88,36 @@ export default function Property() {
           </button>
         </div>
       </div>
+
+      {/* Composite property risk score (underwriting headline) */}
+      {risk && risk.score != null && (
+        <Card className="p-5">
+          <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Property risk score</div>
+          <div className="flex items-baseline gap-3 mt-1">
+            <span className={`text-4xl font-light font-mono ${COPE_TONE[risk.grade ?? ''] ?? 'text-zinc-100'}`}>
+              {risk.score}<span className="text-lg text-zinc-600">/100</span>
+            </span>
+            <span className={`text-sm font-semibold uppercase ${RISK_LEVEL_TONE[risk.risk_level ?? ''] ?? 'text-zinc-400'}`}>
+              {risk.risk_level} risk · grade {risk.grade}
+            </span>
+          </div>
+          <div className="text-[11px] text-zinc-600 mt-1">TIV-weighted COPE quality, adjusted for insurance-to-value + catastrophe exposure · {risk.rated} buildings scored.</div>
+          {risk.top_risks.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-white/[0.06]">
+              <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-1.5">Top risk contributors</div>
+              <ul className="space-y-1">
+                {risk.top_risks.slice(0, 3).map((t) => (
+                  <li key={t.building_id} className="text-[12px] flex items-center gap-2">
+                    <span className={`font-mono font-semibold w-4 ${COPE_TONE[t.grade] ?? 'text-zinc-400'}`}>{t.grade}</span>
+                    <span className="text-zinc-300">{t.name || '(unnamed)'}</span>
+                    <span className="text-zinc-600">{t.drivers.map((d) => d.detail).join(' · ') || 'COPE-limited'}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Rollup */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -203,6 +233,7 @@ export default function Property() {
                 <th className="px-4 py-2.5 text-center">COPE</th>
                 <th className="px-4 py-2.5 text-right">ITV</th>
                 <th className="px-4 py-2.5 text-center">Cat</th>
+                <th className="px-4 py-2.5 text-center">Risk</th>
                 <th className="px-4 py-2.5"></th>
               </tr>
             </thead>
@@ -210,6 +241,7 @@ export default function Property() {
               {buildings.map((b) => {
                 const worst = WORST_PERIL(b)
                 const itv = b.itv_ratio != null ? Math.round(b.itv_ratio * 100) : null
+                const br = risk?.by_building[b.id]
                 const isOpen = expanded.has(b.id)
                 return (
                   <Fragment key={b.id}>
@@ -231,6 +263,11 @@ export default function Property() {
                         {worst ? <span className={`uppercase font-semibold ${PERIL_TONE[worst] ?? 'text-zinc-400'}`}>{worst}</span>
                           : <span className="text-zinc-600">{b.geocoded_at ? '—' : 'pending'}</span>}
                       </td>
+                      <td className="px-4 py-3 text-center">
+                        {br?.grade
+                          ? <span className={`font-mono font-semibold ${COPE_TONE[br.grade] ?? 'text-zinc-400'}`} title={`${br.score}/100 · ${br.risk_level} risk`}>{br.grade}</span>
+                          : <span className="text-zinc-600">—</span>}
+                      </td>
                       <td className="px-4 py-3 text-right whitespace-nowrap">
                         <button onClick={() => openEdit(b)} className="text-zinc-500 hover:text-zinc-200 mr-2"><Pencil className="h-3.5 w-3.5 inline" /></button>
                         <button onClick={() => onDelete(b)} className="text-zinc-600 hover:text-red-400"><Trash2 className="h-3.5 w-3.5 inline" /></button>
@@ -239,7 +276,17 @@ export default function Property() {
                     {isOpen && (
                       <tr className="bg-zinc-900/40 border-b border-zinc-800/30">
                         <td></td>
-                        <td colSpan={7} className="px-4 py-3">
+                        <td colSpan={8} className="px-4 py-3">
+                          {br && br.score != null && (
+                            <div className="mb-2.5 text-[11px]">
+                              <span className="text-zinc-500">Risk score </span>
+                              <span className={`font-mono font-semibold ${COPE_TONE[br.grade ?? ''] ?? 'text-zinc-300'}`}>{br.score}/100</span>
+                              <span className={`ml-1.5 uppercase ${RISK_LEVEL_TONE[br.risk_level ?? ''] ?? 'text-zinc-500'}`}>{br.risk_level} risk</span>
+                              {br.drivers.filter((d) => d.delta < 0).length > 0 && (
+                                <span className="text-zinc-600"> — {br.drivers.filter((d) => d.delta < 0).map((d) => `${d.detail} (${d.delta})`).join(', ')}</span>
+                              )}
+                            </div>
+                          )}
                           {exposure?.buildings[b.id] && (
                             <div className="mb-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-zinc-500">
                               <span>AAL <span className="font-mono text-zinc-300">{fmtUsd(exposure.buildings[b.id].aal)}</span></span>

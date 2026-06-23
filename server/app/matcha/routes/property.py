@@ -22,6 +22,7 @@ from ..services import property_sov as sov
 from ..services import property_sov_parser as sov_parser
 from ..services import property_exposure as exposure
 from ..services import property_recommendations as recs
+from ..services import property_risk as prisk
 from ..services import submission_readiness as sr
 from ..models.property import BuildingUpsert, BuildingBulkInsert, BulkUploadResult
 
@@ -84,6 +85,8 @@ async def get_sov(current_user=Depends(require_admin_or_client)):
     # Directional $ exposure — pure over the already-serialized buildings (no extra fetch).
     payload["exposure"] = exposure.portfolio_exposure(payload["buildings"])
     payload["plan"] = recs.build_plan(payload["buildings"], payload["rollup"], exposure=payload["exposure"])
+    # Composite property risk score (COPE + ITV + catastrophe → one underwriting number).
+    payload["risk"] = prisk.portfolio_risk(payload["buildings"])
     return payload
 
 

@@ -119,6 +119,40 @@ export interface PropertyPlan {
   summary: { total: number; by_severity: Record<string, number>; shown: number }
 }
 
+export interface PropertyRiskDriver {
+  factor: string
+  detail: string
+  delta: number
+}
+
+export interface PropertyBuildingRisk {
+  score: number | null
+  grade: string | null
+  risk_level: string | null
+  worst_cat: string | null
+  drivers: PropertyRiskDriver[]
+}
+
+export interface PropertyTopRisk {
+  building_id: string
+  name: string | null
+  tiv: number
+  score: number
+  grade: string
+  risk_level: string
+  worst_cat: string | null
+  drivers: PropertyRiskDriver[]
+}
+
+export interface PropertyRisk {
+  score: number | null
+  grade: string | null
+  risk_level: string | null
+  by_building: Record<string, PropertyBuildingRisk>
+  top_risks: PropertyTopRisk[]
+  rated: number
+}
+
 export interface PropertySov {
   company_id: string
   buildings: PropertyBuilding[]
@@ -126,6 +160,11 @@ export interface PropertySov {
   readiness?: PropertyReadiness
   exposure?: PropertyExposure
   plan?: PropertyPlan
+  risk?: PropertyRisk
+}
+
+export const RISK_LEVEL_TONE: Record<string, string> = {
+  low: 'text-emerald-400', moderate: 'text-zinc-200', elevated: 'text-amber-400', high: 'text-red-400',
 }
 
 export const FIX_SEVERITY_TONE: Record<string, string> = {

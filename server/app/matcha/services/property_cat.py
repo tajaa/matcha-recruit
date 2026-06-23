@@ -120,6 +120,47 @@ def _wind_tier(state, county, ref_rows: list[dict]) -> tuple[str, int] | None:
     return r["tier"], int(r["score"])
 
 
+# Coarse wildfire baseline by state/county. The free per-address WHP point services
+# (USFS apps.fs.usda.gov, ESRI Living Atlas) are now 403/token-gated, so — exactly like
+# wind — wildfire resolves from a directional, sourced, editable reference (network-free).
+# County rows override the statewide baseline; everything else is low.
+_WF_TIER_SCORE = {"low": 10, "moderate": 30, "elevated": 50, "high": 72, "severe": 90}
+# Statewide baselines are deliberately conservative (≤ elevated) so a coarse state read
+# doesn't overstate wildfire on an urban core (a downtown high-rise isn't WUI). True
+# wildland-urban-interface exposure comes from the county overrides below (high/severe).
+WILDFIRE_STATE_TIER = {
+    "CA": "elevated", "CO": "elevated", "OR": "elevated", "ID": "elevated", "MT": "elevated",
+    "AZ": "elevated", "NV": "elevated", "NM": "elevated", "WA": "elevated", "UT": "elevated",
+    "WY": "elevated", "TX": "elevated", "OK": "elevated",
+    "FL": "moderate", "GA": "moderate", "NC": "moderate", "SC": "moderate", "TN": "moderate",
+    "AR": "moderate", "KS": "moderate", "NE": "moderate", "SD": "moderate", "ND": "moderate",
+    "MN": "moderate", "WI": "moderate",
+}
+WILDFIRE_COUNTY_TIER = {
+    ("CA", "Napa"): "severe", ("CA", "Sonoma"): "severe", ("CA", "Butte"): "severe",
+    ("CA", "Lake"): "severe", ("CA", "Shasta"): "severe", ("CA", "El Dorado"): "severe",
+    ("CA", "Nevada"): "severe", ("CA", "Mariposa"): "severe",
+    ("CA", "San Diego"): "high", ("CA", "Riverside"): "high", ("CA", "San Bernardino"): "high",
+    ("CA", "Ventura"): "high",
+    ("CO", "Boulder"): "severe", ("CO", "El Paso"): "high", ("CO", "Larimer"): "high",
+    ("OR", "Jackson"): "severe", ("OR", "Deschutes"): "high",
+    ("WA", "Chelan"): "high", ("WA", "Okanogan"): "high", ("WA", "Spokane"): "elevated",
+    ("AZ", "Coconino"): "high", ("MT", "Flathead"): "high", ("NV", "Washoe"): "high",
+    ("ID", "Ada"): "elevated", ("TX", "Bastrop"): "high",
+}
+
+
+def _wildfire_state_tier(state, county) -> tuple[str, int] | None:
+    """Directional wildfire tier from the state/county baseline (county overrides state).
+    Network-free fallback now that the WHP point services are gated. Pure."""
+    if not state:
+        return None
+    st = str(state).upper().strip()
+    cty = str(county or "").strip()
+    tier = WILDFIRE_COUNTY_TIER.get((st, cty)) or WILDFIRE_STATE_TIER.get(st, "low")
+    return tier, _WF_TIER_SCORE[tier]
+
+
 # --- network helpers (best-effort; None on any failure) --------------------
 
 async def _get_json(client: httpx.AsyncClient, url: str, params: dict):
@@ -260,24 +301,38 @@ async def enrich_building(conn, building_id: UUID) -> dict:
                 "UPDATE company_property_buildings SET cat_refreshed_at=NOW() WHERE id=$1", building_id)
             return {"status": "no_geocode"}
 
-        # point perils
-        for peril, fn in (("flood", fetch_flood), ("quake", fetch_quake), ("wildfire", fetch_wildfire)):
+        # point perils (live external sources): flood + quake.
+        # NOTE: wildfire is NOT a point fetch here — every free WHP point service is now
+        # 403/token-gated, so wildfire resolves from the coarse state/county baseline below
+        # (same approach as wind). fetch_wildfire / _wildfire_tier are kept for a future
+        # working point source.
+        for peril, fn in (("flood", fetch_flood), ("quake", fetch_quake)):
             try:
                 res = await fn(client, lat, lng)
                 await _upsert_peril(conn, building_id, peril, res, error=None if res else "no data")
             except Exception as exc:  # noqa: BLE001
                 await _upsert_peril(conn, building_id, peril, None, error=str(exc)[:300])
 
-    # wind (DB reference, no network)
+    # county/state reference perils (no network): wind + wildfire.
+    refreshed_county = await conn.fetchval(
+        "SELECT county FROM company_property_buildings WHERE id = $1", building_id)
     try:
         ref = await _coastal_wind_rows(conn)
-        wt = _wind_tier(b["state"], b["county"], ref)
+        wt = _wind_tier(b["state"], refreshed_county, ref)
         if wt:
             await _upsert_peril(conn, building_id, "wind",
                                 {"zone": f"{b['state']} coastal", "tier": wt[0], "score": wt[1],
                                  "source": "coastal_wind_tier", "raw": None})
     except Exception as exc:  # noqa: BLE001
         await _upsert_peril(conn, building_id, "wind", None, error=str(exc)[:300])
+    try:
+        wf = _wildfire_state_tier(b["state"], refreshed_county)
+        if wf:
+            await _upsert_peril(conn, building_id, "wildfire",
+                                {"zone": f"{b['state']} baseline", "tier": wf[0], "score": wf[1],
+                                 "source": "WHP state/county baseline (directional)", "raw": None})
+    except Exception as exc:  # noqa: BLE001
+        await _upsert_peril(conn, building_id, "wildfire", None, error=str(exc)[:300])
 
     await conn.execute(
         "UPDATE company_property_buildings SET cat_refreshed_at=NOW() WHERE id=$1", building_id)
