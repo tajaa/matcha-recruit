@@ -70,6 +70,45 @@ export interface LossDevelopment {
   snapshots: LossSnapshot[]
 }
 
+// Loss ratio = projected ultimate ÷ paid premium (per line per policy year).
+export type LossRatioStatus = 'favorable' | 'adverse' | 'na'
+
+export interface LossRatioRow {
+  line: string
+  label: string
+  period_label: string
+  period_start: string | null
+  projected_ultimate: number
+  paid_premium: number | null
+  loss_ratio: number | null
+  status: LossRatioStatus
+}
+
+export interface LossRatioYear {
+  period_label: string
+  period_start: string | null
+  total_ultimate: number
+  total_premium: number | null
+  loss_ratio: number | null
+  status: LossRatioStatus
+}
+
+export interface LossRatioData {
+  rows: LossRatioRow[]
+  years: LossRatioYear[]
+  target: number
+  has_data: boolean
+  subject_kind: string
+  subject_id: string
+  subject_name: string
+}
+
+export interface LossPremiumBody {
+  line: string
+  policy_period_label: string
+  paid_premium: number | null
+}
+
 // Parsed draft from an uploaded loss-run PDF.
 export interface LossRunDraftPeriod {
   policy_period_label: string

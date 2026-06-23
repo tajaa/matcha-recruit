@@ -24,3 +24,13 @@ class LossRunValuationCommit(BaseModel):
     line: Literal["wc", "gl", "auto", "property"] = "wc"
     source: Optional[str] = Field(None, max_length=60)
     periods: List[LossRunPeriod] = Field(..., min_length=1)
+
+
+class LossPremiumUpsert(BaseModel):
+    """Broker-entered paid premium for a (line, policy period) → loss ratio input.
+
+    ``paid_premium=None`` clears a previously entered value."""
+
+    line: Literal["wc", "gl", "auto", "property"]
+    policy_period_label: str = Field(..., min_length=1, max_length=40)
+    paid_premium: Optional[float] = Field(None, ge=0)

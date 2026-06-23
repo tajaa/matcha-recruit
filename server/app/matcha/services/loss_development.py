@@ -196,6 +196,107 @@ async def build_development(conn, broker_id, subject_kind: str, subject_id, *,
     return tri
 
 
+# --- loss ratio (projected ultimate ÷ paid premium) -------------------------
+#
+# Underwriters price on the loss ratio and target < 60% for profitability. The
+# projected ultimate already comes out of build_development per (line, policy
+# year); the broker enters the premium the client paid the carrier (per line per
+# year) and we divide. Status: favorable (< target) / adverse (>= target) / na
+# (no premium entered yet).
+
+LOSS_RATIO_TARGET = 60  # percent — underwriter profitability threshold
+
+
+def _ratio_status(ratio) -> str:
+    if ratio is None:
+        return "na"
+    return "favorable" if ratio < LOSS_RATIO_TARGET else "adverse"
+
+
+def _ratio(ultimate: float, premium) -> float | None:
+    if not premium or premium <= 0:
+        return None
+    return round(ultimate / premium * 100, 1)
+
+
+def _merge_loss_ratio(dev: dict, premiums: dict) -> dict:
+    """Pure merge of a build_development() result + a {(line, period_label):
+    paid_premium} map → per-(line, year) rows + per-year account rollups."""
+    rows: list[dict] = []
+    year_acc: dict[str, dict] = {}
+    for ln in dev.get("lines", []):
+        for p in ln.get("periods", []):
+            ult = float(p.get("ultimate") or 0)
+            prem = premiums.get((ln["line"], p["period_label"]))
+            ratio = _ratio(ult, prem)
+            rows.append({
+                "line": ln["line"],
+                "label": ln.get("label", ln["line"]),
+                "period_label": p["period_label"],
+                "period_start": p.get("period_start"),
+                "projected_ultimate": round(ult, 2),
+                "paid_premium": prem,
+                "loss_ratio": ratio,
+                "status": _ratio_status(ratio),
+            })
+            acc = year_acc.setdefault(p["period_label"], {
+                "ultimate": 0.0, "premium": 0.0, "has_premium": False,
+                "period_start": p.get("period_start"),
+            })
+            acc["ultimate"] += ult
+            if prem and prem > 0:
+                acc["premium"] += prem
+                acc["has_premium"] = True
+
+    years = []
+    for label, a in year_acc.items():
+        ratio = _ratio(a["ultimate"], a["premium"]) if a["has_premium"] else None
+        years.append({
+            "period_label": label,
+            "period_start": a["period_start"],
+            "total_ultimate": round(a["ultimate"], 2),
+            "total_premium": round(a["premium"], 2) if a["has_premium"] else None,
+            "loss_ratio": ratio,
+            "status": _ratio_status(ratio),
+        })
+    years.sort(key=lambda y: y["period_label"])
+    rows.sort(key=lambda r: (r["line"], r["period_label"]))
+    return {"rows": rows, "years": years}
+
+
+async def _list_premiums(conn, broker_id, subject_kind: str, subject_id) -> dict:
+    rows = await conn.fetch(
+        """SELECT line, policy_period_label, paid_premium FROM broker_loss_premiums
+           WHERE broker_id = $1 AND subject_kind = $2 AND subject_id = $3""",
+        broker_id, subject_kind, subject_id,
+    )
+    out: dict = {}
+    for r in rows:
+        prem = r["paid_premium"]
+        out[(r["line"], r["policy_period_label"])] = float(prem) if prem is not None else None
+    return out
+
+
+async def compute_loss_ratio(conn, broker_id, subject_kind: str, subject_id, *,
+                             subject_name: str = "Client") -> dict:
+    """build_development + broker-entered premiums → loss-ratio table. Never raises."""
+    dev = await build_development(conn, broker_id, subject_kind, subject_id, subject_name=subject_name)
+    premiums: dict = {}
+    try:
+        premiums = await _list_premiums(conn, broker_id, subject_kind, subject_id)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("loss_development.compute_loss_ratio premium fetch failed: %s", exc)
+    merged = _merge_loss_ratio(dev, premiums)
+    return {
+        **merged,
+        "target": LOSS_RATIO_TARGET,
+        "has_data": dev["has_data"],
+        "subject_kind": subject_kind,
+        "subject_id": str(subject_id),
+        "subject_name": subject_name,
+    }
+
+
 # --- deterministic PDF ------------------------------------------------------
 
 def _esc(v) -> str:

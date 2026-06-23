@@ -37,7 +37,7 @@ import type {
 } from '../types/broker'
 import type { ControlsRegister } from '../types/controlsEvidence'
 import type { LimitReview } from '../types/limitAdequacy'
-import type { LossDevelopment, LossRunDraft, LossRunCommit } from '../types/lossDevelopment'
+import type { LossDevelopment, LossRunDraft, LossRunCommit, LossRatioData, LossPremiumBody } from '../types/lossDevelopment'
 
 export function fetchPropertyPortfolio() {
   return api.get<PropertyPortfolioResponse>('/broker/property-portfolio')
@@ -274,6 +274,21 @@ export function deleteClientLossRunSnapshot(companyId: string, snapshotId: strin
 }
 export function downloadClientLossDevelopment(companyId: string) {
   return api.download(`/broker/clients/${companyId}/loss-development.pdf`, `loss-development-${companyId}.pdf`)
+}
+
+// --- loss ratio (projected ultimate ÷ paid premium) -------------------------
+
+export function fetchClientLossRatio(companyId: string) {
+  return api.get<LossRatioData>(`/broker/clients/${companyId}/loss-ratio`)
+}
+export function recordClientLossPremium(companyId: string, body: LossPremiumBody) {
+  return api.put<LossRatioData>(`/broker/clients/${companyId}/loss-ratio/premium`, body)
+}
+export function fetchExternalLossRatio(clientId: string) {
+  return api.get<LossRatioData>(`/broker/external-clients/${clientId}/loss-ratio`)
+}
+export function recordExternalLossPremium(clientId: string, body: LossPremiumBody) {
+  return api.put<LossRatioData>(`/broker/external-clients/${clientId}/loss-ratio/premium`, body)
 }
 
 // --- Action Center: milestones + outreach ---

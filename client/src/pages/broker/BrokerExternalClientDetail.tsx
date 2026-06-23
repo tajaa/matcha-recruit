@@ -8,7 +8,9 @@ import {
   fetchExternalClientDetail, saveExternalWc, saveExternalEplAttestation,
   downloadExternalSubmission, fetchExternalCoverageGap, parseExternalLossRun,
   createExternalIntakeLink, saveExternalProperty,
+  fetchExternalLossRatio, recordExternalLossPremium,
 } from '../../api/broker'
+import { LossRatioTab } from './BrokerClientDetail'
 import type { ExternalClientDetail, ExternalEplFactor, EplAttestationStatus, ExternalProperty, ExternalPropertyPayload } from '../../types/broker'
 import { RISK_BAND_TONE } from '../../types/riskIndex'
 
@@ -319,6 +321,12 @@ export default function BrokerExternalClientDetail() {
       </Card>
 
       <PropertyCard clientId={clientId!} property={property} onSaved={setData} />
+
+      <LossRatioTab
+        subjectId={clientId!}
+        fetchData={() => fetchExternalLossRatio(clientId!)}
+        savePremium={(b) => recordExternalLossPremium(clientId!, b)}
+      />
 
       <SubmissionPanel
         onDownload={() => downloadExternalSubmission(clientId!)}

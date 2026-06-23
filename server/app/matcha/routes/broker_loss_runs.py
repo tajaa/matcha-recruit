@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from ...database import get_connection
 from ..dependencies import require_broker, require_broker_pro
 from ..services import loss_development as ld, loss_run_parser, external_clients as ext
-from ..models.loss_development import LossRunValuationCommit
+from ..models.loss_development import LossRunValuationCommit, LossPremiumUpsert
 from .broker_portfolio import _assert_broker_owns_company
 from .broker_external import _broker_id
 
@@ -52,6 +52,19 @@ async def _commit_valuation(conn, broker_id, kind: str, sid: UUID, body: LossRun
             broker_id, kind, sid, body.line, p.policy_period_label, p.policy_period_start,
             body.valuation_date, p.claim_count, p.open_count, p.paid, p.reserved, body.source, user_id,
         )
+
+
+async def _upsert_premium(conn, broker_id, kind: str, sid: UUID, body: LossPremiumUpsert, user_id):
+    await conn.execute(
+        """
+        INSERT INTO broker_loss_premiums
+            (broker_id, subject_kind, subject_id, line, policy_period_label, paid_premium, created_by, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+        ON CONFLICT ON CONSTRAINT uq_broker_loss_premiums DO UPDATE SET
+            paid_premium = EXCLUDED.paid_premium, created_by = EXCLUDED.created_by, updated_at = NOW()
+        """,
+        broker_id, kind, sid, body.line, body.policy_period_label, body.paid_premium, user_id,
+    )
 
 
 def _pdf(name: str, pdf: bytes) -> Response:
@@ -111,6 +124,24 @@ async def tenant_loss_development_pdf(company_id: UUID, current_user=Depends(req
     return _pdf(meta["name"], pdf)
 
 
+@router.get("/clients/{company_id}/loss-ratio")
+async def tenant_loss_ratio(company_id: UUID, current_user=Depends(require_broker)):
+    async with get_connection() as conn:
+        meta = await _assert_broker_owns_company(conn, current_user.id, company_id)
+        broker_id = await _broker_id(conn, current_user.id)
+        return await ld.compute_loss_ratio(conn, broker_id, "company", company_id, subject_name=meta["name"])
+
+
+@router.put("/clients/{company_id}/loss-ratio/premium")
+async def tenant_set_loss_premium(company_id: UUID, body: LossPremiumUpsert,
+                                  current_user=Depends(require_broker)):
+    async with get_connection() as conn:
+        meta = await _assert_broker_owns_company(conn, current_user.id, company_id)
+        broker_id = await _broker_id(conn, current_user.id)
+        await _upsert_premium(conn, broker_id, "company", company_id, body, current_user.id)
+        return await ld.compute_loss_ratio(conn, broker_id, "company", company_id, subject_name=meta["name"])
+
+
 # --- external (off-platform, Broker Pro) ------------------------------------
 
 async def _external_ctx(conn, user_id, client_id: UUID):
@@ -164,3 +195,19 @@ async def external_loss_development_pdf(client_id: UUID, current_user=Depends(re
         tri = await ld.build_development(conn, broker_id, "external", client_id, subject_name=name)
     pdf = await ld.render_triangle_pdf(name, tri)
     return _pdf(name, pdf)
+
+
+@router.get("/external-clients/{client_id}/loss-ratio")
+async def external_loss_ratio(client_id: UUID, current_user=Depends(require_broker_pro)):
+    async with get_connection() as conn:
+        broker_id, name = await _external_ctx(conn, current_user.id, client_id)
+        return await ld.compute_loss_ratio(conn, broker_id, "external", client_id, subject_name=name)
+
+
+@router.put("/external-clients/{client_id}/loss-ratio/premium")
+async def external_set_loss_premium(client_id: UUID, body: LossPremiumUpsert,
+                                    current_user=Depends(require_broker_pro)):
+    async with get_connection() as conn:
+        broker_id, name = await _external_ctx(conn, current_user.id, client_id)
+        await _upsert_premium(conn, broker_id, "external", client_id, body, current_user.id)
+        return await ld.compute_loss_ratio(conn, broker_id, "external", client_id, subject_name=name)
