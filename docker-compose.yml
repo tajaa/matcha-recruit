@@ -35,6 +35,11 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # NOTE: routine backend deploys go through scripts/deploy-backend-bluegreen.sh
+  # (zero-downtime swap on 8002/8003), NOT `docker-compose up matcha-backend`.
+  # This service definition is the disaster-recovery fallback for a from-scratch
+  # `docker-compose up -d` on a fresh host — see matcha-frontend's note above,
+  # same caveat applies (don't run it against a live host mid-blue/green-deploy).
   matcha-backend:
     image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-west-1}.amazonaws.com/matcha-backend:latest
     container_name: matcha-backend
@@ -145,6 +150,13 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # NOTE: routine frontend deploys go through scripts/deploy-frontend-bluegreen.sh
+  # (zero-downtime swap on 8082/8083), NOT `docker-compose up matcha-frontend`.
+  # This service definition is the disaster-recovery fallback for a from-scratch
+  # `docker-compose up -d` on a fresh host. Don't run that bare command against
+  # a live host with an active blue/green deploy already running — it'll try to
+  # recreate "matcha-frontend" on :8082, which may collide with whichever color
+  # is currently active.
   matcha-frontend:
     image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-west-1}.amazonaws.com/matcha-frontend:latest
     container_name: matcha-frontend

@@ -55,6 +55,30 @@ ssh_cmd() {
     ssh -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new "$EC2_USER@$EC2_HOST" "$1"
 }
 
+sync_nginx() {
+    # matcha.conf's upstream blocks `include` these files (the blue/green
+    # active ports for frontend + backend). nginx -t fails hard on a missing
+    # include, so both must exist BEFORE the new matcha.conf is tested —
+    # deploy-{frontend,backend}-bluegreen.sh also bootstrap them, but those
+    # run after this function, too late for the very first sync.
+    ssh_cmd "[ -f /etc/nginx/conf.d/matcha-frontend-active.conf ] || echo 'server 127.0.0.1:8082;' | sudo tee /etc/nginx/conf.d/matcha-frontend-active.conf > /dev/null"
+    ssh_cmd "[ -f /etc/nginx/conf.d/matcha-backend-active.conf ] || echo 'server 127.0.0.1:8002;' | sudo tee /etc/nginx/conf.d/matcha-backend-active.conf > /dev/null"
+
+    log_info "Syncing nginx config (deploy/nginx/*.conf)..."
+    for f in deploy/nginx/*.conf; do
+        scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new "$f" \
+            "$EC2_USER@$EC2_HOST:/tmp/$(basename "$f")"
+        ssh_cmd "sudo cp /etc/nginx/conf.d/$(basename "$f") /etc/nginx/conf.d/$(basename "$f").bak-\$(date +%Y%m%d-%H%M%S) 2>/dev/null; sudo mv /tmp/$(basename "$f") /etc/nginx/conf.d/$(basename "$f")"
+    done
+    if ssh_cmd "sudo nginx -t" ; then
+        ssh_cmd "sudo nginx -s reload"
+        log_success "nginx config synced + reloaded"
+    else
+        log_error "nginx -t failed on EC2 — config NOT reloaded, previous config still serving. Check /etc/nginx/conf.d/*.bak-* to diff."
+        exit 1
+    fi
+}
+
 ecr_login() {
     log_info "Logging into ECR..."
     ssh_cmd "aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
@@ -86,25 +110,48 @@ pre_cleanup() {
 }
 
 update_matcha() {
-    local services=()
-    [ "$UPDATE_BACKEND" = true ] && services+=(matcha-backend matcha-worker)
-    [ "$UPDATE_FRONTEND" = true ] && services+=(matcha-frontend)
-    log_info "Updating Matcha-Recruit (${services[*]})..."
+    log_info "Updating Matcha-Recruit (backend=${UPDATE_BACKEND} frontend=${UPDATE_FRONTEND})..."
 
     # Sync docker-compose.yml from repo so live host config can't drift from
     # source (memory limits, env vars, profiles). Without this, hand-edits to
     # ~/matcha/docker-compose.yml on EC2 silently override repo defaults
     # forever — which is how matcha-backend stayed pinned at 384M for months
-    # while the repo said 1g.
+    # while the repo said 1g. Still needed even though matcha-backend/
+    # matcha-frontend are blue-green'd now: docker-compose.yml is the source
+    # of truth for image refs, memory limits, etc that the blue-green scripts
+    # don't independently track, and matcha-worker still deploys via compose.
     log_info "Syncing docker-compose.yml..."
     scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new docker-compose.yml \
         "$EC2_USER@$EC2_HOST:~/matcha/docker-compose.yml"
 
-    # Only restart app containers, not shared infrastructure (postgres, redis)
-    # Use --profile worker so the Celery worker container is also created/started
-    ssh_cmd "cd ~/matcha && docker-compose --profile worker pull ${services[*]} && docker-compose --profile worker up -d --no-deps ${services[*]}"
+    if [ "$UPDATE_BACKEND" = true ]; then
+        # matcha-worker isn't in the request path — no need to blue-green it,
+        # pre_cleanup() already stops it gracefully (60s) before this runs.
+        ssh_cmd "cd ~/matcha && docker-compose --profile worker pull matcha-worker && docker-compose --profile worker up -d --no-deps matcha-worker"
+        deploy_backend_zero_downtime
+    fi
+
+    if [ "$UPDATE_FRONTEND" = true ]; then
+        deploy_frontend_zero_downtime
+    fi
 
     log_success "Matcha-Recruit updated!"
+}
+
+deploy_backend_zero_downtime() {
+    log_info "Deploying backend (blue/green — no downtime)..."
+    scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new scripts/deploy-backend-bluegreen.sh \
+        "$EC2_USER@$EC2_HOST:~/matcha/deploy-backend-bluegreen.sh"
+    ssh_cmd "chmod +x ~/matcha/deploy-backend-bluegreen.sh && bash ~/matcha/deploy-backend-bluegreen.sh"
+    log_success "Backend swapped with zero downtime!"
+}
+
+deploy_frontend_zero_downtime() {
+    log_info "Deploying frontend (blue/green — no downtime)..."
+    scp -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new scripts/deploy-frontend-bluegreen.sh \
+        "$EC2_USER@$EC2_HOST:~/matcha/deploy-frontend-bluegreen.sh"
+    ssh_cmd "chmod +x ~/matcha/deploy-frontend-bluegreen.sh && bash ~/matcha/deploy-frontend-bluegreen.sh"
+    log_success "Frontend swapped with zero downtime!"
 }
 
 
@@ -211,6 +258,9 @@ fi
 pre_cleanup
 
 if [ "$UPDATE_MATCHA" = true ]; then
+    # Nginx config (incl. the blue/green frontend upstream block) must be live
+    # before the frontend swap script runs against it.
+    sync_nginx
     update_matcha
 fi
 
