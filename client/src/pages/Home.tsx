@@ -1290,6 +1290,25 @@ const COMPLIANCE_FINDINGS: { state: string; text: string }[] = [
   { state: "TX", text: "Anti-retaliation posters out of date" },
 ];
 
+// AI action layer — grounded in the real product's legislation-watch worker
+// + alerts/action-plans (root CLAUDE.md). Cycles like Platform's ER Copilot.
+const COMPLIANCE_COPILOT = [
+  "Legislation watch: new CA pay-transparency rule effective Jul 1.",
+  "Action plan: file WA predictive-scheduling notice by Mar 14.",
+  "Auto-drafted: updated anti-retaliation poster ready to post.",
+];
+
+// Coverage across compliance areas, not just jurisdictions — the breadth grid,
+// mirroring Platform's domain grid. Illustrative.
+const COMPLIANCE_CATEGORIES = [
+  { label: "Wage & Hour", status: "Gap", color: "#E2725B" },
+  { label: "Leave & Sick", status: "Clear", color: "#86efac" },
+  { label: "Safety / OSHA", status: "Gap", color: "#E2725B" },
+  { label: "Posting", status: "Scan", color: "#d9b65f" },
+  { label: "Classification", status: "Clear", color: "#86efac" },
+  { label: "Pay Equity", status: "Clear", color: "#86efac" },
+] as const;
+
 const FINDING_ICON = {
   flagged: AlertTriangle,
   fixing: Loader2,
@@ -1358,6 +1377,7 @@ function ComplianceInstrument() {
   const TARGET = 60;
   const reduce = useReducedMotion();
   const [score, setScore] = useState(reduce ? TARGET : 0);
+  const copilotIndex = useCyclingIndex(COMPLIANCE_COPILOT.length, 3200, reduce);
   const findingStatuses = useFindingsCascade(
     COMPLIANCE_FINDINGS.length,
     reduce,
@@ -1431,6 +1451,47 @@ function ComplianceInstrument() {
           </span>
         ))}
       </div>
+      <div className="px-5 pt-4 pb-1">
+        <div
+          className="rounded-lg px-3.5 py-2.5 flex items-start gap-2.5"
+          style={{
+            border: `1px solid ${LINE_D}`,
+            backgroundColor: "rgba(245,242,237,0.03)",
+          }}
+        >
+          <Sparkles
+            className="w-3.5 h-3.5 mt-0.5 shrink-0"
+            style={{ color: "#E2725B" }}
+          />
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 mb-1">
+              <span
+                className="text-[8px] font-mono uppercase tracking-[0.16em]"
+                style={{ color: ASH }}
+              >
+                Compliance Copilot
+              </span>
+              <span
+                className="home-pulse w-1 h-1 rounded-full"
+                style={{ backgroundColor: "#E2725B" }}
+              />
+            </div>
+            <AnimatePresence mode="wait">
+              <motion.p
+                key={copilotIndex}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.4 }}
+                className="text-[11px] leading-snug"
+                style={{ color: BONE }}
+              >
+                {COMPLIANCE_COPILOT[copilotIndex]}
+              </motion.p>
+            </AnimatePresence>
+          </div>
+        </div>
+      </div>
       <div
         className="px-5 pb-1 pt-4 border-t mt-4"
         style={{ borderColor: LINE_D }}
@@ -1465,6 +1526,55 @@ function ComplianceInstrument() {
             </div>
           );
         })}
+      </div>
+      {/* Breadth — coverage across every compliance area, not just the open
+          findings. Mirrors Platform's domain grid. */}
+      <div className="px-5 pt-4 pb-4 border-t mt-4" style={{ borderColor: LINE_D }}>
+        <div className="flex items-center justify-between mb-2.5">
+          <span
+            className="text-[8px] font-mono uppercase tracking-[0.16em]"
+            style={{ color: ASH }}
+          >
+            Coverage by area
+          </span>
+          <span
+            className="text-[8px] font-mono uppercase tracking-[0.16em]"
+            style={{ color: ASH }}
+          >
+            247 reqs
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {COMPLIANCE_CATEGORIES.map((c) => (
+            <div
+              key={c.label}
+              className="rounded-lg px-2.5 py-2"
+              style={{
+                border: `1px solid ${LINE_D}`,
+                backgroundColor: "rgba(245,242,237,0.02)",
+              }}
+            >
+              <div className="flex items-center gap-1.5 mb-1">
+                <span
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: c.color }}
+                />
+                <span
+                  className="text-[8px] font-mono uppercase tracking-[0.1em] truncate"
+                  style={{ color: ASH }}
+                >
+                  {c.label}
+                </span>
+              </div>
+              <span
+                className="text-[11px] font-mono"
+                style={{ color: c.color }}
+              >
+                {c.status}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
       <div
         className="flex items-center justify-between px-5 pb-4 pt-3 border-t"
