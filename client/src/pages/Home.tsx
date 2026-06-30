@@ -40,7 +40,7 @@ const PRODUCTS: Product[] = [
   },
   {
     n: '02',
-    name: 'Matcha Daily',
+    name: 'Matcha Lite',
     blurb: 'Incident reporting, OSHA 300 logs, and a full HR library. Bundled for small teams.',
     to: '/matcha-daily',
     accent: '#F2C14E',
@@ -80,10 +80,10 @@ const HOME_JSON_LD = {
   name: 'Matcha',
   url: 'https://hey-matcha.com/',
   description:
-    'Full-service HR — an agentic risk & compliance platform, Matcha Daily for small teams, multi-state compliance tracking, and senior advisory.',
+    'Full-service HR — an agentic risk & compliance platform, Matcha Lite for small teams, multi-state compliance tracking, and senior advisory.',
   makesOffer: [
     { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'HR Risk & Compliance Platform' } },
-    { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Matcha Daily — Incident Reporting & HR Records' } },
+    { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Matcha Lite — Incident Reporting & HR Records' } },
     { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Compliance — Multi-State Regulatory Tracking' } },
     { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'HR & Compliance Consulting' } },
   ],
@@ -93,9 +93,9 @@ export default function Home() {
   const [isPricingOpen, setIsPricingOpen] = useState(false)
 
   useSEO({
-    title: 'Matcha — Full-Service HR: Platform, Daily, Compliance & Consulting',
+    title: 'Matcha — Full-Service HR: Platform, Lite, Compliance & Consulting',
     description:
-      'Full-service HR for modern companies — an agentic risk & compliance platform, Matcha Daily for small teams, multi-state compliance tracking, and senior advisory. One standard of rigor across software and people.',
+      'Full-service HR for modern companies — an agentic risk & compliance platform, Matcha Lite for small teams, multi-state compliance tracking, and senior advisory. One standard of rigor across software and people.',
     canonical: 'https://hey-matcha.com/',
     jsonLd: HOME_JSON_LD,
   })
@@ -556,7 +556,10 @@ const DAILY_BEHAVIORAL_PCT = DAILY_BARS.map((v) => Math.round((Math.round(v * 0.
 // the magic link's "Dictate" button is a real shipped feature (see
 // adminUpdates.ts "ir-magic-link-voice"), this animates what it looks like.
 const VOICE_WAVEFORM = [0.3, 0.6, 0.85, 0.5, 0.95, 0.4, 0.7, 0.55, 0.9, 0.35, 0.65, 0.45]
-const VOICE_PHASES = ['Tap to dictate', 'Listening…', 'Transcribing…', 'Category: Behavioral · Severity: Medium']
+// 0-2 are plain status text; phase 3 ("extracted") renders structured
+// fields instead of a string — see the voicePhase === 3 branch below.
+const VOICE_STATUS = ['Tap to dictate', 'Listening…', 'Transcribing…']
+const VOICE_PHASE_COUNT = 4
 
 // 30-day intake density, illustrative — a second, distinct chart type from
 // the weekly bars (calendar-heatmap shape) for more at-a-glance depth.
@@ -570,7 +573,7 @@ function DailyInstrument() {
   const reduce = useReducedMotion()
   const total = DAILY_BARS.reduce((a, b) => a + b, 0)
   const max = Math.max(...DAILY_BARS)
-  const voicePhase = useCyclingIndex(VOICE_PHASES.length, 1900, reduce)
+  const voicePhase = useCyclingIndex(VOICE_PHASE_COUNT, 1900, reduce)
   const listening = voicePhase === 1
 
   return (
@@ -658,19 +661,42 @@ function DailyInstrument() {
             ))}
           </div>
         </div>
-        <AnimatePresence mode="wait">
-          <motion.p
-            key={voicePhase}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+        {voicePhase < 3 ? (
+          <AnimatePresence mode="wait">
+            <motion.p
+              key={voicePhase}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              className="mt-2 text-[10px] font-mono"
+              style={{ color: voicePhase === 1 ? '#F2C14E' : ASH }}
+            >
+              {VOICE_STATUS[voicePhase]}
+            </motion.p>
+          </AnimatePresence>
+        ) : (
+          <motion.div
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3 }}
-            className="mt-2 text-[10px] font-mono"
-            style={{ color: voicePhase === 3 ? '#86efac' : ASH }}
+            className="mt-2 flex items-center gap-1.5 flex-wrap"
           >
-            {VOICE_PHASES[voicePhase]}
-          </motion.p>
-        </AnimatePresence>
+            <span
+              className="text-[9px] font-mono px-1.5 py-0.5 rounded"
+              style={{ color: '#86efac', backgroundColor: 'rgba(134,239,172,0.1)' }}
+            >
+              Behavioral
+            </span>
+            <span
+              className="text-[9px] font-mono px-1.5 py-0.5 rounded"
+              style={{ color: '#F2C14E', backgroundColor: 'rgba(242,193,78,0.1)' }}
+            >
+              Medium severity
+            </span>
+            <span className="text-[9px] font-mono" style={{ color: ASH }}>— extracted from audio</span>
+          </motion.div>
+        )}
       </div>
       <div className="px-5 pb-3 pt-2 border-t" style={{ borderColor: LINE_D }}>
         <div className="flex items-center justify-between mb-2 mt-1">

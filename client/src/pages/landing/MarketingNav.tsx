@@ -10,7 +10,7 @@ interface Props {
 const PRODUCT_LINKS = [
   { to: '/platform', label: 'Platform' },
   // { to: '/matcha-work', label: 'Matcha Work' }, // beta — hidden until launch
-  { to: '/matcha-daily', label: 'Matcha Daily' },
+  { to: '/matcha-daily', label: 'Matcha Lite' },
   { to: '/compliance', label: 'Compliance' },
   { to: '/services', label: 'Consulting' },
 ]

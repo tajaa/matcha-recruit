@@ -36,7 +36,7 @@ export default function MarketingFooter({
             </p>
           </div>
           <FooterCol title="Products" links={[
-            { label: 'Matcha Daily', to: '/matcha-daily' },
+            { label: 'Matcha Lite', to: '/matcha-daily' },
           ]} />
           <FooterCol title="Explore" links={[
             { label: 'Resources', to: '/resources' },

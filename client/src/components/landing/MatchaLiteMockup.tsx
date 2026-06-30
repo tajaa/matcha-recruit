@@ -154,7 +154,7 @@ export function MatchaLiteMockup() {
       <div className="hidden md:flex flex-col w-56 px-3 py-4" style={{ borderRight: `1px solid ${C.borderSoft}` }}>
         <div className="flex items-center gap-2 mb-7 px-2">
           <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: C.jade, boxShadow: `0 0 8px ${C.jade}` }} />
-          <span className="text-[11px] font-bold tracking-widest uppercase" style={{ color: C.text }}>Matcha Daily</span>
+          <span className="text-[11px] font-bold tracking-widest uppercase" style={{ color: C.text }}>Matcha Lite</span>
         </div>
 
         <Label className="!font-bold mb-2 px-2">Risk + Safety</Label>

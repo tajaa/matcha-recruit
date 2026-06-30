@@ -143,7 +143,7 @@ function Hero({ onContactClick }: { onContactClick: () => void }) {
               fontSize: 'clamp(2.25rem, 7vw, 5.25rem)',
             }}
           >
-            Matcha Daily.
+            Matcha Lite.
           </h1>
           <p
             className="mt-5 sm:mt-6 mx-auto max-w-xl text-[15px] sm:text-base px-2"
