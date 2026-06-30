@@ -204,70 +204,71 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
         <Marquee />
       </div>
 
-      {/* Headline + supporting content */}
+      {/* Headline + supporting content. Below xl: stacked (carousel in normal
+          flow under the CTAs, full width). xl+: real two-column grid — the
+          carousel needs its own column to grow properly instead of fighting
+          the headline for dead space, which is what capped it small before. */}
       <div className="relative max-w-[1600px] mx-auto w-full px-6 sm:px-10 flex-1 flex flex-col justify-center py-8 sm:py-10">
-        <span
-          className="home-fade inline-flex items-center gap-2.5 self-start rounded-full px-3.5 py-1.5 mb-7"
-          style={{ border: `1px solid ${LINE_D}`, animationDelay: '0.1s' }}
-        >
-          <span className="home-pulse w-1.5 h-1.5 rounded-full" style={{ backgroundColor: MATCHA }} />
-          <span className="text-[11px] font-mono uppercase tracking-[0.18em]" style={{ color: BONE }}>
-            New — Fractional &amp; Consulting practices now open
-          </span>
-        </span>
-
-        <h1
-          className="home-rise tracking-[-0.02em]"
-          style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 0.86, fontSize: 'clamp(2.75rem, 9.5vw, 9rem)' }}
-        >
-          <span style={{ animationDelay: '0.16s' }}>We run</span>
-          <br />
-          <span style={{ animationDelay: '0.26s' }}>the whole</span>
-          <br />
-          <span style={{ animationDelay: '0.36s', color: MATCHA, fontStyle: 'italic' }}>risk</span>
-          <span style={{ animationDelay: '0.44s' }}>&nbsp;&amp;</span>
-          <br />
-          <span style={{ animationDelay: '0.54s', color: MATCHA, fontStyle: 'italic' }}>people</span>
-          <span style={{ animationDelay: '0.62s' }}>&nbsp;function.</span>
-        </h1>
-
-        <div
-          className="mt-9 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-7 home-fade"
-          style={{ animationDelay: '0.66s' }}
-        >
-          <p className="max-w-2xl text-lg sm:text-xl" style={{ color: BONE, lineHeight: 1.45 }}>
-            From software you run yourself to senior practitioners who run it for you.{' '}
-            <span style={{ color: ASH }}>
-              Workplace safety, compliance, and the human side of the job — one standard of rigor across all four.
+        <div className="xl:grid xl:grid-cols-[1fr_1.05fr] xl:gap-14 2xl:gap-20 xl:items-center">
+          <div>
+            <span
+              className="home-fade inline-flex items-center gap-2.5 self-start rounded-full px-3.5 py-1.5 mb-7"
+              style={{ border: `1px solid ${LINE_D}`, animationDelay: '0.1s' }}
+            >
+              <span className="home-pulse w-1.5 h-1.5 rounded-full" style={{ backgroundColor: MATCHA }} />
+              <span className="text-[11px] font-mono uppercase tracking-[0.18em]" style={{ color: BONE }}>
+                New — Fractional &amp; Consulting practices now open
+              </span>
             </span>
-          </p>
-          <div className="flex items-center gap-5 shrink-0">
-            <button
-              onClick={onDemoClick}
-              className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium transition-transform hover:-translate-y-0.5 cursor-pointer"
-              style={{ backgroundColor: MATCHA, color: NOIR }}
-            >
-              Request a Demo
-            </button>
-            <a
-              href="#index"
-              className="inline-flex items-center gap-2 text-[15px] transition-opacity hover:opacity-60"
-              style={{ color: BONE }}
-            >
-              Find your starting line
-              <span aria-hidden>↓</span>
-            </a>
-          </div>
-        </div>
 
-        {/* Product carousel — same hero as the headline, not a separate section.
-            Floats in the dead space right of the (narrower-than-container) text
-            on large screens; drops to normal flow below the CTAs on mobile. */}
-        <div
-          className="mt-12 lg:mt-0 lg:absolute lg:top-1/2 lg:-translate-y-1/2 lg:right-6 xl:right-10 w-full sm:w-[460px] lg:w-[480px] xl:w-[520px] 2xl:w-[640px] home-fade"
-          style={{ animationDelay: '0.8s' }}
-        >
-          <ProductCarousel />
+            <h1
+              className="home-rise tracking-[-0.02em] text-[clamp(2.75rem,9.5vw,9rem)] xl:text-[clamp(2.75rem,5.4vw,6.75rem)]"
+              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 0.86 }}
+            >
+              <span style={{ animationDelay: '0.16s' }}>We run</span>
+              <br />
+              <span style={{ animationDelay: '0.26s' }}>the whole</span>
+              <br />
+              <span style={{ animationDelay: '0.36s', color: MATCHA, fontStyle: 'italic' }}>risk</span>
+              <span style={{ animationDelay: '0.44s' }}>&nbsp;&amp;</span>
+              <br />
+              <span style={{ animationDelay: '0.54s', color: MATCHA, fontStyle: 'italic' }}>people</span>
+              <span style={{ animationDelay: '0.62s' }}>&nbsp;function.</span>
+            </h1>
+
+            <div
+              className="mt-9 flex flex-col lg:flex-row lg:items-end lg:justify-between xl:flex-col xl:items-start gap-7 home-fade"
+              style={{ animationDelay: '0.66s' }}
+            >
+              <p className="max-w-2xl text-lg sm:text-xl" style={{ color: BONE, lineHeight: 1.45 }}>
+                From software you run yourself to senior practitioners who run it for you.{' '}
+                <span style={{ color: ASH }}>
+                  Workplace safety, compliance, and the human side of the job — one standard of rigor across all four.
+                </span>
+              </p>
+              <div className="flex items-center gap-5 shrink-0">
+                <button
+                  onClick={onDemoClick}
+                  className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium transition-transform hover:-translate-y-0.5 cursor-pointer"
+                  style={{ backgroundColor: MATCHA, color: NOIR }}
+                >
+                  Request a Demo
+                </button>
+                <a
+                  href="#index"
+                  className="inline-flex items-center gap-2 text-[15px] transition-opacity hover:opacity-60"
+                  style={{ color: BONE }}
+                >
+                  Find your starting line
+                  <span aria-hidden>↓</span>
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-14 xl:mt-0 home-fade" style={{ animationDelay: '0.8s' }}>
+            <ProductCarousel />
+          </div>
         </div>
       </div>
     </section>
@@ -439,6 +440,7 @@ function PlatformInstrument() {
   const subMetrics = [
     { label: 'WC', value: clampScore(score - 6) },
     { label: 'EPL', value: clampScore(score + 9) },
+    { label: 'ER', value: clampScore(score + 2) },
     { label: 'COMPLIANCE', value: clampScore(score - 13) },
   ]
 
@@ -455,7 +457,7 @@ function PlatformInstrument() {
         </div>
       </div>
       <div className="px-3 pt-2">
-        <svg viewBox={`0 0 ${VBW} ${VBH}`} preserveAspectRatio="none" className="w-full" style={{ height: 108 }}>
+        <svg viewBox={`0 0 ${VBW} ${VBH}`} preserveAspectRatio="none" className="w-full" style={{ height: 150 }}>
           <defs>
             <linearGradient id="homeRiskStroke" x1="0" y1="0" x2="1" y2="0">
               <stop offset="0%" stopColor="#86efac" />
@@ -534,7 +536,7 @@ function PlatformInstrument() {
           </div>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-3 px-5 pb-4 pt-3 border-t" style={{ borderColor: LINE_D }}>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-3 px-5 pb-4 pt-3 border-t" style={{ borderColor: LINE_D }}>
         {subMetrics.map((m) => (
           <div key={m.label}>
             <div className="flex items-baseline justify-between mb-1.5">
@@ -565,6 +567,14 @@ const DAILY_BEHAVIORAL_PCT = DAILY_BARS.map((v) => Math.round((Math.round(v * 0.
 // adminUpdates.ts "ir-magic-link-voice"), this animates what it looks like.
 const VOICE_WAVEFORM = [0.3, 0.6, 0.85, 0.5, 0.95, 0.4, 0.7, 0.55, 0.9, 0.35, 0.65, 0.45]
 const VOICE_PHASES = ['Tap to dictate', 'Listening…', 'Transcribing…', 'Category: Behavioral · Severity: Medium']
+
+// 30-day intake density, illustrative — a second, distinct chart type from
+// the weekly bars (calendar-heatmap shape) for more at-a-glance depth.
+const DAILY_HEATMAP = [
+  1, 0, 2, 1, 3, 0, 1, 2, 4, 1,
+  0, 2, 3, 1, 0, 1, 2, 3, 1, 0,
+  2, 1, 3, 2, 0, 1, 4, 2, 1, 0,
+]
 
 function DailyInstrument() {
   const reduce = useReducedMotion()
@@ -672,6 +682,23 @@ function DailyInstrument() {
           </motion.p>
         </AnimatePresence>
       </div>
+      <div className="px-5 pb-3 pt-2 border-t" style={{ borderColor: LINE_D }}>
+        <div className="flex items-center justify-between mb-2 mt-1">
+          <span className="text-[8px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>Last 30 days</span>
+          <span className="text-[8px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>
+            {DAILY_HEATMAP.reduce((a, b) => a + b, 0)} total
+          </span>
+        </div>
+        <div className="grid grid-cols-10 gap-[3px]">
+          {DAILY_HEATMAP.map((v, i) => (
+            <div
+              key={i}
+              className="aspect-square rounded-[2px]"
+              style={{ backgroundColor: v === 0 ? 'rgba(245,242,237,0.06)' : `rgba(242,193,78,${0.18 + v * 0.18})` }}
+            />
+          ))}
+        </div>
+      </div>
       <div className="flex items-center justify-between px-5 pb-4 pt-3 border-t" style={{ borderColor: LINE_D }}>
         <span className="text-[9px] font-mono uppercase tracking-[0.16em] truncate" style={{ color: ASH }}>
           hey-matcha.com/intake/atl7
@@ -698,7 +725,9 @@ type FindingStatus = 'flagged' | 'fixing' | 'fixed'
 const COMPLIANCE_FINDINGS: { state: string; text: string }[] = [
   { state: 'CA', text: 'Meal period waivers missing for 12 employees' },
   { state: 'NY', text: 'Paid sick leave accrual rate below statute' },
+  { state: 'FED', text: 'FLSA overtime threshold update not applied' },
   { state: 'WA', text: 'Predictive scheduling notice window expired' },
+  { state: 'IL', text: 'BIPA biometric consent forms unsigned' },
   { state: 'TX', text: 'Anti-retaliation posters out of date' },
 ]
 
@@ -871,6 +900,38 @@ function ProductCarousel() {
 
   return (
     <div onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+      {/* What you're about to see, ABOVE the card — and sized like a real
+          heading, not a caption. */}
+      <div className="flex items-end justify-between gap-4 mb-5">
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={slide.n}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.3 }}
+            className="flex items-baseline gap-3 min-w-0"
+          >
+            <span className="font-mono text-sm shrink-0" style={{ color: slide.accent }}>
+              {slide.n}
+            </span>
+            <h3
+              className="tracking-[-0.02em] truncate"
+              style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: 'clamp(1.75rem, 2.4vw, 2.75rem)', color: BONE }}
+            >
+              {slide.name}
+            </h3>
+          </motion.div>
+        </AnimatePresence>
+        <Link
+          to={slide.to}
+          className="text-[13px] font-mono uppercase tracking-[0.18em] shrink-0 transition-opacity hover:opacity-60"
+          style={{ color: ASH }}
+        >
+          View →
+        </Link>
+      </div>
+
       <MotionConfig reducedMotion="user">
         <Link to={slide.to} className="group block">
           <AnimatePresence mode="wait" custom={direction} initial={false}>
@@ -889,20 +950,7 @@ function ProductCarousel() {
         </Link>
       </MotionConfig>
 
-      <div className="flex items-center justify-between mt-3">
-        <span className="text-[11px] font-mono uppercase tracking-[0.18em]" style={{ color: ASH }}>
-          {slide.n} — {slide.name}
-        </span>
-        <Link
-          to={slide.to}
-          className="text-[11px] font-mono uppercase tracking-[0.18em] transition-opacity hover:opacity-60"
-          style={{ color: ASH }}
-        >
-          View →
-        </Link>
-      </div>
-
-      <div className="mt-3 flex items-center gap-2">
+      <div className="mt-4 flex items-center gap-2">
         {CAROUSEL_PRODUCTS.map((s, i) => (
           <button
             key={s.n}
