@@ -7,8 +7,21 @@ import SaveTemplateButton from './SaveTemplateButton'
 
 type Block = { id: string; kind: string; text: string; items: string[]; new_page: boolean; column: string }
 type MarginTier = { label: string; min_employees: number; max_employees: number; margin_pct: number }
-type BrokerTemplate = { blocks: Block[]; margin_tiers: MarginTier[] }
+type Cover = { wordmark: string; subtitle: string; product_line: string; product_title: string; tagline: string; footer_note: string; footer_contact: string }
+type BrokerTemplate = { blocks: Block[]; margin_tiers: MarginTier[]; cover?: Cover }
 type PlatformTier = 'lite' | 'mid' | 'max'
+
+const EMPTY_COVER: Cover = { wordmark: '', subtitle: '', product_line: '', product_title: '', tagline: '', footer_note: '', footer_contact: '' }
+// Placeholders mirror the server-side cover defaults — blank fields fall back to these.
+const COVER_PH: Cover = {
+  wordmark: 'matcha',
+  subtitle: 'Risk, Compliance, Employee Relations Intelligence',
+  product_line: 'Partner Program',
+  product_title: 'Broker Edition',
+  tagline: 'Sell risk management. Keep the margin.',
+  footer_note: 'Confidential — proprietary partner pricing, for the named recipient only.',
+  footer_contact: 'hey-matcha.com · aaron@hey-matcha.com',
+}
 
 const COMPUTED_LABEL: Record<string, string> = {
   cover: 'Cover (auto)',
@@ -30,6 +43,7 @@ export default function BrokerTab() {
   const [repTier, setRepTier] = useState<PlatformTier>('mid')
   const [tierOverride, setTierOverride] = useState('auto')
   const [marginTiers, setMarginTiers] = useState<MarginTier[]>([])
+  const [cover, setCover] = useState<Cover>(EMPTY_COVER)
   const [scName, setScName] = useState('Sample Client')
   const [scHeadcount, setScHeadcount] = useState('300')
   const [scTier, setScTier] = useState<PlatformTier>('mid')
@@ -53,6 +67,7 @@ export default function BrokerTab() {
         const t = saved.payload
         setBlocks(t?.blocks ?? def.blocks)
         setMarginTiers(t?.margin_tiers ?? def.margin_tiers)
+        if (t?.cover) setCover({ ...EMPTY_COVER, ...t.cover })
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load template'))
   }, [])
@@ -68,11 +83,12 @@ export default function BrokerTab() {
       sample_client_name: scName.trim() || 'Sample Client',
       sample_client_headcount: int(scHeadcount, 300),
       sample_client_tier: scTier,
+      cover,
       blocks: blocks
         ? blocks.map((b) => (b.kind === 'bullets' ? { ...b, items: b.items.filter((i) => i.trim()) } : b))
         : null,
     }),
-    [brokerName, bookNum, proposalDate, repTier, tierOverride, marginTiers, scName, scHeadcount, scTier, blocks],
+    [brokerName, bookNum, proposalDate, repTier, tierOverride, marginTiers, scName, scHeadcount, scTier, cover, blocks],
   )
 
   const inputsRef = useRef(inputs)
@@ -98,6 +114,9 @@ export default function BrokerTab() {
   function updateTier(i: number, patch: Partial<MarginTier>) {
     setMarginTiers((prev) => prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)))
   }
+  function updateCover(patch: Partial<Cover>) {
+    setCover((prev) => ({ ...prev, ...patch }))
+  }
   function addTier() {
     setMarginTiers((prev) => {
       const last = prev[prev.length - 1]
@@ -111,7 +130,7 @@ export default function BrokerTab() {
 
   async function saveTpl() {
     // Reusable template = program copy + margin-tier schedule; broker/sample-client are per-deal.
-    await saveTemplate<BrokerTemplate>('broker', { blocks: blocks ?? [], margin_tiers: marginTiers })
+    await saveTemplate<BrokerTemplate>('broker', { blocks: blocks ?? [], margin_tiers: marginTiers, cover })
   }
 
   async function download() {
@@ -160,6 +179,19 @@ export default function BrokerTab() {
               options={[['lite', 'Lite'], ['mid', 'Mid'], ['max', 'Max']]} />
           </Section>
 
+          <Section title="Cover page">
+            <p className="text-xs text-zinc-500">Cover text. Leave a field blank to use the default (shown as the placeholder).</p>
+            <CoverField label="Wordmark" k="wordmark" cover={cover} ph={COVER_PH} onChange={updateCover} />
+            <CoverField label="Subtitle" k="subtitle" cover={cover} ph={COVER_PH} onChange={updateCover} />
+            <div className="grid grid-cols-2 gap-2">
+              <CoverField label="Product line" k="product_line" cover={cover} ph={COVER_PH} onChange={updateCover} />
+              <CoverField label="Product title" k="product_title" cover={cover} ph={COVER_PH} onChange={updateCover} />
+            </div>
+            <CoverField label="Tagline" k="tagline" cover={cover} ph={COVER_PH} onChange={updateCover} />
+            <CoverField label="Footer note" k="footer_note" cover={cover} ph={COVER_PH} onChange={updateCover} />
+            <CoverField label="Footer contact" k="footer_contact" cover={cover} ph={COVER_PH} onChange={updateCover} />
+          </Section>
+
           <Section title="Margin tiers">
             <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-2 text-xs">
               <span className="font-medium text-zinc-500">Tier · book range</span>
@@ -205,6 +237,10 @@ export default function BrokerTab() {
       </div>
     </div>
   )
+}
+
+function CoverField({ label, k, cover, ph, onChange }: { label: string; k: keyof Cover; cover: Cover; ph: Cover; onChange: (patch: Partial<Cover>) => void }) {
+  return <Input label={label} value={cover[k]} placeholder={ph[k]} onChange={(e) => onChange({ [k]: e.target.value })} />
 }
 
 function FragmentTier({ tier, onChange, onRemove }: { tier: MarginTier; onChange: (patch: Partial<MarginTier>) => void; onRemove: () => void }) {

@@ -11,28 +11,26 @@ from datetime import date
 from html import escape
 
 from .deal_book import BookInputs, BookQuote
-from .deal_full_template import _CSS, _fmt_date, _m, _p
+from .deal_full_template import _CSS, _fmt_date, _m, _p, render_cover
+
+_COVER_DEFAULTS = {
+    "wordmark": "matcha",
+    "subtitle": "Risk, Compliance, Employee Relations Intelligence",
+    "product_line": "Matcha Lite",
+    "product_title": "Book Pricing",
+    "tagline": "One platform for your whole book. One pooled rate.",
+    "footer_note": "Confidential &mdash; This document contains proprietary partner pricing and is intended solely for the named recipient.",
+    "footer_contact": "hey-matcha.com &middot; aaron@hey-matcha.com",
+}
 
 
 def _cover(inp: BookInputs, q: BookQuote, date_str: str) -> str:
     broker = escape(inp.broker_name)
     disc = f"{q.discount_pct}% volume discount" if q.discount_pct else "list pricing"
-    return f"""<div class="cover">
-  <h1>matcha</h1>
-  <div class="subtitle">Risk, Compliance, Employee Relations Intelligence</div>
-  <div class="product">Matcha Lite<br><strong>Book Pricing</strong></div>
-  <div class="divider"></div>
-  <div class="quote">"One platform for your whole book. One pooled rate."</div>
-  <div class="prepared">
-    <p>Prepared for <strong>{broker}</strong></p>
-    <p>{q.total_seats:,} committed seats &middot; {disc}</p>
-    <p>{date_str}</p>
-  </div>
-  <div class="footer">
-    <p>Confidential &mdash; This document contains proprietary partner pricing and is intended solely for the named recipient.</p>
-    <p>hey-matcha.com &middot; aaron@hey-matcha.com</p>
-  </div>
-</div>"""
+    prepared = (f"<p>Prepared for <strong>{broker}</strong></p>"
+                f"<p>{q.total_seats:,} committed seats &middot; {disc}</p>"
+                f"<p>{date_str}</p>")
+    return render_cover(inp.cover, _COVER_DEFAULTS, prepared)
 
 
 def _t_discount(inp: BookInputs, q: BookQuote) -> str:

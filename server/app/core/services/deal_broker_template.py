@@ -11,27 +11,25 @@ from datetime import date
 from html import escape
 
 from .deal_broker import BrokerInputs, BrokerQuote
-from .deal_full_template import _CSS, _fmt_date, _m, _p
+from .deal_full_template import _CSS, _fmt_date, _m, _p, render_cover
+
+_COVER_DEFAULTS = {
+    "wordmark": "matcha",
+    "subtitle": "Risk, Compliance, Employee Relations Intelligence",
+    "product_line": "Partner Program",
+    "product_title": "Broker Edition",
+    "tagline": "Sell risk management. Keep the margin.",
+    "footer_note": "Confidential &mdash; This document contains proprietary partner pricing and is intended solely for the named recipient.",
+    "footer_contact": "hey-matcha.com &middot; aaron@hey-matcha.com",
+}
 
 
 def _cover(inp: BrokerInputs, q: BrokerQuote, date_str: str) -> str:
     broker = escape(inp.broker_name)
-    return f"""<div class="cover">
-  <h1>matcha</h1>
-  <div class="subtitle">Risk, Compliance, Employee Relations Intelligence</div>
-  <div class="product">Partner Program<br><strong>Broker Edition</strong></div>
-  <div class="divider"></div>
-  <div class="quote">"Sell risk management. Keep the margin."</div>
-  <div class="prepared">
-    <p>Prepared for <strong>{broker}</strong></p>
-    <p>{q.book_employees:,} committed seats &middot; {escape(q.tier_label)} tier ({q.margin_pct}% margin)</p>
-    <p>{date_str}</p>
-  </div>
-  <div class="footer">
-    <p>Confidential &mdash; This document contains proprietary partner pricing and is intended solely for the named recipient.</p>
-    <p>hey-matcha.com &middot; aaron@hey-matcha.com</p>
-  </div>
-</div>"""
+    prepared = (f"<p>Prepared for <strong>{broker}</strong></p>"
+                f"<p>{q.book_employees:,} committed seats &middot; {escape(q.tier_label)} tier ({q.margin_pct}% margin)</p>"
+                f"<p>{date_str}</p>")
+    return render_cover(inp.cover, _COVER_DEFAULTS, prepared)
 
 
 def _t_tiers(inp: BrokerInputs, q: BrokerQuote) -> str:

@@ -8,7 +8,20 @@ import SaveTemplateButton from './SaveTemplateButton'
 type Block = { id: string; kind: string; text: string; items: string[]; new_page: boolean; column: string }
 type DiscountTier = { min_seats: number; discount_pct: number; max_seats?: number | null }
 type ClientRow = { name: string; seats: string }
-type BookTemplate = { blocks: Block[]; discount_tiers: DiscountTier[]; list_pepm: number }
+type Cover = { wordmark: string; subtitle: string; product_line: string; product_title: string; tagline: string; footer_note: string; footer_contact: string }
+type BookTemplate = { blocks: Block[]; discount_tiers: DiscountTier[]; list_pepm: number; cover?: Cover }
+
+const EMPTY_COVER: Cover = { wordmark: '', subtitle: '', product_line: '', product_title: '', tagline: '', footer_note: '', footer_contact: '' }
+// Placeholders mirror the server-side cover defaults — blank fields fall back to these.
+const COVER_PH: Cover = {
+  wordmark: 'matcha',
+  subtitle: 'Risk, Compliance, Employee Relations Intelligence',
+  product_line: 'Matcha Lite',
+  product_title: 'Book Pricing',
+  tagline: 'One platform for your whole book. One pooled rate.',
+  footer_note: 'Confidential — proprietary partner pricing, for the named recipient only.',
+  footer_contact: 'hey-matcha.com · aaron@hey-matcha.com',
+}
 
 const COMPUTED_LABEL: Record<string, string> = {
   cover: 'Cover (auto)',
@@ -37,6 +50,7 @@ export default function BookPricingTab() {
   const [listPepm, setListPepm] = useState('5')
   const [proposalDate, setProposalDate] = useState(today)
   const [tiers, setTiers] = useState<DiscountTier[]>([])
+  const [cover, setCover] = useState<Cover>(EMPTY_COVER)
   const [clients, setClients] = useState<ClientRow[]>([
     { name: 'Acme Clinic', seats: '80' },
     { name: 'Baytown Mfg', seats: '210' },
@@ -60,6 +74,7 @@ export default function BookPricingTab() {
         setBlocks(t?.blocks ?? def.blocks)
         setTiers(t?.discount_tiers ?? def.discount_tiers)
         if (t?.list_pepm != null) setListPepm(String(t.list_pepm))
+        if (t?.cover) setCover({ ...EMPTY_COVER, ...t.cover })
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load template'))
   }, [])
@@ -78,11 +93,12 @@ export default function BookPricingTab() {
         .map((c) => ({ name: c.name.trim(), seats: int(c.seats, 0) }))
         .filter((c) => c.name || c.seats > 0),
       proposal_date: proposalDate || null,
+      cover,
       blocks: blocks
         ? blocks.map((b) => (b.kind === 'bullets' ? { ...b, items: b.items.filter((i) => i.trim()) } : b))
         : null,
     }),
-    [brokerName, list, tiers, clients, proposalDate, blocks],
+    [brokerName, list, tiers, clients, proposalDate, cover, blocks],
   )
 
   const inputsRef = useRef(inputs)
@@ -101,6 +117,9 @@ export default function BookPricingTab() {
 
   function updateBlock(id: string, patch: Partial<Block>) {
     setBlocks((prev) => prev && prev.map((b) => (b.id === id ? { ...b, ...patch } : b)))
+  }
+  function updateCover(patch: Partial<Cover>) {
+    setCover((prev) => ({ ...prev, ...patch }))
   }
   function updateTier(i: number, patch: Partial<DiscountTier>) {
     setTiers((prev) => prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)))
@@ -124,7 +143,7 @@ export default function BookPricingTab() {
   async function saveTpl() {
     // Persist the reusable template (prose + volume tiers + list rate); the broker
     // name and client roster are per-deal inputs and stay out of the saved template.
-    await saveTemplate<BookTemplate>('book', { blocks: blocks ?? [], discount_tiers: tiers, list_pepm: list })
+    await saveTemplate<BookTemplate>('book', { blocks: blocks ?? [], discount_tiers: tiers, list_pepm: list, cover })
   }
 
   async function download() {
@@ -168,6 +187,19 @@ export default function BookPricingTab() {
               <b className="text-zinc-100">{totalSeats.toLocaleString()}</b> committed seats &rarr;{' '}
               <b className="text-violet-200">{disc}% off</b> &rarr; <b className="text-zinc-100">${netPepm.toFixed(2)}</b> PEPM
             </div>
+          </Section>
+
+          <Section title="Cover page">
+            <p className="text-xs text-zinc-500">Cover text. Leave a field blank to use the default (shown as the placeholder).</p>
+            <CoverField label="Wordmark" k="wordmark" cover={cover} ph={COVER_PH} onChange={updateCover} />
+            <CoverField label="Subtitle" k="subtitle" cover={cover} ph={COVER_PH} onChange={updateCover} />
+            <div className="grid grid-cols-2 gap-2">
+              <CoverField label="Product line" k="product_line" cover={cover} ph={COVER_PH} onChange={updateCover} />
+              <CoverField label="Product title" k="product_title" cover={cover} ph={COVER_PH} onChange={updateCover} />
+            </div>
+            <CoverField label="Tagline" k="tagline" cover={cover} ph={COVER_PH} onChange={updateCover} />
+            <CoverField label="Footer note" k="footer_note" cover={cover} ph={COVER_PH} onChange={updateCover} />
+            <CoverField label="Footer contact" k="footer_contact" cover={cover} ph={COVER_PH} onChange={updateCover} />
           </Section>
 
           <Section title="Volume discount tiers">
@@ -239,6 +271,10 @@ export default function BookPricingTab() {
       </div>
     </div>
   )
+}
+
+function CoverField({ label, k, cover, ph, onChange }: { label: string; k: keyof Cover; cover: Cover; ph: Cover; onChange: (patch: Partial<Cover>) => void }) {
+  return <Input label={label} value={cover[k]} placeholder={ph[k]} onChange={(e) => onChange({ [k]: e.target.value })} />
 }
 
 function FragmentTier({ tier, onChange, onRemove }: { tier: DiscountTier; onChange: (patch: Partial<DiscountTier>) => void; onRemove: () => void }) {

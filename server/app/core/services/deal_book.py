@@ -16,7 +16,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from .deal_pricing import Block, TIER_PEPM
+from .deal_pricing import Block, CoverFields, TIER_PEPM
 
 
 class DiscountTier(BaseModel):
@@ -96,6 +96,7 @@ class BookInputs(BaseModel):
     clients: Optional[list[BookClient]] = None            # None → one sample row
     proposal_date: Optional[date] = None
     blocks: Optional[list[Block]] = None
+    cover: Optional[CoverFields] = None   # None / blank fields → per-tab cover defaults
 
     def resolved_tiers(self) -> list[DiscountTier]:
         tiers = self.discount_tiers if self.discount_tiers is not None else [DiscountTier(**t) for t in DEFAULT_DISCOUNT_TIERS]

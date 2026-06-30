@@ -67,6 +67,21 @@ class Block(BaseModel):
     column: str = ""
 
 
+class CoverFields(BaseModel):
+    """Editable cover-page text, shared by the Broker + Book-Pricing packets.
+
+    Every field is optional; a blank/None field falls back to the per-tab default at
+    render time (see `deal_full_template.render_cover`). The dynamic "prepared for" block
+    (broker name / seats / date) is computed per tab and not part of this model."""
+    wordmark: Optional[str] = Field(default=None, max_length=60)
+    subtitle: Optional[str] = Field(default=None, max_length=200)
+    product_line: Optional[str] = Field(default=None, max_length=80)
+    product_title: Optional[str] = Field(default=None, max_length=80)
+    tagline: Optional[str] = Field(default=None, max_length=200)
+    footer_note: Optional[str] = Field(default=None, max_length=400)
+    footer_contact: Optional[str] = Field(default=None, max_length=200)
+
+
 class TierOverride(BaseModel):
     """Per-deal override of a tier's PEPM / onboarding fee."""
     pepm: int = Field(..., ge=0, le=10_000)

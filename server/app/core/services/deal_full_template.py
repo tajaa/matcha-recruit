@@ -26,7 +26,47 @@ def _fmt_date(d: date) -> str:
     return d.strftime("%B %-d, %Y")
 
 
+def render_cover(cover, defaults: dict, prepared_html: str) -> str:
+    """Shared cover-page builder for the Broker + Book-Pricing packets.
+
+    `cover` is an optional `CoverFields`; each field falls back to `defaults[...]` when
+    blank/None. `prepared_html` is the per-tab "prepared for / seats / date" block, already
+    built and escaped by the caller. Defaults may carry literal &-entities; user-supplied
+    overrides are escaped."""
+    def g(key: str) -> str:
+        val = getattr(cover, key, None) if cover is not None else None
+        return escape(val) if val else defaults[key]
+    return f"""<div class="cover">
+  <div class="spine"></div>
+  <div class="cover-brand">
+    <h1>{g('wordmark')}</h1>
+    <div class="subtitle">{g('subtitle')}</div>
+  </div>
+  <div class="cover-lead">
+    <div class="product">{g('product_line')}<br><strong>{g('product_title')}</strong></div>
+    <div class="divider"></div>
+    <div class="quote">&ldquo;{g('tagline')}&rdquo;</div>
+  </div>
+  <div class="prepared">{prepared_html}</div>
+  <div class="footer">
+    <p>{g('footer_note')}</p>
+    <p>{g('footer_contact')}</p>
+  </div>
+</div>"""
+
+
 # ── Computed-block renderers ──────────────────────────────────────────────────
+_FULL_COVER_DEFAULTS = {
+    "wordmark": "matcha",
+    "subtitle": "Risk, Compliance, Employee Relations Intelligence",
+    "product_line": "Platform",
+    "product_title": "Service Proposal",
+    "tagline": "Manage your risk or your risk will manage you.",
+    "footer_note": "Confidential &mdash; This document contains proprietary pricing and is intended solely for the named recipient.",
+    "footer_contact": "hey-matcha.com &middot; aaron@hey-matcha.com",
+}
+
+
 def _cover(inp: FullDealInputs, date_str: str) -> str:
     company = escape(inp.company_name)
     loc = escape(inp.location.strip())
@@ -34,22 +74,10 @@ def _cover(inp: FullDealInputs, date_str: str) -> str:
     if loc:
         line2 += f" &middot; {loc}"
     line2 += " &middot; Full Platform Access"
-    return f"""<div class="cover">
-  <h1>matcha</h1>
-  <div class="subtitle">Risk, Compliance, Employee Relations Intelligence</div>
-  <div class="product">Platform<br><strong>Service Proposal</strong></div>
-  <div class="divider"></div>
-  <div class="quote">"Manage your risk or your risk will manage you."</div>
-  <div class="prepared">
-    <p>Prepared for <strong>{company}</strong></p>
-    <p>{line2}</p>
-    <p>{date_str}</p>
-  </div>
-  <div class="footer">
-    <p>Confidential &mdash; This document contains proprietary pricing and is intended solely for the named recipient.</p>
-    <p>hey-matcha.com &middot; aaron@hey-matcha.com</p>
-  </div>
-</div>"""
+    prepared = (f"<p>Prepared for <strong>{company}</strong></p>"
+                f"<p>{line2}</p>"
+                f"<p>{date_str}</p>")
+    return render_cover(None, _FULL_COVER_DEFAULTS, prepared)
 
 
 def _t_pepm(q: FullQuote) -> str:
@@ -178,19 +206,22 @@ _CSS = """
   @page cover-page { size: letter; margin: 0; background: #1a1a2e; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; color: #1a1a2e; font-size: 10.5pt; line-height: 1.55; }
-  .cover { page: cover-page; page-break-after: always; background: #1a1a2e; color: white; height: 11in; padding: 80px 70px 60px; position: relative; overflow: hidden; }
-  .cover::after { content: ''; position: absolute; top: -120px; right: -120px; width: 500px; height: 500px; border-radius: 50%; background: rgba(255,255,255,0.03); }
-  .cover::before { content: ''; position: absolute; bottom: -80px; left: -80px; width: 400px; height: 400px; border-radius: 50%; background: rgba(255,255,255,0.02); }
-  .cover h1 { font-size: 42pt; font-weight: 800; letter-spacing: -1px; margin-bottom: 4px; }
-  .cover .subtitle { font-size: 8pt; letter-spacing: 5px; text-transform: uppercase; color: rgba(255,255,255,0.6); margin-bottom: 6px; }
-  .cover .product { font-size: 22pt; font-weight: 300; color: rgba(255,255,255,0.8); }
-  .cover .product strong { font-weight: 700; color: white; display: block; font-size: 30pt; }
-  .cover .divider { width: 60px; height: 3px; background: #6c63ff; margin: 30px 0; }
-  .cover .quote { font-style: italic; color: rgba(255,255,255,0.6); font-size: 12pt; margin-bottom: 40px; }
-  .cover .prepared { font-size: 11pt; }
-  .cover .prepared strong { font-size: 13pt; }
-  .cover .prepared p { margin: 4px 0; color: rgba(255,255,255,0.85); }
-  .cover .footer { position: absolute; bottom: 60px; left: 70px; color: rgba(255,255,255,0.35); font-size: 8.5pt; }
+  .cover { page: cover-page; page-break-after: always; background: linear-gradient(157deg, #20203d 0%, #161630 52%, #0f0f22 100%); color: white; height: 11in; padding: 96px 78px 60px; position: relative; overflow: hidden; }
+  .cover::before { content: ''; position: absolute; top: -170px; right: -150px; width: 580px; height: 580px; border-radius: 50%; background: radial-gradient(circle, rgba(108,99,255,0.22) 0%, rgba(108,99,255,0) 70%); }
+  .cover::after { content: ''; position: absolute; bottom: -130px; left: -110px; width: 460px; height: 460px; border-radius: 50%; background: radial-gradient(circle, rgba(167,139,250,0.10) 0%, rgba(167,139,250,0) 70%); }
+  .cover .spine { position: absolute; top: 0; left: 0; width: 7px; height: 100%; background: linear-gradient(180deg, #6c63ff 0%, #a78bfa 100%); }
+  .cover .cover-brand { position: relative; }
+  .cover h1 { font-size: 46pt; font-weight: 800; letter-spacing: -1.5px; margin-bottom: 9px; }
+  .cover .subtitle { font-size: 8pt; letter-spacing: 5px; text-transform: uppercase; color: rgba(255,255,255,0.55); }
+  .cover .cover-lead { margin-top: 86px; position: relative; }
+  .cover .product { font-size: 21pt; font-weight: 300; color: rgba(255,255,255,0.6); line-height: 1.22; }
+  .cover .product strong { font-weight: 700; color: white; display: block; font-size: 33pt; letter-spacing: -0.5px; margin-top: 2px; }
+  .cover .divider { width: 72px; height: 4px; border-radius: 2px; background: linear-gradient(90deg, #6c63ff, #a78bfa); margin: 30px 0 28px; }
+  .cover .quote { color: rgba(255,255,255,0.72); font-size: 13pt; font-style: italic; line-height: 1.5; max-width: 74%; padding-left: 20px; border-left: 3px solid rgba(108,99,255,0.55); }
+  .cover .prepared { position: absolute; left: 78px; right: 78px; bottom: 142px; font-size: 11pt; padding-top: 24px; border-top: 1px solid rgba(255,255,255,0.12); }
+  .cover .prepared strong { font-size: 13pt; color: #fff; }
+  .cover .prepared p { margin: 5px 0; color: rgba(255,255,255,0.82); }
+  .cover .footer { position: absolute; bottom: 54px; left: 78px; right: 78px; color: rgba(255,255,255,0.4); font-size: 8.5pt; }
   .cover .footer p { margin: 3px 0; }
   .page { padding: 8px 60px 28px; }
   .page.fresh { page-break-before: always; }

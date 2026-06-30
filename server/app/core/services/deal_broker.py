@@ -15,7 +15,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from .deal_pricing import Block, TIER_PEPM, lite_pepm
+from .deal_pricing import Block, CoverFields, TIER_PEPM, lite_pepm
 
 PlatformTier = Literal["lite", "mid", "max"]
 PLATFORM_LABEL = {"lite": "Lite", "mid": "Mid", "max": "Max"}
@@ -97,6 +97,7 @@ class BrokerInputs(BaseModel):
     sample_client_tier: PlatformTier = "mid"
 
     blocks: Optional[list[Block]] = None
+    cover: Optional[CoverFields] = None   # None / blank fields → per-tab cover defaults
 
     def resolved_tiers(self) -> list[MarginTier]:
         return self.margin_tiers if self.margin_tiers is not None else [MarginTier(**t) for t in DEFAULT_MARGIN_TIERS]
