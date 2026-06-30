@@ -7,11 +7,12 @@ import SaveTemplateButton from './SaveTemplateButton'
 
 type Block = { id: string; kind: string; text: string; items: string[]; new_page: boolean; column: string }
 type MarginTier = { label: string; min_employees: number; max_employees: number; margin_pct: number }
-type Cover = { wordmark: string; subtitle: string; product_line: string; product_title: string; tagline: string; footer_note: string; footer_contact: string }
+type Cover = { wordmark: string; subtitle: string; product_line: string; product_title: string; tagline: string; footer_note: string; footer_contact: string; title_font: string; accent_color: string; bg_style: string }
 type BrokerTemplate = { blocks: Block[]; margin_tiers: MarginTier[]; cover?: Cover }
 type PlatformTier = 'lite' | 'mid' | 'max'
 
-const EMPTY_COVER: Cover = { wordmark: '', subtitle: '', product_line: '', product_title: '', tagline: '', footer_note: '', footer_contact: '' }
+// Text fields blank → server default; design fields carry concrete defaults so the controls render.
+const EMPTY_COVER: Cover = { wordmark: '', subtitle: '', product_line: '', product_title: '', tagline: '', footer_note: '', footer_contact: '', title_font: 'Fraunces', accent_color: '#7c6cff', bg_style: 'ink' }
 // Placeholders mirror the server-side cover defaults — blank fields fall back to these.
 const COVER_PH: Cover = {
   wordmark: 'matcha',
@@ -21,10 +22,13 @@ const COVER_PH: Cover = {
   tagline: 'Sell risk management. Keep the margin.',
   footer_note: 'Confidential — proprietary partner pricing, for the named recipient only.',
   footer_contact: 'hey-matcha.com · aaron@hey-matcha.com',
+  title_font: 'Fraunces', accent_color: '#7c6cff', bg_style: 'ink',
 }
+const FONT_OPTS: [string, string][] = [['Fraunces', 'Fraunces (serif)'], ['Playfair Display', 'Playfair Display'], ['Cormorant Garamond', 'Cormorant Garamond'], ['Space Grotesk', 'Space Grotesk'], ['Inter', 'Inter (sans)']]
+const BG_OPTS: [string, string][] = [['ink', 'Ink (navy)'], ['noir', 'Noir'], ['plum', 'Plum'], ['forest', 'Forest'], ['slate', 'Slate']]
 
 const COMPUTED_LABEL: Record<string, string> = {
-  cover: 'Cover (auto)',
+  cover: 'Cover — edit text & design in the "Cover page" panel ←',
   t_tiers: 'Margin tier table (auto)',
   t_wholesale: 'Wholesale rate card (auto)',
   book_econ: 'Book economics (auto)',
@@ -190,6 +194,19 @@ export default function BrokerTab() {
             <CoverField label="Tagline" k="tagline" cover={cover} ph={COVER_PH} onChange={updateCover} />
             <CoverField label="Footer note" k="footer_note" cover={cover} ph={COVER_PH} onChange={updateCover} />
             <CoverField label="Footer contact" k="footer_contact" cover={cover} ph={COVER_PH} onChange={updateCover} />
+            <div className="border-t border-zinc-800 pt-3">
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">Design</p>
+              <div className="grid grid-cols-2 gap-2">
+                <SelectRow label="Title font" value={cover.title_font} onChange={(v) => updateCover({ title_font: v })} options={FONT_OPTS} />
+                <SelectRow label="Background" value={cover.bg_style} onChange={(v) => updateCover({ bg_style: v })} options={BG_OPTS} />
+              </div>
+              <div className="mt-2 flex items-center gap-2">
+                <label className="text-sm font-medium text-zinc-300">Accent color</label>
+                <input type="color" value={cover.accent_color} onChange={(e) => updateCover({ accent_color: e.target.value })}
+                  className="h-8 w-12 cursor-pointer rounded border border-zinc-700 bg-zinc-900" />
+                <span className="text-xs text-zinc-500">{cover.accent_color}</span>
+              </div>
+            </div>
           </Section>
 
           <Section title="Margin tiers">

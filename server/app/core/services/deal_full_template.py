@@ -26,17 +26,55 @@ def _fmt_date(d: date) -> str:
     return d.strftime("%B %-d, %Y")
 
 
+# Curated, premium-only design options (kept tight so a cover can't be made ugly).
+# Every font here is loaded by the @import in _CSS; the picker only switches among them.
+COVER_TITLE_FONTS = {
+    "Fraunces": "'Fraunces', serif",
+    "Playfair Display": "'Playfair Display', serif",
+    "Cormorant Garamond": "'Cormorant Garamond', serif",
+    "Space Grotesk": "'Space Grotesk', sans-serif",
+    "Inter": "'Inter', sans-serif",
+}
+# Each background theme carries its own gradient + corner glow so the look stays cohesive.
+COVER_BG_STYLES = {
+    "ink":    {"bg": "linear-gradient(157deg, #21213f 0%, #15152c 52%, #0d0d1d 100%)", "glow": "radial-gradient(circle, rgba(124,108,255,0.24) 0%, rgba(124,108,255,0) 68%)"},
+    "noir":   {"bg": "linear-gradient(157deg, #232327 0%, #141416 55%, #0b0b0d 100%)", "glow": "radial-gradient(circle, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 70%)"},
+    "plum":   {"bg": "linear-gradient(157deg, #2c2042 0%, #1c142b 54%, #120c1d 100%)", "glow": "radial-gradient(circle, rgba(168,120,255,0.26) 0%, rgba(168,120,255,0) 68%)"},
+    "forest": {"bg": "linear-gradient(157deg, #163027 0%, #0f1f18 54%, #0a130e 100%)", "glow": "radial-gradient(circle, rgba(86,204,150,0.20) 0%, rgba(86,204,150,0) 70%)"},
+    "slate":  {"bg": "linear-gradient(157deg, #1d2736 0%, #131a25 54%, #0c1018 100%)", "glow": "radial-gradient(circle, rgba(96,165,250,0.22) 0%, rgba(96,165,250,0) 70%)"},
+}
+
+
 def render_cover(cover, defaults: dict, prepared_html: str) -> str:
     """Shared cover-page builder for the Broker + Book-Pricing packets.
 
     `cover` is an optional `CoverFields`; each field falls back to `defaults[...]` when
     blank/None. `prepared_html` is the per-tab "prepared for / seats / date" block, already
     built and escaped by the caller. Defaults may carry literal &-entities; user-supplied
-    overrides are escaped."""
+    text overrides are escaped. Design knobs (font/color/bg) are whitelisted/pattern-checked
+    on `CoverFields`, then emitted as a scoped <style> that overrides the _CSS defaults."""
     def g(key: str) -> str:
         val = getattr(cover, key, None) if cover is not None else None
         return escape(val) if val else defaults[key]
-    return f"""<div class="cover">
+
+    # Per-cover design overrides — only emit for known-safe values.
+    ov: list[str] = []
+    accent = getattr(cover, "accent_color", None) if cover is not None else None
+    if accent:  # pattern-validated #rrggbb on the model
+        ov.append(f".cover .spine{{background:{accent}}}")
+        ov.append(f".cover .divider{{background:{accent}}}")
+        ov.append(f".cover .product{{color:{accent}}}")
+        ov.append(f".cover .quote{{border-left-color:{accent}}}")
+    tfont = getattr(cover, "title_font", None) if cover is not None else None
+    if tfont in COVER_TITLE_FONTS:
+        ov.append(f".cover .product strong, .cover .quote{{font-family:{COVER_TITLE_FONTS[tfont]}}}")
+    bg = getattr(cover, "bg_style", None) if cover is not None else None
+    if bg in COVER_BG_STYLES:
+        ov.append(f".cover{{background:{COVER_BG_STYLES[bg]['bg']}}}")
+        ov.append(f".cover::before{{background:{COVER_BG_STYLES[bg]['glow']}}}")
+    style = f"<style>{''.join(ov)}</style>" if ov else ""
+
+    return f"""{style}<div class="cover">
   <div class="spine"></div>
   <div class="cover-brand">
     <h1>{g('wordmark')}</h1>
@@ -202,7 +240,7 @@ def _render_block(blk: Block, inp: FullDealInputs, q: FullQuote, date_str: str) 
 
 
 _CSS = """
-  @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,400;1,9..144,500&family=Inter:wght@300;400;500;600;700;800&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,400;1,9..144,500&family=Playfair+Display:ital,wght@0,500;0,600;1,500&family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Space+Grotesk:wght@400;500;700&family=Inter:wght@300;400;500;600;700;800&display=swap');
   @page { size: letter; margin: 0.55in 0; }
   @page cover-page { size: letter; margin: 0; background: #1a1a2e; }
   * { margin: 0; padding: 0; box-sizing: border-box; }

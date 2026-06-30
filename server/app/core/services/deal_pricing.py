@@ -80,6 +80,11 @@ class CoverFields(BaseModel):
     tagline: Optional[str] = Field(default=None, max_length=200)
     footer_note: Optional[str] = Field(default=None, max_length=400)
     footer_contact: Optional[str] = Field(default=None, max_length=200)
+    # Design knobs (curated — the renderer whitelists font/bg and pattern-checks the color,
+    # so these can't inject arbitrary CSS). Blank/None → the premium defaults.
+    title_font: Optional[str] = Field(default=None, max_length=40)   # display face for title + tagline
+    accent_color: Optional[str] = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")  # spine/divider/eyebrow/rule
+    bg_style: Optional[str] = Field(default=None, max_length=20)     # background theme preset key
 
 
 class TierOverride(BaseModel):
