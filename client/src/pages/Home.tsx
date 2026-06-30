@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AnimatePresence, motion, MotionConfig } from 'framer-motion'
-import { AlertTriangle, CheckCircle2, Loader2, Mic, Sparkles } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Loader2, Lock, Mic, Sparkles } from 'lucide-react'
 
 import MarketingNav from './landing/MarketingNav'
 import MarketingFooter from './landing/MarketingFooter'
@@ -561,14 +561,6 @@ const VOICE_WAVEFORM = [0.3, 0.6, 0.85, 0.5, 0.95, 0.4, 0.7, 0.55, 0.9, 0.35, 0.
 const VOICE_STATUS = ['Tap to dictate', 'Listening…', 'Transcribing…']
 const VOICE_PHASE_COUNT = 4
 
-// 30-day intake density, illustrative — a second, distinct chart type from
-// the weekly bars (calendar-heatmap shape) for more at-a-glance depth.
-const DAILY_HEATMAP = [
-  1, 0, 2, 1, 3, 0, 1, 2, 4, 1,
-  0, 2, 3, 1, 0, 1, 2, 3, 1, 0,
-  2, 1, 3, 2, 0, 1, 4, 2, 1, 0,
-]
-
 function DailyInstrument() {
   const reduce = useReducedMotion()
   const total = DAILY_BARS.reduce((a, b) => a + b, 0)
@@ -626,98 +618,96 @@ function DailyInstrument() {
           Safety
         </span>
       </div>
-      <div className="px-5 pb-3 pt-1">
+      {/* Voice intake demo — same mockup as the dedicated section on
+          /matcha-daily (magic link header, mic, waveform, extracted
+          fields), just scaled to fit the hero card. */}
+      <div className="px-5 pb-4 pt-1">
         <div
-          className="rounded-lg px-3.5 py-3 flex items-center gap-3 transition-colors duration-300"
-          style={{
-            border: `1px solid ${listening ? 'rgba(242,193,78,0.4)' : LINE_D}`,
-            backgroundColor: listening ? 'rgba(242,193,78,0.06)' : 'rgba(245,242,237,0.03)',
-          }}
+          className="rounded-lg overflow-hidden border transition-colors duration-300"
+          style={{ borderColor: listening ? 'rgba(242,193,78,0.4)' : LINE_D }}
         >
           <div
-            className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition-colors duration-300"
-            style={{
-              backgroundColor: listening ? 'rgba(242,193,78,0.18)' : 'rgba(245,242,237,0.05)',
-              border: `1px solid ${listening ? 'rgba(242,193,78,0.45)' : LINE_D}`,
-            }}
+            className="flex items-center gap-2 px-3.5 py-2 border-b"
+            style={{ borderColor: LINE_D, backgroundColor: 'rgba(245,242,237,0.02)' }}
           >
-            <Mic className="w-3.5 h-3.5" style={{ color: listening ? '#F2C14E' : ASH }} />
-          </div>
-          <div className="flex items-end gap-[3px] h-5 flex-1">
-            {VOICE_WAVEFORM.map((v, i) => (
-              <motion.div
-                key={i}
-                className="flex-1 rounded-full"
-                style={{ backgroundColor: listening ? 'rgba(242,193,78,0.8)' : LINE_D }}
-                animate={
-                  reduce
-                    ? { height: listening ? `${v * 100}%` : '15%' }
-                    : { height: listening ? [`${v * 55}%`, `${v * 100}%`, `${v * 55}%`] : '15%' }
-                }
-                transition={
-                  reduce ? { duration: 0 } : { duration: 0.8, repeat: listening ? Infinity : 0, delay: i * 0.05, ease: 'easeInOut' }
-                }
-              />
-            ))}
-          </div>
-        </div>
-        {voicePhase < 3 ? (
-          <AnimatePresence mode="wait">
-            <motion.p
-              key={voicePhase}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-              className="mt-2 text-[10px] font-mono"
-              style={{ color: voicePhase === 1 ? '#F2C14E' : ASH }}
-            >
-              {VOICE_STATUS[voicePhase]}
-            </motion.p>
-          </AnimatePresence>
-        ) : (
-          <motion.div
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-            className="mt-2 flex items-center gap-1.5 flex-wrap"
-          >
+            <Lock className="w-2.5 h-2.5 shrink-0" style={{ color: ASH }} />
+            <span className="text-[9px] font-mono truncate" style={{ color: ASH }}>hey-matcha.com/intake/atl7</span>
             <span
-              className="text-[9px] font-mono px-1.5 py-0.5 rounded"
-              style={{ color: '#86efac', backgroundColor: 'rgba(134,239,172,0.1)' }}
+              className="ml-auto shrink-0 text-[7px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded"
+              style={{ border: `1px solid ${LINE_D}`, color: ASH }}
             >
-              Behavioral
+              Public form
             </span>
-            <span
-              className="text-[9px] font-mono px-1.5 py-0.5 rounded"
-              style={{ color: '#F2C14E', backgroundColor: 'rgba(242,193,78,0.1)' }}
-            >
-              Medium severity
+          </div>
+
+          <div className="px-4 py-5 flex flex-col items-center text-center" style={{ backgroundColor: 'rgba(245,242,237,0.015)' }}>
+            <span className="text-[8px] font-mono uppercase tracking-widest mb-3" style={{ color: ASH }}>
+              Atlanta — Store 7
             </span>
-            <span className="text-[9px] font-mono" style={{ color: ASH }}>— extracted from audio</span>
-          </motion.div>
-        )}
-      </div>
-      <div className="px-5 pb-3 pt-2 border-t" style={{ borderColor: LINE_D }}>
-        <div className="flex items-center justify-between mb-2 mt-1">
-          <span className="text-[8px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>Last 30 days</span>
-          <span className="text-[8px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>
-            {DAILY_HEATMAP.reduce((a, b) => a + b, 0)} total
-          </span>
-        </div>
-        <div className="grid grid-cols-10 gap-[3px]">
-          {DAILY_HEATMAP.map((v, i) => (
             <div
-              key={i}
-              className="aspect-square rounded-[2px]"
-              style={{ backgroundColor: v === 0 ? 'rgba(245,242,237,0.06)' : `rgba(242,193,78,${0.18 + v * 0.18})` }}
-            />
-          ))}
+              className="relative w-11 h-11 rounded-full flex items-center justify-center mb-2.5 transition-colors duration-300"
+              style={{
+                backgroundColor: listening ? 'rgba(242,193,78,0.15)' : 'rgba(245,242,237,0.05)',
+                border: `1px solid ${listening ? 'rgba(242,193,78,0.5)' : LINE_D}`,
+              }}
+            >
+              {listening && (
+                <span className="absolute inset-0 rounded-full animate-ping" style={{ backgroundColor: 'rgba(242,193,78,0.2)' }} />
+              )}
+              <Mic className="w-5 h-5 relative" style={{ color: listening ? '#F2C14E' : ASH }} />
+            </div>
+            <div className="flex items-end gap-[2.5px] h-4 mb-2.5">
+              {VOICE_WAVEFORM.map((v, i) => (
+                <motion.div
+                  key={i}
+                  className="w-[2.5px] rounded-full"
+                  style={{ backgroundColor: listening ? 'rgba(242,193,78,0.8)' : LINE_D }}
+                  animate={
+                    reduce
+                      ? { height: listening ? `${v * 100}%` : '20%' }
+                      : { height: listening ? [`${v * 55}%`, `${v * 100}%`, `${v * 55}%`] : '20%' }
+                  }
+                  transition={
+                    reduce ? { duration: 0 } : { duration: 0.8, repeat: listening ? Infinity : 0, delay: i * 0.05, ease: 'easeInOut' }
+                  }
+                />
+              ))}
+            </div>
+            <AnimatePresence mode="wait">
+              <motion.span
+                key={voicePhase}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className="text-[10px] font-mono"
+                style={{ color: voicePhase === 1 ? '#F2C14E' : voicePhase === 3 ? '#86efac' : ASH }}
+              >
+                {voicePhase < 3 ? VOICE_STATUS[voicePhase] : 'Report ready for review'}
+              </motion.span>
+            </AnimatePresence>
+          </div>
+
+          <div
+            className="border-t px-4 py-3 transition-opacity duration-500"
+            style={{ borderColor: LINE_D, opacity: voicePhase === 3 ? 1 : 0.25 }}
+          >
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <div className="text-[7px] font-mono uppercase tracking-widest mb-0.5" style={{ color: ASH }}>Category</div>
+                <div className="text-[10px]" style={{ color: BONE }}>Customer escalation</div>
+              </div>
+              <div>
+                <div className="text-[7px] font-mono uppercase tracking-widest mb-0.5" style={{ color: ASH }}>Severity</div>
+                <div className="text-[10px] font-medium" style={{ color: '#F2C14E' }}>Medium</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <div className="flex items-center justify-between px-5 pb-4 pt-3 border-t" style={{ borderColor: LINE_D }}>
-        <span className="text-[9px] font-mono uppercase tracking-[0.16em] truncate" style={{ color: ASH }}>
-          hey-matcha.com/intake/atl7
+        <span className="text-[9px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>
+          Reviewed before it submits
         </span>
         <span className="text-[9px] font-mono uppercase tracking-[0.16em] shrink-0 ml-2" style={{ color: ASH }}>
           Talk or type
