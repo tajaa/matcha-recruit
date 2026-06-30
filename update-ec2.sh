@@ -57,12 +57,16 @@ ssh_cmd() {
 
 sync_nginx() {
     # matcha.conf's upstream blocks `include` these files (the blue/green
-    # active ports for frontend + backend). nginx -t fails hard on a missing
-    # include, so both must exist BEFORE the new matcha.conf is tested —
-    # deploy-{frontend,backend}-bluegreen.sh also bootstrap them, but those
-    # run after this function, too late for the very first sync.
-    ssh_cmd "[ -f /etc/nginx/conf.d/matcha-frontend-active.conf ] || echo 'server 127.0.0.1:8082;' | sudo tee /etc/nginx/conf.d/matcha-frontend-active.conf > /dev/null"
-    ssh_cmd "[ -f /etc/nginx/conf.d/matcha-backend-active.conf ] || echo 'server 127.0.0.1:8002;' | sudo tee /etc/nginx/conf.d/matcha-backend-active.conf > /dev/null"
+    # active ports for frontend + backend). They live under
+    # /etc/nginx/upstream/ (NOT conf.d/) so nginx's automatic conf.d/*.conf
+    # glob does NOT pick them up at http context — a bare `server 127.0.0.1:8002;`
+    # is valid inside upstream{} but causes "directive 'server' has no opening
+    # '{}'" when nginx tries to parse it at http level.
+    ssh_cmd "sudo mkdir -p /etc/nginx/upstream"
+    ssh_cmd "[ -f /etc/nginx/upstream/matcha-frontend-active.conf ] || echo 'server 127.0.0.1:8082;' | sudo tee /etc/nginx/upstream/matcha-frontend-active.conf > /dev/null"
+    ssh_cmd "[ -f /etc/nginx/upstream/matcha-backend-active.conf ] || echo 'server 127.0.0.1:8002;' | sudo tee /etc/nginx/upstream/matcha-backend-active.conf > /dev/null"
+    # Clean up any stale active-conf files in conf.d/ from the old layout
+    ssh_cmd "sudo rm -f /etc/nginx/conf.d/matcha-backend-active.conf /etc/nginx/conf.d/matcha-frontend-active.conf"
 
     log_info "Syncing nginx config (deploy/nginx/*.conf)..."
     for f in deploy/nginx/*.conf; do

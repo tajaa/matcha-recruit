@@ -29,7 +29,7 @@ set +a
 
 AWS_REGION="${AWS_REGION:-us-west-1}"
 IMAGE="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/matcha-frontend:latest"
-ACTIVE_CONF=/etc/nginx/conf.d/matcha-frontend-active.conf
+ACTIVE_CONF=/etc/nginx/upstream/matcha-frontend-active.conf
 # Derive the compose network name from a container that's never blue-greened
 # (so its name never changes) rather than guessing the "<project>_<network>"
 # prefix compose generates. matcha-backend is now ALSO blue-green'd (see
@@ -39,6 +39,7 @@ NETWORK=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}
 # First run after this script lands: the conf file doesn't exist yet and the
 # live container is still the compose-managed "matcha-frontend" on 8082.
 if [ ! -f "$ACTIVE_CONF" ]; then
+    sudo mkdir -p /etc/nginx/upstream
     echo "server 127.0.0.1:8082;" | sudo tee "$ACTIVE_CONF" > /dev/null
     sudo nginx -t && sudo nginx -s reload
 fi

@@ -31,13 +31,14 @@ set +a
 
 AWS_REGION="${AWS_REGION:-us-west-1}"
 IMAGE="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/matcha-backend:latest"
-ACTIVE_CONF=/etc/nginx/conf.d/matcha-backend-active.conf
+ACTIVE_CONF=/etc/nginx/upstream/matcha-backend-active.conf
 # Stable anchor for network name — never blue-green'd, name never changes.
 NETWORK=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' matcha-redis)
 
 # First run after this script lands: the conf file doesn't exist yet and the
 # live container is still the compose-managed "matcha-backend" on 8002.
 if [ ! -f "$ACTIVE_CONF" ]; then
+    sudo mkdir -p /etc/nginx/upstream
     echo "server 127.0.0.1:8002;" | sudo tee "$ACTIVE_CONF" > /dev/null
     sudo nginx -t && sudo nginx -s reload
 fi
