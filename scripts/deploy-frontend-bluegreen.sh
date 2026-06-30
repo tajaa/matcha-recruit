@@ -44,7 +44,7 @@ if [ ! -f "$ACTIVE_CONF" ]; then
     sudo nginx -t && sudo nginx -s reload
 fi
 
-CUR_PORT=$(grep -oE '[0-9]+' "$ACTIVE_CONF" | head -1)
+CUR_PORT=$(grep -oE ':[0-9]+' "$ACTIVE_CONF" | head -1 | tr -d ':')
 if [ "$CUR_PORT" = "8082" ]; then
     NEW_PORT=8083
 else
