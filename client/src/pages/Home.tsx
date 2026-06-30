@@ -211,16 +211,6 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
       <div className="relative max-w-[1600px] mx-auto w-full px-6 sm:px-10 flex-1 flex flex-col justify-center py-8 sm:py-10">
         <div className="xl:grid xl:grid-cols-[1fr_1.05fr] xl:gap-14 2xl:gap-20 xl:items-center">
           <div>
-            <span
-              className="home-fade inline-flex items-center gap-2.5 self-start rounded-full px-3.5 py-1.5 mb-7"
-              style={{ border: `1px solid ${LINE_D}`, animationDelay: '0.1s' }}
-            >
-              <span className="home-pulse w-1.5 h-1.5 rounded-full" style={{ backgroundColor: MATCHA }} />
-              <span className="text-[11px] font-mono uppercase tracking-[0.18em]" style={{ color: BONE }}>
-                New — Fractional &amp; Consulting practices now open
-              </span>
-            </span>
-
             <h1
               className="home-rise tracking-[-0.02em] text-[clamp(2.75rem,9.5vw,9rem)] xl:text-[clamp(2.75rem,5.4vw,6.75rem)]"
               style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 0.86 }}

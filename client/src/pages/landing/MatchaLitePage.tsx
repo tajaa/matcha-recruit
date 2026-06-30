@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { motion, useInView } from 'framer-motion'
-import { ShieldAlert, FileText, MapPin, Bell, Brain, ClipboardList } from 'lucide-react'
+import { ShieldAlert, FileText, MapPin, Bell, Brain, ClipboardList, Mic } from 'lucide-react'
 
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
@@ -24,8 +24,16 @@ const FEATURES: { id: string; icon: typeof ShieldAlert; title: string; caption: 
     icon: ShieldAlert,
     title: 'Incident reporting',
     caption:
-      'A magic link per location — texted, QR-coded, or bookmarked at the register — opens intake pre-filled with that site. Reporters can type or just talk: dictate the account and Matcha fills the form for them to review. Photo evidence, witness capture, an anonymous channel — every incident logged with a defensible chain of custody, no compliance team required.',
+      'A magic link per location — texted, QR-coded, or bookmarked at the register — opens intake pre-filled with that site. Photo evidence, witness capture, an anonymous channel — every incident logged with a defensible chain of custody, no compliance team required.',
     visual: IncidentBars,
+  },
+  {
+    id: 'voice',
+    icon: Mic,
+    title: 'Voice intake',
+    caption:
+      'New: tap Dictate on any magic link and talk through what happened. Matcha transcribes in real time and fills the report — reporter, witnesses, location, date — for them to review before it submits. No typing, works hands-free on a phone in the moment.',
+    visual: VoiceWave,
   },
   {
     id: 'ir_analysis',
@@ -479,6 +487,28 @@ function useInViewRef() {
   const ref = useRef<HTMLDivElement>(null)
   const inView = useInView(ref, { margin: '-40px' })
   return { ref, inView }
+}
+
+function VoiceWave() {
+  const { ref, inView } = useInViewRef()
+  const heights = [0.3, 0.7, 0.5, 0.9, 0.4, 0.65, 0.35]
+  return (
+    <div ref={ref} className="flex items-center gap-[3px] h-8">
+      {heights.map((h, i) => (
+        <motion.div
+          key={i}
+          initial={{ height: 4 }}
+          animate={inView ? { height: [h * 14, h * 28, h * 14] } : { height: 4 }}
+          transition={{
+            duration: 1.1, repeat: Infinity, repeatType: 'mirror',
+            delay: i * 0.08, ease: 'easeInOut',
+          }}
+          className="w-[3px] rounded-full"
+          style={{ backgroundColor: '#d7ba7d' }}
+        />
+      ))}
+    </div>
+  )
 }
 
 function IncidentBars() {
