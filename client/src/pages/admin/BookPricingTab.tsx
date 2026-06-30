@@ -122,6 +122,9 @@ export default function BookPricingTab() {
   function updateBlock(id: string, patch: Partial<Block>) {
     setBlocks((prev) => prev && prev.map((b) => (b.id === id ? { ...b, ...patch } : b)))
   }
+  function removeBlock(id: string) {
+    setBlocks((prev) => prev && prev.filter((b) => b.id !== id))
+  }
   function updateCover(patch: Partial<Cover>) {
     setCover((prev) => ({ ...prev, ...patch }))
   }
@@ -280,7 +283,7 @@ export default function BookPricingTab() {
             <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
               <p className="text-xs text-zinc-500">Edit the one-pager copy. Tables fill from the inputs at left. Preview to see the styled packet.</p>
               {blocks.map((b) => (
-                <BlockEditor key={b.id} block={b} onChange={(patch) => updateBlock(b.id, patch)} />
+                <BlockEditor key={b.id} block={b} onChange={(patch) => updateBlock(b.id, patch)} onRemove={() => removeBlock(b.id)} />
               ))}
             </div>
           )}
@@ -319,28 +322,46 @@ function FragmentTier({ tier, onChange, onRemove }: { tier: DiscountTier; onChan
   )
 }
 
-function BlockEditor({ block, onChange }: { block: Block; onChange: (patch: Partial<Block>) => void }) {
+function BlockEditor({ block, onChange, onRemove }: { block: Block; onChange: (patch: Partial<Block>) => void; onRemove: () => void }) {
+  const removeBtn = (
+    <button type="button" onClick={onRemove} title="Remove block"
+      className="shrink-0 rounded px-1.5 text-xs text-zinc-600 hover:bg-red-500/15 hover:text-red-400">✕</button>
+  )
   if (!EDITABLE.has(block.kind)) {
     return (
-      <div className="rounded-md border border-dashed border-zinc-700 bg-zinc-800/40 px-3 py-2 text-xs italic text-zinc-500">
-        ▦ {COMPUTED_LABEL[block.kind] ?? block.kind}
+      <div className="flex items-center justify-between gap-2 rounded-md border border-dashed border-zinc-700 bg-zinc-800/40 px-3 py-2 text-xs italic text-zinc-500">
+        <span>▦ {COMPUTED_LABEL[block.kind] ?? block.kind}</span>
+        {removeBtn}
       </div>
     )
   }
   if (block.kind === 'h2' || block.kind === 'h3' || block.kind === 'h4') {
     const size = block.kind === 'h2' ? 'text-lg font-bold' : block.kind === 'h3' ? 'text-base font-semibold' : 'text-sm font-semibold'
     return (
-      <input value={block.text} onChange={(e) => onChange({ text: e.target.value })}
-        className={`w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-zinc-100 hover:border-zinc-700 focus:border-violet-500 focus:outline-none ${size}`} />
+      <div className="flex items-center gap-1">
+        <input value={block.text} onChange={(e) => onChange({ text: e.target.value })}
+          className={`w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-zinc-100 hover:border-zinc-700 focus:border-violet-500 focus:outline-none ${size}`} />
+        {removeBtn}
+      </div>
     )
   }
   if (block.kind === 'bullets') {
-    return <AutoTextarea value={block.items.join('\n')} onChange={(v) => onChange({ items: v.split('\n') })} className="text-sm text-zinc-300" placeholder="One per line" />
+    return (
+      <div className="flex items-start gap-1">
+        <AutoTextarea value={block.items.join('\n')} onChange={(v) => onChange({ items: v.split('\n') })} className="text-sm text-zinc-300" placeholder="One per line" />
+        {removeBtn}
+      </div>
+    )
   }
   const cls = block.kind === 'note' ? 'text-xs italic text-zinc-400'
     : block.kind === 'callout' ? 'text-sm text-zinc-200 border-l-2 border-violet-500/50 pl-3'
     : 'text-sm text-zinc-300'
-  return <AutoTextarea value={block.text} onChange={(v) => onChange({ text: v })} className={cls} />
+  return (
+    <div className="flex items-start gap-1">
+      <AutoTextarea value={block.text} onChange={(v) => onChange({ text: v })} className={cls} />
+      {removeBtn}
+    </div>
+  )
 }
 
 function AutoTextarea({ value, onChange, className = '', placeholder }: { value: string; onChange: (v: string) => void; className?: string; placeholder?: string }) {
