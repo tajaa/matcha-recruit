@@ -561,6 +561,15 @@ const VOICE_WAVEFORM = [0.3, 0.6, 0.85, 0.5, 0.95, 0.4, 0.7, 0.55, 0.9, 0.35, 0.
 const VOICE_STATUS = ['Tap to dictate', 'Listening…', 'Transcribing…']
 const VOICE_PHASE_COUNT = 4
 
+// Actual logged records (illustrative) + their AI analytics — a taste of the
+// incident log itself, not just the intake form. Each row: location, type,
+// auto-categorized class, severity.
+const RECENT_INCIDENTS = [
+  { loc: 'Atlanta — Store 7', type: 'Customer escalation', sev: 'High', color: '#ce5a4f' },
+  { loc: 'Phoenix — Warehouse', type: 'Slip / fall', sev: 'Med', color: '#F2C14E' },
+  { loc: 'Dallas — Store 3', type: 'Near-miss', sev: 'Low', color: '#86efac' },
+]
+
 function DailyInstrument() {
   const reduce = useReducedMotion()
   const total = DAILY_BARS.reduce((a, b) => a + b, 0)
@@ -617,6 +626,35 @@ function DailyInstrument() {
           <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: 'rgba(242,193,78,0.38)' }} />
           Safety
         </span>
+      </div>
+      {/* The log itself — actual logged records + their auto-categorization
+          and severity, so the card shows the output, not just the intake. */}
+      <div className="px-5 pt-3 pb-1 border-t" style={{ borderColor: LINE_D }}>
+        <div className="flex items-center justify-between mb-2 mt-1">
+          <span className="text-[8px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>Recent incidents</span>
+          <span className="text-[8px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>Auto-categorized</span>
+        </div>
+        {RECENT_INCIDENTS.map((r, i) => (
+          <motion.div
+            key={r.loc}
+            initial={reduce ? false : { opacity: 0, x: -6 }}
+            whileInView={reduce ? undefined : { opacity: 1, x: 0 }}
+            viewport={{ once: true, margin: '-20px' }}
+            transition={{ delay: i * 0.1, duration: 0.4 }}
+            className="flex items-center gap-2.5 py-1.5 border-t first:border-t-0"
+            style={{ borderColor: 'rgba(245,242,237,0.06)' }}
+          >
+            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: r.color }} />
+            <span className="text-[10px] truncate" style={{ color: BONE }}>{r.loc}</span>
+            <span className="text-[9px] font-mono truncate hidden sm:inline" style={{ color: ASH }}>{r.type}</span>
+            <span
+              className="ml-auto shrink-0 text-[8px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded"
+              style={{ color: r.color, backgroundColor: `${r.color}1a` }}
+            >
+              {r.sev}
+            </span>
+          </motion.div>
+        ))}
       </div>
       {/* Voice intake demo — same mockup as the dedicated section on
           /matcha-daily (magic link header, mic, waveform, extracted
