@@ -24,7 +24,7 @@ const FEATURES: { id: string; icon: typeof ShieldAlert; title: string; caption: 
     icon: ShieldAlert,
     title: 'Incident reporting',
     caption:
-      'Workplace and field safety intake — photo evidence, witness capture, and an anonymous reporting channel. Every incident logged with a defensible chain of custody, no compliance team required.',
+      'A magic link per location — texted, QR-coded, or bookmarked at the register — opens intake pre-filled with that site. Reporters can type or just talk: dictate the account and Matcha fills the form for them to review. Photo evidence, witness capture, an anonymous channel — every incident logged with a defensible chain of custody, no compliance team required.',
     visual: IncidentBars,
   },
   {
@@ -122,7 +122,7 @@ function Hero({ onContactClick }: { onContactClick: () => void }) {
           >
             <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#86efac' }} />
             <span className="text-[10px] sm:text-[11px] uppercase tracking-wider font-medium">
-              HR risk + compliance, bundled
+              Built for daily use, not a once-a-year binder
             </span>
           </div>
           <h1
@@ -140,10 +140,11 @@ function Hero({ onContactClick }: { onContactClick: () => void }) {
             className="mt-5 sm:mt-6 mx-auto max-w-xl text-[15px] sm:text-base px-2"
             style={{ color: MUTED, lineHeight: 1.55 }}
           >
-            Incident reporting, intelligent analysis, and OSHA 300 logs — plus a
-            full HR library with state guides, calculators, templates, and
-            a compliance audit. Bundled for small teams that don't need a
-            bespoke engagement.
+            The everyday intake layer for your team: a magic link per location
+            anyone can text, type into, or just talk into — no login, no app.
+            OSHA logs that fill themselves, risk insights surfaced straight from
+            your own data, and a full HR library underneath. Bundled for small
+            teams that don't need a bespoke engagement.
           </p>
           <div className="mt-8 sm:mt-10 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <button
@@ -200,8 +201,9 @@ function RiskInsightsShowcase() {
           </h2>
           <p className="mt-4 sm:mt-5 text-base sm:text-lg" style={{ color: MUTED, lineHeight: 1.6 }}>
             A location-by-location risk matrix, a live incident trend, and your
-            workers-comp posture — TRIR, DART, lost days — all auto-computed from
-            intake. The numbers a safety review actually asks for.
+            workers-comp posture — TRIR, DART, lost days — risk insights surfaced
+            directly from your own data, not a report someone has to assemble.
+            The numbers a safety review actually asks for.
           </p>
         </div>
 

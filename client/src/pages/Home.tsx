@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { AnimatePresence, motion, MotionConfig } from 'framer-motion'
 
 import MarketingNav from './landing/MarketingNav'
 import MarketingFooter from './landing/MarketingFooter'
@@ -58,6 +59,10 @@ const PRODUCTS: Product[] = [
     accent: '#7FB2C9',
   },
 ]
+
+// First 3 of the 4 — the carousel in the hero shows the software products;
+// Consulting is people, not an instrument, and stays text-only in the index below.
+const CAROUSEL_PRODUCTS = PRODUCTS.slice(0, 3)
 
 const MARQUEE_WORDS = [
   'WORKPLACE SAFETY',
@@ -152,6 +157,10 @@ function PageStyle() {
         0%, 100% { opacity: 1; transform: scale(1); }
         50% { opacity: 0.45; transform: scale(0.8); }
       }
+      @keyframes showcaseProgress {
+        from { transform: scaleX(0); }
+        to { transform: scaleX(1); }
+      }
       .home-rise > span { display: inline-block; animation: homeRise 0.9s cubic-bezier(0.16,1,0.3,1) both; }
       .home-fade { opacity: 0; animation: homeFadeUp 0.8s ease-out forwards; }
       .home-marquee-track { animation: homeMarquee 32s linear infinite; }
@@ -196,15 +205,6 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
 
       {/* Headline + supporting content */}
       <div className="relative max-w-[1600px] mx-auto w-full px-6 sm:px-10 flex-1 flex flex-col justify-center py-8 sm:py-10">
-        {/* Risk card — floats in upper-right dead space on large screens. Decorative. */}
-        <div
-          className="hidden lg:block absolute top-1/2 -translate-y-1/2 right-6 xl:right-10 w-[480px] xl:w-[560px] home-fade z-10"
-          style={{ animationDelay: '0.6s' }}
-          aria-hidden
-        >
-          <RiskCard />
-        </div>
-
         <span
           className="home-fade inline-flex items-center gap-2.5 self-start rounded-full px-3.5 py-1.5 mb-7"
           style={{ border: `1px solid ${LINE_D}`, animationDelay: '0.1s' }}
@@ -259,24 +259,14 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
           </div>
         </div>
 
-        {/* Inline four-vertical index — quick nav + a preview of what's below */}
+        {/* Product carousel — same hero as the headline, not a separate section.
+            Floats in the dead space right of the (narrower-than-container) text
+            on large screens; drops to normal flow below the CTAs on mobile. */}
         <div
-          className="mt-10 pt-6 border-t grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4 home-fade"
-          style={{ borderColor: LINE_D, animationDelay: '0.8s' }}
+          className="mt-12 lg:mt-0 lg:absolute lg:top-1/2 lg:-translate-y-1/2 lg:right-6 xl:right-10 w-full sm:w-[420px] lg:w-[440px] xl:w-[480px] home-fade"
+          style={{ animationDelay: '0.8s' }}
         >
-          {PRODUCTS.map((p) => (
-            <Link key={p.name} to={p.to} className="group flex items-baseline gap-3">
-              <span className="font-mono text-xs" style={{ color: p.accent }}>
-                {p.n}
-              </span>
-              <span
-                className="text-base sm:text-lg tracking-tight transition-colors"
-                style={{ fontFamily: DISPLAY, fontWeight: 400, color: BONE }}
-              >
-                <span className="group-hover:opacity-60 transition-opacity">{p.name}</span>
-              </span>
-            </Link>
-          ))}
+          <ProductCarousel />
         </div>
       </div>
     </section>
@@ -312,9 +302,11 @@ function Marquee() {
 }
 
 // ---------------------------------------------------------------------------
-// Risk card — editorial "instrument" showing how we model risk. Composite
-// index readout + an animated lognormal loss-distribution curve. Palette-locked
-// to the hero (noir/bone/matcha/Fraunces); pure SVG + one rAF loop, no deps.
+// Instrument carousel — bespoke "instrument" graphics in the hero's own
+// palette (noir/bone/Fraunces), not the real product pages' dense dashboards
+// scaled down. Each is self-contained SVG/CSS + a count-up, same restrained
+// language as the rest of the hero. Autoplays (paused on hover), dots only —
+// floats in the same hero as the headline, not a separate section.
 // ---------------------------------------------------------------------------
 
 const RISK_BANDS = [
@@ -336,22 +328,20 @@ function lognormal(x: number, mu = Math.log(0.32), sigma = 0.62) {
 }
 
 const VBW = 320
-const VBH = 132
+const VBH = 110
 
-// Curve heights for a given animation phase — the loss-distribution peak drifts
-// and its spread breathes over time so the curve is always in motion.
 function curveHeights(phase: number) {
   const mu = Math.log(0.3) + 0.12 * Math.sin(phase)
   const sigma = 0.6 + 0.08 * Math.sin(phase * 0.7 + 1)
   const raw = Array.from({ length: CURVE_N }, (_, i) => lognormal((i + 0.5) / CURVE_N, mu, sigma))
   const max = Math.max(...raw)
-  return raw.map((v) => v / max) // normalized 0..1
+  return raw.map((v) => v / max)
 }
 
 function curvePath(phase: number) {
   const pts = curveHeights(phase).map((h, i) => {
     const x = (i / (CURVE_N - 1)) * VBW
-    const y = VBH - h * (VBH - 14) - 6 // 6px floor padding, 14px headroom
+    const y = VBH - h * (VBH - 10) - 4
     return [x, y] as const
   })
   const line = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
@@ -359,172 +349,310 @@ function curvePath(phase: number) {
   return { line, area }
 }
 
-function RiskCard() {
-  const TARGET = 73
-  const reduce =
-    typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+function useReducedMotion() {
+  return useRef(
+    typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
+  ).current
+}
 
+function InstrumentFrame({ label, accent, children }: { label: string; accent: string; children: React.ReactNode }) {
+  return (
+    <div className="w-full rounded-2xl backdrop-blur-sm" style={{ border: `1px solid ${LINE_D}`, backgroundColor: 'rgba(245,242,237,0.025)' }}>
+      <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b" style={{ borderColor: LINE_D }}>
+        <span className="text-[10px] font-mono uppercase tracking-[0.22em]" style={{ color: ASH }}>
+          {label}
+        </span>
+        <span className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.18em]" style={{ color: ASH }}>
+          <span className="home-pulse w-1.5 h-1.5 rounded-full" style={{ backgroundColor: accent }} />
+          Live
+        </span>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function PlatformInstrument() {
+  const TARGET = 73
+  const reduce = useReducedMotion()
   const [score, setScore] = useState(reduce ? TARGET : 0)
-  const [drawn, setDrawn] = useState(reduce ? 1 : 0) // 0..1 draw-on progress
-  const [scanX, setScanX] = useState(-1) // -1 hidden, else 0..1
+  const [drawn, setDrawn] = useState(reduce ? 1 : 0)
   const [phase, setPhase] = useState(0)
   const raf = useRef(0)
   const start = useRef(0)
 
   useEffect(() => {
     if (reduce) return
-    const DUR = 1500 // intro draw-on + count-up
-    const SCAN = 3400 // scan sweep period (loops forever)
-
+    const DUR = 1400
     const loop = (now: number) => {
       if (!start.current) start.current = now
       const e = now - start.current
       const intro = Math.min(1, e / DUR)
       const eased = 1 - Math.pow(1 - intro, 3)
       setDrawn(eased)
-      setPhase(e / 1100) // curve perpetually drifts/breathes
-      // count up to target, then gentle ±1 live jitter
+      setPhase(e / 1100)
       const jitter = intro >= 1 ? Math.round(Math.sin(e / 650) * 1.4) : 0
       setScore(Math.round(eased * TARGET) + jitter)
-      setScanX((e % SCAN) / SCAN) // continuous left→right sweep
       raf.current = requestAnimationFrame(loop)
     }
-
     raf.current = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf.current)
   }, [reduce])
 
   const { line, area } = curvePath(phase)
   const band = riskBand(score)
-  const pathLen = VBW * 1.4 // generous over-estimate for dashoffset draw-on
-  const ticks = [0.5, 1]
-  const pMarkers = [
-    { f: 0.18, l: 'P50' },
-    { f: 0.46, l: 'P90' },
-    { f: 0.74, l: 'P99' },
-  ]
+  const pathLen = VBW * 1.4
 
   return (
-    <div
-      className="w-full rounded-2xl backdrop-blur-sm"
-      style={{ border: `1px solid ${LINE_D}`, backgroundColor: 'rgba(245,242,237,0.025)' }}
-    >
-      {/* header */}
-      <div
-        className="flex items-center justify-between px-5 pt-4 pb-3 border-b"
-        style={{ borderColor: LINE_D }}
-      >
-        <span className="text-[10px] font-mono uppercase tracking-[0.22em]" style={{ color: ASH }}>
-          Composite Risk Index
-        </span>
-        <span
-          className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.18em]"
-          style={{ color: ASH }}
-        >
-          <span className="home-pulse w-1.5 h-1.5 rounded-full" style={{ backgroundColor: MATCHA }} />
-          Modeled
-        </span>
-      </div>
-
-      {/* readout */}
+    <InstrumentFrame label="Composite Risk Index" accent={MATCHA}>
       <div className="px-5 pt-4 flex items-end justify-between">
-        <span
-          className="tabular-nums leading-none"
-          style={{ fontFamily: DISPLAY, fontWeight: 300, fontSize: '5.5rem', color: band.color }}
-        >
+        <span className="tabular-nums leading-none" style={{ fontFamily: DISPLAY, fontWeight: 300, fontSize: '3.5rem', color: band.color }}>
           {score}
-          <span className="ml-1 align-top text-[1rem]" style={{ color: ASH }}>
-            /100
-          </span>
+          <span className="ml-1 align-top text-[0.9rem]" style={{ color: ASH }}>/100</span>
         </span>
         <div className="text-right">
-          <div
-            className="text-[11px] font-mono uppercase tracking-[0.2em]"
-            style={{ color: band.color }}
-          >
-            {band.label}
-          </div>
-          <div className="text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>
-            WC · EPL · Compliance
-          </div>
+          <div className="text-[11px] font-mono uppercase tracking-[0.2em]" style={{ color: band.color }}>{band.label}</div>
+          <div className="text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>WC · EPL · Compliance</div>
         </div>
       </div>
-
-      {/* curve */}
-      <div className="px-3 pb-3 pt-2">
-        <svg
-          viewBox={`0 0 ${VBW} ${VBH}`}
-          preserveAspectRatio="none"
-          className="w-full"
-          style={{ height: 230 }}
-        >
+      <div className="px-3 pb-4 pt-2">
+        <svg viewBox={`0 0 ${VBW} ${VBH}`} preserveAspectRatio="none" className="w-full" style={{ height: 110 }}>
           <defs>
-            <linearGradient id="riskStroke" x1="0" y1="0" x2="1" y2="0">
+            <linearGradient id="homeRiskStroke" x1="0" y1="0" x2="1" y2="0">
               <stop offset="0%" stopColor="#86efac" />
               <stop offset="44%" stopColor="#d9b65f" />
               <stop offset="100%" stopColor="#ce5a4f" />
             </linearGradient>
-            <linearGradient id="riskFill" x1="0" y1="0" x2="0" y2="1">
+            <linearGradient id="homeRiskFill" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#d9b65f" stopOpacity="0.38" />
-              <stop offset="48%" stopColor="#c07a4a" stopOpacity="0.16" />
               <stop offset="100%" stopColor="#ce5a4f" stopOpacity="0" />
             </linearGradient>
           </defs>
-          {ticks.map((f) => (
-            <line
-              key={f}
-              x1={0}
-              x2={VBW}
-              y1={VBH - f * (VBH - 14)}
-              y2={VBH - f * (VBH - 14)}
-              stroke={LINE_D}
-              strokeWidth={1}
-              strokeDasharray={f === 1 ? '0' : '2 4'}
-            />
-          ))}
-          <path d={area} fill="url(#riskFill)" opacity={drawn} />
+          <path d={area} fill="url(#homeRiskFill)" opacity={drawn} />
           <path
             d={line}
             fill="none"
-            stroke="url(#riskStroke)"
+            stroke="url(#homeRiskStroke)"
             strokeWidth={2}
             vectorEffect="non-scaling-stroke"
             strokeDasharray={pathLen}
             strokeDashoffset={pathLen * (1 - drawn)}
           />
-          {pMarkers.map((m) => (
-            <line
-              key={m.l}
-              x1={m.f * VBW}
-              x2={m.f * VBW}
-              y1={6}
-              y2={VBH}
-              stroke={BONE}
-              strokeOpacity={0.18 * drawn}
-              strokeWidth={1}
-              strokeDasharray="2 3"
-            />
-          ))}
-          {scanX >= 0 && (
-            <line
-              x1={scanX * VBW}
-              x2={scanX * VBW}
-              y1={0}
-              y2={VBH}
-              stroke={MATCHA}
-              strokeWidth={1.5}
-              opacity={0.5}
-            />
-          )}
         </svg>
-        <div
-          className="flex justify-between mt-1 px-1 text-[9px] font-mono uppercase tracking-[0.16em]"
-          style={{ color: ASH }}
-        >
+        <div className="flex justify-between mt-1 px-1 text-[9px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>
           <span>$0</span>
           <span>Annual loss exposure →</span>
           <span>PML</span>
         </div>
+      </div>
+    </InstrumentFrame>
+  )
+}
+
+const DAILY_BARS = [3, 5, 2, 6, 4, 1, 4] // Mon..Sun — illustrative
+const DAILY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+
+function DailyInstrument() {
+  const reduce = useReducedMotion()
+  const total = DAILY_BARS.reduce((a, b) => a + b, 0)
+  const max = Math.max(...DAILY_BARS)
+
+  return (
+    <InstrumentFrame label="Daily Intake" accent="#F2C14E">
+      <div className="px-5 pt-4 flex items-end justify-between">
+        <span className="tabular-nums leading-none" style={{ fontFamily: DISPLAY, fontWeight: 300, fontSize: '3.5rem', color: '#F2C14E' }}>
+          {total}
+          <span className="ml-1 align-top text-[0.9rem]" style={{ color: ASH }}>/week</span>
+        </span>
+        <div className="text-right">
+          <div className="text-[11px] font-mono uppercase tracking-[0.2em]" style={{ color: '#F2C14E' }}>Reports</div>
+          <div className="text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>via magic link</div>
+        </div>
+      </div>
+      <div className="px-5 pt-6 pb-2 flex items-end gap-2.5" style={{ height: 96 }}>
+        {DAILY_BARS.map((v, i) => {
+          const h = (v / max) * 64
+          return (
+            <div key={i} className="flex-1 flex flex-col items-center gap-1.5">
+              <motion.div
+                className="w-full rounded-t-sm"
+                style={{ backgroundColor: 'rgba(242,193,78,0.55)' }}
+                initial={{ height: 4 }}
+                animate={reduce ? { height: h } : { height: [4, h, h * 0.85, h] }}
+                transition={reduce ? { duration: 0 } : { duration: 2.2, repeat: Infinity, repeatType: 'mirror', delay: i * 0.12, ease: 'easeInOut' }}
+              />
+              <span className="text-[8px] font-mono" style={{ color: ASH }}>{DAILY_LABELS[i]}</span>
+            </div>
+          )
+        })}
+      </div>
+      <div className="flex items-center justify-between px-5 pb-4 pt-3 border-t" style={{ borderColor: LINE_D }}>
+        <span className="text-[9px] font-mono uppercase tracking-[0.16em] truncate" style={{ color: ASH }}>
+          hey-matcha.com/intake/atl7
+        </span>
+        <span className="text-[9px] font-mono uppercase tracking-[0.16em] shrink-0 ml-2" style={{ color: ASH }}>
+          Talk or type
+        </span>
+      </div>
+    </InstrumentFrame>
+  )
+}
+
+const COMPLIANCE_CHIPS = [
+  { code: 'CA', resolved: true },
+  { code: 'NY', resolved: true },
+  { code: 'FED', resolved: false },
+  { code: 'WA', resolved: false },
+  { code: 'IL', resolved: false },
+  { code: 'TX', resolved: false },
+]
+
+function ComplianceInstrument() {
+  const TARGET = 60
+  const reduce = useReducedMotion()
+  const [score, setScore] = useState(reduce ? TARGET : 0)
+
+  useEffect(() => {
+    if (reduce) return
+    const DUR = 1200
+    let raf = 0
+    let start = 0
+    const loop = (now: number) => {
+      if (!start) start = now
+      const e = now - start
+      const intro = Math.min(1, e / DUR)
+      const eased = 1 - Math.pow(1 - intro, 3)
+      setScore(Math.round(eased * TARGET))
+      if (intro < 1) raf = requestAnimationFrame(loop)
+    }
+    raf = requestAnimationFrame(loop)
+    return () => cancelAnimationFrame(raf)
+  }, [reduce])
+
+  const resolvedCount = COMPLIANCE_CHIPS.filter((c) => c.resolved).length
+
+  return (
+    <InstrumentFrame label="Compliance Monitor" accent="#E2725B">
+      <div className="px-5 pt-4 flex items-end justify-between">
+        <span className="tabular-nums leading-none" style={{ fontFamily: DISPLAY, fontWeight: 300, fontSize: '3.5rem', color: '#E2725B' }}>
+          {score}
+          <span className="ml-1 align-top text-[0.9rem]" style={{ color: ASH }}>/100</span>
+        </span>
+        <div className="text-right">
+          <div className="text-[11px] font-mono uppercase tracking-[0.2em]" style={{ color: '#E2725B' }}>
+            {resolvedCount}/{COMPLIANCE_CHIPS.length} resolved
+          </div>
+          <div className="text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>6 jurisdictions</div>
+        </div>
+      </div>
+      <div className="px-5 pt-6 pb-4 flex flex-wrap gap-2">
+        {COMPLIANCE_CHIPS.map((c) => (
+          <span
+            key={c.code}
+            className="px-2.5 py-1 rounded-full text-[10px] font-mono uppercase tracking-wider"
+            style={{
+              border: `1px solid ${c.resolved ? 'rgba(134,239,172,0.35)' : 'rgba(226,114,91,0.35)'}`,
+              color: c.resolved ? '#86efac' : '#E2725B',
+              backgroundColor: c.resolved ? 'rgba(134,239,172,0.08)' : 'rgba(226,114,91,0.08)',
+            }}
+          >
+            {c.code} {c.resolved ? '✓' : '!'}
+          </span>
+        ))}
+      </div>
+      <div className="flex items-center justify-between px-5 pb-4 pt-3 border-t" style={{ borderColor: LINE_D }}>
+        <span className="text-[9px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>247 requirements scanned</span>
+        <span className="text-[9px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>Updated just now</span>
+      </div>
+    </InstrumentFrame>
+  )
+}
+
+const INSTRUMENT_COMPONENTS = [PlatformInstrument, DailyInstrument, ComplianceInstrument]
+const SHOWCASE_INTERVAL = 6000
+
+function ProductCarousel() {
+  const [index, setIndex] = useState(0)
+  const [direction, setDirection] = useState(1)
+  const [paused, setPaused] = useState(false)
+  const reduceMotion = useReducedMotion()
+
+  const goTo = (next: number, dir: number) => {
+    setDirection(dir)
+    setIndex(((next % CAROUSEL_PRODUCTS.length) + CAROUSEL_PRODUCTS.length) % CAROUSEL_PRODUCTS.length)
+  }
+
+  useEffect(() => {
+    if (paused || reduceMotion) return
+    const t = window.setInterval(() => goTo(index + 1, 1), SHOWCASE_INTERVAL)
+    return () => window.clearInterval(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paused, index, reduceMotion])
+
+  const slide = CAROUSEL_PRODUCTS[index]
+  const Instrument = INSTRUMENT_COMPONENTS[index]
+
+  const variants = {
+    enter: (dir: number) => ({ x: dir > 0 ? 32 : -32, opacity: 0 }),
+    center: { x: 0, opacity: 1 },
+    exit: (dir: number) => ({ x: dir > 0 ? -32 : 32, opacity: 0 }),
+  }
+
+  return (
+    <div onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+      <MotionConfig reducedMotion="user">
+        <Link to={slide.to} className="group block">
+          <AnimatePresence mode="wait" custom={direction} initial={false}>
+            <motion.div
+              key={slide.n}
+              custom={direction}
+              variants={variants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <Instrument />
+            </motion.div>
+          </AnimatePresence>
+        </Link>
+      </MotionConfig>
+
+      <div className="flex items-center justify-between mt-3">
+        <span className="text-[11px] font-mono uppercase tracking-[0.18em]" style={{ color: ASH }}>
+          {slide.n} — {slide.name}
+        </span>
+        <Link
+          to={slide.to}
+          className="text-[11px] font-mono uppercase tracking-[0.18em] transition-opacity hover:opacity-60"
+          style={{ color: ASH }}
+        >
+          View →
+        </Link>
+      </div>
+
+      <div className="mt-3 flex items-center gap-2">
+        {CAROUSEL_PRODUCTS.map((s, i) => (
+          <button
+            key={s.n}
+            type="button"
+            aria-label={`Go to ${s.name}`}
+            onClick={() => goTo(i, i > index ? 1 : -1)}
+            className="relative h-1.5 rounded-full overflow-hidden transition-all duration-300"
+            style={{ width: i === index ? 28 : 8, backgroundColor: i === index ? 'rgba(245,242,237,0.18)' : LINE_D }}
+          >
+            {i === index && !paused && !reduceMotion && (
+              <span
+                key={index}
+                className="absolute inset-0 origin-left"
+                style={{ backgroundColor: s.accent, animation: `showcaseProgress ${SHOWCASE_INTERVAL}ms linear` }}
+              />
+            )}
+            {i === index && (paused || reduceMotion) && (
+              <span className="absolute inset-0" style={{ backgroundColor: s.accent }} />
+            )}
+          </button>
+        ))}
       </div>
     </div>
   )
