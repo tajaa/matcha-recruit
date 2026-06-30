@@ -20,9 +20,14 @@ from .deal_pricing import Block, TIER_PEPM
 
 
 class DiscountTier(BaseModel):
-    """Pooled committed-seat threshold → volume discount % off the Lite list PEPM."""
+    """Pooled committed-seat threshold → volume discount % off the Lite list PEPM.
+
+    `max_seats` is an optional upper cap. Set it on the final tier to cap the schedule —
+    seats beyond the cap render as "available upon request" (custom-quoted). Leave it None
+    for an open-ended top tier (the historical behavior)."""
     min_seats: int = Field(ge=0)
     discount_pct: int = Field(ge=0, le=90)
+    max_seats: Optional[int] = Field(default=None, ge=0)
 
 
 # Both the threshold and the % are editable per deal (and rows can be added/removed in the UI).

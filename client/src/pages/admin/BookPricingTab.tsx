@@ -6,7 +6,7 @@ import { getTemplate, saveTemplate } from '../../api/dealTemplates'
 import SaveTemplateButton from './SaveTemplateButton'
 
 type Block = { id: string; kind: string; text: string; items: string[]; new_page: boolean; column: string }
-type DiscountTier = { min_seats: number; discount_pct: number }
+type DiscountTier = { min_seats: number; discount_pct: number; max_seats?: number | null }
 type ClientRow = { name: string; seats: string }
 type BookTemplate = { blocks: Block[]; discount_tiers: DiscountTier[]; list_pepm: number }
 
@@ -171,9 +171,10 @@ export default function BookPricingTab() {
           </Section>
 
           <Section title="Volume discount tiers">
-            <p className="text-xs text-zinc-500">Both the seat threshold and the % are editable. Pooled committed seats pick the rate.</p>
-            <div className="grid grid-cols-[1fr_1fr_auto] items-center gap-x-2 gap-y-2 text-xs">
+            <p className="text-xs text-zinc-500">Seat threshold and % are editable; pooled committed seats pick the rate. Leave the last tier's max blank for open-ended, or set a cap — seats beyond it are quoted on request.</p>
+            <div className="grid grid-cols-[1fr_1fr_1fr_auto] items-center gap-x-2 gap-y-2 text-xs">
               <span className="font-medium text-zinc-500">Min seats</span>
+              <span className="font-medium text-zinc-500">Max seats</span>
               <span className="font-medium text-zinc-500">Discount %</span>
               <span />
               {tiers.map((t, i) => (
@@ -246,6 +247,11 @@ function FragmentTier({ tier, onChange, onRemove }: { tier: DiscountTier; onChan
       <input
         type="number" min={0} value={tier.min_seats}
         onChange={(e) => onChange({ min_seats: int(e.target.value, tier.min_seats) })}
+        className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 focus:border-violet-500 focus:outline-none"
+      />
+      <input
+        type="number" min={0} value={tier.max_seats ?? ''} placeholder="∞"
+        onChange={(e) => onChange({ max_seats: e.target.value.trim() === '' ? null : int(e.target.value, tier.max_seats ?? 0) })}
         className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 focus:border-violet-500 focus:outline-none"
       />
       <input

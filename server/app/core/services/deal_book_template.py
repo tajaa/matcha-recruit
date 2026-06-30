@@ -37,20 +37,35 @@ def _cover(inp: BookInputs, q: BookQuote, date_str: str) -> str:
 
 def _t_discount(inp: BookInputs, q: BookQuote) -> str:
     tiers = inp.resolved_tiers()
+    n = len(tiers)
     rows = []
     for i, t in enumerate(tiers):
-        if i + 1 < len(tiers):
+        # Upper bound of the band: an explicit cap wins; else the next tier's floor; else open-ended.
+        if t.max_seats is not None:
+            hi = t.max_seats
+        elif i + 1 < n:
             hi = tiers[i + 1].min_seats - 1
-            band = f"Up to {hi:,}" if t.min_seats == 0 else f"{t.min_seats:,}&ndash;{hi:,}"
         else:
+            hi = None
+        if hi is None:
             band = f"{t.min_seats:,}+"
+        elif t.min_seats == 0:
+            band = f"Up to {hi:,}"
+        else:
+            band = f"{t.min_seats:,}&ndash;{hi:,}"
+        tier_pepm = round(inp.list_pepm * (1 - t.discount_pct / 100.0), 2)
         active = q.applied_tier_min is not None and t.min_seats == q.applied_tier_min
         cls = ' class="row-bold"' if active else ""
         mark = " &larr; your book" if active else ""
         rows.append(f'<tr{cls}><td style="text-align:left"><strong>{band}</strong>{mark}</td>'
-                    f'<td>{t.discount_pct}%</td></tr>')
+                    f'<td>{t.discount_pct}%</td><td>{_p(tier_pepm)}</td></tr>')
+    # A capped final tier means anything beyond the cap is custom-quoted.
+    last = tiers[-1] if tiers else None
+    if last is not None and last.max_seats is not None:
+        rows.append(f'<tr><td style="text-align:left"><strong>{last.max_seats + 1:,}+</strong></td>'
+                    f'<td colspan="2"><em>Available upon request</em></td></tr>')
     return ('<table><thead><tr><th style="text-align:left">Committed Seats</th>'
-            f'<th>Volume Discount</th></tr></thead><tbody>{"".join(rows)}</tbody></table>')
+            f'<th>Volume Discount</th><th>PEPM</th></tr></thead><tbody>{"".join(rows)}</tbody></table>')
 
 
 def _t_roster(q: BookQuote) -> str:

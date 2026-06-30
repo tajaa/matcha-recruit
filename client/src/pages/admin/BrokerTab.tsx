@@ -98,6 +98,16 @@ export default function BrokerTab() {
   function updateTier(i: number, patch: Partial<MarginTier>) {
     setMarginTiers((prev) => prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)))
   }
+  function addTier() {
+    setMarginTiers((prev) => {
+      const last = prev[prev.length - 1]
+      const min = last ? (last.max_employees >= 10_000_000 ? last.min_employees : last.max_employees + 1) : 0
+      return [...prev, { label: 'New Tier', min_employees: min, max_employees: 10_000_000, margin_pct: 10 }]
+    })
+  }
+  function removeTier(i: number) {
+    setMarginTiers((prev) => prev.filter((_, idx) => idx !== i))
+  }
 
   async function saveTpl() {
     // Reusable template = program copy + margin-tier schedule; broker/sample-client are per-deal.
@@ -151,13 +161,16 @@ export default function BrokerTab() {
           </Section>
 
           <Section title="Margin tiers">
-            <div className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-2 text-xs">
+            <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-3 gap-y-2 text-xs">
               <span className="font-medium text-zinc-500">Tier · book range</span>
               <span className="font-medium text-zinc-500">Margin %</span>
+              <span />
               {marginTiers.map((t, i) => (
-                <FragmentTier key={t.label} tier={t} onChange={(patch) => updateTier(i, patch)} />
+                <FragmentTier key={i} tier={t} onChange={(patch) => updateTier(i, patch)} onRemove={() => removeTier(i)} />
               ))}
             </div>
+            <button type="button" onClick={addTier}
+              className="text-xs font-medium text-violet-400 hover:text-violet-300">+ Add tier</button>
           </Section>
 
           <Section title="Sample client">
@@ -194,12 +207,15 @@ export default function BrokerTab() {
   )
 }
 
-function FragmentTier({ tier, onChange }: { tier: MarginTier; onChange: (patch: Partial<MarginTier>) => void }) {
+function FragmentTier({ tier, onChange, onRemove }: { tier: MarginTier; onChange: (patch: Partial<MarginTier>) => void; onRemove: () => void }) {
   const isUnbounded = tier.max_employees >= 10_000_000
   return (
     <>
       <div className="flex items-center gap-1.5 text-sm text-zinc-300">
-        <b className="shrink-0">{tier.label}</b>
+        <input
+          value={tier.label} onChange={(e) => onChange({ label: e.target.value })}
+          className="w-20 shrink-0 rounded-md border border-transparent bg-transparent px-1 py-0.5 font-bold text-zinc-100 hover:border-zinc-700 focus:border-violet-500 focus:outline-none"
+        />
         <input
           type="number" min={0} value={tier.min_employees}
           onChange={(e) => onChange({ min_employees: int(e.target.value, tier.min_employees) })}
@@ -217,6 +233,8 @@ function FragmentTier({ tier, onChange }: { tier: MarginTier; onChange: (patch: 
         onChange={(e) => onChange({ margin_pct: int(e.target.value, tier.margin_pct) })}
         className="w-20 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-sm text-zinc-100 focus:border-violet-500 focus:outline-none"
       />
+      <button type="button" onClick={onRemove} title="Remove tier"
+        className="shrink-0 rounded px-1.5 text-xs text-zinc-600 hover:bg-red-500/15 hover:text-red-400">✕</button>
     </>
   )
 }
