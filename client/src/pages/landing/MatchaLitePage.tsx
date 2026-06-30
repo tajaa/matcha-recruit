@@ -134,7 +134,7 @@ function Hero({ onContactClick }: { onContactClick: () => void }) {
               fontSize: 'clamp(2.25rem, 7vw, 5.25rem)',
             }}
           >
-            Matcha Lite.
+            Matcha Daily.
           </h1>
           <p
             className="mt-5 sm:mt-6 mx-auto max-w-xl text-[15px] sm:text-base px-2"
@@ -358,7 +358,7 @@ const OSHA_ROWS = [
 ]
 
 const OSHA_BULLETS = [
-  { label: 'Automatic recordability', desc: 'Every incident screened against 29 CFR 1904 — first aid vs. medical treatment, restricted duty, days away, loss of consciousness — recordable or not, decided for you.' },
+  { label: 'Automatic recordability', desc: 'Every incident screened against 29 CFR 1904 — first aid vs. medical treatment, restricted duty, days away, loss of consciousness — recordable or not, flagged for you.' },
   { label: 'Forms 300, 300A & 301', desc: 'The full set generated from one intake: the 300 log, the 300A annual summary, and a 301 incident report per case.' },
   { label: 'Days away, restricted & transfer', desc: 'DART rate, lost-day and restricted-duty counts roll up automatically from each incident’s status.' },
   { label: 'Electronic ITA submission', desc: 'Establishments required to e-file get an export formatted for OSHA’s Injury Tracking Application.' },

@@ -38,16 +38,16 @@ const PRODUCTS: Product[] = [
   },
   {
     n: '02',
-    name: 'Matcha Lite',
+    name: 'Matcha Daily',
     blurb: 'Incident reporting, OSHA 300 logs, and a full HR library. Bundled for small teams.',
-    to: '/matcha-lite',
+    to: '/matcha-daily',
     accent: '#F2C14E',
   },
   {
     n: '03',
-    name: 'Fractional',
-    blurb: 'Senior HR leaders, embedded. CHRO to Director — without the full-time cost.',
-    to: '/fractional',
+    name: 'Compliance',
+    blurb: 'Multi-state regulatory tracking, jurisdiction-aware alerts, and audit-ready records.',
+    to: '/compliance',
     accent: '#E2725B',
   },
   {
@@ -65,7 +65,7 @@ const MARQUEE_WORDS = [
   'EMPLOYEE RELATIONS',
   'RISK MANAGEMENT',
   'PEOPLE STRATEGY',
-  'FRACTIONAL LEADERSHIP',
+  'REGULATORY TRACKING',
 ]
 
 const HOME_JSON_LD = {
@@ -74,11 +74,11 @@ const HOME_JSON_LD = {
   name: 'Matcha',
   url: 'https://hey-matcha.com/',
   description:
-    'Full-service HR — an agentic risk & compliance platform, Matcha Lite for small teams, embedded fractional HR leadership, and senior advisory.',
+    'Full-service HR — an agentic risk & compliance platform, Matcha Daily for small teams, multi-state compliance tracking, and senior advisory.',
   makesOffer: [
     { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'HR Risk & Compliance Platform' } },
-    { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Matcha Lite — Incident Reporting & HR Records' } },
-    { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Fractional HR Leadership' } },
+    { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Matcha Daily — Incident Reporting & HR Records' } },
+    { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Compliance — Multi-State Regulatory Tracking' } },
     { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'HR & Compliance Consulting' } },
   ],
 }
@@ -87,9 +87,9 @@ export default function Home() {
   const [isPricingOpen, setIsPricingOpen] = useState(false)
 
   useSEO({
-    title: 'Matcha — Full-Service HR: Platform, Lite, Fractional & Consulting',
+    title: 'Matcha — Full-Service HR: Platform, Daily, Compliance & Consulting',
     description:
-      'Full-service HR for modern companies — an agentic risk & compliance platform, Matcha Lite for small teams, embedded fractional HR leaders, and senior advisory. One standard of rigor across software and people.',
+      'Full-service HR for modern companies — an agentic risk & compliance platform, Matcha Daily for small teams, multi-state compliance tracking, and senior advisory. One standard of rigor across software and people.',
     canonical: 'https://hey-matcha.com/',
     jsonLd: HOME_JSON_LD,
   })

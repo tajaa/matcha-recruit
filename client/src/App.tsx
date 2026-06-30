@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import { lazy, Suspense } from 'react'
 import Home from './pages/Home'
 import Login from './pages/Login'
@@ -84,7 +84,8 @@ export default function App() {
         <Route path="/" element={isCappeHost ? <CappeRoutes /> : <Home />} />
         <Route path="/platform" element={<Landing />} />
         <Route path="/matcha-work" element={<MatchaWorkPage />} />
-        <Route path="/matcha-lite" element={<MatchaLitePage />} />
+        <Route path="/matcha-daily" element={<MatchaLitePage />} />
+        <Route path="/matcha-lite" element={<Navigate to="/matcha-daily" replace />} />
         {/* Marketing page for the standalone Compliance product (distinct from
             /compliance/signup + /compliance/onboarding, which are exact paths). */}
         <Route path="/compliance" element={<CompliancePage />} />
