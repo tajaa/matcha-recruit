@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AnimatePresence, motion, MotionConfig } from 'framer-motion'
+import { AlertTriangle, CheckCircle2, Loader2, Mic, Sparkles } from 'lucide-react'
 
 import MarketingNav from './landing/MarketingNav'
 import MarketingFooter from './landing/MarketingFooter'
@@ -263,7 +264,7 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
             Floats in the dead space right of the (narrower-than-container) text
             on large screens; drops to normal flow below the CTAs on mobile. */}
         <div
-          className="mt-12 lg:mt-0 lg:absolute lg:top-1/2 lg:-translate-y-1/2 lg:right-6 xl:right-10 w-full sm:w-[420px] lg:w-[440px] xl:w-[480px] home-fade"
+          className="mt-12 lg:mt-0 lg:absolute lg:top-1/2 lg:-translate-y-1/2 lg:right-6 xl:right-10 w-full sm:w-[460px] lg:w-[480px] xl:w-[520px] 2xl:w-[640px] home-fade"
           style={{ animationDelay: '0.8s' }}
         >
           <ProductCarousel />
@@ -355,6 +356,19 @@ function useReducedMotion() {
   ).current
 }
 
+// Cycles 0..length-1 on an interval — used by the small "live AI" callouts
+// (ER Copilot insight, voice-intake phase) so they feel alive without each
+// instrument hand-rolling its own setInterval bookkeeping.
+function useCyclingIndex(length: number, intervalMs: number, reduce: boolean) {
+  const [i, setI] = useState(0)
+  useEffect(() => {
+    if (reduce || length <= 1) return
+    const t = window.setInterval(() => setI((v) => (v + 1) % length), intervalMs)
+    return () => window.clearInterval(t)
+  }, [length, intervalMs, reduce])
+  return i
+}
+
 function InstrumentFrame({ label, accent, children }: { label: string; accent: string; children: React.ReactNode }) {
   return (
     <div className="w-full rounded-2xl backdrop-blur-sm" style={{ border: `1px solid ${LINE_D}`, backgroundColor: 'rgba(245,242,237,0.025)' }}>
@@ -376,6 +390,12 @@ function clampScore(n: number) {
   return Math.max(0, Math.min(100, n))
 }
 
+const ER_INSIGHTS = [
+  'Pattern detected: 3 escalating conflicts, Store 7 late shift.',
+  'Suggested action: schedule mediation before Friday closeout.',
+  '2 cases auto-categorized — severity confirmed by manager.',
+]
+
 function PlatformInstrument() {
   const TARGET = 73
   const reduce = useReducedMotion()
@@ -385,6 +405,7 @@ function PlatformInstrument() {
   const [phase, setPhase] = useState(0)
   const raf = useRef(0)
   const start = useRef(0)
+  const erIndex = useCyclingIndex(ER_INSIGHTS.length, 3200, reduce)
 
   useEffect(() => {
     if (reduce) return
@@ -486,6 +507,33 @@ function PlatformInstrument() {
           <span>PML</span>
         </div>
       </div>
+      <div className="px-5 pt-3 pb-1">
+        <div
+          className="rounded-lg px-3.5 py-2.5 flex items-start gap-2.5"
+          style={{ border: `1px solid ${LINE_D}`, backgroundColor: 'rgba(245,242,237,0.03)' }}
+        >
+          <Sparkles className="w-3.5 h-3.5 mt-0.5 shrink-0" style={{ color: MATCHA }} />
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className="text-[8px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>ER Copilot</span>
+              <span className="home-pulse w-1 h-1 rounded-full" style={{ backgroundColor: MATCHA }} />
+            </div>
+            <AnimatePresence mode="wait">
+              <motion.p
+                key={erIndex}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.4 }}
+                className="text-[11px] leading-snug"
+                style={{ color: BONE }}
+              >
+                {ER_INSIGHTS[erIndex]}
+              </motion.p>
+            </AnimatePresence>
+          </div>
+        </div>
+      </div>
       <div className="grid grid-cols-3 gap-3 px-5 pb-4 pt-3 border-t" style={{ borderColor: LINE_D }}>
         {subMetrics.map((m) => (
           <div key={m.label}>
@@ -512,10 +560,18 @@ const DAILY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
 // not just a raw count.
 const DAILY_BEHAVIORAL_PCT = DAILY_BARS.map((v) => Math.round((Math.round(v * 0.6) / v) * 100))
 
+// Illustrative waveform shape (not real audio) for the voice-intake demo —
+// the magic link's "Dictate" button is a real shipped feature (see
+// adminUpdates.ts "ir-magic-link-voice"), this animates what it looks like.
+const VOICE_WAVEFORM = [0.3, 0.6, 0.85, 0.5, 0.95, 0.4, 0.7, 0.55, 0.9, 0.35, 0.65, 0.45]
+const VOICE_PHASES = ['Tap to dictate', 'Listening…', 'Transcribing…', 'Category: Behavioral · Severity: Medium']
+
 function DailyInstrument() {
   const reduce = useReducedMotion()
   const total = DAILY_BARS.reduce((a, b) => a + b, 0)
   const max = Math.max(...DAILY_BARS)
+  const voicePhase = useCyclingIndex(VOICE_PHASES.length, 1900, reduce)
+  const listening = voicePhase === 1
 
   return (
     <InstrumentFrame label="Daily Intake" accent="#F2C14E">
@@ -567,6 +623,55 @@ function DailyInstrument() {
           Safety
         </span>
       </div>
+      <div className="px-5 pb-3 pt-1">
+        <div
+          className="rounded-lg px-3.5 py-3 flex items-center gap-3 transition-colors duration-300"
+          style={{
+            border: `1px solid ${listening ? 'rgba(242,193,78,0.4)' : LINE_D}`,
+            backgroundColor: listening ? 'rgba(242,193,78,0.06)' : 'rgba(245,242,237,0.03)',
+          }}
+        >
+          <div
+            className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition-colors duration-300"
+            style={{
+              backgroundColor: listening ? 'rgba(242,193,78,0.18)' : 'rgba(245,242,237,0.05)',
+              border: `1px solid ${listening ? 'rgba(242,193,78,0.45)' : LINE_D}`,
+            }}
+          >
+            <Mic className="w-3.5 h-3.5" style={{ color: listening ? '#F2C14E' : ASH }} />
+          </div>
+          <div className="flex items-end gap-[3px] h-5 flex-1">
+            {VOICE_WAVEFORM.map((v, i) => (
+              <motion.div
+                key={i}
+                className="flex-1 rounded-full"
+                style={{ backgroundColor: listening ? 'rgba(242,193,78,0.8)' : LINE_D }}
+                animate={
+                  reduce
+                    ? { height: listening ? `${v * 100}%` : '15%' }
+                    : { height: listening ? [`${v * 55}%`, `${v * 100}%`, `${v * 55}%`] : '15%' }
+                }
+                transition={
+                  reduce ? { duration: 0 } : { duration: 0.8, repeat: listening ? Infinity : 0, delay: i * 0.05, ease: 'easeInOut' }
+                }
+              />
+            ))}
+          </div>
+        </div>
+        <AnimatePresence mode="wait">
+          <motion.p
+            key={voicePhase}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="mt-2 text-[10px] font-mono"
+            style={{ color: voicePhase === 3 ? '#86efac' : ASH }}
+          >
+            {VOICE_PHASES[voicePhase]}
+          </motion.p>
+        </AnimatePresence>
+      </div>
       <div className="flex items-center justify-between px-5 pb-4 pt-3 border-t" style={{ borderColor: LINE_D }}>
         <span className="text-[9px] font-mono uppercase tracking-[0.16em] truncate" style={{ color: ASH }}>
           hey-matcha.com/intake/atl7
@@ -588,19 +693,66 @@ const COMPLIANCE_CHIPS = [
   { code: 'TX', resolved: false },
 ]
 
-const COMPLIANCE_STATUS_COLOR = { resolved: '#86efac', flagged: '#E2725B', scanning: '#d9b65f' } as const
+type FindingStatus = 'flagged' | 'fixing' | 'fixed'
 
-const COMPLIANCE_CATEGORIES: { label: string; status: keyof typeof COMPLIANCE_STATUS_COLOR }[] = [
-  { label: 'Wage & Hour', status: 'flagged' },
-  { label: 'Leave', status: 'resolved' },
-  { label: 'Safety', status: 'flagged' },
-  { label: 'Posting', status: 'scanning' },
+const COMPLIANCE_FINDINGS: { state: string; text: string }[] = [
+  { state: 'CA', text: 'Meal period waivers missing for 12 employees' },
+  { state: 'NY', text: 'Paid sick leave accrual rate below statute' },
+  { state: 'WA', text: 'Predictive scheduling notice window expired' },
+  { state: 'TX', text: 'Anti-retaliation posters out of date' },
 ]
+
+const FINDING_ICON = { flagged: AlertTriangle, fixing: Loader2, fixed: CheckCircle2 } as const
+const FINDING_COLOR = { flagged: '#E2725B', fixing: '#d9b65f', fixed: '#86efac' } as const
+
+// Mirrors the real flag → fixing → fixed cascade from the actual /compliance
+// page's live engine, staggered per row and looping, instead of a static list.
+function useFindingsCascade(count: number, reduce: boolean) {
+  const [statuses, setStatuses] = useState<FindingStatus[]>(() => Array(count).fill('flagged'))
+
+  useEffect(() => {
+    if (reduce) {
+      setStatuses(Array.from({ length: count }, (_, i) => (i < 2 ? 'fixed' : 'flagged')))
+      return
+    }
+    const STEP = 1600
+    const ROW_STAGGER = 900
+    const CYCLE = STEP * 2 + count * ROW_STAGGER + 2000
+    let timers: number[] = []
+
+    const runCycle = () => {
+      setStatuses(Array(count).fill('flagged'))
+      for (let i = 0; i < count; i++) {
+        timers.push(
+          window.setTimeout(() => {
+            setStatuses((s) => s.map((v, j) => (j === i ? 'fixing' : v)))
+          }, STEP + i * ROW_STAGGER),
+        )
+        timers.push(
+          window.setTimeout(() => {
+            setStatuses((s) => s.map((v, j) => (j === i ? 'fixed' : v)))
+          }, STEP * 2 + i * ROW_STAGGER),
+        )
+      }
+    }
+
+    runCycle()
+    const loop = window.setInterval(runCycle, CYCLE)
+    return () => {
+      timers.forEach((t) => window.clearTimeout(t))
+      window.clearInterval(loop)
+      timers = []
+    }
+  }, [count, reduce])
+
+  return statuses
+}
 
 function ComplianceInstrument() {
   const TARGET = 60
   const reduce = useReducedMotion()
   const [score, setScore] = useState(reduce ? TARGET : 0)
+  const findingStatuses = useFindingsCascade(COMPLIANCE_FINDINGS.length, reduce)
 
   useEffect(() => {
     if (reduce) return
@@ -650,13 +802,34 @@ function ComplianceInstrument() {
           </span>
         ))}
       </div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-2 px-5 pb-4 pt-3 border-t mt-4" style={{ borderColor: LINE_D }}>
-        {COMPLIANCE_CATEGORIES.map((c) => (
-          <div key={c.label} className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: COMPLIANCE_STATUS_COLOR[c.status] }} />
-            <span className="text-[9px] font-mono uppercase tracking-[0.12em] truncate" style={{ color: ASH }}>{c.label}</span>
-          </div>
-        ))}
+      <div className="px-5 pb-1 pt-4 border-t mt-4" style={{ borderColor: LINE_D }}>
+        {COMPLIANCE_FINDINGS.map((f, i) => {
+          const status = findingStatuses[i]
+          const Icon = FINDING_ICON[status]
+          return (
+            <div key={f.state} className="flex items-center gap-2.5 py-1.5">
+              <span
+                className="text-[9px] font-mono px-1.5 py-0.5 rounded shrink-0"
+                style={{ border: `1px solid ${LINE_D}`, color: ASH }}
+              >
+                {f.state}
+              </span>
+              <span
+                className="text-[11px] flex-1 truncate transition-colors duration-300"
+                style={{
+                  color: status === 'fixed' ? ASH : BONE,
+                  textDecoration: status === 'fixed' ? 'line-through rgba(245,242,237,0.4)' : 'none',
+                }}
+              >
+                {f.text}
+              </span>
+              <Icon
+                className={`w-3.5 h-3.5 shrink-0 ${status === 'fixing' ? 'animate-spin' : ''}`}
+                style={{ color: FINDING_COLOR[status] }}
+              />
+            </div>
+          )
+        })}
       </div>
       <div className="flex items-center justify-between px-5 pb-4 pt-3 border-t" style={{ borderColor: LINE_D }}>
         <span className="text-[9px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>247 requirements scanned</span>
