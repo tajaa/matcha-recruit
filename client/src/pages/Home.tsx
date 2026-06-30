@@ -372,11 +372,16 @@ function InstrumentFrame({ label, accent, children }: { label: string; accent: s
   )
 }
 
+function clampScore(n: number) {
+  return Math.max(0, Math.min(100, n))
+}
+
 function PlatformInstrument() {
   const TARGET = 73
   const reduce = useReducedMotion()
   const [score, setScore] = useState(reduce ? TARGET : 0)
   const [drawn, setDrawn] = useState(reduce ? 1 : 0)
+  const [scanX, setScanX] = useState(-1)
   const [phase, setPhase] = useState(0)
   const raf = useRef(0)
   const start = useRef(0)
@@ -384,6 +389,7 @@ function PlatformInstrument() {
   useEffect(() => {
     if (reduce) return
     const DUR = 1400
+    const SCAN = 3400
     const loop = (now: number) => {
       if (!start.current) start.current = now
       const e = now - start.current
@@ -393,6 +399,7 @@ function PlatformInstrument() {
       setPhase(e / 1100)
       const jitter = intro >= 1 ? Math.round(Math.sin(e / 650) * 1.4) : 0
       setScore(Math.round(eased * TARGET) + jitter)
+      setScanX((e % SCAN) / SCAN)
       raf.current = requestAnimationFrame(loop)
     }
     raf.current = requestAnimationFrame(loop)
@@ -402,6 +409,17 @@ function PlatformInstrument() {
   const { line, area } = curvePath(phase)
   const band = riskBand(score)
   const pathLen = VBW * 1.4
+  const ticks = [0.33, 0.66, 1]
+  const pMarkers = [
+    { f: 0.18, l: 'P50' },
+    { f: 0.46, l: 'P90' },
+    { f: 0.74, l: 'P99' },
+  ]
+  const subMetrics = [
+    { label: 'WC', value: clampScore(score - 6) },
+    { label: 'EPL', value: clampScore(score + 9) },
+    { label: 'COMPLIANCE', value: clampScore(score - 13) },
+  ]
 
   return (
     <InstrumentFrame label="Composite Risk Index" accent={MATCHA}>
@@ -412,11 +430,11 @@ function PlatformInstrument() {
         </span>
         <div className="text-right">
           <div className="text-[11px] font-mono uppercase tracking-[0.2em]" style={{ color: band.color }}>{band.label}</div>
-          <div className="text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>WC · EPL · Compliance</div>
+          <div className="text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>Modeled · updated live</div>
         </div>
       </div>
-      <div className="px-3 pb-4 pt-2">
-        <svg viewBox={`0 0 ${VBW} ${VBH}`} preserveAspectRatio="none" className="w-full" style={{ height: 110 }}>
+      <div className="px-3 pt-2">
+        <svg viewBox={`0 0 ${VBW} ${VBH}`} preserveAspectRatio="none" className="w-full" style={{ height: 108 }}>
           <defs>
             <linearGradient id="homeRiskStroke" x1="0" y1="0" x2="1" y2="0">
               <stop offset="0%" stopColor="#86efac" />
@@ -428,6 +446,18 @@ function PlatformInstrument() {
               <stop offset="100%" stopColor="#ce5a4f" stopOpacity="0" />
             </linearGradient>
           </defs>
+          {ticks.map((f) => (
+            <line
+              key={f}
+              x1={0}
+              x2={VBW}
+              y1={VBH - f * (VBH - 10)}
+              y2={VBH - f * (VBH - 10)}
+              stroke={LINE_D}
+              strokeWidth={1}
+              strokeDasharray={f === 1 ? '0' : '2 4'}
+            />
+          ))}
           <path d={area} fill="url(#homeRiskFill)" opacity={drawn} />
           <path
             d={line}
@@ -438,6 +468,17 @@ function PlatformInstrument() {
             strokeDasharray={pathLen}
             strokeDashoffset={pathLen * (1 - drawn)}
           />
+          {pMarkers.map((m) => (
+            <g key={m.l} opacity={0.6 * drawn}>
+              <line x1={m.f * VBW} x2={m.f * VBW} y1={8} y2={VBH} stroke={BONE} strokeOpacity={0.22} strokeWidth={1} strokeDasharray="2 3" />
+              <text x={m.f * VBW + 3} y={16} fontSize={7} fontFamily="monospace" fill={ASH} letterSpacing={0.5}>
+                {m.l}
+              </text>
+            </g>
+          ))}
+          {scanX >= 0 && (
+            <line x1={scanX * VBW} x2={scanX * VBW} y1={0} y2={VBH} stroke={MATCHA} strokeWidth={1.5} opacity={0.45} />
+          )}
         </svg>
         <div className="flex justify-between mt-1 px-1 text-[9px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>
           <span>$0</span>
@@ -445,12 +486,31 @@ function PlatformInstrument() {
           <span>PML</span>
         </div>
       </div>
+      <div className="grid grid-cols-3 gap-3 px-5 pb-4 pt-3 border-t" style={{ borderColor: LINE_D }}>
+        {subMetrics.map((m) => (
+          <div key={m.label}>
+            <div className="flex items-baseline justify-between mb-1.5">
+              <span className="text-[8px] font-mono uppercase tracking-[0.12em]" style={{ color: ASH }}>{m.label}</span>
+              <span className="text-[11px] font-mono tabular-nums" style={{ color: BONE }}>{m.value}</span>
+            </div>
+            <div className="h-[3px] rounded-full overflow-hidden" style={{ backgroundColor: LINE_D }}>
+              <div
+                className="h-full rounded-full transition-all duration-700"
+                style={{ width: `${m.value}%`, backgroundColor: riskBand(m.value).color }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
     </InstrumentFrame>
   )
 }
 
-const DAILY_BARS = [3, 5, 2, 6, 4, 1, 4] // Mon..Sun — illustrative
+const DAILY_BARS = [3, 5, 2, 6, 4, 1, 4] // Mon..Sun total — illustrative
 const DAILY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+// Illustrative category split per day — communicates the AI categorization,
+// not just a raw count.
+const DAILY_BEHAVIORAL_PCT = DAILY_BARS.map((v) => Math.round((Math.round(v * 0.6) / v) * 100))
 
 function DailyInstrument() {
   const reduce = useReducedMotion()
@@ -460,23 +520,34 @@ function DailyInstrument() {
   return (
     <InstrumentFrame label="Daily Intake" accent="#F2C14E">
       <div className="px-5 pt-4 flex items-end justify-between">
-        <span className="tabular-nums leading-none" style={{ fontFamily: DISPLAY, fontWeight: 300, fontSize: '3.5rem', color: '#F2C14E' }}>
-          {total}
-          <span className="ml-1 align-top text-[0.9rem]" style={{ color: ASH }}>/week</span>
-        </span>
+        <div className="flex items-baseline gap-2">
+          <span className="tabular-nums leading-none" style={{ fontFamily: DISPLAY, fontWeight: 300, fontSize: '3.5rem', color: '#F2C14E' }}>
+            {total}
+          </span>
+          <span className="text-[0.9rem]" style={{ color: ASH }}>/week</span>
+          <span
+            className="text-[10px] font-mono px-1.5 py-0.5 rounded"
+            style={{ color: '#86efac', backgroundColor: 'rgba(134,239,172,0.1)' }}
+          >
+            ▲ 18%
+          </span>
+        </div>
         <div className="text-right">
           <div className="text-[11px] font-mono uppercase tracking-[0.2em]" style={{ color: '#F2C14E' }}>Reports</div>
           <div className="text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>via magic link</div>
         </div>
       </div>
-      <div className="px-5 pt-6 pb-2 flex items-end gap-2.5" style={{ height: 96 }}>
+      <div className="px-5 pt-6 pb-2 flex items-end gap-2.5" style={{ height: 80 }}>
         {DAILY_BARS.map((v, i) => {
-          const h = (v / max) * 64
+          const h = (v / max) * 60
+          const pct = DAILY_BEHAVIORAL_PCT[i]
           return (
             <div key={i} className="flex-1 flex flex-col items-center gap-1.5">
               <motion.div
                 className="w-full rounded-t-sm"
-                style={{ backgroundColor: 'rgba(242,193,78,0.55)' }}
+                style={{
+                  background: `linear-gradient(to top, rgba(242,193,78,0.9) ${pct}%, rgba(242,193,78,0.38) ${pct}%)`,
+                }}
                 initial={{ height: 4 }}
                 animate={reduce ? { height: h } : { height: [4, h, h * 0.85, h] }}
                 transition={reduce ? { duration: 0 } : { duration: 2.2, repeat: Infinity, repeatType: 'mirror', delay: i * 0.12, ease: 'easeInOut' }}
@@ -485,6 +556,16 @@ function DailyInstrument() {
             </div>
           )
         })}
+      </div>
+      <div className="flex items-center gap-3 px-5 pb-3 pt-1 text-[8px] font-mono uppercase tracking-[0.12em]" style={{ color: ASH }}>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: 'rgba(242,193,78,0.9)' }} />
+          Behavioral
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: 'rgba(242,193,78,0.38)' }} />
+          Safety
+        </span>
       </div>
       <div className="flex items-center justify-between px-5 pb-4 pt-3 border-t" style={{ borderColor: LINE_D }}>
         <span className="text-[9px] font-mono uppercase tracking-[0.16em] truncate" style={{ color: ASH }}>
@@ -505,6 +586,15 @@ const COMPLIANCE_CHIPS = [
   { code: 'WA', resolved: false },
   { code: 'IL', resolved: false },
   { code: 'TX', resolved: false },
+]
+
+const COMPLIANCE_STATUS_COLOR = { resolved: '#86efac', flagged: '#E2725B', scanning: '#d9b65f' } as const
+
+const COMPLIANCE_CATEGORIES: { label: string; status: keyof typeof COMPLIANCE_STATUS_COLOR }[] = [
+  { label: 'Wage & Hour', status: 'flagged' },
+  { label: 'Leave', status: 'resolved' },
+  { label: 'Safety', status: 'flagged' },
+  { label: 'Posting', status: 'scanning' },
 ]
 
 function ComplianceInstrument() {
@@ -542,10 +632,10 @@ function ComplianceInstrument() {
           <div className="text-[11px] font-mono uppercase tracking-[0.2em]" style={{ color: '#E2725B' }}>
             {resolvedCount}/{COMPLIANCE_CHIPS.length} resolved
           </div>
-          <div className="text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>6 jurisdictions</div>
+          <div className="text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: ASH }}>Next: WA in 9d</div>
         </div>
       </div>
-      <div className="px-5 pt-6 pb-4 flex flex-wrap gap-2">
+      <div className="px-5 pt-5 flex flex-wrap gap-2">
         {COMPLIANCE_CHIPS.map((c) => (
           <span
             key={c.code}
@@ -558,6 +648,14 @@ function ComplianceInstrument() {
           >
             {c.code} {c.resolved ? '✓' : '!'}
           </span>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 px-5 pb-4 pt-3 border-t mt-4" style={{ borderColor: LINE_D }}>
+        {COMPLIANCE_CATEGORIES.map((c) => (
+          <div key={c.label} className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: COMPLIANCE_STATUS_COLOR[c.status] }} />
+            <span className="text-[9px] font-mono uppercase tracking-[0.12em] truncate" style={{ color: ASH }}>{c.label}</span>
+          </div>
         ))}
       </div>
       <div className="flex items-center justify-between px-5 pb-4 pt-3 border-t" style={{ borderColor: LINE_D }}>
