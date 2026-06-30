@@ -85,9 +85,17 @@ fi
 docker pull "$IMAGE"
 
 docker rm -f "$NEW_CONTAINER" > /dev/null 2>&1 || true
+# --network-alias matcha-backend: the port-suffixed container name
+# (matcha-backend-8002/-8003) is NOT resolvable as "matcha-backend" on the
+# docker network, but the frontend image's internal nginx still proxies /api
+# to upstream "matcha-backend:8002" and refuses to boot if that name doesn't
+# resolve. Compose used to provide this alias via the service name; the
+# blue/green run must set it explicitly or a fresh frontend container can't
+# start once the legacy compose "matcha-backend" container is gone.
 docker run -d \
     --name "$NEW_CONTAINER" \
     --network "$NETWORK" \
+    --network-alias matcha-backend \
     -p "127.0.0.1:${NEW_PORT}:8002" \
     --env-file .env.backend \
     -v "${UPLOADS_VOLUME}:/app/uploads" \
