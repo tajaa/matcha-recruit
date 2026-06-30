@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { motion, useInView } from 'framer-motion'
-import { ShieldAlert, FileText, MapPin, Bell, Brain, ClipboardList, Mic } from 'lucide-react'
+import { ShieldAlert, FileText, MapPin, Bell, Brain, ClipboardList, Mic, Lock } from 'lucide-react'
 
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
@@ -82,6 +82,7 @@ export default function MatchaLitePage() {
   const focus = useScrollFocus()
 
   const sections = [
+    <VoiceIntakeSection key="voice" />,
     <RiskInsightsShowcase key="risk" />,
     <IrAnalysisSection key="ir" />,
     <OshaSection key="osha" />,
@@ -186,6 +187,165 @@ function Hero({ onContactClick }: { onContactClick: () => void }) {
         </div>
       </div>
     </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Voice intake — demo of the magic link's "Dictate" flow: tap mic -> listen
+// -> transcribe -> extracted fields. Loops while in view.
+// ---------------------------------------------------------------------------
+
+const VOICE_BULLETS = [
+  { label: 'No app, no login', desc: 'The same magic link your team already uses — tap Dictate and start talking.' },
+  { label: 'Real-time transcription', desc: 'Matcha transcribes as you speak and extracts reporter, witnesses, location, date, and a suggested category/severity.' },
+  { label: 'Reporter still reviews', desc: 'Nothing submits automatically — the extracted draft is reviewed and edited before it becomes the record.' },
+]
+
+function VoiceIntakeSection() {
+  return (
+    <section className="py-16 sm:py-24 md:py-28 border-t" style={{ borderColor: LINE }}>
+      <div className="max-w-[1440px] mx-auto px-5 sm:px-10">
+        <div className="grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+          <div>
+            <div className="text-[11px] uppercase tracking-wider font-medium mb-3 sm:mb-4" style={{ color: MUTED }}>
+              New — Voice intake
+            </div>
+            <h2
+              className="tracking-tight"
+              style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(1.875rem, 4vw, 3rem)', lineHeight: 1.05 }}
+            >
+              Talk through it. Matcha writes it up.
+            </h2>
+            <p className="mt-4 text-base" style={{ color: MUTED, lineHeight: 1.6 }}>
+              Anyone on a magic link can tap Dictate and just talk — Matcha transcribes the
+              account in real time and fills in the report for review. No typing, no app,
+              works hands-free on a phone in the moment.
+            </p>
+            <ul className="mt-7 space-y-5">
+              {VOICE_BULLETS.map(item => (
+                <li key={item.label} className="flex gap-3">
+                  <div className="w-1.5 h-1.5 rounded-full mt-[7px] shrink-0" style={{ backgroundColor: INK }} />
+                  <div>
+                    <span className="text-sm font-medium" style={{ color: INK }}>{item.label}</span>
+                    <p className="text-sm mt-0.5" style={{ color: MUTED, lineHeight: 1.55 }}>{item.desc}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="min-w-0 w-full max-w-md mx-auto lg:mx-0">
+            <VoiceIntakePanel />
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+const VOICE_WAVEFORM_DEMO = [0.3, 0.6, 0.85, 0.5, 0.95, 0.4, 0.7, 0.55, 0.9, 0.35, 0.65, 0.45]
+
+function VoiceIntakePanel() {
+  const ref = useRef<HTMLDivElement>(null)
+  const inView = useInView(ref, { margin: '-40px' })
+  const [phase, setPhase] = useState(0)
+
+  useEffect(() => {
+    if (!inView) return
+    const STEP = 2200
+    const t = window.setInterval(() => setPhase(p => (p + 1) % 4), STEP)
+    return () => window.clearInterval(t)
+  }, [inView])
+
+  const listening = phase === 1
+  const transcribing = phase === 2
+  const filled = phase === 3
+
+  return (
+    <div ref={ref} className="rounded-xl overflow-hidden border font-sans" style={{ borderColor: 'rgba(63,63,70,0.5)', backgroundColor: '#0d0d10' }}>
+      <div className="flex items-center gap-2 px-5 py-3 border-b" style={{ borderColor: 'rgba(39,39,42,0.5)' }}>
+        <Lock className="w-3 h-3" style={{ color: '#52525b' }} />
+        <span className="text-[11px] font-mono" style={{ color: '#a1a1aa' }}>hey-matcha.com/intake/atl7</span>
+        <span
+          className="ml-auto px-2 py-0.5 rounded text-[8px] font-mono uppercase tracking-wider"
+          style={{ backgroundColor: '#18181b', border: '1px solid #27272a', color: '#71717a' }}
+        >
+          Public form
+        </span>
+      </div>
+
+      <div className="px-6 py-8 flex flex-col items-center text-center">
+        <span className="text-[10px] font-mono uppercase tracking-widest mb-5" style={{ color: '#52525b' }}>
+          Atlanta — Store 7
+        </span>
+
+        <div
+          className="relative w-16 h-16 rounded-full flex items-center justify-center mb-4 transition-colors duration-300"
+          style={{
+            backgroundColor: listening ? 'rgba(201,138,62,0.15)' : '#18181b',
+            border: `1px solid ${listening ? 'rgba(201,138,62,0.5)' : '#27272a'}`,
+          }}
+        >
+          {listening && (
+            <span className="absolute inset-0 rounded-full animate-ping" style={{ backgroundColor: 'rgba(201,138,62,0.2)' }} />
+          )}
+          <Mic className="w-6 h-6 relative" style={{ color: listening ? '#c98a3e' : '#71717a' }} />
+        </div>
+
+        <div className="flex items-end gap-[3px] h-6 mb-4">
+          {VOICE_WAVEFORM_DEMO.map((v, i) => (
+            <motion.div
+              key={i}
+              className="w-[3px] rounded-full"
+              style={{ backgroundColor: listening ? '#c98a3e' : '#3f3f46' }}
+              animate={listening ? { height: [`${v * 40}%`, `${v * 100}%`, `${v * 40}%`] } : { height: '20%' }}
+              transition={{ duration: 0.8, repeat: listening ? Infinity : 0, delay: i * 0.05, ease: 'easeInOut' }}
+            />
+          ))}
+        </div>
+
+        <span
+          className="text-sm font-medium"
+          style={{ color: transcribing ? '#e4e4e7' : listening ? '#c98a3e' : filled ? '#6ee7b7' : '#a1a1aa' }}
+        >
+          {phase === 0 && 'Tap to dictate'}
+          {phase === 1 && 'Listening…'}
+          {phase === 2 && 'Transcribing…'}
+          {phase === 3 && 'Report ready for review'}
+        </span>
+      </div>
+
+      <div
+        className="border-t px-5 py-4 transition-opacity duration-500"
+        style={{ borderColor: 'rgba(39,39,42,0.5)', opacity: filled ? 1 : 0.25 }}
+      >
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <div>
+            <div className="text-[8px] font-mono uppercase tracking-widest mb-1" style={{ color: '#52525b' }}>Category</div>
+            <div className="text-[12px]" style={{ color: '#e4e4e7' }}>Customer escalation</div>
+          </div>
+          <div>
+            <div className="text-[8px] font-mono uppercase tracking-widest mb-1" style={{ color: '#52525b' }}>Severity</div>
+            <div className="text-[12px] font-medium" style={{ color: '#c98a3e' }}>Medium</div>
+          </div>
+        </div>
+        <div className="text-[8px] font-mono uppercase tracking-widest mb-1" style={{ color: '#52525b' }}>Description</div>
+        <p className="text-[12px] italic" style={{ color: '#a1a1aa' }}>
+          "Customer escalated at register, raised voice. Crew stayed calm, called manager. No physical contact."
+        </p>
+      </div>
+
+      <div className="flex items-center justify-between px-5 py-3 border-t" style={{ borderColor: 'rgba(39,39,42,0.5)' }}>
+        <span className="text-[10px]" style={{ color: '#52525b' }}>No login required · audio discarded after transcription</span>
+        {filled && (
+          <span
+            className="text-[8px] font-medium px-2 py-0.5 rounded"
+            style={{ color: '#6ee7b7', backgroundColor: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)' }}
+          >
+            AI-extracted
+          </span>
+        )}
+      </div>
+    </div>
   )
 }
 
