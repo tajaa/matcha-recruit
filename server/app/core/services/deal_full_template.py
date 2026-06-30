@@ -202,26 +202,28 @@ def _render_block(blk: Block, inp: FullDealInputs, q: FullQuote, date_str: str) 
 
 
 _CSS = """
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,400;1,9..144,500&family=Inter:wght@300;400;500;600;700;800&display=swap');
   @page { size: letter; margin: 0.55in 0; }
   @page cover-page { size: letter; margin: 0; background: #1a1a2e; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; color: #1a1a2e; font-size: 10.5pt; line-height: 1.55; }
-  .cover { page: cover-page; page-break-after: always; background: linear-gradient(157deg, #20203d 0%, #161630 52%, #0f0f22 100%); color: white; height: 11in; padding: 96px 78px 60px; position: relative; overflow: hidden; }
-  .cover::before { content: ''; position: absolute; top: -170px; right: -150px; width: 580px; height: 580px; border-radius: 50%; background: radial-gradient(circle, rgba(108,99,255,0.22) 0%, rgba(108,99,255,0) 70%); }
-  .cover::after { content: ''; position: absolute; bottom: -130px; left: -110px; width: 460px; height: 460px; border-radius: 50%; background: radial-gradient(circle, rgba(167,139,250,0.10) 0%, rgba(167,139,250,0) 70%); }
-  .cover .spine { position: absolute; top: 0; left: 0; width: 7px; height: 100%; background: linear-gradient(180deg, #6c63ff 0%, #a78bfa 100%); }
+  body { font-family: 'Inter', -apple-system, 'Helvetica Neue', Arial, sans-serif; color: #1a1a2e; font-size: 10.5pt; line-height: 1.55; }
+  .cover { page: cover-page; page-break-after: always; background: linear-gradient(157deg, #21213f 0%, #15152c 52%, #0d0d1d 100%); color: white; height: 11in; padding: 104px 84px 62px; position: relative; overflow: hidden; }
+  .cover::before { content: ''; position: absolute; top: -180px; right: -150px; width: 600px; height: 600px; border-radius: 50%; background: radial-gradient(circle, rgba(124,108,255,0.24) 0%, rgba(124,108,255,0) 68%); }
+  .cover::after { content: ''; position: absolute; bottom: -140px; left: -120px; width: 480px; height: 480px; border-radius: 50%; background: radial-gradient(circle, rgba(167,139,250,0.10) 0%, rgba(167,139,250,0) 70%); }
+  .cover .spine { position: absolute; top: 0; left: 0; width: 6px; height: 100%; background: linear-gradient(180deg, #7c6cff 0%, #a78bfa 100%); }
   .cover .cover-brand { position: relative; }
-  .cover h1 { font-size: 46pt; font-weight: 800; letter-spacing: -1.5px; margin-bottom: 9px; }
-  .cover .subtitle { font-size: 8pt; letter-spacing: 5px; text-transform: uppercase; color: rgba(255,255,255,0.55); }
-  .cover .cover-lead { margin-top: 86px; position: relative; }
-  .cover .product { font-size: 21pt; font-weight: 300; color: rgba(255,255,255,0.6); line-height: 1.22; }
-  .cover .product strong { font-weight: 700; color: white; display: block; font-size: 33pt; letter-spacing: -0.5px; margin-top: 2px; }
-  .cover .divider { width: 72px; height: 4px; border-radius: 2px; background: linear-gradient(90deg, #6c63ff, #a78bfa); margin: 30px 0 28px; }
-  .cover .quote { color: rgba(255,255,255,0.72); font-size: 13pt; font-style: italic; line-height: 1.5; max-width: 74%; padding-left: 20px; border-left: 3px solid rgba(108,99,255,0.55); }
-  .cover .prepared { position: absolute; left: 78px; right: 78px; bottom: 142px; font-size: 11pt; padding-top: 24px; border-top: 1px solid rgba(255,255,255,0.12); }
-  .cover .prepared strong { font-size: 13pt; color: #fff; }
-  .cover .prepared p { margin: 5px 0; color: rgba(255,255,255,0.82); }
-  .cover .footer { position: absolute; bottom: 54px; left: 78px; right: 78px; color: rgba(255,255,255,0.4); font-size: 8.5pt; }
+  .cover h1 { font-family: 'Inter'; font-size: 44pt; font-weight: 800; letter-spacing: -2px; margin-bottom: 11px; }
+  .cover .subtitle { font-family: 'Inter'; font-size: 7.5pt; font-weight: 500; letter-spacing: 5.5px; text-transform: uppercase; color: rgba(255,255,255,0.5); }
+  .cover .cover-lead { margin-top: 96px; position: relative; }
+  .cover .product { font-family: 'Inter'; font-size: 10pt; font-weight: 600; letter-spacing: 4px; text-transform: uppercase; color: #b3a4ff; line-height: 1; }
+  .cover .product strong { font-family: 'Fraunces'; font-weight: 600; color: #fff; display: block; font-size: 41pt; letter-spacing: -0.5px; line-height: 1.02; text-transform: none; margin-top: 16px; }
+  .cover .divider { width: 60px; height: 3px; border-radius: 2px; background: linear-gradient(90deg, #7c6cff, #a78bfa); margin: 34px 0 30px; }
+  .cover .quote { font-family: 'Fraunces'; font-style: italic; font-weight: 500; font-size: 15.5pt; color: rgba(255,255,255,0.74); line-height: 1.45; max-width: 76%; padding-left: 22px; border-left: 2px solid rgba(124,108,255,0.6); }
+  .cover .prepared { position: absolute; left: 84px; right: 84px; bottom: 150px; font-size: 10.5pt; padding-top: 26px; border-top: 1px solid rgba(255,255,255,0.13); }
+  .cover .prepared strong { font-weight: 600; font-size: 12.5pt; color: #fff; }
+  .cover .prepared p { margin: 6px 0; color: rgba(255,255,255,0.8); }
+  .cover .prepared p:first-child { letter-spacing: 0.2px; }
+  .cover .footer { position: absolute; bottom: 52px; left: 84px; right: 84px; color: rgba(255,255,255,0.38); font-size: 8pt; letter-spacing: 0.3px; }
   .cover .footer p { margin: 3px 0; }
   .page { padding: 8px 60px 28px; }
   .page.fresh { page-break-before: always; }
