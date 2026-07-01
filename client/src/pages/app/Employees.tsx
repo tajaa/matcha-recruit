@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Button, Input, Select } from '../../components/ui'
 import { EmployeeStatusBadge } from '../../components/employees/EmployeeStatusBadge'
 import { MultiBatchModal } from '../../components/employees/MultiBatchModal'
@@ -20,6 +20,14 @@ export default function Employees() {
   const showHrisUpsell =
     me?.profile?.signup_source === 'matcha_lite' &&
     !hasFeature('hris_gusto') && !hasFeature('hris_finch') && !hasFeature('hris_import')
+  // One-time welcome after the Essentials → Lite upgrade redirect.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [showUpgradeBanner, setShowUpgradeBanner] = useState(searchParams.get('upgraded') === '1')
+  function dismissUpgradeBanner() {
+    setShowUpgradeBanner(false)
+    searchParams.delete('upgraded')
+    setSearchParams(searchParams, { replace: true })
+  }
   const [status, setStatus] = useState('all')
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -62,6 +70,24 @@ export default function Employees() {
 
   return (
     <div>
+      {showUpgradeBanner && (
+        <div className="mb-6 flex items-start justify-between gap-4 rounded-lg border border-emerald-500/30 bg-emerald-500/[0.07] px-4 py-3">
+          <div>
+            <p className="text-sm font-medium text-emerald-300">Welcome to Matcha Lite</p>
+            <p className="mt-0.5 text-xs text-zinc-400">
+              Import your roster to unlock OSHA logs and the full insight suite — upload a CSV or add employees below.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={dismissUpgradeBanner}
+            className="text-zinc-500 hover:text-zinc-300 text-sm leading-none transition-colors"
+            aria-label="Dismiss"
+          >
+            &times;
+          </button>
+        </div>
+      )}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100">
