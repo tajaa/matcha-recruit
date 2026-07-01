@@ -385,7 +385,7 @@ const JURISDICTION_STORY: StoryConfig = {
   ],
 }
 
-function StoryPanel({ stage, delay, inView }: { stage: StoryStage; delay: number; inView: boolean }) {
+function StoryPanel({ stage, delay, inView, pulse }: { stage: StoryStage; delay: number; inView: boolean; pulse?: boolean }) {
   const color = toneColor(stage.tone)
   return (
     <motion.div
@@ -395,7 +395,17 @@ function StoryPanel({ stage, delay, inView }: { stage: StoryStage; delay: number
       className="flex-1 min-w-0 rounded-lg p-3.5"
       style={{ background: `linear-gradient(180deg, ${color}1f 0%, ${color}00 70%)`, border: `1px solid ${color}55` }}
     >
-      <Micro color={color} className="!font-bold block">{stage.label}</Micro>
+      <div className="flex items-center gap-1.5">
+        {pulse && (
+          <motion.span
+            className="w-1 h-1 rounded-full shrink-0"
+            style={{ backgroundColor: color }}
+            animate={inView ? { opacity: [1, 0.25, 1] } : {}}
+            transition={{ delay: delay + 0.4, duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
+          />
+        )}
+        <Micro color={color} className="!font-bold block">{stage.label}</Micro>
+      </div>
       <div className="text-[13px] font-medium mt-1.5 leading-snug" style={{ color: C.text }}>{stage.heading}</div>
       <div className="mt-1.5 space-y-0.5">
         {stage.lines.map(line => (
@@ -440,6 +450,14 @@ function StageConnector({ fromTone, toTone, delay, inView }: { fromTone: Tone; t
           animate={inView ? { opacity: 1 } : {}}
           transition={{ delay: delay + 0.3, duration: 0.2 }}
         />
+        {/* traveling dot — continuous flow, starts once the reveal finishes */}
+        <motion.circle
+          r={1.8}
+          fill={toColor}
+          initial={{ opacity: 0, cx: 0, cy: 5 }}
+          animate={inView ? { opacity: [0, 1, 1, 0], cx: [0, 0, 30, 30] } : {}}
+          transition={{ delay: delay + 0.6, duration: 1.6, repeat: Infinity, repeatDelay: 0.6, ease: 'easeInOut', times: [0, 0.1, 0.85, 1] }}
+        />
       </svg>
     </div>
   )
@@ -464,7 +482,12 @@ function ComplianceFlowMockup() {
           <span className="px-1.5 py-0.5 rounded text-[8px] font-medium" style={{ backgroundColor: ACCENT.bg, color: ACCENT.text, border: `1px solid ${ACCENT.border}` }}>{f.code.toUpperCase()} · LIVE</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: C.jade, boxShadow: `0 0 6px ${C.jade}` }} />
+          <motion.span
+            className="w-1.5 h-1.5 rounded-full"
+            style={{ backgroundColor: C.jade, boxShadow: `0 0 6px ${C.jade}` }}
+            animate={{ opacity: [1, 0.4, 1] }}
+            transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+          />
           <Micro color={C.textDim} className="normal-case tracking-normal">Live Engine · {f.engine}</Micro>
         </div>
       </div>
@@ -481,7 +504,7 @@ function ComplianceFlowMockup() {
         <div className="mt-3 flex items-stretch">
           <StoryPanel stage={f.stages[0]} delay={0.1} inView={inView} />
           <StageConnector fromTone={f.stages[0].tone} toTone={f.stages[1].tone} delay={0.3} inView={inView} />
-          <StoryPanel stage={f.stages[1]} delay={0.35} inView={inView} />
+          <StoryPanel stage={f.stages[1]} delay={0.35} inView={inView} pulse />
           <StageConnector fromTone={f.stages[1].tone} toTone={f.stages[2].tone} delay={0.55} inView={inView} />
           <StoryPanel stage={f.stages[2]} delay={0.6} inView={inView} />
         </div>
