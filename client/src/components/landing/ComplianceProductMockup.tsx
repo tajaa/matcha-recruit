@@ -516,7 +516,7 @@ function ComplianceFlowMockup() {
   return (
     <div
       ref={ref}
-      className="relative w-full rounded-xl overflow-hidden shadow-2xl h-auto font-sans"
+      className="relative w-full max-w-5xl mx-auto rounded-xl overflow-hidden shadow-2xl h-auto font-sans"
       style={{ backgroundColor: C.bg, border: `1px solid ${C.borderHard}` }}
     >
       {/* Header */}
