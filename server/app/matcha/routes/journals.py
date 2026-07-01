@@ -27,7 +27,11 @@ class JournalCreate(BaseModel):
     color: Optional[str] = None
     icon: Optional[str] = None
     kind: Optional[str] = None          # note|blog|todo|novel|screenplay|journal
-    folder_id: Optional[UUID] = None    # initial hub-folder placement
+    # Initial hub-folder placement. Omitted entirely -> auto-filed into the
+    # caller's default "Notes" notebook. Explicitly sent as null -> genuinely
+    # unfiled; distinguished via `model_fields_set` (a bare Optional can't
+    # tell "omitted" from "null" once parsed) — same trick as JournalPatch.
+    folder_id: Optional[UUID] = None
 
 
 class JournalPatch(BaseModel):
@@ -102,6 +106,7 @@ async def create_journal_endpoint(
         icon=body.icon,
         kind=body.kind,
         folder_id=body.folder_id,
+        folder_id_provided="folder_id" in body.model_fields_set,
     )
 
 

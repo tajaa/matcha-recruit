@@ -193,11 +193,11 @@ class MatchaWorkService {
 
     func createJournal(
         title: String, description: String? = nil, color: String? = nil, icon: String? = nil,
-        kind: String? = nil, folderId: String? = nil
+        kind: String? = nil, folderId: String? = nil, explicitlyUnfiled: Bool = false
     ) async throws -> MWJournal {
         try await JournalService.shared.createJournal(
             title: title, description: description, color: color, icon: icon,
-            kind: kind, folderId: folderId)
+            kind: kind, folderId: folderId, explicitlyUnfiled: explicitlyUnfiled)
     }
 
     func updateJournal(

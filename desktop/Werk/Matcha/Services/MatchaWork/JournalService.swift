@@ -31,31 +31,50 @@ final class JournalService {
         try await client.request(method: "GET", path: "\(basePath)/journals/\(id)")
     }
 
+    /// `explicitlyUnfiled: true` + `folderId: nil` forces `folder_id: null`
+    /// onto the wire so the backend genuinely leaves the note unfiled instead
+    /// of auto-filing it into the caller's default "Notes" notebook — same
+    /// distinction `moveJournal` relies on for "Move to → None".
     func createJournal(
         title: String,
         description: String? = nil,
         color: String? = nil,
         icon: String? = nil,
         kind: String? = nil,
-        folderId: String? = nil
+        folderId: String? = nil,
+        explicitlyUnfiled: Bool = false
     ) async throws -> MWJournal {
-        struct Body: Codable {
+        struct Body: Encodable {
             let title: String
             let description: String?
             let color: String?
             let icon: String?
             let kind: String?
             let folderId: String?
+            let forceFolderKey: Bool
             enum CodingKeys: String, CodingKey {
                 case title, description, color, icon, kind
                 case folderId = "folder_id"
+            }
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(title, forKey: .title)
+                try c.encodeIfPresent(description, forKey: .description)
+                try c.encodeIfPresent(color, forKey: .color)
+                try c.encodeIfPresent(icon, forKey: .icon)
+                try c.encodeIfPresent(kind, forKey: .kind)
+                if forceFolderKey {
+                    try c.encode(folderId, forKey: .folderId)   // always sends the key, even null
+                } else {
+                    try c.encodeIfPresent(folderId, forKey: .folderId)   // nil -> key omitted
+                }
             }
         }
         let journal: MWJournal = try await client.request(
             method: "POST",
             path: "\(basePath)/journals",
-            body: Body(title: title, description: description, color: color,
-                       icon: icon, kind: kind, folderId: folderId),
+            body: Body(title: title, description: description, color: color, icon: icon,
+                       kind: kind, folderId: folderId, forceFolderKey: explicitlyUnfiled),
         )
         invalidateLists()
         return journal

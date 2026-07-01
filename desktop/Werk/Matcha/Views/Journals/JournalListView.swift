@@ -315,7 +315,7 @@ extension SlashBlock {
 struct JournalsWorkspace: View {
     @Environment(AppState.self) private var appState
 
-    enum FolderMode: Equatable { case all, starred, shared, folder(String) }
+    enum FolderMode: Equatable { case all, starred, shared, uncategorized, folder(String) }
     enum SortKey: String, CaseIterable { case modified = "Date Modified", created = "Date Created", title = "Title" }
 
     @State private var folders: [MWJournalFolder] = []
@@ -396,6 +396,8 @@ struct JournalsWorkspace: View {
                         fixedRow(title: "Shared with me", icon: "person.2",
                                  selected: mode == .shared) { mode = .shared }
                     }
+                    fixedRow(title: "Uncategorized", icon: "tray",
+                             selected: mode == .uncategorized) { mode = .uncategorized }
                     if !folders.isEmpty {
                         Divider().padding(.horizontal, 8).padding(.vertical, 4)
                     }
@@ -692,6 +694,7 @@ struct JournalsWorkspace: View {
         case .all: return "All Notes"
         case .starred: return "Starred"
         case .shared: return "Shared with me"
+        case .uncategorized: return "Uncategorized"
         case .folder(let id): return folders.first { $0.id == id }?.name ?? "Folder"
         }
     }
@@ -714,6 +717,7 @@ struct JournalsWorkspace: View {
         case .all: base = journals.filter { !$0.isSharedWithMe }
         case .starred: base = journals.filter { JournalStarStore.shared.isStarred($0.id) }
         case .shared: base = journals.filter { $0.isSharedWithMe }
+        case .uncategorized: base = journals.filter { $0.folderId == nil && !$0.isSharedWithMe }
         case .folder(let id): base = journals.filter { $0.folderId == id && !$0.isSharedWithMe }
         }
         if !search.isEmpty {
@@ -762,7 +766,7 @@ struct JournalsWorkspace: View {
         // A note shared with me carries the OWNER's folder_id (not in my tree),
         // so route it to the "Shared with me" view, not a phantom folder.
         if j.isSharedWithMe { mode = .shared; return }
-        if let fid = j.folderId { mode = .folder(fid); collapsed.remove(fid) }
+        if let fid = j.folderId { mode = .folder(fid); collapsed.remove(fid) } else { mode = .uncategorized }
     }
 
     private func startFolderRename(_ folder: MWJournalFolder) {
@@ -837,6 +841,7 @@ struct JournalsWorkspace: View {
             let j = try await MatchaWorkService.shared.createJournal(
                 title: "", description: nil, color: nil, icon: nil,
                 kind: kind.rawValue, folderId: currentFolderId,
+                explicitlyUnfiled: mode == .uncategorized,
             )
             appState.journalsListGeneration &+= 1
             await load()

@@ -320,6 +320,7 @@ async def create_journal(
     icon: Optional[str] = None,
     kind: Optional[str] = None,
     folder_id: Optional[UUID] = None,
+    folder_id_provided: bool = False,
 ) -> dict:
     kind = _normalize_kind(kind)
     # Fall back to the kind's default icon when the form didn't pick one.
@@ -327,9 +328,10 @@ async def create_journal(
         icon = JOURNAL_KIND_DEFAULTS.get(kind, {}).get("icon")
     async with get_connection() as conn:
         # A folder, if given, must belong to the same company; otherwise file
-        # the new note into the default "Notes" notebook (Evernote model — no
-        # truly-unfiled notes from create; the note menu's "Move to → None"
-        # still allows un-filing after the fact).
+        # the new note into the default "Notes" notebook (invalid/foreign
+        # folder falls back to the same auto-assign path as "not provided" —
+        # the caller asked for a real folder that isn't theirs, not for an
+        # unfiled note).
         if folder_id is not None:
             ok = await conn.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM mw_journal_folders "
@@ -338,7 +340,13 @@ async def create_journal(
             )
             if not ok:
                 folder_id = None
-        if folder_id is None:
+                folder_id_provided = False
+        # Evernote-model default: omitting folder_id entirely files the note
+        # into the caller's default "Notes" notebook. An explicit `folder_id:
+        # null` (folder_id_provided=True) means the caller genuinely wants an
+        # unfiled note — skip the auto-assign so it lands with folder_id NULL.
+        # ("Move to → None" already un-files an existing note the same way.)
+        if folder_id is None and not folder_id_provided:
             folder_id = await _ensure_default_folder(conn, company_id, creator_id)
         row = await conn.fetchrow(
             """
