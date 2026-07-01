@@ -37,6 +37,7 @@ const DISPLAY = "var(--font-display)"; // Fraunces
 type Product = {
   n: string;
   name: string;
+  subheader?: string;
   blurb: string;
   to: string;
   accent: string;
@@ -47,6 +48,7 @@ const PRODUCTS: Product[] = [
   {
     n: "01",
     name: "Full Platform",
+    subheader: "Full Risk and Employee Relations Suite",
     blurb:
       "Agentic risk management — safety, compliance, and employee relations on one brain.",
     to: "/platform",
@@ -55,6 +57,7 @@ const PRODUCTS: Product[] = [
   {
     n: "02",
     name: "Matcha Lite",
+    subheader: "Incident Reporting and OSHA Logs",
     blurb:
       "Incident reporting, OSHA 300 logs, and a full HR library. Bundled for small teams.",
     to: "/matcha-daily",
@@ -63,6 +66,7 @@ const PRODUCTS: Product[] = [
   {
     n: "03",
     name: "Compliance",
+    subheader: "Multi-State Jurisdictional Intelligence",
     blurb:
       "Multi-state regulatory tracking, jurisdiction-aware alerts, and audit-ready records.",
     to: "/compliance",
@@ -80,7 +84,9 @@ const PRODUCTS: Product[] = [
 
 // Hero carousel slides. Not 1:1 with PRODUCTS: Matcha Lite gets two slides
 // (the incident-reporting flow + its OSHA 300 recordkeeping), both keyed "02"
-// and routed to /matcha-daily so they read as two facets of one product.
+// and titled "Matcha Lite" with the same subheader — the OSHA facet is part
+// of the Matcha Lite bundle, not a separate product, so it shouldn't read as
+// one. Routed to /matcha-daily so they read as two facets of one product.
 // Order is presentation, not the product numbering: lead with the entry-tier
 // product (Matcha Lite, then its OSHA facet), then Compliance, then close on
 // the Full Platform as the "and everything above, unified" capstone.
@@ -89,7 +95,8 @@ const CAROUSEL_PRODUCTS: Product[] = [
   PRODUCTS[1], // 02 Matcha Lite — incident reporting flow
   {
     n: "02",
-    name: "OSHA Recordkeeping",
+    name: "Matcha Lite",
+    subheader: "Incident Reporting and OSHA Logs",
     blurb:
       "Recordable incidents flow straight into your OSHA 300 log, 300A summary, and ITA export.",
     to: "/matcha-daily",
@@ -1942,25 +1949,35 @@ function ProductCarousel() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.3 }}
-            className="flex items-baseline gap-3 min-w-0"
+            className="flex items-start gap-3 min-w-0"
           >
             <span
-              className="font-mono text-sm shrink-0"
+              className="font-mono text-sm shrink-0 pt-1"
               style={{ color: slide.accent }}
             >
               {slide.n}
             </span>
-            <h3
-              className="tracking-[-0.02em] truncate"
-              style={{
-                fontFamily: DISPLAY,
-                fontWeight: 400,
-                fontSize: "clamp(1.75rem, 2.4vw, 2.75rem)",
-                color: BONE,
-              }}
-            >
-              {slide.name}
-            </h3>
+            <div className="min-w-0">
+              <h3
+                className="tracking-[-0.02em] truncate"
+                style={{
+                  fontFamily: DISPLAY,
+                  fontWeight: 400,
+                  fontSize: "clamp(1.75rem, 2.4vw, 2.75rem)",
+                  color: BONE,
+                }}
+              >
+                {slide.name}
+              </h3>
+              {slide.subheader && (
+                <p
+                  className="text-[11px] sm:text-[12px] font-mono uppercase tracking-[0.14em] mt-1 truncate"
+                  style={{ color: ASH }}
+                >
+                  {slide.subheader}
+                </p>
+              )}
+            </div>
           </motion.div>
         </AnimatePresence>
         <Link
