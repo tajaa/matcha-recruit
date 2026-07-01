@@ -3,30 +3,31 @@
 # Replace the DEV database with an ANONYMIZED clone of PRODUCTION.
 #
 # PROD = the matcha-prod RDS instance (app VPC). It is reachable ONLY from the
-# app EC2 (54.177.107.107) — the DB EC2 is a different VPC and cannot route to
-# it. DEV = the matcha-postgres container (:5432) on the DB EC2 (3.101.83.217).
+# app EC2 (54.177.107.107) — dump runs there via SSH and streams straight to
+# this laptop.
+# DEV = the LOCAL matcha-postgres docker container (managed by dev-remote.sh).
+# The old DB EC2 (3.101.83.217, "matcha-postgres-db") is STOPPED and has no
+# public IP anymore — dev moved off it entirely on 2026-06-15. There is no
+# remote leg on the dev side anymore: everything below runs locally via
+# `docker exec`.
 #
-# Copy path: pg_dump runs on the APP EC2 (PG16 client, dumps the PG15 RDS,
-# read-only) and streams through this laptop into a dump file on the DB EC2,
-# then restores into a staging DB inside the dev container. Rename-swap at the
-# end, so a failed/aborted clone leaves the existing dev DB intact. A gzipped
-# snapshot of dev is taken first for belt-and-suspenders recovery.
-# NOTE: the dump transits this laptop (the two EC2s have no SSH trust). Fine
-# pre-customer; revisit once real PII exists.
-#
-# --legacy-source: clone from the OLD prod container (matcha-postgres-prod
-# :5433 on the DB EC2, host-side pipe like the original flow) — the live DB
-# until cutover, frozen afterwards.
+# Copy path: pg_dump runs on the APP EC2 inside a disposable `postgres:15`
+# container (the box's own bare-metal client is PG16 — its custom-format
+# archives use a newer version tag that a PG15 pg_restore refuses to read;
+# dumping from a matching-version container sidesteps that entirely, first
+# run pulls the ~80MB image and it's cached after), streams over SSH to a
+# local temp file, then restores into a staging DB inside the local
+# matcha-postgres container. Rename-swap at the end, so a failed/aborted
+# clone leaves the existing dev DB intact. A gzipped snapshot of dev is taken
+# first for belt-and-suspenders recovery.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PEM="${PEM:-$REPO_ROOT/roonMT-arm.pem}"
-DB_EC2="${DB_EC2:-ec2-user@3.101.83.217}"
 APP_EC2="${APP_EC2:-ec2-user@54.177.107.107}"
 RDS_HOST="${RDS_HOST:-matcha-prod.cbego6cwwdqy.us-west-1.rds.amazonaws.com}"
 
-PROD_CONTAINER="${PROD_CONTAINER:-matcha-postgres-prod}"   # legacy source (read-only)
-DEV_CONTAINER="${DEV_CONTAINER:-matcha-postgres}"          # target (rebuilt)
+DEV_CONTAINER="${DEV_CONTAINER:-matcha-postgres}"          # local docker container (target, rebuilt)
 DB_NAME="${DB_NAME:-matcha}"
 DB_USER="${DB_USER:-matcha}"
 DEV_LOGIN_PASSWORD="${DEV_LOGIN_PASSWORD:-devpass123}"     # password for every NON-preserved dev user
@@ -53,48 +54,57 @@ case "$(echo "${SKIP_ANONYMIZE:-}" | tr '[:upper:]' '[:lower:]')" in
 esac
 
 ANON_SQL="$REPO_ROOT/scripts/sql/anonymize_dev.sql"
-KEEP_OLD=1   # how many matcha_old_* DBs to retain on the host
+SNAP_DIR="${SNAP_DIR:-$HOME/matcha-dev-snapshots}"   # local now — no more DB EC2 to hold these
+KEEP_OLD=1   # how many matcha_old_* DBs to retain locally
 
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; NC=$'\033[0m'
 
-# --- Safety rails (local) ---------------------------------------------------
+ddev() { docker exec -i "$DEV_CONTAINER" psql -U "$DB_USER" -v ON_ERROR_STOP=1 "$@"; }
+
+# --- Safety rails ------------------------------------------------------------
 # Destructive ops must NEVER target the prod container.
 if [[ "$DEV_CONTAINER" == *prod* ]]; then
     echo "${RED}REFUSING: DEV_CONTAINER='$DEV_CONTAINER' looks like production.${NC}"; exit 1
 fi
 [[ -f "$PEM" ]]      || { echo "${RED}SSH key not found: $PEM${NC}"; exit 1; }
 [[ -f "$ANON_SQL" ]] || { echo "${RED}Anonymizer not found: $ANON_SQL${NC}"; exit 1; }
+command -v docker >/dev/null || { echo "${RED}docker not found on PATH.${NC}"; exit 1; }
+
+if ! docker ps --format '{{.Names}}' | grep -qx "$DEV_CONTAINER"; then
+    if docker ps -a --format '{{.Names}}' | grep -qx "$DEV_CONTAINER"; then
+        echo "${YELLOW}Starting local $DEV_CONTAINER...${NC}"
+        docker start "$DEV_CONTAINER" >/dev/null
+        for _ in $(seq 1 30); do
+            docker exec "$DEV_CONTAINER" pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1 && break
+            sleep 1
+        done
+    else
+        echo "${RED}Local container '$DEV_CONTAINER' not found. Run ./scripts/dev-remote.sh once first (it creates it).${NC}"
+        exit 1
+    fi
+fi
 
 PY="$REPO_ROOT/server/venv/bin/python"
 [[ -x "$PY" ]] || PY="$(command -v python3 || true)"
 [[ -n "$PY" ]] || { echo "${RED}No python found to generate the dev password hash.${NC}"; exit 1; }
 
-# Warn if a local dev stack is holding connections to dev :5432 (blocks the swap).
-if lsof -n -P -iTCP:5432 -sTCP:LISTEN >/dev/null 2>&1; then
-    echo "${YELLOW}Warning: something is listening on localhost:5432 (dev-remote tunnel?).${NC}"
-    echo "${YELLOW}A running dev backend reconnects to the dev DB and can block the rename-swap.${NC}"
-    echo "${YELLOW}Recommend: ./scripts/dev-remote.sh stop  before continuing.${NC}"
-fi
+echo "${YELLOW}Reminder: stop any running ./scripts/dev-remote.sh backend first — a live${NC}"
+echo "${YELLOW}connection to $DB_NAME can block the rename-swap at the end.${NC}"
 
 DRY_RUN=false
-SOURCE="rds"
 for arg in "$@"; do
     case "$arg" in
-        --dry-run)       DRY_RUN=true;;
-        --legacy-source) SOURCE="container";;
-        *) echo "${RED}Unknown arg: $arg${NC} (use --dry-run / --legacy-source)"; exit 1;;
+        --dry-run) DRY_RUN=true;;
+        *) echo "${RED}Unknown arg: $arg${NC} (use --dry-run)"; exit 1;;
     esac
 done
 
 # RDS creds come from PROD_DATABASE_URL in server/.env (the laptop-tunnel form;
 # only the password is reused here — host is the real endpoint, used from the
 # app EC2 which is the only box that can route to RDS).
-RDS_PW=""
-if [[ "$SOURCE" == "rds" ]]; then
-    RDS_URL="$(sed -n 's/^PROD_DATABASE_URL=//p' "$REPO_ROOT/server/.env" | head -1 | tr -d "\"'")"
-    RDS_PW="$(printf '%s' "$RDS_URL" | sed -nE 's#^[a-z+]+://[^:/@]+:([^@]*)@.*#\1#p')"
-    [[ -n "$RDS_PW" ]] || { echo "${RED}Could not parse password from PROD_DATABASE_URL in server/.env${NC}"; exit 1; }
-fi
+RDS_URL="$(sed -n 's/^PROD_DATABASE_URL=//p' "$REPO_ROOT/server/.env" | head -1 | tr -d "\"'")"
+RDS_PW="$(printf '%s' "$RDS_URL" | sed -nE 's#^[a-z+]+://[^:/@]+:([^@]*)@.*#\1#p')"
+[[ -n "$RDS_PW" ]] || { echo "${RED}Could not parse password from PROD_DATABASE_URL in server/.env${NC}"; exit 1; }
 
 if [[ "$SKIP_ANON" == true ]]; then
     ANON_STATUS="${RED}OFF — dev becomes a FULL, UNSCRUBBED copy of prod (real emails/passwords/PII)${NC}"
@@ -102,16 +112,10 @@ else
     ANON_STATUS="on (PII scrubbed; preserve list keeps your real logins)"
 fi
 
-if [[ "$SOURCE" == "rds" ]]; then
-    SRC_DESC="RDS $RDS_HOST : $DB_NAME (dumped on $APP_EC2)"
-else
-    SRC_DESC="$DB_EC2 -> $PROD_CONTAINER : $DB_NAME (LEGACY container)"
-fi
-
 cat <<EOF
 ${YELLOW}This will REPLACE the dev database with a copy of PRODUCTION.${NC}
-  source (prod, read-only): $SRC_DESC
-  target (dev,  REBUILT)  : $DB_EC2  ->  $DEV_CONTAINER  : $DB_NAME
+  source (prod, read-only): RDS $RDS_HOST : $DB_NAME (dumped on $APP_EC2)
+  target (dev,  REBUILT)  : local docker $DEV_CONTAINER : $DB_NAME
   anonymize PII: $ANON_STATUS
   non-preserved dev user password becomes: $DEV_LOGIN_PASSWORD
   preserved real logins (keep real email + password): ${DEV_PRESERVE_EMAILS:-(none)}
@@ -143,120 +147,87 @@ if [[ -n "$DEV_PRESERVE_EMAILS" ]]; then
 fi
 
 RENDERED="$(mktemp -t anonymize_dev.XXXXXX.sql)"
-REMOTE_SCRIPT="$(mktemp -t refresh_dev_remote.XXXXXX.sh)"
-trap 'rm -f "$RENDERED" "$REMOTE_SCRIPT"' EXIT
+DUMP_FILE="$(mktemp -t prod_rds.XXXXXX.dump)"
+trap 'rm -f "$RENDERED" "$DUMP_FILE"' EXIT
 sed -e "s|__DEV_PW_HASH__|$DEV_PW_HASH|g" \
     -e "s|__PRESERVE_EMAILS__|$PRESERVE_SQL|g" "$ANON_SQL" > "$RENDERED"
 
-# Remote driver shipped as a FILE (not piped to `bash -s`): if it were on stdin,
-# the first `docker exec -i` would swallow the rest of the script as its stdin.
-cat > "$REMOTE_SCRIPT" <<'REMOTE'
-set -euo pipefail
 TS=$(date +%F_%H-%M-%S)
-SNAP_DIR=/home/ec2-user/dev-snapshots
-ddev()  { docker exec -i "$DEV"  psql -U "$U" -v ON_ERROR_STOP=1 "$@"; }   # stdin free (script is a file)
 
-if [ "$SOURCE" = "container" ]; then
-    docker ps --format '{{.Names}}' | grep -qx "$PROD" || { echo "prod container $PROD not running"; exit 1; }
-else
-    [ -s /tmp/prod_rds.dump ] || { echo "missing/empty /tmp/prod_rds.dump (RDS dump stage failed?)"; exit 1; }
-fi
-docker ps --format '{{.Names}}' | grep -qx "$DEV"  || { echo "dev container $DEV not running";  exit 1; }
-
-echo "[1/6] Pre-refresh dev snapshot..."
+echo "${YELLOW}[1/6] Pre-refresh dev snapshot...${NC}"
 mkdir -p "$SNAP_DIR"
-docker exec "$DEV" pg_dump -U "$U" "$DB" | gzip > "$SNAP_DIR/dev_pre_refresh_$TS.sql.gz"
+docker exec "$DEV_CONTAINER" pg_dump -U "$DB_USER" "$DB_NAME" | gzip > "$SNAP_DIR/dev_pre_refresh_$TS.sql.gz"
 echo "      $(du -h "$SNAP_DIR/dev_pre_refresh_$TS.sql.gz" | cut -f1) -> $SNAP_DIR/dev_pre_refresh_$TS.sql.gz"
-ls -1t "$SNAP_DIR"/dev_pre_refresh_*.sql.gz | tail -n +6 | xargs -r rm -f   # keep last 5
+ls -1t "$SNAP_DIR"/dev_pre_refresh_*.sql.gz 2>/dev/null | tail -n +6 | xargs -r rm -f   # keep last 5
 
-echo "[2/6] Staging fresh DB ${DB}_new..."
-ddev -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${DB}_new' AND pid<>pg_backend_pid();" >/dev/null
-ddev -d postgres -c "DROP DATABASE IF EXISTS ${DB}_new;"
-ddev -d postgres -c "CREATE DATABASE ${DB}_new OWNER $U;"
+echo "${YELLOW}Dumping RDS prod on the app EC2 (via a PG15 dump container), streaming to this laptop...${NC}"
+# Password rides stdin (read by the remote shell) so it never appears in
+# argv/ps on the app EC2. PGSSLMODE=require: rds.force_ssl=1. pg_dump runs
+# inside `postgres:15` (--network host, -e VARNAME with no '=' forwards the
+# value from the remote shell's env without it showing up in `docker run`'s
+# own argv) so the archive version matches the local PG15 restore target.
+printf '%s\n' "$RDS_PW" | ssh -i "$PEM" "$APP_EC2" \
+    "IFS= read -r PGPASSWORD; export PGPASSWORD PGSSLMODE=require; docker run --rm --network host -e PGPASSWORD -e PGSSLMODE postgres:15 pg_dump -h '$RDS_HOST' -p 5432 -U '$DB_USER' -d '$DB_NAME' -Fc" \
+    > "$DUMP_FILE"
+echo "      $(du -h "$DUMP_FILE" | cut -f1) dumped"
 
-if [ "$SOURCE" = "container" ]; then
-    echo "[3/6] Cloning legacy prod container -> ${DB}_new (host-local pipe)..."
-    docker exec "$PROD" pg_dump -U "$U" -Fc "$DB" \
-      | docker exec -i "$DEV" pg_restore -U "$U" -d "${DB}_new" --no-owner --no-privileges --exit-on-error
+echo "${YELLOW}[2/6] Staging fresh ${DB_NAME}_new...${NC}"
+ddev -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${DB_NAME}_new' AND pid<>pg_backend_pid();" >/dev/null
+ddev -d postgres -c "DROP DATABASE IF EXISTS ${DB_NAME}_new;"
+ddev -d postgres -c "CREATE DATABASE ${DB_NAME}_new OWNER $DB_USER;"
+
+echo "${YELLOW}[3/6] Restoring staged RDS dump -> ${DB_NAME}_new...${NC}"
+docker exec -i "$DEV_CONTAINER" pg_restore -U "$DB_USER" -d "${DB_NAME}_new" --no-owner --no-privileges --exit-on-error < "$DUMP_FILE"
+
+if [[ "$SKIP_ANON" == true ]]; then
+    echo "${YELLOW}[4/6] SKIPPING anonymization — dev will be a FULL UNSCRUBBED prod mirror (SKIP_ANONYMIZE set).${NC}"
 else
-    echo "[3/6] Restoring staged RDS dump -> ${DB}_new ($(du -h /tmp/prod_rds.dump | cut -f1))..."
-    docker exec -i "$DEV" pg_restore -U "$U" -d "${DB}_new" --no-owner --no-privileges --exit-on-error < /tmp/prod_rds.dump
-    rm -f /tmp/prod_rds.dump
+    echo "${YELLOW}[4/6] Anonymizing ${DB_NAME}_new...${NC}"
+    docker exec -i "$DEV_CONTAINER" psql -U "$DB_USER" -d "${DB_NAME}_new" -v ON_ERROR_STOP=1 < "$RENDERED"
 fi
 
-if [ "${SKIP_ANON:-false}" = "true" ]; then
-    echo "[4/6] SKIPPING anonymization — dev will be a FULL UNSCRUBBED prod mirror (SKIP_ANONYMIZE set)."
-else
-    echo "[4/6] Anonymizing ${DB}_new..."
-    # Read the SQL from the HOST file via stdin: `-f /path` would look inside the
-    # container, where the scp'd file doesn't exist.
-    docker exec -i "$DEV" psql -U "$U" -d "${DB}_new" -v ON_ERROR_STOP=1 < /tmp/anonymize_dev.sql
-fi
-
-if [ "$DRY_RUN" = "true" ]; then
-    echo "[5/6] DRY RUN — leaving anonymized clone as ${DB}_new, NOT swapping."
-    echo "      Inspect: docker exec -it $DEV psql -U $U -d ${DB}_new"
-    echo "[6/6] Skipped swap."
+if [[ "$DRY_RUN" == "true" ]]; then
+    echo "${YELLOW}[5/6] DRY RUN — leaving anonymized clone as ${DB_NAME}_new, NOT swapping.${NC}"
+    echo "      Inspect: docker exec -it $DEV_CONTAINER psql -U $DB_USER -d ${DB_NAME}_new"
+    echo "${YELLOW}[6/6] Skipped swap.${NC}"
     exit 0
 fi
 
-echo "[5/6] Swapping ${DB} <- ${DB}_new ..."
+echo "${YELLOW}[5/6] Swapping ${DB_NAME} <- ${DB_NAME}_new ...${NC}"
 # Double-quote the timestamped name: $TS has hyphens/colons, illegal in an
 # unquoted SQL identifier. matcha / matcha_new are bare-identifier-safe.
 ddev -d postgres <<SQL
-SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname IN ('${DB}','${DB}_new') AND pid<>pg_backend_pid();
-ALTER DATABASE ${DB} RENAME TO "${DB}_old_${TS}";
-ALTER DATABASE ${DB}_new RENAME TO ${DB};
+SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname IN ('${DB_NAME}','${DB_NAME}_new') AND pid<>pg_backend_pid();
+ALTER DATABASE ${DB_NAME} RENAME TO "${DB_NAME}_old_${TS}";
+ALTER DATABASE ${DB_NAME}_new RENAME TO ${DB_NAME};
 SQL
-for old in $(ddev -tA -d postgres -c "SELECT datname FROM pg_database WHERE datname LIKE '${DB}_old_%' ORDER BY datname DESC OFFSET ${KEEP_OLD};"); do
+for old in $(ddev -tA -d postgres -c "SELECT datname FROM pg_database WHERE datname LIKE '${DB_NAME}_old_%' ORDER BY datname DESC OFFSET ${KEEP_OLD};"); do
     echo "      dropping stale $old"
     ddev -d postgres -c "DROP DATABASE IF EXISTS \"$old\";"
 done
 
-echo "[6/6] Verifying live dev DB..."
-ddev -tA -d "$DB" -c "SELECT 'companies='||count(*) FROM companies UNION ALL SELECT 'users='||count(*) FROM users;"
-if [ "${SKIP_ANON:-false}" = "true" ]; then
+echo "${YELLOW}[6/6] Verifying live dev DB...${NC}"
+ddev -tA -d "$DB_NAME" -c "SELECT 'companies='||count(*) FROM companies UNION ALL SELECT 'users='||count(*) FROM users;"
+if [[ "$SKIP_ANON" == true ]]; then
     echo "      anonymization SKIPPED — dev holds REAL prod data by request; leak check not applicable."
 else
-    LEAK=$(ddev -tA -d "$DB" -c "SELECT count(*) FROM users WHERE email NOT LIKE '%@example.com' AND email <> ALL(ARRAY[${PRESERVE_SQL}]::text[]);")
+    LEAK=$(ddev -tA -d "$DB_NAME" -c "SELECT count(*) FROM users WHERE email NOT LIKE '%@example.com' AND email <> ALL(ARRAY[${PRESERVE_SQL}]::text[]);")
     echo "      non-reserved user emails, excl. preserved (must be 0): $LEAK"
-    [ "$LEAK" = "0" ] || { echo "PII LEAK DETECTED — anonymizer missed rows."; exit 1; }
+    [[ "$LEAK" == "0" ]] || { echo "${RED}PII LEAK DETECTED — anonymizer missed rows.${NC}"; exit 1; }
 fi
 echo "      sample logins:"
-ddev -tA -d "$DB" -c "SELECT '        '||role||'  ->  '||email FROM users WHERE role IN ('admin','client','individual') ORDER BY role LIMIT 6;"
-REMOTE
-
-scp -q -i "$PEM" "$RENDERED" "$DB_EC2:/tmp/anonymize_dev.sql"
-scp -q -i "$PEM" "$REMOTE_SCRIPT" "$DB_EC2:/tmp/refresh_dev_remote.sh"
-
-if [[ "$SOURCE" == "rds" ]]; then
-    echo "${YELLOW}Dumping RDS prod on the app EC2, staging on the DB EC2 (via laptop)...${NC}"
-    # Password rides stdin (read by the remote shell) so it never appears in
-    # argv/ps on the app EC2. PGSSLMODE=require: rds.force_ssl=1.
-    printf '%s\n' "$RDS_PW" | ssh -i "$PEM" "$APP_EC2" \
-        "IFS= read -r PGPASSWORD; export PGPASSWORD PGSSLMODE=require; pg_dump -h '$RDS_HOST' -p 5432 -U '$DB_USER' -d '$DB_NAME' -Fc" \
-      | ssh -i "$PEM" "$DB_EC2" "cat > /tmp/prod_rds.dump"
-    ssh -n -i "$PEM" "$DB_EC2" "du -h /tmp/prod_rds.dump"
-fi
-
-# -n: don't let our local stdin (the confirm pipe) leak into the remote command.
-ssh -n -i "$PEM" "$DB_EC2" \
-    "SOURCE='$SOURCE' PROD='$PROD_CONTAINER' DEV='$DEV_CONTAINER' DB='$DB_NAME' U='$DB_USER' DRY_RUN='$DRY_RUN' KEEP_OLD='$KEEP_OLD' PRESERVE_SQL=\"$PRESERVE_SQL\" SKIP_ANON='$SKIP_ANON' bash /tmp/refresh_dev_remote.sh; rc=\$?; rm -f /tmp/refresh_dev_remote.sh /tmp/anonymize_dev.sql /tmp/prod_rds.dump; exit \$rc"
+ddev -tA -d "$DB_NAME" -c "SELECT '        '||role||'  ->  '||email FROM users WHERE role IN ('admin','client','individual') ORDER BY role LIMIT 6;"
 
 echo
-if [[ "$DRY_RUN" == "true" ]]; then
-    echo "${GREEN}Dry run complete. Review matcha_new on the host, then re-run without --dry-run.${NC}"
+if [[ "$SKIP_ANON" == true ]]; then
+    echo "${GREEN}Dev DB refreshed from prod — UNSCRUBBED full mirror.${NC}"
+    echo "${GREEN}Log in with your REAL prod email + REAL password (every account works).${NC}"
+    echo "${YELLOW}Re-enable scrubbing once you have customers: unset SKIP_ANONYMIZE.${NC}"
 else
-    if [[ "$SKIP_ANON" == true ]]; then
-        echo "${GREEN}Dev DB refreshed from prod — UNSCRUBBED full mirror.${NC}"
-        echo "${GREEN}Log in with your REAL prod email + REAL password (every account works).${NC}"
-        echo "${YELLOW}Re-enable scrubbing once you have customers: unset SKIP_ANONYMIZE.${NC}"
-    else
-        echo "${GREEN}Dev DB refreshed from prod (anonymized).${NC}"
-        echo "${GREEN}Anonymized test users: any listed email + password: ${DEV_LOGIN_PASSWORD}${NC}"
-        if [[ -n "$DEV_PRESERVE_EMAILS" ]]; then
-            echo "${GREEN}Preserved accounts: real email + real password: ${DEV_PRESERVE_EMAILS}${NC}"
-        fi
+    echo "${GREEN}Dev DB refreshed from prod (anonymized).${NC}"
+    echo "${GREEN}Anonymized test users: any listed email + password: ${DEV_LOGIN_PASSWORD}${NC}"
+    if [[ -n "$DEV_PRESERVE_EMAILS" ]]; then
+        echo "${GREEN}Preserved accounts: real email + real password: ${DEV_PRESERVE_EMAILS}${NC}"
     fi
-    echo "Restart your stack: ./scripts/dev-remote.sh"
 fi
+echo "Restart your stack: ./scripts/dev-remote.sh"

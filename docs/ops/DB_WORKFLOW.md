@@ -6,23 +6,24 @@ data between them. Companion to [`DB_ENCRYPTION_RUNBOOK.md`](./DB_ENCRYPTION_RUN
 
 ## Topology
 
-**2026-06-09: prod is moving to RDS.** `matcha-prod` (PG 15.18, encrypted, single-AZ,
-`db.t4g.small`) was created in the app VPC and loaded with a verified clone of the
-prod container. **Cutover is pending** — until the app EC2's `DATABASE_URL` is flipped
-to RDS, the live DB is still the `:5433` container.
+**2026-06-15: dev moved off the DB EC2 to a local container.** The old DB EC2
+(`3.101.83.217`, instance `matcha-postgres-db`) is now **stopped** with no public
+IP — it's no longer reachable at all. `dev-remote.sh` now manages a local
+pgvector/pg15 docker container (`matcha-postgres`) on your own laptop instead.
+
+**Prod is on RDS.** `matcha-prod` (PG 15.18, encrypted, single-AZ, `db.t4g.small`)
+lives in the app VPC.
 
 | Instance | Where | Role | Reachable from |
 |---|---|---|---|
-| `matcha-prod` RDS | `matcha-prod.cbego6cwwdqy.us-west-1.rds.amazonaws.com:5432` (app VPC) | **PROD** (post-cutover) | app EC2 only (SG-locked); laptop via app-EC2 tunnel `localhost:5434`. `rds.force_ssl=1` → `sslmode=require` |
-| `matcha-postgres-prod` container | DB EC2 `3.101.83.217` `:5433` | **PROD until cutover**, frozen copy after | app EC2; laptop via DB-EC2 tunnel |
-| `matcha-postgres` container | DB EC2 `3.101.83.217` `:5432` | **DEV** (+ 8 other apps' DBs) | laptop via `dev-remote.sh` SSH tunnel |
+| `matcha-prod` RDS | `matcha-prod.cbego6cwwdqy.us-west-1.rds.amazonaws.com:5432` (app VPC) | **PROD** | app EC2 only (SG-locked); laptop via app-EC2 tunnel `localhost:5434`. `rds.force_ssl=1` → `sslmode=require` |
+| `matcha-postgres` container | **local docker**, on your laptop | **DEV** | directly — no SSH/tunnel needed. Managed by `dev-remote.sh` (`docker exec` for everything else) |
 
-The DB EC2 and the app VPC are **different VPCs** — the DB EC2 cannot route to RDS.
-Anything that talks to RDS goes through the app EC2 (`54.177.107.107`).
+Anything that talks to RDS goes through the app EC2 (`54.177.107.107`, tagged
+`minty-backend-rds` in AWS) — that's the only box in the RDS's VPC.
 
 App containers (backend/worker/frontend/redis/livekit) run on the app EC2 and point
-at prod `:5433` until cutover (runbook: set `DATABASE_URL` to the RDS endpoint +
-`DATABASE_SSL=require`, restart backend, smoke-test; revert = point back).
+at the RDS endpoint (`DATABASE_URL` + `DATABASE_SSL=require`).
 
 ## The two flows
 
@@ -42,11 +43,11 @@ at prod `:5433` until cutover (runbook: set `DATABASE_URL` to the RDS endpoint +
 
 | Script | Tunnels / acts on | What it does |
 |---|---|---|
-| `scripts/dev-remote.sh` | dev `:5432` | Start the local stack (tunnel + backend + worker + frontend). Does **not** run migrations. |
-| `scripts/migrate-dev.sh` | dev `:5432` | `alembic upgrade head` against dev. Reuses an existing dev-remote tunnel if present. |
-| `scripts/migrate-prod.sh` | RDS via app EC2 (`localhost:5434`) | `alembic upgrade head` against RDS prod (reads `PROD_DATABASE_URL` from `server/.env`). `--legacy` targets the old `:5433` container (`PROD_LEGACY_DATABASE_URL`). Pre-cutover, a migration that must hit live prod needs **both**. |
-| `scripts/refresh-dev-from-prod.sh` | app EC2 (dump) + DB EC2 (restore) | Clone RDS prod → dev and anonymize; dump streams app EC2 → laptop → DB EC2. `--legacy-source` clones from the old `:5433` container host-side instead. See below. |
-| `scripts/backups.sh` | DB host | Convenience CLI over the S3 backup bucket (list/latest/create/download/restore/size). |
+| `scripts/dev-remote.sh` | local docker | Start the local stack (local Postgres container + backend + worker + frontend). Does **not** run migrations. |
+| `scripts/migrate-dev.sh` | local docker | `alembic upgrade heads` against the local dev container. Starts it if not running. |
+| `scripts/migrate-prod.sh` | RDS via app EC2 (`localhost:5434`) | `alembic upgrade heads` against RDS prod (reads `PROD_DATABASE_URL` from `server/.env`). `--legacy` targets the old `:5433` container (`PROD_LEGACY_DATABASE_URL`) — that container's host is stopped, so this path only works if you boot it back up. |
+| `scripts/refresh-dev-from-prod.sh` | app EC2 (dump) + local docker (restore) | Clone RDS prod → local dev container and anonymize; dump streams app EC2 → laptop, restores via `docker exec`. See below. |
+| `scripts/backups.sh` | DB host `3.101.83.217` | Convenience CLI over the S3 backup bucket — **stale**: the host cron it drives lives on the now-stopped DB EC2, so this currently can't reach it. RDS has its own automated snapshots separately; this script needs a rework if you want the old S3-cron flow back. |
 | `scripts/sql/anonymize_dev.sql` | — | PII/secret scrub applied during a refresh. |
 
 ### Typical schema change
@@ -71,18 +72,24 @@ afterward.
 ./scripts/dev-remote.sh                        # reconnect
 ```
 
-What it does, all host-side (no customer data leaves the EC2 box):
+What it does:
 
-1. **Snapshot** dev → `/home/ec2-user/dev-snapshots/dev_pre_refresh_<ts>.sql.gz` (keeps last 5).
-2. **Stage** a fresh `matcha_new`.
-3. **Clone** `pg_dump matcha-postgres-prod | pg_restore → matcha_new` (host-local pipe).
+1. **Snapshot** dev → `~/matcha-dev-snapshots/dev_pre_refresh_<ts>.sql.gz` on your laptop (keeps last 5).
+2. **Dump** RDS prod on the app EC2, streamed over SSH to a local temp file. Runs inside a
+   disposable `postgres:15` container on the app EC2 rather than the box's bare-metal
+   client — that's PG16, whose custom-format archives (`pg_dump -Fc`) use a newer
+   version tag that a PG15 `pg_restore` refuses to read (`unsupported version (1.15) in
+   file header`). Dumping from a matching-version container avoids the mismatch; first
+   run pulls the ~80MB image, cached after.
+3. **Stage** a fresh `matcha_new` in the local `matcha-postgres` container and `pg_restore` the dump into it (`docker exec`, no SSH — the container is local).
 4. **Anonymize** `matcha_new` with `anonymize_dev.sql`.
 5. **Swap** `matcha → matcha_old_<ts>`, `matcha_new → matcha` (keeps 1 old DB).
 6. **Verify** counts + assert zero non-`@example.com` user emails.
 
 Safety: it refuses if the target container name contains `prod`, requires typing
-`refresh-dev`, and only ever rebuilds `matcha-postgres` (dev); prod is read-only as the
-`pg_dump` source. A failed clone leaves the live dev DB untouched (the swap is last).
+`refresh-dev`, and only ever rebuilds the local `matcha-postgres` container (dev); prod
+(RDS) is read-only as the `pg_dump` source. A failed clone leaves the live dev DB
+untouched (the swap is last).
 
 After a refresh, **all dev users share one password** (`devpass123`, override with
 `DEV_LOGIN_PASSWORD=`). The script prints sample `admin`/`client`/`individual` emails to
@@ -134,10 +141,16 @@ offer-letter benefits, message bodies, company summaries). Extend the SQL if you
 those gone too. The column list is validated against the live schema; the run is wrapped
 in a transaction with `ON_ERROR_STOP`, so an unknown column aborts safely.
 
-## Backups (reference)
+## Backups (reference — STALE, needs a rework)
 
-Canonical backup = host cron `/home/ec2-user/backup-to-s3.sh` on `3.101.83.217`, every
-12h, gzipped per-DB → `s3://matcha-recruit-backups/postgres/` (SSE-AES256). Prod matcha
-is `matcha_*` (~12 MB gz); dev/legacy matcha is `matcha_test_*`. Use `scripts/backups.sh
-latest` to see the most recent of each. (The `postgres_*` ~400-byte objects are the
-empty maintenance DB — harmless.)
+The old canonical backup was a host cron `/home/ec2-user/backup-to-s3.sh` on
+`3.101.83.217`, every 12h, gzipped per-DB → `s3://matcha-recruit-backups/postgres/`
+(SSE-AES256), driven via `scripts/backups.sh`. That box is now **stopped** (dev moved
+to a local container, prod moved to RDS), so this cron isn't running and
+`scripts/backups.sh` can't reach it anymore.
+
+RDS has its own automated snapshots (AWS-managed) covering prod in the meantime, but
+there's no equivalent scripted backup for the local dev container, and the S3-cron
+flow hasn't been rebuilt against the new topology. Treat this as an open gap, not a
+working safety net — `refresh-dev-from-prod.sh`'s own pre-refresh snapshot
+(`~/matcha-dev-snapshots/`) is the only current local backup of dev.
