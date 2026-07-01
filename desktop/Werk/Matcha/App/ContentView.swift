@@ -16,7 +16,6 @@ struct ContentView: View {
     @AppStorage("mw-sidebar-email-open") private var emailSectionOpen = false
     @State private var showNewJournal = false
     @State private var pendingConnectionsCount = 0
-    @State private var showCreateChannel = false
     @State private var showDiscoverChannels = false
     @State private var showNotifications = false
     @State private var orderStore = SidebarSectionOrderStore.shared
@@ -92,15 +91,6 @@ struct ContentView: View {
             Button("Not now", role: .cancel) { }
         } message: {
             Text("Notifications are off. Turn them on in System Settings → Notifications → Matcha so you don't miss channel mentions, task assignments, and project updates.")
-        }
-        .sheet(isPresented: $showCreateChannel) {
-            CreateChannelSheet { newChannel in
-                appState.selectedThreadId = nil
-                appState.selectedProjectId = nil
-                appState.selectedJournalId = nil
-                appState.channelsListGeneration &+= 1
-                NotificationCenter.default.post(name: .mwChannelCreated, object: newChannel.id)
-            }
         }
         .sheet(isPresented: $showDiscoverChannels) {
             DiscoverChannelsSheet { joinedId in
@@ -399,48 +389,44 @@ struct ContentView: View {
         .cornerRadius(6)
     }
 
-    /// A single nav-only sidebar row: clicking the label opens that surface's
-    /// full-pane hub; the optional trailing slot carries a create "+" control.
-    /// The sidebar lists NO individual items — browsing/organizing lives in the
-    /// hub (only the Starred pins strip surfaces specific items).
+    /// A single nav-only sidebar row: clicking it opens that surface's
+    /// full-pane hub. The sidebar lists NO individual items and no create
+    /// "+" controls — browsing, organizing, and creating all live in the hub
+    /// itself (only the Starred pins strip surfaces specific items).
     @ViewBuilder
-    private func sidebarNavRow<Trailing: View>(
+    private func sidebarNavRow(
         title: String, icon: String, isActive: Bool,
         // When set, the row renders a lock and opens the paywall (with this
         // feature key) instead of navigating. nil = unlocked.
         lockedFeature: String? = nil,
-        onOpen: @escaping () -> Void,
-        @ViewBuilder trailing: () -> Trailing = { EmptyView() }
+        onOpen: @escaping () -> Void
     ) -> some View {
-        HStack(spacing: 6) {
-            Button(action: {
-                if let feature = lockedFeature {
-                    appState.presentPaywall(for: feature)
-                } else {
-                    onOpen()
-                }
-            }) {
-                HStack(spacing: 8) {
-                    Image(systemName: icon)
-                        .font(.system(size: 12))
-                        .foregroundColor(isActive ? appState.themeAccent : appState.themeTextSecondary)
-                        .frame(width: 16)
-                    Text(title.uppercased())
-                        .font(.system(size: 10, weight: .semibold))
-                        .tracking(0.5)
-                        .foregroundColor(isActive ? appState.themeAccent : appState.themeTextSecondary)
-                    if lockedFeature != nil {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 8))
-                            .foregroundColor(appState.themeTextSecondary.opacity(0.7))
-                    }
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
+        Button(action: {
+            if let feature = lockedFeature {
+                appState.presentPaywall(for: feature)
+            } else {
+                onOpen()
             }
-            .buttonStyle(.plain)
-            trailing()
+        }) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                    .foregroundColor(isActive ? appState.themeAccent : appState.themeTextSecondary)
+                    .frame(width: 16)
+                Text(title.uppercased())
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.5)
+                    .foregroundColor(isActive ? appState.themeAccent : appState.themeTextSecondary)
+                if lockedFeature != nil {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 8))
+                        .foregroundColor(appState.themeTextSecondary.opacity(0.7))
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
         .background(
@@ -449,36 +435,12 @@ struct ContentView: View {
         )
     }
 
-    /// Small "+" chip reused by the section create controls.
-    private var plusChip: some View {
-        Image(systemName: "plus")
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundColor(.secondary)
-            .frame(width: 18, height: 18)
-            .background(Color(white: 0.58))
-            .cornerRadius(4)
-    }
-
     @ViewBuilder
     private var channelsSidebarSection: some View {
+        // No "+" here — the Channels hub has its own New-channel + Browse
+        // controls on its rail.
         sidebarNavRow(title: "Channels", icon: "number",
-                      isActive: appState.showChannelsHub, onOpen: openChannelsHub) {
-            Menu {
-                Button("New channel") {
-                    appState.channelAdminWizardMode = .create
-                    appState.showChannelAdminWizard = true
-                }
-                Button("Quick create (no guide)") { showCreateChannel = true }
-                Divider()
-                Button("Browse public channels") { showChannelBrowse() }
-            } label: {
-                plusChip
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 22, height: 18)
-            .help("New channel · browse")
-        }
+                      isActive: appState.showChannelsHub, onOpen: openChannelsHub)
     }
 
     @ViewBuilder
@@ -506,47 +468,21 @@ struct ContentView: View {
     @ViewBuilder
     private var journalsSidebarSection: some View {
         sidebarNavRow(title: "Journals", icon: "book.closed",
-                      isActive: appState.showJournalsHub, onOpen: openJournalsHub) {
-            Button { openJournalsHub() } label: { plusChip }
-                .buttonStyle(.plain)
-                .help("Open Journals")
-        }
+                      isActive: appState.showJournalsHub, onOpen: openJournalsHub)
     }
 
     /// Nav-only row — opens the Productivity hub (personal kanban boards).
     @ViewBuilder
     private var productivitySidebarSection: some View {
         sidebarNavRow(title: "Productivity", icon: "checklist",
-                      isActive: appState.showProductivityHub, onOpen: openProductivityHub) {
-            Button { openProductivityHub() } label: { plusChip }
-                .buttonStyle(.plain)
-                .help("Open Productivity")
-        }
+                      isActive: appState.showProductivityHub, onOpen: openProductivityHub)
     }
-
 
     @ViewBuilder
     private var threadsSidebarSection: some View {
+        // No "+" here — the Threads hub has its own New-thread control on its rail.
         sidebarNavRow(title: "Threads", icon: "bubble.left.and.bubble.right",
-                      isActive: appState.showThreadsHub, onOpen: openThreadsHub) {
-            Button { createThreadFromSidebar() } label: { plusChip }
-                .buttonStyle(.plain)
-                .help("New thread")
-        }
-    }
-
-    /// Create a thread straight from the sidebar "+" and open it (the inline
-    /// list that used to handle `.mwCreateNewThread` is gone — the Threads hub
-    /// owns browsing now).
-    private func createThreadFromSidebar() {
-        Task {
-            if let t = await threadListVM.createThread(title: nil) {
-                await MainActor.run {
-                    appState.clearPrimaryNav()
-                    appState.selectedThreadId = t.id
-                }
-            }
-        }
+                      isActive: appState.showThreadsHub, onOpen: openThreadsHub)
     }
 
     @ViewBuilder
@@ -584,22 +520,6 @@ struct ContentView: View {
     /// The primary (left) detail pane — routed off the shared `selectedX`
     /// nav state. The detail panes live in DetailPanes.swift (PrimaryDetailPane /
     /// SplitSecondaryPane) so churning unread counters don't rebuild them.
-
-    /// Navigate to the full-pane Channels browse view. Clears any active
-    /// thread/project/channel/journal/inbox selection so the detail pane
-    /// renders the browse surface unambiguously.
-    private func showChannelBrowse() {
-        appState.showChannelBrowse = true
-        appState.selectedThreadId = nil
-        appState.selectedProjectId = nil
-        appState.selectedChannelId = nil
-        appState.selectedJournalId = nil
-        appState.selectedEmailId = nil
-        appState.showInbox = false
-        appState.showPeople = false
-        appState.showSkills = false
-        appState.showHome = false
-    }
 
     private func sidebarSection<Content: View, Trailing: View>(
         title: String,
