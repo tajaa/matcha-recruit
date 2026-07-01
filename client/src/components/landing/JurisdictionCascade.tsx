@@ -1,134 +1,204 @@
 import { useRef, useState, useEffect } from 'react'
-import { motion, useInView } from 'framer-motion'
-import { WIRE_MESH_BG, WIRE_MESH_SIZE } from './shared'
+import { motion, useInView, AnimatePresence } from 'framer-motion'
+import { SCAN_LINE_BG } from './shared'
+
+// Illustrative — mirrors TimelineConstructor's visual vocabulary (same page,
+// ER Copilot section) so the two "engine" graphics read as one family.
+const STEPS = [
+  {
+    title: 'Federal Baseline Checked',
+    doc: 'FLSA, OSHA, FMLA',
+    type: 'verified',
+    desc: 'Federal floor established.',
+  },
+  {
+    title: 'State Rules Layered',
+    doc: 'CA FEHA, WA PFML',
+    type: 'verified',
+    desc: 'State requirements applied.',
+  },
+  {
+    title: 'Local Ordinance Conflict',
+    doc: 'LA MWO vs. CA minimum wage',
+    type: 'alert',
+    desc: 'Local rate exceeds state floor.',
+  },
+  {
+    title: 'Compliance Matrix Updated',
+    doc: 'jurisdiction_matrix.pdf',
+    type: 'pending',
+    desc: 'Highest-obligation rule applied.',
+  },
+]
 
 /* ── Jurisdiction Cascade (Compliance Engine) ─────────────────── */
 export function JurisdictionCascade() {
   const ref = useRef<HTMLDivElement>(null)
   const inView = useInView(ref, { margin: '-80px' })
-
-  const tiers = [
-    { id: 'fed', level: 'FEDERAL', items: ['FLSA', 'OSHA', 'FMLA', 'ADA', 'EEOC'] },
-    { id: 'state', level: 'STATE', items: ['CA FEHA', 'NY WARN', 'TX TWC', 'FL SB', 'WA PFML'] },
-    { id: 'local', level: 'LOCAL', items: ['SF HCSO', 'NYC ESL', 'LA MWO', 'SEA PSL', 'CHI FWW'] },
-  ]
-
-  const [activeItem, setActiveItem] = useState<{ tier: number, itemIndex: number } | null>({ tier: 0, itemIndex: 2 })
+  const [currentStep, setCurrentStep] = useState(0)
 
   useEffect(() => {
-    if (!inView) return
+    if (!inView) {
+      setCurrentStep(0)
+      return
+    }
+    setCurrentStep(1)
     const interval = setInterval(() => {
-      setActiveItem({
-        tier: Math.floor(Math.random() * tiers.length),
-        itemIndex: Math.floor(Math.random() * 5)
-      })
-    }, 2500)
+      setCurrentStep(s => s >= 4 ? 1 : s + 1)
+    }, 2000)
     return () => clearInterval(interval)
-  }, [inView, tiers.length])
+  }, [inView])
 
   return (
-    <div ref={ref} className="relative h-[400px] lg:h-[460px] overflow-hidden bg-zinc-950 flex flex-col items-center justify-center px-6" style={{ backgroundImage: WIRE_MESH_BG, backgroundSize: WIRE_MESH_SIZE }}>
+    <div ref={ref} className="relative h-[400px] lg:h-[460px] overflow-hidden bg-zinc-950 flex flex-col items-center justify-center p-6" style={{ backgroundImage: SCAN_LINE_BG }}>
 
-      {/* Floating Data Nodes (Particles) — kept subtle, behind the cards */}
-      {inView && Array.from({ length: 6 }).map((_, i) => (
-        <motion.div
-          key={`particle-${i}`}
-          className="absolute w-1 h-1 bg-zinc-500/20 rounded-full pointer-events-none"
-          style={{ zIndex: 0 }}
-          initial={{
-            x: Math.random() * 300 - 150,
-            y: Math.random() * 300 - 150,
-            opacity: 0,
-            scale: 0
-          }}
-          animate={{
-            y: [null, Math.random() * 300 - 150],
-            opacity: [0, 0.6, 0],
-            scale: [0, 1.2, 0]
-          }}
-          transition={{
-            duration: 3 + Math.random() * 4,
-            repeat: Infinity,
-            delay: Math.random() * 2
-          }}
-        />
-      ))}
+      {/* Background Grid */}
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-amber-900/10 via-zinc-950 to-zinc-950 pointer-events-none" />
 
-      {/* Flat, narrowing stack — Federal is widest (broadest scope), Local is
-          narrowest (most specific), so the hierarchy reads at a glance
-          instead of relying on a hard-to-parse isometric tilt. */}
+      {/* Connection Line — cascades from Federal (broadest) to Local (most specific) */}
+      <div className="absolute left-10 right-10 top-1/2 h-px bg-zinc-800" />
       <motion.div
-        className="relative z-10 w-full max-w-[460px] flex flex-col items-center gap-5"
-        initial={{ opacity: 0, y: 20 }}
-        animate={inView ? { opacity: 1, y: 0 } : {}}
-        transition={{ duration: 0.8, ease: 'easeOut' }}
-      >
-        {tiers.map((tier, tIdx) => (
-          <motion.div
-            key={tier.id}
-            className="relative rounded-lg border border-zinc-700/40 bg-zinc-900/70 px-4 py-4 flex flex-col items-center overflow-hidden"
-            style={{
-              width: `${100 - tIdx * 9}%`,
-              boxShadow: '0 10px 30px -10px rgba(0,0,0,0.7)',
-            }}
-            initial={{ opacity: 0, y: -16 }}
-            animate={inView ? { opacity: 1, y: 0 } : {}}
-            transition={{ delay: tIdx * 0.15 + 0.3, duration: 0.6 }}
-          >
-            {/* Scanning line, only over the currently active tier */}
-            {activeItem?.tier === tIdx && (
+        className="absolute left-10 h-[2px] bg-amber-500 shadow-[0_0_10px_#f59e0b]"
+        initial={{ width: '0%' }}
+        animate={{ width: currentStep === 0 ? '0%' : currentStep === 1 ? '16%' : currentStep === 2 ? '42%' : currentStep === 3 ? '68%' : '94%' }}
+        transition={{ duration: 1.5, ease: 'easeInOut' }}
+        style={{ top: 'calc(50% - 0.5px)', maxWidth: 'calc(100% - 5rem)' }}
+      />
+
+      <div className="relative w-full h-full flex justify-between items-center z-10 px-4 sm:px-8">
+        {STEPS.map((step, idx) => {
+          const isActive = currentStep >= idx + 1
+          const isCurrent = currentStep === idx + 1
+          const isAlert = step.type === 'alert'
+
+          return (
+            <div key={idx} className="relative flex flex-col items-center justify-center w-1/4">
+
+              {/* Top Source Node */}
               <motion.div
-                className="absolute inset-x-0 h-[2px] bg-zinc-400/50 z-20"
-                initial={{ top: '0%', opacity: 0 }}
-                animate={{ top: '100%', opacity: [0, 1, 1, 0] }}
-                transition={{ duration: 1.8, ease: 'linear' }}
+                className={`absolute bottom-10 w-full max-w-[130px] border p-2 bg-zinc-950/90 rounded backdrop-blur-md ${
+                  isActive ? (isAlert ? 'border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.2)]' : 'border-amber-500/30') : 'border-zinc-800 opacity-20'
+                }`}
+                initial={{ y: 20, opacity: 0 }}
+                animate={isActive ? { y: 0, opacity: 1 } : { y: 20, opacity: 0 }}
+                transition={{ duration: 0.5, delay: 0.2 }}
+              >
+                <div className="text-[11px] text-zinc-500 uppercase tracking-widest mb-1.5 text-center">Source</div>
+                <div className={`text-xs sm:text-[11px] font-mono text-center break-words ${isAlert ? 'text-amber-400' : 'text-zinc-300'}`}>
+                  {step.doc}
+                </div>
+              </motion.div>
+
+              {/* Connecting Line to Node */}
+              <motion.div
+                className={`absolute bottom-4 w-px h-6 ${isActive ? (isAlert ? 'bg-amber-500' : 'bg-amber-500/50') : 'bg-transparent'}`}
+                initial={{ scaleY: 0 }}
+                animate={isActive ? { scaleY: 1 } : { scaleY: 0 }}
+                style={{ originY: 1 }}
+                transition={{ duration: 0.3 }}
               />
-            )}
 
-            <div className="flex items-center gap-2 mb-3">
-              <div className={`h-1.5 w-1.5 rounded-full ${activeItem?.tier === tIdx ? 'bg-amber-500 animate-pulse' : 'bg-zinc-700'}`} />
-              <span className="text-sm font-[Orbitron] font-bold tracking-widest uppercase text-zinc-400">
-                {tier.level}
-              </span>
-            </div>
-
-            <div className="flex gap-2 flex-wrap justify-center">
-              {tier.items.map((item, iIdx) => {
-                const isActive = activeItem?.tier === tIdx && activeItem?.itemIndex === iIdx
-                return (
+              {/* Central Node */}
+              <motion.div
+                className={`relative w-4 h-4 rounded-full border-2 flex items-center justify-center bg-zinc-950 z-20 ${
+                  isActive
+                    ? (isAlert ? 'border-amber-400' : 'border-amber-500')
+                    : 'border-zinc-700'
+                }`}
+                animate={isCurrent && isAlert ? { scale: [1, 1.3, 1] } : { scale: 1 }}
+                transition={{ duration: 1, repeat: isCurrent && isAlert ? Infinity : 0 }}
+              >
+                {isActive && (
+                  <div className={`w-1.5 h-1.5 rounded-full ${isAlert ? 'bg-amber-400' : 'bg-amber-500'}`} />
+                )}
+                {isCurrent && isAlert && (
                   <motion.div
-                    key={item}
-                    className={`relative px-3 py-1.5 text-xs font-mono border rounded transition-all duration-300 ${
-                      isActive
-                        ? 'border-amber-500/60 bg-amber-500/10 text-zinc-100 scale-110'
-                        : 'border-zinc-700/50 bg-zinc-900/80 text-zinc-500'
-                    }`}
-                  >
-                    {item}
-                    {isActive && (
-                      <motion.div
-                        className="absolute inset-0 border border-amber-500/50 rounded"
-                        initial={{ opacity: 1, scale: 1 }}
-                        animate={{ opacity: 0, scale: 1.5 }}
-                        transition={{ duration: 1, repeat: Infinity }}
-                      />
-                    )}
-                  </motion.div>
-                )
-              })}
+                    className="absolute inset-0 rounded-full border border-amber-400"
+                    initial={{ scale: 1, opacity: 1 }}
+                    animate={{ scale: 2.5, opacity: 0 }}
+                    transition={{ duration: 1.5, repeat: Infinity }}
+                  />
+                )}
+              </motion.div>
+
+              {/* Connecting Line to Bottom */}
+              <motion.div
+                className={`absolute top-4 w-px h-6 ${isActive ? (isAlert ? 'bg-amber-500' : 'bg-amber-500/50') : 'bg-transparent'}`}
+                initial={{ scaleY: 0 }}
+                animate={isActive ? { scaleY: 1 } : { scaleY: 0 }}
+                style={{ originY: 0 }}
+                transition={{ duration: 0.3 }}
+              />
+
+              {/* Bottom Info Node */}
+              <motion.div
+                className={`absolute top-10 flex flex-col items-center text-center w-full px-1 ${isActive ? 'opacity-100' : 'opacity-20'}`}
+                initial={{ y: -10, opacity: 0 }}
+                animate={isActive ? { y: 0, opacity: 1 } : { y: -10, opacity: 0 }}
+                transition={{ duration: 0.5, delay: 0.4 }}
+              >
+                <div className={`text-xs sm:text-[11px] font-[Orbitron] font-bold tracking-widest uppercase mb-1.5 ${isAlert ? 'text-amber-400' : 'text-zinc-200'}`}>
+                  {step.title}
+                </div>
+                <div className="text-xs text-zinc-500 leading-tight">
+                  {step.desc}
+                </div>
+              </motion.div>
+
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Terminal Overlay for Conflict */}
+      <AnimatePresence>
+        {(currentStep === 3 || currentStep === 4) && (
+          <motion.div
+            className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[85%] max-w-sm border border-amber-500/40 bg-amber-950/60 backdrop-blur-md p-4 rounded z-30 shadow-[0_10px_30px_-10px_rgba(245,158,11,0.3)]"
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+            transition={{ duration: 0.4, type: 'spring' }}
+          >
+            <div className="text-[11px] text-amber-400 uppercase tracking-widest mb-2.5 flex items-center gap-2 font-bold">
+              <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse shadow-[0_0_8px_#f59e0b]" />
+              Agent Alert: Rate Conflict
+            </div>
+            <div className="text-xs font-mono text-amber-100/90 leading-relaxed bg-black/40 p-2.5 rounded border border-amber-500/20">
+              <span className="text-amber-500 font-bold">State:</span> CA minimum wage is $16.50/hr.<br />
+              <span className="text-amber-500 font-bold">Local:</span> LA MWO sets $17.87/hr.<br />
+              <motion.div
+                className="mt-2 text-amber-300 font-bold"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.8 }}
+              >
+                &gt; No preemption — higher local rate applies. Flagging for payroll.
+              </motion.div>
             </div>
           </motion.div>
-        ))}
-      </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* HUD — status only. No query/engine internals surfaced here. */}
-      <div className="absolute top-4 right-4 flex items-center gap-2">
-        <span className="relative flex h-2 w-2">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-500 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
-        </span>
-        <span className="text-[10px] text-zinc-500 uppercase font-bold tracking-widest">Live Engine</span>
+      {/* HUD */}
+      <div className="absolute top-4 left-4 flex flex-col gap-1 z-30">
+        <div className="text-xs text-zinc-500 uppercase tracking-widest font-bold">Jurisdiction Engine</div>
+        <div className="text-xs text-amber-500 font-mono flex items-center gap-2">
+          <span>STATUS: {currentStep === 0 ? 'AWAITING SCAN' : currentStep >= 4 ? 'MATRIX READY' : 'MAPPING...'}</span>
+          {currentStep > 0 && currentStep < 4 && <span className="animate-pulse">▊</span>}
+        </div>
       </div>
+
+      <div className="absolute top-4 right-4 flex items-center gap-2 z-30">
+        <span className="relative flex h-2 w-2">
+          <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${currentStep === 3 ? 'bg-amber-400' : 'bg-zinc-500'}`} />
+          <span className={`relative inline-flex rounded-full h-2 w-2 ${currentStep === 3 ? 'bg-amber-500' : 'bg-zinc-600'}`} />
+        </span>
+        <span className="text-xs uppercase font-bold tracking-widest text-zinc-500">
+          Auto-Mapper
+        </span>
+      </div>
+
     </div>
   )
 }
