@@ -801,6 +801,9 @@ struct KanbanBoardView: View {
                             id: task.id, title: task.title, column: task.boardColumn)
                         appState.pendingProjectPanel = .chat
                     } label: { Label("Chat about this ticket", systemImage: "bubble.left.and.text.bubble.right") }
+                    Button {
+                        Task { await viewModel.duplicateTask(task) }
+                    } label: { Label("Duplicate", systemImage: "doc.on.doc") }
                     Button(role: .destructive) {
                         taskToDelete = task
                     } label: { Label("Delete", systemImage: "trash") }

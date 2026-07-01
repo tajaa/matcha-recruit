@@ -76,6 +76,34 @@ extension ProjectDetailViewModel {
         }
     }
 
+    /// Duplicate an existing task: same title (with a "(copy)" suffix so the
+    /// two are distinguishable), column, priority, assignee, description,
+    /// category, element, and checklist item titles (created fresh/not-done —
+    /// completion state isn't carried over, matching how `createProjectTask`'s
+    /// `subtasks` param already works for a brand-new task). Attachments are
+    /// NOT duplicated — no existing S3-file-copy precedent in the codebase,
+    /// and re-pointing/re-uploading them is a separate concern.
+    func duplicateTask(_ task: MWProjectTask) async {
+        guard let pid = project?.id else { return }
+        let subtaskTitles: [String]
+        if let cached = taskSubtasks[task.id] {
+            subtaskTitles = cached.map { $0.title }
+        } else {
+            subtaskTitles = (try? await service.listSubtasks(projectId: pid, taskId: task.id))?.map { $0.title } ?? []
+        }
+        await addTask(
+            title: "\(task.title) (copy)",
+            column: task.boardColumn,
+            pipelineColumn: task.pipelineColumn ?? "lead",
+            priority: task.priority,
+            assignedTo: task.assignedTo,
+            description: task.description,
+            category: task.category,
+            elementId: task.elementId,
+            subtasks: subtaskTitles.isEmpty ? nil : subtaskTitles
+        )
+    }
+
     // MARK: - Collab: realtime task fan-out (project WS task.created/updated/deleted)
 
     /// Wire the project WS task event callbacks to apply* methods. Call once

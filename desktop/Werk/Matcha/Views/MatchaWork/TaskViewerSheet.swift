@@ -42,6 +42,8 @@ struct TaskViewerSheet: View {
     @State var showEarlierAttachments = false
     @State var didCopy = false
     @State var isCopying = false
+    @State var didDuplicate = false
+    @State var isDuplicating = false
     @State var isSummarizing = false
     @State var newNote = ""
     @State var addingNote = false
@@ -220,6 +222,27 @@ struct TaskViewerSheet: View {
                 .buttonStyle(.plain)
                 .disabled(isCopying)
                 .help("Copy ticket as text + screenshot paths (for Claude Code)")
+                Button {
+                    Task {
+                        isDuplicating = true
+                        await viewModel.duplicateTask(task)
+                        isDuplicating = false
+                        didDuplicate = true
+                        try? await Task.sleep(for: .milliseconds(1500))
+                        didDuplicate = false
+                    }
+                } label: {
+                    if isDuplicating {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: didDuplicate ? "checkmark" : "plus.square.on.square")
+                            .font(.system(size: 11))
+                            .foregroundColor(didDuplicate ? .mwInkStrong : .secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isDuplicating)
+                .help("Duplicate this ticket")
                 Button {
                     Task {
                         isSummarizing = true
