@@ -876,47 +876,47 @@ const REPORT_ANALYSIS = [
   { label: "Action", value: "Manager coaching + security review" },
 ];
 
-// One numbered step in the "how it works" sequence. Laid out 2-up (see the
-// grid in DailyInstrument) so the card reads left→right, top→bottom as a
-// flow: report comes in → agentic reads & routes // the log builds →
-// analytics roll up — wide instead of a single tall stack.
 function FlowStep({
   n,
   title,
   sub,
+  last,
   children,
 }: {
   n: string;
   title: string;
   sub: string;
+  last?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <div>
-      <div className="flex items-center gap-2.5 mb-2.5">
+    <div className="relative pl-12 pr-5">
+      {/* spine down to the next step */}
+      {!last && (
         <span
-          className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-mono tabular-nums shrink-0"
-          style={{
-            color: "#F2C14E",
-            backgroundColor: "rgba(242,193,78,0.1)",
-            border: "1px solid rgba(242,193,78,0.35)",
-          }}
+          className="absolute w-px"
+          style={{ left: 26, top: 30, bottom: -24, backgroundColor: LINE_D }}
+        />
+      )}
+      <span
+        className="absolute left-3 top-0 w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-mono tabular-nums"
+        style={{
+          color: "#F2C14E",
+          backgroundColor: "rgba(242,193,78,0.1)",
+          border: "1px solid rgba(242,193,78,0.35)",
+        }}
+      >
+        {n}
+      </span>
+      <div className="pt-0.5 mb-2.5">
+        <div
+          className="text-[11px] font-mono uppercase tracking-[0.18em]"
+          style={{ color: BONE }}
         >
-          {n}
-        </span>
-        <div className="min-w-0">
-          <div
-            className="text-[11px] font-mono uppercase tracking-[0.18em] truncate"
-            style={{ color: BONE }}
-          >
-            {title}
-          </div>
-          <div
-            className="text-[9px] font-mono truncate"
-            style={{ color: ASH }}
-          >
-            {sub}
-          </div>
+          {title}
+        </div>
+        <div className="text-[9px] font-mono mt-0.5" style={{ color: ASH }}>
+          {sub}
         </div>
       </div>
       {children}
@@ -933,7 +933,7 @@ function DailyInstrument() {
 
   return (
     <InstrumentFrame label="Incident Reporting" accent="#F2C14E">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-7 px-5 py-5">
+      <div className="flex flex-col gap-7 py-5">
         {/* 1 — a worker reports from a phone via the location's magic link:
             talk or type, AI extracts the fields, human reviews before submit. */}
         <FlowStep
@@ -1249,6 +1249,7 @@ function DailyInstrument() {
           n="4"
           title="Analytics roll up"
           sub="Trends · patterns · week over week"
+          last
         >
           <div
             className="rounded-lg border pt-3 pb-3"
