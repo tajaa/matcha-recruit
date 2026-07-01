@@ -1,11 +1,17 @@
 import { useEffect, useState } from 'react'
 import { api } from './client'
 
-// signup_source values priced through this table: the two Lite variants that
-// share the /lite/signup page + checkout (standard, with an employee roster;
-// Essentials, no roster/no OSHA logs) plus standalone Matcha Compliance —
-// each priced independently.
-export type MatchaLiteProductCode = 'matcha_lite' | 'matcha_lite_essentials' | 'matcha_compliance'
+// Product codes priced through this table: the two Lite variants that share
+// the /lite/signup page + checkout (standard, with an employee roster;
+// Essentials, no roster/no OSHA logs), standalone Matcha Compliance, and the
+// Lite add-ons (block_size=1 ⇒ per-employee/month) — each priced independently.
+export type MatchaLiteProductCode =
+  | 'matcha_lite'
+  | 'matcha_lite_essentials'
+  | 'matcha_compliance'
+  | 'addon_voice_intake'
+  | 'addon_hris_sync'
+  | 'addon_handbook_watch'
 
 export interface MatchaLitePricingConfig {
   price_per_block_cents: number

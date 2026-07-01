@@ -131,6 +131,14 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # only POST /ir/incidents/voice/parse + the "Dictate" button (stacks on the
     # incidents gate). Default off; admin-toggle; NOT in any tier overlay.
     "ir_voice_intake": False,
+    # Scheduled handbook-freshness monitoring ("handbook watch"). Gates ONLY the
+    # per-company sweep in the handbook_freshness Celery worker (+ its alert
+    # emails) — the manual POST /handbooks/{id}/freshness-check stays free with
+    # `handbooks`. Sold as a Lite-family add-on (own Stripe sub via the
+    # matcha_lite_addon checkout); a paid gate like `incidents`, so NOT in any
+    # tier overlay — merged value == stored value, letting the worker filter in
+    # SQL on enabled_features. Default off; admin-toggle.
+    "handbook_watch": False,
     # Legal Defense builder (full Matcha / Pro). An admin opens a legal matter
     # (subpoena / class action / EEOC / audit), converses with a GROUNDED AI that
     # pulls the company's own records across every enabled subsystem (IR/OSHA, ER,

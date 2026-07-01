@@ -7,36 +7,32 @@ import {
   type MatchaLitePricingAdminConfig,
 } from '../../api/matchaLitePricing'
 
+const PRODUCT_TABS: { code: MatchaLiteProductCode; label: string }[] = [
+  { code: 'matcha_lite', label: 'Standard Lite' },
+  { code: 'matcha_lite_essentials', label: 'Essentials (no roster)' },
+  { code: 'matcha_compliance', label: 'Compliance' },
+  { code: 'addon_voice_intake', label: 'Add-on: Voice Intake' },
+  { code: 'addon_hris_sync', label: 'Add-on: HRIS Sync' },
+  { code: 'addon_handbook_watch', label: 'Add-on: Handbook Watch' },
+]
+
 export default function MatchaLitePricingPanel() {
   const [productCode, setProductCode] = useState<MatchaLiteProductCode>('matcha_lite')
 
   return (
     <div>
-      <div className="flex gap-1 mb-4">
-        <button
-          onClick={() => setProductCode('matcha_lite')}
-          className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-            productCode === 'matcha_lite' ? 'bg-emerald-700 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
-          }`}
-        >
-          Standard Lite
-        </button>
-        <button
-          onClick={() => setProductCode('matcha_lite_essentials')}
-          className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-            productCode === 'matcha_lite_essentials' ? 'bg-emerald-700 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
-          }`}
-        >
-          Essentials (no roster)
-        </button>
-        <button
-          onClick={() => setProductCode('matcha_compliance')}
-          className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-            productCode === 'matcha_compliance' ? 'bg-emerald-700 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
-          }`}
-        >
-          Compliance
-        </button>
+      <div className="flex flex-wrap gap-1 mb-4">
+        {PRODUCT_TABS.map((tab) => (
+          <button
+            key={tab.code}
+            onClick={() => setProductCode(tab.code)}
+            className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+              productCode === tab.code ? 'bg-emerald-700 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
       {/* key forces a clean remount/refetch on switch instead of threading
           productCode through every field's state */}
@@ -60,11 +56,11 @@ function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
   const [minHeadcount, setMinHeadcount] = useState('')
   const [maxHeadcount, setMaxHeadcount] = useState('')
 
-  // Compliance is flat per-head pricing modeled as block_size=1 in this
-  // step-function table — lock the field so an admin can't accidentally
-  // turn it back into a step function (e.g. block_size=5 would silently
-  // change the effective rate without changing price_per_block).
-  const isFlatRate = productCode === 'matcha_compliance'
+  // Compliance and the add-ons are flat per-head pricing modeled as
+  // block_size=1 in this step-function table — lock the field so an admin
+  // can't accidentally turn them back into a step function (e.g. block_size=5
+  // would silently change the effective rate without changing price_per_block).
+  const isFlatRate = productCode === 'matcha_compliance' || productCode.startsWith('addon_')
 
   useEffect(() => {
     fetchMatchaLitePricingAdmin(productCode)
@@ -164,7 +160,7 @@ function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
               disabled={isFlatRate}
               className="mt-1 w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
             />
-            {isFlatRate && <span className="block mt-1 text-xs text-zinc-500">Fixed at 1 — Compliance is priced flat per employee</span>}
+            {isFlatRate && <span className="block mt-1 text-xs text-zinc-500">Fixed at 1 — priced flat per employee</span>}
           </label>
         </div>
         {perHeadEquivalent && <p className="text-xs text-zinc-500">≈ ${perHeadEquivalent}/employee/month</p>}

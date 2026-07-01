@@ -21,15 +21,28 @@ SELECT_COLUMNS = """
     sale_active, min_headcount, max_headcount, updated_at, updated_by
 """
 
-# signup_source values priced via this table: the two Lite variants (share the
-# /lite/signup page + /checkout/lite endpoint) plus standalone Matcha Compliance
-# (/compliance/signup + /checkout/compliance) — each its own row.
-PRODUCT_CODES = ("matcha_lite", "matcha_lite_essentials", "matcha_compliance")
+# Product codes priced via this table: the two Lite variants (share the
+# /lite/signup page + /checkout/lite endpoint), standalone Matcha Compliance
+# (/compliance/signup + /checkout/compliance), and the Lite add-ons
+# (/checkout/lite-addon — see services/lite_addons.py; block_size=1 ⇒ PEPM).
+PRODUCT_CODES = (
+    "matcha_lite",
+    "matcha_lite_essentials",
+    "matcha_compliance",
+    "addon_voice_intake",
+    "addon_hris_sync",
+    "addon_handbook_watch",
+)
 
 _FALLBACK_DEFAULTS = {
     "matcha_lite": dict(price_per_block_cents=5000, block_size=10, min_headcount=1, max_headcount=300),
     "matcha_lite_essentials": dict(price_per_block_cents=4000, block_size=10, min_headcount=1, max_headcount=300),
     "matcha_compliance": dict(price_per_block_cents=800, block_size=1, min_headcount=1, max_headcount=300),
+    # Add-on placeholders — mirror migration mlpricing04; real prices are set
+    # by the admin at /admin/matcha-lite-pricing.
+    "addon_voice_intake": dict(price_per_block_cents=100, block_size=1, min_headcount=1, max_headcount=300),
+    "addon_hris_sync": dict(price_per_block_cents=200, block_size=1, min_headcount=1, max_headcount=300),
+    "addon_handbook_watch": dict(price_per_block_cents=100, block_size=1, min_headcount=1, max_headcount=300),
 }
 
 
