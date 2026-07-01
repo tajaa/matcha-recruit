@@ -348,6 +348,135 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                 except Exception as exc:
                     logger.error("Failed to activate %s for %s: %s", _tier_label, company_id_str, exc)
 
+        elif session_mode == "subscription" and meta.get("type") == "matcha_lite_addon":
+            # ── Matcha Lite add-on purchase ────────────────────────────────
+            # The add-on rides its own Stripe sub. Resolve metadata.addon_key
+            # through the lite_addons registry and flip exactly that add-on's
+            # feature — never a metadata-supplied flag name (the registry is
+            # the whitelist of enabled_features keys billing may touch).
+            from ..services.lite_addons import LITE_ADDONS, addon_pack_id
+            _addon = LITE_ADDONS.get(meta.get("addon_key") or "")
+            company_id_str = meta.get("company_id") or ""
+            stripe_sub_id = str(event_object.get("subscription") or "")
+            stripe_customer_id = str(event_object.get("customer") or "")
+            if _addon is None:
+                # Junk metadata — ack (a Stripe retry can't fix it), leave a
+                # loud log for manual follow-up since the customer paid.
+                logger.error(
+                    "Unknown lite addon_key %r in checkout %s (company=%s) — no flag flipped",
+                    meta.get("addon_key"), stripe_session_id, company_id_str,
+                )
+            elif company_id_str:
+                try:
+                    import json as _json
+                    from ...database import get_connection as _gc
+                    company_id = UUID(company_id_str)
+                    async with _gc() as conn:
+                        existing = await conn.fetchval(
+                            "SELECT enabled_features FROM companies WHERE id = $1",
+                            company_id,
+                        )
+                        features = existing if isinstance(existing, dict) else (
+                            _json.loads(existing) if existing else {}
+                        )
+                        features[_addon.feature] = True
+                        await conn.execute(
+                            "UPDATE companies SET enabled_features = $1::jsonb WHERE id = $2",
+                            _json.dumps(features), company_id,
+                        )
+                    if stripe_sub_id:
+                        await billing_service.upsert_subscription(
+                            company_id=company_id,
+                            stripe_subscription_id=stripe_sub_id,
+                            stripe_customer_id=stripe_customer_id,
+                            pack_id=addon_pack_id(_addon.key),
+                            credits_per_cycle=0,
+                            amount_cents=int(meta.get("amount_cents") or 0),
+                        )
+                    logger.info(
+                        "Lite add-on %s activated: company=%s sub=%s",
+                        _addon.key, company_id_str, stripe_sub_id,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "Failed to activate lite add-on %s for %s: %s",
+                        _addon.key, company_id_str, exc,
+                    )
+
+        elif session_mode == "subscription" and meta.get("type") == "matcha_lite_upgrade_from_essentials":
+            # ── Essentials → standard Lite upgrade ─────────────────────────
+            # Checkout-first flow: nothing changed until this event. Flip
+            # signup_source (the tier overlay restores employees + osha_logs
+            # at read time — no backfill) + keep incidents on, record the new
+            # sub, then retire the old Essentials sub. Old-sub retirement is
+            # DB-record FIRST, Stripe second: deleting the Stripe sub emits
+            # customer.subscription.deleted for a pack_id='matcha_lite' row,
+            # and that handler would un-flip `incidents` — pre-marking the
+            # row canceled makes its cancel_subscription_record call return
+            # False, skipping the whole un-flip block.
+            company_id_str = meta.get("company_id") or ""
+            stripe_sub_id = str(event_object.get("subscription") or "")
+            stripe_customer_id = str(event_object.get("customer") or "")
+            old_sub_id = meta.get("old_subscription_id") or ""
+            if company_id_str:
+                try:
+                    import json as _json
+                    from ...database import get_connection as _gc
+                    company_id = UUID(company_id_str)
+                    async with _gc() as conn:
+                        existing = await conn.fetchval(
+                            "SELECT enabled_features FROM companies WHERE id = $1",
+                            company_id,
+                        )
+                        features = existing if isinstance(existing, dict) else (
+                            _json.loads(existing) if existing else {}
+                        )
+                        features["incidents"] = True
+                        await conn.execute(
+                            """
+                            UPDATE companies
+                            SET enabled_features = $1::jsonb,
+                                signup_source = 'matcha_lite'
+                            WHERE id = $2
+                            """,
+                            _json.dumps(features),
+                            company_id,
+                        )
+                    if stripe_sub_id:
+                        await billing_service.upsert_subscription(
+                            company_id=company_id,
+                            stripe_subscription_id=stripe_sub_id,
+                            stripe_customer_id=stripe_customer_id,
+                            pack_id="matcha_lite",
+                            credits_per_cycle=0,
+                            amount_cents=int(meta.get("amount_cents") or 0),
+                        )
+                    if old_sub_id and old_sub_id != stripe_sub_id:
+                        await billing_service.cancel_subscription_record(old_sub_id)
+                        try:
+                            from ..services.stripe_service import StripeService
+                            await StripeService().cancel_subscription(old_sub_id, at_period_end=False)
+                        except Exception as cancel_exc:
+                            # Bounded double-billing until manually resolved —
+                            # loud log with the sub id for admin cancel/refund.
+                            # Deliberately not re-raised: the upgrade itself
+                            # succeeded, and a dedupe-released retry would
+                            # re-run the whole branch for nothing.
+                            logger.error(
+                                "Essentials→Lite upgrade: failed to cancel old Stripe sub %s "
+                                "for company %s — cancel/refund manually: %s",
+                                old_sub_id, company_id_str, cancel_exc,
+                            )
+                    logger.info(
+                        "Essentials→Lite upgrade fulfilled: company=%s new_sub=%s old_sub=%s",
+                        company_id_str, stripe_sub_id, old_sub_id,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "Failed to fulfill Essentials→Lite upgrade for %s: %s",
+                        company_id_str, exc,
+                    )
+
         elif session_mode == "subscription" and is_channel_event:
             # ── Channel subscription checkout ────────────────────────────
             channel_id_str = meta.get("channel_id") or ""
@@ -616,24 +745,111 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                         "matcha_x": "incidents",
                         "matcha_compliance": "compliance",
                     }.get(_pack, "incidents")
-                    try:
-                        import json as _json
-                        from ...database import get_connection as _gc
-                        async with _gc() as conn:
-                            existing = await conn.fetchval(
-                                "SELECT enabled_features FROM companies WHERE id = $1",
-                                sub["company_id"],
+                    # Cancel-then-resubscribe guard: if the company already
+                    # holds ANOTHER active sub of the same pack (e.g. the
+                    # Essentials→Lite upgrade recorded its new sub before the
+                    # old one's deleted event arrived out of order), the paid
+                    # gate must stay on and the add-on cascade must not run.
+                    replacement = await billing_service.get_active_subscription(
+                        sub["company_id"], pack_ids=(_pack,)
+                    )
+                    if replacement is not None:
+                        logger.info(
+                            "%s sub %s canceled but replacement sub %s is active for company %s — keeping access",
+                            _tier_label, stripe_sub_id,
+                            replacement["stripe_subscription_id"], sub["company_id"],
+                        )
+                    else:
+                        try:
+                            import json as _json
+                            from ...database import get_connection as _gc
+                            async with _gc() as conn:
+                                existing = await conn.fetchval(
+                                    "SELECT enabled_features FROM companies WHERE id = $1",
+                                    sub["company_id"],
+                                )
+                                features = existing if isinstance(existing, dict) else (
+                                    _json.loads(existing) if existing else {}
+                                )
+                                features[_paid_feature] = False
+                                await conn.execute(
+                                    "UPDATE companies SET enabled_features = $1::jsonb WHERE id = $2",
+                                    _json.dumps(features), sub["company_id"],
+                                )
+                            logger.info("%s deactivated for company %s", _tier_label, sub["company_id"])
+                        except Exception as exc:
+                            logger.error("Failed to deactivate %s for %s: %s", _tier_label, sub["company_id"], exc)
+                        # Base Lite gone → cascade-cancel any add-on subs
+                        # riding it. Best-effort + immediate; each add-on's
+                        # own deleted event then un-flips its feature flag
+                        # (event-driven, no double bookkeeping here). Stripe
+                        # doesn't auto-refund the remainder — admin refund
+                        # tooling covers that.
+                        if _pack == "matcha_lite":
+                            from ..services.lite_addons import ADDON_PACK_PREFIX
+                            try:
+                                addon_subs = [
+                                    s for s in await billing_service.list_active_subscriptions(sub["company_id"])
+                                    if s["pack_id"].startswith(ADDON_PACK_PREFIX)
+                                ]
+                                if addon_subs:
+                                    from ..services.stripe_service import StripeService
+                                    _stripe = StripeService()
+                                    for addon_sub in addon_subs:
+                                        try:
+                                            await _stripe.cancel_subscription(
+                                                addon_sub["stripe_subscription_id"], at_period_end=False,
+                                            )
+                                            logger.info(
+                                                "Cascade-canceled add-on sub %s (%s) for company %s",
+                                                addon_sub["stripe_subscription_id"],
+                                                addon_sub["pack_id"], sub["company_id"],
+                                            )
+                                        except Exception as cascade_exc:
+                                            logger.error(
+                                                "Failed to cascade-cancel add-on sub %s for company %s: %s",
+                                                addon_sub["stripe_subscription_id"],
+                                                sub["company_id"], cascade_exc,
+                                            )
+                            except Exception as exc:
+                                logger.error(
+                                    "Add-on cascade-cancel failed for company %s: %s",
+                                    sub["company_id"], exc,
+                                )
+                elif sub and sub["pack_id"].startswith("matcha_lite_addon_"):
+                    # ── Lite add-on cancellation — un-flip that add-on's flag.
+                    from ..services.lite_addons import addon_for_pack_id
+                    _addon = addon_for_pack_id(sub["pack_id"])
+                    if _addon is None:
+                        logger.error(
+                            "Canceled sub %s has unknown add-on pack_id %r — no flag un-flipped",
+                            stripe_sub_id, sub["pack_id"],
+                        )
+                    else:
+                        try:
+                            import json as _json
+                            from ...database import get_connection as _gc
+                            async with _gc() as conn:
+                                existing = await conn.fetchval(
+                                    "SELECT enabled_features FROM companies WHERE id = $1",
+                                    sub["company_id"],
+                                )
+                                features = existing if isinstance(existing, dict) else (
+                                    _json.loads(existing) if existing else {}
+                                )
+                                features[_addon.feature] = False
+                                await conn.execute(
+                                    "UPDATE companies SET enabled_features = $1::jsonb WHERE id = $2",
+                                    _json.dumps(features), sub["company_id"],
+                                )
+                            logger.info(
+                                "Lite add-on %s deactivated for company %s",
+                                _addon.key, sub["company_id"],
                             )
-                            features = existing if isinstance(existing, dict) else (
-                                _json.loads(existing) if existing else {}
+                        except Exception as exc:
+                            logger.error(
+                                "Failed to deactivate lite add-on %s for %s: %s",
+                                _addon.key, sub["company_id"], exc,
                             )
-                            features[_paid_feature] = False
-                            await conn.execute(
-                                "UPDATE companies SET enabled_features = $1::jsonb WHERE id = $2",
-                                _json.dumps(features), sub["company_id"],
-                            )
-                        logger.info("%s deactivated for company %s", _tier_label, sub["company_id"])
-                    except Exception as exc:
-                        logger.error("Failed to deactivate %s for %s: %s", _tier_label, sub["company_id"], exc)
 
     return {"received": True}

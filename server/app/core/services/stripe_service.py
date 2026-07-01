@@ -436,6 +436,138 @@ class StripeService:
         except Exception as exc:
             raise StripeServiceError(f"Failed to create Matcha Lite checkout: {exc}") from exc
 
+    async def create_lite_addon_checkout(
+        self,
+        company_id: UUID,
+        addon_key: str,
+        addon_name: str,
+        addon_description: str,
+        headcount: int,
+        amount_cents: int,
+        success_url: Optional[str] = None,
+        cancel_url: Optional[str] = None,
+    ):
+        """Subscription checkout for a Lite add-on (its own Stripe sub on top of
+        the base Lite sub — no multi-item machinery, matching every other
+        purchase in this module).
+
+        The caller (POST /resources/checkout/lite-addon) resolves the add-on
+        through the services/lite_addons.py registry and prices it from
+        matcha_lite_pricing — the webhook re-resolves metadata.addon_key
+        through the same registry and never flips a metadata-supplied flag.
+        """
+        self._ensure_secret_key()
+
+        resolved_success_url = success_url or self.settings.stripe_success_url
+        resolved_cancel_url = cancel_url or self.settings.stripe_cancel_url
+
+        metadata = {
+            "company_id": str(company_id),
+            "type": "matcha_lite_addon",
+            "addon_key": addon_key,
+            "headcount": str(headcount),
+            "amount_cents": str(amount_cents),
+            "mode": "subscription",
+        }
+
+        def _create():
+            return stripe.checkout.Session.create(
+                mode="subscription",
+                success_url=resolved_success_url,
+                cancel_url=resolved_cancel_url,
+                payment_method_types=["card"],
+                metadata=metadata,
+                subscription_data={"metadata": metadata},
+                line_items=[
+                    {
+                        "price_data": {
+                            "currency": "usd",
+                            "unit_amount": amount_cents,
+                            "recurring": {"interval": "month"},
+                            "product_data": {
+                                "name": f"Matcha Lite add-on: {addon_name}",
+                                "description": (
+                                    f"{addon_description} "
+                                    f"({headcount} employee{'s' if headcount != 1 else ''}). "
+                                    f"Auto-renews monthly."
+                                ),
+                            },
+                        },
+                        "quantity": 1,
+                    }
+                ],
+            )
+
+        try:
+            return await asyncio.to_thread(_create)
+        except Exception as exc:
+            raise StripeServiceError(f"Failed to create Lite add-on checkout: {exc}") from exc
+
+    async def create_lite_essentials_upgrade_checkout(
+        self,
+        company_id: UUID,
+        headcount: int,
+        amount_cents: int,
+        old_subscription_id: str,
+        success_url: Optional[str] = None,
+        cancel_url: Optional[str] = None,
+    ):
+        """Subscription checkout upgrading Essentials → standard Matcha Lite.
+
+        Checkout-first, cancel-on-webhook: the Essentials sub stays live until
+        `checkout.session.completed` lands, where the webhook flips
+        signup_source → 'matcha_lite' (the tier overlay restores employees +
+        osha_logs at read time) and immediately cancels `old_subscription_id`
+        (DB record first, then Stripe — see stripe_webhook.py). Abandoning the
+        checkout changes nothing.
+        """
+        self._ensure_secret_key()
+
+        resolved_success_url = success_url or self.settings.stripe_success_url
+        resolved_cancel_url = cancel_url or self.settings.stripe_cancel_url
+
+        metadata = {
+            "company_id": str(company_id),
+            "type": "matcha_lite_upgrade_from_essentials",
+            "old_subscription_id": old_subscription_id,
+            "headcount": str(headcount),
+            "amount_cents": str(amount_cents),
+            "mode": "subscription",
+        }
+
+        def _create():
+            return stripe.checkout.Session.create(
+                mode="subscription",
+                success_url=resolved_success_url,
+                cancel_url=resolved_cancel_url,
+                payment_method_types=["card"],
+                metadata=metadata,
+                subscription_data={"metadata": metadata},
+                line_items=[
+                    {
+                        "price_data": {
+                            "currency": "usd",
+                            "unit_amount": amount_cents,
+                            "recurring": {"interval": "month"},
+                            "product_data": {
+                                "name": "Matcha Lite (upgrade from Essentials)",
+                                "description": (
+                                    f"Incident reporting + employee roster + OSHA logs + HR resources "
+                                    f"({headcount} employee{'s' if headcount != 1 else ''}). "
+                                    f"Replaces your Essentials subscription. Auto-renews monthly."
+                                ),
+                            },
+                        },
+                        "quantity": 1,
+                    }
+                ],
+            )
+
+        try:
+            return await asyncio.to_thread(_create)
+        except Exception as exc:
+            raise StripeServiceError(f"Failed to create Essentials upgrade checkout: {exc}") from exc
+
     async def create_matcha_x_checkout(
         self,
         company_id: UUID,

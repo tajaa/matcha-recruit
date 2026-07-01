@@ -371,6 +371,307 @@ async def create_lite_checkout(
 
 
 # ---------------------------------------------------------------------------
+# Matcha Lite add-ons — each its own Stripe sub on top of the base Lite sub.
+# Registry (whitelist + eligibility rules): app/core/services/lite_addons.py.
+# ---------------------------------------------------------------------------
+
+
+class LiteAddonInfo(BaseModel):
+    key: str
+    name: str
+    description: str
+    status: str  # 'active' | 'available' | 'not_eligible'
+    monthly_price_cents: Optional[int] = None
+    # True when the add-on rides a self-purchased Stripe sub (cancellable
+    # here); False for admin-granted flags without a sub.
+    cancellable: bool = False
+
+
+class LiteAddonCheckoutRequest(BaseModel):
+    addon_key: str
+    success_url: Optional[str] = None
+    cancel_url: Optional[str] = None
+
+
+async def _lite_company_context(company_id) -> dict:
+    """signup_source + merged features + headcount for the add-on endpoints."""
+    import json as _json
+
+    from ..feature_flags import merge_company_features
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT c.signup_source, c.enabled_features, COALESCE(chp.headcount, 0) AS headcount
+            FROM companies c
+            LEFT JOIN company_handbook_profiles chp ON chp.company_id = c.id
+            WHERE c.id = $1
+            """,
+            company_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Company not found")
+    raw = row["enabled_features"]
+    stored = raw if isinstance(raw, dict) else (_json.loads(raw) if raw else {})
+    return {
+        "signup_source": row["signup_source"],
+        "features": merge_company_features(stored, row["signup_source"]),
+        "headcount": int(row["headcount"]),
+    }
+
+
+@router.get("/lite-addons", response_model=list[LiteAddonInfo])
+async def list_lite_addons(current_user: CurrentUser = Depends(require_client)):
+    """Add-ons for the caller's Lite-family company, with live PEPM pricing.
+
+    Not-lite companies get an empty list rather than a 403 — the panel simply
+    doesn't render for them.
+    """
+    from ...matcha.services import billing_service
+    from ..services.lite_addons import LITE_ADDONS, addon_pack_id
+    from ..services.matcha_lite_pricing import compute_matcha_lite_price_cents, get_matcha_lite_pricing
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with this account")
+
+    ctx = await _lite_company_context(company_id)
+    if ctx["signup_source"] not in ("matcha_lite", "matcha_lite_essentials"):
+        return []
+
+    active_subs = await billing_service.list_active_subscriptions(company_id)
+    active_pack_ids = {s["pack_id"] for s in active_subs}
+
+    out: list[LiteAddonInfo] = []
+    for addon in LITE_ADDONS.values():
+        has_sub = addon_pack_id(addon.key) in active_pack_ids
+        is_active = bool(ctx["features"].get(addon.feature)) or has_sub
+        eligible = ctx["signup_source"] in addon.allowed_sources and all(
+            ctx["features"].get(f) for f in addon.requires_features
+        )
+        pricing = await get_matcha_lite_pricing(product_code=addon.product_code)
+        out.append(
+            LiteAddonInfo(
+                key=addon.key,
+                name=addon.name,
+                description=addon.description,
+                status="active" if is_active else ("available" if eligible else "not_eligible"),
+                monthly_price_cents=(
+                    compute_matcha_lite_price_cents(pricing, ctx["headcount"]) if ctx["headcount"] >= 1 else None
+                ),
+                cancellable=has_sub,
+            )
+        )
+    return out
+
+
+@router.post("/checkout/lite-addon", response_model=UpgradeCheckoutResponse)
+async def create_lite_addon_checkout(
+    body: LiteAddonCheckoutRequest,
+    current_user: CurrentUser = Depends(require_client),
+):
+    """Open a Stripe subscription checkout for a Lite add-on.
+
+    Requires an active self-purchased base Lite sub (pack_id='matcha_lite') —
+    broker-paid Lite companies have no sub row here, so their add-ons are
+    admin-toggled instead. The webhook flips the add-on's feature flag on
+    `checkout.session.completed` (metadata.type='matcha_lite_addon').
+    """
+    from ...matcha.services import billing_service
+    from ..services.lite_addons import LITE_ADDONS, addon_pack_id
+    from ..services.matcha_lite_pricing import compute_matcha_lite_price_cents, get_matcha_lite_pricing
+    from ..services.stripe_service import StripeService, StripeServiceError
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with this account")
+
+    addon = LITE_ADDONS.get(body.addon_key)
+    if addon is None:
+        raise HTTPException(status_code=404, detail="Unknown add-on")
+
+    ctx = await _lite_company_context(company_id)
+    if ctx["signup_source"] not in addon.allowed_sources:
+        raise HTTPException(status_code=403, detail=f"{addon.name} is not available on your plan")
+
+    base_sub = await billing_service.get_active_subscription(company_id, pack_ids=("matcha_lite",))
+    if base_sub is None:
+        raise HTTPException(
+            status_code=402,
+            detail="An active Matcha Lite subscription is required before purchasing add-ons",
+        )
+
+    missing = [f for f in addon.requires_features if not ctx["features"].get(f)]
+    if missing:
+        raise HTTPException(status_code=403, detail=f"{addon.name} requires features your plan doesn't include")
+
+    existing_addon_sub = await billing_service.get_active_subscription(
+        company_id, pack_ids=(addon_pack_id(addon.key),)
+    )
+    if ctx["features"].get(addon.feature) or existing_addon_sub is not None:
+        raise HTTPException(status_code=409, detail=f"{addon.name} is already active on your account")
+
+    headcount = ctx["headcount"]
+    if headcount < 1:
+        raise HTTPException(status_code=400, detail="Company headcount not set — please contact support")
+
+    pricing = await get_matcha_lite_pricing(product_code=addon.product_code)
+    if headcount < pricing.min_headcount:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Headcount under {pricing.min_headcount} — please contact us for pricing",
+        )
+    amount_cents = compute_matcha_lite_price_cents(pricing, headcount)
+    if amount_cents is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Headcount over {pricing.max_headcount} — please contact us for pricing",
+        )
+
+    stripe_service = StripeService()
+    try:
+        session = await stripe_service.create_lite_addon_checkout(
+            company_id=company_id,
+            addon_key=addon.key,
+            addon_name=addon.name,
+            addon_description=addon.description,
+            headcount=headcount,
+            amount_cents=amount_cents,
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+        )
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    stripe_session_id = str(getattr(session, "id", "") or "")
+    checkout_url = str(getattr(session, "url", "") or "")
+    if not stripe_session_id or not checkout_url:
+        raise HTTPException(status_code=502, detail="Stripe checkout did not return expected fields")
+
+    logger.info(
+        "Lite add-on checkout opened: company=%s addon=%s headcount=%d session=%s",
+        company_id, addon.key, headcount, stripe_session_id,
+    )
+    return UpgradeCheckoutResponse(checkout_url=checkout_url, stripe_session_id=stripe_session_id)
+
+
+@router.post("/lite-addons/{addon_key}/cancel")
+async def cancel_lite_addon(
+    addon_key: str,
+    current_user: CurrentUser = Depends(require_client),
+):
+    """Cancel an add-on subscription at period end.
+
+    Deliberately does NOT mark the mw_subscriptions row canceled here — the
+    row must stay 'active' so the eventual customer.subscription.deleted
+    webhook passes its `if canceled:` gate and un-flips the feature flag when
+    the period actually ends.
+    """
+    from ...matcha.services import billing_service
+    from ..services.lite_addons import LITE_ADDONS, addon_pack_id
+    from ..services.stripe_service import StripeService, StripeServiceError
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with this account")
+
+    addon = LITE_ADDONS.get(addon_key)
+    if addon is None:
+        raise HTTPException(status_code=404, detail="Unknown add-on")
+
+    sub = await billing_service.get_active_subscription(company_id, pack_ids=(addon_pack_id(addon.key),))
+    if sub is None:
+        raise HTTPException(status_code=404, detail="No active subscription for this add-on")
+
+    try:
+        await StripeService().cancel_subscription(sub["stripe_subscription_id"])
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    logger.info("Lite add-on cancel scheduled: company=%s addon=%s sub=%s", company_id, addon.key, sub["stripe_subscription_id"])
+    return {"canceled": True, "message": f"{addon.name} will not renew at the end of the current period."}
+
+
+# ---------------------------------------------------------------------------
+# Essentials → Lite self-serve upgrade (checkout-first; the webhook flips
+# signup_source and cancels the old Essentials sub on completion).
+# ---------------------------------------------------------------------------
+
+
+@router.post("/checkout/lite-upgrade", response_model=UpgradeCheckoutResponse)
+async def create_lite_upgrade_checkout(
+    body: LiteCheckoutRequest,
+    current_user: CurrentUser = Depends(require_client),
+):
+    """Open a Stripe checkout upgrading an Essentials company to standard Lite.
+
+    Only callable while signup_source == 'matcha_lite_essentials' (a completed
+    upgrade flips it to 'matcha_lite', which also blocks double-upgrades).
+    Priced at the standard matcha_lite rate for the stored headcount. Nothing
+    changes until checkout.session.completed lands — abandoning is a no-op.
+    """
+    from ...matcha.services import billing_service
+    from ..services.matcha_lite_pricing import compute_matcha_lite_price_cents, get_matcha_lite_pricing
+    from ..services.stripe_service import StripeService, StripeServiceError
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with this account")
+
+    ctx = await _lite_company_context(company_id)
+    if ctx["signup_source"] != "matcha_lite_essentials":
+        raise HTTPException(status_code=403, detail="This upgrade is only available for Matcha Lite Essentials accounts")
+
+    base_sub = await billing_service.get_active_subscription(company_id, pack_ids=("matcha_lite",))
+    if base_sub is None:
+        raise HTTPException(
+            status_code=402,
+            detail="An active Essentials subscription is required before upgrading",
+        )
+
+    headcount = ctx["headcount"]
+    if headcount < 1:
+        raise HTTPException(status_code=400, detail="Company headcount not set — please contact support")
+
+    pricing = await get_matcha_lite_pricing(product_code="matcha_lite")
+    if headcount < pricing.min_headcount:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Headcount under {pricing.min_headcount} — please contact us for pricing",
+        )
+    amount_cents = compute_matcha_lite_price_cents(pricing, headcount)
+    if amount_cents is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Headcount over {pricing.max_headcount} — please contact us for pricing",
+        )
+
+    stripe_service = StripeService()
+    try:
+        session = await stripe_service.create_lite_essentials_upgrade_checkout(
+            company_id=company_id,
+            headcount=headcount,
+            amount_cents=amount_cents,
+            old_subscription_id=base_sub["stripe_subscription_id"],
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+        )
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    stripe_session_id = str(getattr(session, "id", "") or "")
+    checkout_url = str(getattr(session, "url", "") or "")
+    if not stripe_session_id or not checkout_url:
+        raise HTTPException(status_code=502, detail="Stripe checkout did not return expected fields")
+
+    logger.info(
+        "Essentials→Lite upgrade checkout opened: company=%s headcount=%d session=%s",
+        company_id, headcount, stripe_session_id,
+    )
+    return UpgradeCheckoutResponse(checkout_url=checkout_url, stripe_session_id=stripe_session_id)
+
+
+# ---------------------------------------------------------------------------
 # Matcha-X — headcount-based subscription checkout (mid tier; clone of Lite)
 # ---------------------------------------------------------------------------
 

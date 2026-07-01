@@ -54,11 +54,17 @@ async def _dispatch_freshness_checks() -> dict:
             else 5
         )
 
+        # Per-company paid gate: the scheduled sweep is the `handbook_watch`
+        # add-on (manual freshness checks stay free with `handbooks`).
+        # handbook_watch is a paid flag in NO tier overlay, so the stored
+        # enabled_features value IS the merged value — safe to filter in SQL.
         rows = await conn.fetch(
             """
             SELECT h.id AS handbook_id, h.company_id
             FROM handbooks h
+            JOIN companies c ON c.id = h.company_id
             WHERE h.status = 'active'
+              AND COALESCE((c.enabled_features->>'handbook_watch')::boolean, false)
             ORDER BY h.updated_at ASC
             LIMIT $1
             """,

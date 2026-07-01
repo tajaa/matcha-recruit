@@ -60,7 +60,14 @@ def test_admin_configured_headcount_bounds_are_respected():
 
 
 def test_product_codes_has_standard_and_essentials():
-    assert PRODUCT_CODES == ("matcha_lite", "matcha_lite_essentials", "matcha_compliance")
+    assert PRODUCT_CODES == (
+        "matcha_lite",
+        "matcha_lite_essentials",
+        "matcha_compliance",
+        "addon_voice_intake",
+        "addon_hris_sync",
+        "addon_handbook_watch",
+    )
 
 
 def test_essentials_fallback_default_is_four_dollars_per_head():
@@ -79,3 +86,18 @@ def test_compliance_fallback_default_is_flat_eight_dollars_per_head():
 def test_standard_fallback_default_matches_launch_price():
     pricing = _pricing(**_FALLBACK_DEFAULTS["matcha_lite"])
     assert compute_matcha_lite_price_cents(pricing, 10) == 5000
+
+
+def test_addon_fallback_defaults_are_flat_pepm():
+    # Placeholders mirroring migration mlpricing04 — block_size=1 makes the
+    # per-block price a straight per-employee/month rate.
+    for code, per_head in (
+        ("addon_voice_intake", 100),
+        ("addon_hris_sync", 200),
+        ("addon_handbook_watch", 100),
+    ):
+        pricing = _pricing(**_FALLBACK_DEFAULTS[code])
+        assert pricing.block_size == 1
+        assert compute_matcha_lite_price_cents(pricing, 1) == per_head
+        assert compute_matcha_lite_price_cents(pricing, 25) == 25 * per_head
+        assert compute_matcha_lite_price_cents(pricing, 301) is None
