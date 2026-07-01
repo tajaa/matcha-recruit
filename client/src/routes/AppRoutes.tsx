@@ -68,8 +68,8 @@ export default function AppRoutes() {
       <Route element={<AppLayout sidebar={<TenantSidebar />} />}>
         <Route index element={<Dashboard />} />
         <Route path="company" element={<CompanySettings />} />
-        <Route path="employees" element={<Employees />} />
-        <Route path="employees/:employeeId" element={<EmployeeDetail />} />
+        <Route path="employees" element={<FeatureGate feature="employees" label="Employees"><Employees /></FeatureGate>} />
+        <Route path="employees/:employeeId" element={<FeatureGate feature="employees" label="Employees"><EmployeeDetail /></FeatureGate>} />
         <Route path="onboarding" element={<Onboarding />} />
         <Route path="er-copilot" element={<FeatureGate feature="er_copilot" label="ER Copilot"><ERCopilot /></FeatureGate>} />
         <Route path="er-copilot/:caseId" element={<FeatureGate feature="er_copilot" label="ER Copilot"><ERCaseDetail /></FeatureGate>} />

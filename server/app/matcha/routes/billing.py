@@ -187,7 +187,9 @@ async def create_personal_checkout_session(
 
     plan_cfg = StripeService.PERSONAL_PLANS[body.plan]
 
-    existing = await billing_service.get_active_subscription(company_id)
+    existing = await billing_service.get_active_subscription(
+        company_id, pack_ids=billing_service.WERK_PACK_IDS
+    )
     if existing and existing.get("pack_id") == plan_cfg["pack_id"]:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -247,7 +249,9 @@ async def get_subscription(
     if company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No company associated with this account")
 
-    sub = await billing_service.get_active_subscription(company_id)
+    sub = await billing_service.get_active_subscription(
+        company_id, pack_ids=billing_service.WERK_PACK_IDS
+    )
     if sub is None:
         return SubscriptionResponse(active=False)
 
@@ -270,7 +274,9 @@ async def cancel_subscription(
     if company_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No company associated with this account")
 
-    sub = await billing_service.get_active_subscription(company_id)
+    sub = await billing_service.get_active_subscription(
+        company_id, pack_ids=billing_service.WERK_PACK_IDS
+    )
     if sub is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active subscription found")
 

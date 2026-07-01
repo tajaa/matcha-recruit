@@ -740,7 +740,9 @@ async def _get_model(
                 # subscription on the company unlocks the pro model.
                 from uuid import UUID as _UUID
                 from . import billing_service
-                sub = await billing_service.get_active_subscription(_UUID(company_id))
+                sub = await billing_service.get_active_subscription(
+                    _UUID(company_id), pack_ids=billing_service.WERK_PACK_IDS
+                )
                 return bool(sub and sub.get("pack_id") == entitlements_service.PRO_PACK_ID)
         except Exception:
             # Fail closed (deny pro), but log — otherwise a resolver outage

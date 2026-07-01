@@ -89,7 +89,9 @@ function MatchaLitePendingSidebar({ headcount, isEssentials }: { headcount: numb
       <div className="mb-6">
         <h2 className="text-sm font-semibold text-zinc-100 mb-1">Complete your subscription</h2>
         <p className="text-xs text-zinc-400">
-          Activate Matcha Lite to access incident reporting, employee management, and HR resources.
+          {isEssentials
+            ? 'Activate Matcha Lite Essentials to access incident reporting and HR resources.'
+            : 'Activate Matcha Lite to access incident reporting, employee management, and HR resources.'}
         </p>
       </div>
 

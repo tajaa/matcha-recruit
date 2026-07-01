@@ -4,7 +4,7 @@ import { LogOut, Settings, ChevronDown, Lock } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import { Logo } from './ui'
 import Avatar from './Avatar'
-import { invalidateMeCache } from '../hooks/useMe'
+import { invalidateMeCache, useMe } from '../hooks/useMe'
 import { disconnectSharedChannelSocket } from '../api/channelSocket'
 import { useLayoutContext } from '../layouts/LayoutContext'
 
@@ -165,6 +165,21 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
   const navigate = useNavigate()
   const location = useLocation()
   const { hasTopNav, sidebarCollapsed } = useLayoutContext()
+  const { hasFeature } = useMe()
+
+  // Enforce the `feature` contract declared on NavItem/NavGroup for every
+  // sidebar that renders through this shell. Locked upsell entries carry no
+  // `feature` key, so they survive the filter and render their lock UI.
+  const visibleNav = nav.reduce<(NavItem | NavGroup)[]>((out, item) => {
+    if (isGroup(item)) {
+      if (item.feature && !hasFeature(item.feature)) return out
+      const items = item.items.filter((child) => !child.feature || hasFeature(child.feature))
+      if (items.length > 0) out.push({ ...item, items })
+    } else if (!item.feature || hasFeature(item.feature)) {
+      out.push(item)
+    }
+    return out
+  }, [])
 
   function handleLogout() {
     localStorage.removeItem('matcha_access_token')
@@ -187,7 +202,7 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFoot
 
       {/* Navigation */}
       <nav className={`flex-1 ${navPx} pt-2 space-y-1 overflow-y-auto overflow-x-hidden`}>
-        {nav.map((item) =>
+        {visibleNav.map((item) =>
           isGroup(item) ? (
             <NavGroupSection key={item.label} group={item} location={location} collapsed={sidebarCollapsed} />
           ) : (

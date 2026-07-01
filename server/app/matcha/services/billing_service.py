@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 from uuid import UUID
 
 import asyncpg
@@ -15,6 +15,16 @@ INSUFFICIENT_CREDITS_MESSAGE = (
     "Insufficient credits. Purchase more credits to continue using Matcha Work."
 )
 INSUFFICIENT_CREDITS_CODE = "insufficient_credits"
+
+# Werk subscription packs. Callers that only care about Werk plans must pass
+# these to get_active_subscription — a company can also hold matcha_lite /
+# matcha_lite_addon_* rows, and an unfiltered newest-first lookup would
+# surface those instead.
+WERK_PACK_IDS: tuple[str, ...] = (
+    "matcha_work_lite",      # personal Lite plan
+    "matcha_work_personal",  # personal Pro plan (legacy "Plus" pack id)
+    "matcha_work_pro",       # business token subscription
+)
 
 
 def _insufficient_credits_exception(credits_remaining: float = 0) -> HTTPException:
@@ -503,8 +513,16 @@ async def fulfill_checkout_session(stripe_session_id: str) -> Optional[dict[str,
     }
 
 
-async def get_active_subscription(company_id: UUID) -> Optional[dict[str, Any]]:
-    """Return the active subscription for a company, or None."""
+async def get_active_subscription(
+    company_id: UUID,
+    pack_ids: Optional[Sequence[str]] = None,
+) -> Optional[dict[str, Any]]:
+    """Return the newest active subscription for a company, or None.
+
+    Pass `pack_ids` to scope the lookup (e.g. WERK_PACK_IDS, or
+    ("matcha_lite",) for the Lite base sub) — without it the newest row of
+    ANY pack wins, which is wrong once a company holds base + add-on subs.
+    """
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
@@ -514,14 +532,34 @@ async def get_active_subscription(company_id: UUID) -> Optional[dict[str, Any]]:
             FROM mw_subscriptions
             WHERE company_id = $1
               AND status IN ('active', 'past_due')
+              AND ($2::text[] IS NULL OR pack_id = ANY($2::text[]))
             ORDER BY created_at DESC
             LIMIT 1
             """,
             company_id,
+            list(pack_ids) if pack_ids is not None else None,
         )
     if row is None:
         return None
     return dict(row)
+
+
+async def list_active_subscriptions(company_id: UUID) -> list[dict[str, Any]]:
+    """Return every active/past_due subscription row for a company."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, company_id, stripe_subscription_id, stripe_customer_id,
+                   pack_id, credits_per_cycle, amount_cents, status,
+                   current_period_end, created_at, canceled_at
+            FROM mw_subscriptions
+            WHERE company_id = $1
+              AND status IN ('active', 'past_due')
+            ORDER BY created_at DESC
+            """,
+            company_id,
+        )
+    return [dict(r) for r in rows]
 
 
 async def get_subscription_by_stripe_id(stripe_subscription_id: str) -> Optional[dict[str, Any]]:
