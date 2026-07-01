@@ -869,11 +869,27 @@ const RECENT_INCIDENTS = [
 ];
 
 // One report opened with its agentic analysis — the "report itself + its
-// data", not just the intake. Illustrative.
+// data", not just the intake. Illustrative. Index here doubles as the
+// "field" a NARRATIVE_TOKENS chunk points at (see below) — same order,
+// same meaning, so the highlighted phrase and the resolved fact always match.
 const REPORT_ANALYSIS = [
   { label: "Pattern", value: "3rd escalation · this location · 14 days" },
   { label: "Policy", value: "Workplace Violence Prevention §4" },
   { label: "Action", value: "Manager coaching + security review" },
+];
+
+// The raw narrative, broken into plain-text chunks and phrase chunks. Each
+// phrase chunk's `field` is an index into REPORT_ANALYSIS — the card sweeps
+// a highlight across the phrase that produced each fact, then resolves it
+// below, so it *shows* the read instead of just listing conclusions.
+const NARRATIVE_TOKENS: { text: string; field?: number }[] = [
+  { text: "Customer got " },
+  { text: "aggressive at the register", field: 2 },
+  { text: " — " },
+  { text: "third time this month", field: 0 },
+  { text: ", so this falls under " },
+  { text: "workplace violence prevention", field: 1 },
+  { text: "." },
 ];
 
 function DailyInstrument() {
@@ -882,6 +898,7 @@ function DailyInstrument() {
   const max = Math.max(...DAILY_BARS);
   const voicePhase = useCyclingIndex(VOICE_PHASE_COUNT, 1900, reduce);
   const listening = voicePhase === 1;
+  const extractPhase = useCyclingIndex(REPORT_ANALYSIS.length, 2400, reduce);
 
   return (
     <InstrumentFrame label="Daily Intake" accent="#F2C14E">
@@ -1082,23 +1099,69 @@ function DailyInstrument() {
                 style={{ backgroundColor: "#F2C14E" }}
               />
             </div>
-            <div className="flex flex-col gap-2">
-              {REPORT_ANALYSIS.map((a) => (
-                <div key={a.label} className="flex items-baseline gap-2.5">
+            {/* The raw report, with the phrase behind the current fact lit up
+                as it's "read" — shows the extraction happening instead of
+                just listing what it found. */}
+            <p
+              className="text-[10px] leading-relaxed italic"
+              style={{ color: ASH }}
+            >
+              “
+              {NARRATIVE_TOKENS.map((t, i) => {
+                const active = t.field === extractPhase;
+                return (
                   <span
-                    className="text-[8px] font-mono uppercase tracking-[0.12em] w-12 shrink-0"
+                    key={i}
+                    className="transition-colors duration-500 not-italic"
+                    style={
+                      t.field === undefined
+                        ? undefined
+                        : {
+                            color: active ? "#F2C14E" : ASH,
+                            backgroundColor: active
+                              ? "rgba(242,193,78,0.12)"
+                              : "transparent",
+                            borderRadius: 3,
+                            padding: active ? "0 3px" : undefined,
+                          }
+                    }
+                  >
+                    {t.text}
+                  </span>
+                );
+              })}
+              ”
+            </p>
+            <div className="flex items-center gap-2 mt-2.5">
+              <span
+                className="text-[10px] shrink-0"
+                style={{ color: "#F2C14E" }}
+              >
+                ↳
+              </span>
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={extractPhase}
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  transition={{ duration: 0.3 }}
+                  className="flex items-baseline gap-2.5 min-w-0"
+                >
+                  <span
+                    className="text-[8px] font-mono uppercase tracking-[0.12em] shrink-0"
                     style={{ color: ASH }}
                   >
-                    {a.label}
+                    {REPORT_ANALYSIS[extractPhase].label}
                   </span>
                   <span
-                    className="text-[10px] leading-snug"
+                    className="text-[10px] leading-snug truncate"
                     style={{ color: BONE }}
                   >
-                    {a.value}
+                    {REPORT_ANALYSIS[extractPhase].value}
                   </span>
-                </div>
-              ))}
+                </motion.div>
+              </AnimatePresence>
             </div>
           </div>
           <div
