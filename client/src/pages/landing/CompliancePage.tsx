@@ -1,14 +1,10 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { motion } from 'framer-motion'
-import { Scale, Layers, Radar, ClipboardCheck, AlertTriangle, MessageSquare } from 'lucide-react'
 
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
 import { ComplianceTicker } from '../../components/landing/ComplianceTicker'
-import { JurisdictionCascade } from '../../components/landing/JurisdictionCascade'
-import { TimelineConstructor } from '../../components/landing/TimelineConstructor'
-import { FocusSection, useScrollFocus } from '../../components/landing/ScrollFocus'
+import { ComplianceMockup } from '../../components/landing/ComplianceProductMockup'
 import { PricingContactModal } from '../../components/PricingContactModal'
 import { ComplianceHeroAnimation } from './ComplianceHeroAnimation'
 
@@ -18,78 +14,108 @@ const MUTED = 'var(--color-ivory-muted)'
 const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 
-const FEATURES: { id: string; icon: typeof Scale; title: string; caption: string; visual: React.ComponentType }[] = [
+// ---------------------------------------------------------------------------
+// Four-pillar product model. Matcha Compliance is sold standalone (like
+// Matcha-lite): jurisdictional compliance + handbook audit + policy management
+// + credentialing, each a real, shipping feature (built for Matcha-X). Each
+// pillar renders a full app-window mockup (ComplianceMockup) beneath its copy.
+// Copy is kept accurate deliberately — see the guardrail notes per pillar.
+// ---------------------------------------------------------------------------
+
+type Screen = 'jurisdiction' | 'handbook' | 'policy' | 'credential'
+
+type Pillar = {
+  id: string
+  number: string
+  title: string
+  tagline: string
+  description: string
+  deliverables: string[]
+  screen: Screen
+}
+
+const PILLARS: Pillar[] = [
   {
     id: 'jurisdiction',
-    icon: Scale,
-    title: 'Jurisdiction-aware checks',
-    caption:
-      'Every federal, state, and local requirement that applies to each of your locations — resolved from structured data, a curated repository, and live AI research when the books are thin.',
-    visual: LayerPulse,
+    number: '01',
+    title: 'Jurisdictional Compliance',
+    tagline: 'Every rule that governs each location, resolved.',
+    description:
+      'Add a location and Matcha assembles the full federal → state → county → city requirement stack that applies to it, de-conflicts the overlaps, and keeps watching for change. This is the robust engine at the core of the product — structured data, a curated repository, and grounded AI research when the books are thin.',
+    deliverables: [
+      'Federal → state → county → city requirement stack, per location',
+      'Preemption engine resolves overlapping rules to the one that governs',
+      'Grounded legislation watch flags new and amended law before it takes effect',
+      'Every gap becomes an assignable action with an owner, due date, and SLA',
+      'Wage-violation alerts — minimum wage, overtime, pay transparency',
+      'Ask compliance anything — answered with citations to the governing rule',
+    ],
+    screen: 'jurisdiction',
   },
   {
-    id: 'preemption',
-    icon: Layers,
-    title: 'Preemption engine',
-    caption:
-      'Overlapping federal / state / local rules stacked and de-conflicted, so you see the one standard that actually governs — not six contradictory ones.',
-    visual: StackResolve,
+    id: 'handbook-audit',
+    number: '02',
+    title: 'Handbook Audit',
+    tagline: 'Find the gaps before an auditor does.',
+    description:
+      'Upload an employee handbook and pick the operating state. Matcha extracts each section and grades it against that state’s requirements — surfacing what’s missing, what’s weak, and what good looks like. Informational, not legal advice; one state per run.',
+    deliverables: [
+      'Upload a handbook (PDF) and choose the operating state',
+      'AI extracts each section and grades it against that state’s requirements',
+      'Gaps ranked critical / important / recommended, each with a citation',
+      '“What good looks like” guidance for every missing or weak section',
+      'Exportable PDF report to hand to counsel or leadership',
+    ],
+    screen: 'handbook',
   },
   {
-    id: 'legislation',
-    icon: Radar,
-    title: 'Legislation watch',
-    caption:
-      'Grounded monitoring surfaces new and amended law before it takes effect, with the delta against your current posture flagged for review.',
-    visual: RadarSweep,
+    id: 'policy-management',
+    number: '03',
+    title: 'Policy Management',
+    tagline: 'Draft, store, and keep policies current.',
+    description:
+      'A living policy library. Draft a new policy from a topic and jurisdiction with grounded AI, or bring your own — then track each one from draft to active with review dates that don’t slip. Gap suggestions surface the policies you’re missing, mined from your own incident and case patterns.',
+    deliverables: [
+      'Create from text, or upload existing PDF / DOCX (auto text-extracted)',
+      'AI drafts jurisdiction-grounded policy language with citations',
+      'Category taxonomy — HR, compliance, safety, HIPAA, clinical, and more',
+      'Draft → active → archived lifecycle with effective and review dates',
+      'Gap suggestions surfaced from your own incident and ER case patterns',
+    ],
+    screen: 'policy',
   },
   {
-    id: 'actions',
-    icon: ClipboardCheck,
-    title: 'Action plans & reminders',
-    caption:
-      'Each gap becomes an assignable action with an owner, due date, and SLA. Overdue items escalate — nothing lapses quietly.',
-    visual: ChecklistCascade,
-  },
-  {
-    id: 'wage',
-    icon: AlertTriangle,
-    title: 'Wage-violation alerts',
-    caption:
-      'Minimum-wage, overtime, and pay-transparency exposure detected per location and surfaced against the governing rate.',
-    visual: SeverityGauge,
-  },
-  {
-    id: 'ask',
-    icon: MessageSquare,
-    title: 'Ask compliance, anything',
-    caption:
-      'A grounded assistant answers "what applies to us in X?" with citations to the requirements behind the answer — not a generic chatbot.',
-    visual: ChatPulse,
+    id: 'credentialing',
+    number: '04',
+    title: 'Credentialing',
+    tagline: 'The right credentials, tracked to the date.',
+    description:
+      'Define the credentials each role needs in each jurisdiction — researched for you — then let Matcha assign them to every employee automatically and verify the documents themselves. License numbers and expirations are read straight off the uploaded file, and expiring credentials are flagged in-app.',
+    deliverables: [
+      'Required credentials per role and jurisdiction, AI-researched',
+      'Requirements auto-assigned to each employee at hire and on HRIS sync',
+      'Upload license documents — OCR extracts the number and expiration',
+      'Admin approve / reject with a per-employee requirement checklist',
+      'Expiration badges flag expired, ≤30-day, and ≤90-day credentials',
+    ],
+    screen: 'credential',
   },
 ]
 
 export default function CompliancePage() {
   const [isPricingOpen, setIsPricingOpen] = useState(false)
-  const focus = useScrollFocus()
-
-  const sections = [
-    <JurisdictionSection key="jurisdiction" />,
-    <TimelineSection key="timeline" />,
-    <FeatureGrid key="grid" />,
-  ]
 
   return (
     <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen overflow-x-hidden">
-      <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
+      <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} mode="consultation" />
       <ComplianceTicker />
       <MarketingNav onDemoClick={() => setIsPricingOpen(true)} />
 
       <Hero onContactClick={() => setIsPricingOpen(true)} />
 
       <main>
-        {sections.map((node, i) => (
-          <FocusSection key={i} idx={i} focus={focus}>{node}</FocusSection>
+        {PILLARS.map(p => (
+          <PillarSection key={p.id} pillar={p} />
         ))}
       </main>
 
@@ -122,7 +148,7 @@ function Hero({ onContactClick }: { onContactClick: () => void }) {
           >
             <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#86efac' }} />
             <span className="text-[10px] sm:text-[11px] uppercase tracking-wider font-medium">
-              Jurisdiction-aware compliance
+              Standalone compliance platform
             </span>
           </div>
           <h1
@@ -137,12 +163,12 @@ function Hero({ onContactClick }: { onContactClick: () => void }) {
             Matcha Compliance.
           </h1>
           <p
-            className="mt-5 sm:mt-6 mx-auto max-w-xl text-[15px] sm:text-base px-2"
+            className="mt-5 sm:mt-6 mx-auto max-w-xl text-base sm:text-lg px-2"
             style={{ color: MUTED, lineHeight: 1.55 }}
           >
-            Track every federal, state, and local requirement that applies to your
-            team. Preemption-aware checks, live legislation watch, and AI-built
-            action plans — so nothing lapses before you know about it.
+            Four systems, one product: jurisdiction-aware compliance tracking,
+            handbook auditing, policy management, and credentialing — assembled
+            into the compliance platform your team actually runs on.
           </p>
           <div className="mt-8 sm:mt-10 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <button
@@ -175,160 +201,58 @@ function Hero({ onContactClick }: { onContactClick: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
-// Jurisdiction stack
+// Pillar section — editorial copy (heading + description + deliverables) above
+// a full-width product-window mockup for that pillar.
 // ---------------------------------------------------------------------------
 
-function JurisdictionSection() {
+function PillarSection({ pillar }: { pillar: Pillar }) {
   return (
-    <section className="py-16 sm:py-24 md:py-28 border-t" style={{ borderColor: LINE }}>
+    <section id={pillar.id} className="py-20 sm:py-28 md:py-32 border-t" style={{ borderColor: LINE }}>
       <div className="max-w-[1440px] mx-auto px-5 sm:px-10">
-        <div className="max-w-2xl mb-10 sm:mb-12">
-          <div className="text-[11px] uppercase tracking-wider font-medium mb-3 sm:mb-4" style={{ color: MUTED }}>
-            Built from your locations up
-          </div>
-          <h2
-            className="tracking-tight"
-            style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(1.875rem, 5vw, 3.25rem)', lineHeight: 1.05 }}
-          >
-            Every jurisdiction you operate in, stacked.
-          </h2>
-          <p className="mt-4 sm:mt-5 text-base sm:text-lg" style={{ color: MUTED, lineHeight: 1.6 }}>
-            Add a location and Matcha assembles the full federal → state → county →
-            city requirement stack that governs it, then resolves the overlaps so
-            you read one answer instead of arguing six.
-          </p>
-        </div>
-
-        <div className="max-w-5xl mx-auto -mx-2 sm:mx-auto">
-          <div
-            className="relative rounded-lg sm:rounded-xl overflow-hidden ring-1 shadow-2xl"
-            style={{ boxShadow: '0 40px 80px -25px rgba(31, 29, 26, 0.3)', borderColor: 'rgba(0,0,0,0.08)' }}
-          >
-            <JurisdictionCascade />
-          </div>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Signal → action plan timeline
-// ---------------------------------------------------------------------------
-
-const TIMELINE_BULLETS = [
-  { label: 'Signal', desc: 'Grounded legislation watch catches new and amended law in the jurisdictions you operate in.' },
-  { label: 'Impact', desc: 'Each change is scored against your current posture — what lapses, who it affects, by when.' },
-  { label: 'Action plan', desc: 'A concrete plan is drafted: the steps to close the gap, mapped to owners and due dates.' },
-  { label: 'Reminders', desc: 'Open items are chased on an SLA; overdue work escalates before the effective date arrives.' },
-]
-
-function TimelineSection() {
-  return (
-    <section className="py-16 sm:py-24 md:py-28 border-t" style={{ borderColor: LINE }}>
-      <div className="max-w-[1440px] mx-auto px-5 sm:px-10">
-        <div className="grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
-          <div>
-            <div className="text-[11px] uppercase tracking-wider font-medium mb-3 sm:mb-4" style={{ color: MUTED }}>
-              Legislation watch
+        <div className="grid lg:grid-cols-[1fr_1fr] gap-8 lg:gap-16 items-start mb-12 sm:mb-16">
+          <div className="max-w-xl">
+            <div className="text-[11px] uppercase tracking-[0.2em] font-mono mb-6" style={{ color: MUTED }}>
+              {pillar.number} — {pillar.title}
             </div>
             <h2
               className="tracking-tight"
-              style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(1.875rem, 4vw, 3rem)', lineHeight: 1.05 }}
+              style={{
+                fontFamily: DISPLAY,
+                fontWeight: 400,
+                color: INK,
+                fontSize: 'clamp(2.25rem, 5vw, 4rem)',
+                lineHeight: 1.02,
+              }}
             >
-              From signal to action plan, before it takes effect.
+              {pillar.tagline}
             </h2>
-            <p className="mt-4 text-base" style={{ color: MUTED, lineHeight: 1.6 }}>
-              The work that usually surfaces in an audit — a rule changed, nobody
-              caught it — runs continuously instead. Watch turns into impact, impact
-              into a plan, plan into reminders.
-            </p>
-            <ul className="mt-7 space-y-5">
-              {TIMELINE_BULLETS.map(item => (
-                <li key={item.label} className="flex gap-3">
-                  <div className="w-1.5 h-1.5 rounded-full mt-[7px] shrink-0" style={{ backgroundColor: INK }} />
-                  <div>
-                    <span className="text-sm font-medium" style={{ color: INK }}>{item.label}</span>
-                    <p className="text-sm mt-0.5" style={{ color: MUTED, lineHeight: 1.55 }}>{item.desc}</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
           </div>
-          <div className="min-w-0">
-            <div
-              className="relative rounded-lg sm:rounded-xl overflow-hidden ring-1 shadow-2xl"
-              style={{ boxShadow: '0 40px 80px -25px rgba(31, 29, 26, 0.3)', borderColor: 'rgba(0,0,0,0.08)' }}
-            >
-              <TimelineConstructor />
+
+          <div className="max-w-xl lg:pt-2">
+            <p className="text-lg sm:text-xl" style={{ color: MUTED, lineHeight: 1.6 }}>
+              {pillar.description}
+            </p>
+
+            <div className="mt-8 pt-6 border-t" style={{ borderColor: LINE }}>
+              <div className="text-[10.5px] uppercase tracking-[0.2em] font-mono mb-4" style={{ color: MUTED }}>
+                What’s included
+              </div>
+              <ol className="space-y-2.5">
+                {pillar.deliverables.map((d, i) => (
+                  <li key={d} className="flex items-baseline gap-4 text-[15px]" style={{ color: INK }}>
+                    <span className="font-mono tabular-nums text-[11px] shrink-0 w-5" style={{ color: MUTED }}>
+                      {String(i + 1).padStart(2, '0')}
+                    </span>
+                    <span style={{ lineHeight: 1.5 }}>{d}</span>
+                  </li>
+                ))}
+              </ol>
             </div>
           </div>
         </div>
-      </div>
-    </section>
-  )
-}
 
-// ---------------------------------------------------------------------------
-// Feature grid
-// ---------------------------------------------------------------------------
-
-function FeatureGrid() {
-  return (
-    <section className="py-16 sm:py-24 md:py-28 border-t" style={{ borderColor: LINE }}>
-      <div className="max-w-[1440px] mx-auto px-5 sm:px-10">
-        <div className="max-w-2xl mb-12 sm:mb-16">
-          <div className="text-[11px] uppercase tracking-wider font-medium mb-3 sm:mb-4" style={{ color: MUTED }}>
-            What's inside
-          </div>
-          <h2
-            className="tracking-tight"
-            style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(1.875rem, 5vw, 3.25rem)', lineHeight: 1.05 }}
-          >
-            The full compliance surface — and nothing you don't need.
-          </h2>
-          <p className="mt-4 sm:mt-5 text-base sm:text-lg" style={{ color: MUTED, lineHeight: 1.6 }}>
-            Matcha Compliance is the compliance system on its own — priced by
-            headcount and the number of jurisdictions you operate in. No bundle,
-            no modules you'll never open.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px rounded-xl overflow-hidden" style={{ backgroundColor: LINE }}>
-          {FEATURES.map((f, i) => {
-            const Icon = f.icon
-            const Visual = f.visual
-            return (
-              <motion.div
-                key={f.id}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, margin: '-60px' }}
-                transition={{ duration: 0.5, delay: i * 0.08, ease: 'easeOut' }}
-                className="p-6 sm:p-8 flex flex-col"
-                style={{ backgroundColor: BG }}
-              >
-                <div className="flex items-start justify-between mb-5">
-                  <div
-                    className="w-10 h-10 rounded-lg flex items-center justify-center"
-                    style={{ backgroundColor: 'rgba(31,29,26,0.06)' }}
-                  >
-                    <Icon className="w-5 h-5" style={{ color: INK }} />
-                  </div>
-                  <div className="h-10 flex items-center">
-                    <Visual />
-                  </div>
-                </div>
-                <h3 className="text-lg sm:text-xl mb-2" style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}>
-                  {f.title}
-                </h3>
-                <p className="text-sm" style={{ color: MUTED, lineHeight: 1.6 }}>
-                  {f.caption}
-                </p>
-              </motion.div>
-            )
-          })}
-        </div>
+        {/* Full-width product-window mockup */}
+        <ComplianceMockup screen={pillar.screen} />
       </div>
     </section>
   )
@@ -344,13 +268,14 @@ function CtaBand({ onContactClick }: { onContactClick: () => void }) {
       <div className="max-w-2xl mx-auto px-5 sm:px-10 text-center">
         <h2
           className="tracking-tight"
-          style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(1.875rem, 5vw, 3rem)', lineHeight: 1.05 }}
+          style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(2rem, 5vw, 3.25rem)', lineHeight: 1.05 }}
         >
-          See your jurisdiction stack.
+          See the whole compliance stack.
         </h2>
-        <p className="mt-4 text-base sm:text-lg" style={{ color: MUTED, lineHeight: 1.6 }}>
-          Tell us where you operate and how many people you employ. We'll review
-          your account, then walk you through the requirements that apply to you.
+        <p className="mt-4 text-lg sm:text-xl" style={{ color: MUTED, lineHeight: 1.6 }}>
+          Tell us where you operate and how many people you employ. We’ll review
+          your account, then walk you through compliance, handbooks, policies, and
+          credentialing — the way they’ll work for you.
         </p>
         <div className="mt-8 flex justify-center">
           <button
@@ -363,122 +288,5 @@ function CtaBand({ onContactClick }: { onContactClick: () => void }) {
         </div>
       </div>
     </section>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Per-card mini animations — looped while in view, idle otherwise.
-// ---------------------------------------------------------------------------
-
-function LayerPulse() {
-  return (
-    <div className="flex flex-col gap-[3px]">
-      {[0, 1, 2].map((i) => (
-        <motion.div
-          key={i}
-          initial={{ opacity: 0.25 }}
-          whileInView={{ opacity: [0.25, 0.9, 0.25] }}
-          viewport={{ once: false }}
-          transition={{ duration: 2, repeat: Infinity, delay: i * 0.3, ease: 'easeInOut' }}
-          className="h-[3px] rounded-full"
-          style={{ width: `${28 - i * 6}px`, backgroundColor: INK }}
-        />
-      ))}
-    </div>
-  )
-}
-
-function StackResolve() {
-  return (
-    <div className="relative w-10 h-9">
-      {[0, 1, 2].map((i) => (
-        <motion.div
-          key={i}
-          initial={{ x: i * 4, y: -i * 3, opacity: 0.4 }}
-          whileInView={{ x: 0, y: 0, opacity: i === 0 ? 1 : 0.15 }}
-          viewport={{ once: false }}
-          transition={{ duration: 1.4, repeat: Infinity, repeatType: 'reverse', delay: i * 0.1, ease: 'easeInOut' }}
-          className="absolute inset-0 rounded-sm"
-          style={{ border: `1px solid ${INK}`, backgroundColor: BG }}
-        />
-      ))}
-    </div>
-  )
-}
-
-function RadarSweep() {
-  return (
-    <div className="relative w-9 h-9 rounded-full" style={{ border: `1px solid rgba(31,29,26,0.25)` }}>
-      <motion.div
-        className="absolute inset-0 rounded-full"
-        style={{ background: `conic-gradient(from 0deg, ${INK}33, transparent 35%)` }}
-        animate={{ rotate: 360 }}
-        transition={{ duration: 2.4, repeat: Infinity, ease: 'linear' }}
-      />
-      <div className="absolute left-1/2 top-1/2 w-1 h-1 -ml-0.5 -mt-0.5 rounded-full" style={{ backgroundColor: INK }} />
-    </div>
-  )
-}
-
-function ChecklistCascade() {
-  return (
-    <div className="flex flex-col gap-1">
-      {[0, 1, 2].map((i) => (
-        <motion.div
-          key={i}
-          initial={{ opacity: 0.3 }}
-          whileInView={{ opacity: [0.3, 1, 1] }}
-          viewport={{ once: false }}
-          transition={{ duration: 2.4, repeat: Infinity, delay: i * 0.4, ease: 'easeOut', times: [0, 0.4, 1] }}
-          className="flex items-center gap-1.5"
-        >
-          <div className="w-2.5 h-2.5 rounded-sm flex items-center justify-center" style={{ border: `1px solid ${INK}`, backgroundColor: INK }}>
-            <svg width="6" height="6" viewBox="0 0 8 8" fill="none">
-              <path d="M1 4l2 2 4-4" stroke={BG} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <div className="h-[2px] w-6 rounded-full" style={{ backgroundColor: 'rgba(31,29,26,0.2)' }} />
-        </motion.div>
-      ))}
-    </div>
-  )
-}
-
-function SeverityGauge() {
-  const levels = ['#86efac', '#d7ba7d', '#ce9178']
-  return (
-    <div className="flex flex-col gap-1">
-      {levels.map((c, i) => (
-        <motion.div
-          key={i}
-          initial={{ opacity: 0.25 }}
-          whileInView={{ opacity: [0.25, 1, 0.25] }}
-          viewport={{ once: false }}
-          transition={{ duration: 2, repeat: Infinity, delay: i * 0.55, ease: 'easeInOut' }}
-          className="flex items-center gap-1.5"
-        >
-          <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: c }} />
-          <div className="h-[2px] rounded-full" style={{ width: `${12 + i * 8}px`, backgroundColor: 'rgba(31,29,26,0.2)' }} />
-        </motion.div>
-      ))}
-    </div>
-  )
-}
-
-function ChatPulse() {
-  return (
-    <div className="flex items-center gap-[3px]">
-      {[0, 1, 2].map((i) => (
-        <motion.div
-          key={i}
-          initial={{ opacity: 0.25 }}
-          whileInView={{ opacity: [0.25, 1, 0.25] }}
-          viewport={{ once: false }}
-          transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.18, ease: 'easeInOut' }}
-          className="w-1.5 h-1.5 rounded-full"
-          style={{ backgroundColor: INK }}
-        />
-      ))}
-    </div>
   )
 }

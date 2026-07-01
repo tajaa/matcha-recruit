@@ -21,6 +21,14 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "cobra": False,
     "separation_agreements": False,
     "credential_templates": False,
+    # Customer policy library (create/upload/AI-draft policies, draft→active→
+    # archived lifecycle, effective/review dates, IR/ER-mined gap suggestions).
+    # Gates the policies_router + /app/policies. Default off so
+    # require_feature("policies") is well-defined for every company (same rule
+    # as compliance/incidents) — it was previously absent from defaults, which
+    # left it 403-by-omission everywhere. Granted to the standalone Matcha
+    # Compliance product via the matcha_compliance TIER_REQUIRED overlay.
+    "policies": False,
     # Handbook AUDIT (gap analyzer) as an in-app feature. Distinct from
     # `handbooks` (the generator, which Lite keeps). Default off; granted to
     # Matcha-X via TIER_REQUIRED overlay and to Pro/bespoke at signup time.
@@ -192,6 +200,23 @@ TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
         # build wrote (requirements + jurisdiction stack + summary + upcoming
         # legislation). Full `compliance` (power tools) stays Pro-only.
         "compliance_lite": True,
+    },
+    # matcha_compliance (paid, standalone self-serve product) — the full
+    # Compliance system sold on its own, bundling four pillars assembled from
+    # existing Matcha-X pieces: jurisdictional compliance + handbook audit +
+    # policy management + credentialing (per-employee, needs the roster).
+    # `compliance` itself is DELIBERATELY NOT here — it stays the Stripe-webhook
+    # paid gate (stripe_webhook.py flips it on checkout.session.completed;
+    # isMatchaCompliancePending checks !compliance). Putting compliance in the
+    # overlay would make every company non-pending = a free product. The four
+    # pillar flags below are always-on for the tier (zero-backfill inheritance,
+    # same pattern as matcha_x) — a pending/unpaid company still sees the
+    # Subscribe CTA because sidebar dispatch checks !compliance first.
+    "matcha_compliance": {
+        "handbook_audit": True,
+        "policies": True,
+        "credential_templates": True,
+        "employees": True,
     },
     # ir_only_self_serve (legacy free private beta) — full IR + HR bundle is
     # always on, no payment gate.
