@@ -46,7 +46,7 @@ type Product = {
 const PRODUCTS: Product[] = [
   {
     n: "01",
-    name: "The Platform",
+    name: "Full Platform",
     blurb:
       "Agentic risk management — safety, compliance, and employee relations on one brain.",
     to: "/platform",
@@ -81,9 +81,11 @@ const PRODUCTS: Product[] = [
 // Hero carousel slides. Not 1:1 with PRODUCTS: Matcha Lite gets two slides
 // (the incident-reporting flow + its OSHA 300 recordkeeping), both keyed "02"
 // and routed to /matcha-daily so they read as two facets of one product.
+// Order is presentation, not the product numbering: lead with the entry-tier
+// product (Matcha Lite, then its OSHA facet), then Compliance, then close on
+// the Full Platform as the "and everything above, unified" capstone.
 // Consulting is people, not an instrument, and stays text-only in the index below.
 const CAROUSEL_PRODUCTS: Product[] = [
-  PRODUCTS[0], // 01 The Platform
   PRODUCTS[1], // 02 Matcha Lite — incident reporting flow
   {
     n: "02",
@@ -94,6 +96,7 @@ const CAROUSEL_PRODUCTS: Product[] = [
     accent: "#F2C14E",
   },
   PRODUCTS[2], // 03 Compliance
+  PRODUCTS[0], // 01 Full Platform
 ];
 
 const MARQUEE_WORDS = [
@@ -865,58 +868,55 @@ const RECENT_INCIDENTS = [
   { loc: "Dallas — Store 3", type: "Near-miss", sev: "Low", color: "#86efac" },
 ];
 
-// One report opened with its AI analysis — the "report itself + its data",
-// not just the intake. Illustrative.
+// One report opened with its agentic analysis — the "report itself + its
+// data", not just the intake. Illustrative.
 const REPORT_ANALYSIS = [
   { label: "Pattern", value: "3rd escalation · this location · 14 days" },
   { label: "Policy", value: "Workplace Violence Prevention §4" },
   { label: "Action", value: "Manager coaching + security review" },
 ];
 
-// One numbered step in the "how it works" sequence. A left-rail number badge
-// + a vertical spine connect the steps so the card reads top→bottom as a flow:
-// report comes in → AI reads & routes → the log builds → analytics roll up.
+// One numbered step in the "how it works" sequence. Laid out 2-up (see the
+// grid in DailyInstrument) so the card reads left→right, top→bottom as a
+// flow: report comes in → agentic reads & routes // the log builds →
+// analytics roll up — wide instead of a single tall stack.
 function FlowStep({
   n,
   title,
   sub,
-  last,
   children,
 }: {
   n: string;
   title: string;
   sub: string;
-  last?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <div className="relative pl-12 pr-5">
-      {/* spine down to the next step */}
-      {!last && (
+    <div>
+      <div className="flex items-center gap-2.5 mb-2.5">
         <span
-          className="absolute w-px"
-          style={{ left: 26, top: 30, bottom: -24, backgroundColor: LINE_D }}
-        />
-      )}
-      <span
-        className="absolute left-3 top-0 w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-mono tabular-nums"
-        style={{
-          color: "#F2C14E",
-          backgroundColor: "rgba(242,193,78,0.1)",
-          border: "1px solid rgba(242,193,78,0.35)",
-        }}
-      >
-        {n}
-      </span>
-      <div className="pt-0.5 mb-2.5">
-        <div
-          className="text-[11px] font-mono uppercase tracking-[0.18em]"
-          style={{ color: BONE }}
+          className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-mono tabular-nums shrink-0"
+          style={{
+            color: "#F2C14E",
+            backgroundColor: "rgba(242,193,78,0.1)",
+            border: "1px solid rgba(242,193,78,0.35)",
+          }}
         >
-          {title}
-        </div>
-        <div className="text-[9px] font-mono mt-0.5" style={{ color: ASH }}>
-          {sub}
+          {n}
+        </span>
+        <div className="min-w-0">
+          <div
+            className="text-[11px] font-mono uppercase tracking-[0.18em] truncate"
+            style={{ color: BONE }}
+          >
+            {title}
+          </div>
+          <div
+            className="text-[9px] font-mono truncate"
+            style={{ color: ASH }}
+          >
+            {sub}
+          </div>
         </div>
       </div>
       {children}
@@ -933,7 +933,7 @@ function DailyInstrument() {
 
   return (
     <InstrumentFrame label="Incident Reporting" accent="#F2C14E">
-      <div className="flex flex-col gap-7 py-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-7 px-5 py-5">
         {/* 1 — a worker reports from a phone via the location's magic link:
             talk or type, AI extracts the fields, human reviews before submit. */}
         <FlowStep
@@ -1102,7 +1102,7 @@ function DailyInstrument() {
             policy, spots the pattern, and routes it to the right manager. */}
         <FlowStep
           n="2"
-          title="AI reads & routes"
+          title="Agentic reads & routes"
           sub="Auto-categorized · severity · policy mapped"
         >
           <div
@@ -1146,7 +1146,7 @@ function DailyInstrument() {
                   className="text-[8px] font-mono uppercase tracking-[0.16em]"
                   style={{ color: ASH }}
                 >
-                  AI analysis
+                  Agentic analysis
                 </span>
                 <span
                   className="home-pulse w-1 h-1 rounded-full"
@@ -1249,7 +1249,6 @@ function DailyInstrument() {
           n="4"
           title="Analytics roll up"
           sub="Trends · patterns · week over week"
-          last
         >
           <div
             className="rounded-lg border pt-3 pb-3"
@@ -1908,10 +1907,10 @@ function ComplianceInstrument() {
 }
 
 const INSTRUMENT_COMPONENTS = [
-  PlatformInstrument,
   DailyInstrument,
   OshaLogInstrument,
   ComplianceInstrument,
+  PlatformInstrument,
 ];
 const SHOWCASE_INTERVAL = 6000;
 
