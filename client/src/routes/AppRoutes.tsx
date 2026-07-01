@@ -80,7 +80,7 @@ export default function AppRoutes() {
         <Route path="compliance-calendar" element={<ComplianceCalendar />} />
         <Route path="ir" element={<FeatureGate feature="incidents" label="Incidents"><IRList /></FeatureGate>} />
         <Route path="ir/risk-insights" element={<FeatureGate feature="incidents" label="Risk Insights"><IRRiskInsights /></FeatureGate>} />
-        <Route path="ir/osha" element={<FeatureGate feature="incidents" label="OSHA Logs"><OshaLogs /></FeatureGate>} />
+        <Route path="ir/osha" element={<FeatureGate feature="incidents" label="OSHA Logs"><FeatureGate feature="osha_logs" label="OSHA Logs"><OshaLogs /></FeatureGate></FeatureGate>} />
         <Route path="ir/people/:personId" element={<FeatureGate feature="incidents" label="Incidents"><IRPersonDetail /></FeatureGate>} />
         <Route path="ir/:incidentId" element={<FeatureGate feature="incidents" label="Incidents"><IRDetail /></FeatureGate>} />
         <Route path="locations" element={<FeatureGate feature="incidents" label="Locations"><Locations /></FeatureGate>} />

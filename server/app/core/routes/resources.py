@@ -277,11 +277,15 @@ class MatchaLitePricingResponse(BaseModel):
 
 
 @router.get("/matcha-lite/pricing", response_model=MatchaLitePricingResponse)
-async def get_matcha_lite_pricing_public():
-    """Public — current Matcha Lite pricing, for the signup calculator + pending-subscription screen."""
-    from ..services.matcha_lite_pricing import get_matcha_lite_pricing
+async def get_matcha_lite_pricing_public(product_code: str = "matcha_lite"):
+    """Public — current pricing for `product_code` ('matcha_lite' or
+    'matcha_lite_essentials'), for the signup calculator + pending-subscription screen."""
+    from ..services.matcha_lite_pricing import PRODUCT_CODES, get_matcha_lite_pricing
 
-    pricing = await get_matcha_lite_pricing()
+    if product_code not in PRODUCT_CODES:
+        raise HTTPException(status_code=400, detail=f"Unknown product_code — must be one of {PRODUCT_CODES}")
+
+    pricing = await get_matcha_lite_pricing(product_code=product_code)
     return MatchaLitePricingResponse(
         price_per_block_cents=pricing.price_per_block_cents,
         block_size=pricing.block_size,
@@ -323,10 +327,9 @@ async def create_lite_checkout(
             """,
             company_id,
         )
-        pricing = await get_matcha_lite_pricing(conn)
-
-    if not row or row["signup_source"] != "matcha_lite":
-        raise HTTPException(status_code=403, detail="This endpoint is only available for Matcha Lite accounts")
+        if not row or row["signup_source"] not in ("matcha_lite", "matcha_lite_essentials"):
+            raise HTTPException(status_code=403, detail="This endpoint is only available for Matcha Lite accounts")
+        pricing = await get_matcha_lite_pricing(conn, product_code=row["signup_source"])
 
     headcount = int(row["headcount"])
     if headcount < 1:
@@ -352,6 +355,7 @@ async def create_lite_checkout(
             amount_cents=amount_cents,
             success_url=body.success_url,
             cancel_url=body.cancel_url,
+            is_essentials=(row["signup_source"] == "matcha_lite_essentials"),
         )
     except StripeServiceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

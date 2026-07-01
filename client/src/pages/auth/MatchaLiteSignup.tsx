@@ -15,6 +15,7 @@ export default function MatchaLiteSignup() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [headcount, setHeadcount] = useState('')
+  const [essentials, setEssentials] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [inviteInfo, setInviteInfo] = useState<
@@ -36,7 +37,7 @@ export default function MatchaLiteSignup() {
       .catch(() => {})
   }, [brokerRef])
 
-  const pricing = useMatchaLitePricing()
+  const pricing = useMatchaLitePricing(essentials ? 'matcha_lite_essentials' : 'matcha_lite')
   const maxHeadcount = pricing?.max_headcount ?? 300
 
   const seatInvite = inviteInfo?.valid === true
@@ -71,6 +72,7 @@ export default function MatchaLiteSignup() {
           email: email.trim().toLowerCase(),
           password,
           headcount: hc,
+          lite_essentials: essentials,
           ...(brokerRef ? { lite_broker_token: brokerRef } : {}),
           ...(inviteToken ? { lite_invite_token: inviteToken } : {}),
         }),
@@ -125,7 +127,7 @@ export default function MatchaLiteSignup() {
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-semibold text-zinc-100 mb-2">Matcha Lite</h1>
           <p className="text-sm text-zinc-400">
-            Incident reporting &amp; HR resources.
+            {essentials ? 'Incident reporting — no employee records required.' : 'Incident reporting & HR resources.'}
           </p>
         </div>
 
@@ -173,6 +175,21 @@ export default function MatchaLiteSignup() {
               </p>
             ) : null}
           </div>
+
+          {!seatInvite && !inviteToken && (
+            <label className="flex items-start gap-2 cursor-pointer p-3 rounded-lg bg-zinc-900 border border-zinc-800">
+              <input
+                type="checkbox"
+                checked={essentials}
+                onChange={(e) => setEssentials(e.target.checked)}
+                className="mt-0.5 rounded border-zinc-700 bg-zinc-800 text-emerald-600 focus:ring-emerald-700"
+              />
+              <span className="text-xs text-zinc-400">
+                <span className="text-zinc-200 font-medium">Essentials</span> — just want incident reporting?
+                Skip employee records (no CSV/HRIS import, no OSHA logs) for a lower price.
+              </span>
+            </label>
+          )}
 
           {error && <p className="text-sm text-red-400">{error}</p>}
 

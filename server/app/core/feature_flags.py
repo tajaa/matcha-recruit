@@ -133,6 +133,11 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # /legal-defense router + the /app/legal-defense page. Default off; admin-
     # toggle; NOT bundled (paid full-platform asset).
     "legal_defense": False,
+    # OSHA 300/301/300A logs within IR. Default True (existing behavior for
+    # every `incidents` company, unchanged) — forced False for the no-roster
+    # matcha_lite_essentials config, where there's no employee roster to log
+    # injured persons against. Gates the ir_incidents osha.py sub-router.
+    "osha_logs": True,
 }
 
 # Tier-defining features that should always be on for a given signup_source,
@@ -151,6 +156,23 @@ TIER_REQUIRED_FEATURES: dict[str, dict[str, bool]] = {
         "employees": True,
         "training": False,
         "discipline": False,
+    },
+    # matcha_lite_essentials — a signup-time choice on the SAME /lite/signup
+    # page/checkout as matcha_lite (not a separate product surface), for
+    # companies that want incident reporting without managing an employee
+    # roster. No `employees` (no CSV/HRIS import, no roster picker on the
+    # incident form — client already gates that on hasFeature('employees')),
+    # no `osha_logs` (OSHA 300 logs need a roster to log injured persons
+    # against; sold separately later). `incidents` itself is still the
+    # Stripe-gated flag, flipped by the same checkout.session.completed
+    # webhook as standard Lite. Priced as its own row in matcha_lite_pricing
+    # (product_code='matcha_lite_essentials'), cheaper than standard Lite.
+    "matcha_lite_essentials": {
+        "handbooks": True,
+        "employees": False,
+        "training": False,
+        "discipline": False,
+        "osha_logs": False,
     },
     # matcha_x (paid mid tier) — clone of matcha_lite at Lite parity. Unlike
     # Lite, `discipline` is in the always-on overlay so the paid bundle is

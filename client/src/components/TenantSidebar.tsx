@@ -42,16 +42,21 @@ export default function TenantSidebar() {
   if (isMatchaX(me?.profile)) return <MatchaXSidebar />
   if (isMatchaCompliancePending(me?.profile)) return <CompliancePendingSidebar headcount={me?.profile?.headcount ?? 0} jurisdictionCount={me?.profile?.jurisdiction_count ?? 0} />
   if (isMatchaCompliance(me?.profile)) return <ComplianceSidebar />
-  if (isMatchaLitePending(me?.profile)) return <MatchaLitePendingSidebar headcount={me?.profile?.headcount ?? 0} />
+  if (isMatchaLitePending(me?.profile)) return (
+    <MatchaLitePendingSidebar
+      headcount={me?.profile?.headcount ?? 0}
+      isEssentials={me?.profile?.signup_source === 'matcha_lite_essentials'}
+    />
+  )
   if (isResourcesFreeTier(me?.profile)) return <ResourcesFreeSidebar />
   if (isIrOnlyTier(me?.profile)) return <IrSidebar />
   return <ClientSidebar />
 }
 
-function MatchaLitePendingSidebar({ headcount }: { headcount: number }) {
+function MatchaLitePendingSidebar({ headcount, isEssentials }: { headcount: number; isEssentials: boolean }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const pricing = useMatchaLitePricing()
+  const pricing = useMatchaLitePricing(isEssentials ? 'matcha_lite_essentials' : 'matcha_lite')
   const maxHeadcount = pricing?.max_headcount ?? 300
 
   const validHeadcount = headcount >= 1 && headcount <= maxHeadcount

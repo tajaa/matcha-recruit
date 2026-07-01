@@ -395,12 +395,16 @@ class StripeService:
         amount_cents: int,
         success_url: Optional[str] = None,
         cancel_url: Optional[str] = None,
+        is_essentials: bool = False,
     ):
         """Subscription checkout for Matcha Lite (IR + Resources) priced by headcount.
 
         Pricing is resolved by the caller (server/app/core/services/matcha_lite_pricing.py,
         DB-backed + admin-configurable) and passed in as `amount_cents` — this
         function stays DB-free, matching the rest of this module.
+        `is_essentials` only affects the Stripe product name/description shown to
+        the customer (receipt/dashboard) — metadata.type stays 'matcha_lite' since
+        the webhook treats both configs identically (flips `incidents`).
         Webhook catches metadata.type == 'matcha_lite' and activates incidents.
         """
         self._ensure_secret_key()
@@ -415,6 +419,17 @@ class StripeService:
             "amount_cents": str(amount_cents),
             "mode": "subscription",
         }
+
+        product_name = "Matcha Lite Essentials" if is_essentials else "Matcha Lite"
+        product_description = (
+            f"Incident reporting ({headcount} employee{'s' if headcount != 1 else ''}, no employee roster). "
+            f"Auto-renews monthly."
+            if is_essentials
+            else (
+                f"Incident reporting + HR resources "
+                f"({headcount} employee{'s' if headcount != 1 else ''}). Auto-renews monthly."
+            )
+        )
 
         def _create():
             return stripe.checkout.Session.create(
@@ -431,11 +446,8 @@ class StripeService:
                             "unit_amount": amount_cents,
                             "recurring": {"interval": "month"},
                             "product_data": {
-                                "name": "Matcha Lite",
-                                "description": (
-                                    f"Incident reporting + HR resources "
-                                    f"({headcount} employee{'s' if headcount != 1 else ''}). Auto-renews monthly."
-                                ),
+                                "name": product_name,
+                                "description": product_description,
                             },
                         },
                         "quantity": 1,

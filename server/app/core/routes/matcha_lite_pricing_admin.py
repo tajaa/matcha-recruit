@@ -8,15 +8,21 @@ import json
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ...database import get_connection
 from ..dependencies import require_admin
-from ..services.matcha_lite_pricing import SELECT_COLUMNS, row_to_pricing
+from ..services.matcha_lite_pricing import PRODUCT_CODES, SELECT_COLUMNS, row_to_pricing
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _validate_product_code(product_code: str) -> str:
+    if product_code not in PRODUCT_CODES:
+        raise HTTPException(status_code=400, detail=f"Unknown product_code — must be one of {PRODUCT_CODES}")
+    return product_code
 
 
 class MatchaLitePricingConfig(BaseModel):
@@ -40,9 +46,13 @@ class MatchaLitePricingUpdate(BaseModel):
 
 
 @router.get("/matcha-lite-pricing", response_model=MatchaLitePricingConfig)
-async def get_matcha_lite_pricing_admin(current_user=Depends(require_admin)):
+async def get_matcha_lite_pricing_admin(
+    product_code: str = Query("matcha_lite"),
+    current_user=Depends(require_admin),
+):
+    product_code = _validate_product_code(product_code)
     async with get_connection() as conn:
-        row = await conn.fetchrow(f"SELECT {SELECT_COLUMNS} FROM matcha_lite_pricing WHERE product_code = 'matcha_lite'")
+        row = await conn.fetchrow(f"SELECT {SELECT_COLUMNS} FROM matcha_lite_pricing WHERE product_code = $1", product_code)
     if not row:
         raise HTTPException(status_code=404, detail="Pricing config not found")
     pricing = row_to_pricing(row)
@@ -50,7 +60,12 @@ async def get_matcha_lite_pricing_admin(current_user=Depends(require_admin)):
 
 
 @router.put("/matcha-lite-pricing", response_model=MatchaLitePricingConfig)
-async def update_matcha_lite_pricing(body: MatchaLitePricingUpdate, current_user=Depends(require_admin)):
+async def update_matcha_lite_pricing(
+    body: MatchaLitePricingUpdate,
+    product_code: str = Query("matcha_lite"),
+    current_user=Depends(require_admin),
+):
+    product_code = _validate_product_code(product_code)
     if body.min_headcount > body.max_headcount:
         raise HTTPException(status_code=400, detail="min_headcount cannot exceed max_headcount")
     if body.sale_active and body.sale_price_per_block_cents is None:
@@ -64,9 +79,10 @@ async def update_matcha_lite_pricing(body: MatchaLitePricingUpdate, current_user
                 """
                 SELECT price_per_block_cents, block_size, sale_price_per_block_cents,
                        sale_active, min_headcount, max_headcount
-                FROM matcha_lite_pricing WHERE product_code = 'matcha_lite'
+                FROM matcha_lite_pricing WHERE product_code = $1
                 FOR UPDATE
-                """
+                """,
+                product_code,
             )
             if not old_row:
                 raise HTTPException(status_code=404, detail="Pricing config not found")
@@ -77,7 +93,7 @@ async def update_matcha_lite_pricing(body: MatchaLitePricingUpdate, current_user
                 SET price_per_block_cents = $1, block_size = $2, sale_price_per_block_cents = $3,
                     sale_active = $4, min_headcount = $5, max_headcount = $6,
                     updated_at = now(), updated_by = $7
-                WHERE product_code = 'matcha_lite'
+                WHERE product_code = $8
                 RETURNING {SELECT_COLUMNS}
                 """,
                 body.price_per_block_cents,
@@ -87,6 +103,7 @@ async def update_matcha_lite_pricing(body: MatchaLitePricingUpdate, current_user
                 body.min_headcount,
                 body.max_headcount,
                 updated_by,
+                product_code,
             )
             await conn.execute(
                 """
@@ -95,9 +112,9 @@ async def update_matcha_lite_pricing(body: MatchaLitePricingUpdate, current_user
                 """,
                 updated_by,
                 json.dumps(dict(old_row)),
-                json.dumps(body.model_dump()),
+                json.dumps({**body.model_dump(), "product_code": product_code}),
             )
 
-    logger.info("Matcha Lite pricing updated by %s: %s", updated_by, body.model_dump())
+    logger.info("Matcha Lite pricing (%s) updated by %s: %s", product_code, updated_by, body.model_dump())
     pricing = row_to_pricing(new_row)
     return MatchaLitePricingConfig(**pricing.__dict__)

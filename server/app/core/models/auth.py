@@ -120,6 +120,12 @@ class BusinessRegister(BaseModel):
     lite_broker_token: Optional[str] = None
     # Admin-generated invite token — activates Matcha Lite immediately on signup
     lite_invite_token: Optional[str] = None
+    # Signup-time choice on the SAME /lite/signup page/checkout as standard
+    # matcha_lite (not a separate product): skips the employee roster (no
+    # CSV/HRIS import, no OSHA logs) for companies that just want incident
+    # reporting. Only consulted when tier == "matcha_lite"; routes to
+    # signup_source = "matcha_lite_essentials" instead of "matcha_lite".
+    lite_essentials: bool = False
 
     # Self-serve product tier. "ir_only" = Matcha IR free-beta signup
     # (auto-approve, only `incidents` feature on, slim IR layout).

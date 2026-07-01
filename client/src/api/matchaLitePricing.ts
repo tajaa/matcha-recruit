@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react'
 import { api } from './client'
 
+// The two signup_source values that share the /lite/signup page + checkout —
+// standard Lite (with an employee roster) and Essentials (no roster, no OSHA
+// logs) — each priced independently.
+export type MatchaLiteProductCode = 'matcha_lite' | 'matcha_lite_essentials'
+
 export interface MatchaLitePricingConfig {
   price_per_block_cents: number
   block_size: number
@@ -10,21 +15,22 @@ export interface MatchaLitePricingConfig {
   max_headcount: number
 }
 
-export function fetchMatchaLitePricing() {
-  return api.get<MatchaLitePricingConfig>('/resources/matcha-lite/pricing')
+export function fetchMatchaLitePricing(productCode: MatchaLiteProductCode = 'matcha_lite') {
+  return api.get<MatchaLitePricingConfig>(`/resources/matcha-lite/pricing?product_code=${productCode}`)
 }
 
 export function computeLitePriceDollars(headcount: number, pricing: MatchaLitePricingConfig): number {
   return Math.ceil(headcount / pricing.block_size) * (pricing.effective_price_per_block_cents / 100)
 }
 
-// Live Matcha Lite price, fetched once. Callers should fall back to a sane
-// default (e.g. 300) for max_headcount while `pricing` is still null.
-export function useMatchaLitePricing(): MatchaLitePricingConfig | null {
+// Live Matcha Lite price, fetched once per productCode. Callers should fall
+// back to a sane default (e.g. 300) for max_headcount while `pricing` is null.
+export function useMatchaLitePricing(productCode: MatchaLiteProductCode = 'matcha_lite'): MatchaLitePricingConfig | null {
   const [pricing, setPricing] = useState<MatchaLitePricingConfig | null>(null)
   useEffect(() => {
-    fetchMatchaLitePricing().then(setPricing).catch(() => {})
-  }, [])
+    setPricing(null)
+    fetchMatchaLitePricing(productCode).then(setPricing).catch(() => {})
+  }, [productCode])
   return pricing
 }
 
@@ -51,10 +57,13 @@ export interface MatchaLitePricingUpdate {
   max_headcount: number
 }
 
-export function fetchMatchaLitePricingAdmin() {
-  return api.get<MatchaLitePricingAdminConfig>('/admin/matcha-lite-pricing')
+export function fetchMatchaLitePricingAdmin(productCode: MatchaLiteProductCode = 'matcha_lite') {
+  return api.get<MatchaLitePricingAdminConfig>(`/admin/matcha-lite-pricing?product_code=${productCode}`)
 }
 
-export function saveMatchaLitePricingAdmin(update: MatchaLitePricingUpdate) {
-  return api.put<MatchaLitePricingAdminConfig>('/admin/matcha-lite-pricing', update)
+export function saveMatchaLitePricingAdmin(
+  update: MatchaLitePricingUpdate,
+  productCode: MatchaLiteProductCode = 'matcha_lite',
+) {
+  return api.put<MatchaLitePricingAdminConfig>(`/admin/matcha-lite-pricing?product_code=${productCode}`, update)
 }

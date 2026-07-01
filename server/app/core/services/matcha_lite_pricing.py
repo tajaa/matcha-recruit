@@ -19,6 +19,15 @@ SELECT_COLUMNS = """
     sale_active, min_headcount, max_headcount, updated_at, updated_by
 """
 
+# The two signup_source values that share the /lite/signup page + /checkout/lite
+# endpoint, each with its own row in matcha_lite_pricing.
+PRODUCT_CODES = ("matcha_lite", "matcha_lite_essentials")
+
+_FALLBACK_DEFAULTS = {
+    "matcha_lite": dict(price_per_block_cents=5000, block_size=10, min_headcount=1, max_headcount=300),
+    "matcha_lite_essentials": dict(price_per_block_cents=4000, block_size=10, min_headcount=1, max_headcount=300),
+}
+
 
 @dataclass
 class MatchaLitePricing:
@@ -51,33 +60,32 @@ def row_to_pricing(row) -> MatchaLitePricing:
     )
 
 
-async def get_matcha_lite_pricing(conn=None) -> MatchaLitePricing:
-    """Fetch the live Matcha Lite pricing config.
+async def get_matcha_lite_pricing(conn=None, product_code: str = "matcha_lite") -> MatchaLitePricing:
+    """Fetch the live pricing config for `product_code` ('matcha_lite' or
+    'matcha_lite_essentials' — see PRODUCT_CODES).
 
     Pass an existing `conn` to reuse a connection already held by the caller
     (e.g. the checkout endpoint, which also reads headcount in the same
     request); otherwise a short-lived connection is opened.
     """
-    query = f"SELECT {SELECT_COLUMNS} FROM matcha_lite_pricing WHERE product_code = 'matcha_lite'"
+    query = f"SELECT {SELECT_COLUMNS} FROM matcha_lite_pricing WHERE product_code = $1"
 
     if conn is not None:
-        row = await conn.fetchrow(query)
+        row = await conn.fetchrow(query, product_code)
     else:
         async with get_connection() as c:
-            row = await c.fetchrow(query)
+            row = await c.fetchrow(query, product_code)
 
     if row is None:
         # Defensive fallback if the seed row was somehow deleted — matches
-        # the launch default (migration mlpricing01).
+        # the launch defaults (migrations mlpricing01/mlpricing02).
+        defaults = _FALLBACK_DEFAULTS.get(product_code, _FALLBACK_DEFAULTS["matcha_lite"])
         return MatchaLitePricing(
-            price_per_block_cents=5000,
-            block_size=10,
             sale_price_per_block_cents=None,
             sale_active=False,
-            min_headcount=1,
-            max_headcount=300,
             updated_at=None,
             updated_by=None,
+            **defaults,
         )
     return row_to_pricing(row)
 

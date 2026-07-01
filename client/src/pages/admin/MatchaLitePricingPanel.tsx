@@ -3,10 +3,41 @@ import { Loader2 } from 'lucide-react'
 import {
   fetchMatchaLitePricingAdmin,
   saveMatchaLitePricingAdmin,
+  type MatchaLiteProductCode,
   type MatchaLitePricingAdminConfig,
 } from '../../api/matchaLitePricing'
 
 export default function MatchaLitePricingPanel() {
+  const [productCode, setProductCode] = useState<MatchaLiteProductCode>('matcha_lite')
+
+  return (
+    <div>
+      <div className="flex gap-1 mb-4">
+        <button
+          onClick={() => setProductCode('matcha_lite')}
+          className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+            productCode === 'matcha_lite' ? 'bg-emerald-700 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+          }`}
+        >
+          Standard Lite
+        </button>
+        <button
+          onClick={() => setProductCode('matcha_lite_essentials')}
+          className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+            productCode === 'matcha_lite_essentials' ? 'bg-emerald-700 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+          }`}
+        >
+          Essentials (no roster)
+        </button>
+      </div>
+      {/* key forces a clean remount/refetch on switch instead of threading
+          productCode through every field's state */}
+      <PricingForm key={productCode} productCode={productCode} />
+    </div>
+  )
+}
+
+function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
   const [config, setConfig] = useState<MatchaLitePricingAdminConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -22,7 +53,7 @@ export default function MatchaLitePricingPanel() {
   const [maxHeadcount, setMaxHeadcount] = useState('')
 
   useEffect(() => {
-    fetchMatchaLitePricingAdmin()
+    fetchMatchaLitePricingAdmin(productCode)
       .then((c) => {
         setConfig(c)
         setPriceDollars(String(c.price_per_block_cents / 100))
@@ -34,7 +65,7 @@ export default function MatchaLitePricingPanel() {
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Failed to load pricing'))
       .finally(() => setLoading(false))
-  }, [])
+  }, [productCode])
 
   const priceNum = parseFloat(priceDollars)
   const blockSizeNum = parseInt(blockSize, 10)
@@ -56,14 +87,17 @@ export default function MatchaLitePricingPanel() {
     setError(null)
     setSaved(false)
     try {
-      const updated = await saveMatchaLitePricingAdmin({
-        price_per_block_cents: Math.round(priceNum * 100),
-        block_size: blockSizeNum,
-        sale_price_per_block_cents: salePriceNum !== null ? Math.round(salePriceNum * 100) : null,
-        sale_active: saleActive,
-        min_headcount: minNum,
-        max_headcount: maxNum,
-      })
+      const updated = await saveMatchaLitePricingAdmin(
+        {
+          price_per_block_cents: Math.round(priceNum * 100),
+          block_size: blockSizeNum,
+          sale_price_per_block_cents: salePriceNum !== null ? Math.round(salePriceNum * 100) : null,
+          sale_active: saleActive,
+          min_headcount: minNum,
+          max_headcount: maxNum,
+        },
+        productCode,
+      )
       setConfig(updated)
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)

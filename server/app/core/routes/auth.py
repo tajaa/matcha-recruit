@@ -1785,7 +1785,13 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 # cancellation. The IR system runs standalone — no
                 # employees feature dependency.
                 company_status = "approved"
-                signup_source = "matcha_lite"
+                # Essentials is a signup-time choice on this same page/checkout,
+                # not a separate product — no employee roster (no CSV/HRIS
+                # import, no OSHA logs), just incident reporting. Routed via a
+                # distinct signup_source so it gets its own TIER_REQUIRED_FEATURES
+                # overlay + matcha_lite_pricing row, cheaper than standard Lite.
+                is_lite_essentials = bool(request.lite_essentials)
+                signup_source = "matcha_lite_essentials" if is_lite_essentials else "matcha_lite"
                 # Lite (entry tier) = IR + employees + handbook GENERATION.
                 # training/discipline/handbook_audit/credentialing moved up to
                 # Matcha-X — not granted here. The matcha_lite tier overlay
@@ -1795,7 +1801,8 @@ async def register_business(request: BusinessRegister, http_request: Request):
                 lite_features["handbooks"] = True
                 if lite_broker_pays or lite_invite_activated:
                     lite_features["incidents"] = True
-                    lite_features["employees"] = True
+                    if not is_lite_essentials:
+                        lite_features["employees"] = True
                 enabled_features_json = json.dumps(lite_features)
             elif is_matcha_x:
                 # Matcha-X is the paid mid tier — a clone of Matcha Lite at

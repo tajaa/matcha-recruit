@@ -13,6 +13,10 @@ line below to point at the new module.
 Prefix and feature-gate are applied at the parent mount in
 `server/app/matcha/routes/__init__.py` — this router stays bare.
 """
+from fastapi import Depends
+
+from app.matcha.dependencies import require_feature
+
 # The package's exported `router` IS `crud.router`. CRUD owns the
 # empty-path collection routes (`@router.post("")`, `@router.get("")`).
 # Wrapping crud.router inside a fresh `APIRouter()` and including it
@@ -38,7 +42,10 @@ from .documents import router as _documents_router
 router.include_router(_documents_router)
 
 from .osha import router as _osha_router
-router.include_router(_osha_router)
+# Additional gate on top of the inherited `incidents` requirement — the
+# no-roster matcha_lite_essentials config has incidents on but osha_logs off
+# (no employee roster to log injured persons against).
+router.include_router(_osha_router, dependencies=[Depends(require_feature("osha_logs"))])
 
 from .investigation_interviews import router as _investigation_interviews_router
 router.include_router(_investigation_interviews_router)

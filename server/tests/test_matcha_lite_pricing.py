@@ -1,6 +1,11 @@
 """Pure-function tests for the admin-configurable Matcha Lite pricing engine."""
 
-from app.core.services.matcha_lite_pricing import MatchaLitePricing, compute_matcha_lite_price_cents
+from app.core.services.matcha_lite_pricing import (
+    PRODUCT_CODES,
+    MatchaLitePricing,
+    _FALLBACK_DEFAULTS,
+    compute_matcha_lite_price_cents,
+)
 
 
 def _pricing(**overrides):
@@ -52,3 +57,19 @@ def test_admin_configured_headcount_bounds_are_respected():
     assert compute_matcha_lite_price_cents(pricing, 4) is None
     assert compute_matcha_lite_price_cents(pricing, 51) is None
     assert compute_matcha_lite_price_cents(pricing, 5) == 5000
+
+
+def test_product_codes_has_standard_and_essentials():
+    assert PRODUCT_CODES == ("matcha_lite", "matcha_lite_essentials")
+
+
+def test_essentials_fallback_default_is_four_dollars_per_head():
+    pricing = _pricing(**_FALLBACK_DEFAULTS["matcha_lite_essentials"])
+    assert compute_matcha_lite_price_cents(pricing, 1) == 4000
+    assert compute_matcha_lite_price_cents(pricing, 10) == 4000
+    assert compute_matcha_lite_price_cents(pricing, 11) == 8000
+
+
+def test_standard_fallback_default_matches_launch_price():
+    pricing = _pricing(**_FALLBACK_DEFAULTS["matcha_lite"])
+    assert compute_matcha_lite_price_cents(pricing, 10) == 5000

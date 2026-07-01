@@ -7,7 +7,7 @@ import { useSidebarBadges } from '../../hooks/useSidebarBadges'
 const nav: (NavItem | NavGroup)[] = [
   { to: '/app/ir', icon: AlertTriangle, label: 'Incidents' },
   { to: '/app/ir/risk-insights', icon: TrendingUp, label: 'Risk Insights' },
-  { to: '/app/ir/osha', icon: ClipboardList, label: 'OSHA Logs' },
+  { to: '/app/ir/osha', icon: ClipboardList, label: 'OSHA Logs', feature: 'osha_logs' },
   { to: '/app/handbooks', icon: FileText, label: 'Handbooks' },
   { to: '/app/resources', icon: BookOpen, label: 'Resources' },
   { to: '/app/company', icon: Building2, label: 'Company' },
