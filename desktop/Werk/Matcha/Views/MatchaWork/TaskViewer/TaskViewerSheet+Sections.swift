@@ -909,6 +909,7 @@ extension TaskViewerSheet {
                 VStack(alignment: .leading, spacing: 3) {
                     SubtaskRow(
                         item: item,
+                        taskTitle: task.title,
                         collaborators: viewModel.collaborators,
                         currentUserId: appState.currentUser?.id,
                         onToggle: {

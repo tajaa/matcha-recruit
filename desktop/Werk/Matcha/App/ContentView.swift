@@ -15,13 +15,9 @@ struct ContentView: View {
     @AppStorage("mw-sidebar-threads-open-v2") private var threadsSectionOpen = false
     @AppStorage("mw-sidebar-email-open") private var emailSectionOpen = false
     @State private var showNewJournal = false
-    @State private var showNewBlog = false
     @State private var pendingConnectionsCount = 0
     @State private var showCreateChannel = false
     @State private var showDiscoverChannels = false
-    @State private var showProjectTypePicker = false
-    @State private var isCreatingProject = false
-    @State private var projectCreateError: String?
     @State private var showNotifications = false
     @State private var orderStore = SidebarSectionOrderStore.shared
 
@@ -485,98 +481,14 @@ struct ContentView: View {
         }
     }
 
-    /// Pro-class project types (multi-user). Mirrors the server's
-    /// COLLAB_PROJECT_TYPES gate in create_project_endpoint.
-    private func isCollabClassType(_ type: String) -> Bool {
-        type == "collab" || type == "recruiting"
-    }
-
     @ViewBuilder
     private var projectsSidebarSection: some View {
+        // No "+" here — project creation lives on the Projects home page
+        // (ProjectsLibraryView), not as a sidebar shortcut.
         sidebarNavRow(title: "Projects", icon: "folder",
                       isActive: appState.showProjectsHub,
                       lockedFeature: appState.canSoloProjects ? nil : "projects_solo",
-                      onOpen: openProjectsHub) {
-                Button {
-                    if appState.canSoloProjects {
-                        showProjectTypePicker = true
-                    } else {
-                        appState.presentPaywall(for: "projects_solo")
-                    }
-                } label: {
-                    plusChip
-                }
-                .buttonStyle(.plain)
-                .help("New project")
-                .disabled(isCreatingProject)
-                .popover(isPresented: $showProjectTypePicker) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("New Project").font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
-                            .padding(.bottom, 4)
-                        ForEach(["general", "presentation", "recruiting", "collab"], id: \.self) { type in
-                            let locked = isCollabClassType(type) && !appState.canCollabProjects
-                            Button {
-                                showProjectTypePicker = false
-                                if locked {
-                                    appState.presentPaywall(for: "projects_collab")
-                                } else if type == "collab" {
-                                    appState.collabProjectWizardMode = .create
-                                    appState.showCollabProjectWizard = true
-                                } else {
-                                    createProject(type: type)
-                                }
-                            } label: {
-                                HStack {
-                                    Image(systemName: iconForProjectType(type))
-                                        .font(.system(size: 11))
-                                        .frame(width: 16)
-                                    Text(labelForProjectType(type))
-                                        .font(.system(size: 12))
-                                    if locked {
-                                        Spacer(minLength: 4)
-                                        Image(systemName: "lock.fill")
-                                            .font(.system(size: 9))
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 4)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundColor(.white)
-                            .opacity(locked ? 0.6 : 1)
-                            .help(locked ? "Collab projects need Pro" : "")
-                        }
-                        Button {
-                            showProjectTypePicker = false
-                            showNewBlog = true
-                        } label: {
-                            HStack {
-                                Image(systemName: "doc.richtext")
-                                    .font(.system(size: 11))
-                                    .frame(width: 16)
-                                Text("Blog Post")
-                                    .font(.system(size: 12))
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 4)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundColor(.white)
-                    }
-                    .padding(12)
-                    .frame(width: 180)
-                }
-                .sheet(isPresented: $showNewBlog) {
-                    NewBlogSheet { proj in
-                        appState.selectedProjectId = proj.id
-                        appState.selectedThreadId = nil
-                        appState.selectedChannelId = nil
-                        appState.selectedJournalId = nil
-                        appState.projectsListGeneration &+= 1
-                    }
-                }
-            }
+                      onOpen: openProjectsHub)
     }
 
     /// Open the Journals hub — the Obsidian-style parent module that houses all
@@ -779,52 +691,6 @@ struct ContentView: View {
             await MainActor.run { pendingConnectionsCount = list.count }
         } catch {
             // Silent failure — badge just won't update
-        }
-    }
-
-    private func createProject(type: String) {
-        isCreatingProject = true
-        projectCreateError = nil
-        Task {
-            do {
-                let proj = try await MatchaWorkService.shared.createProject(title: "New Project", projectType: type)
-                await MainActor.run {
-                    appState.selectedProjectId = proj.id
-                    appState.selectedThreadId = nil
-                    appState.selectedChannelId = nil
-                    appState.selectedJournalId = nil
-                    appState.projectsListGeneration &+= 1
-                    isCreatingProject = false
-                }
-            } catch {
-                await MainActor.run {
-                    isCreatingProject = false
-                    // Server plan gate (403 plan_required) → paywall, not an error.
-                    if case APIError.httpError(403, let body) = error, body.contains("plan_required") {
-                        appState.presentPaywall(for: type == "collab" || type == "recruiting"
-                                                ? "projects_collab" : "projects_solo")
-                    } else {
-                        projectCreateError = "Couldn't create project: \(error.localizedDescription)"
-                    }
-                }
-            }
-        }
-    }
-
-    private func iconForProjectType(_ type: String) -> String {
-        switch type {
-        case "general": return "doc.text"
-        case "presentation": return "rectangle.on.rectangle"
-        case "recruiting": return "person.3"
-        case "collab": return "person.2.crop.square.stack"
-        default: return "doc.text"
-        }
-    }
-
-    private func labelForProjectType(_ type: String) -> String {
-        switch type {
-        case "collab": return "Collab"
-        default: return type.capitalized
         }
     }
 

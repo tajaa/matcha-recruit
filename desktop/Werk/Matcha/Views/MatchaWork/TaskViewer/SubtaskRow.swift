@@ -6,6 +6,8 @@ import AppKit
 struct SubtaskRow: View {
     @Environment(AppState.self) private var appState
     let item: MWSubtask
+    /// Parent ticket's title, prefixed onto the copied text for context.
+    let taskTitle: String
     let collaborators: [MWProjectCollaborator]
     let currentUserId: String?
     let onToggle: () -> Void
@@ -54,7 +56,7 @@ struct SubtaskRow: View {
                 .contextMenu {
                     Button("Copy") {
                         NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(item.title, forType: .string)
+                        NSPasteboard.general.setString("\(taskTitle): \(item.title)", forType: .string)
                     }
                 }
             if let by = addedByName {
