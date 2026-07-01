@@ -23,6 +23,40 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'lite-addons-essentials-upgrade',
+    date: '2026-07-01',
+    category: 'Matcha Lite',
+    title: 'Matcha Lite — self-serve paid add-ons + Essentials→Lite one-click upgrade',
+    summary:
+      'Lite and Essentials tenants can now buy add-ons themselves, and Essentials customers can upgrade to full Lite without canceling and re-registering. Three add-ons launch the program — Voice Incident Intake (dictate a report, AI fills the form), HRIS Sync (roster auto-sync via Finch: Rippling, BambooHR, ADP, QuickBooks…), and Handbook Watch (we re-check their handbook against current law on a schedule and email them when something changes). Each add-on bills as its own monthly per-employee Stripe subscription on top of the base plan, priced from the same admin-editable pricing table Lite already uses. The Essentials→Lite upgrade is a single checkout: payment completes, the old Essentials subscription is retired automatically, and the employee roster + OSHA logs unlock instantly. A round of tier-gating fixes shipped alongside (Essentials no longer sees Employees/OSHA nav it can’t use; URL-hopping to /app/employees now shows the upgrade card instead of a broken error).',
+    whatsNew: [
+      'Add-ons panel: Lite-family tenants get an "Add-ons" section on Company (/app/company#addons) showing each add-on with live per-employee pricing, buy (Stripe checkout) and cancel-at-period-end. Eligibility is enforced server-side: HRIS Sync is standard-Lite only (needs a roster), Voice Intake and Handbook Watch sell to both Lite and Essentials.',
+      'Upsell teasers where the value is felt: a locked "Dictate this report" row on the incident form, a "Sync from HRIS" button on Employees, and a one-liner on the handbook Freshness panel — all route to the add-ons section.',
+      'Essentials→Lite upgrade: an upgrade card in the Essentials sidebar (live Lite pricing for their headcount) plus locked Employees/OSHA nav entries that point at it. Checkout-first — nothing changes until payment lands, then the webhook flips the tier, cancels the old Essentials subscription immediately (no double-billing), and the customer lands on the roster with an import prompt.',
+      'New handbook_watch feature flag gates ONLY the scheduled freshness sweep + alert emails — the manual "Run Freshness Check" button stays free for every handbooks company. The worker now skips companies without the flag.',
+      'Billing plumbing: each add-on records its own subscription row (pack matcha_lite_addon_*). Canceling the base Lite subscription auto-cancels its add-ons. Subscription lookups are now pack-scoped so base + add-on subs coexist safely with Werk billing.',
+      'Gating fixes: sidebar feature filtering is now enforced for every tenant shell (Essentials no longer sees Employees/OSHA entries), /app/employees is feature-gated like every other page, and the pending-checkout sidebar no longer advertises employee management to Essentials signups.',
+    ],
+    howToUse: [
+      'Set real add-on prices: Admin → Signup Links → Pricing → the three "Add-on" tabs (Voice Intake, HRIS Sync, Handbook Watch). Seeded placeholders are $1/$2/$1 per employee/month — flat per-head, block size locked to 1.',
+      'Customer buys an add-on: Company page → Add-ons → Add → Stripe checkout → feature turns on automatically when payment completes. Cancel from the same panel (stays active until period end).',
+      'Customer upgrades Essentials→Lite: Upgrade card in their sidebar (or any locked Employees/OSHA entry) → checkout at standard Lite pricing → lands on Employees with a roster-import banner. Old Essentials subscription is canceled for them.',
+      'Comped/broker-paid companies have no self-serve subscription, so their add-ons are admin-granted: toggle the feature flag (ir_voice_intake, hris_finch, handbook_watch) on the company directly.',
+    ],
+    setup: [
+      'Apply migration mlpricing04 (seeds the three add-on pricing rows). Applied to DEV; PROD pending — run ./scripts/migrate-prod.sh.',
+      'Set real prices before promoting — the $1/$2/$1 PEPM seeds are placeholders (the broker pricing model doc suggests $0.35–$0.50 PEPM wholesale as the floor reference).',
+      'Handbook Watch: enable the handbook_freshness row in scheduler settings once the first customer buys it — the Celery sweep is off globally by default.',
+    ],
+    notes: [
+      'Why separate subscriptions per add-on: the codebase has no multi-line-item Stripe machinery, and every existing purchase (token packs, channels, personal plans) is already one-sub-per-product. Customers see one extra line on their Stripe invoice per add-on.',
+      'HRIS Sync grants the unified Finch flag only — one purchase covers every supported provider. Deductions write-back stays a separate, admin-only grant.',
+      'OSHA logs stay Lite-exclusive on purpose: they work without a roster technically, but they’re the headline reason for Essentials to upgrade.',
+      'Stripe test-mode end-to-end (buy, cancel, cascade, upgrade) has not been run yet — worth a pass with stripe listen before announcing.',
+    ],
+    tag: 'action-needed',
+  },
+  {
     id: 'matcha-compliance-standalone-admin-tools',
     date: '2026-07-01',
     category: 'Compliance',
