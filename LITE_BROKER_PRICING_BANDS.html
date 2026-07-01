@@ -1,0 +1,148 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: letter; margin: 55px 65px; }
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: #1c1c28;
+    font-size: 11pt;
+    line-height: 1.6;
+  }
+  h1 { font-size: 24pt; color: #092c1c; border-bottom: 2px solid #092c1c; padding-bottom: 10px; margin-bottom: 20px; }
+  h2 { font-size: 16pt; color: #10b981; margin-top: 30px; margin-bottom: 15px; }
+  h3 { font-size: 13pt; margin-top: 20px; margin-bottom: 10px; }
+  p { margin-bottom: 15px; }
+  ul { margin-bottom: 15px; padding-left: 20px; }
+  li { margin-bottom: 8px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+  th, td { border: 1px solid #d1d5db; padding: 10px; text-align: left; }
+  th { background-color: #092c1c; color: white; }
+  tr:nth-child(even) { background-color: #f9fafb; }
+</style>
+</head>
+<body>
+<h1>Matcha-Lite Brokerage Pricing Model &amp; Unit Economics</h1>
+<h2>1. Underlying Cost Basis (Unit Economics)</h2>
+<p>To establish defensible wholesale pricing for large brokerages, we must first isolate our variable costs to serve an employee.</p>
+<h3>AI Processing Costs (Gemini 3.0 Flash)</h3>
+<p>Matcha relies heavily on Gemini 3.0 Flash (<code>gemini-3-flash-preview</code>), priced at $0.50 per 1M input tokens and $3.00 per 1M output tokens.</p>
+<ul>
+<li><strong>Incident Processing:</strong> Auto-categorization, severity assessment, OSHA privacy cleansing, and the Copilot orchestration require approximately 6-8 API calls per incident.<ul>
+<li><em>Average token usage:</em> 25k input / 3k output.</li>
+<li><em>Cost per incident:</em> <strong>~$0.03</strong></li>
+</ul>
+</li>
+<li><strong>Voice Intake (Add-on):</strong> Multimodal audio parsing using Gemini.<ul>
+<li><em>Cost per voice incident:</em> <strong>~$0.005</strong></li>
+</ul>
+</li>
+<li><strong>Compliance Audit &amp; Resource Hub:</strong> <ul>
+<li><em>Cost per audit generation/resource:</em> <strong>~$0.01</strong> (amortized to zero on a per-month basis)</li>
+</ul>
+</li>
+</ul>
+<p><strong>Estimated Core AI Cost per Employee:</strong> Assuming an industry-average 15 incidents per 100 FTEs annually, the AI cost translates to <strong>$0.0004 Per Employee Per Month (PEPM)</strong>. AI costs are a negligible factor in our floor pricing.</p>
+<h3>Third-Party Vendor Costs (HRIS)</h3>
+<ul>
+<li><strong>Finch (HRIS Integration):</strong> Finch charges based on connected lives. At high enterprise volumes, this typically scales down to a hard cost of <strong>$0.20 - $0.30 PEPM</strong>.</li>
+</ul>
+<hr />
+<h2>2. Matcha-Lite Core Pricing (Base Platform)</h2>
+<p>Retail pricing for Matcha-Lite is currently <strong>$10.00 PEPM</strong> (sold in blocks of 10 for $100/mo). For large brokerages using this to win/retain benefits Broker of Record (BOR) status, we offer aggressive wholesale discounting.</p>
+<p><em>Our core variable cost (AI + Hosting) is &lt;$0.02 PEPM, yielding &gt;95% gross margins on the base platform.</em></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Headcount Band</th>
+<th style="text-align: left;">Suggested Wholesale PEPM</th>
+<th style="text-align: left;">Monthly Rev at Tier Floor</th>
+<th style="text-align: left;">Annual Rev at Tier Floor</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>1,000 - 10,000</strong></td>
+<td style="text-align: left;"><strong>$2.00</strong></td>
+<td style="text-align: left;">$2,000</td>
+<td style="text-align: left;">$24,000</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>10,000 - 50,000</strong></td>
+<td style="text-align: left;"><strong>$1.25</strong></td>
+<td style="text-align: left;">$12,500</td>
+<td style="text-align: left;">$150,000</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>50,000 - 100,000</strong></td>
+<td style="text-align: left;"><strong>$0.75</strong></td>
+<td style="text-align: left;">$37,500</td>
+<td style="text-align: left;">$450,000</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>100,000 - 500,000</strong></td>
+<td style="text-align: left;"><strong>$0.40</strong></td>
+<td style="text-align: left;">$40,000</td>
+<td style="text-align: left;">$480,000</td>
+</tr>
+</tbody>
+</table>
+<p><em>Note: Brokerages will typically bundle this into their PEPM advisory fee to their clients, or absorb the cost directly as a client retention expense.</em></p>
+<hr />
+<h2>3. Add-On Pricing Strategy</h2>
+<p>We isolate high-cost or high-value features as modular add-ons. This protects our margins from Finch's hard costs and allows us to capture upside on Voice.</p>
+<h3>Add-on 1: Automated HRIS Sync (powered by Finch)</h3>
+<p>Allows employers to automatically sync employee directories, org charts, and payroll data into Matcha.
+*   <strong>Vendor Cost:</strong> ~$0.25 PEPM
+*   <strong>Suggested Price:</strong> <strong>+$0.50 PEPM</strong> (Flat across all bands)
+*   <strong>Margin:</strong> ~50%
+*   <em>Sales Narrative:</em> "Eliminates manual roster uploads and ensures incident reports are automatically tied to the correct, active employee record."</p>
+<h3>Add-on 2: Voice Incident Intake &amp; OSHA Logs</h3>
+<p>Enables frontline workers to "talk in" an incident report from their phone. Includes automatic transcription, AI extraction to the OSHA 300 log format, and privacy-masking.
+*   <strong>Vendor Cost (Gemini Audio):</strong> &lt;$0.01 PEPM
+*   <strong>Suggested Price:</strong> <strong>+$0.35 PEPM</strong>
+*   <strong>Margin:</strong> &gt;95%
+*   <em>Sales Narrative:</em> "Dramatically increases safety reporting compliance in deskless workforces (manufacturing, construction, hospitality) by removing the friction of typing out forms."</p>
+<hr />
+<h2>4. Total Expected Yield (Base + Add-ons)</h2>
+<p>If a brokerage purchases the base platform and opts into both add-ons (HRIS + Voice = +$0.85 PEPM), the blended economics look like this:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Headcount Band</th>
+<th style="text-align: left;">Fully Loaded PEPM (w/ Add-ons)</th>
+<th style="text-align: left;">Total Monthly Rev (at floor)</th>
+<th style="text-align: left;">Blended Gross Margin</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;"><strong>1k - 10k</strong></td>
+<td style="text-align: left;"><strong>$2.85</strong></td>
+<td style="text-align: left;">$2,850</td>
+<td style="text-align: left;">~90%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>10k - 50k</strong></td>
+<td style="text-align: left;"><strong>$2.10</strong></td>
+<td style="text-align: left;">$21,000</td>
+<td style="text-align: left;">~86%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>50k - 100k</strong></td>
+<td style="text-align: left;"><strong>$1.60</strong></td>
+<td style="text-align: left;">$80,000</td>
+<td style="text-align: left;">~82%</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>100k - 500k</strong></td>
+<td style="text-align: left;"><strong>$1.25</strong></td>
+<td style="text-align: left;">$125,000</td>
+<td style="text-align: left;">~77%</td>
+</tr>
+</tbody>
+</table>
+</body>
+</html>
