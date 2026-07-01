@@ -1,5 +1,5 @@
-import { useRef } from 'react'
-import { motion, useInView } from 'framer-motion'
+import { useEffect, useRef, useState } from 'react'
+import { motion, useInView, AnimatePresence } from 'framer-motion'
 
 // Compliance product mockups for the /compliance landing pillars.
 //
@@ -368,22 +368,58 @@ type StoryConfig = {
   stats: Stat[]
 }
 
-const JURISDICTION_STORY: StoryConfig = {
-  code: 'SB 553',
-  engine: 'Cal/OSHA',
-  intro: { label: 'Gap exposure', delta: '$200,000', note: 'new location added' },
-  stages: [
-    { label: 'Issue', tone: 'red', heading: 'SB 553 · Written WVP plan', lines: ['8 locations flagged', 'no plan on file'] },
-    { label: 'Reasoning', tone: 'amber', heading: 'Cal Lab §6401.9(c)', lines: ['requires a site-specific,', 'employee-accessible plan'] },
-    { label: 'Resolved', tone: 'green', heading: 'Plan drafted', lines: ['assigned to 8 sites', 'tracked to done'] },
-  ],
-  stats: [
-    { label: 'Gaps found', value: '5', sub: 'of 5 required', tone: 'red', pct: 100 },
-    { label: 'Days to close', value: '12', sub: 'avg across gaps', tone: 'amber', pct: 40 },
-    { label: 'Exposure eliminated', value: '−$200,000', sub: 'fully resolved', tone: 'green', pct: 100 },
-    { label: 'Coverage', value: '100%', sub: 'all components', tone: 'green', pct: 100 },
-  ],
-}
+// Rotates through a few real jurisdictions so the card keeps moving after its
+// initial reveal — each entry is a full issue → reasoning → resolved story.
+const JURISDICTION_STORIES: StoryConfig[] = [
+  {
+    code: 'SB 553',
+    engine: 'Cal/OSHA',
+    intro: { label: 'Gap exposure', delta: '$200,000', note: 'new location added' },
+    stages: [
+      { label: 'Issue', tone: 'red', heading: 'SB 553 · Written WVP plan', lines: ['8 locations flagged', 'no plan on file'] },
+      { label: 'Reasoning', tone: 'amber', heading: 'Cal Lab §6401.9(c)', lines: ['requires a site-specific,', 'employee-accessible plan'] },
+      { label: 'Resolved', tone: 'green', heading: 'Plan drafted', lines: ['assigned to 8 sites', 'tracked to done'] },
+    ],
+    stats: [
+      { label: 'Gaps found', value: '5', sub: 'of 5 required', tone: 'red', pct: 100 },
+      { label: 'Days to close', value: '12', sub: 'avg across gaps', tone: 'amber', pct: 40 },
+      { label: 'Exposure eliminated', value: '−$200,000', sub: 'fully resolved', tone: 'green', pct: 100 },
+      { label: 'Coverage', value: '100%', sub: 'all components', tone: 'green', pct: 100 },
+    ],
+  },
+  {
+    code: 'S9427-A',
+    engine: 'NY DOL',
+    intro: { label: 'Pay transparency gap', delta: '12 postings', note: 'salary range missing' },
+    stages: [
+      { label: 'Issue', tone: 'red', heading: 'NY S9427-A · Salary range', lines: ['12 postings missing range', 'live on job boards'] },
+      { label: 'Reasoning', tone: 'amber', heading: 'NY Labor Law §194-b', lines: ['requires min/max salary', 'disclosed at posting'] },
+      { label: 'Resolved', tone: 'green', heading: 'Ranges published', lines: ['12 postings updated', 'tracked to done'] },
+    ],
+    stats: [
+      { label: 'Gaps found', value: '12', sub: 'of 12 postings', tone: 'red', pct: 100 },
+      { label: 'Days to close', value: '3', sub: 'avg to update', tone: 'amber', pct: 15 },
+      { label: 'Exposure eliminated', value: '−$36,000', sub: 'fully resolved', tone: 'green', pct: 100 },
+      { label: 'Coverage', value: '100%', sub: 'all postings', tone: 'green', pct: 100 },
+    ],
+  },
+  {
+    code: 'BIPA',
+    engine: 'IL AG',
+    intro: { label: 'Biometric consent gap', delta: '3 locations', note: 'missing consent forms' },
+    stages: [
+      { label: 'Issue', tone: 'red', heading: 'IL BIPA · Biometric consent', lines: ['3 locations, fingerprint clocks', 'no signed consent on file'] },
+      { label: 'Reasoning', tone: 'amber', heading: '740 ILCS 14/15(b)', lines: ['written consent required', 'before collection begins'] },
+      { label: 'Resolved', tone: 'green', heading: 'Consent collected', lines: ['3 locations signed', 'tracked to done'] },
+    ],
+    stats: [
+      { label: 'Gaps found', value: '3', sub: 'of 3 locations', tone: 'red', pct: 100 },
+      { label: 'Days to close', value: '7', sub: 'avg to remediate', tone: 'amber', pct: 28 },
+      { label: 'Exposure eliminated', value: '−$15,000', sub: 'fully resolved', tone: 'green', pct: 100 },
+      { label: 'Coverage', value: '100%', sub: 'all locations', tone: 'green', pct: 100 },
+    ],
+  },
+]
 
 function StoryPanel({ stage, delay, inView, pulse }: { stage: StoryStage; delay: number; inView: boolean; pulse?: boolean }) {
   const color = toneColor(stage.tone)
@@ -466,7 +502,16 @@ function StageConnector({ fromTone, toTone, delay, inView }: { fromTone: Tone; t
 function ComplianceFlowMockup() {
   const ref = useRef<HTMLDivElement>(null)
   const inView = useInView(ref, { margin: '-80px', once: true })
-  const f = JURISDICTION_STORY
+  const [idx, setIdx] = useState(0)
+  const f = JURISDICTION_STORIES[idx]
+
+  // Rotate to the next jurisdiction's story once the initial reveal has run —
+  // keeps the card moving instead of settling into a single static state.
+  useEffect(() => {
+    if (!inView) return
+    const t = setInterval(() => setIdx(i => (i + 1) % JURISDICTION_STORIES.length), 5000)
+    return () => clearInterval(t)
+  }, [inView])
 
   return (
     <div
@@ -479,7 +524,16 @@ function ComplianceFlowMockup() {
         <div className="flex items-center gap-2.5">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.textDim} strokeWidth="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M6 9v6"/><path d="M18 6a9 9 0 0 1-9 9"/><circle cx="18" cy="6" r="3"/></svg>
           <span className="text-sm font-semibold" style={{ color: C.heading }}>Compliance Analysis</span>
-          <span className="px-1.5 py-0.5 rounded text-[8px] font-medium" style={{ backgroundColor: ACCENT.bg, color: ACCENT.text, border: `1px solid ${ACCENT.border}` }}>{f.code.toUpperCase()} · LIVE</span>
+          <AnimatePresence mode="wait">
+            <motion.span
+              key={f.code}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}
+              className="px-1.5 py-0.5 rounded text-[8px] font-medium"
+              style={{ backgroundColor: ACCENT.bg, color: ACCENT.text, border: `1px solid ${ACCENT.border}` }}
+            >
+              {f.code.toUpperCase()} · LIVE
+            </motion.span>
+          </AnimatePresence>
         </div>
         <div className="flex items-center gap-1.5">
           <motion.span
@@ -488,47 +542,55 @@ function ComplianceFlowMockup() {
             animate={{ opacity: [1, 0.4, 1] }}
             transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
           />
-          <Micro color={C.textDim} className="normal-case tracking-normal">Live Engine · {f.engine}</Micro>
+          <AnimatePresence mode="wait">
+            <motion.span key={f.engine} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
+              <Micro color={C.textDim} className="normal-case tracking-normal">Live Engine · {f.engine}</Micro>
+            </motion.span>
+          </AnimatePresence>
         </div>
       </div>
 
-      {/* Story content */}
+      {/* Story content — remounts each rotation so the reveal stagger replays */}
       <div className="px-5 py-4">
-        <div className="flex items-baseline gap-2 flex-wrap">
-          <Micro className="normal-case tracking-normal">{f.intro.label}</Micro>
-          <span className="text-[13px] font-medium" style={{ color: C.red }}>↗ {f.intro.delta}</span>
-          <span className="text-[11px]" style={{ color: C.textDim }}>{f.intro.note}</span>
-        </div>
+        <AnimatePresence mode="wait">
+          <motion.div key={f.code} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}>
+            <div className="flex items-baseline gap-2 flex-wrap">
+              <Micro className="normal-case tracking-normal">{f.intro.label}</Micro>
+              <span className="text-[13px] font-medium" style={{ color: C.red }}>↗ {f.intro.delta}</span>
+              <span className="text-[11px]" style={{ color: C.textDim }}>{f.intro.note}</span>
+            </div>
 
-        {/* 3-panel issue → reasoning → resolved flow */}
-        <div className="mt-3 flex items-stretch">
-          <StoryPanel stage={f.stages[0]} delay={0.1} inView={inView} />
-          <StageConnector fromTone={f.stages[0].tone} toTone={f.stages[1].tone} delay={0.3} inView={inView} />
-          <StoryPanel stage={f.stages[1]} delay={0.35} inView={inView} pulse />
-          <StageConnector fromTone={f.stages[1].tone} toTone={f.stages[2].tone} delay={0.55} inView={inView} />
-          <StoryPanel stage={f.stages[2]} delay={0.6} inView={inView} />
-        </div>
+            {/* 3-panel issue → reasoning → resolved flow */}
+            <div className="mt-3 flex items-stretch">
+              <StoryPanel stage={f.stages[0]} delay={0.1} inView={inView} />
+              <StageConnector fromTone={f.stages[0].tone} toTone={f.stages[1].tone} delay={0.3} inView={inView} />
+              <StoryPanel stage={f.stages[1]} delay={0.35} inView={inView} pulse />
+              <StageConnector fromTone={f.stages[1].tone} toTone={f.stages[2].tone} delay={0.55} inView={inView} />
+              <StoryPanel stage={f.stages[2]} delay={0.6} inView={inView} />
+            </div>
 
-        {/* Stat strip — same big-number + underline-bar treatment as the other pillars */}
-        <div className="flex mt-4" style={{ borderTop: `1px solid ${C.borderSoft}` }}>
-          {f.stats.map((s, i) => (
-            <motion.div
-              key={s.label}
-              initial={{ opacity: 0, y: 8 }}
-              animate={inView ? { opacity: 1, y: 0 } : {}}
-              transition={{ delay: 0.8 + i * 0.08 }}
-              className="flex-1 min-w-0 px-3 py-3 first:pl-0"
-              style={{ borderLeft: i === 0 ? 'none' : `1px solid ${C.borderSoft}` }}
-            >
-              <Micro className="block truncate">{s.label}</Micro>
-              <div className="font-bold tabular-nums leading-none mt-1.5" style={{ color: toneColor(s.tone), fontSize: '1.5rem', letterSpacing: '-0.02em' }}>{s.value}</div>
-              <div className="mt-2 h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(255,255,255,0.05)' }}>
-                <motion.div initial={{ width: 0 }} animate={inView ? { width: `${s.pct}%` } : {}} transition={{ delay: 0.8 + i * 0.08 + 0.2, duration: 0.6 }} className="h-full" style={{ backgroundColor: toneColor(s.tone) }} />
-              </div>
-              <Micro className="block mt-2">{s.sub}</Micro>
-            </motion.div>
-          ))}
-        </div>
+            {/* Stat strip — same big-number + underline-bar treatment as the other pillars */}
+            <div className="flex mt-4" style={{ borderTop: `1px solid ${C.borderSoft}` }}>
+              {f.stats.map((s, i) => (
+                <motion.div
+                  key={s.label}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={inView ? { opacity: 1, y: 0 } : {}}
+                  transition={{ delay: 0.8 + i * 0.08 }}
+                  className="flex-1 min-w-0 px-3 py-3 first:pl-0"
+                  style={{ borderLeft: i === 0 ? 'none' : `1px solid ${C.borderSoft}` }}
+                >
+                  <Micro className="block truncate">{s.label}</Micro>
+                  <div className="font-bold tabular-nums leading-none mt-1.5" style={{ color: toneColor(s.tone), fontSize: '1.5rem', letterSpacing: '-0.02em' }}>{s.value}</div>
+                  <div className="mt-2 h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(255,255,255,0.05)' }}>
+                    <motion.div initial={{ width: 0 }} animate={inView ? { width: `${s.pct}%` } : {}} transition={{ delay: 0.8 + i * 0.08 + 0.2, duration: 0.6 }} className="h-full" style={{ backgroundColor: toneColor(s.tone) }} />
+                  </div>
+                  <Micro className="block mt-2">{s.sub}</Micro>
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        </AnimatePresence>
       </div>
     </div>
   )
