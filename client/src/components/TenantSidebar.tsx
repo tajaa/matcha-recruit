@@ -27,13 +27,6 @@ function matchaXPriceDollars(headcount: number): number {
   return Math.ceil(headcount / 10) * 100
 }
 
-// TODO: keep in sync with matcha_compliance_price_cents() in
-// server/app/core/services/stripe_service.py (headcount component +
-// per-jurisdiction surcharge). Placeholder pricing.
-const COMPLIANCE_PER_JURISDICTION_DOLLARS = 50
-function compliancePriceDollars(headcount: number, jurisdictionCount: number): number {
-  return Math.ceil(headcount / 10) * 100 + Math.max(0, jurisdictionCount) * COMPLIANCE_PER_JURISDICTION_DOLLARS
-}
 
 export default function TenantSidebar() {
   const { me, loading } = useMe()
@@ -129,13 +122,15 @@ function MatchaLitePendingSidebar({ headcount, isEssentials }: { headcount: numb
 
 // Pending sidebar for the standalone Matcha Compliance product: posts to the
 // /resources/checkout/compliance endpoint and returns to /compliance/onboarding
-// on success. Price = headcount component + per-jurisdiction surcharge.
+// on success. jurisdictionCount is shown for context only — no longer part of price.
 function CompliancePendingSidebar({ headcount, jurisdictionCount }: { headcount: number; jurisdictionCount: number }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const pricing = useMatchaLitePricing('matcha_compliance')
+  const maxHeadcount = pricing?.max_headcount ?? 300
 
-  const validHeadcount = headcount >= 1 && headcount <= 300
-  const price = validHeadcount ? compliancePriceDollars(headcount, jurisdictionCount) : null
+  const validHeadcount = headcount >= 1 && headcount <= maxHeadcount
+  const price = validHeadcount && pricing ? computeLitePriceDollars(headcount, pricing) : null
 
   async function handleSubscribe() {
     setLoading(true)
@@ -177,13 +172,17 @@ function CompliancePendingSidebar({ headcount, jurisdictionCount }: { headcount:
 
       <div className="space-y-4">
         {price !== null ? (
-          <p className="text-xs text-zinc-400">
-            <span className="text-zinc-100 font-medium">${price}/month</span> for {headcount} employee{headcount !== 1 ? 's' : ''}
-            {jurisdictionCount > 0 ? ` · ${jurisdictionCount} jurisdiction${jurisdictionCount !== 1 ? 's' : ''}` : ''}
-          </p>
-        ) : headcount > 300 ? (
+          <>
+            <p className="text-xs text-zinc-400">
+              <span className="text-zinc-100 font-medium">${price}/month</span> for {headcount} employee{headcount !== 1 ? 's' : ''}
+            </p>
+            {jurisdictionCount > 0 && (
+              <p className="text-xs text-zinc-500">Tracking {jurisdictionCount} jurisdiction{jurisdictionCount !== 1 ? 's' : ''}</p>
+            )}
+          </>
+        ) : headcount > maxHeadcount ? (
           <p className="text-xs text-red-400">
-            Over 300 employees —{' '}
+            Over {maxHeadcount} employees —{' '}
             <a href="mailto:hello@matcha.work" className="underline">contact us</a>
           </p>
         ) : null}

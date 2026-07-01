@@ -29,6 +29,14 @@ export default function MatchaLitePricingPanel() {
         >
           Essentials (no roster)
         </button>
+        <button
+          onClick={() => setProductCode('matcha_compliance')}
+          className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+            productCode === 'matcha_compliance' ? 'bg-emerald-700 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+          }`}
+        >
+          Compliance
+        </button>
       </div>
       {/* key forces a clean remount/refetch on switch instead of threading
           productCode through every field's state */}
@@ -51,6 +59,12 @@ function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
   const [salePriceDollars, setSalePriceDollars] = useState('')
   const [minHeadcount, setMinHeadcount] = useState('')
   const [maxHeadcount, setMaxHeadcount] = useState('')
+
+  // Compliance is flat per-head pricing modeled as block_size=1 in this
+  // step-function table — lock the field so an admin can't accidentally
+  // turn it back into a step function (e.g. block_size=5 would silently
+  // change the effective rate without changing price_per_block).
+  const isFlatRate = productCode === 'matcha_compliance'
 
   useEffect(() => {
     fetchMatchaLitePricingAdmin(productCode)
@@ -90,7 +104,7 @@ function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
       const updated = await saveMatchaLitePricingAdmin(
         {
           price_per_block_cents: Math.round(priceNum * 100),
-          block_size: blockSizeNum,
+          block_size: isFlatRate ? 1 : blockSizeNum,
           sale_price_per_block_cents: salePriceNum !== null ? Math.round(salePriceNum * 100) : null,
           sale_active: saleActive,
           min_headcount: minNum,
@@ -145,10 +159,12 @@ function PricingForm({ productCode }: { productCode: MatchaLiteProductCode }) {
               type="number"
               min={1}
               step="1"
-              value={blockSize}
+              value={isFlatRate ? '1' : blockSize}
               onChange={(e) => setBlockSize(e.target.value)}
-              className="mt-1 w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700"
+              disabled={isFlatRate}
+              className="mt-1 w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed"
             />
+            {isFlatRate && <span className="block mt-1 text-xs text-zinc-500">Fixed at 1 — Compliance is priced flat per employee</span>}
           </label>
         </div>
         {perHeadEquivalent && <p className="text-xs text-zinc-500">≈ ${perHeadEquivalent}/employee/month</p>}

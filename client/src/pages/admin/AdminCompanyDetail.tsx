@@ -721,6 +721,7 @@ const TIER_OPTIONS = [
   { value: 'resources_free', label: 'Free (Resources only)' },
   { value: 'matcha_lite', label: 'Matcha Lite' },
   { value: 'matcha_x', label: 'Matcha-X (mid tier — requires Stripe checkout to activate)' },
+  { value: 'matcha_compliance', label: 'Matcha Compliance (standalone — requires Stripe checkout or a signup link to activate)' },
   { value: 'bespoke', label: 'Platform / Bespoke (full features)' },
   { value: 'ir_only_self_serve', label: 'IR Cap (incidents + employees + discipline)' },
 ]
@@ -912,7 +913,7 @@ function LifecycleActions({
         </div>
         <p className="text-[10px] text-zinc-600 mt-2">
           Current: <span className="font-mono text-zinc-400">{registration.signup_source ?? 'bespoke'}</span>.
-          Switching rewrites enabled_features to the target tier's preset. Activating Lite requires Stripe checkout — not allowed here.
+          Switching rewrites enabled_features to the target tier's preset. Activating Lite, Matcha-X, or Compliance requires Stripe checkout (or a signup link) — not allowed here.
         </p>
       </section>
 

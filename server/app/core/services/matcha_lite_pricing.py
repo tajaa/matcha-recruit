@@ -2,9 +2,11 @@
 
 Price is a step function: ceil(headcount / block_size) * price_per_block, with
 an optional sale override. Supersedes stripe_service.matcha_lite_price_cents
-for the actual checkout path — that function stays in place since
-matcha_compliance_price_cents still calls it as its headcount component
-(Matcha-X / Matcha Compliance pricing is unchanged, still a hardcoded stub).
+for the actual checkout path — that function stays in place for Matcha-X,
+which is unchanged, still a hardcoded stub.
+
+Matcha Compliance also uses this table (product_code='matcha_compliance'),
+seeded flat at $8/head (block_size=1) — see migration mlpricing03.
 """
 from __future__ import annotations
 
@@ -19,13 +21,15 @@ SELECT_COLUMNS = """
     sale_active, min_headcount, max_headcount, updated_at, updated_by
 """
 
-# The two signup_source values that share the /lite/signup page + /checkout/lite
-# endpoint, each with its own row in matcha_lite_pricing.
-PRODUCT_CODES = ("matcha_lite", "matcha_lite_essentials")
+# signup_source values priced via this table: the two Lite variants (share the
+# /lite/signup page + /checkout/lite endpoint) plus standalone Matcha Compliance
+# (/compliance/signup + /checkout/compliance) — each its own row.
+PRODUCT_CODES = ("matcha_lite", "matcha_lite_essentials", "matcha_compliance")
 
 _FALLBACK_DEFAULTS = {
     "matcha_lite": dict(price_per_block_cents=5000, block_size=10, min_headcount=1, max_headcount=300),
     "matcha_lite_essentials": dict(price_per_block_cents=4000, block_size=10, min_headcount=1, max_headcount=300),
+    "matcha_compliance": dict(price_per_block_cents=800, block_size=1, min_headcount=1, max_headcount=300),
 }
 
 

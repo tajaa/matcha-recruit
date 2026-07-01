@@ -85,30 +85,6 @@ def matcha_x_price_cents(headcount: int) -> Optional[int]:
     return math.ceil(headcount / 10) * 10_000
 
 
-# Per-jurisdiction monthly surcharge for Matcha Compliance, added on top of the
-# headcount component.
-# TODO: finalize price — placeholder so the flow works end-to-end (same
-# convention as the matcha_x_price_cents stub). Tunable in one constant.
-COMPLIANCE_PER_JURISDICTION_CENTS = 5_000
-
-
-def matcha_compliance_price_cents(headcount: int, jurisdiction_count: int) -> Optional[int]:
-    """Monthly price for Matcha Compliance in cents.
-
-    Headcount component (mirrors Lite's $100/mo-per-10-employees formula) PLUS a
-    per-jurisdiction surcharge. Returns None if headcount < 1 or > 300.
-
-    TODO: finalize pricing — both the headcount formula and
-    COMPLIANCE_PER_JURISDICTION_CENTS are placeholders so the flow works
-    end-to-end (same convention as matcha_x_price_cents).
-    """
-    base = matcha_lite_price_cents(headcount)
-    if base is None:
-        return None
-    jurisdictions = max(0, jurisdiction_count or 0)
-    return base + jurisdictions * COMPLIANCE_PER_JURISDICTION_CENTS
-
-
 class StripeServiceError(Exception):
     """Raised when Stripe operations fail or are misconfigured."""
 
@@ -526,21 +502,21 @@ class StripeService:
         company_id: UUID,
         headcount: int,
         jurisdiction_count: int,
+        amount_cents: int,
         success_url: Optional[str] = None,
         cancel_url: Optional[str] = None,
     ):
         """Subscription checkout for Matcha Compliance (standalone self-serve).
 
-        Priced by headcount + number of jurisdictions
-        (see matcha_compliance_price_cents). Headcount > 300 is rejected
-        (contact sales). The webhook catches metadata.type ==
-        'matcha_compliance' and flips the full `compliance` feature on.
+        Pricing is resolved by the caller (server/app/core/services/matcha_lite_pricing.py,
+        DB-backed + admin-configurable, product_code='matcha_compliance') and passed
+        in as `amount_cents` — this function stays DB-free, matching Lite/X.
+        `jurisdiction_count` no longer affects price; it's carried in metadata only
+        (the jurisdiction count itself is a signup-time fact used by the compliance
+        feature, stored separately in company_handbook_profiles). The webhook catches
+        metadata.type == 'matcha_compliance' and flips the full `compliance` feature on.
         """
         self._ensure_secret_key()
-
-        amount_cents = matcha_compliance_price_cents(headcount, jurisdiction_count)
-        if amount_cents is None:
-            raise StripeServiceError("Headcount over 300 — please contact us for pricing")
 
         resolved_success_url = success_url or self.settings.stripe_success_url
         resolved_cancel_url = cancel_url or self.settings.stripe_cancel_url
@@ -551,6 +527,7 @@ class StripeService:
             "type": "matcha_compliance",
             "headcount": str(headcount),
             "jurisdiction_count": str(jurisdictions),
+            "amount_cents": str(amount_cents),
             "mode": "subscription",
         }
 
@@ -572,8 +549,7 @@ class StripeService:
                                 "name": "Matcha Compliance",
                                 "description": (
                                     f"Jurisdiction-aware compliance "
-                                    f"({headcount} employee{'s' if headcount != 1 else ''}, "
-                                    f"{jurisdictions} jurisdiction{'s' if jurisdictions != 1 else ''}). "
+                                    f"({headcount} employee{'s' if headcount != 1 else ''}). "
                                     f"Auto-renews monthly."
                                 ),
                             },

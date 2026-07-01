@@ -30,7 +30,7 @@ const nav: NavGroup[] = [
     items: [
       { to: '/admin/gap-analysis', icon: Sparkles, label: 'Gap Analysis' },
       { to: '/admin/deal-flow', icon: Calculator, label: 'Deal Flow' },
-      { to: '/admin/matcha-lite', icon: Leaf, label: 'Matcha Lite' },
+      { to: '/admin/matcha-lite', icon: Leaf, label: 'Signup Links' },
     ],
   },
   {

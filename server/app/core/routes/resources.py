@@ -278,8 +278,9 @@ class MatchaLitePricingResponse(BaseModel):
 
 @router.get("/matcha-lite/pricing", response_model=MatchaLitePricingResponse)
 async def get_matcha_lite_pricing_public(product_code: str = "matcha_lite"):
-    """Public — current pricing for `product_code` ('matcha_lite' or
-    'matcha_lite_essentials'), for the signup calculator + pending-subscription screen."""
+    """Public — current pricing for `product_code` ('matcha_lite',
+    'matcha_lite_essentials', or 'matcha_compliance'), for the signup calculator
+    + pending-subscription screen."""
     from ..services.matcha_lite_pricing import PRODUCT_CODES, get_matcha_lite_pricing
 
     if product_code not in PRODUCT_CODES:
@@ -444,13 +445,16 @@ async def create_compliance_checkout(
 ):
     """Open a Stripe subscription checkout for the standalone Matcha Compliance product.
 
-    Pricing reads the headcount + jurisdiction count stored at registration time
-    (company_handbook_profiles). Headcount > 300 is rejected — must contact
-    sales. The webhook (metadata.type == 'matcha_compliance') flips the full
-    `compliance` feature on successful payment. Only callable by
-    matcha_compliance companies.
+    Pricing is admin-configurable (server/app/core/services/matcha_lite_pricing.py,
+    product_code='matcha_compliance'), read from the headcount stored at
+    registration time (company_handbook_profiles). Jurisdiction count is carried
+    in checkout metadata but no longer affects price. Headcount outside the
+    configured min/max is rejected — must contact sales. The webhook
+    (metadata.type == 'matcha_compliance') flips the full `compliance` feature
+    on successful payment. Only callable by matcha_compliance companies.
     """
     from ..services.stripe_service import StripeService, StripeServiceError
+    from ..services.matcha_lite_pricing import get_matcha_lite_pricing, compute_matcha_lite_price_cents
 
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -468,16 +472,26 @@ async def create_compliance_checkout(
             """,
             company_id,
         )
-
-    if not row or row["signup_source"] != "matcha_compliance":
-        raise HTTPException(status_code=403, detail="This endpoint is only available for Matcha Compliance accounts")
+        if not row or row["signup_source"] != "matcha_compliance":
+            raise HTTPException(status_code=403, detail="This endpoint is only available for Matcha Compliance accounts")
+        pricing = await get_matcha_lite_pricing(conn, product_code="matcha_compliance")
 
     headcount = int(row["headcount"])
     jurisdiction_count = int(row["jurisdiction_count"])
     if headcount < 1:
         raise HTTPException(status_code=400, detail="Company headcount not set — please contact support")
-    if headcount > 300:
-        raise HTTPException(status_code=400, detail="Headcount over 300 — please contact us for pricing")
+    if headcount < pricing.min_headcount:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Headcount under {pricing.min_headcount} — please contact us for pricing",
+        )
+
+    amount_cents = compute_matcha_lite_price_cents(pricing, headcount)
+    if amount_cents is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Headcount over {pricing.max_headcount} — please contact us for pricing",
+        )
 
     stripe_service = StripeService()
     try:
@@ -485,6 +499,7 @@ async def create_compliance_checkout(
             company_id=company_id,
             headcount=headcount,
             jurisdiction_count=jurisdiction_count,
+            amount_cents=amount_cents,
             success_url=body.success_url,
             cancel_url=body.cancel_url,
         )

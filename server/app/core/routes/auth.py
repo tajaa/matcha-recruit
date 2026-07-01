@@ -1735,12 +1735,31 @@ async def register_business(request: BusinessRegister, http_request: Request):
             is_matcha_compliance = request.tier == "matcha_compliance"
 
             # Broker seat invites carry their own allocation, so they bypass the
-            # self-serve 300 cap (same as an admin comp invite).
-            if (is_matcha_lite or is_matcha_x or is_matcha_compliance) and not lite_invite_activated and broker_seat_count is None and request.headcount > 300:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Headcount over 300 — please contact us for pricing at matcha.work",
-                )
+            # self-serve headcount cap (same as an admin comp invite).
+            if not lite_invite_activated and broker_seat_count is None:
+                if is_matcha_x and request.headcount > 300:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Headcount over 300 — please contact us for pricing at matcha.work",
+                    )
+                elif is_matcha_lite or is_matcha_compliance:
+                    # Lite/Essentials/Compliance share the DB-backed, admin-
+                    # configurable pricing table (matcha_lite_pricing) — read
+                    # its max_headcount rather than a hardcoded 300, so the
+                    # cap here can't drift from what /checkout/lite and
+                    # /checkout/compliance actually enforce.
+                    from ..services.matcha_lite_pricing import get_matcha_lite_pricing
+                    product_code = (
+                        "matcha_compliance" if is_matcha_compliance
+                        else "matcha_lite_essentials" if request.lite_essentials
+                        else "matcha_lite"
+                    )
+                    reg_pricing = await get_matcha_lite_pricing(conn, product_code=product_code)
+                    if request.headcount > reg_pricing.max_headcount:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Headcount over {reg_pricing.max_headcount} — please contact us for pricing at matcha.work",
+                        )
 
             if is_ir_only:
                 company_status = "approved"

@@ -60,7 +60,7 @@ def test_admin_configured_headcount_bounds_are_respected():
 
 
 def test_product_codes_has_standard_and_essentials():
-    assert PRODUCT_CODES == ("matcha_lite", "matcha_lite_essentials")
+    assert PRODUCT_CODES == ("matcha_lite", "matcha_lite_essentials", "matcha_compliance")
 
 
 def test_essentials_fallback_default_is_four_dollars_per_head():
@@ -68,6 +68,12 @@ def test_essentials_fallback_default_is_four_dollars_per_head():
     assert compute_matcha_lite_price_cents(pricing, 1) == 4000
     assert compute_matcha_lite_price_cents(pricing, 10) == 4000
     assert compute_matcha_lite_price_cents(pricing, 11) == 8000
+
+
+def test_compliance_fallback_default_is_flat_eight_dollars_per_head():
+    pricing = _pricing(**_FALLBACK_DEFAULTS["matcha_compliance"])
+    assert compute_matcha_lite_price_cents(pricing, 1) == 800
+    assert compute_matcha_lite_price_cents(pricing, 20) == 16000
 
 
 def test_standard_fallback_default_matches_launch_price():

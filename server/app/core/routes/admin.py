@@ -453,7 +453,7 @@ _BUSINESS_REGISTRATION_SELECT = """
 
 
 def _tier_filter_clause(tier: Optional[str]) -> tuple[str, list]:
-    """Translate a tier chip ('free'|'lite'|'x'|'platform'|'personal') to SQL.
+    """Translate a tier chip ('free'|'lite'|'x'|'compliance'|'platform'|'personal') to SQL.
 
     Personal is by `is_personal=true` (lives on companies). The others
     are by `signup_source` value; platform covers bespoke + legacy NULL rows
@@ -465,6 +465,8 @@ def _tier_filter_clause(tier: Optional[str]) -> tuple[str, list]:
         return " AND comp.signup_source = 'matcha_lite'", []
     if tier == "x":
         return " AND comp.signup_source = 'matcha_x'", []
+    if tier == "compliance":
+        return " AND comp.signup_source = 'matcha_compliance'", []
     if tier == "platform":
         return " AND (comp.signup_source IN ('bespoke') OR comp.signup_source IS NULL) AND comp.is_personal IS NOT TRUE", []
     if tier == "personal":
@@ -476,7 +478,7 @@ def _tier_filter_clause(tier: Optional[str]) -> tuple[str, list]:
 async def list_business_registrations(
     status_filter: Optional[str] = Query(None, alias="status", description="Filter by status: pending, approved, rejected"),
     signup_source: Optional[str] = Query(None, description="Filter by signup_source value (resources_free, matcha_lite, matcha_x, bespoke, ir_only_self_serve)"),
-    tier: Optional[str] = Query(None, description="Tier chip: free | lite | x | platform | personal"),
+    tier: Optional[str] = Query(None, description="Tier chip: free | lite | x | compliance | platform | personal"),
     include_deleted: bool = Query(False, description="Include soft-deleted companies"),
 ):
     """List all business registrations with optional status/tier filters."""
@@ -9720,7 +9722,7 @@ async def create_matcha_lite_invite_token(
     """Generate a one-use comp signup link that activates on registration (no Stripe).
 
     The token is tier-agnostic — the activated tier is set by which signup page
-    the link points to. We return both a Lite link and a Matcha-X link for the
+    the link points to. We return a Lite, Matcha-X, and Compliance link for the
     same token; the admin sends whichever tier they're comping.
     """
     token = secrets.token_urlsafe(48)
@@ -9738,6 +9740,7 @@ async def create_matcha_lite_invite_token(
         "note": row["note"],
         "signup_url": f"{base_url}/lite/signup?invite_token={token}",
         "signup_url_x": f"{base_url}/matcha-x/signup?invite_token={token}",
+        "signup_url_compliance": f"{base_url}/compliance/signup?invite_token={token}",
         "created_at": row["created_at"].isoformat(),
     }
 
@@ -9762,6 +9765,7 @@ async def list_matcha_lite_invite_tokens(current_user=Depends(require_admin)):
             "note": r["note"],
             "signup_url": f"{base_url}/lite/signup?invite_token={r['token']}",
             "signup_url_x": f"{base_url}/matcha-x/signup?invite_token={r['token']}",
+            "signup_url_compliance": f"{base_url}/compliance/signup?invite_token={r['token']}",
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
             "used_at": r["used_at"].isoformat() if r["used_at"] else None,
             "company_name": r["company_name"],
@@ -9825,6 +9829,19 @@ _TIER_FEATURE_PRESETS: dict[str, dict] = {
     "ir_only_self_serve": {
         **{k: False for k in DEFAULT_COMPANY_FEATURES},
         "incidents": True, "employees": True, "discipline": True,
+    },
+    # Matcha Compliance (standalone): compliance itself plus the 4-pillar
+    # bundle, forced True directly (no webhook involved in an admin-driven
+    # tier change, unlike the Stripe-flipped self-serve path). Like Lite/X,
+    # `matcha_compliance` is in _stripe_gated below, so admins can't PATCH a
+    # company *into* it without payment (use a signup link — self-serve or a
+    # comped invite token); this preset covers a same-tier reset-to-clean-
+    # defaults and makes the tier a recognized PATCH target when downgrading
+    # a compliance company to something else.
+    "matcha_compliance": {
+        **{k: False for k in DEFAULT_COMPANY_FEATURES},
+        "compliance": True, "handbook_audit": True, "policies": True,
+        "credential_templates": True, "employees": True,
     },
 }
 
@@ -9892,7 +9909,7 @@ async def admin_issue_password_reset(user_id: UUID):
 
 
 class TierChangeBody(BaseModel):
-    tier: str  # 'resources_free' | 'matcha_lite' | 'matcha_x' | 'bespoke' | 'ir_only_self_serve'
+    tier: str  # 'resources_free' | 'matcha_lite' | 'matcha_x' | 'matcha_compliance' | 'bespoke' | 'ir_only_self_serve'
 
 
 @router.patch("/companies/{company_id}/tier", dependencies=[Depends(require_admin)])
@@ -9904,12 +9921,13 @@ async def admin_change_tier(company_id: UUID, body: TierChangeBody):
     individually.
 
     Stripe sub side-effects:
-    - **Lite → non-Lite**: cancels the active Stripe subscription
+    - **Lite/X/Compliance → non-paid**: cancels the active Stripe subscription
       immediately. Otherwise the customer keeps getting charged for a tier
       they no longer have.
-    - **non-Lite → Lite**: refused. Activating Lite requires a Stripe
-      checkout (or a broker-pays referral) so payment is established;
-      admin should not bypass that. Use the customer's signup link.
+    - **non-paid → Lite/X/Compliance**: refused. Activating any of these
+      requires a Stripe checkout (or a broker-pays/comped referral) so
+      payment is established; admin should not bypass that. Use the
+      customer's signup link.
     - **Bespoke ↔ IR Cap**: no Stripe coupling, just preset rewrite.
     """
     preset = _TIER_FEATURE_PRESETS.get(body.tier)
@@ -9920,20 +9938,30 @@ async def admin_change_tier(company_id: UUID, body: TierChangeBody):
         )
     async with get_connection() as conn:
         current = await conn.fetchrow(
-            "SELECT signup_source FROM companies WHERE id = $1",
+            "SELECT signup_source, enabled_features FROM companies WHERE id = $1",
             company_id,
         )
         if not current:
             raise HTTPException(status_code=404, detail="Company not found")
         current_tier = current["signup_source"]
+        current_features = merge_company_features(current["enabled_features"])
 
-        # Paid tiers whose `incidents` gate is established via Stripe checkout.
-        _stripe_gated = {"matcha_lite", "matcha_x"}
+        # Paid tiers whose paid gate is established via Stripe checkout,
+        # keyed to the flag name each one's webhook flips (incidents for
+        # Lite/X, compliance for Compliance).
+        _stripe_gate_flag = {"matcha_lite": "incidents", "matcha_x": "incidents", "matcha_compliance": "compliance"}
+        _stripe_gated = set(_stripe_gate_flag)
 
-        # Refuse upgrades into a paid tier — payment isn't established.
-        if body.tier in _stripe_gated and current_tier != body.tier:
-            _label = "Matcha-X" if body.tier == "matcha_x" else "Matcha Lite"
-            _path = "/matcha-x/signup" if body.tier == "matcha_x" else "/lite/signup"
+        # Refuse activating a paid tier's gate unless it's already on. Checked
+        # against the actual flag, not just current_tier != body.tier — every
+        # self-serve signup already has signup_source == its target tier
+        # before payment completes (e.g. a pending matcha_compliance company
+        # IS current_tier == "matcha_compliance" with compliance=False), so a
+        # same-tier PATCH would otherwise skip this guard entirely and grant
+        # the paid preset for free.
+        if body.tier in _stripe_gated and not current_features.get(_stripe_gate_flag[body.tier]):
+            _label = {"matcha_x": "Matcha-X", "matcha_compliance": "Matcha Compliance"}.get(body.tier, "Matcha Lite")
+            _path = {"matcha_x": "/matcha-x/signup", "matcha_compliance": "/compliance/signup"}.get(body.tier, "/lite/signup")
             raise HTTPException(
                 status_code=400,
                 detail=f"Activating {_label} requires Stripe checkout. Send the customer to {_path} or use a broker referral token; admin cannot promote into a paid tier without payment.",

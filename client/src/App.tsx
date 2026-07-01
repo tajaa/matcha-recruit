@@ -56,6 +56,7 @@ const IrSignup = lazy(() => import('./pages/auth/IrSignup'))
 const MatchaLiteSignup = lazy(() => import('./pages/auth/MatchaLiteSignup'))
 const MatchaXSignup = lazy(() => import('./pages/auth/MatchaXSignup'))
 const ComplianceSignup = lazy(() => import('./pages/auth/ComplianceSignup'))
+const BusinessInviteRegister = lazy(() => import('./pages/auth/BusinessInviteRegister'))
 const IrOnboardingWizard = lazy(() => import('./features/ir-onboarding/IrOnboardingWizard'))
 const MatchaXOnboardingWizard = lazy(() => import('./features/matcha-x-onboarding/MatchaXOnboardingWizard'))
 const AnonymousReport = lazy(() => import('./pages/shared/AnonymousReport'))
@@ -118,6 +119,7 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/sso/callback" element={<SSOCallback />} />
         <Route path="/register/beta" element={<BetaRegister />} />
+        <Route path="/register/invite/:token" element={<BusinessInviteRegister />} />
         <Route path="/join-channel/:code" element={<ChannelInviteLanding />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/s/:token" element={<ERExportDownload />} />

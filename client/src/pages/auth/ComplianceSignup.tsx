@@ -2,16 +2,9 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../../hooks/useMe'
+import { useMatchaLitePricing, computeLitePriceDollars } from '../../api/matchaLitePricing'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
-// TODO: keep in sync with matcha_compliance_price_cents() in
-// server/app/core/services/stripe_service.py (headcount component +
-// per-jurisdiction surcharge). Placeholder pricing.
-const COMPLIANCE_PER_JURISDICTION_DOLLARS = 50
-function compliancePriceDollars(headcount: number, jurisdictionCount: number): number {
-  return Math.ceil(headcount / 10) * 100 + Math.max(0, jurisdictionCount) * COMPLIANCE_PER_JURISDICTION_DOLLARS
-}
 
 export default function ComplianceSignup() {
   const [searchParams] = useSearchParams()
@@ -44,14 +37,17 @@ export default function ComplianceSignup() {
       .catch(() => {})
   }, [brokerRef])
 
+  const pricing = useMatchaLitePricing('matcha_compliance')
+  const maxHeadcount = pricing?.max_headcount ?? 300
+
   const seatInvite = inviteInfo?.valid === true
   const comped = !!inviteToken || seatInvite
   const hc = parseInt(headcount, 10)
   const jc = parseInt(jurisdictions, 10)
   const headcountValid = !isNaN(hc) && hc >= 1
   const jurisdictionCount = !isNaN(jc) && jc >= 0 ? jc : 0
-  const overLimit = headcountValid && !comped && hc > 300
-  const price = headcountValid && !overLimit && !comped ? compliancePriceDollars(hc, jurisdictionCount) : null
+  const overLimit = headcountValid && !comped && hc > maxHeadcount
+  const price = headcountValid && !overLimit && !comped && pricing ? computeLitePriceDollars(hc, pricing) : null
 
   const canSubmit =
     companyName.trim() &&
@@ -184,7 +180,7 @@ export default function ComplianceSignup() {
             </label>
             {overLimit ? (
               <p className="mt-2 text-xs text-red-400">
-                Over 300 employees —{' '}
+                Over {maxHeadcount} employees —{' '}
                 <a href="mailto:hello@matcha.work" className="underline">
                   contact us for pricing
                 </a>
