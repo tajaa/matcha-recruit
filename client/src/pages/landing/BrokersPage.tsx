@@ -24,30 +24,32 @@ type Pillar = {
   deliverables: string[]
   highlight: string
   engagement: EngagementDetail[]
+  visual: 'risk-curve' | 'wc' | 'command'
 }
 
 const PILLARS: Pillar[] = [
   {
-    id: 'radar',
+    id: 'risk-curve',
     number: '01',
-    title: 'Renewal Risk Radar',
+    title: 'Risk Curve',
     tagline: 'See the renewal before it hits your desk.',
     description:
-      'Every client you put on Matcha feeds a live signal stream — turnover trends, lost workdays, near misses, and behavioral incidents — that we score into a single renewal-risk band per account. You walk into renewal prep already knowing which books are deteriorating, why, and where. Drill into any client by location or department, watch the period-over-period deltas, and download a Workforce Stabilization Kit you can hand the employer before the carrier ever re-rates them.',
+      'Every client you put on Matcha feeds a live signal stream — lost workdays, near misses, property damage, and behavioral incidents — that we roll into an exposure-weighted risk curve for the whole book. You walk into renewal prep already knowing which accounts are deteriorating, why, and where. Matcha doesn\'t just flag the trend — it arms you with risk alerts and concrete suggestions for resolving it, so you can step in and support the client well before the carrier re-rates them.',
     deliverables: [
-      'Per-client risk band — Critical / Elevated / Stable',
-      'Turnover, lost-workday, near-miss, and behavioral-incident signals',
-      'Location- and department-level deep dives with trend deltas',
-      'Workforce Stabilization Kit with prioritized recommendations',
+      'Exposure-weighted loss curve, modeled headcount- or premium-basis',
+      'Aggregate risk band per account — Strong / Adequate / Developing / Exposed',
+      'Lost-workday, near-miss, property-damage, and behavioral-incident signals',
+      'Risk alerts with suggested actions for resolving negative trends',
       'Early warning months ahead of the carrier re-rate',
     ],
     highlight:
-      'Workforce instability predicts the claim before the claim predicts the premium. The radar puts that signal in your hands first.',
+      'A loss curve you can act on beats a loss run you can only read. See the exposure shift, get the suggested fix, make the call before renewal is impacted.',
     engagement: [
-      { label: 'Bands', value: '3 tiers' },
+      { label: 'Bands', value: '4 tiers' },
       { label: 'Cadence', value: 'Live' },
-      { label: 'Output', value: 'Stabilization kit' },
+      { label: 'Output', value: 'Risk alerts' },
     ],
+    visual: 'risk-curve',
   },
   {
     id: 'wc',
@@ -60,8 +62,7 @@ const PILLARS: Pillar[] = [
       'TRIR and DART rate computed per client',
       'Recordable cases and lost-day counts at a glance',
       'Severity banding — critical / at-risk / fair / good',
-      'Net premium exposure per account',
-      'Sort-by-risk triage across the entire book',
+      'Net premium exposure per account, and rolled up across the book',
     ],
     highlight:
       'One screen ranks every client by safety deterioration — so the loss-control call goes to the account that needs it, not the one that shouts loudest.',
@@ -70,50 +71,30 @@ const PILLARS: Pillar[] = [
       { label: 'View', value: 'Whole book' },
       { label: 'Triage', value: 'By risk' },
     ],
-  },
-  {
-    id: 'benefits',
-    number: '03',
-    title: 'Benefits Eligibility & Premium-Leak Detection',
-    tagline: 'Find the money your clients are quietly losing.',
-    description:
-      'Matcha ingests each client\'s roster — via Finch or a CSV — and cross-references it against benefits enrollment to surface two problems employers almost never catch on their own: new hires drifting past their enrollment window, and terminated employees still carrying active health deductions. The first is a compliance gap; the second is a live premium leak we quantify in dollars per month. Nudge the client\'s HR directly from the exception, then resolve or dismiss.',
-    deliverables: [
-      'New-hire enrollment-gap detection with a window countdown',
-      'Termination premium-leak detection, quantified in $/month',
-      'Source-agnostic roster ingest — Finch or CSV',
-      'One-click "Ping Client HR" nudge from any exception',
-      'Resolve / dismiss workflow with an audit trail',
-    ],
-    highlight:
-      'A terminated employee still on the plan is a leak you can put a dollar figure on — and bring to the client as found money, not a fire drill.',
-    engagement: [
-      { label: 'Source', value: 'Finch + CSV' },
-      { label: 'Flags', value: 'Gaps + leaks' },
-      { label: 'Unit', value: '$ / month' },
-    ],
+    visual: 'wc',
   },
   {
     id: 'command',
-    number: '04',
+    number: '03',
     title: 'Book-of-Business Command Center',
     tagline: 'Every account, every signal, one queue.',
     description:
-      'The dashboard is your whole book on one screen — total clients, headcount across the portfolio, at-risk count, and compliance posture per account. The Action Center turns the underlying signals into a worked queue: unread risk alerts with badges, and positive milestones like incident-free streaks or a TRIR below benchmark. Each one comes with AI-drafted outreach in a celebratory, advisory, or urgent tone, so a flagged signal becomes a client conversation in a click — not a blank email.',
+      'The dashboard is your whole book on one screen — total clients, headcount across the portfolio, at-risk count, and compliance posture per account. The Action Center turns the underlying signals into a worked queue: unread risk alerts, ranked by severity, each with AI-drafted outreach in an advisory or urgent tone. A flagged trend becomes a client conversation with the talking points already written — not a blank email you have to draft from scratch.',
     deliverables: [
       'Portfolio dashboard — clients, headcount, at-risk count, posture',
       'Unified action queue with unread risk-alert badges',
-      'Positive milestones — incident-free streaks, TRIR below benchmark',
-      'AI-drafted outreach in celebratory / advisory / urgent tone',
+      'Risk alerts ranked by severity across the whole book',
+      'AI-drafted outreach in advisory / urgent tone',
       'Handbook-coverage reporting to spot weak HR infrastructure',
     ],
     highlight:
-      'Good news is outreach too. The command center surfaces the wins worth a call, not just the fires worth a worry.',
+      'Every alert is a client conversation waiting to happen. The command center hands you the talking points so the fix starts before the renewal does.',
     engagement: [
       { label: 'Queue', value: 'Unified' },
       { label: 'Outreach', value: 'AI-drafted' },
-      { label: 'Tone', value: '3 modes' },
+      { label: 'Tone', value: '2 modes' },
     ],
+    visual: 'command',
   },
 ]
 
@@ -126,23 +107,22 @@ const PROCESS_STEPS = [
   {
     number: '02',
     title: 'Aggregate',
-    blurb: 'Workforce, safety, and benefits data from every employer rolls up into one book-of-business view automatically.',
+    blurb: 'Safety and loss data from every employer rolls up into one book-of-business view automatically.',
   },
   {
     number: '03',
     title: 'Surface',
-    blurb: 'The radar flags renewal risk, the portfolio ranks loss control, and eligibility scans quantify premium leaks — per client.',
+    blurb: 'The risk curve flags deteriorating accounts, and the WC portfolio ranks loss control across the book — per account.',
   },
   {
     number: '04',
     title: 'Act',
-    blurb: 'AI-drafted outreach turns each signal into a client conversation, with the talking points already written.',
+    blurb: 'AI-drafted outreach turns each flagged issue into a client conversation, with the talking points already written.',
   },
 ]
 
-// Hero radar card — an animated read of a book of business. Fictional clients;
-// the values illustrate the signal types (TRIR, turnover, premium leaks), not
-// real accounts.
+// Hero risk-curve card — an animated read of a book of business. Fictional clients;
+// the values illustrate the signal types (TRIR, DART, loss trend), not real accounts.
 type RiskBand = 'critical' | 'elevated' | 'stable'
 
 const BAND_COLOR: Record<RiskBand, string> = {
@@ -153,9 +133,9 @@ const BAND_COLOR: Record<RiskBand, string> = {
 
 const RADAR_ROWS: { client: string; band: RiskBand; metric: string; delta: string }[] = [
   { client: 'Northgate Logistics', band: 'critical', metric: 'TRIR 6.2', delta: '+1.4' },
-  { client: 'Cedar Valley Mfg', band: 'elevated', metric: 'Turnover 22%', delta: '+5.0' },
+  { client: 'Cedar Valley Mfg', band: 'elevated', metric: 'Lost days 14', delta: '+5.0' },
   { client: 'Harbor Foods Co', band: 'stable', metric: 'DART 1.1', delta: '−0.3' },
-  { client: 'Atlas Care Group', band: 'elevated', metric: 'Leak $1.4k/mo', delta: 'new' },
+  { client: 'Atlas Care Group', band: 'elevated', metric: 'Near miss ×3', delta: 'new' },
   { client: 'Summit Builders', band: 'stable', metric: 'TRIR 0.9', delta: '−0.2' },
 ]
 
@@ -172,7 +152,7 @@ const MODELS = [
   },
   {
     name: 'Team & onboarding',
-    blurb: 'Invite your team with owner / admin / member roles, run a draft-to-active onboarding pipeline, and preconfigure the modules each client gets.',
+    blurb: 'Invite your team with owner / admin / member roles, and run every client from submitted to live on a draft-to-active onboarding pipeline.',
     suits: 'Multi-user brokerages',
   },
 ]
@@ -183,15 +163,14 @@ const BROKERS_JSON_LD = {
   name: 'Matcha for Brokers',
   url: 'https://hey-matcha.com/brokers',
   description:
-    'A book-of-business intelligence layer for insurance and benefits brokers — renewal risk radar, workers\' comp loss-control portfolio, benefits premium-leak detection, and AI-drafted client outreach.',
+    'A book-of-business intelligence layer for P&C brokers — exposure-weighted risk curve, workers\' comp loss-control portfolio, and AI-drafted client outreach.',
   serviceType: 'Insurance brokerage software',
   hasOfferCatalog: {
     '@type': 'OfferCatalog',
     name: 'Broker Tools',
     itemListElement: [
-      { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Renewal Risk Radar' } },
+      { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Book Risk Curve' } },
       { '@type': 'Offer', itemOffered: { '@type': 'Service', name: "Workers' Comp Portfolio" } },
-      { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Benefits Premium-Leak Detection' } },
       { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Book-of-Business Command Center' } },
     ],
   },
@@ -201,9 +180,9 @@ export default function BrokersPage() {
   const [isPricingOpen, setIsPricingOpen] = useState(false)
 
   useSEO({
-    title: "Matcha for Brokers | Renewal Risk Radar & Book-of-Business Intelligence",
+    title: "Matcha for Brokers | Book Risk Curve & Book-of-Business Intelligence",
     description:
-      "Give your clients HR, safety, and compliance software — and get the intelligence layer back. Renewal risk radar, workers' comp loss control, benefits premium-leak detection, and AI-drafted outreach across your whole book.",
+      "Give your P&C clients a live safety intake system — and get the intelligence layer back. Exposure-weighted risk curve, workers' comp loss control, and AI-drafted outreach across your whole book.",
     canonical: 'https://hey-matcha.com/brokers',
     jsonLd: BROKERS_JSON_LD,
     noindex: true, // unlisted — reachable by direct link only, kept out of search indexes
@@ -251,7 +230,7 @@ function Hero({ onBookClick }: { onBookClick: () => void }) {
             >
               <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#86efac' }} />
               <span className="text-[11px] uppercase tracking-wider font-medium">
-                For insurance &amp; benefits brokers
+                For P&amp;C brokers
               </span>
             </div>
             <h1
@@ -269,7 +248,7 @@ function Hero({ onBookClick }: { onBookClick: () => void }) {
               className="mt-6 max-w-lg"
               style={{ color: MUTED, fontSize: 'clamp(1rem, 1.15vw, 1.125rem)', lineHeight: 1.55 }}
             >
-              Put Matcha in front of your clients for HR, safety, and compliance — and get back what no carrier portal gives you: a live read on renewal risk, loss control, and premium leaks across every account you manage.
+              Matcha Lite replaces the client's static, paperwork-driven safety process with a live intake system woven into how they already work. While the client runs safer, more compliant operations, you get back what no carrier portal gives you: real-time performance metrics — TRIR, DART, loss trends — plus risk alerts and suggested actions, across every account you manage.
             </p>
             <div className="mt-10 flex items-center gap-4 flex-wrap">
               <button
@@ -282,7 +261,7 @@ function Hero({ onBookClick }: { onBookClick: () => void }) {
             </div>
           </div>
 
-          <RenewalRadarCard />
+          <BookRiskCurveCard />
         </div>
       </div>
     </section>
@@ -291,7 +270,7 @@ function Hero({ onBookClick }: { onBookClick: () => void }) {
 
 // Animated hero card — a live read of a book of business. A scanline sweeps the
 // client rows; risk bands on the volatile accounts pulse to draw the eye.
-function RenewalRadarCard() {
+function BookRiskCurveCard() {
   const ref = useRef(null)
   const inView = useInView(ref, { amount: 0.3 })
 
@@ -329,7 +308,7 @@ function RenewalRadarCard() {
             className="text-[10px] font-mono uppercase tracking-[0.18em]"
             style={{ color: '#e4ded2' }}
           >
-            Renewal Risk Radar
+            Book Risk Curve
           </span>
         </div>
         <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: '#6a737d' }}>
@@ -415,6 +394,190 @@ function RenewalRadarCard() {
   )
 }
 
+// Per-pillar mini mockup cards. Fictional illustrative data, styled to match the
+// hero risk-curve card (dark, mono labels) — not live product screenshots.
+
+const WC_ROWS: { client: string; trir: string; dart: string; band: 'critical' | 'at_risk' | 'fair' | 'good' }[] = [
+  { client: 'Northgate Logistics', trir: '6.2', dart: '3.4', band: 'critical' },
+  { client: 'Cedar Valley Mfg', trir: '3.1', dart: '1.8', band: 'at_risk' },
+  { client: 'Harbor Foods Co', trir: '1.4', dart: '1.1', band: 'fair' },
+  { client: 'Summit Builders', trir: '0.9', dart: '0.4', band: 'good' },
+]
+
+const WC_BAND_COLOR: Record<string, string> = {
+  critical: '#ff6b6b',
+  at_risk: '#f5b545',
+  fair: '#8fd6ef',
+  good: '#6ee7a8',
+}
+
+const WC_BAND_LABEL: Record<string, string> = {
+  critical: 'Critical',
+  at_risk: 'At risk',
+  fair: 'Fair',
+  good: 'Good',
+}
+
+function WcPortfolioVisual() {
+  return (
+    <div
+      className="relative rounded-xl overflow-hidden border"
+      style={{ borderColor: 'rgba(0,0,0,0.08)', backgroundColor: '#0e0d0b', boxShadow: '0 30px 60px -18px rgba(31, 29, 26, 0.24)' }}
+    >
+      <div className="px-5 py-4 flex items-center justify-between border-b" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+        <span className="text-[10px] font-mono uppercase tracking-[0.18em]" style={{ color: '#e4ded2' }}>
+          WC Portfolio
+        </span>
+        <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: '#6a737d' }}>
+          Sorted worst-first
+        </span>
+      </div>
+      <ul>
+        {WC_ROWS.map((r) => (
+          <li
+            key={r.client}
+            className="px-5 py-3 flex items-center justify-between gap-3 border-b"
+            style={{ borderColor: 'rgba(255,255,255,0.045)' }}
+          >
+            <div className="min-w-0 text-[13px] truncate" style={{ color: 'rgba(245,242,237,0.9)' }}>
+              {r.client}
+            </div>
+            <div className="flex items-center gap-4 shrink-0">
+              <span className="text-[10px] font-mono tabular-nums" style={{ color: 'rgba(245,242,237,0.5)' }}>
+                TRIR {r.trir}
+              </span>
+              <span className="text-[10px] font-mono tabular-nums" style={{ color: 'rgba(245,242,237,0.5)' }}>
+                DART {r.dart}
+              </span>
+              <span
+                className="text-[9px] font-medium uppercase tracking-wider px-2 py-1 rounded"
+                style={{ color: WC_BAND_COLOR[r.band], backgroundColor: `${WC_BAND_COLOR[r.band]}1f` }}
+              >
+                {WC_BAND_LABEL[r.band]}
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+const COMMAND_ALERTS: { client: string; issue: string; tone: 'advisory' | 'urgent' }[] = [
+  { client: 'Northgate Logistics', issue: 'TRIR trending up 3 months straight', tone: 'urgent' },
+  { client: 'Cedar Valley Mfg', issue: 'Lost-day count above book average', tone: 'advisory' },
+  { client: 'Atlas Care Group', issue: 'Near-miss reports up 40% this quarter', tone: 'advisory' },
+]
+
+const COMMAND_TONE_COLOR: Record<string, string> = { advisory: '#f5b545', urgent: '#ff6b6b' }
+
+function CommandCenterVisual() {
+  return (
+    <div
+      className="relative rounded-xl overflow-hidden border"
+      style={{ borderColor: 'rgba(0,0,0,0.08)', backgroundColor: '#0e0d0b', boxShadow: '0 30px 60px -18px rgba(31, 29, 26, 0.24)' }}
+    >
+      <div className="px-5 py-4 flex items-center justify-between border-b" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+        <span className="text-[10px] font-mono uppercase tracking-[0.18em]" style={{ color: '#e4ded2' }}>
+          Action Center
+        </span>
+        <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: '#6a737d' }}>
+          {COMMAND_ALERTS.length} unread
+        </span>
+      </div>
+      <ul>
+        {COMMAND_ALERTS.map((a) => (
+          <li
+            key={a.client}
+            className="px-5 py-3.5 flex items-start gap-3 border-b"
+            style={{ borderColor: 'rgba(255,255,255,0.045)' }}
+          >
+            <span
+              className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0"
+              style={{ backgroundColor: COMMAND_TONE_COLOR[a.tone] }}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px]" style={{ color: 'rgba(245,242,237,0.92)' }}>{a.client}</div>
+              <div className="text-[11px] mt-0.5" style={{ color: 'rgba(245,242,237,0.45)' }}>{a.issue}</div>
+            </div>
+            <span
+              className="text-[9px] font-medium uppercase tracking-wider px-2 py-1 rounded shrink-0"
+              style={{ color: COMMAND_TONE_COLOR[a.tone], backgroundColor: `${COMMAND_TONE_COLOR[a.tone]}1f` }}
+            >
+              {a.tone}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <div className="px-5 py-3 text-[11px]" style={{ color: 'rgba(245,242,237,0.4)', backgroundColor: 'rgba(255,255,255,0.015)' }}>
+        Outreach drafted for every flagged issue — advisory or urgent tone.
+      </div>
+    </div>
+  )
+}
+
+function RiskCurveMiniVisual() {
+  return (
+    <div
+      className="relative rounded-xl overflow-hidden border"
+      style={{ borderColor: 'rgba(0,0,0,0.08)', backgroundColor: '#0e0d0b', boxShadow: '0 30px 60px -18px rgba(31, 29, 26, 0.24)' }}
+    >
+      <div className="px-5 py-4 flex items-center justify-between border-b" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+        <span className="text-[10px] font-mono uppercase tracking-[0.18em]" style={{ color: '#e4ded2' }}>
+          Loss Curve
+        </span>
+        <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: '#6a737d' }}>
+          Exposure-weighted
+        </span>
+      </div>
+      <div className="px-5 py-6">
+        <svg viewBox="0 0 320 100" className="w-full h-24" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="lossCurveFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#6ee7a8" stopOpacity="0.28" />
+              <stop offset="100%" stopColor="#6ee7a8" stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path
+            d="M0,88 C40,86 60,78 90,60 C120,42 140,34 180,24 C220,15 260,10 320,4 L320,100 L0,100 Z"
+            fill="url(#lossCurveFill)"
+          />
+          <path
+            d="M0,88 C40,86 60,78 90,60 C120,42 140,34 180,24 C220,15 260,10 320,4"
+            fill="none"
+            stroke="#6ee7a8"
+            strokeWidth="1.5"
+          />
+        </svg>
+        <div className="flex items-center justify-between mt-2 text-[9px] font-mono uppercase tracking-wider" style={{ color: '#6a737d' }}>
+          <span>Low loss</span>
+          <span>Annual loss ($)</span>
+          <span>High loss</span>
+        </div>
+      </div>
+      <div className="px-5 py-3.5 flex items-center gap-4 border-t" style={{ borderColor: 'rgba(255,255,255,0.045)', backgroundColor: 'rgba(255,255,255,0.015)' }}>
+        {(['strong', 'adequate', 'developing', 'exposed'] as const).map((band) => (
+          <div key={band} className="flex items-center gap-1.5">
+            <span
+              className="w-1.5 h-1.5 rounded-full"
+              style={{ backgroundColor: band === 'strong' ? '#6ee7a8' : band === 'adequate' ? '#8fd6ef' : band === 'developing' ? '#f5b545' : '#ff6b6b' }}
+            />
+            <span className="text-[10px] font-mono capitalize" style={{ color: 'rgba(245,242,237,0.55)' }}>
+              {band}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function PillarVisual({ kind }: { kind: Pillar['visual'] }) {
+  if (kind === 'wc') return <WcPortfolioVisual />
+  if (kind === 'command') return <CommandCenterVisual />
+  return <RiskCurveMiniVisual />
+}
+
 function Positioning() {
   return (
     <section className="py-24 sm:py-32 border-t" style={{ borderColor: LINE }}>
@@ -437,10 +600,10 @@ function Positioning() {
                 Your client sees
               </div>
               <ul className="space-y-2.5 text-[15px]" style={{ color: INK }}>
-                <li>HR records &amp; handbooks</li>
-                <li>Incident reporting &amp; OSHA</li>
-                <li>Compliance &amp; risk insights</li>
-                <li>Benefits administration</li>
+                <li>Incidents</li>
+                <li>IR Copilot</li>
+                <li>Risk Insights</li>
+                <li>Theme Analysis</li>
               </ul>
             </div>
             <div className="p-8" style={{ backgroundColor: BG }}>
@@ -448,9 +611,9 @@ function Positioning() {
                 You see
               </div>
               <ul className="space-y-2.5 text-[15px]" style={{ color: INK }}>
-                <li>Renewal risk per account</li>
+                <li>Book-wide risk curve, weighted by exposure</li>
                 <li>Loss-control ranking across the book</li>
-                <li>Premium leaks in dollars</li>
+                <li>Risk alerts, ranked by severity</li>
                 <li>Outreach moments, AI-drafted</li>
               </ul>
             </div>
@@ -511,7 +674,9 @@ function PillarSection({ pillar, reverse }: { pillar: Pillar; reverse: boolean }
           </div>
 
           <div className="md:pt-8">
-            <div className="relative pl-6 pr-2" style={{ borderLeft: `2px solid ${INK}` }}>
+            <PillarVisual kind={pillar.visual} />
+
+            <div className="mt-10 relative pl-6 pr-2" style={{ borderLeft: `2px solid ${INK}` }}>
               <p
                 className="leading-snug"
                 style={{
