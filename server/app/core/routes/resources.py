@@ -267,6 +267,31 @@ class LiteCheckoutRequest(BaseModel):
     cancel_url: Optional[str] = None
 
 
+class MatchaLitePricingResponse(BaseModel):
+    price_per_block_cents: int
+    block_size: int
+    effective_price_per_block_cents: int
+    sale_active: bool
+    min_headcount: int
+    max_headcount: int
+
+
+@router.get("/matcha-lite/pricing", response_model=MatchaLitePricingResponse)
+async def get_matcha_lite_pricing_public():
+    """Public — current Matcha Lite pricing, for the signup calculator + pending-subscription screen."""
+    from ..services.matcha_lite_pricing import get_matcha_lite_pricing
+
+    pricing = await get_matcha_lite_pricing()
+    return MatchaLitePricingResponse(
+        price_per_block_cents=pricing.price_per_block_cents,
+        block_size=pricing.block_size,
+        effective_price_per_block_cents=pricing.effective_price_per_block_cents,
+        sale_active=pricing.sale_active,
+        min_headcount=pricing.min_headcount,
+        max_headcount=pricing.max_headcount,
+    )
+
+
 @router.post("/checkout/lite", response_model=UpgradeCheckoutResponse)
 async def create_lite_checkout(
     body: LiteCheckoutRequest,
@@ -274,12 +299,15 @@ async def create_lite_checkout(
 ):
     """Open a Stripe subscription checkout for Matcha Lite.
 
-    Pricing: $100/month per 10 employees (ceiling), read from the headcount stored
-    at registration time. Headcount > 300 is rejected — must contact sales.
-    The webhook activates incidents + employees + discipline on successful payment.
+    Pricing is admin-configurable (server/app/core/services/matcha_lite_pricing.py),
+    read from the headcount stored at registration time. Headcount outside the
+    configured min/max is rejected — must contact sales.
+    The webhook activates incidents on successful payment (employees is granted
+    at signup; Lite has no discipline).
     Only callable by matcha_lite companies.
     """
     from ..services.stripe_service import StripeService, StripeServiceError
+    from ..services.matcha_lite_pricing import get_matcha_lite_pricing, compute_matcha_lite_price_cents
 
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -295,6 +323,7 @@ async def create_lite_checkout(
             """,
             company_id,
         )
+        pricing = await get_matcha_lite_pricing(conn)
 
     if not row or row["signup_source"] != "matcha_lite":
         raise HTTPException(status_code=403, detail="This endpoint is only available for Matcha Lite accounts")
@@ -302,14 +331,25 @@ async def create_lite_checkout(
     headcount = int(row["headcount"])
     if headcount < 1:
         raise HTTPException(status_code=400, detail="Company headcount not set — please contact support")
-    if headcount > 300:
-        raise HTTPException(status_code=400, detail="Headcount over 300 — please contact us for pricing")
+    if headcount < pricing.min_headcount:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Headcount under {pricing.min_headcount} — please contact us for pricing",
+        )
+
+    amount_cents = compute_matcha_lite_price_cents(pricing, headcount)
+    if amount_cents is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Headcount over {pricing.max_headcount} — please contact us for pricing",
+        )
 
     stripe_service = StripeService()
     try:
         session = await stripe_service.create_matcha_lite_checkout(
             company_id=company_id,
             headcount=headcount,
+            amount_cents=amount_cents,
             success_url=body.success_url,
             cancel_url=body.cancel_url,
         )

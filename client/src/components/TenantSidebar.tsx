@@ -7,6 +7,7 @@ import ComplianceSidebar from './ir-only/ComplianceSidebar'
 import ResourcesFreeSidebar from './resources-free/ResourcesFreeSidebar'
 import { useMe } from '../hooks/useMe'
 import { isIrOnlyTier, isResourcesFreeTier, isMatchaLitePending, isMatchaX, isMatchaXPending, isMatchaCompliance, isMatchaCompliancePending } from '../utils/tier'
+import { useMatchaLitePricing, computeLitePriceDollars } from '../api/matchaLitePricing'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -20,10 +21,6 @@ const BASE = import.meta.env.VITE_API_URL ?? '/api'
  * Defaults to ClientSidebar while /auth/me is in flight to avoid a flash
  * of the wrong layout for the dominant case.
  */
-function litePriceDollars(headcount: number): number {
-  return Math.ceil(headcount / 10) * 100
-}
-
 // TODO: set the real Matcha-X price. Mirrors Lite's stub for now — keep in
 // sync with matcha_x_price_cents() in server/app/core/services/stripe_service.py.
 function matchaXPriceDollars(headcount: number): number {
@@ -54,9 +51,11 @@ export default function TenantSidebar() {
 function MatchaLitePendingSidebar({ headcount }: { headcount: number }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const pricing = useMatchaLitePricing()
+  const maxHeadcount = pricing?.max_headcount ?? 300
 
-  const validHeadcount = headcount >= 1 && headcount <= 300
-  const price = validHeadcount ? litePriceDollars(headcount) : null
+  const validHeadcount = headcount >= 1 && headcount <= maxHeadcount
+  const price = validHeadcount && pricing ? computeLitePriceDollars(headcount, pricing) : null
 
   async function handleSubscribe() {
     setLoading(true)
@@ -101,9 +100,9 @@ function MatchaLitePendingSidebar({ headcount }: { headcount: number }) {
           <p className="text-xs text-zinc-400">
             <span className="text-zinc-100 font-medium">${price}/month</span> for {headcount} employee{headcount !== 1 ? 's' : ''}
           </p>
-        ) : headcount > 300 ? (
+        ) : headcount > maxHeadcount ? (
           <p className="text-xs text-red-400">
-            Over 300 employees —{' '}
+            Over {maxHeadcount} employees —{' '}
             <a href="mailto:hello@matcha.work" className="underline">contact us</a>
           </p>
         ) : null}

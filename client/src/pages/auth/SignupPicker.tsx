@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { Check } from 'lucide-react'
+import { useMatchaLitePricing } from '../../api/matchaLitePricing'
 
 const INK = 'var(--color-ivory-ink)'
 const BG = 'var(--color-ivory-bg)'
@@ -22,6 +23,10 @@ const LITE_FEATURES = [
 ]
 
 export default function SignupPicker() {
+  const pricing = useMatchaLitePricing()
+  const blockPriceDollars = (pricing?.effective_price_per_block_cents ?? 5000) / 100
+  const blockSize = pricing?.block_size ?? 10
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 py-16" style={{ backgroundColor: BG, color: INK }}>
       <Link to="/" className="mb-12 text-center">
@@ -106,8 +111,8 @@ export default function SignupPicker() {
             </div>
 
             <div className="mb-6">
-              <span className="text-3xl font-semibold" style={{ color: BG, fontFamily: DISPLAY }}>$100</span>
-              <span className="text-sm ml-2" style={{ color: 'rgba(255,255,255,0.6)' }}>/month per 10 employees</span>
+              <span className="text-3xl font-semibold" style={{ color: BG, fontFamily: DISPLAY }}>${blockPriceDollars}</span>
+              <span className="text-sm ml-2" style={{ color: 'rgba(255,255,255,0.6)' }}>/month per {blockSize} employees</span>
             </div>
 
             <ul className="flex flex-col gap-3 mb-8 flex-1">

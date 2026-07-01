@@ -39,6 +39,7 @@ from .client_errors import router as client_errors_router
 from .server_errors import router as server_errors_router
 from .landing_media import public_router as landing_media_public_router, admin_router as landing_media_admin_router
 from .resources import router as resources_router
+from .matcha_lite_pricing_admin import router as matcha_lite_pricing_admin_router
 from .handbook_gap_analyzer import router as handbook_gap_analyzer_router
 from .expert_advice import router as expert_advice_router
 from ...matcha.dependencies import require_feature, require_any_feature
@@ -93,6 +94,7 @@ core_router.include_router(profile_resume_router, prefix="/users", tags=["profil
 core_router.include_router(newsletter_public_router, prefix="/newsletter", tags=["newsletter-public"])
 core_router.include_router(newsletter_admin_router, prefix="/admin/newsletter", tags=["newsletter-admin"])
 core_router.include_router(resources_router, prefix="/resources", tags=["resources"])
+core_router.include_router(matcha_lite_pricing_admin_router, prefix="/admin", tags=["matcha-lite-pricing-admin"])
 core_router.include_router(
     handbook_gap_analyzer_router,
     prefix="/resources/handbook-gap-analyzer",

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Copy, Check, Link, Trash2 } from 'lucide-react'
 import { api } from '../../api/client'
+import MatchaLitePricingPanel from './MatchaLitePricingPanel'
 
 type InviteToken = {
   id: string
@@ -14,6 +15,7 @@ type InviteToken = {
 }
 
 export default function MatchaLiteAdmin() {
+  const [tab, setTab] = useState<'links' | 'pricing'>('links')
   const [tokens, setTokens] = useState<InviteToken[]>([])
   const [note, setNote] = useState('')
   const [generating, setGenerating] = useState(false)
@@ -59,7 +61,31 @@ export default function MatchaLiteAdmin() {
 
   return (
     <div className="p-6 max-w-3xl">
-      <h1 className="text-xl font-semibold text-zinc-100 mb-1">Comp Signup Links</h1>
+      <h1 className="text-xl font-semibold text-zinc-100 mb-1">Matcha Lite</h1>
+      <p className="text-sm text-zinc-500 mb-6">Comp signup links and pricing configuration.</p>
+
+      <div className="flex gap-1 mb-6 border-b border-zinc-800">
+        <button
+          onClick={() => setTab('links')}
+          className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            tab === 'links' ? 'text-zinc-100 border-emerald-600' : 'text-zinc-500 border-transparent hover:text-zinc-300'
+          }`}
+        >
+          Comp Signup Links
+        </button>
+        <button
+          onClick={() => setTab('pricing')}
+          className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            tab === 'pricing' ? 'text-zinc-100 border-emerald-600' : 'text-zinc-500 border-transparent hover:text-zinc-300'
+          }`}
+        >
+          Pricing
+        </button>
+      </div>
+
+      {tab === 'pricing' && <MatchaLitePricingPanel />}
+
+      {tab !== 'links' ? null : <>
       <p className="text-sm text-zinc-500 mb-6">
         One-use links that activate an account without Stripe. Each token works for either tier —
         send the <span className="text-emerald-300">Lite</span> or <span className="text-teal-300">Matcha-X</span> link.
@@ -144,6 +170,7 @@ export default function MatchaLiteAdmin() {
           </tbody>
         </table>
       </div>
+      </>}
     </div>
   )
 }

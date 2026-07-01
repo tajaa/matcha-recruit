@@ -313,7 +313,10 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                                 """,
                                 company_id,
                             )
-                    # Record subscription so cancellation handler can find it
+                    # Record subscription so cancellation handler can find it.
+                    # amount_cents comes from checkout-creation metadata when the
+                    # caller set it (matcha_lite does; matcha_x/matcha_compliance
+                    # don't yet, so this stays 0 for them, unchanged from before).
                     if stripe_sub_id:
                         await billing_service.upsert_subscription(
                             company_id=company_id,
@@ -321,7 +324,7 @@ async def _route_event(event_type: str, event_object: dict) -> dict:
                             stripe_customer_id=stripe_customer_id,
                             pack_id=_tier_type,
                             credits_per_cycle=0,
-                            amount_cents=0,
+                            amount_cents=int(meta.get("amount_cents") or 0),
                         )
                     # Best-effort activation email — never let a flaky
                     # email service 500 the webhook (Stripe will retry).

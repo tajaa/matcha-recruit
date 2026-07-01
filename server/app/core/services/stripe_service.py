@@ -392,20 +392,18 @@ class StripeService:
         self,
         company_id: UUID,
         headcount: int,
+        amount_cents: int,
         success_url: Optional[str] = None,
         cancel_url: Optional[str] = None,
     ):
         """Subscription checkout for Matcha Lite (IR + Resources) priced by headcount.
 
-        Pricing: $100/mo per 10 employees (ceil). 1–10 → $100, 11–20 → $200, …, 291–300 → $3,000.
-        Headcount > 300 is rejected — must contact sales.
+        Pricing is resolved by the caller (server/app/core/services/matcha_lite_pricing.py,
+        DB-backed + admin-configurable) and passed in as `amount_cents` — this
+        function stays DB-free, matching the rest of this module.
         Webhook catches metadata.type == 'matcha_lite' and activates incidents.
         """
         self._ensure_secret_key()
-
-        amount_cents = matcha_lite_price_cents(headcount)
-        if amount_cents is None:
-            raise StripeServiceError("Headcount over 300 — please contact us for pricing")
 
         resolved_success_url = success_url or self.settings.stripe_success_url
         resolved_cancel_url = cancel_url or self.settings.stripe_cancel_url
@@ -414,6 +412,7 @@ class StripeService:
             "company_id": str(company_id),
             "type": "matcha_lite",
             "headcount": str(headcount),
+            "amount_cents": str(amount_cents),
             "mode": "subscription",
         }
 

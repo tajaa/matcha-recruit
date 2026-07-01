@@ -2,12 +2,9 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../../hooks/useMe'
+import { useMatchaLitePricing, computeLitePriceDollars } from '../../api/matchaLitePricing'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
-
-function litePriceDollars(headcount: number): number {
-  return Math.ceil(headcount / 10) * 100
-}
 
 export default function MatchaLiteSignup() {
   const [searchParams] = useSearchParams()
@@ -39,12 +36,15 @@ export default function MatchaLiteSignup() {
       .catch(() => {})
   }, [brokerRef])
 
+  const pricing = useMatchaLitePricing()
+  const maxHeadcount = pricing?.max_headcount ?? 300
+
   const seatInvite = inviteInfo?.valid === true
   const comped = !!inviteToken || seatInvite
   const hc = parseInt(headcount, 10)
   const headcountValid = !isNaN(hc) && hc >= 1
-  const overLimit = headcountValid && !comped && hc > 300
-  const price = headcountValid && !overLimit && !comped ? litePriceDollars(hc) : null
+  const overLimit = headcountValid && !comped && hc > maxHeadcount
+  const price = headcountValid && !overLimit && !comped && pricing ? computeLitePriceDollars(hc, pricing) : null
 
   const canSubmit =
     companyName.trim() &&
@@ -162,7 +162,7 @@ export default function MatchaLiteSignup() {
             </label>
             {overLimit ? (
               <p className="mt-1 text-xs text-red-400">
-                Over 300 employees —{' '}
+                Over {maxHeadcount} employees —{' '}
                 <a href="mailto:hello@matcha.work" className="underline">
                   contact us for pricing
                 </a>
