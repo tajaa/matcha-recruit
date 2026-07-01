@@ -6,6 +6,8 @@ import { fetchLocations, createLocation, updateLocation, deleteLocation, fetchJu
 import { ComplianceLocationList } from '../../components/compliance/ComplianceLocationList'
 import { ComplianceLocationModal } from '../../components/compliance/ComplianceLocationModal'
 import { FacilityProfileBanner } from '../../components/compliance/FacilityProfileBanner'
+import LiteAddonsPanel from '../../components/ir-only/LiteAddonsPanel'
+import { useMe } from '../../hooks/useMe'
 import type { BusinessLocation, LocationCreate, JurisdictionOption } from '../../types/compliance'
 
 type Tab = 'profile' | 'locations'
@@ -185,7 +187,13 @@ function EditableSelect({ label, value, options, onSave }: EditableSelectProps) 
 }
 
 export default function CompanySettings() {
+  const { me, hasFeature } = useMe()
   const [tab, setTab] = useState<Tab>('profile')
+  // Lite-family tenants manage their paid add-ons here (/app/company#addons).
+  const isLiteFamily =
+    me?.profile?.signup_source === 'matcha_lite' ||
+    me?.profile?.signup_source === 'matcha_lite_essentials'
+  const showAddons = isLiteFamily && hasFeature('incidents')
   const [company, setCompany] = useState<CompanyData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -444,6 +452,17 @@ export default function CompanySettings() {
               </dl>
             </Card>
           </div>
+        </div>
+      )}
+
+      {/* Add-ons — Lite-family tenants only */}
+      {tab === 'profile' && showAddons && (
+        <div>
+          <h3 className="text-sm font-medium text-zinc-300 mb-1">Add-ons</h3>
+          <p className="text-xs text-zinc-600 mb-4">
+            Extend your plan — add-ons bill monthly per employee alongside your subscription.
+          </p>
+          <LiteAddonsPanel />
         </div>
       )}
 

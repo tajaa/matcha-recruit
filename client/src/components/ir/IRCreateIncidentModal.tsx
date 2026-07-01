@@ -65,9 +65,15 @@ function Field({ label, required, children }: { label: string; required?: boolea
 }
 
 export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
-  const { hasFeature } = useMe()
+  const { me, hasFeature } = useMe()
   const hasRoster = hasFeature('employees')
   const canDictate = hasFeature('ir_voice_intake')
+  // Lite-family tenants without the voice add-on see a purchase teaser
+  // instead of nothing — the add-on is self-serve at /app/company#addons.
+  const showDictateUpsell =
+    !canDictate &&
+    (me?.profile?.signup_source === 'matcha_lite' ||
+      me?.profile?.signup_source === 'matcha_lite_essentials')
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [locations, setLocations] = useState<LocationRow[] | null>(null)
@@ -226,6 +232,25 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
               </div>
             )}
           </div>
+        )}
+
+        {showDictateUpsell && (
+          <Link
+            to="/app/company#addons"
+            onClick={onClose}
+            className="group flex w-full items-center gap-3 rounded-xl border border-white/[0.08] bg-zinc-800/30 px-4 py-3 text-left transition-colors hover:border-white/15"
+          >
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-zinc-500 transition-colors group-hover:text-zinc-300">
+              <Mic className="h-4 w-4" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium text-zinc-300">Dictate this report</span>
+              <span className="block text-[12px] text-zinc-500">Talk it through — AI fills the form for you.</span>
+            </span>
+            <span className="text-[8.5px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20 leading-none">
+              Add-on
+            </span>
+          </Link>
         )}
 
         {canDictate && (

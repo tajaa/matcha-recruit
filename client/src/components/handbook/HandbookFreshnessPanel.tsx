@@ -1,4 +1,6 @@
+import { Link } from 'react-router-dom'
 import { Button, Card, Badge } from '../ui'
+import { useMe } from '../../hooks/useMe'
 import type { HandbookFreshnessCheck } from '../../types/handbook'
 
 type Props = {
@@ -8,6 +10,14 @@ type Props = {
 }
 
 export function HandbookFreshnessPanel({ check, running, onRunCheck }: Props) {
+  const { me, hasFeature } = useMe()
+  // Manual checks are free; the SCHEDULED sweep is the handbook_watch add-on.
+  // Lite-family tenants without it get a one-line teaser to the add-ons section.
+  const showWatchUpsell =
+    !hasFeature('handbook_watch') &&
+    (me?.profile?.signup_source === 'matcha_lite' ||
+      me?.profile?.signup_source === 'matcha_lite_essentials')
+
   return (
     <Card>
       <div className="flex items-center justify-between mb-3">
@@ -16,6 +26,16 @@ export function HandbookFreshnessPanel({ check, running, onRunCheck }: Props) {
           {running ? 'Running...' : 'Run Freshness Check'}
         </Button>
       </div>
+
+      {showWatchUpsell && (
+        <p className="mb-3 text-xs text-zinc-500">
+          Want this to run automatically?{' '}
+          <Link to="/app/company#addons" className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2">
+            Handbook Watch
+          </Link>{' '}
+          re-checks your handbook on a schedule and emails you when the law changes.
+        </p>
+      )}
 
       {!check ? (
         <p className="text-xs text-zinc-600">No freshness checks have been run yet.</p>

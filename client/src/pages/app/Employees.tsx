@@ -14,7 +14,12 @@ import type { WageGapSummary, FlightRiskWidgetSummary } from '../../types/dashbo
 
 export default function Employees() {
   const navigate = useNavigate()
-  const { hasFeature } = useMe()
+  const { me, hasFeature } = useMe()
+  // Standard Lite without an HRIS flag sees a teaser routing to the add-ons
+  // section (HRIS sync is a self-serve Lite add-on; essentials has no roster).
+  const showHrisUpsell =
+    me?.profile?.signup_source === 'matcha_lite' &&
+    !hasFeature('hris_gusto') && !hasFeature('hris_finch') && !hasFeature('hris_import')
   const [status, setStatus] = useState('all')
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -70,6 +75,14 @@ export default function Employees() {
           <Button variant="ghost" onClick={() => setShowUpload(true)}>Upload CSV</Button>
           {(hasFeature('hris_gusto') || hasFeature('hris_finch') || hasFeature('hris_import')) && (
             <Button variant="ghost" onClick={() => setShowHRIS(true)}>Sync from HRIS</Button>
+          )}
+          {showHrisUpsell && (
+            <Button variant="ghost" onClick={() => navigate('/app/company#addons')}>
+              Sync from HRIS
+              <span className="ml-1.5 text-[8.5px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/20 leading-none">
+                Add-on
+              </span>
+            </Button>
           )}
           <Button onClick={() => setShowBatch(true)}>Add Employees</Button>
         </div>
