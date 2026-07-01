@@ -348,189 +348,163 @@ function ComplianceDashboardMockup({ screen }: { screen: 'handbook' | 'policy' |
 }
 
 // =============================================================================
-// Fan-out audit-flow mockup — Jurisdictional Compliance (the engine) ONLY
+// Story-flow mockup — Jurisdictional Compliance (the engine) ONLY
+//
+// A plain full-width card, no sidebar — just the header + a 3-panel
+// sequence (issue found → why it's required → resolved) connected by
+// animated arrows, plus a stat strip. Literally readable left-to-right,
+// no curve or axis to decode. Deliberately doesn't expose the actual
+// citations/questions/fix-detail granularity — that's the audit mechanics,
+// not the story this pillar needs to sell.
 // =============================================================================
 
-type FlowTone = 'red' | 'amber' | 'green'
-const FLOW_TC: Record<FlowTone, { c: string; lite: string }> = {
-  red: { c: C.red, lite: '#e8a08f' },
-  amber: { c: C.amber, lite: '#e3c07a' },
-  green: { c: C.jade, lite: C.jadeLite },
-}
-// stacked-gradient card fill — mirrors the trend chart's 0.85→0.22 stops
-const cardBg = (t: FlowTone) => `linear-gradient(180deg, ${FLOW_TC[t].c}2b 0%, ${FLOW_TC[t].c}0d 46%, ${FLOW_TC[t].c}00 100%)`
+type StoryStage = { label: string; tone: Tone; heading: string; lines: string[] }
 
-type Comp = { title: string; cite: string; tone: FlowTone; badge: string; question: string; fix: string }
-type FlowConfig = {
+type StoryConfig = {
+  code: string
   engine: string
-  banner: { code: string; effective: string; summary: string; gapsLabel: string; gaps: string; exposure: string; exposureNote: string }
-  central: string
-  comps: Comp[]
-  status: string
+  intro: { label: string; delta: string; note: string }
+  stages: StoryStage[]
+  stats: Stat[]
 }
 
-const JURISDICTION_FLOW: FlowConfig = {
+const JURISDICTION_STORY: StoryConfig = {
+  code: 'SB 553',
   engine: 'Cal/OSHA',
-  banner: {
-    code: 'SB 553',
-    effective: 'Effective Jul 1, 2024',
-    summary: 'SF coffee chain · 8 locations · 87 employees · last audit: never',
-    gapsLabel: 'Gaps',
-    gaps: '5/5',
-    exposure: '$200,000',
-    exposureNote: 'Cal/OSHA serious violation × 8 locations',
-  },
-  central: 'SB 553 audit · 5 components',
-  comps: [
-    { title: 'Written WVP plan', cite: 'CA Lab §6401.9(c)', tone: 'red', badge: 'Gap', question: 'Plan exists, site-specific, employee-accessible?', fix: 'Draft plan · 8 sites × 4 risk types' },
-    { title: 'Annual training', cite: 'CA Lab §6401.9(e)', tone: 'red', badge: 'Gap', question: 'All employees trained interactively < 12 months?', fix: '87 emp · interactive · bilingual' },
-    { title: 'Violent incident log', cite: 'CA Lab §6401.9(f)', tone: 'red', badge: 'Gap', question: 'Log incidents + threats + near-misses, retain 5y?', fix: 'Deploy log · 5-year retention' },
-    { title: 'Hazard assessment', cite: 'CA Lab §6401.9(c)(2)', tone: 'red', badge: 'Gap', question: 'Per-site assessment with workplace-specific hazards?', fix: '8 sites × 2hr walkthrough' },
-    { title: 'Annual review', cite: 'CA Lab §6401.9(d)', tone: 'red', badge: 'Gap', question: 'Annual + post-incident review cadence in place?', fix: 'Schedule cadence + trigger rules' },
+  intro: { label: 'Gap exposure', delta: '$200,000', note: 'new location added' },
+  stages: [
+    { label: 'Issue', tone: 'red', heading: 'SB 553 · Written WVP plan', lines: ['8 locations flagged', 'no plan on file'] },
+    { label: 'Reasoning', tone: 'amber', heading: 'Cal Lab §6401.9(c)', lines: ['requires a site-specific,', 'employee-accessible plan'] },
+    { label: 'Resolved', tone: 'green', heading: 'Plan drafted', lines: ['assigned to 8 sites', 'tracked to done'] },
   ],
-  status: 'Drafting remediation plan · sequencing dependencies…',
+  stats: [
+    { label: 'Gaps found', value: '5', sub: 'of 5 required', tone: 'red', pct: 100 },
+    { label: 'Days to close', value: '12', sub: 'avg across gaps', tone: 'amber', pct: 40 },
+    { label: 'Exposure eliminated', value: '−$200,000', sub: 'fully resolved', tone: 'green', pct: 100 },
+    { label: 'Coverage', value: '100%', sub: 'all components', tone: 'green', pct: 100 },
+  ],
 }
 
-// fan-out connectors (central node → each component)
-function FanLines({ n, inView }: { n: number; inView: boolean }) {
+function StoryPanel({ stage, delay, inView }: { stage: StoryStage; delay: number; inView: boolean }) {
+  const color = toneColor(stage.tone)
   return (
-    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full h-7 block" aria-hidden>
-      <defs>
-        <linearGradient id="fan-grad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={C.amber} stopOpacity={0.7} />
-          <stop offset="100%" stopColor={C.jade} stopOpacity={0.35} />
-        </linearGradient>
-      </defs>
-      {Array.from({ length: n }, (_, i) => {
-        const x = ((i + 0.5) / n) * 100
-        return (
-          <motion.path
-            key={i}
-            d={`M50 2 C50 55, ${x} 45, ${x} 98`}
-            fill="none"
-            stroke="url(#fan-grad)"
-            strokeWidth={1}
-            vectorEffect="non-scaling-stroke"
-            initial={{ pathLength: 0, opacity: 0 }}
-            animate={inView ? { pathLength: 1, opacity: 1 } : {}}
-            transition={{ delay: 0.2 + i * 0.1, duration: 0.5, ease: 'easeOut' }}
-          />
-        )
-      })}
-    </svg>
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={inView ? { opacity: 1, y: 0 } : {}}
+      transition={{ delay, duration: 0.35 }}
+      className="flex-1 min-w-0 rounded-lg p-3.5"
+      style={{ background: `linear-gradient(180deg, ${color}1f 0%, ${color}00 70%)`, border: `1px solid ${color}55` }}
+    >
+      <Micro color={color} className="!font-bold block">{stage.label}</Micro>
+      <div className="text-[13px] font-medium mt-1.5 leading-snug" style={{ color: C.text }}>{stage.heading}</div>
+      <div className="mt-1.5 space-y-0.5">
+        {stage.lines.map(line => (
+          <div key={line} className="text-[11px] leading-snug" style={{ color: C.textDim }}>{line}</div>
+        ))}
+      </div>
+    </motion.div>
+  )
+}
+
+function StageConnector({ fromTone, toTone, delay, inView }: { fromTone: Tone; toTone: Tone; delay: number; inView: boolean }) {
+  const fromColor = toneColor(fromTone)
+  const toColor = toneColor(toTone)
+  const gradId = `connector-${fromTone}-${toTone}`
+  return (
+    <div className="w-6 md:w-10 shrink-0 flex items-center justify-center">
+      <svg width="100%" height="10" viewBox="0 0 40 10" preserveAspectRatio="none" aria-hidden>
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor={fromColor} />
+            <stop offset="100%" stopColor={toColor} />
+          </linearGradient>
+        </defs>
+        <motion.line
+          x1={0} y1={5} x2={32} y2={5}
+          stroke={`url(#${gradId})`}
+          strokeWidth={1.5}
+          vectorEffect="non-scaling-stroke"
+          initial={{ pathLength: 0, opacity: 0 }}
+          animate={inView ? { pathLength: 1, opacity: 1 } : {}}
+          transition={{ delay, duration: 0.35, ease: 'easeOut' }}
+        />
+        <motion.path
+          d="M30 1 L36 5 L30 9"
+          fill="none"
+          stroke={toColor}
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
+          initial={{ opacity: 0 }}
+          animate={inView ? { opacity: 1 } : {}}
+          transition={{ delay: delay + 0.3, duration: 0.2 }}
+        />
+      </svg>
+    </div>
   )
 }
 
 function ComplianceFlowMockup() {
   const ref = useRef<HTMLDivElement>(null)
   const inView = useInView(ref, { margin: '-80px', once: true })
-  const f = JURISDICTION_FLOW
+  const f = JURISDICTION_STORY
 
   return (
     <div
       ref={ref}
-      className="relative w-full rounded-xl overflow-hidden shadow-2xl flex flex-col md:flex-row h-auto font-sans"
+      className="relative w-full rounded-xl overflow-hidden shadow-2xl h-auto font-sans"
       style={{ backgroundColor: C.bg, border: `1px solid ${C.borderHard}` }}
     >
-      <Sidebar screen="jurisdiction" />
+      {/* Header */}
+      <div className="flex items-center px-5 py-3 justify-between" style={{ borderBottom: `1px solid ${C.borderSoft}` }}>
+        <div className="flex items-center gap-2.5">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.textDim} strokeWidth="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M6 9v6"/><path d="M18 6a9 9 0 0 1-9 9"/><circle cx="18" cy="6" r="3"/></svg>
+          <span className="text-sm font-semibold" style={{ color: C.heading }}>Compliance Analysis</span>
+          <span className="px-1.5 py-0.5 rounded text-[8px] font-medium" style={{ backgroundColor: ACCENT.bg, color: ACCENT.text, border: `1px solid ${ACCENT.border}` }}>{f.code.toUpperCase()} · LIVE</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: C.jade, boxShadow: `0 0 6px ${C.jade}` }} />
+          <Micro color={C.textDim} className="normal-case tracking-normal">Live Engine · {f.engine}</Micro>
+        </div>
+      </div>
 
-      {/* Main panel */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
-        <div className="flex items-center px-5 py-3 justify-between" style={{ borderBottom: `1px solid ${C.borderSoft}` }}>
-          <div className="flex items-center gap-2.5">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.textDim} strokeWidth="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M6 9v6"/><path d="M18 6a9 9 0 0 1-9 9"/><circle cx="18" cy="6" r="3"/></svg>
-            <span className="text-sm font-semibold" style={{ color: C.heading }}>Compliance Analysis</span>
-            <span className="px-1.5 py-0.5 rounded text-[8px] font-medium" style={{ backgroundColor: ACCENT.bg, color: ACCENT.text, border: `1px solid ${ACCENT.border}` }}>{f.banner.code.toUpperCase()} · LIVE</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: C.jade, boxShadow: `0 0 6px ${C.jade}` }} />
-            <Micro color={C.textDim} className="normal-case tracking-normal">Live Engine · {f.engine}</Micro>
-          </div>
+      {/* Story content */}
+      <div className="px-5 py-4">
+        <div className="flex items-baseline gap-2 flex-wrap">
+          <Micro className="normal-case tracking-normal">{f.intro.label}</Micro>
+          <span className="text-[13px] font-medium" style={{ color: C.red }}>↗ {f.intro.delta}</span>
+          <span className="text-[11px]" style={{ color: C.textDim }}>{f.intro.note}</span>
         </div>
 
-        {/* Flow content */}
-        <div className="px-5 py-3.5">
-          {/* Exposure banner */}
-          <motion.div
-            initial={{ opacity: 0, y: 8 }} animate={inView ? { opacity: 1, y: 0 } : {}} transition={{ duration: 0.4 }}
-            className="rounded-lg px-3.5 py-2.5"
-            style={{ background: `linear-gradient(180deg, ${C.red}24 0%, ${C.red}00 75%)`, border: `1px solid ${C.red}55` }}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-start gap-2 min-w-0">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.red} strokeWidth="2" className="mt-0.5 shrink-0"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
-                <div className="min-w-0">
-                  <div className="flex items-baseline gap-2 flex-wrap">
-                    <span className="text-[12px] font-medium" style={{ color: FLOW_TC.red.lite }}>{f.banner.code}</span>
-                    <Micro className="normal-case tracking-normal">{f.banner.effective}</Micro>
-                  </div>
-                  <div className="text-[11px] mt-0.5" style={{ color: C.textDim }}>{f.banner.summary}</div>
-                </div>
-              </div>
-              <div className="text-right shrink-0">
-                <Micro className="block">{f.banner.gapsLabel}</Micro>
-                <div className="font-bold tabular-nums leading-none mt-0.5" style={{ color: C.red, fontSize: '1.15rem' }}>{f.banner.gaps}</div>
-              </div>
-            </div>
-            <div className="mt-1.5 pt-1.5 flex items-baseline gap-2 flex-wrap" style={{ borderTop: `1px solid ${C.red}2b` }}>
-              <Micro className="normal-case tracking-normal">Exposure</Micro>
-              <span className="text-[12px] font-medium" style={{ color: C.red }}>{f.banner.exposure}</span>
-              <span className="text-[10px]" style={{ color: C.label }}>{f.banner.exposureNote}</span>
-            </div>
-          </motion.div>
+        {/* 3-panel issue → reasoning → resolved flow */}
+        <div className="mt-3 flex items-stretch">
+          <StoryPanel stage={f.stages[0]} delay={0.1} inView={inView} />
+          <StageConnector fromTone={f.stages[0].tone} toTone={f.stages[1].tone} delay={0.3} inView={inView} />
+          <StoryPanel stage={f.stages[1]} delay={0.35} inView={inView} />
+          <StageConnector fromTone={f.stages[1].tone} toTone={f.stages[2].tone} delay={0.55} inView={inView} />
+          <StoryPanel stage={f.stages[2]} delay={0.6} inView={inView} />
+        </div>
 
-          {/* Central node */}
-          <div className="flex justify-center mt-2.5">
+        {/* Stat strip — same big-number + underline-bar treatment as the other pillars */}
+        <div className="flex mt-4" style={{ borderTop: `1px solid ${C.borderSoft}` }}>
+          {f.stats.map((s, i) => (
             <motion.div
-              initial={{ opacity: 0, scale: 0.96 }} animate={inView ? { opacity: 1, scale: 1 } : {}} transition={{ delay: 0.15, duration: 0.35 }}
-              className="inline-flex items-center gap-2 px-3 py-1 rounded-lg"
-              style={{ background: `linear-gradient(180deg, ${C.amber}24, ${C.jade}14)`, border: `1px solid ${C.amber}66`, boxShadow: `0 0 18px ${C.amber}22` }}
+              key={s.label}
+              initial={{ opacity: 0, y: 8 }}
+              animate={inView ? { opacity: 1, y: 0 } : {}}
+              transition={{ delay: 0.8 + i * 0.08 }}
+              className="flex-1 min-w-0 px-3 py-3 first:pl-0"
+              style={{ borderLeft: i === 0 ? 'none' : `1px solid ${C.borderSoft}` }}
             >
-              <motion.span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: C.amber }} animate={{ opacity: [1, 0.35, 1] }} transition={{ duration: 1.8, repeat: Infinity }} />
-              <span className="text-[10px] font-medium tracking-wide" style={{ color: C.text }}>{f.central}</span>
+              <Micro className="block truncate">{s.label}</Micro>
+              <div className="font-bold tabular-nums leading-none mt-1.5" style={{ color: toneColor(s.tone), fontSize: '1.5rem', letterSpacing: '-0.02em' }}>{s.value}</div>
+              <div className="mt-2 h-1 rounded-full overflow-hidden" style={{ backgroundColor: 'rgba(255,255,255,0.05)' }}>
+                <motion.div initial={{ width: 0 }} animate={inView ? { width: `${s.pct}%` } : {}} transition={{ delay: 0.8 + i * 0.08 + 0.2, duration: 0.6 }} className="h-full" style={{ backgroundColor: toneColor(s.tone) }} />
+              </div>
+              <Micro className="block mt-2">{s.sub}</Micro>
             </motion.div>
-          </div>
-
-          {/* Fan-out connectors */}
-          <FanLines n={f.comps.length} inView={inView} />
-
-          {/* Component cards */}
-          <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${f.comps.length}, minmax(0,1fr))` }}>
-            {f.comps.map((comp, i) => (
-              <motion.div
-                key={comp.title}
-                initial={{ opacity: 0, y: 10 }} animate={inView ? { opacity: 1, y: 0 } : {}} transition={{ delay: 0.5 + i * 0.08, duration: 0.35 }}
-                className="rounded-lg p-2 flex flex-col"
-                style={{ background: cardBg(comp.tone), border: `1px solid ${FLOW_TC[comp.tone].c}55` }}
-              >
-                <div className="text-[9.5px] font-medium uppercase tracking-wide leading-tight" style={{ color: C.text }}>{comp.title}</div>
-                <div className="text-[7.5px] font-mono mt-0.5" style={{ color: FLOW_TC[comp.tone].lite }}>{comp.cite}</div>
-                <div className="mt-1.5">
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[7px] font-medium uppercase tracking-wider"
-                    style={{ color: FLOW_TC[comp.tone].lite, backgroundColor: `${FLOW_TC[comp.tone].c}22`, border: `1px solid ${FLOW_TC[comp.tone].c}55` }}>
-                    <span>{comp.tone === 'green' ? '✓' : '×'}</span>{comp.badge}
-                  </span>
-                </div>
-                <div className="text-[9px] italic leading-snug mt-1.5 line-clamp-2" style={{ color: C.textDim }}>“{comp.question}”</div>
-                <div className="mt-1.5">
-                  <div className="rounded-md px-1.5 py-1" style={{ background: `linear-gradient(180deg, ${C.jade}1f 0%, ${C.jade}00 100%)`, border: `1px solid ${C.jade}44` }}>
-                    <Micro color={C.jadeLite} className="block">Suggested fix</Micro>
-                    <div className="text-[9px] leading-snug mt-0.5 line-clamp-2" style={{ color: C.text }}>{comp.fix}</div>
-                  </div>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-
-          {/* Status bar */}
-          <div className="flex items-center justify-between pt-2 mt-2.5" style={{ borderTop: `1px solid ${C.borderSoft}` }}>
-            <div className="flex items-center gap-2 min-w-0">
-              <Micro className="shrink-0">Status</Micro>
-              <span className="text-[10px] truncate" style={{ color: C.amber, fontFamily: 'ui-monospace, monospace' }}>{f.status}</span>
-            </div>
-            <Micro className="normal-case tracking-normal shrink-0">Jurisdiction CA · {f.engine}</Micro>
-          </div>
+          ))}
         </div>
       </div>
     </div>
