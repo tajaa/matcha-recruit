@@ -11,9 +11,21 @@ const PRODUCT_LINKS = [
   { to: '/platform', label: 'Full Platform' },
   // { to: '/matcha-work', label: 'Matcha Work' }, // beta — hidden until launch
   { to: '/matcha-daily', label: 'Matcha Lite' },
-  { to: '/compliance', label: 'Compliance' },
+  { to: '/compliance', label: 'Compliance', isNew: true },
+  { to: '/brokers', label: 'Brokers', isNew: true },
   { to: '/services', label: 'Consulting' },
 ]
+
+function NewBadge() {
+  return (
+    <span
+      className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-1 rounded-sm text-[7px] font-semibold uppercase tracking-wider leading-[1.3] whitespace-nowrap animate-pulse"
+      style={{ backgroundColor: '#6ee7a8', color: '#0F0F0F' }}
+    >
+      New
+    </span>
+  )
+}
 
 // Content / non-offering — split into the Explore sub-nav.
 const EXPLORE_LINKS = [
@@ -63,10 +75,11 @@ export default function MarketingNav({ onDemoClick }: Props) {
               <Link
                 key={link.to}
                 to={link.to}
-                className="text-sm transition-opacity hover:opacity-60"
+                className="relative text-sm transition-opacity hover:opacity-60"
                 style={{ color: TEXT_COLOR }}
               >
                 {link.label}
+                {link.isNew && <NewBadge />}
               </Link>
             ))}
 
@@ -169,7 +182,10 @@ export default function MarketingNav({ onDemoClick }: Props) {
                   borderColor: 'rgba(245, 242, 237, 0.15)',
                 }}
               >
-                {link.label}
+                <span className="relative inline-block">
+                  {link.label}
+                  {link.isNew && <NewBadge />}
+                </span>
               </Link>
             ))}
 

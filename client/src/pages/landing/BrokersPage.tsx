@@ -185,7 +185,6 @@ export default function BrokersPage() {
       "Give your P&C clients a live safety intake system — and get the intelligence layer back. Exposure-weighted risk curve, workers' comp loss control, and AI-drafted outreach across your whole book.",
     canonical: 'https://hey-matcha.com/brokers',
     jsonLd: BROKERS_JSON_LD,
-    noindex: true, // unlisted — reachable by direct link only, kept out of search indexes
   })
 
   return (
