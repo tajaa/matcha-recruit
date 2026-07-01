@@ -23,6 +23,38 @@ export type AdminUpdate = {
 
 export const ADMIN_UPDATES: AdminUpdate[] = [
   {
+    id: 'matcha-compliance-standalone-admin-tools',
+    date: '2026-07-01',
+    category: 'Compliance',
+    title: 'Matcha Compliance — 4-pillar landing page + admin signup links, real pricing, tier provisioning',
+    summary:
+      'Matcha Compliance is now sold and operable as a fully standalone product, the way Matcha Lite already is. The /compliance landing page repositions it as four pillars (jurisdictional compliance, handbook audit, policy management, credentialing) built entirely from pieces already shipped for Matcha-X. On the admin side: pricing moved off a hardcoded placeholder onto real, admin-configurable $8/employee/month billing; admins can generate a Compliance signup link that activates an account with no Stripe charge (for invoiced/gifted clients) or manually provision/retier a company into Compliance; and a long-dead invite link for full-platform (Bespoke/Pro) accounts was fixed and given an admin panel. A same-tier security gap that could have granted any of Lite/X/Compliance for free was also closed.',
+    whatsNew: [
+      'Landing: /compliance rebuilt around 4 pillars, each with its own mockup — jurisdictional compliance gets an animated "issue → reasoning → resolved" card that rotates through 3 real scenarios (CA SB 553, NY pay transparency, IL BIPA); handbook audit / policy management / credentialing keep the standard dashboard-style mockup.',
+      'Entitlements: a matcha_compliance tier overlay grants handbook_audit + policies + credential_templates + employees automatically — compliance itself stays the Stripe-webhook paid gate, unchanged.',
+      'Pricing: flat $8/employee/month, admin-editable at Admin → Signup Links → Pricing → Compliance tab (same panel Lite/Essentials already use — block-size is locked to 1 for Compliance so it can’t accidentally become step pricing).',
+      'Signup links: Admin → Signup Links now generates a Compliance link alongside Lite/Matcha-X — one-use, activates instantly with NO Stripe charge (the comped/invoiced-client path). The plain public /compliance/signup URL is unchanged and still requires real payment.',
+      'Admin can now retier an existing company to/from matcha_compliance (previously 400’d as "unknown tier") and filter the company list by a new Compliance chip.',
+      'Fixed a dead link: /register/invite/:token (the generic, any-tier Bespoke/Pro invite) had a working backend but no page at all. It now works, and Admin → Signup Links → "Bespoke / Pro Invites" generates them — also comped, no Stripe.',
+      'Security fix: PATCH /admin/companies/{id}/tier had a gap where re-submitting a company’s OWN current tier (e.g. a still-pending, unpaid signup) skipped the payment check entirely and granted the full paid bundle for free. Affected Lite, Matcha-X, and Compliance alike — closed for all three.',
+    ],
+    howToUse: [
+      'Generate a comped link: Admin → Signup Links → "Comp Signup Links" tab → Generate → send the Compliance URL to an invoiced/gifted client. They sign up and land active immediately, no card required.',
+      'Provision/retier manually: Admin → a company → Lifecycle actions → pick "Matcha Compliance" → Switch (only works moving FROM another tier — you still can’t force-activate an unpaid company this way, by design).',
+      'Bespoke/Pro invite: Admin → Signup Links → "Bespoke / Pro Invites" tab → Generate → send the link → recipient fills in company + headcount and lands on the full platform, no payment.',
+      'Adjust price: Admin → Signup Links → Pricing → Compliance tab → change price-per-employee → Save (block size stays fixed at 1).',
+    ],
+    setup: [
+      'Apply migration mlpricing03 (seeds the $8/head Compliance pricing row). Applied to DEV; PROD pending — run ./scripts/migrate-prod.sh.',
+      'No new feature flag beyond the existing matcha_compliance tier overlay (already live). No new integration or env var.',
+    ],
+    notes: [
+      'The jurisdiction-count field on the Compliance signup form is still collected (it drives the compliance-check feature itself) but no longer affects price — pricing is flat per-head now, matching what "$8 a head" meant.',
+      'Comped invite tokens (Lite/X/Compliance/Bespoke) all share the same behavior: one-use, instant-activate, zero Stripe involvement — that’s the intended mechanism for invoiced clients, not a bug.',
+    ],
+    tag: 'action-needed',
+  },
+  {
     id: 'broker-loss-ratio',
     date: '2026-06-23',
     category: 'Broker',
