@@ -23,12 +23,13 @@ const HEADLINES = [
 
 const ITEMS = [...HEADLINES, ...HEADLINES]
 
-// Default keeps the warm gold accent (the original /platform look). `mono`
-// renders the ticker in matcha-green — the single emphasis color used across
-// the simpler-pages design system.
+// Default keeps the warm gold accent on a dark bar (the original /platform
+// look, still used by the legacy /platform route). `mono` matches the
+// simpler-pages ComplianceTicker treatment: transparent bg (page cream
+// shows through), dark gray text, matcha-green as the one accent.
 const PALETTE = {
-  gold: { accent: '#d7ba7d', tagText: '#c9b48e', tagBorder: 'rgba(201,180,142,0.45)' },
-  mono: { accent: '#A3C57D', tagText: '#c3dba3', tagBorder: 'rgba(163,197,125,0.45)' },
+  gold: { accent: '#d7ba7d', tagText: '#c9b48e', tagBorder: 'rgba(201,180,142,0.45)', headline: 'rgba(240,236,228,0.95)' },
+  mono: { accent: '#A3C57D', tagText: '#374151', tagBorder: '#374151', headline: '#374151' },
 }
 
 export function EnforcementTotalsTicker({ mono = false }: { mono?: boolean } = {}) {
@@ -38,23 +39,23 @@ export function EnforcementTotalsTicker({ mono = false }: { mono?: boolean } = {
       className="fixed left-0 right-0 z-40 w-full overflow-hidden"
       style={{
         top: '64px',
-        backgroundColor: 'var(--color-ivory-ink)',
+        ...(mono ? {} : { backgroundColor: 'var(--color-ivory-ink)' }),
         borderBottom: '1px solid rgba(255,255,255,0.06)',
-        height: '44px',
+        height: mono ? '40px' : '44px',
       }}
     >
       <div className="flex items-center h-full">
         <div
-          className="shrink-0 flex items-center gap-2 px-5 h-full border-r text-[11px] font-medium uppercase tracking-[0.18em]"
+          className={`shrink-0 flex items-center gap-2 px-5 h-full border-r text-[11px] font-medium uppercase tracking-[0.18em]${mono ? ' text-gray-600' : ''}`}
           style={{
             borderColor: 'rgba(255,255,255,0.08)',
-            color: P.accent,
+            ...(mono ? {} : { color: P.accent }),
           }}
         >
-          <span className="relative inline-flex w-1.5 h-1.5">
+          <span className={`relative inline-flex ${mono ? 'w-1 h-1' : 'w-1.5 h-1.5'}`}>
             <span
               className="absolute inline-flex w-full h-full rounded-full animate-ping"
-              style={{ backgroundColor: P.accent, opacity: 0.5 }}
+              style={mono ? { opacity: 0.5 } : { backgroundColor: P.accent, opacity: 0.5 }}
             />
             <span
               className="relative inline-flex rounded-full w-1.5 h-1.5"
@@ -82,7 +83,7 @@ export function EnforcementTotalsTicker({ mono = false }: { mono?: boolean } = {
                 </span>
                 <span
                   className="text-[13px]"
-                  style={{ color: 'rgba(240,236,228,0.95)' }}
+                  style={{ color: P.headline }}
                 >
                   {item.text}
                 </span>

@@ -291,25 +291,21 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
       </div>
 
       {/* Ticker — pulled high so it reads immediately, no scroll required */}
-      <div className="mt-6 sm:mt-7">
+      <div>
         <Marquee />
       </div>
 
-      {/* Headline + supporting content. Below xl: stacked (carousel in normal
-          flow under the CTAs, full width). xl+: real two-column grid — the
-          carousel needs its own column to grow properly instead of fighting
-          the headline for dead space, which is what capped it small before. */}
+      {/* Headline + supporting content, stacked at every breakpoint — the
+          carousel sits full-width below the headline/CTAs instead of
+          fighting them for space in a side-by-side column. */}
       <div className="relative max-w-[1600px] mx-auto w-full px-6 sm:px-10 flex-1 flex flex-col justify-center py-8 sm:py-10">
-        <div className="xl:grid xl:grid-cols-[0.82fr_1.18fr] xl:gap-14 2xl:gap-20 xl:items-center">
+        <div>
           <div>
             <h1
-              className="home-rise tracking-[-0.02em] text-[clamp(2.75rem,9.5vw,9rem)] xl:text-[clamp(2.75rem,5.4vw,6.75rem)]"
-              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 0.86 }}
+              className="home-rise tracking-[-0.02em] text-[clamp(2.75rem,9.5vw,9rem)] xl:text-[clamp(2.75rem,4.4vw,5.5rem)]"
+              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 0.98 }}
             >
-              <span style={{ animationDelay: "0.16s" }}>We run</span>
-              <br />
-              <span style={{ animationDelay: "0.26s" }}>the whole</span>
-              <br />
+              <span style={{ animationDelay: "0.16s" }}>We run the whole</span>{" "}
               <span
                 style={{
                   animationDelay: "0.36s",
@@ -319,8 +315,7 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
               >
                 risk
               </span>
-              <span style={{ animationDelay: "0.44s" }}>&nbsp;&amp;</span>
-              <br />
+              <span style={{ animationDelay: "0.44s" }}>&nbsp;&amp;&nbsp;</span>
               <span
                 style={{
                   animationDelay: "0.54s",
@@ -334,14 +329,14 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
             </h1>
 
             <div
-              className="mt-9 flex flex-col lg:flex-row lg:items-end lg:justify-between xl:flex-col xl:items-start gap-7 home-fade"
+              className="mt-9 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-7 home-fade"
               style={{ animationDelay: "0.66s" }}
             >
               <p
                 className="max-w-2xl text-lg sm:text-xl"
                 style={{ color: BONE, lineHeight: 1.45 }}
               >
-                <span style={{ color: "#A3C57D" }}>
+                <span style={{ color: "#FFFFFF" }}>
                   Managing your risk before your risk manages you.
                 </span>{" "}
                 <span style={{ color: ASH }}>
@@ -373,7 +368,7 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
           </div>
 
           <div
-            className="mt-14 xl:mt-0 home-fade"
+            className="mt-14 home-fade"
             style={{ animationDelay: "0.8s" }}
           >
             <ProductCarousel />
@@ -2032,7 +2027,9 @@ function ProductCarousel() {
               exit="exit"
               transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
             >
-              <Instrument />
+              <div style={{ transform: "scale(0.88)", transformOrigin: "top left", width: "113.64%" }}>
+                <Instrument />
+              </div>
             </motion.div>
           </AnimatePresence>
         </Link>
