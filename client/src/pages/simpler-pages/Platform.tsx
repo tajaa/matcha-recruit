@@ -16,15 +16,15 @@ const BG = 'var(--color-ivory-bg)'
 const MUTED = 'var(--color-ivory-muted)'
 const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
-const AMBER = '#F59E0B' // the one emphasis color — everything else stays grayscale
-const AMBER_600 = '#D97706' // eyebrow labels specifically
+const GREEN = '#A3C57D' // the one emphasis color — everything else stays grayscale
+const GREEN_600 = '#5B7F3E' // eyebrow labels specifically
 
 // ---------------------------------------------------------------------------
 // Simplified /platform — the full Matcha platform (EHS + GRC + ER unified on
 // one agentic brain) told in outcome-level marketing copy only. No mechanism
 // detail, no dense product dashboards — the same design language as the
 // simplified /matcha-compliance page: a live hero panel, four full-width
-// alternating pillar rows each with a bespoke grayscale+amber instrument, a
+// alternating pillar rows each with a bespoke grayscale+green instrument, a
 // coverage recap grid, an editorial cut, and the monochrome newsletter band.
 // ---------------------------------------------------------------------------
 
@@ -120,7 +120,7 @@ function Hero({ onContactClick }: { onContactClick: () => void }) {
             className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-6 sm:mb-8"
             style={{ backgroundColor: 'rgba(31,29,26,0.06)', color: MUTED }}
           >
-            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: AMBER }} />
+            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: GREEN }} />
             <span className="text-[10px] sm:text-[11px] uppercase tracking-wider font-medium">
               The full platform
             </span>
@@ -183,7 +183,7 @@ function Hero({ onContactClick }: { onContactClick: () => void }) {
 // ---------------------------------------------------------------------------
 // Pillars — four full-width editorial rows (≈ two pages of scroll). Each
 // pillar alternates copy / instrument sides and gets its own bespoke
-// grayscale diagram, with one amber mark for the node it resolves to and an
+// grayscale diagram, with one green mark for the node it resolves to and an
 // oversized ghost numeral bleeding off the copy side. Grayscale everywhere.
 // ---------------------------------------------------------------------------
 
@@ -192,11 +192,11 @@ function PulseDot({ size = 8 }: { size?: number }) {
     <span className="relative flex items-center justify-center" style={{ width: size, height: size }}>
       <motion.span
         className="absolute rounded-full"
-        style={{ width: size, height: size, backgroundColor: AMBER }}
+        style={{ width: size, height: size, backgroundColor: GREEN }}
         animate={{ scale: [1, 2.4, 1], opacity: [0.35, 0, 0.35] }}
         transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
       />
-      <span className="relative block rounded-full" style={{ width: size, height: size, backgroundColor: AMBER }} />
+      <span className="relative block rounded-full" style={{ width: size, height: size, backgroundColor: GREEN }} />
     </span>
   )
 }
@@ -219,31 +219,15 @@ function InstrumentFrame({ caption, foot, children }: { caption: string; foot: s
   )
 }
 
-// 01 — intake pipeline: report resolves through to routed.
+// 01 — incident intake, resolved to routed. No pipeline detail.
 function IntakeInstrument() {
-  const steps = ['Report', 'Categorize', 'Severity', 'Routed']
-  const activeIdx = 3
   return (
     <InstrumentFrame caption="Incident · intake" foot="Every report categorized, scored, and routed">
-      <div className="relative py-2">
-        <div className="absolute left-0 right-0 top-[9px] h-px" style={{ backgroundColor: LINE }} />
-        <div className="relative flex items-start justify-between">
-          {steps.map((s, i) => (
-            <div key={s} className="flex flex-col items-center gap-3" style={{ width: 72 }}>
-              {i === activeIdx ? (
-                <PulseDot size={9} />
-              ) : (
-                <span className="block rounded-full" style={{ width: 7, height: 7, backgroundColor: i < activeIdx ? MUTED : LINE, border: i > activeIdx ? `1px solid ${LINE}` : 'none' }} />
-              )}
-              <span
-                className="text-[9.5px] font-mono uppercase tracking-wider text-center"
-                style={{ color: i === activeIdx ? INK : MUTED, fontWeight: i === activeIdx ? 600 : 400 }}
-              >
-                {s}
-              </span>
-            </div>
-          ))}
-        </div>
+      <div className="flex flex-col items-center text-center gap-4 py-3">
+        <PulseDot size={10} />
+        <p style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '1.6rem', color: INK, lineHeight: 1.2 }}>
+          Reported. Scored. Routed.
+        </p>
       </div>
       <div className="mt-6 pt-5 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
         <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: MUTED }}>Atlanta — Store 7</span>
@@ -273,7 +257,7 @@ function ComplianceInstrument() {
               {lit ? (
                 <span className="flex items-center gap-1.5 shrink-0">
                   <PulseDot size={6} />
-                  <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: AMBER_600 }}>Flagged</span>
+                  <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: GREEN_600 }}>Flagged</span>
                 </span>
               ) : (
                 <span className="text-[9px] font-mono uppercase tracking-wider shrink-0" style={{ color: MUTED }}>Clear</span>
@@ -302,7 +286,7 @@ function CaseInstrument() {
         )}
       </div>
       <div className="mt-5 pt-5 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
-        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: AMBER_600 }}>Pattern found</span>
+        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: GREEN_600 }}>Pattern found</span>
         <span className="text-[11px] font-mono" style={{ color: INK }}>A repeat, one location</span>
       </div>
     </InstrumentFrame>
@@ -332,7 +316,7 @@ function ConvergenceInstrument() {
         <span className="text-[11px] font-mono" style={{ color: MUTED }}>→</span>
         <div className="flex flex-col items-center gap-1 shrink-0">
           <div className="flex items-baseline gap-1">
-            <span className="tabular-nums leading-none" style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '2.75rem', color: AMBER }}>72</span>
+            <span className="tabular-nums leading-none" style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '2.75rem', color: GREEN }}>72</span>
           </div>
           <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: MUTED }}>Risk index</span>
         </div>
@@ -381,7 +365,7 @@ function PillarRow({ pillar, index }: { pillar: Pillar; index: number }) {
             viewport={{ once: true, margin: '-80px' }}
             transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
           >
-            <div className="text-[12px] uppercase tracking-[0.2em] font-mono mb-6" style={{ color: AMBER_600 }}>
+            <div className="text-[12px] uppercase tracking-[0.2em] font-mono mb-6" style={{ color: GREEN_600 }}>
               {pillar.number} · {pillar.title}
             </div>
             <h3
@@ -451,7 +435,7 @@ function GlyphBars() {
   return (
     <div className="flex items-end gap-1 h-6">
       {[10, 16, 12, 22, 14].map((h, i) => (
-        <span key={i} className="w-[3px] rounded-full" style={{ height: h, backgroundColor: i === 3 ? AMBER : LINE }} />
+        <span key={i} className="w-[3px] rounded-full" style={{ height: h, backgroundColor: i === 3 ? GREEN : LINE }} />
       ))}
     </div>
   )
@@ -461,7 +445,7 @@ function GlyphBrain() {
     <div className="flex flex-col gap-1 items-end">
       {[0, 1, 2].map((i) => (
         <span key={i} className="flex items-center gap-1">
-          <span className="rounded-full" style={{ width: 4, height: 4, backgroundColor: i === 1 ? AMBER : MUTED }} />
+          <span className="rounded-full" style={{ width: 4, height: 4, backgroundColor: i === 1 ? GREEN : MUTED }} />
           <span className="h-[2px] rounded-full" style={{ width: i === 1 ? 16 : 12, backgroundColor: LINE }} />
         </span>
       ))}
@@ -472,7 +456,7 @@ function GlyphScale() {
   return (
     <div className="flex flex-col items-end gap-1">
       {[16, 12, 9].map((w, i) => (
-        <span key={w} className="h-[3px] rounded-full" style={{ width: w, backgroundColor: i === 2 ? AMBER : LINE }} />
+        <span key={w} className="h-[3px] rounded-full" style={{ width: w, backgroundColor: i === 2 ? GREEN : LINE }} />
       ))}
     </div>
   )
@@ -481,21 +465,21 @@ function GlyphSteps() {
   return (
     <div className="flex items-center gap-1.5">
       {[0, 1, 2].map((i) => (
-        <span key={i} className="rounded-full" style={{ width: 6, height: 6, backgroundColor: i === 2 ? AMBER : 'transparent', border: i === 2 ? 'none' : `1px solid ${LINE}` }} />
+        <span key={i} className="rounded-full" style={{ width: 6, height: 6, backgroundColor: i === 2 ? GREEN : 'transparent', border: i === 2 ? 'none' : `1px solid ${LINE}` }} />
       ))}
     </div>
   )
 }
 function GlyphGauge() {
   return (
-    <span className="tabular-nums" style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '1.5rem', color: AMBER, lineHeight: 1 }}>72</span>
+    <span className="tabular-nums" style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '1.5rem', color: GREEN, lineHeight: 1 }}>72</span>
   )
 }
 function GlyphCluster() {
   return (
     <div className="grid grid-cols-3 gap-1">
       {[0, 1, 2, 3, 4, 5].map((i) => (
-        <span key={i} className="rounded-full" style={{ width: 4, height: 4, backgroundColor: i === 4 ? AMBER : LINE }} />
+        <span key={i} className="rounded-full" style={{ width: 4, height: 4, backgroundColor: i === 4 ? GREEN : LINE }} />
       ))}
     </div>
   )

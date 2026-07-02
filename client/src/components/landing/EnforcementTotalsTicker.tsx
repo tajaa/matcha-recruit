@@ -24,11 +24,11 @@ const HEADLINES = [
 const ITEMS = [...HEADLINES, ...HEADLINES]
 
 // Default keeps the warm gold accent (the original /platform look). `mono`
-// renders the ticker fully grayscale for the simpler-pages design system,
-// where amber is reserved as the single emphasis color used sparingly.
+// renders the ticker in matcha-green — the single emphasis color used across
+// the simpler-pages design system.
 const PALETTE = {
   gold: { accent: '#d7ba7d', tagText: '#c9b48e', tagBorder: 'rgba(201,180,142,0.45)' },
-  mono: { accent: '#b8b2a8', tagText: 'rgba(240,236,228,0.7)', tagBorder: 'rgba(240,236,228,0.22)' },
+  mono: { accent: '#A3C57D', tagText: '#c3dba3', tagBorder: 'rgba(163,197,125,0.45)' },
 }
 
 export function EnforcementTotalsTicker({ mono = false }: { mono?: boolean } = {}) {

@@ -13,14 +13,14 @@ const BG = 'var(--color-ivory-bg)'
 const MUTED = 'var(--color-ivory-muted)'
 const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
-const AMBER = '#F59E0B' // the one emphasis color — everything else grayscale
-const AMBER_600 = '#D97706' // eyebrow labels
+const GREEN = '#A3C57D' // the one emphasis color — everything else grayscale
+const GREEN_600 = '#5B7F3E' // eyebrow labels
 
 // ---------------------------------------------------------------------------
 // Simplified /brokers. Keeps the original colorful Book-Risk-Curve hero card
 // (the signature the user wanted to preserve), then simplifies the rest into
 // the simpler-pages design language: full-width alternating pillar rows with
-// bespoke grayscale+amber instruments, a coverage recap grid, an editorial
+// bespoke grayscale+green instruments, a coverage recap grid, an editorial
 // cut, and the monochrome newsletter band.
 // ---------------------------------------------------------------------------
 
@@ -143,7 +143,7 @@ function Hero({ onBookClick }: { onBookClick: () => void }) {
               className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-8"
               style={{ backgroundColor: 'rgba(31,29,26,0.06)', color: MUTED }}
             >
-              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: AMBER }} />
+              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: GREEN }} />
               <span className="text-[11px] uppercase tracking-wider font-medium">
                 For P&amp;C brokers
               </span>
@@ -332,7 +332,7 @@ function Positioning() {
               </ul>
             </div>
             <div className="p-8" style={{ backgroundColor: BG }}>
-              <div className="text-[10.5px] uppercase tracking-[0.2em] font-mono mb-4" style={{ color: AMBER_600 }}>
+              <div className="text-[10.5px] uppercase tracking-[0.2em] font-mono mb-4" style={{ color: GREEN_600 }}>
                 You see
               </div>
               <ul className="space-y-2.5 text-[15px]" style={{ color: INK }}>
@@ -349,18 +349,18 @@ function Positioning() {
   )
 }
 
-// ── Pillars — alternating rows with bespoke grayscale+amber instruments ────
+// ── Pillars — alternating rows with bespoke grayscale+green instruments ────
 
 function PulseDot({ size = 8 }: { size?: number }) {
   return (
     <span className="relative flex items-center justify-center" style={{ width: size, height: size }}>
       <motion.span
         className="absolute rounded-full"
-        style={{ width: size, height: size, backgroundColor: AMBER }}
+        style={{ width: size, height: size, backgroundColor: GREEN }}
         animate={{ scale: [1, 2.4, 1], opacity: [0.35, 0, 0.35] }}
         transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
       />
-      <span className="relative block rounded-full" style={{ width: size, height: size, backgroundColor: AMBER }} />
+      <span className="relative block rounded-full" style={{ width: size, height: size, backgroundColor: GREEN }} />
     </span>
   )
 }
@@ -400,7 +400,7 @@ function RiskCurveInstrument() {
               {b.label}
             </div>
             <div className="relative flex-1 h-2">
-              <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${b.w}%`, backgroundColor: b.lit ? AMBER : LINE }} />
+              <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${b.w}%`, backgroundColor: b.lit ? GREEN : LINE }} />
               {b.lit && (
                 <span className="absolute top-1/2 -translate-y-1/2" style={{ left: `${b.w}%` }}>
                   <PulseDot size={7} />
@@ -431,7 +431,7 @@ function WcInstrument() {
             {r.lit ? (
               <span className="flex items-center gap-1.5 shrink-0 w-24 justify-end">
                 <PulseDot size={6} />
-                <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: AMBER_600 }}>Needs a call</span>
+                <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: GREEN_600 }}>Needs a call</span>
               </span>
             ) : (
               <span className="text-[9px] font-mono uppercase tracking-wider shrink-0 w-24 text-right" style={{ color: MUTED }}>Stable</span>
@@ -462,7 +462,7 @@ function CommandInstrument() {
               <div className="text-[12px]" style={{ color: a.lit ? INK : MUTED, fontWeight: a.lit ? 600 : 400 }}>{a.client}</div>
               <div className="text-[10.5px] mt-0.5" style={{ color: MUTED }}>{a.issue}</div>
             </div>
-            <span className="text-[9px] font-mono uppercase tracking-wider shrink-0" style={{ color: a.lit ? AMBER_600 : MUTED }}>
+            <span className="text-[9px] font-mono uppercase tracking-wider shrink-0" style={{ color: a.lit ? GREEN_600 : MUTED }}>
               {a.lit ? 'Urgent' : 'Advisory'}
             </span>
           </div>
@@ -511,7 +511,7 @@ function PillarRow({ pillar, index }: { pillar: Pillar; index: number }) {
             viewport={{ once: true, margin: '-80px' }}
             transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
           >
-            <div className="text-[12px] uppercase tracking-[0.2em] font-mono mb-6" style={{ color: AMBER_600 }}>
+            <div className="text-[12px] uppercase tracking-[0.2em] font-mono mb-6" style={{ color: GREEN_600 }}>
               {pillar.number} · {pillar.title}
             </div>
             <h3
@@ -578,7 +578,7 @@ function PillarsGrid() {
 function GlyphCurve() {
   return (
     <svg width="40" height="22" viewBox="0 0 40 22" fill="none">
-      <path d="M1 20 C10 18 14 10 22 7 C30 4 36 3 39 2" stroke={AMBER} strokeWidth="1.4" fill="none" />
+      <path d="M1 20 C10 18 14 10 22 7 C30 4 36 3 39 2" stroke={GREEN} strokeWidth="1.4" fill="none" />
     </svg>
   )
 }
@@ -586,7 +586,7 @@ function GlyphBands() {
   return (
     <div className="flex flex-col items-end gap-1">
       {[16, 12, 9].map((w, i) => (
-        <span key={w} className="h-[3px] rounded-full" style={{ width: w, backgroundColor: i === 2 ? AMBER : LINE }} />
+        <span key={w} className="h-[3px] rounded-full" style={{ width: w, backgroundColor: i === 2 ? GREEN : LINE }} />
       ))}
     </div>
   )
@@ -596,7 +596,7 @@ function GlyphQueue() {
     <div className="flex flex-col gap-1 items-end">
       {[0, 1, 2].map((i) => (
         <span key={i} className="flex items-center gap-1">
-          <span className="rounded-full" style={{ width: 4, height: 4, backgroundColor: i === 0 ? AMBER : MUTED }} />
+          <span className="rounded-full" style={{ width: 4, height: 4, backgroundColor: i === 0 ? GREEN : MUTED }} />
           <span className="h-[2px] rounded-full" style={{ width: i === 0 ? 16 : 12, backgroundColor: LINE }} />
         </span>
       ))}
@@ -607,7 +607,7 @@ function GlyphSeats() {
   return (
     <div className="grid grid-cols-3 gap-1">
       {[0, 1, 2, 3, 4, 5].map((i) => (
-        <span key={i} className="rounded-sm" style={{ width: 5, height: 5, backgroundColor: i === 4 ? AMBER : LINE }} />
+        <span key={i} className="rounded-sm" style={{ width: 5, height: 5, backgroundColor: i === 4 ? GREEN : LINE }} />
       ))}
     </div>
   )
@@ -616,7 +616,7 @@ function GlyphLink() {
   return (
     <div className="flex items-center gap-1">
       {[9, 7, 5].map((w, i) => (
-        <span key={i} className="rounded-full" style={{ width: w, height: w, backgroundColor: i === 2 ? AMBER : LINE }} />
+        <span key={i} className="rounded-full" style={{ width: w, height: w, backgroundColor: i === 2 ? GREEN : LINE }} />
       ))}
     </div>
   )
@@ -627,7 +627,7 @@ function GlyphChecks() {
       {[0, 1, 2].map((i) => (
         <span key={i} className="flex items-center gap-1">
           <span className="h-[2px] rounded-full" style={{ width: 12, backgroundColor: LINE }} />
-          <span className="rounded-full" style={{ width: 4, height: 4, backgroundColor: i === 0 ? AMBER : MUTED }} />
+          <span className="rounded-full" style={{ width: 4, height: 4, backgroundColor: i === 0 ? GREEN : MUTED }} />
         </span>
       ))}
     </div>

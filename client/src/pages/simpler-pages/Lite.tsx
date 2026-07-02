@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import { ShieldAlert, Mic, Brain, ClipboardList, FileText, MapPin } from 'lucide-react'
 
 import MarketingNav from '../landing/MarketingNav'
@@ -14,13 +14,13 @@ const BG = 'var(--color-ivory-bg)'
 const MUTED = 'var(--color-ivory-muted)'
 const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
-const AMBER = '#F59E0B'
-const AMBER_600 = '#D97706'
+const GREEN = '#A3C57D'
+const GREEN_600 = '#5B7F3E'
 
 // ---------------------------------------------------------------------------
 // Simplified /matcha-daily (Matcha Lite). Outcome-level marketing copy, the
 // simpler-pages design language: clean centered hero, four full-width
-// alternating pillar rows with bespoke grayscale+amber instruments, a
+// alternating pillar rows with bespoke grayscale+green instruments, a
 // coverage recap grid, an editorial cut, and the monochrome newsletter band.
 // ---------------------------------------------------------------------------
 
@@ -114,7 +114,7 @@ function Hero({ onContactClick }: { onContactClick: () => void }) {
             className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-6 sm:mb-8"
             style={{ backgroundColor: 'rgba(31,29,26,0.06)', color: MUTED }}
           >
-            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: AMBER }} />
+            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: GREEN }} />
             <span className="text-[10px] sm:text-[11px] uppercase tracking-wider font-medium">
               Built for daily use, not a once-a-year binder
             </span>
@@ -124,7 +124,8 @@ function Hero({ onContactClick }: { onContactClick: () => void }) {
             style={{
               fontFamily: DISPLAY,
               fontWeight: 400,
-              color: INK,
+              color: GREEN,
+              WebkitTextStroke: `1.5px ${INK}`,
               fontSize: 'clamp(2.25rem, 7vw, 5.25rem)',
             }}
           >
@@ -177,11 +178,11 @@ function PulseDot({ size = 8 }: { size?: number }) {
     <span className="relative flex items-center justify-center" style={{ width: size, height: size }}>
       <motion.span
         className="absolute rounded-full"
-        style={{ width: size, height: size, backgroundColor: AMBER }}
+        style={{ width: size, height: size, backgroundColor: GREEN }}
         animate={{ scale: [1, 2.4, 1], opacity: [0.35, 0, 0.35] }}
         transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
       />
-      <span className="relative block rounded-full" style={{ width: size, height: size, backgroundColor: AMBER }} />
+      <span className="relative block rounded-full" style={{ width: size, height: size, backgroundColor: GREEN }} />
     </span>
   )
 }
@@ -204,33 +205,47 @@ function InstrumentFrame({ caption, foot, children }: { caption: string; foot: s
   )
 }
 
-// 01 — magic-link intake pipeline, resolves to logged.
+// 01 — magic-link intake: a real text arrives, resolves to logged. No pipeline detail.
 function IntakeInstrument() {
-  const steps = ['Open link', 'Fill', 'Review', 'Logged']
-  const activeIdx = 3
+  const [logged, setLogged] = useState(false)
+  useEffect(() => {
+    const t = setInterval(() => setLogged((v) => !v), 5200)
+    return () => clearInterval(t)
+  }, [])
   return (
     <InstrumentFrame caption="Magic link · intake" foot="No login, no app — a defensible record">
-      <div className="relative py-2">
-        <div className="absolute left-0 right-0 top-[9px] h-px" style={{ backgroundColor: LINE }} />
-        <div className="relative flex items-start justify-between">
-          {steps.map((s, i) => (
-            <div key={s} className="flex flex-col items-center gap-3" style={{ width: 72 }}>
-              {i === activeIdx ? (
-                <PulseDot size={9} />
-              ) : (
-                <span className="block rounded-full" style={{ width: 7, height: 7, backgroundColor: i < activeIdx ? MUTED : LINE, border: i > activeIdx ? `1px solid ${LINE}` : 'none' }} />
-              )}
-              <span
-                className="text-[9.5px] font-mono uppercase tracking-wider text-center"
-                style={{ color: i === activeIdx ? INK : MUTED, fontWeight: i === activeIdx ? 600 : 400 }}
-              >
-                {s}
+      <div className="flex items-center justify-center py-3" style={{ minHeight: 84 }}>
+        <AnimatePresence mode="wait">
+          {!logged ? (
+            <motion.div
+              key="text"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.35 }}
+              className="max-w-[280px] rounded-2xl rounded-bl-sm px-4 py-3 text-[13px] border"
+              style={{ backgroundColor: BG, borderColor: LINE, color: INK, lineHeight: 1.4 }}
+            >
+              "Wet floor by the loading dock, no injury, cleaned up"
+            </motion.div>
+          ) : (
+            <motion.div
+              key="logged"
+              initial={{ opacity: 0, scale: 0.92 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.92 }}
+              transition={{ duration: 0.35 }}
+              className="flex items-center gap-2.5"
+            >
+              <span style={{ color: INK, fontSize: '1.1rem' }}>✓</span>
+              <span style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '1.4rem', color: INK }}>
+                Logged.
               </span>
-            </div>
-          ))}
-        </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-      <div className="mt-6 pt-5 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
+      <div className="mt-2 pt-5 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
         <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: MUTED }}>Dallas — Store 3</span>
         <span className="text-[11px] font-mono" style={{ color: INK }}>Reported in seconds</span>
       </div>
@@ -249,13 +264,13 @@ function VoiceInstrument() {
             <motion.div
               key={i}
               className="w-[3px] rounded-full"
-              style={{ backgroundColor: i === 4 ? AMBER : MUTED, opacity: i === 4 ? 1 : 0.5 }}
+              style={{ backgroundColor: i === 4 ? GREEN : MUTED, opacity: i === 4 ? 1 : 0.5 }}
               animate={{ height: [`${v * 45}%`, `${v * 100}%`, `${v * 45}%`] }}
               transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.05, ease: 'easeInOut' }}
             />
           ))}
         </div>
-        <span className="text-[10px] font-mono" style={{ color: AMBER_600 }}>Report ready for review</span>
+        <span className="text-[10px] font-mono" style={{ color: GREEN_600 }}>Report ready for review</span>
       </div>
       <div className="mt-5 pt-5 border-t grid grid-cols-2 gap-4" style={{ borderColor: LINE }}>
         <div>
@@ -264,7 +279,7 @@ function VoiceInstrument() {
         </div>
         <div>
           <div className="text-[8px] font-mono uppercase tracking-widest mb-1" style={{ color: MUTED }}>Severity</div>
-          <div className="text-[12px] font-medium" style={{ color: AMBER_600 }}>Medium</div>
+          <div className="text-[12px] font-medium" style={{ color: GREEN_600 }}>Medium</div>
         </div>
       </div>
     </InstrumentFrame>
@@ -288,12 +303,12 @@ function AnalysisInstrument() {
             </span>
             <span className="flex-1 min-w-0 text-[12px] truncate" style={{ color: r.lit ? INK : MUTED, fontWeight: r.lit ? 600 : 400 }}>{r.loc}</span>
             <span className="text-[10px] font-mono truncate hidden sm:inline shrink-0" style={{ color: MUTED }}>{r.type}</span>
-            <span className="text-[9px] font-mono uppercase tracking-wider shrink-0 w-10 text-right" style={{ color: r.lit ? AMBER_600 : MUTED }}>{r.sev}</span>
+            <span className="text-[9px] font-mono uppercase tracking-wider shrink-0 w-10 text-right" style={{ color: r.lit ? GREEN_600 : MUTED }}>{r.sev}</span>
           </div>
         ))}
       </div>
       <div className="mt-5 pt-5 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
-        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: AMBER_600 }}>Pattern detected</span>
+        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: GREEN_600 }}>Pattern detected</span>
         <span className="text-[11px] font-mono" style={{ color: INK }}>A repeat, surfaced early</span>
       </div>
     </InstrumentFrame>
@@ -317,7 +332,7 @@ function OshaInstrument() {
             style={{ borderRight: i < tiles.length - 1 ? `1px solid ${LINE}` : undefined }}
           >
             <div className="text-[8px] font-mono uppercase tracking-widest mb-1.5" style={{ color: MUTED }}>{t.label}</div>
-            <div className="tabular-nums leading-none" style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '1.75rem', color: t.lit ? AMBER : INK }}>{t.value}</div>
+            <div className="tabular-nums leading-none" style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '1.75rem', color: t.lit ? GREEN : INK }}>{t.value}</div>
           </div>
         ))}
       </div>
@@ -369,7 +384,7 @@ function PillarRow({ pillar, index }: { pillar: Pillar; index: number }) {
             viewport={{ once: true, margin: '-80px' }}
             transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
           >
-            <div className="text-[12px] uppercase tracking-[0.2em] font-mono mb-6" style={{ color: AMBER_600 }}>
+            <div className="text-[12px] uppercase tracking-[0.2em] font-mono mb-6" style={{ color: GREEN_600 }}>
               {pillar.number} · {pillar.title}
             </div>
             <h3
@@ -437,7 +452,7 @@ function GlyphBars() {
   return (
     <div className="flex items-end gap-1 h-6">
       {[10, 16, 12, 22, 14].map((h, i) => (
-        <span key={i} className="w-[3px] rounded-full" style={{ height: h, backgroundColor: i === 3 ? AMBER : LINE }} />
+        <span key={i} className="w-[3px] rounded-full" style={{ height: h, backgroundColor: i === 3 ? GREEN : LINE }} />
       ))}
     </div>
   )
@@ -446,7 +461,7 @@ function GlyphWave() {
   return (
     <div className="flex items-end gap-[3px] h-6">
       {[0.4, 0.8, 0.5, 1, 0.6, 0.85, 0.45].map((v, i) => (
-        <span key={i} className="w-[2.5px] rounded-full" style={{ height: `${v * 100}%`, backgroundColor: i === 3 ? AMBER : LINE }} />
+        <span key={i} className="w-[2.5px] rounded-full" style={{ height: `${v * 100}%`, backgroundColor: i === 3 ? GREEN : LINE }} />
       ))}
     </div>
   )
@@ -456,7 +471,7 @@ function GlyphBrain() {
     <div className="flex flex-col gap-1 items-end">
       {[0, 1, 2].map((i) => (
         <span key={i} className="flex items-center gap-1">
-          <span className="rounded-full" style={{ width: 4, height: 4, backgroundColor: i === 0 ? AMBER : MUTED }} />
+          <span className="rounded-full" style={{ width: 4, height: 4, backgroundColor: i === 0 ? GREEN : MUTED }} />
           <span className="h-[2px] rounded-full" style={{ width: i === 0 ? 16 : 12, backgroundColor: LINE }} />
         </span>
       ))}
@@ -467,7 +482,7 @@ function GlyphLog() {
   return (
     <div className="flex flex-col gap-1 items-end">
       {[16, 13, 16, 10].map((w, i) => (
-        <span key={i} className="h-[2px] rounded-full" style={{ width: w, backgroundColor: i === 0 ? AMBER : LINE }} />
+        <span key={i} className="h-[2px] rounded-full" style={{ width: w, backgroundColor: i === 0 ? GREEN : LINE }} />
       ))}
     </div>
   )
@@ -476,7 +491,7 @@ function GlyphStack() {
   return (
     <div className="relative w-5 h-6">
       {[0, 1, 2].map((i) => (
-        <span key={i} className="absolute rounded-sm border" style={{ width: 14, height: 16, left: i * 3, top: i * 2, borderColor: i === 0 ? AMBER : LINE, backgroundColor: BG }} />
+        <span key={i} className="absolute rounded-sm border" style={{ width: 14, height: 16, left: i * 3, top: i * 2, borderColor: i === 0 ? GREEN : LINE, backgroundColor: BG }} />
       ))}
     </div>
   )
@@ -485,7 +500,7 @@ function GlyphDots() {
   return (
     <div className="grid grid-cols-3 gap-1">
       {[0, 1, 2, 3, 4, 5].map((i) => (
-        <span key={i} className="rounded-full" style={{ width: 4, height: 4, backgroundColor: i === 4 ? AMBER : LINE }} />
+        <span key={i} className="rounded-full" style={{ width: 4, height: 4, backgroundColor: i === 4 ? GREEN : LINE }} />
       ))}
     </div>
   )

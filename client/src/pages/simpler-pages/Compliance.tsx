@@ -14,8 +14,8 @@ const BG = 'var(--color-ivory-bg)'
 const MUTED = 'var(--color-ivory-muted)'
 const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
-const AMBER = '#F59E0B' // the one emphasis color — everything else stays grayscale
-const AMBER_600 = '#D97706' // eyebrow labels specifically
+const GREEN = '#A3C57D' // the one emphasis color — everything else stays grayscale
+const GREEN_600 = '#5B7F3E' // eyebrow labels specifically
 
 // ---------------------------------------------------------------------------
 // Simplified /compliance — same four-pillar product (jurisdictional
@@ -24,7 +24,7 @@ const AMBER_600 = '#D97706' // eyebrow labels specifically
 // "preemption engine", no AI/OCR specifics, no data provenance) and no
 // in-app mockups.
 //
-// Grayscale card system, one amber accent used the same way on every card:
+// Grayscale card system, one green accent used the same way on every card:
 // it marks the single node each pillar resolves to — the governing rule,
 // the critical gap, the active policy, the day a credential expires. That's
 // the "shape strip", a chip row that traces each pillar's real structure
@@ -100,7 +100,7 @@ export default function SimpleCompliancePage() {
 }
 
 // ---------------------------------------------------------------------------
-// Hero — dark stat panel, grayscale tiles, amber underline as the one accent.
+// Hero — dark stat panel, grayscale tiles, green underline as the one accent.
 // ---------------------------------------------------------------------------
 
 function Hero({ onContactClick }: { onContactClick: () => void }) {
@@ -120,7 +120,7 @@ function Hero({ onContactClick }: { onContactClick: () => void }) {
             className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-6 sm:mb-8"
             style={{ backgroundColor: 'rgba(31,29,26,0.06)', color: MUTED }}
           >
-            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: AMBER }} />
+            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: GREEN }} />
             <span className="text-[10px] sm:text-[11px] uppercase tracking-wider font-medium">
               Standalone compliance platform
             </span>
@@ -175,7 +175,7 @@ function Hero({ onContactClick }: { onContactClick: () => void }) {
 // compact card grid. Each pillar alternates copy / instrument sides and gets
 // its own bespoke grayscale diagram: a jurisdiction stack that resolves to
 // the governing rule, a graded handbook, a policy lifecycle, a credential
-// countdown. One amber mark per instrument — the node it resolves to — and
+// countdown. One green mark per instrument — the node it resolves to — and
 // an oversized ghost numeral bleeding off the copy side. Grayscale else.
 // ---------------------------------------------------------------------------
 
@@ -184,11 +184,11 @@ function PulseDot({ size = 8 }: { size?: number }) {
     <span className="relative flex items-center justify-center" style={{ width: size, height: size }}>
       <motion.span
         className="absolute rounded-full"
-        style={{ width: size, height: size, backgroundColor: AMBER }}
+        style={{ width: size, height: size, backgroundColor: GREEN }}
         animate={{ scale: [1, 2.4, 1], opacity: [0.35, 0, 0.35] }}
         transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
       />
-      <span className="relative block rounded-full" style={{ width: size, height: size, backgroundColor: AMBER }} />
+      <span className="relative block rounded-full" style={{ width: size, height: size, backgroundColor: GREEN }} />
     </span>
   )
 }
@@ -216,7 +216,7 @@ function JurisdictionInstrument() {
                 style={{
                   width: `${r.w}%`,
                   border: `1px solid ${r.lit ? 'transparent' : LINE}`,
-                  backgroundColor: r.lit ? AMBER : 'transparent',
+                  backgroundColor: r.lit ? GREEN : 'transparent',
                 }}
               >
                 <span
@@ -251,7 +251,7 @@ function HandbookInstrument() {
   const mark: Record<string, { t: string; c: string }> = {
     ok: { t: '✓', c: MUTED },
     weak: { t: '~', c: MUTED },
-    flag: { t: 'CRITICAL', c: AMBER },
+    flag: { t: 'CRITICAL', c: GREEN },
   }
   return (
     <InstrumentFrame caption="Handbook · graded" foot="Every section scored against your state">
@@ -265,7 +265,7 @@ function HandbookInstrument() {
                 <div className="text-[11px] mb-1.5" style={{ color: lit ? INK : MUTED, fontWeight: lit ? 600 : 400 }}>
                   {s.label}
                 </div>
-                <div className="h-1 rounded-full" style={{ width: `${s.w}%`, backgroundColor: lit ? AMBER : LINE }} />
+                <div className="h-1 rounded-full" style={{ width: `${s.w}%`, backgroundColor: lit ? GREEN : LINE }} />
               </div>
               {lit ? (
                 <span className="flex items-center gap-1.5 shrink-0">
@@ -283,31 +283,15 @@ function HandbookInstrument() {
   )
 }
 
-// 03 — a policy lifecycle, current stage lit, with a live review date.
+// 03 — a policy kept current, with a live review date. No lifecycle detail.
 function PolicyInstrument() {
-  const stages = ['Draft', 'Active', 'Archived']
-  const activeIdx = 1
   return (
     <InstrumentFrame caption="Policy · lifecycle" foot="Next review tracked — never slips">
-      <div className="relative py-2">
-        <div className="absolute left-0 right-0 top-[9px] h-px" style={{ backgroundColor: LINE }} />
-        <div className="relative flex items-start justify-between">
-          {stages.map((s, i) => (
-            <div key={s} className="flex flex-col items-center gap-3" style={{ width: 80 }}>
-              {i === activeIdx ? (
-                <PulseDot size={9} />
-              ) : (
-                <span className="block rounded-full" style={{ width: 7, height: 7, backgroundColor: i < activeIdx ? MUTED : LINE, border: i > activeIdx ? `1px solid ${LINE}` : 'none' }} />
-              )}
-              <span
-                className="text-[10px] font-mono uppercase tracking-wider"
-                style={{ color: i === activeIdx ? INK : MUTED, fontWeight: i === activeIdx ? 600 : 400 }}
-              >
-                {s}
-              </span>
-            </div>
-          ))}
-        </div>
+      <div className="flex flex-col items-center text-center gap-4 py-3">
+        <PulseDot size={10} />
+        <p style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '1.6rem', color: INK, lineHeight: 1.2 }}>
+          Always current. Never stale.
+        </p>
       </div>
       <div className="mt-6 pt-5 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
         <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: MUTED }}>Next review</span>
@@ -334,8 +318,8 @@ function CredentialInstrument() {
             </div>
             <div className="flex items-center gap-2.5 flex-1">
               {m.lit ? <PulseDot size={7} /> : <span className="block rounded-full" style={{ width: 6, height: 6, border: `1px solid ${LINE}` }} />}
-              <div className="flex-1 h-px" style={{ backgroundColor: m.lit ? AMBER : LINE }} />
-              <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: m.lit ? AMBER_600 : MUTED }}>{m.note}</span>
+              <div className="flex-1 h-px" style={{ backgroundColor: m.lit ? GREEN : LINE }} />
+              <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: m.lit ? GREEN_600 : MUTED }}>{m.note}</span>
             </div>
           </div>
         ))}
@@ -406,7 +390,7 @@ function PillarRow({ pillar, index }: { pillar: Pillar; index: number }) {
             viewport={{ once: true, margin: '-80px' }}
             transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
           >
-            <div className="text-[12px] uppercase tracking-[0.2em] font-mono mb-6" style={{ color: AMBER_600 }}>
+            <div className="text-[12px] uppercase tracking-[0.2em] font-mono mb-6" style={{ color: GREEN_600 }}>
               {pillar.number} · {pillar.title}
             </div>
             <h3
@@ -472,7 +456,7 @@ function PillarsGrid() {
 // ---------------------------------------------------------------------------
 // Coverage recap — a hairline feature grid summarizing everything the product
 // covers at a glance, after the four detailed pillar rows. Icon tile + serif
-// heading + caption, with a tiny grayscale corner glyph carrying one amber
+// heading + caption, with a tiny grayscale corner glyph carrying one green
 // mark (the same "resolves to one node" motif as the pillar instruments).
 // ---------------------------------------------------------------------------
 
@@ -480,7 +464,7 @@ function GlyphStack() {
   return (
     <div className="flex flex-col items-end gap-1">
       {[16, 12, 9].map((w, i) => (
-        <span key={w} className="h-[3px] rounded-full" style={{ width: w, backgroundColor: i === 2 ? AMBER : LINE }} />
+        <span key={w} className="h-[3px] rounded-full" style={{ width: w, backgroundColor: i === 2 ? GREEN : LINE }} />
       ))}
     </div>
   )
@@ -492,7 +476,7 @@ function GlyphDoc() {
   return (
     <div className="flex flex-col gap-1 items-end">
       {[18, 14, 18, 11].map((w, i) => (
-        <span key={i} className="h-[2px] rounded-full" style={{ width: w, backgroundColor: i === 1 ? AMBER : LINE }} />
+        <span key={i} className="h-[2px] rounded-full" style={{ width: w, backgroundColor: i === 1 ? GREEN : LINE }} />
       ))}
     </div>
   )
@@ -504,7 +488,7 @@ function GlyphLifecycle() {
         <span
           key={i}
           className="rounded-full"
-          style={{ width: 6, height: 6, backgroundColor: i === 1 ? AMBER : 'transparent', border: i === 1 ? 'none' : `1px solid ${LINE}` }}
+          style={{ width: 6, height: 6, backgroundColor: i === 1 ? GREEN : 'transparent', border: i === 1 ? 'none' : `1px solid ${LINE}` }}
         />
       ))}
     </div>
@@ -514,7 +498,7 @@ function GlyphCountdown() {
   return (
     <div className="flex items-center gap-1">
       {[9, 7, 5].map((w, i) => (
-        <span key={i} className="rounded-full" style={{ width: w, height: w, backgroundColor: i === 2 ? AMBER : LINE }} />
+        <span key={i} className="rounded-full" style={{ width: w, height: w, backgroundColor: i === 2 ? GREEN : LINE }} />
       ))}
     </div>
   )
@@ -525,7 +509,7 @@ function GlyphChecks() {
       {[0, 1, 2].map((i) => (
         <span key={i} className="flex items-center gap-1">
           <span className="h-[2px] rounded-full" style={{ width: 12, backgroundColor: LINE }} />
-          <span className="rounded-full" style={{ width: 4, height: 4, backgroundColor: i === 0 ? AMBER : MUTED }} />
+          <span className="rounded-full" style={{ width: 4, height: 4, backgroundColor: i === 0 ? GREEN : MUTED }} />
         </span>
       ))}
     </div>

@@ -352,7 +352,7 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
                 <button
                   onClick={onDemoClick}
                   className="inline-flex items-center px-5 h-10 rounded-full text-[15px] font-medium transition-transform hover:-translate-y-0.5 cursor-pointer"
-                  style={{ backgroundColor: "#F59E0B", color: NOIR }}
+                  style={{ backgroundColor: "#A3C57D", color: NOIR }}
                 >
                   Request a Demo
                 </button>

@@ -20,7 +20,7 @@ function NewBadge() {
   return (
     <span
       className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-1 rounded-sm text-[7px] font-semibold uppercase tracking-wider leading-[1.3] whitespace-nowrap animate-pulse"
-      style={{ backgroundColor: "#6ee7a8", color: "#0F0F0F" }}
+      style={{ backgroundColor: "#A3C57D", color: "#0F0F0F" }}
     >
       New
     </span>
@@ -147,7 +147,7 @@ export default function MarketingNav({ onDemoClick }: Props) {
               className="hidden sm:inline-flex items-center text-sm font-medium transition-opacity hover:opacity-70 cursor-pointer"
               style={{
                 backgroundColor: "transparent",
-                color: "#F59E0B",
+                color: "#A3C57D",
               }}
             >
               Request Demo
