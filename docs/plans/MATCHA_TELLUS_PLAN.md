@@ -21,6 +21,7 @@ as a first-class concept** and **photo/video attachments** (net-new capability).
 | **Pricing** | Per-location / per-store Stripe subscription (a store-feedback product scales by number of stores, not headcount). |
 | **Media** | Photo **and** video, size-capped, private S3 bucket + presigned upload/playback. |
 | **Scope** | Standalone self-serve product **and** an embeddable `/app/tellus` surface inside full-Matcha companies. |
+| **Rewards** | **Tellus Rewards** — stores configure rewards for good *or* bad feedback (service recovery); really-bad feedback can auto-upstream to an IR incident. See section 9. |
 
 Identity: `signup_source='matcha_tellus'`, feature flag `tellus` (Stripe-flipped paid gate,
 exactly like `incidents`/`compliance`). Scaffolding mirrors **Matcha Compliance** end-to-end
@@ -215,17 +216,91 @@ Admin QR panel reuses `qrcode.react` `QRCodeSVG` like `IRAnonymousReportingPanel
 
 ---
 
-## 9. Suggested phasing
+## 9. Tellus Rewards (rewards program)
+
+Stores can **reward customers** for leaving feedback — positive *or* negative
+(negative rewards = service recovery / "thanks for telling us, here's 10% off").
+Each company **configures its own reward rules**; delivery requires the reporter's
+(optional) contact — so the contact field becomes the opt-in for a reward. Reward
+issuance and IR escalation are **independent**: a really-bad report can both trigger
+a service-recovery reward *and* upstream to an incident report.
+
+### Config — `tellus_reward_programs` (new table)
+Per company, optionally per location:
+```
+id UUID PK
+company_id       UUID -> companies
+location_id      UUID -> business_locations (nullable — company-wide if null)
+is_active        BOOL
+trigger_sentiment CHECK IN (positive, negative, any)   -- which feedback earns a reward
+trigger_categories JSONB (nullable)                    -- optional category filter
+reward_type      CHECK IN (discount_code, points, gift_card, manual)
+reward_value     VARCHAR                               -- "10%", "$5", "50 pts"
+delivery         CHECK IN (email, sms, none)           -- uses reporter_contact
+requires_review  BOOL DEFAULT false                    -- manager approves before issuing
+per_reporter_cap INT (nullable)                        -- anti-abuse
+per_day_cap      INT (nullable)
+created_at, updated_at
+```
+
+### Issuance — `tellus_rewards` (new table)
+```
+id UUID PK
+company_id   UUID -> companies
+report_id    UUID -> tellus_reports
+program_id   UUID -> tellus_reward_programs
+status       CHECK IN (pending, approved, issued, redeemed, rejected, expired)
+reward_type  VARCHAR
+reward_value VARCHAR
+code         VARCHAR (nullable)   -- generated coupon/redemption code
+sent_to      VARCHAR (nullable)   -- delivery target from reporter_contact
+sent_at, redeemed_at, expires_at
+created_at, updated_at
+```
+
+Fold both into migration `tellus01` (or a follow-on `tellus02`).
+
+### Flow
+1. On `POST /tellus/{token}` submit, evaluate active programs against the new report
+   (sentiment + optional category filter). On a match **and** a contact was provided,
+   create a `tellus_rewards` row — `pending` when `requires_review`, else `issued`.
+2. Non-review rewards generate a `code` and deliver via `delivery`: email through the
+   existing `EmailService` (`server/app/core/services/email.py`), SMS through the existing
+   Twilio surface (`twilio_webhook.py`) if configured. Respect `per_reporter_cap` /
+   `per_day_cap` (dedupe on `reporter_contact`).
+3. Business endpoints on `tellus.py`: `GET/POST/PATCH /tellus/reward-programs` (config CRUD),
+   `GET /tellus/rewards`, `PATCH /tellus/rewards/{id}` (approve / reject / mark redeemed).
+
+### Auto-escalation ("really bad" feedback -> incident report)
+- A program (or a dedicated escalation rule) carries a **severity threshold**. Reuse the
+  AI sentiment/category pass (section 4) to score negativity/safety.
+- When a report is `negative` **and** (`category='safety'` **or** AI severity >= threshold),
+  auto-invoke the existing `POST /tellus/reports/{id}/promote` path (reuse `create_incident_core`
+  from `ir_incidents/_shared.py`) to open an `ir_incidents` row and set `promoted_incident_id` —
+  only when the company also has `incidents`. If it doesn't, flag `needs_escalation` on the
+  report for manual handling instead.
+
+### Frontend
+- A **Rewards** tab in `TellusSidebar` / `/app/tellus`: a rule builder (`tellus_reward_programs`)
+  + an issued-rewards table with approve / reject / redeem actions.
+- Public report page (`TellusReport.tsx`): after submit, when a reward applies and contact was
+  given, show "You may receive a reward at &lt;contact&gt;".
+
+---
+
+## 10. Suggested phasing
 
 1. Migration + `tellus_*` tables + feature flag.
 2. Public intake (`/tellus/{token}` GET/POST) + business router + report dashboard (text only).
 3. Media (presign endpoint + storage helper + upload UI + playback).
 4. Standalone product wiring (signup, tier, sidebars, checkout, webhook, pricing).
 5. Embeddable `/app/tellus` + AI sentiment + IR promotion.
+6. Tellus Rewards — reward-program config, reward issuance/delivery, and auto-escalation
+   of really-bad feedback to an IR incident.
 
 ---
 
-## 10. Critical files
+## 11. Critical files
 
 - **Data/intake:** `server/alembic/versions/tellus01_*.py`, `server/app/database.py`,
   `server/app/matcha/routes/inbound_email.py`, `server/app/core/services/storage.py`
@@ -242,7 +317,7 @@ Admin QR panel reuses `qrcode.react` `QRCodeSVG` like `IRAnonymousReportingPanel
 
 ---
 
-## 11. Verification
+## 12. Verification
 
 - **Migration:** apply on **dev only** (`./scripts/migrate-dev.sh`) after user approval; confirm
   `alembic_version` and the `tellus_*` tables exist. Never touch prod DDL without explicit approval.
@@ -254,5 +329,10 @@ Admin QR panel reuses `qrcode.react` `QRCodeSVG` like `IRAnonymousReportingPanel
 - **Embedded:** on a full-Matcha company toggle `tellus` on -> `/app/tellus` renders behind `<FeatureGate>`.
 - **Promotion:** submit a `safety` report on a company with `incidents` -> promote -> confirm the
   `ir_incidents` row and `promoted_incident_id` linkage.
+- **Rewards:** configure a program (reward on `positive`, email delivery) -> submit a matching
+  report with contact -> confirm a `tellus_rewards` row + delivery; toggle `requires_review` ->
+  confirm it lands `pending` and can be approved. Configure an escalation threshold -> submit a
+  really-bad `safety`/negative report on an `incidents` company -> confirm auto-promotion to
+  `ir_incidents` (and `needs_escalation` flag when the company lacks IR).
 - **Backend checks:** `cd server && ./venv/bin/python -m pytest tests/ -q` for anything added; the
   post-edit hook runs `py_compile` automatically. Use only RFC 2606 reserved test-data domains.
