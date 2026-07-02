@@ -290,7 +290,13 @@ Scheduling model: no celery-beat. The worker container runs continuously (`resta
 
 PDF render is intentionally inline because the desktop client awaits the bytes — but it is the dominant memory consumer in the backend container. If backend memory pressure recurs, moving `_render_project_pdf` to a celery task and `.get(timeout=60)` is the obvious next step.
 
-## Local Development
+## Host nginx on the app EC2 (deploy/nginx/)
+
+Host-level nginx server blocks on the app EC2 (`/etc/nginx/conf.d/`) are hand-managed; the repo source of truth is `deploy/nginx/` (`matcha.conf`, `cappe.conf` — apply via scp per `deploy/nginx/README.md`, they are NOT touched by `build-and-push.sh`/`update-ec2.sh`).
+
+**Blue-green rule (critical):** deploys alternate frontend `8082↔8083` / backend `8002↔8003` and **remove the old container**. Every server block must `proxy_pass` to the `matcha_frontend` / `matcha_backend` upstream groups (defined in `matcha.conf`; active port written to `/etc/nginx/upstream/matcha-*-active.conf` by the deploy scripts) — **never hardcode a port**. A hardcoded `:8082` in `cappe.conf` is how gummfit.com 502'd to the maintenance page after a swap (fixed 2026-07-02).
+
+Retired/backup configs go to `/etc/nginx/conf.d/archive/` (nginx only globs `*.conf`). Legacy `oceaneca.conf` was retired there 2026-07-01 — `gummfit.com` belongs to `cappe.conf` (Cappe); if oceaneca.com ever revives, restore from archive minus its gummfit.com server blocks.
 
 **Primary script**: `./scripts/dev-remote.sh` — SSH-tunnels the **dev** Postgres container from EC2 (`3.101.83.217:5432` → `matcha-postgres`, not prod), starts Redis tunnel, backend on `:8001`, frontend on `:5174`, local chat model on `:8080`. Requires `roonMT-arm.pem` at repo root. To sync dev/prod see the Database section + `docs/ops/DB_WORKFLOW.md`.
 
