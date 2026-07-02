@@ -48,9 +48,10 @@ async def update_brand(body: TellusBrandUpdate, account: TellusAccount = Depends
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """UPDATE tellus_brands
-               SET name = COALESCE($2, name), logo_url = COALESCE($3, logo_url), updated_at = NOW()
+               SET name = COALESCE($2, name), logo_url = COALESCE($3, logo_url),
+                   reward_mode = COALESCE($4, reward_mode), updated_at = NOW()
                WHERE id = $1 RETURNING *""",
-            account.brand_id, body.name, body.logo_url,
+            account.brand_id, body.name, body.logo_url, body.reward_mode,
         )
     return TellusBrand(**dict(row))
 

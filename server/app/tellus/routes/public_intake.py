@@ -227,4 +227,5 @@ async def submit_feedback(
         report_number=report["report_number"],
         points_awarded=outcome["points_awarded"],
         earned=outcome["earned"],
+        reward_pending=outcome["reward_pending"],
     )

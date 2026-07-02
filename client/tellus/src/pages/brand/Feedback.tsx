@@ -42,6 +42,11 @@ function ReportRow({ report, onChange }: { report: Report; onChange: () => void 
     setBusy(true)
     try { await tellusApi.patch(`/feedback/${report.id}/status`, { status }); onChange() } finally { setBusy(false) }
   }
+  async function decideReward(approve: boolean) {
+    setBusy(true)
+    try { await tellusApi.post(`/feedback/${report.id}/reward`, { approve }); onChange() }
+    catch (e) { alert(e instanceof Error ? e.message : 'Decision failed') } finally { setBusy(false) }
+  }
   async function grant() {
     setBusy(true)
     try { await tellusApi.post('/grants', { report_id: report.id, points: grantPts }); setGranting(false); onChange() }
@@ -60,6 +65,11 @@ function ReportRow({ report, onChange }: { report: Report; onChange: () => void 
           <div className="flex items-center gap-2">
             <Chip tone={report.sentiment}>{report.sentiment}</Chip>
             <Chip>{report.category}</Chip>
+            {report.reward_status === 'pending' && <Chip tone="negative">reward pending</Chip>}
+            {report.reward_status === 'approved' && report.points_awarded > 0 && (
+              <Chip tone="positive">+{report.points_awarded} pts</Chip>
+            )}
+            {report.reward_status === 'rejected' && <Chip>declined</Chip>}
             {report.store_name && <span className="text-xs text-tu-faint">{report.store_name}</span>}
           </div>
           {report.title && <h3 className="mt-2 font-semibold">{report.title}</h3>}
@@ -78,6 +88,14 @@ function ReportRow({ report, onChange }: { report: Report; onChange: () => void 
               {m.media_type}
             </a>
           ))}
+        </div>
+      )}
+
+      {report.reward_status === 'pending' && (
+        <div className="flex items-center gap-2 rounded-lg border border-tu-accent/30 bg-tu-accent/5 p-3">
+          <span className="flex-1 text-sm text-tu-dim">Award points for this feedback?</span>
+          <Button loading={busy} onClick={() => decideReward(true)}>Approve</Button>
+          <Button variant="danger" loading={busy} onClick={() => decideReward(false)}>Decline</Button>
         </div>
       )}
 

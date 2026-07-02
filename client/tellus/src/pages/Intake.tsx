@@ -123,6 +123,10 @@ export default function Intake() {
         <h1 className="text-xl font-bold">Thanks for your feedback!</h1>
         {result.earned ? (
           <p className="mt-2 text-tu-accent">You earned +{result.points_awarded} points.</p>
+        ) : result.reward_pending ? (
+          <p className="mt-2 text-sm text-tu-dim">
+            This brand reviews feedback before awarding points — you'll be notified once it's approved.
+          </p>
         ) : loggedIn ? (
           <p className="mt-2 text-sm text-tu-dim">Your feedback was recorded.</p>
         ) : (

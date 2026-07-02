@@ -7,6 +7,7 @@ atomic debit under FOR UPDATE, balance == sum of ledger) live in one place.
 Level curve: threshold(L) = 50·L·(L-1) cumulative lifetime points.
   L1=0  L2=100  L3=300  L4=600  L5=1000  L6=1500 …
 """
+import json
 import logging
 import math
 import secrets
@@ -81,6 +82,13 @@ async def check_and_award_badges(conn, account_id: UUID) -> list[str]:
     newly: list[str] = []
     for d in defs:
         crit = d["criteria"] or {}
+        # asyncpg returns JSONB as a string unless a codec is registered on the
+        # pool — decode defensively so both shapes work.
+        if isinstance(crit, str):
+            try:
+                crit = json.loads(crit)
+            except ValueError:
+                continue
         ctype, threshold = crit.get("type"), crit.get("threshold", 0)
         met = (
             (ctype == "feedback_count" and feedback_count >= threshold)
@@ -122,6 +130,7 @@ async def award_points(
     reference_id: Optional[str] = None,
     description: Optional[str] = None,
     notify: bool = True,
+    bypass_cooldown: bool = False,
 ) -> dict:
     """Credit points to an account. Atomic + idempotent.
 
@@ -175,8 +184,11 @@ async def award_points(
         # share one reason ('earn_feedback'), and a single submission awards
         # more than one of them back-to-back in the same transaction; scoping
         # by reason made the earlier award trip the later rule's cooldown.
+        # bypass_cooldown: a brand's explicit manual approval is itself the
+        # anti-abuse gate — a rapid-fire cooldown must not eat the credit the
+        # brand just granted. Daily cap + ledger idempotency still apply.
         if rule is not None:
-            if rule["cooldown_seconds"]:
+            if rule["cooldown_seconds"] and not bypass_cooldown:
                 recent = await conn.fetchval(
                     "SELECT 1 FROM tellus_points_ledger "
                     "WHERE account_id = $1 AND event_key = $2 AND delta > 0 "

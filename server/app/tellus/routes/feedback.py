@@ -1,4 +1,5 @@
-"""Tell-Us brand-side feedback dashboard — list, triage, moderate.
+"""Tell-Us brand-side feedback dashboard — list, triage, moderate, and (in
+manual reward mode) approve/reject each submission's points.
 
 Brand accounts only; every query scopes by the caller's brand_id. Media URLs are
 minted (presigned) at read time in the serializer.
@@ -6,7 +7,7 @@ minted (presigned) at read time in the serializer.
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
 from ...database import get_connection
 from ..dependencies import require_brand
@@ -16,7 +17,10 @@ from ..models.tellus import (
     TellusReport,
     TellusReportModerate,
     TellusReportStatusUpdate,
+    TellusRewardDecision,
 )
+from ..services.email import send_tellus_points_email
+from ..services.feedback_service import award_for_report
 from ._shared import get_owned_report, serialize_report
 
 router = APIRouter()
@@ -94,6 +98,61 @@ async def update_status(
             report_id, account.brand_id, body.status,
         )
         return await serialize_report(conn, row)
+
+
+@router.post("/feedback/{report_id}/reward", response_model=TellusReport)
+async def decide_reward(
+    report_id: UUID, body: TellusRewardDecision, background: BackgroundTasks,
+    account: TellusAccount = Depends(require_brand),
+):
+    """Manual reward mode: approve (points credit through the same idempotent
+    award path as auto mode) or reject a pending submission. 409 unless the
+    report is actually awaiting a decision."""
+    reporter = None
+    total = 0
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await get_owned_report(conn, report_id, account.brand_id)
+            if row["reward_status"] != "pending":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="This feedback is not awaiting a reward decision.",
+                )
+            if body.approve:
+                # The brand's explicit decision is the anti-abuse gate here —
+                # don't let the auto-mode farming cooldown eat the credit.
+                total = await award_for_report(conn, row, bypass_cooldown=True)
+                new_status = "approved"
+            else:
+                new_status = "rejected"
+                if row["reporter_account_id"] is not None:
+                    await conn.execute(
+                        """INSERT INTO tellus_notifications
+                               (account_id, kind, title, body, reference_type, reference_id)
+                           VALUES ($1, 'reward_decision', 'Feedback reviewed',
+                                   'This submission did not qualify for points.', 'report', $2)""",
+                        row["reporter_account_id"], str(report_id),
+                    )
+            updated = await conn.fetchrow(
+                "UPDATE tellus_reports SET reward_status = $3, updated_at = NOW() "
+                "WHERE id = $1 AND brand_id = $2 RETURNING *",
+                report_id, account.brand_id, new_status,
+            )
+            if body.approve and total > 0 and row["reporter_account_id"] is not None:
+                reporter = await conn.fetchrow(
+                    "SELECT email, display_name, "
+                    "(SELECT points_balance FROM tellus_points_balances WHERE account_id = $1) AS balance "
+                    "FROM tellus_accounts WHERE id = $1",
+                    row["reporter_account_id"],
+                )
+        result = await serialize_report(conn, updated)
+
+    if reporter:
+        background.add_task(
+            send_tellus_points_email, reporter["email"], reporter["display_name"],
+            total, "approved feedback", reporter["balance"] or 0,
+        )
+    return result
 
 
 @router.patch("/feedback/{report_id}/moderation", response_model=TellusReport)

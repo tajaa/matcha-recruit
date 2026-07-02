@@ -93,12 +93,16 @@ class TellusBrand(BaseModel):
     owner_account_id: UUID
     name: str
     logo_url: Optional[str] = None
+    # auto = useful feedback credits points immediately; manual = the brand
+    # approves/rejects each submission before points credit.
+    reward_mode: Literal["auto", "manual"] = "auto"
     created_at: datetime
 
 
 class TellusBrandUpdate(BaseModel):
     name: Optional[str] = Field(default=None, max_length=255)
     logo_url: Optional[str] = Field(default=None, max_length=2000)
+    reward_mode: Optional[Literal["auto", "manual"]] = None
 
 
 class TellusStoreCreate(BaseModel):
@@ -204,6 +208,8 @@ class TellusFeedbackSubmitResponse(BaseModel):
     points_awarded: int = 0
     # True when a logged-in consumer earned points; False for anonymous.
     earned: bool = False
+    # True when the brand reviews manually — points credit on their approval.
+    reward_pending: bool = False
 
 
 # ── Reports (brand dashboard) ──────────────────────────────────────────────────
@@ -235,12 +241,20 @@ class TellusReport(BaseModel):
     ai_category: Optional[str] = None
     ai_sentiment: Optional[str] = None
     moderation_status: str = "visible"
+    # NULL = anonymous (nothing to credit); pending/approved/rejected otherwise.
+    reward_status: Optional[str] = None
+    points_awarded: int = 0
     created_at: datetime
     media: list[TellusReportMedia] = Field(default_factory=list)
 
 
 class TellusReportStatusUpdate(BaseModel):
     status: ReportStatus
+
+
+class TellusRewardDecision(BaseModel):
+    """Brand approves (points credit) or rejects a pending reward."""
+    approve: bool
 
 
 class TellusReportModerate(BaseModel):

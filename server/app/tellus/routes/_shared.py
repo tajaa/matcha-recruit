@@ -76,6 +76,8 @@ async def serialize_report(conn, row, *, include_media: bool = True) -> TellusRe
         ai_category=row["ai_category"],
         ai_sentiment=row["ai_sentiment"],
         moderation_status=row["moderation_status"],
+        reward_status=row["reward_status"] if "reward_status" in row.keys() else None,
+        points_awarded=row["points_awarded"] if "points_awarded" in row.keys() else 0,
         created_at=row["created_at"],
         media=media,
     )

@@ -35,6 +35,7 @@ export interface Brand {
   owner_account_id: string
   name: string
   logo_url: string | null
+  reward_mode: 'auto' | 'manual'
   created_at: string
 }
 
@@ -92,6 +93,7 @@ export interface FeedbackSubmitResponse {
   report_number: string | null
   points_awarded: number
   earned: boolean
+  reward_pending: boolean
 }
 
 export interface ReportMedia {
@@ -118,6 +120,8 @@ export interface Report {
   status: string
   ai_summary: string | null
   moderation_status: string
+  reward_status: 'pending' | 'approved' | 'rejected' | null
+  points_awarded: number
   created_at: string
   media: ReportMedia[]
 }
