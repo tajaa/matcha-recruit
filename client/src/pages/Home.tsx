@@ -4,6 +4,7 @@ import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
   FileText,
   Gavel,
   GraduationCap,
@@ -234,6 +235,10 @@ function PageStyle() {
         0%, 100% { opacity: 1; transform: scale(1); }
         50% { opacity: 0.45; transform: scale(0.8); }
       }
+      @keyframes homeScrollCue {
+        0%, 100% { opacity: 0.25; transform: translateY(0); }
+        50% { opacity: 0.9; transform: translateY(5px); }
+      }
       @keyframes showcaseProgress {
         from { transform: scaleX(0); }
         to { transform: scaleX(1); }
@@ -242,9 +247,10 @@ function PageStyle() {
       .home-fade { opacity: 0; animation: homeFadeUp 0.8s ease-out forwards; }
       .home-marquee-track { animation: homeMarquee 32s linear infinite; }
       .home-pulse { animation: homePulse 2.4s ease-in-out infinite; }
+      .home-scroll-cue { animation: homeScrollCue 1.8s ease-in-out infinite; }
       @media (prefers-reduced-motion: reduce) {
         .home-rise > span, .home-fade { animation: none !important; opacity: 1 !important; transform: none !important; }
-        .home-marquee-track, .home-pulse { animation: none !important; }
+        .home-marquee-track, .home-pulse, .home-scroll-cue { animation: none !important; }
       }
     `}</style>
   );
@@ -258,7 +264,7 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
   return (
     <section className="relative w-full min-h-[100svh] flex flex-col">
       {/* Masthead row */}
-      <div className="max-w-[1600px] mx-auto w-full px-6 sm:px-10 pt-20 sm:pt-24">
+      <div className="max-w-[1600px] mx-auto w-full px-6 sm:px-10 pt-[76px] sm:pt-[84px]">
         <div
           className="flex items-center justify-between border-b pb-3 home-fade"
           style={{ borderColor: LINE_D, animationDelay: "0.05s" }}
@@ -267,7 +273,7 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
             className="text-[11px] tracking-[0.3em] font-mono uppercase"
             style={{ color: ASH }}
           >
-            Full-service HR
+            MANAGING YOUR RISK
           </span>
           <span
             className="hidden sm:inline text-[11px] tracking-[0.3em] font-mono uppercase"
@@ -294,7 +300,7 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
           carousel needs its own column to grow properly instead of fighting
           the headline for dead space, which is what capped it small before. */}
       <div className="relative max-w-[1600px] mx-auto w-full px-6 sm:px-10 flex-1 flex flex-col justify-center py-8 sm:py-10">
-        <div className="xl:grid xl:grid-cols-[1fr_1.05fr] xl:gap-14 2xl:gap-20 xl:items-center">
+        <div className="xl:grid xl:grid-cols-[0.82fr_1.18fr] xl:gap-14 2xl:gap-20 xl:items-center">
           <div>
             <h1
               className="home-rise tracking-[-0.02em] text-[clamp(2.75rem,9.5vw,9rem)] xl:text-[clamp(2.75rem,5.4vw,6.75rem)]"
@@ -345,8 +351,8 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
               <div className="flex items-center gap-5 shrink-0">
                 <button
                   onClick={onDemoClick}
-                  className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium transition-transform hover:-translate-y-0.5 cursor-pointer"
-                  style={{ backgroundColor: MATCHA, color: NOIR }}
+                  className="inline-flex items-center px-5 h-10 rounded-full text-[15px] font-medium transition-transform hover:-translate-y-0.5 cursor-pointer"
+                  style={{ backgroundColor: "#F59E0B", color: NOIR }}
                 >
                   Request a Demo
                 </button>
@@ -370,6 +376,16 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
           </div>
         </div>
       </div>
+
+      {/* Scroll cue — blinking chevron so it reads as "there's more below" */}
+      <a
+        href="#index"
+        aria-label="Scroll to products"
+        className="home-scroll-cue absolute bottom-5 left-1/2 -translate-x-1/2 z-10 hover:opacity-100"
+        style={{ color: ASH }}
+      >
+        <ChevronDown className="w-6 h-6" strokeWidth={1.5} />
+      </a>
     </section>
   );
 }
@@ -382,19 +398,19 @@ function Marquee() {
   const row = [...MARQUEE_WORDS, ...MARQUEE_WORDS];
   return (
     <div
-      className="relative overflow-hidden border-y py-2 select-none"
+      className="relative overflow-hidden border-y py-[5px] select-none"
       style={{ borderColor: LINE_D, backgroundColor: MATCHA }}
     >
       <div className="home-marquee-track flex w-max items-center whitespace-nowrap">
         {row.map((w, i) => (
           <span key={i} className="flex items-center">
             <span
-              className="px-5 text-[clamp(0.62rem,1.1vw,0.95rem)] tracking-tight"
+              className="px-4 text-[clamp(0.5rem,0.85vw,0.78rem)] tracking-tight"
               style={{ fontFamily: DISPLAY, fontWeight: 400, color: "#5C584E" }}
             >
               {w}
             </span>
-            <span className="text-[0.6rem]" style={{ color: "#5C584E" }}>
+            <span className="text-[0.5rem]" style={{ color: "#5C584E" }}>
               ✦
             </span>
           </span>
@@ -933,14 +949,14 @@ function DailyInstrument() {
 
   return (
     <InstrumentFrame label="Daily Intake" accent="#F2C14E">
-      <div className="px-5 pt-4 flex items-end justify-between">
+      <div className="px-5 pt-3 flex items-end justify-between">
         <div className="flex items-baseline gap-2">
           <span
             className="tabular-nums leading-none"
             style={{
               fontFamily: DISPLAY,
               fontWeight: 300,
-              fontSize: "3.5rem",
+              fontSize: "2.85rem",
               color: "#F2C14E",
             }}
           >
@@ -975,11 +991,11 @@ function DailyInstrument() {
         </div>
       </div>
       <div
-        className="px-5 pt-6 pb-2 flex items-end gap-2.5"
-        style={{ height: 80 }}
+        className="px-5 pt-4 pb-2 flex items-end gap-2.5"
+        style={{ height: 60 }}
       >
         {DAILY_BARS.map((v, i) => {
-          const h = (v / max) * 60;
+          const h = (v / max) * 42;
           const pct = DAILY_BEHAVIORAL_PCT[i];
           return (
             <div key={i} className="flex-1 flex flex-col items-center gap-1.5">
@@ -1121,7 +1137,10 @@ function DailyInstrument() {
         {/* The raw report, with the phrase behind the current fact lit up
             as it's "read" — shows the extraction happening instead of
             just listing what it found. */}
-        <p className="text-[10px] leading-relaxed italic" style={{ color: ASH }}>
+        <p
+          className="text-[10px] leading-relaxed italic"
+          style={{ color: ASH }}
+        >
           “
           {NARRATIVE_TOKENS.map((t, i) => {
             const active = t.field === extractPhase;
@@ -1197,7 +1216,10 @@ function DailyInstrument() {
       >
         <div className="flex items-center gap-2 mb-3">
           <Lock className="w-2.5 h-2.5 shrink-0" style={{ color: ASH }} />
-          <span className="text-[9px] font-mono truncate" style={{ color: ASH }}>
+          <span
+            className="text-[9px] font-mono truncate"
+            style={{ color: ASH }}
+          >
             hey-matcha.com/intake/atl7
           </span>
           <span
@@ -1314,7 +1336,10 @@ function DailyInstrument() {
             >
               Severity
             </div>
-            <div className="text-[10px] font-medium" style={{ color: "#F2C14E" }}>
+            <div
+              className="text-[10px] font-medium"
+              style={{ color: "#F2C14E" }}
+            >
               Medium
             </div>
           </div>
@@ -1430,7 +1455,12 @@ function OshaLogInstrument() {
           >
             <div
               className="tabular-nums leading-none mb-1"
-              style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: "1.4rem", color: t.color }}
+              style={{
+                fontFamily: DISPLAY,
+                fontWeight: 400,
+                fontSize: "1.4rem",
+                color: t.color,
+              }}
             >
               {t.value}
             </div>
@@ -1464,7 +1494,11 @@ function OshaLogInstrument() {
         </div>
         <div
           className="grid items-center gap-2 pb-1.5 mb-1 border-b text-[7px] font-mono uppercase tracking-[0.1em]"
-          style={{ gridTemplateColumns: "auto 1fr auto auto", borderColor: LINE_D, color: ASH }}
+          style={{
+            gridTemplateColumns: "auto 1fr auto auto",
+            borderColor: LINE_D,
+            color: ASH,
+          }}
         >
           <span>Case #</span>
           <span>Employee</span>
@@ -1479,7 +1513,10 @@ function OshaLogInstrument() {
             viewport={{ once: true, margin: "-20px" }}
             transition={{ delay: i * 0.1, duration: 0.4 }}
             className="grid items-center gap-2 py-1.5 border-t first:border-t-0"
-            style={{ gridTemplateColumns: "auto 1fr auto auto", borderColor: "rgba(245,242,237,0.06)" }}
+            style={{
+              gridTemplateColumns: "auto 1fr auto auto",
+              borderColor: "rgba(245,242,237,0.06)",
+            }}
           >
             <span
               className="text-[9px] font-mono tabular-nums"
@@ -1812,7 +1849,10 @@ function ComplianceInstrument() {
       </div>
       {/* Breadth — coverage across every compliance area, not just the open
           findings. Mirrors Platform's domain grid. */}
-      <div className="px-5 pt-4 pb-4 border-t mt-4" style={{ borderColor: LINE_D }}>
+      <div
+        className="px-5 pt-4 pb-4 border-t mt-4"
+        style={{ borderColor: LINE_D }}
+      >
         <div className="flex items-center justify-between mb-2.5">
           <span
             className="text-[8px] font-mono uppercase tracking-[0.16em]"
