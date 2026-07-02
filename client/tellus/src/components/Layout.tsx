@@ -18,45 +18,73 @@ const BRAND_NAV = [
   { to: '/brand/settings', label: 'Settings', icon: Settings },
 ]
 
+function navLinkClass({ isActive }: { isActive: boolean }) {
+  return `flex items-center gap-2 whitespace-nowrap rounded-md border-l-2 px-3 py-2 text-sm font-medium transition ${
+    isActive
+      ? 'border-tu-accent bg-tu-panel text-tu-accent'
+      : 'border-transparent text-tu-dim hover:bg-tu-panel/60 hover:text-tu-text'
+  }`
+}
+
 export function Layout({ children }: { children: ReactNode }) {
   const { account, logout } = useAccount()
   const navigate = useNavigate()
   const nav = account?.account_type === 'brand' ? BRAND_NAV : CONSUMER_NAV
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-5xl flex-col">
-      <header className="sticky top-0 z-10 flex items-center justify-between border-b border-tu-border bg-tu-bg/90 px-4 py-3 backdrop-blur">
-        <button onClick={() => navigate('/')} className="flex items-center gap-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-tu-accent text-sm font-black text-black">TU</span>
-          <span className="text-sm font-bold tracking-tight">Tell-Us</span>
+    <div className="flex min-h-screen">
+      {/* Desktop sidebar — pinned to the true left edge, full height */}
+      <aside className="hidden w-56 shrink-0 flex-col border-r border-tu-border sm:flex">
+        <button onClick={() => navigate('/')} className="flex items-center gap-2 px-5 py-4">
+          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-tu-accent text-xs font-black text-black">TU</span>
+          <span className="font-display text-sm font-bold tracking-tight">Tell-Us</span>
         </button>
-        <div className="flex items-center gap-3">
-          <span className="hidden text-xs text-tu-faint sm:inline">{account?.display_name || account?.email}</span>
-          <button onClick={logout} className="text-tu-faint hover:text-tu-text" title="Log out">
-            <LogOut className="h-4 w-4" />
-          </button>
-        </div>
-      </header>
-
-      <div className="flex flex-1 flex-col sm:flex-row">
-        <nav className="flex gap-1 overflow-x-auto border-b border-tu-border px-2 py-2 sm:w-48 sm:flex-col sm:border-b-0 sm:border-r sm:py-4">
+        <nav className="flex flex-1 flex-col gap-0.5 px-3 py-2">
           {nav.map(({ to, label, icon: Icon, end }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              className={({ isActive }) =>
-                `flex items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition ${
-                  isActive ? 'bg-tu-panel text-tu-accent' : 'text-tu-dim hover:bg-tu-panel hover:text-tu-text'
-                }`
-              }
-            >
+            <NavLink key={to} to={to} end={end} className={navLinkClass}>
               <Icon className="h-4 w-4" />
               {label}
             </NavLink>
           ))}
         </nav>
-        <main className="flex-1 p-4 sm:p-6">{children}</main>
+        <div className="flex items-center justify-between border-t border-tu-border px-4 py-3">
+          <span className="truncate text-xs text-tu-faint">{account?.display_name || account?.email}</span>
+          <button onClick={logout} className="shrink-0 text-tu-faint hover:text-tu-text" title="Log out">
+            <LogOut className="h-4 w-4" />
+          </button>
+        </div>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Mobile top bar + horizontal nav — desktop uses the sidebar instead */}
+        <header className="sticky top-0 z-10 flex items-center justify-between border-b border-tu-border bg-tu-bg/90 px-4 py-3 backdrop-blur sm:hidden">
+          <button onClick={() => navigate('/')} className="flex items-center gap-2">
+            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-tu-accent text-xs font-black text-black">TU</span>
+            <span className="font-display text-sm font-bold tracking-tight">Tell-Us</span>
+          </button>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-tu-faint">{account?.display_name || account?.email}</span>
+            <button onClick={logout} className="text-tu-faint hover:text-tu-text" title="Log out">
+              <LogOut className="h-4 w-4" />
+            </button>
+          </div>
+        </header>
+        <nav className="flex gap-1 overflow-x-auto border-b border-tu-border px-2 py-2 sm:hidden">
+          {nav.map(({ to, label, icon: Icon, end }) => (
+            <NavLink key={to} to={to} end={end} className={navLinkClass}>
+              <Icon className="h-4 w-4" />
+              {label}
+            </NavLink>
+          ))}
+        </nav>
+
+        <main className="relative flex-1 p-4 sm:p-6">
+          <div
+            className="pointer-events-none absolute inset-0 -z-10"
+            style={{ background: 'radial-gradient(ellipse 60% 30% at 50% 0%, rgba(249,115,22,0.05) 0%, rgba(249,115,22,0) 70%)' }}
+          />
+          <div className="mx-auto max-w-5xl">{children}</div>
+        </main>
       </div>
     </div>
   )

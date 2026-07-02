@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Award, ImageIcon, Video } from 'lucide-react'
+import { Award, Frown, ImageIcon, Meh, MessageSquare, Smile, Sparkles, Video } from 'lucide-react'
 import { tellusApi } from '../../api/tellusClient'
-import { Button, Card, Chip, Empty, Select, Spinner } from '../../components/ui'
+import { Button, Chip, Empty, Select, Spinner } from '../../components/ui'
 import type { FeedbackStats, Report } from '../../api/types'
 
 const STATUS_OPTS = [
@@ -24,12 +24,13 @@ const STATUS_SET = [
   { value: 'archived', label: 'Archived' },
 ]
 
-function Stat({ label, value, tone }: { label: string; value: number; tone?: string }) {
+function Stat({ label, value, tone = 'text-tu-text', icon: Icon }: { label: string; value: number; tone?: string; icon: typeof MessageSquare }) {
   return (
-    <Card className="text-center">
-      <p className={`text-2xl font-black ${tone ?? ''}`}>{value}</p>
-      <p className="text-xs text-tu-faint">{label}</p>
-    </Card>
+    <span className="inline-flex items-center gap-1.5 text-sm">
+      <Icon className={`h-3.5 w-3.5 ${tone}`} />
+      <span className={`font-semibold ${tone}`}>{value}</span>
+      <span className="text-tu-faint">{label}</span>
+    </span>
   )
 }
 
@@ -59,10 +60,10 @@ function ReportRow({ report, onChange }: { report: Report; onChange: () => void 
   }
 
   return (
-    <Card className="space-y-3">
+    <div className="px-4 py-3">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <Chip tone={report.sentiment}>{report.sentiment}</Chip>
             <Chip>{report.category}</Chip>
             {report.reward_status === 'pending' && <Chip tone="negative">reward pending</Chip>}
@@ -72,18 +73,18 @@ function ReportRow({ report, onChange }: { report: Report; onChange: () => void 
             {report.reward_status === 'rejected' && <Chip>declined</Chip>}
             {report.store_name && <span className="text-xs text-tu-faint">{report.store_name}</span>}
           </div>
-          {report.title && <h3 className="mt-2 font-semibold">{report.title}</h3>}
+          {report.title && <h3 className="mt-1 text-sm font-semibold">{report.title}</h3>}
         </div>
         <span className="whitespace-nowrap text-xs text-tu-faint">{new Date(report.created_at).toLocaleDateString()}</span>
       </div>
 
-      <p className="whitespace-pre-wrap text-sm text-tu-dim">{report.description}</p>
+      <p className="mt-1.5 whitespace-pre-wrap text-sm text-tu-dim">{report.description}</p>
 
       {report.media.length > 0 && (
-        <div className="flex flex-wrap gap-2">
+        <div className="mt-2 flex flex-wrap gap-2">
           {report.media.map((m) => (
             <a key={m.id} href={m.url ?? '#'} target="_blank" rel="noreferrer"
-              className="flex items-center gap-1 rounded-lg border border-tu-border px-2 py-1 text-xs text-tu-dim hover:border-tu-accent">
+              className="flex items-center gap-1 rounded-md border border-tu-border px-2 py-1 text-xs text-tu-dim hover:border-tu-accent">
               {m.media_type === 'video' ? <Video className="h-3.5 w-3.5" /> : <ImageIcon className="h-3.5 w-3.5" />}
               {m.media_type}
             </a>
@@ -92,30 +93,31 @@ function ReportRow({ report, onChange }: { report: Report; onChange: () => void 
       )}
 
       {report.reward_status === 'pending' && (
-        <div className="flex items-center gap-2 rounded-lg border border-tu-accent/30 bg-tu-accent/5 p-3">
+        <div className="mt-2.5 flex items-center gap-2.5 rounded-md bg-tu-accent/5 px-2.5 py-1.5">
+          <Award className="h-3.5 w-3.5 shrink-0 text-tu-accent" />
           <span className="flex-1 text-sm text-tu-dim">Award points for this feedback?</span>
-          <Button loading={busy} onClick={() => decideReward(true)}>Approve</Button>
-          <Button variant="danger" loading={busy} onClick={() => decideReward(false)}>Decline</Button>
+          <Button size="sm" loading={busy} onClick={() => decideReward(true)}>Approve</Button>
+          <Button size="sm" variant="danger" loading={busy} onClick={() => decideReward(false)}>Decline</Button>
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-tu-border pt-3">
-        <div className="w-40">
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <div className="w-32">
           <Select value={report.status} onChange={(e) => setStatus(e.target.value)} options={STATUS_SET} />
         </div>
         {granting ? (
           <div className="flex items-center gap-2">
             <input type="number" min={1} max={5000} value={grantPts} onChange={(e) => setGrantPts(Number(e.target.value))}
-              className="w-20 rounded-lg border border-tu-border bg-tu-panel2 px-2 py-1.5 text-sm" />
-            <Button loading={busy} onClick={grant}>Grant</Button>
-            <Button variant="ghost" onClick={() => setGranting(false)}>Cancel</Button>
+              className="w-14 rounded-md border border-tu-border bg-tu-panel2 px-2 py-1 text-xs" />
+            <Button size="sm" loading={busy} onClick={grant}>Grant</Button>
+            <Button size="sm" variant="ghost" onClick={() => setGranting(false)}>Cancel</Button>
           </div>
         ) : (
-          <Button variant="soft" onClick={() => setGranting(true)}><Award className="h-4 w-4" /> Grant points</Button>
+          <Button size="sm" variant="ghost" onClick={() => setGranting(true)}><Award className="h-3.5 w-3.5" /> Grant points</Button>
         )}
-        <Button variant="ghost" onClick={moderate} className="ml-auto text-tu-bad">Remove</Button>
+        <Button size="sm" variant="ghost" onClick={moderate} className="ml-auto text-tu-bad">Remove</Button>
       </div>
-    </Card>
+    </div>
   )
 }
 
@@ -141,28 +143,31 @@ export default function BrandFeedback() {
   useEffect(() => { void load() }, [load])
 
   return (
-    <div className="space-y-5">
-      <h1 className="text-lg font-bold">Feedback</h1>
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-lg font-semibold">Feedback</h1>
+        <p className="mt-0.5 text-sm text-tu-dim">Track sentiment across your stores and decide what earns points.</p>
+      </div>
 
       {stats && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-          <Stat label="Total" value={stats.total} />
-          <Stat label="New" value={stats.new} tone="text-tu-accent" />
-          <Stat label="Positive" value={stats.positive} tone="text-tu-good" />
-          <Stat label="Neutral" value={stats.neutral} />
-          <Stat label="Negative" value={stats.negative} tone="text-tu-bad" />
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 border-b border-tu-border pb-4">
+          <Stat label="Total" value={stats.total} icon={MessageSquare} />
+          <Stat label="New" value={stats.new} tone="text-tu-accent" icon={Sparkles} />
+          <Stat label="Positive" value={stats.positive} tone="text-tu-good" icon={Smile} />
+          <Stat label="Neutral" value={stats.neutral} icon={Meh} />
+          <Stat label="Negative" value={stats.negative} tone="text-tu-bad" icon={Frown} />
         </div>
       )}
 
-      <div className="flex gap-3">
-        <div className="w-44"><Select value={status} onChange={(e) => setStatus(e.target.value)} options={STATUS_OPTS} /></div>
-        <div className="w-44"><Select value={sentiment} onChange={(e) => setSentiment(e.target.value)} options={SENTIMENT_OPTS} /></div>
+      <div className="flex flex-wrap gap-2">
+        <div className="w-40"><Select value={status} onChange={(e) => setStatus(e.target.value)} options={STATUS_OPTS} /></div>
+        <div className="w-40"><Select value={sentiment} onChange={(e) => setSentiment(e.target.value)} options={SENTIMENT_OPTS} /></div>
       </div>
 
       {loading ? <Spinner /> : reports.length === 0 ? (
         <Empty>No feedback yet. Share a QR link to start collecting.</Empty>
       ) : (
-        <div className="space-y-3">
+        <div className="divide-y divide-tu-border rounded-lg border border-tu-border">
           {reports.map((r) => <ReportRow key={r.id} report={r} onChange={load} />)}
         </div>
       )}
