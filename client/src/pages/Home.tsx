@@ -185,7 +185,7 @@ export default function Home() {
       />
       <MarketingNav onDemoClick={() => setIsPricingOpen(true)} />
 
-      <Hero onDemoClick={() => setIsPricingOpen(true)} />
+      <Hero />
       <ProductIndex />
       <Manifesto />
       <CTABand onDemoClick={() => setIsPricingOpen(true)} />
@@ -243,14 +243,19 @@ function PageStyle() {
         from { transform: scaleX(0); }
         to { transform: scaleX(1); }
       }
+      @keyframes homeFloat {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-9px); }
+      }
       .home-rise > span { display: inline-block; animation: homeRise 0.9s cubic-bezier(0.16,1,0.3,1) both; }
       .home-fade { opacity: 0; animation: homeFadeUp 0.8s ease-out forwards; }
       .home-marquee-track { animation: homeMarquee 32s linear infinite; }
       .home-pulse { animation: homePulse 2.4s ease-in-out infinite; }
       .home-scroll-cue { animation: homeScrollCue 1.8s ease-in-out infinite; }
+      .home-float { animation: homeFloat 7s ease-in-out infinite; }
       @media (prefers-reduced-motion: reduce) {
         .home-rise > span, .home-fade { animation: none !important; opacity: 1 !important; transform: none !important; }
-        .home-marquee-track, .home-pulse, .home-scroll-cue { animation: none !important; }
+        .home-marquee-track, .home-pulse, .home-scroll-cue, .home-float { animation: none !important; }
       }
     `}</style>
   );
@@ -260,7 +265,7 @@ function PageStyle() {
 // Hero — magazine cover
 // ---------------------------------------------------------------------------
 
-function Hero({ onDemoClick }: { onDemoClick: () => void }) {
+function Hero() {
   return (
     <section className="relative w-full min-h-[100svh] flex flex-col">
       {/* Masthead row */}
@@ -302,7 +307,7 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
         <div>
           <div>
             <h1
-              className="home-rise tracking-[-0.02em] text-[clamp(2.75rem,9.5vw,9rem)] xl:text-[clamp(2.75rem,4.4vw,5.5rem)]"
+              className="home-rise tracking-[-0.02em] text-[clamp(1.9rem,6.5vw,6rem)] xl:text-[clamp(1.9rem,3vw,3.8rem)]"
               style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 0.98 }}
             >
               <span style={{ animationDelay: "0.16s" }}>We run the whole</span>{" "}
@@ -344,17 +349,6 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
                 </span>
               </p>
               <div className="flex items-center gap-5 shrink-0">
-                <button
-                  onClick={onDemoClick}
-                  className="inline-flex items-center px-5 h-10 rounded-full text-[15px] font-medium transition-transform hover:-translate-y-0.5 cursor-pointer"
-                  style={{
-                    background: "linear-gradient(180deg, #BCDE96 0%, #A3C57D 45%, #80A25A 100%)",
-                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.5), 0 3px 8px rgba(0,0,0,0.25)",
-                    color: NOIR,
-                  }}
-                >
-                  Request a Demo
-                </button>
                 <a
                   href="#index"
                   className="inline-flex items-center gap-2 text-[15px] transition-opacity hover:opacity-60"
@@ -368,7 +362,7 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
           </div>
 
           <div
-            className="mt-14 home-fade"
+            className="mt-14 home-fade w-full max-w-[1360px] mx-auto"
             style={{ animationDelay: "0.8s" }}
           >
             <ProductCarousel />
@@ -509,35 +503,48 @@ function InstrumentFrame({
   children: React.ReactNode;
 }) {
   return (
-    <div
-      className="w-full rounded-2xl backdrop-blur-sm"
-      style={{
-        border: `1px solid ${LINE_D}`,
-        backgroundColor: "rgba(245,242,237,0.025)",
-      }}
-    >
+    <div className="relative home-float">
+      {/* soft accent-tinted glow so the card reads as lifted off the black */}
       <div
-        className="flex items-center justify-between px-5 pt-4 pb-3 border-b"
-        style={{ borderColor: LINE_D }}
+        aria-hidden
+        className="absolute -inset-x-6 -inset-y-4 pointer-events-none"
+        style={{
+          background: `radial-gradient(58% 60% at 50% 42%, ${accent}1f 0%, transparent 72%)`,
+          filter: "blur(30px)",
+        }}
+      />
+      <div
+        className="relative w-full rounded-2xl backdrop-blur-sm"
+        style={{
+          border: "1px solid rgba(245,242,237,0.06)",
+          backgroundColor: "rgba(245,242,237,0.025)",
+          boxShadow:
+            "inset 0 1px 0 rgba(255,255,255,0.05), 0 34px 64px -24px rgba(0,0,0,0.8), 0 12px 28px -14px rgba(0,0,0,0.55)",
+        }}
       >
-        <span
-          className="text-[10px] font-mono uppercase tracking-[0.22em]"
-          style={{ color: ASH }}
-        >
-          {label}
-        </span>
-        <span
-          className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.18em]"
-          style={{ color: ASH }}
+        <div
+          className="flex items-center justify-between px-5 pt-4 pb-3 border-b"
+          style={{ borderColor: "rgba(245,242,237,0.06)" }}
         >
           <span
-            className="home-pulse w-1.5 h-1.5 rounded-full"
-            style={{ backgroundColor: accent }}
-          />
-          Live
-        </span>
+            className="text-[10px] font-mono uppercase tracking-[0.22em]"
+            style={{ color: ASH }}
+          >
+            {label}
+          </span>
+          <span
+            className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.18em]"
+            style={{ color: ASH }}
+          >
+            <span
+              className="home-pulse w-1.5 h-1.5 rounded-full"
+              style={{ backgroundColor: accent }}
+            />
+            Live
+          </span>
+        </div>
+        {children}
       </div>
-      {children}
     </div>
   );
 }
@@ -948,6 +955,10 @@ function DailyInstrument() {
 
   return (
     <InstrumentFrame label="Daily Intake" accent="#F2C14E">
+      {/* Two-column layout so the card fills its width instead of stacking
+          tall. Left = intake + the log; right = the AI analysis + voice. */}
+      <div className="grid grid-cols-2 items-stretch">
+      <div className="flex flex-col justify-between">
       <div className="px-5 pt-3 flex items-end justify-between">
         <div className="flex items-baseline gap-2">
           <span
@@ -955,13 +966,13 @@ function DailyInstrument() {
             style={{
               fontFamily: DISPLAY,
               fontWeight: 300,
-              fontSize: "2.85rem",
+              fontSize: "3.35rem",
               color: "#F2C14E",
             }}
           >
             {total}
           </span>
-          <span className="text-[0.9rem]" style={{ color: ASH }}>
+          <span className="text-[1rem]" style={{ color: ASH }}>
             /week
           </span>
           <span
@@ -1019,7 +1030,7 @@ function DailyInstrument() {
                       }
                 }
               />
-              <span className="text-[8px] font-mono" style={{ color: ASH }}>
+              <span className="text-[9px] font-mono" style={{ color: ASH }}>
                 {DAILY_LABELS[i]}
               </span>
             </div>
@@ -1027,7 +1038,7 @@ function DailyInstrument() {
         })}
       </div>
       <div
-        className="flex items-center gap-3 px-5 pb-3 pt-1 text-[8px] font-mono uppercase tracking-[0.12em]"
+        className="flex items-center gap-3 px-5 pb-3 pt-1 text-[9px] font-mono uppercase tracking-[0.12em]"
         style={{ color: ASH }}
       >
         <span className="inline-flex items-center gap-1.5">
@@ -1050,13 +1061,13 @@ function DailyInstrument() {
       <div className="px-5 pt-3 pb-1 border-t" style={{ borderColor: LINE_D }}>
         <div className="flex items-center justify-between mb-2 mt-1">
           <span
-            className="text-[8px] font-mono uppercase tracking-[0.16em]"
+            className="text-[9px] font-mono uppercase tracking-[0.16em]"
             style={{ color: ASH }}
           >
             Recent incidents
           </span>
           <span
-            className="text-[8px] font-mono uppercase tracking-[0.16em]"
+            className="text-[9px] font-mono uppercase tracking-[0.16em]"
             style={{ color: ASH }}
           >
             Auto-categorized
@@ -1076,7 +1087,7 @@ function DailyInstrument() {
               className="w-1.5 h-1.5 rounded-full shrink-0"
               style={{ backgroundColor: r.color }}
             />
-            <span className="text-[10px] truncate" style={{ color: BONE }}>
+            <span className="text-[11px] truncate" style={{ color: BONE }}>
               {r.loc}
             </span>
             <span
@@ -1094,11 +1105,12 @@ function DailyInstrument() {
           </motion.div>
         ))}
       </div>
+      </div>
+      {/* Right column — the AI does the work: analysis + voice intake. */}
+      <div className="flex flex-col border-l" style={{ borderColor: LINE_D }}>
       {/* The report opened, with its analysis — pattern detection, policy
-          mapping, recommended action. Flush section, no nested card — same
-          border-t rhythm as the sections above, not a box floating inside
-          the frame. */}
-      <div className="px-5 pt-3 pb-3 border-t" style={{ borderColor: LINE_D }}>
+          mapping, recommended action. */}
+      <div className="px-5 pt-3 pb-3" style={{ borderColor: LINE_D }}>
         <div className="flex items-center gap-2 mb-2.5">
           <span className="text-[10px] font-mono" style={{ color: BONE }}>
             IR-2041
@@ -1137,7 +1149,7 @@ function DailyInstrument() {
             as it's "read" — shows the extraction happening instead of
             just listing what it found. */}
         <p
-          className="text-[10px] leading-relaxed italic"
+          className="text-[11px] leading-relaxed italic"
           style={{ color: ASH }}
         >
           “
@@ -1343,6 +1355,8 @@ function DailyInstrument() {
             </div>
           </div>
         </div>
+      </div>
+      </div>
       </div>
       <div
         className="flex items-center justify-between px-5 pb-4 pt-3 border-t"
@@ -1965,9 +1979,10 @@ function ProductCarousel() {
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
-      {/* What you're about to see, ABOVE the card — and sized like a real
-          heading, not a caption. */}
-      <div className="flex items-end justify-between gap-4 mb-5">
+      {/* What you're about to see, ABOVE the card. Fixed-height slot so the
+          heading (1- vs 2-line names + optional subheader) never reflows the
+          card below it as slides change. */}
+      <div className="flex items-start justify-between gap-4 mb-5 h-[72px]">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={index}
@@ -2027,9 +2042,7 @@ function ProductCarousel() {
               exit="exit"
               transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
             >
-              <div style={{ transform: "scale(0.88)", transformOrigin: "top left", width: "113.64%" }}>
-                <Instrument />
-              </div>
+              <Instrument />
             </motion.div>
           </AnimatePresence>
         </Link>
