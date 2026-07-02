@@ -253,6 +253,19 @@ tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
 # Disable gitstatus in dev panes to avoid index.lock conflicts
 GS_OFF="export POWERLEVEL9K_DISABLE_GITSTATUS=true &&"
 
+# Tell-Us frontend port — picked BEFORE the panes so the main frontend can
+# receive VITE_TELLUS_TARGET (its '/tellus' proxy → this server, making
+# http://localhost:5174/tellus/ work in dev like prod). Range starts at the
+# tellus default (5191), clear of the main frontend's 5175-5190 fallback.
+TELLUS_PORT=""
+if [ -d "$PROJECT_ROOT/client/tellus/node_modules" ]; then
+    TELLUS_PORT="$(pick_available_port 5191 5199)"
+fi
+TELLUS_ENV=""
+if [ -n "$TELLUS_PORT" ]; then
+    TELLUS_ENV="VITE_TELLUS_TARGET='http://127.0.0.1:$TELLUS_PORT' "
+fi
+
 # Create new tmux session
 echo -e "${YELLOW}Creating tmux session...${NC}"
 
@@ -281,7 +294,7 @@ tmux split-window -t "$SESSION_NAME:dev.1" -v -c "$PROJECT_ROOT/server" \
 
 # Pane 3: Frontend - Start immediately (proxies will retry until backend is up)
 tmux split-window -t "$SESSION_NAME:dev.2" -v -c "$PROJECT_ROOT/client" \
-    "$GS_OFF VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' npm run dev -- --port $FRONTEND_PORT; echo -e '\n${RED}Frontend exited.${NC}'; read"
+    "$GS_OFF VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' ${TELLUS_ENV}npm run dev -- --port $FRONTEND_PORT; echo -e '\n${RED}Frontend exited.${NC}'; read"
 
 # Pane 4 (optional): AI Chat Model Server
 if [ "$ENABLE_CHAT" = true ] && [ "$CHAT_REUSE_EXISTING" = false ]; then
@@ -289,7 +302,17 @@ if [ "$ENABLE_CHAT" = true ] && [ "$CHAT_REUSE_EXISTING" = false ]; then
         "$GS_OFF echo 'Starting Qwen chat model on port $CHAT_PORT...'; llama-server -m $CHAT_MODEL_PATH --mmproj $CHAT_MMPROJ_PATH -ngl 99 --ctx-size 4096 --port $CHAT_PORT; echo -e '\n${RED}Chat model exited.${NC}'; read"
 fi
 
+# Extra window: Tell-Us frontend (separate Vite app served at /tellus/). Its own
+# window keeps the crowded dev pane layout intact. Port was picked before the
+# panes (TELLUS_PORT) so the main frontend proxies /tellus → here — meaning
+# http://localhost:$FRONTEND_PORT/tellus/ works; the direct port works too.
+if [ -n "$TELLUS_PORT" ]; then
+    tmux new-window -t "$SESSION_NAME" -n "tellus" -c "$PROJECT_ROOT/client/tellus" \
+        "$GS_OFF VITE_PROXY_TARGET='http://127.0.0.1:$BACKEND_PORT' npm run dev -- --port $TELLUS_PORT --strictPort; echo -e '\n${RED}Tell-Us frontend exited.${NC}'; read"
+fi
+
 # Select the server pane as active
+tmux select-window -t "$SESSION_NAME:dev"
 tmux select-pane -t "$SESSION_NAME:dev.0"
 
 echo -e "${GREEN}Remote Dev environment started!${NC}"
@@ -297,6 +320,9 @@ echo -e "  - Database: LOCAL matcha-postgres (localhost:$LOCAL_PORT/matcha)"
 echo -e "  - Redis:    Local ($REDIS_PORT)"
 echo -e "  - Backend:  http://localhost:$BACKEND_PORT"
 echo -e "  - Frontend: http://localhost:$FRONTEND_PORT"
+if [ -n "$TELLUS_PORT" ]; then
+    echo -e "  - Tell-Us:  http://localhost:$FRONTEND_PORT/tellus/ (proxied; direct :$TELLUS_PORT, window: tellus)"
+fi
 if [ "$ENABLE_CHAT" = true ]; then
     echo -e "  - AI Chat:  http://localhost:$CHAT_PORT (Qwen2-VL-2B)"
 fi

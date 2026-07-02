@@ -20,14 +20,22 @@ ENV VITE_LANDING_BUILD_VERSION=${VITE_LANDING_BUILD_VERSION}
 # Build application (API_BASE will be replaced at runtime)
 RUN npm run build
 
+# Tell-Us — a SEPARATE Vite app in the same repo (client/tellus). Build it too;
+# it emits under base '/tellus/' and is served from /usr/share/nginx/html/tellus
+# by the same nginx (see nginx.conf). Its own package-lock → its own npm ci.
+RUN cd tellus \
+    && npm ci --legacy-peer-deps \
+    && npm run build
+
 # Stage 2: Runtime with nginx
 FROM nginx:1.25-alpine
 
 # Install gettext for envsubst
 RUN apk add --no-cache gettext
 
-# Copy built files
+# Copy built files (main app at root, Tell-Us under /tellus)
 COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=builder /app/tellus/dist /usr/share/nginx/html/tellus
 
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/nginx.conf

@@ -352,6 +352,40 @@ class StorageService:
         except ClientError:
             return False
 
+    def get_presigned_upload_url(
+        self,
+        filename: str,
+        prefix: str = "documents",
+        content_type: Optional[str] = None,
+        expires_in: int = 900,
+    ) -> Optional[tuple[str, str]]:
+        """Mint a presigned S3 PUT URL for a direct browser upload to the PRIVATE
+        bucket. Returns (upload_url, storage_path) where storage_path is the
+        `s3://…` URI to persist, or None if S3 isn't configured.
+
+        The browser PUTs the bytes straight to S3 (bypassing nginx's body-size
+        limit); the tiny presign JSON is the only thing that crosses our servers.
+        The PUT must send the SAME Content-Type it was signed with — pass it back
+        to the client and set it on the request. SSE is enforced bucket-side.
+        """
+        bucket = self.private_bucket or self.bucket
+        if not self.s3_client or not bucket:
+            return None
+
+        key = self._generate_key(filename, prefix)
+        params = {"Bucket": bucket, "Key": key}
+        if content_type:
+            params["ContentType"] = content_type
+        try:
+            url = self.s3_client.generate_presigned_url(
+                "put_object",
+                Params=params,
+                ExpiresIn=expires_in,
+            )
+        except ClientError:
+            return None
+        return url, f"s3://{bucket}/{key}"
+
     def get_presigned_url(self, path: str, expires_in: int = 3600) -> Optional[str]:
         """Get a presigned URL for downloading a file.
 

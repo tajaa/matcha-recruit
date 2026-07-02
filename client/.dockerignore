@@ -1,5 +1,7 @@
 node_modules/
 dist/
+tellus/node_modules/
+tellus/dist/
 .env*
 *.log
 .git

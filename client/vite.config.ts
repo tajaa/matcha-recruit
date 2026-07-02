@@ -27,6 +27,16 @@ export default defineConfig({
   server: {
     port: 5174,
     proxy: {
+      // Tell-Us is a SEPARATE Vite app (client/tellus, base '/tellus/') with
+      // its own dev server. Proxying it here makes dev match prod (one origin
+      // serves both apps), so /tellus/* works on this port too. ws:true keeps
+      // the tellus HMR websocket alive through the proxy. Target defaults to
+      // the tellus dev server's fixed port; dev-remote.sh overrides via env.
+      '/tellus': {
+        target: process.env.VITE_TELLUS_TARGET || 'http://127.0.0.1:5191',
+        changeOrigin: true,
+        ws: true,
+      },
       '/api': {
         target: backendTarget,
         changeOrigin: true,
