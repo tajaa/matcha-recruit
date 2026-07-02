@@ -38,6 +38,7 @@ type Product = {
   n: string;
   name: string;
   subheader?: string;
+  nameSize?: string;
   blurb: string;
   to: string;
   accent: string;
@@ -92,11 +93,18 @@ const PRODUCTS: Product[] = [
 // the Full Platform as the "and everything above, unified" capstone.
 // Consulting is people, not an instrument, and stays text-only in the index below.
 const CAROUSEL_PRODUCTS: Product[] = [
-  PRODUCTS[1], // 02 Matcha Lite — incident reporting flow
   {
     n: "02",
-    name: "Matcha Lite",
-    subheader: "Incident Reporting and OSHA Logs",
+    name: "Matcha Lite: Incident Reporting Pro",
+    blurb:
+      "Incident reporting, OSHA 300 logs, and a full HR library. Bundled for small teams.",
+    to: "/matcha-daily",
+    accent: "#F2C14E",
+  },
+  {
+    n: "02",
+    name: "Matcha Lite: 1 Click OSHA Logs Export",
+    nameSize: "clamp(1.35rem, 1.85vw, 2.1rem)",
     blurb:
       "Recordable incidents flow straight into your OSHA 300 log, 300A summary, and ITA export.",
     to: "/matcha-daily",
@@ -327,11 +335,11 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
                 className="max-w-2xl text-lg sm:text-xl"
                 style={{ color: BONE, lineHeight: 1.45 }}
               >
-                From software you run yourself to senior practitioners who run
-                it for you.{" "}
+                <span style={{ color: "#D97706" }}>
+                  Managing your risk before your risk manages you.
+                </span>{" "}
                 <span style={{ color: ASH }}>
-                  Workplace safety, compliance, and risk analysis. Managing your
-                  risk before your risk manages you.
+                  Workplace safety, compliance, and risk analysis.
                 </span>
               </p>
               <div className="flex items-center gap-5 shrink-0">
@@ -381,12 +389,12 @@ function Marquee() {
         {row.map((w, i) => (
           <span key={i} className="flex items-center">
             <span
-              className="px-5 text-[clamp(0.7rem,1.4vw,1.15rem)] tracking-tight"
-              style={{ fontFamily: DISPLAY, fontWeight: 400, color: NOIR }}
+              className="px-5 text-[clamp(0.62rem,1.1vw,0.95rem)] tracking-tight"
+              style={{ fontFamily: DISPLAY, fontWeight: 400, color: "#5C584E" }}
             >
               {w}
             </span>
-            <span className="text-[0.7rem]" style={{ color: NOIR }}>
+            <span className="text-[0.6rem]" style={{ color: "#5C584E" }}>
               ✦
             </span>
           </span>
@@ -521,6 +529,19 @@ function InstrumentFrame({
 
 function clampScore(n: number) {
   return Math.max(0, Math.min(100, n));
+}
+
+// Shared cell-divider style for the small stat grids (platform domains,
+// compliance coverage) — one bordered grid with internal lines, not N
+// separate floating boxes.
+function gridCellBorderStyle(i: number, total: number, cols = 3) {
+  const rows = Math.ceil(total / cols);
+  const isLastCol = i % cols === cols - 1;
+  const isLastRow = i >= (rows - 1) * cols;
+  return {
+    borderRight: isLastCol ? undefined : `1px solid ${LINE_D}`,
+    borderBottom: isLastRow ? undefined : `1px solid ${LINE_D}`,
+  };
 }
 
 const ER_INSIGHTS = [
@@ -798,17 +819,20 @@ function PlatformInstrument() {
             Unified
           </span>
         </div>
-        <div className="grid grid-cols-3 gap-2">
-          {PLATFORM_DOMAINS.map((d) => {
+        <div
+          className="grid grid-cols-3 rounded-lg overflow-hidden border"
+          style={{
+            borderColor: LINE_D,
+            backgroundColor: "rgba(245,242,237,0.02)",
+          }}
+        >
+          {PLATFORM_DOMAINS.map((d, i) => {
             const Icon = d.icon;
             return (
               <div
                 key={d.label}
-                className="rounded-lg px-2.5 py-2"
-                style={{
-                  border: `1px solid ${LINE_D}`,
-                  backgroundColor: "rgba(245,242,237,0.02)",
-                }}
+                className="px-2.5 py-2"
+                style={gridCellBorderStyle(i, PLATFORM_DOMAINS.length)}
               >
                 <div className="flex items-center gap-1.5 mb-1">
                   <Icon
@@ -1056,282 +1080,242 @@ function DailyInstrument() {
         ))}
       </div>
       {/* The report opened, with its analysis — pattern detection, policy
-          mapping, recommended action. The data dashboard, not just a row. */}
-      <div className="px-5 pt-3 pb-4 border-t" style={{ borderColor: LINE_D }}>
-        <div
-          className="rounded-lg overflow-hidden border"
-          style={{
-            borderColor: LINE_D,
-            backgroundColor: "rgba(245,242,237,0.02)",
-          }}
-        >
-          <div
-            className="flex items-center gap-2 px-3.5 py-2.5 border-b"
-            style={{ borderColor: LINE_D }}
+          mapping, recommended action. Flush section, no nested card — same
+          border-t rhythm as the sections above, not a box floating inside
+          the frame. */}
+      <div className="px-5 pt-3 pb-3 border-t" style={{ borderColor: LINE_D }}>
+        <div className="flex items-center gap-2 mb-2.5">
+          <span className="text-[10px] font-mono" style={{ color: BONE }}>
+            IR-2041
+          </span>
+          <span
+            className="text-[9px] font-mono truncate"
+            style={{ color: ASH }}
           >
-            <span className="text-[10px] font-mono" style={{ color: BONE }}>
-              IR-2041
-            </span>
-            <span
-              className="text-[9px] font-mono truncate"
-              style={{ color: ASH }}
-            >
-              Atlanta — Store 7
-            </span>
-            <span
-              className="ml-auto shrink-0 text-[8px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded"
-              style={{
-                color: "#c98a3e",
-                backgroundColor: "rgba(201,138,62,0.12)",
-                border: "1px solid rgba(201,138,62,0.25)",
-              }}
-            >
-              OSHA recordable
-            </span>
-          </div>
-          <div className="px-3.5 py-3">
-            <div className="flex items-center gap-1.5 mb-2.5">
-              <Sparkles
-                className="w-3 h-3 shrink-0"
-                style={{ color: "#F2C14E" }}
-              />
+            Atlanta — Store 7
+          </span>
+          <span
+            className="ml-auto shrink-0 text-[8px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded"
+            style={{
+              color: "#c98a3e",
+              backgroundColor: "rgba(201,138,62,0.12)",
+              border: "1px solid rgba(201,138,62,0.25)",
+            }}
+          >
+            OSHA recordable
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 mb-2.5">
+          <Sparkles className="w-3 h-3 shrink-0" style={{ color: "#F2C14E" }} />
+          <span
+            className="text-[8px] font-mono uppercase tracking-[0.16em]"
+            style={{ color: ASH }}
+          >
+            Agentic analysis
+          </span>
+          <span
+            className="home-pulse w-1 h-1 rounded-full"
+            style={{ backgroundColor: "#F2C14E" }}
+          />
+        </div>
+        {/* The raw report, with the phrase behind the current fact lit up
+            as it's "read" — shows the extraction happening instead of
+            just listing what it found. */}
+        <p className="text-[10px] leading-relaxed italic" style={{ color: ASH }}>
+          “
+          {NARRATIVE_TOKENS.map((t, i) => {
+            const active = t.field === extractPhase;
+            return (
               <span
-                className="text-[8px] font-mono uppercase tracking-[0.16em]"
+                key={i}
+                className="transition-colors duration-500 not-italic"
+                style={
+                  t.field === undefined
+                    ? undefined
+                    : {
+                        color: active ? "#F2C14E" : ASH,
+                        backgroundColor: active
+                          ? "rgba(242,193,78,0.12)"
+                          : "transparent",
+                        borderRadius: 3,
+                        padding: active ? "0 3px" : undefined,
+                      }
+                }
+              >
+                {t.text}
+              </span>
+            );
+          })}
+          ”
+        </p>
+        <div className="flex items-center gap-2 mt-2.5">
+          <span className="text-[10px] shrink-0" style={{ color: "#F2C14E" }}>
+            ↳
+          </span>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={extractPhase}
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.3 }}
+              className="flex items-baseline gap-2.5 min-w-0"
+            >
+              <span
+                className="text-[8px] font-mono uppercase tracking-[0.12em] shrink-0"
                 style={{ color: ASH }}
               >
-                Agentic analysis
+                {REPORT_ANALYSIS[extractPhase].label}
               </span>
               <span
-                className="home-pulse w-1 h-1 rounded-full"
-                style={{ backgroundColor: "#F2C14E" }}
-              />
-            </div>
-            {/* The raw report, with the phrase behind the current fact lit up
-                as it's "read" — shows the extraction happening instead of
-                just listing what it found. */}
-            <p
-              className="text-[10px] leading-relaxed italic"
-              style={{ color: ASH }}
-            >
-              “
-              {NARRATIVE_TOKENS.map((t, i) => {
-                const active = t.field === extractPhase;
-                return (
-                  <span
-                    key={i}
-                    className="transition-colors duration-500 not-italic"
-                    style={
-                      t.field === undefined
-                        ? undefined
-                        : {
-                            color: active ? "#F2C14E" : ASH,
-                            backgroundColor: active
-                              ? "rgba(242,193,78,0.12)"
-                              : "transparent",
-                            borderRadius: 3,
-                            padding: active ? "0 3px" : undefined,
-                          }
-                    }
-                  >
-                    {t.text}
-                  </span>
-                );
-              })}
-              ”
-            </p>
-            <div className="flex items-center gap-2 mt-2.5">
-              <span
-                className="text-[10px] shrink-0"
-                style={{ color: "#F2C14E" }}
+                className="text-[10px] leading-snug truncate"
+                style={{ color: BONE }}
               >
-                ↳
+                {REPORT_ANALYSIS[extractPhase].value}
               </span>
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={extractPhase}
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -4 }}
-                  transition={{ duration: 0.3 }}
-                  className="flex items-baseline gap-2.5 min-w-0"
-                >
-                  <span
-                    className="text-[8px] font-mono uppercase tracking-[0.12em] shrink-0"
-                    style={{ color: ASH }}
-                  >
-                    {REPORT_ANALYSIS[extractPhase].label}
-                  </span>
-                  <span
-                    className="text-[10px] leading-snug truncate"
-                    style={{ color: BONE }}
-                  >
-                    {REPORT_ANALYSIS[extractPhase].value}
-                  </span>
-                </motion.div>
-              </AnimatePresence>
-            </div>
-          </div>
-          <div
-            className="flex items-center gap-3 px-3.5 py-2 border-t text-[8px] font-mono uppercase tracking-[0.12em]"
-            style={{ borderColor: LINE_D, color: ASH }}
-          >
-            <span>2 witnesses</span>
-            <span style={{ color: LINE_D }}>·</span>
-            <span>3 photos</span>
-            <span style={{ color: LINE_D }}>·</span>
-            <span style={{ color: "#86efac" }}>Routed to manager</span>
-          </div>
+            </motion.div>
+          </AnimatePresence>
+        </div>
+        <div
+          className="flex items-center gap-3 mt-3 pt-2.5 border-t text-[8px] font-mono uppercase tracking-[0.12em]"
+          style={{ borderColor: "rgba(245,242,237,0.06)", color: ASH }}
+        >
+          <span>2 witnesses</span>
+          <span style={{ color: LINE_D }}>·</span>
+          <span>3 photos</span>
+          <span style={{ color: LINE_D }}>·</span>
+          <span style={{ color: "#86efac" }}>Routed to manager</span>
         </div>
       </div>
       {/* Voice intake demo — same mockup as the dedicated section on
           /matcha-daily (magic link header, mic, waveform, extracted
-          fields), just scaled to fit the hero card. */}
-      <div className="px-5 pb-4 pt-1">
-        <div
-          className="rounded-lg overflow-hidden border transition-colors duration-300"
-          style={{ borderColor: listening ? "rgba(242,193,78,0.4)" : LINE_D }}
-        >
+          fields), just scaled to fit the hero card. Flush section like the
+          one above it — same card, no inner box. */}
+      <div
+        className="px-5 pt-3 pb-4 border-t transition-colors duration-300"
+        style={{ borderColor: listening ? "rgba(242,193,78,0.4)" : LINE_D }}
+      >
+        <div className="flex items-center gap-2 mb-3">
+          <Lock className="w-2.5 h-2.5 shrink-0" style={{ color: ASH }} />
+          <span className="text-[9px] font-mono truncate" style={{ color: ASH }}>
+            hey-matcha.com/intake/atl7
+          </span>
+          <span
+            className="ml-auto shrink-0 text-[7px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded"
+            style={{ border: `1px solid ${LINE_D}`, color: ASH }}
+          >
+            Public form
+          </span>
+        </div>
+
+        <div className="flex flex-col items-center text-center py-1">
+          <span
+            className="text-[8px] font-mono uppercase tracking-widest mb-3"
+            style={{ color: ASH }}
+          >
+            Atlanta — Store 7
+          </span>
           <div
-            className="flex items-center gap-2 px-3.5 py-2 border-b"
+            className="relative w-11 h-11 rounded-full flex items-center justify-center mb-2.5 transition-colors duration-300"
             style={{
-              borderColor: LINE_D,
-              backgroundColor: "rgba(245,242,237,0.02)",
+              backgroundColor: listening
+                ? "rgba(242,193,78,0.15)"
+                : "rgba(245,242,237,0.05)",
+              border: `1px solid ${listening ? "rgba(242,193,78,0.5)" : LINE_D}`,
             }}
           >
-            <Lock className="w-2.5 h-2.5 shrink-0" style={{ color: ASH }} />
-            <span
-              className="text-[9px] font-mono truncate"
-              style={{ color: ASH }}
-            >
-              hey-matcha.com/intake/atl7
-            </span>
-            <span
-              className="ml-auto shrink-0 text-[7px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded"
-              style={{ border: `1px solid ${LINE_D}`, color: ASH }}
-            >
-              Public form
-            </span>
+            {listening && (
+              <span
+                className="absolute inset-0 rounded-full animate-ping"
+                style={{ backgroundColor: "rgba(242,193,78,0.2)" }}
+              />
+            )}
+            <Mic
+              className="w-5 h-5 relative"
+              style={{ color: listening ? "#F2C14E" : ASH }}
+            />
           </div>
-
-          <div
-            className="px-4 py-5 flex flex-col items-center text-center"
-            style={{ backgroundColor: "rgba(245,242,237,0.015)" }}
-          >
-            <span
-              className="text-[8px] font-mono uppercase tracking-widest mb-3"
-              style={{ color: ASH }}
-            >
-              Atlanta — Store 7
-            </span>
-            <div
-              className="relative w-11 h-11 rounded-full flex items-center justify-center mb-2.5 transition-colors duration-300"
+          <div className="flex items-end gap-[2.5px] h-4 mb-2.5">
+            {VOICE_WAVEFORM.map((v, i) => (
+              <motion.div
+                key={i}
+                className="w-[2.5px] rounded-full"
+                style={{
+                  backgroundColor: listening ? "rgba(242,193,78,0.8)" : LINE_D,
+                }}
+                animate={
+                  reduce
+                    ? { height: listening ? `${v * 100}%` : "20%" }
+                    : {
+                        height: listening
+                          ? [`${v * 55}%`, `${v * 100}%`, `${v * 55}%`]
+                          : "20%",
+                      }
+                }
+                transition={
+                  reduce
+                    ? { duration: 0 }
+                    : {
+                        duration: 0.8,
+                        repeat: listening ? Infinity : 0,
+                        delay: i * 0.05,
+                        ease: "easeInOut",
+                      }
+                }
+              />
+            ))}
+          </div>
+          <AnimatePresence mode="wait">
+            <motion.span
+              key={voicePhase}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              className="text-[10px] font-mono"
               style={{
-                backgroundColor: listening
-                  ? "rgba(242,193,78,0.15)"
-                  : "rgba(245,242,237,0.05)",
-                border: `1px solid ${listening ? "rgba(242,193,78,0.5)" : LINE_D}`,
+                color:
+                  voicePhase === 1
+                    ? "#F2C14E"
+                    : voicePhase === 3
+                      ? "#86efac"
+                      : ASH,
               }}
             >
-              {listening && (
-                <span
-                  className="absolute inset-0 rounded-full animate-ping"
-                  style={{ backgroundColor: "rgba(242,193,78,0.2)" }}
-                />
-              )}
-              <Mic
-                className="w-5 h-5 relative"
-                style={{ color: listening ? "#F2C14E" : ASH }}
-              />
-            </div>
-            <div className="flex items-end gap-[2.5px] h-4 mb-2.5">
-              {VOICE_WAVEFORM.map((v, i) => (
-                <motion.div
-                  key={i}
-                  className="w-[2.5px] rounded-full"
-                  style={{
-                    backgroundColor: listening
-                      ? "rgba(242,193,78,0.8)"
-                      : LINE_D,
-                  }}
-                  animate={
-                    reduce
-                      ? { height: listening ? `${v * 100}%` : "20%" }
-                      : {
-                          height: listening
-                            ? [`${v * 55}%`, `${v * 100}%`, `${v * 55}%`]
-                            : "20%",
-                        }
-                  }
-                  transition={
-                    reduce
-                      ? { duration: 0 }
-                      : {
-                          duration: 0.8,
-                          repeat: listening ? Infinity : 0,
-                          delay: i * 0.05,
-                          ease: "easeInOut",
-                        }
-                  }
-                />
-              ))}
-            </div>
-            <AnimatePresence mode="wait">
-              <motion.span
-                key={voicePhase}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.3 }}
-                className="text-[10px] font-mono"
-                style={{
-                  color:
-                    voicePhase === 1
-                      ? "#F2C14E"
-                      : voicePhase === 3
-                        ? "#86efac"
-                        : ASH,
-                }}
-              >
-                {voicePhase < 3
-                  ? VOICE_STATUS[voicePhase]
-                  : "Report ready for review"}
-              </motion.span>
-            </AnimatePresence>
-          </div>
+              {voicePhase < 3
+                ? VOICE_STATUS[voicePhase]
+                : "Report ready for review"}
+            </motion.span>
+          </AnimatePresence>
+        </div>
 
-          <div
-            className="border-t px-4 py-3 transition-opacity duration-500"
-            style={{
-              borderColor: LINE_D,
-              opacity: voicePhase === 3 ? 1 : 0.25,
-            }}
-          >
-            <div className="grid grid-cols-2 gap-2.5">
-              <div>
-                <div
-                  className="text-[7px] font-mono uppercase tracking-widest mb-0.5"
-                  style={{ color: ASH }}
-                >
-                  Category
-                </div>
-                <div className="text-[10px]" style={{ color: BONE }}>
-                  Customer escalation
-                </div>
-              </div>
-              <div>
-                <div
-                  className="text-[7px] font-mono uppercase tracking-widest mb-0.5"
-                  style={{ color: ASH }}
-                >
-                  Severity
-                </div>
-                <div
-                  className="text-[10px] font-medium"
-                  style={{ color: "#F2C14E" }}
-                >
-                  Medium
-                </div>
-              </div>
+        <div
+          className="grid grid-cols-2 gap-2.5 mt-3 pt-3 border-t transition-opacity duration-500"
+          style={{
+            borderColor: "rgba(245,242,237,0.06)",
+            opacity: voicePhase === 3 ? 1 : 0.25,
+          }}
+        >
+          <div>
+            <div
+              className="text-[7px] font-mono uppercase tracking-widest mb-0.5"
+              style={{ color: ASH }}
+            >
+              Category
+            </div>
+            <div className="text-[10px]" style={{ color: BONE }}>
+              Customer escalation
+            </div>
+          </div>
+          <div>
+            <div
+              className="text-[7px] font-mono uppercase tracking-widest mb-0.5"
+              style={{ color: ASH }}
+            >
+              Severity
+            </div>
+            <div className="text-[10px] font-medium" style={{ color: "#F2C14E" }}>
+              Medium
             </div>
           </div>
         </div>
@@ -1843,15 +1827,18 @@ function ComplianceInstrument() {
             247 reqs
           </span>
         </div>
-        <div className="grid grid-cols-3 gap-2">
-          {COMPLIANCE_CATEGORIES.map((c) => (
+        <div
+          className="grid grid-cols-3 rounded-lg overflow-hidden border"
+          style={{
+            borderColor: LINE_D,
+            backgroundColor: "rgba(245,242,237,0.02)",
+          }}
+        >
+          {COMPLIANCE_CATEGORIES.map((c, i) => (
             <div
               key={c.label}
-              className="rounded-lg px-2.5 py-2"
-              style={{
-                border: `1px solid ${LINE_D}`,
-                backgroundColor: "rgba(245,242,237,0.02)",
-              }}
+              className="px-2.5 py-2"
+              style={gridCellBorderStyle(i, COMPLIANCE_CATEGORIES.length)}
             >
               <div className="flex items-center gap-1.5 mb-1">
                 <span
@@ -1963,7 +1950,7 @@ function ProductCarousel() {
                 style={{
                   fontFamily: DISPLAY,
                   fontWeight: 400,
-                  fontSize: "clamp(1.75rem, 2.4vw, 2.75rem)",
+                  fontSize: slide.nameSize ?? "clamp(1.75rem, 2.4vw, 2.75rem)",
                   color: BONE,
                 }}
               >
