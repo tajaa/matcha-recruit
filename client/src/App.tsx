@@ -25,6 +25,7 @@ const ServicesPage = lazy(() => import('./pages/landing/ServicesPage'))
 // /brokers, /compliance pages restyled closer to /services. Live at their
 // own routes alongside the originals so either can be reverted to freely.
 const SimpleCompliancePage = lazy(() => import('./pages/simpler-pages/Compliance'))
+const SimplePlatformPage = lazy(() => import('./pages/simpler-pages/Platform'))
 const Subscribe = lazy(() => import('./pages/landing/Subscribe'))
 const TermsPage = lazy(() => import('./pages/landing/TermsPage'))
 const PrivacyPage = lazy(() => import('./pages/landing/PrivacyPage'))
@@ -95,6 +96,7 @@ export default function App() {
             /compliance/signup + /compliance/onboarding, which are exact paths). */}
         <Route path="/compliance" element={<CompliancePage />} />
         <Route path="/matcha-compliance" element={<SimpleCompliancePage />} />
+        <Route path="/matcha-platform" element={<SimplePlatformPage />} />
         <Route path="/services" element={<ServicesPage />} />
         <Route path="/subscribe" element={<Subscribe />} />
         <Route path="/terms" element={<TermsPage />} />
