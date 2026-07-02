@@ -103,7 +103,7 @@ export default function SimplePlatformPage() {
   return (
     <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen overflow-x-hidden">
       <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
-      <EnforcementTotalsTicker />
+      <EnforcementTotalsTicker mono />
       <MarketingNav onDemoClick={() => setIsPricingOpen(true)} />
 
       <Hero onContactClick={() => setIsPricingOpen(true)} />
@@ -188,11 +188,11 @@ function Hero({ onContactClick }: { onContactClick: () => void }) {
         {/* Live agent-reasoning panel — the platform's signature visual */}
         <div className="hidden sm:flex mt-12 sm:mt-16 w-full overflow-hidden justify-center">
           <LazyMount
-            minHeight={440}
-            fallback={<div className="w-full max-w-[900px] mx-auto rounded-xl" style={{ height: 440, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}
+            minHeight={600}
+            fallback={<div className="w-full max-w-[1060px] mx-auto rounded-xl" style={{ height: 600, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}
           >
-            <Suspense fallback={<div className="w-full max-w-[900px] mx-auto rounded-xl" style={{ height: 440, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}>
-              <AgentReasoningAnimation />
+            <Suspense fallback={<div className="w-full max-w-[1060px] mx-auto rounded-xl" style={{ height: 600, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}>
+              <AgentReasoningAnimation mono />
             </Suspense>
           </LazyMount>
         </div>

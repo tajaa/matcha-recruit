@@ -23,7 +23,16 @@ const HEADLINES = [
 
 const ITEMS = [...HEADLINES, ...HEADLINES]
 
-export function EnforcementTotalsTicker() {
+// Default keeps the warm gold accent (the original /platform look). `mono`
+// renders the ticker fully grayscale for the simpler-pages design system,
+// where amber is reserved as the single emphasis color used sparingly.
+const PALETTE = {
+  gold: { accent: '#d7ba7d', tagText: '#c9b48e', tagBorder: 'rgba(201,180,142,0.45)' },
+  mono: { accent: '#b8b2a8', tagText: 'rgba(240,236,228,0.7)', tagBorder: 'rgba(240,236,228,0.22)' },
+}
+
+export function EnforcementTotalsTicker({ mono = false }: { mono?: boolean } = {}) {
+  const P = mono ? PALETTE.mono : PALETTE.gold
   return (
     <div
       className="fixed left-0 right-0 z-40 w-full overflow-hidden"
@@ -39,17 +48,17 @@ export function EnforcementTotalsTicker() {
           className="shrink-0 flex items-center gap-2 px-5 h-full border-r text-[11px] font-medium uppercase tracking-[0.18em]"
           style={{
             borderColor: 'rgba(255,255,255,0.08)',
-            color: '#d7ba7d',
+            color: P.accent,
           }}
         >
           <span className="relative inline-flex w-1.5 h-1.5">
             <span
               className="absolute inline-flex w-full h-full rounded-full animate-ping"
-              style={{ backgroundColor: '#d7ba7d', opacity: 0.5 }}
+              style={{ backgroundColor: P.accent, opacity: 0.5 }}
             />
             <span
               className="relative inline-flex rounded-full w-1.5 h-1.5"
-              style={{ backgroundColor: '#d7ba7d' }}
+              style={{ backgroundColor: P.accent }}
             />
           </span>
           Enforcement totals
@@ -65,8 +74,8 @@ export function EnforcementTotalsTicker() {
                 <span
                   className="text-[10.5px] font-medium uppercase tracking-wider px-2 py-[2px] rounded-sm"
                   style={{
-                    color: '#c9b48e',
-                    border: '1px solid rgba(201,180,142,0.45)',
+                    color: P.tagText,
+                    border: `1px solid ${P.tagBorder}`,
                   }}
                 >
                   {item.tag}

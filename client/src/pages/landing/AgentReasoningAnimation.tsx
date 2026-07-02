@@ -96,6 +96,16 @@ const RED = '#f87171'
 const AMBER = '#d7ba7d'
 const ZINC_LINE = 'rgba(255,255,255,0.08)'
 
+// The default (gold) palette keeps the semantic red/green/amber for the
+// original /platform page. The mono palette collapses everything to one amber
+// accent + neutral grays for the simpler-pages design system — amber marks
+// what needs attention (the audit, its gaps, exposure), everything resolved
+// or structural stays neutral, so the card reads as one system, not a
+// stoplight.
+type Palette = { red: string; emerald: string; amber: string; live: string; neutral: string }
+const GOLD: Palette = { red: RED, emerald: EMERALD, amber: AMBER, live: EMERALD, neutral: '#cbd5e1' }
+const MONO: Palette = { red: '#F59E0B', emerald: '#8b8f96', amber: '#F59E0B', live: '#F59E0B', neutral: '#cbd5e1' }
+
 // Phase ordering for the loop
 type DecisionPhase = 'pending' | 'weighing' | 'committed' | 'remediated'
 
@@ -106,7 +116,8 @@ interface DecisionState {
 
 const INITIAL_STATES: DecisionState[] = DECISIONS.map(() => ({ phase: 'pending', weighIdx: 0 }))
 
-export default function AgentReasoningAnimation() {
+export default function AgentReasoningAnimation({ mono = false }: { mono?: boolean } = {}) {
+  const P = mono ? MONO : GOLD
   const containerRef = useRef<HTMLDivElement>(null)
   const [scenarioVisible, setScenarioVisible] = useState(false)
   const [rootVisible, setRootVisible] = useState(false)
@@ -221,7 +232,7 @@ export default function AgentReasoningAnimation() {
   return (
     <div
       ref={containerRef}
-      className="relative w-full max-w-[900px] rounded-xl overflow-hidden mx-auto flex flex-col"
+      className="relative w-full max-w-[1060px] rounded-xl overflow-hidden mx-auto flex flex-col"
       style={{
         backgroundColor: '#0a0a08',
         color: '#d4d4d4',
@@ -241,15 +252,15 @@ export default function AgentReasoningAnimation() {
           </span>
           <span
             className="text-[7.5px] uppercase tracking-wider px-1.5 py-[1px] rounded font-mono"
-            style={{ color: AMBER, border: `1px solid ${AMBER}55` }}
+            style={{ color: P.amber, border: `1px solid ${P.amber}55` }}
           >
             SB 553 · LIVE
           </span>
         </div>
         <div className="flex items-center gap-2 font-mono text-[8.5px]">
           <span className="relative flex h-1.5 w-1.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ backgroundColor: EMERALD }} />
-            <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ backgroundColor: EMERALD }} />
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ backgroundColor: P.live }} />
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ backgroundColor: P.live }} />
           </span>
           <span style={{ color: '#9a8a70' }}>Live Engine · Cal/OSHA</span>
         </div>
@@ -259,7 +270,7 @@ export default function AgentReasoningAnimation() {
       <div
         className="relative overflow-hidden"
         style={{
-          height: 440,
+          height: 520,
           transition: 'opacity 600ms ease',
           opacity: phase === 'reset' ? 0.15 : 1,
         }}
@@ -275,7 +286,7 @@ export default function AgentReasoningAnimation() {
         />
 
         {/* Floating particles for ambient feel */}
-        <ParticleField />
+        <ParticleField p={P} />
 
         {/* Tree */}
         <div className="relative w-full h-full px-4 py-4 flex flex-col">
@@ -289,20 +300,20 @@ export default function AgentReasoningAnimation() {
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.4 }}
                 className="relative mx-auto"
-                style={{ width: 460 }}
+                style={{ width: 540 }}
               >
                 <div
-                  className="rounded-lg px-4 py-2.5 flex items-start gap-3"
+                  className="rounded-lg px-5 py-3.5 flex items-start gap-3"
                   style={{
-                    backgroundColor: 'rgba(248,113,113,0.06)',
-                    border: `1px solid ${RED}55`,
-                    boxShadow: `0 0 20px ${RED}22, inset 0 0 12px ${RED}10`,
+                    backgroundColor: mono ? 'rgba(245,158,11,0.04)' : 'rgba(248,113,113,0.05)',
+                    border: `1px solid ${P.red}20`,
+                    boxShadow: `0 0 12px ${P.red}0d`,
                   }}
                 >
-                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" style={{ color: RED }} />
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" style={{ color: P.red }} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-baseline gap-2">
-                      <span className="font-mono text-[12px] font-semibold" style={{ color: RED }}>
+                      <span className="font-mono text-[12px] font-semibold" style={{ color: P.red }}>
                         {SCENARIO.bill}
                       </span>
                       <span className="font-mono text-[8.5px] uppercase tracking-wider" style={{ color: '#9a8a70' }}>
@@ -314,7 +325,7 @@ export default function AgentReasoningAnimation() {
                     </div>
                     <div className="font-mono text-[10px] mt-1.5 flex items-baseline gap-2">
                       <span style={{ color: '#6a737d' }}>Exposure</span>
-                      <span className="font-semibold tabular-nums text-[13px]" style={{ color: RED }}>
+                      <span className="font-semibold tabular-nums text-[13px]" style={{ color: P.red }}>
                         {SCENARIO.exposure}
                       </span>
                       <span className="text-[8.5px]" style={{ color: '#6a737d' }}>
@@ -326,7 +337,7 @@ export default function AgentReasoningAnimation() {
                     <div className="font-mono text-[8px] uppercase tracking-wider" style={{ color: '#6a737d' }}>
                       Gaps
                     </div>
-                    <div className="font-mono tabular-nums text-[20px] font-bold" style={{ color: gapCount > 0 ? RED : '#3f3f46' }}>
+                    <div className="font-mono tabular-nums text-[20px] font-bold" style={{ color: gapCount > 0 ? P.red : '#3f3f46' }}>
                       {gapCount}/5
                     </div>
                   </div>
@@ -339,7 +350,7 @@ export default function AgentReasoningAnimation() {
           {!synthesisVisible && (
             <div className="relative flex-1 mt-4">
               {/* SVG connector layer */}
-              <ConnectorSvg rootVisible={rootVisible} states={states} />
+              <ConnectorSvg rootVisible={rootVisible} states={states} p={P} />
 
               {/* Root node */}
               <AnimatePresence>
@@ -353,18 +364,18 @@ export default function AgentReasoningAnimation() {
                     className="absolute"
                     style={{ top: 0, left: '50%', transform: 'translateX(-50%)' }}
                   >
-                    <RootNode />
+                    <RootNode p={P} />
                   </motion.div>
                 )}
               </AnimatePresence>
 
               {/* Decision columns */}
               <div
-                className="absolute inset-x-0 grid grid-cols-5 gap-2 px-2"
-                style={{ top: 64 }}
+                className="absolute inset-x-0 grid grid-cols-5 gap-3 px-3"
+                style={{ top: 72 }}
               >
                 {DECISIONS.map((d, i) => (
-                  <DecisionColumn key={d.id} decision={d} state={states[i]} index={i} />
+                  <DecisionColumn key={d.id} decision={d} state={states[i]} index={i} p={P} />
                 ))}
               </div>
             </div>
@@ -381,9 +392,9 @@ export default function AgentReasoningAnimation() {
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.5, ease: 'easeOut' }}
                   className="pointer-events-auto"
-                  style={{ width: 720, maxWidth: '100%' }}
+                  style={{ width: 820, maxWidth: '100%' }}
                 >
-                  <SynthesisCard />
+                  <SynthesisCard p={P} />
                 </motion.div>
               )}
             </AnimatePresence>
@@ -400,11 +411,11 @@ export default function AgentReasoningAnimation() {
           <span style={{ color: '#6a737d' }}>Status</span>
           <span
             className="truncate"
-            style={{ color: phase === 'synthesized' ? EMERALD : AMBER }}
+            style={{ color: phase === 'synthesized' ? P.live : P.amber }}
           >
             {hudStatus}
           </span>
-          <span style={{ color: AMBER, animation: 'reasoning-cursor 0.9s steps(1) infinite' }}>▎</span>
+          <span style={{ color: P.amber, animation: 'reasoning-cursor 0.9s steps(1) infinite' }}>▎</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span style={{ color: '#6a737d' }}>Jurisdiction</span>
@@ -432,17 +443,17 @@ export default function AgentReasoningAnimation() {
 // Sub-components
 // ─────────────────────────────────────────────────────────────────────────────
 
-function RootNode() {
+function RootNode({ p }: { p: Palette }) {
   return (
     <div
-      className="rounded-md px-3 py-1.5 flex items-center gap-2"
+      className="rounded-md px-3.5 py-2 flex items-center gap-2"
       style={{
         backgroundColor: 'rgba(20,20,16,0.95)',
-        border: `1px solid ${AMBER}66`,
-        boxShadow: `0 0 16px ${AMBER}30`,
+        border: `1px solid ${p.amber}26`,
+        boxShadow: `0 0 8px ${p.amber}10`,
       }}
     >
-      <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: AMBER, boxShadow: `0 0 6px ${AMBER}` }} />
+      <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: p.amber, boxShadow: `0 0 6px ${p.amber}` }} />
       <span className="font-mono text-[10px] font-semibold tracking-wide uppercase" style={{ color: '#e4ded2' }}>
         SB 553 audit
       </span>
@@ -452,13 +463,13 @@ function RootNode() {
   )
 }
 
-function DecisionColumn({ decision, state, index }: { decision: Decision; state: DecisionState; index: number }) {
+function DecisionColumn({ decision, state, index, p }: { decision: Decision; state: DecisionState; index: number; p: Palette }) {
   const isPending = state.phase === 'pending'
   const isWeighing = state.phase === 'weighing'
   const isCommitted = state.phase === 'committed' || state.phase === 'remediated'
   const showRemediation = state.phase === 'remediated'
 
-  const accentColor = decision.result === 'GAP' ? RED : EMERALD
+  const accentColor = decision.result === 'GAP' ? p.red : p.emerald
 
   return (
     <div className="relative flex flex-col items-center gap-1.5">
@@ -472,7 +483,7 @@ function DecisionColumn({ decision, state, index }: { decision: Decision; state:
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="font-mono text-[8px] tabular-nums"
-              style={{ color: AMBER, animation: 'weigh-pulse 0.6s ease-in-out infinite' }}
+              style={{ color: p.amber, animation: 'weigh-pulse 0.6s ease-in-out infinite' }}
             >
               {decision.weighing[state.weighIdx]}
             </motion.div>
@@ -489,17 +500,17 @@ function DecisionColumn({ decision, state, index }: { decision: Decision; state:
           scale: isWeighing ? 1.04 : 1,
         }}
         transition={{ duration: 0.35, delay: index * 0.06 }}
-        className="rounded-md w-full px-2 py-1.5 text-center"
+        className="rounded-md w-full px-2.5 py-2 text-center"
         style={{
           backgroundColor: 'rgba(20,20,16,0.85)',
           backdropFilter: 'blur(6px)',
           border: `1px solid ${
-            isCommitted ? `${accentColor}88` : isWeighing ? `${AMBER}88` : 'rgba(255,255,255,0.1)'
+            isCommitted ? `${accentColor}40` : isWeighing ? `${p.amber}40` : 'rgba(255,255,255,0.07)'
           }`,
           boxShadow: isWeighing
-            ? `0 0 14px ${AMBER}44, inset 0 0 8px ${AMBER}20`
+            ? `0 0 8px ${p.amber}16`
             : isCommitted
-              ? `0 0 14px ${accentColor}44, inset 0 0 8px ${accentColor}20`
+              ? `0 0 8px ${accentColor}16`
               : 'none',
           transition: 'border-color 220ms, box-shadow 220ms',
         }}
@@ -531,8 +542,8 @@ function DecisionColumn({ decision, state, index }: { decision: Decision; state:
             className="rounded-full px-2 py-[2px] font-mono text-[9px] font-bold tracking-wider uppercase flex items-center gap-1"
             style={{
               color: accentColor,
-              backgroundColor: `${accentColor}15`,
-              border: `1px solid ${accentColor}55`,
+              backgroundColor: `${accentColor}10`,
+              border: `1px solid ${accentColor}2a`,
             }}
           >
             <span>{decision.result === 'GAP' ? '✗' : '✓'}</span>
@@ -564,14 +575,14 @@ function DecisionColumn({ decision, state, index }: { decision: Decision; state:
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.32, ease: 'easeOut' }}
-            className="rounded-md w-full px-2 py-1.5 text-center mt-1"
+            className="rounded-md w-full px-2.5 py-2 text-center mt-1"
             style={{
-              backgroundColor: 'rgba(52,211,153,0.06)',
-              border: `1px solid ${EMERALD}55`,
-              boxShadow: `0 0 10px ${EMERALD}25`,
+              backgroundColor: 'rgba(255,255,255,0.02)',
+              border: `1px solid ${p.emerald}24`,
+              boxShadow: `0 0 6px ${p.emerald}0e`,
             }}
           >
-            <div className="font-mono text-[7.5px] uppercase tracking-wider mb-0.5" style={{ color: EMERALD }}>
+            <div className="font-mono text-[7.5px] uppercase tracking-wider mb-0.5" style={{ color: p.emerald }}>
               Suggested fix
             </div>
             <div className="font-mono text-[9px] leading-tight" style={{ color: '#cbd5e1' }}>
@@ -584,7 +595,7 @@ function DecisionColumn({ decision, state, index }: { decision: Decision; state:
   )
 }
 
-function ConnectorSvg({ rootVisible, states }: { rootVisible: boolean; states: DecisionState[] }) {
+function ConnectorSvg({ rootVisible, states, p }: { rootVisible: boolean; states: DecisionState[]; p: Palette }) {
   // 5 columns, root above. SVG sits over the tree area.
   const cols = 5
   return (
@@ -603,13 +614,13 @@ function ConnectorSvg({ rootVisible, states }: { rootVisible: boolean; states: D
             y1="6"
             x2={`${xPct}%`}
             y2="50"
-            stroke={isActive ? AMBER : 'rgba(255,255,255,0.12)'}
-            strokeWidth={isActive ? 1.2 : 0.8}
+            stroke={isActive ? p.amber : 'rgba(255,255,255,0.1)'}
+            strokeWidth={isActive ? 1 : 0.7}
             initial={{ pathLength: 0, opacity: 0 }}
             animate={{ pathLength: rootVisible ? 1 : 0, opacity: rootVisible ? 1 : 0 }}
             transition={{ duration: 0.5, delay: i * 0.08 }}
             style={{
-              filter: isActive ? `drop-shadow(0 0 4px ${AMBER}88)` : 'none',
+              filter: isActive ? `drop-shadow(0 0 3px ${p.amber}55)` : 'none',
               transition: 'stroke 240ms, filter 240ms',
             }}
           />
@@ -619,21 +630,21 @@ function ConnectorSvg({ rootVisible, states }: { rootVisible: boolean; states: D
   )
 }
 
-function SynthesisCard() {
+function SynthesisCard({ p }: { p: Palette }) {
   return (
     <div
-      className="rounded-lg px-5 py-4"
+      className="rounded-lg px-6 py-5"
       style={{
-        backgroundColor: 'rgba(20,30,22,0.92)',
+        backgroundColor: 'rgba(24,26,24,0.92)',
         backdropFilter: 'blur(8px)',
-        border: `1px solid ${EMERALD}66`,
-        boxShadow: `0 0 36px ${EMERALD}33, inset 0 0 16px ${EMERALD}10`,
+        border: `1px solid ${p.emerald}28`,
+        boxShadow: `0 0 18px ${p.emerald}12`,
       }}
     >
       <div className="flex items-baseline gap-2 mb-3">
         <span
           className="font-mono text-[11px] font-semibold uppercase tracking-wider"
-          style={{ color: EMERALD }}
+          style={{ color: p.emerald }}
         >
           Draft remediation plan · for your review
         </span>
@@ -643,10 +654,10 @@ function SynthesisCard() {
       </div>
 
       <div className="grid grid-cols-4 gap-3">
-        <SynthesisStat label="Timeline" value={SYNTHESIS.timeline} accent={EMERALD} />
+        <SynthesisStat label="Timeline" value={SYNTHESIS.timeline} accent={p.live} />
         <SynthesisStat label="Internal labor" value={SYNTHESIS.laborHours} accent="#cbd5e1" />
         <SynthesisStat label="Cost" value={SYNTHESIS.cost} accent="#cbd5e1" />
-        <SynthesisStat label="Exposure avoided" value={SYNTHESIS.exposureAvoided} accent={EMERALD} large />
+        <SynthesisStat label="Exposure avoided" value={SYNTHESIS.exposureAvoided} accent={p.live} large />
       </div>
 
       <div className="mt-3 pt-3 border-t flex items-center gap-3" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
@@ -659,7 +670,7 @@ function SynthesisCard() {
       <div className="mt-2 flex items-center gap-3 font-mono text-[9px]" style={{ color: '#6a737d' }}>
         <span>Human paralegal: <span style={{ color: '#cbd5e1' }}>~4 hours, 6 statutes, 2 enforcement docs</span></span>
         <span style={{ color: '#3f3f46' }}>·</span>
-        <span>Matcha: <span style={{ color: EMERALD, fontWeight: 600 }}>2.1 seconds</span></span>
+        <span>Matcha: <span style={{ color: p.live, fontWeight: 600 }}>2.1 seconds</span></span>
       </div>
     </div>
   )
@@ -681,8 +692,8 @@ function SynthesisStat({ label, value, accent, large = false }: { label: string;
   )
 }
 
-function ParticleField() {
-  // 12 ambient emerald dots floating
+function ParticleField({ p }: { p: Palette }) {
+  // 12 ambient dots floating
   const particles = Array.from({ length: 12 }).map((_, i) => ({
     id: i,
     x: Math.random() * 100,
@@ -699,7 +710,7 @@ function ParticleField() {
           style={{
             width: 2,
             height: 2,
-            backgroundColor: EMERALD,
+            backgroundColor: p.emerald,
             opacity: 0.3,
             left: `${p.x}%`,
             top: `${p.y}%`,
