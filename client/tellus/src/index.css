@@ -16,6 +16,14 @@
   --color-tu-accent-soft: #fb923c;
   --color-tu-good: #34d399;
   --color-tu-bad: #f87171;
+
+  /* Ticket/receipt paper — signature panels only (hero ticket, step stubs), never full-page bg */
+  --color-tu-paper: #f3ede0;
+  --color-tu-paper-dim: #e6ddc9;
+  --color-tu-ink: #17140f;
+
+  --font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'Space Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
 }
 
 html, body, #root {
@@ -31,4 +39,68 @@ body {
 
 * {
   box-sizing: border-box;
+}
+
+/* Perforated ticket-tear — the page's signature connective motif.
+   .tu-tear-edge notches the BOTTOM of a bounded panel (hero ticket, step
+   stubs). .tu-tear-edge-divider notches BOTH edges of a thin full-bleed
+   strip, reading as a strip torn off a roll (section dividers, footer top). */
+:root {
+  --tu-tear-depth: 10px;
+}
+
+.tu-tear-edge {
+  clip-path: polygon(
+    0 0, 100% 0,
+    100% 100%, 95% calc(100% - var(--tu-tear-depth)),
+    90% 100%, 85% calc(100% - var(--tu-tear-depth)),
+    80% 100%, 75% calc(100% - var(--tu-tear-depth)),
+    70% 100%, 65% calc(100% - var(--tu-tear-depth)),
+    60% 100%, 55% calc(100% - var(--tu-tear-depth)),
+    50% 100%, 45% calc(100% - var(--tu-tear-depth)),
+    40% 100%, 35% calc(100% - var(--tu-tear-depth)),
+    30% 100%, 25% calc(100% - var(--tu-tear-depth)),
+    20% 100%, 15% calc(100% - var(--tu-tear-depth)),
+    10% 100%, 5% calc(100% - var(--tu-tear-depth)),
+    0 100%
+  );
+}
+
+.tu-tear-edge-divider {
+  height: 20px;
+  background: var(--color-tu-border);
+  clip-path: polygon(
+    0 var(--tu-tear-depth), 5% 0, 10% var(--tu-tear-depth), 15% 0, 20% var(--tu-tear-depth), 25% 0,
+    30% var(--tu-tear-depth), 35% 0, 40% var(--tu-tear-depth), 45% 0, 50% var(--tu-tear-depth), 55% 0,
+    60% var(--tu-tear-depth), 65% 0, 70% var(--tu-tear-depth), 75% 0, 80% var(--tu-tear-depth), 85% 0,
+    90% var(--tu-tear-depth), 95% 0, 100% var(--tu-tear-depth),
+    100% calc(100% - var(--tu-tear-depth)), 95% 100%, 90% calc(100% - var(--tu-tear-depth)), 85% 100%,
+    80% calc(100% - var(--tu-tear-depth)), 75% 100%, 70% calc(100% - var(--tu-tear-depth)), 65% 100%,
+    60% calc(100% - var(--tu-tear-depth)), 55% 100%, 50% calc(100% - var(--tu-tear-depth)), 45% 100%,
+    40% calc(100% - var(--tu-tear-depth)), 35% 100%, 30% calc(100% - var(--tu-tear-depth)), 25% 100%,
+    20% calc(100% - var(--tu-tear-depth)), 15% 100%, 10% calc(100% - var(--tu-tear-depth)), 5% 100%,
+    0 calc(100% - var(--tu-tear-depth))
+  );
+}
+
+/* Marquee — pure CSS loop; the track renders its content twice back-to-back
+   so translateX(-50%) loops seamlessly. */
+@keyframes tu-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+.tu-marquee-track {
+  animation: tu-marquee 32s linear infinite;
+}
+
+.tu-marquee-track:hover {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tu-marquee-track {
+    animation: none;
+    transform: none;
+  }
 }
