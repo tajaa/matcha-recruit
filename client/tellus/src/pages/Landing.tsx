@@ -9,6 +9,8 @@ import { useAccount } from '../hooks/useAccount'
 import { TicketPanel } from '../components/landing/Ticket'
 import { HeroTicket } from '../components/landing/HeroTicket'
 import { MarqueeTicker } from '../components/landing/MarqueeTicker'
+import { AmbientGlow } from '../components/landing/AmbientGlow'
+import { TypeHeader, TypedHeadline } from '../components/landing/TypeHeader'
 
 const REVEAL = {
   initial: { opacity: 0, y: 24 },
@@ -102,15 +104,19 @@ export default function Landing() {
 
       {/* Hero */}
       <section className="relative overflow-hidden">
-        <div className="pointer-events-none absolute inset-0 -z-10" style={{ background: 'radial-gradient(ellipse 70% 55% at 50% -10%, rgba(249,115,22,0.14) 0%, rgba(249,115,22,0) 60%)' }} />
+        <AmbientGlow />
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-5 pb-14 pt-14 sm:pt-20 lg:grid-cols-[1.1fr_0.9fr] lg:gap-8">
           <div className="mx-auto max-w-xl text-center lg:mx-0 lg:text-left">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-tu-accent/30 bg-tu-accent/10 px-3 py-1 font-mono text-xs font-medium text-tu-accent">
               <Sparkles className="h-3.5 w-3.5" /> Feedback that pays off
             </span>
-            <h1 className="mt-5 font-display text-4xl font-semibold leading-[1.05] tracking-tight sm:text-6xl">
-              Tell brands what you think.<br /><span className="text-tu-accent">Get rewarded for it.</span>
-            </h1>
+            <TypedHeadline
+              className="mt-5 font-display text-4xl font-semibold leading-[1.05] tracking-tight sm:text-6xl"
+              segments={[
+                { text: 'Tell brands what you think.' },
+                { text: 'Get rewarded for it.', accent: true, newLine: true },
+              ]}
+            />
             <p className="mx-auto mt-5 max-w-lg text-lg leading-relaxed text-tu-dim lg:mx-0">
               Share honest feedback about the stores and brands around you — good or bad, with a photo or video.
               Earn points for useful feedback and swap them for real perks in your city.
@@ -134,7 +140,7 @@ export default function Landing() {
       {/* How it works — consumer */}
       <section id="how-it-works" className="mx-auto max-w-6xl scroll-mt-20 px-5 py-16">
         <div className="mx-auto mb-10 max-w-lg text-center">
-          <h2 className="font-display text-2xl font-semibold sm:text-3xl">How it works</h2>
+          <TypeHeader text="How it works" className="font-display text-2xl font-semibold sm:text-3xl" />
           <p className="mt-2 text-sm text-tu-dim">Three steps between an opinion and a reward.</p>
         </div>
         <div className="grid gap-4 sm:grid-cols-3">
@@ -146,7 +152,7 @@ export default function Landing() {
 
       {/* Gamification strip */}
       <section className="mx-auto max-w-6xl px-5 py-8">
-        <motion.div {...REVEAL} transition={{ duration: 0.4 }} className="grid grid-cols-2 gap-3 rounded-sm border border-tu-border bg-tu-panel p-6 sm:grid-cols-4 sm:gap-4">
+        <motion.div {...REVEAL} transition={{ duration: 0.4 }} className="grid grid-cols-2 gap-3 rounded-sm border border-tu-border bg-gradient-to-br from-tu-panel to-tu-panel2 p-6 shadow-lg shadow-black/20 sm:grid-cols-4 sm:gap-4">
           {[
             { icon: Star, label: 'Levels', sub: 'Climb as you contribute' },
             { icon: Flame, label: 'Streaks', sub: 'Come back daily' },
@@ -159,9 +165,10 @@ export default function Landing() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ duration: 0.35, delay: i * 0.08 }}
-              className="rounded-sm px-2 py-3 text-center transition hover:bg-tu-panel2"
+              whileHover={{ y: -2 }}
+              className="group rounded-sm px-2 py-3 text-center transition hover:bg-tu-panel2"
             >
-              <Icon className="mx-auto mb-2 h-6 w-6 text-tu-accent" />
+              <Icon className="mx-auto mb-2 h-6 w-6 text-tu-accent drop-shadow-[0_0_0px_rgba(249,115,22,0)] transition-all duration-300 group-hover:drop-shadow-[0_0_10px_rgba(249,115,22,0.6)]" />
               <p className="text-sm font-semibold">{label}</p>
               <p className="text-xs text-tu-faint">{sub}</p>
             </motion.div>
@@ -171,12 +178,17 @@ export default function Landing() {
 
       {/* For brands */}
       <section id="for-brands" className="mx-auto max-w-6xl scroll-mt-20 px-5 py-16">
-        <motion.div {...REVEAL} transition={{ duration: 0.4 }} className="grid items-center gap-10 rounded-sm border border-tu-border bg-tu-panel p-8 sm:p-10 lg:grid-cols-2">
+        <motion.div
+          {...REVEAL}
+          transition={{ duration: 0.4 }}
+          className="relative grid items-center gap-10 overflow-hidden rounded-sm border border-tu-border bg-tu-panel p-8 shadow-2xl shadow-black/30 ring-1 ring-white/[0.04] sm:p-10 lg:grid-cols-2"
+        >
+          <div className="pointer-events-none absolute -left-24 -top-24 -z-10 h-72 w-72 rounded-full bg-tu-accent/[0.08] blur-3xl" />
           <div>
             <span className="inline-flex items-center gap-1.5 rounded-full border border-tu-border px-3 py-1 font-mono text-xs font-medium text-tu-dim">
               <Store className="h-3.5 w-3.5" /> For brands & stores
             </span>
-            <h2 className="mt-4 font-display text-2xl font-semibold sm:text-3xl">Turn feedback into loyalty</h2>
+            <TypeHeader text="Turn feedback into loyalty" className="mt-4 font-display text-2xl font-semibold sm:text-3xl" />
             <p className="mt-3 text-sm leading-relaxed text-tu-dim">
               Print a QR code for each location, see honest feedback and sentiment roll up in one dashboard,
               and fund rewards that bring customers back — no complex loyalty stack required.
@@ -230,14 +242,20 @@ export default function Landing() {
       </section>
 
       {/* Final CTA */}
-      <motion.section {...REVEAL} transition={{ duration: 0.4 }} className="mx-auto max-w-6xl px-5 py-20 text-center">
-        <h2 className="font-display text-3xl font-semibold sm:text-4xl">Your opinion is worth something.</h2>
+      <motion.section {...REVEAL} transition={{ duration: 0.4 }} className="relative overflow-hidden px-5 py-20 text-center">
+        <AmbientGlow />
+        <div className="mx-auto max-w-6xl">
+        <TypeHeader
+          text="Your opinion is worth something."
+          className="tu-gradient-text bg-gradient-to-r from-tu-text via-tu-accent to-tu-text bg-clip-text font-display text-3xl font-semibold text-transparent sm:text-4xl"
+        />
         <p className="mx-auto mt-3 max-w-md text-tu-dim">Join Tell-Us and start turning everyday feedback into local rewards.</p>
         <motion.span className="mt-7 inline-block" whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }}>
           <Link to="/signup" className="inline-flex items-center gap-1.5 rounded-lg bg-tu-accent px-7 py-3.5 text-sm font-semibold text-black transition hover:bg-tu-accent-soft">
             Create your free account <ArrowRight className="h-4 w-4" />
           </Link>
         </motion.span>
+        </div>
       </motion.section>
 
       <footer>

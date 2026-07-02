@@ -98,9 +98,37 @@ body {
   animation-play-state: paused;
 }
 
+/* Reward-bar idle shine + the CTA's single animated-gradient headline moment. */
+@keyframes tu-shimmer {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(220%); }
+}
+
+@keyframes tu-gradient-text {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.tu-gradient-text {
+  background-size: 200% auto;
+  animation: tu-gradient-text 6s ease-in-out infinite;
+}
+
+.tu-shimmer-sweep {
+  animation: tu-shimmer 5s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tu-marquee-track {
     animation: none;
     transform: none;
+  }
+  .tu-shimmer-sweep {
+    animation: none;
+    display: none;
+  }
+  .tu-gradient-text {
+    animation: none;
+    background-position: 0% 50%;
   }
 }
