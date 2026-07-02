@@ -20,6 +20,7 @@ import { IRPremiumImpactCard } from './risk/IRPremiumImpactCard'
 import { IRQuarterlyRecordableChart } from './risk/IRQuarterlyRecordableChart'
 import { IRSeverityDonut } from './risk/IRSeverityDonut'
 import { IRPeopleCard } from './risk/IRPeopleCard'
+import { IREssentialsLockedCard } from './risk/IREssentialsLockedCard'
 
 type LocationRow = {
   id: string
@@ -67,6 +68,9 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
   // and Matcha-X (mid) tenants — on the full platform IR is just one of many
   // features already.
   const isLiteTenant = isIrOnlyTier(me?.profile) || isMatchaX(me?.profile)
+  // Essentials has no roster and no OSHA log tooling, so the Workers' Comp
+  // cards would render misleading zeros — swap them for a locked upgrade tease.
+  const isEssentials = me?.profile?.signup_source === 'matcha_lite_essentials'
   const [view, setView] = useState<View>('overview')
   const [locations, setLocations] = useState<LocationRow[] | null>(null)
   const [locationFilter, setLocationFilter] = useState<string>('')
@@ -133,13 +137,19 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
   }, [locationFilter, days])
 
   useEffect(() => {
-    api.get<WcMetrics>('/ir/incidents/analytics/wc-metrics?period_days=365')
-      .then(setWcMetrics)
-      .catch(() => setWcMetrics(null))
+    // Wait for the profile so the essentials check is reliable, and skip the
+    // WC fetch entirely for essentials — the locked card renders instead.
+    if (!me?.profile) return
+    if (!isEssentials) {
+      api.get<WcMetrics>('/ir/incidents/analytics/wc-metrics?period_days=365')
+        .then(setWcMetrics)
+        .catch(() => setWcMetrics(null))
+    }
     api.get<IRAnalyticsSummary>('/ir/incidents/analytics/summary')
       .then(setSummary)
       .catch(() => setSummary(null))
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.profile, isEssentials])
 
   const locationOptions = useMemo(() => {
     const active = (locations || []).filter((l) => l.is_active)
@@ -237,12 +247,18 @@ export function IRRiskInsightsTab({ onNavigateIncident }: Props) {
 
           <IRIncidentTrendChart />
 
-          {wcMetrics && <IRWcMetricsCard metrics={wcMetrics} />}
+          {isEssentials ? (
+            <IREssentialsLockedCard />
+          ) : (
+            <>
+              {wcMetrics && <IRWcMetricsCard metrics={wcMetrics} />}
 
-          {wcMetrics?.premium_impact && <IRPremiumImpactCard metrics={wcMetrics} />}
+              {wcMetrics?.premium_impact && <IRPremiumImpactCard metrics={wcMetrics} />}
 
-          {wcMetrics && wcMetrics.quarterly.length > 0 && (
-            <IRQuarterlyRecordableChart quarterly={wcMetrics.quarterly} />
+              {wcMetrics && wcMetrics.quarterly.length > 0 && (
+                <IRQuarterlyRecordableChart quarterly={wcMetrics.quarterly} />
+              )}
+            </>
           )}
 
           <IRSeverityDonut summary={summary} />

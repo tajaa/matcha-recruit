@@ -95,6 +95,7 @@ export const TENANT_UPDATES: TenantUpdate[] = [
     whereToFind: [
       { label: 'Upgrade panel at the bottom of the sidebar' },
       { label: 'Locked OSHA Logs / Employees entries open the same panel' },
+      { label: 'Risk Insights → locked Workers’ Comp section', to: '/app/ir/risk-insights' },
     ],
     availability: 'upgrade',
     whyItMatters:
