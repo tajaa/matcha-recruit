@@ -8,8 +8,17 @@ restore from here.
 
 | File | Serves | Upstream |
 |---|---|---|
-| `matcha.conf` | `hey-matcha.com` | SPA `:8082`, API `:8002`, WS, LiveKit |
-| `cappe.conf` | `gummfit.com` + `*.gummfit.com` (Cappe) | apex SPA `:8082`; tenant renderer `:8002` |
+| `matcha.conf` | `hey-matcha.com` | `matcha_frontend` / `matcha_backend` blue-green upstreams, WS, LiveKit |
+| `cappe.conf` | `gummfit.com` + `*.gummfit.com` (Cappe) | apex SPA `matcha_frontend`; tenant renderer + API `matcha_backend` |
+
+**Never hardcode `127.0.0.1:8082/8083/8002/8003` in these files.** Blue-green
+deploys alternate ports and remove the old container; the active port lives in
+`/etc/nginx/upstream/matcha-{frontend,backend}-active.conf` (host-only,
+rewritten by `scripts/deploy-*-bluegreen.sh`). The `matcha_frontend` /
+`matcha_backend` upstream groups in `matcha.conf` include those files — every
+server block (cappe included) must proxy to the group names. cappe.conf
+hardcoding `:8082/:8002` is exactly how gummfit.com 502'd to the maintenance
+page after the 2026-07-01 swap to 8083/8003 (fixed 2026-07-02).
 
 > The frontend **container** nginx is separate and lives in the repo at
 > `client/nginx.conf` (baked into the `matcha-frontend` image).
