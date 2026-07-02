@@ -313,7 +313,7 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
               <span
                 style={{
                   animationDelay: "0.36s",
-                  color: MATCHA,
+                  color: "#D97706",
                   fontStyle: "italic",
                 }}
               >
@@ -341,7 +341,7 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
                 className="max-w-2xl text-lg sm:text-xl"
                 style={{ color: BONE, lineHeight: 1.45 }}
               >
-                <span style={{ color: "#D97706" }}>
+                <span style={{ color: "#A3C57D" }}>
                   Managing your risk before your risk manages you.
                 </span>{" "}
                 <span style={{ color: ASH }}>
@@ -352,7 +352,11 @@ function Hero({ onDemoClick }: { onDemoClick: () => void }) {
                 <button
                   onClick={onDemoClick}
                   className="inline-flex items-center px-5 h-10 rounded-full text-[15px] font-medium transition-transform hover:-translate-y-0.5 cursor-pointer"
-                  style={{ backgroundColor: "#A3C57D", color: NOIR }}
+                  style={{
+                    background: "linear-gradient(180deg, #BCDE96 0%, #A3C57D 45%, #80A25A 100%)",
+                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.5), 0 3px 8px rgba(0,0,0,0.25)",
+                    color: NOIR,
+                  }}
                 >
                   Request a Demo
                 </button>
