@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ShieldAlert, Mic, Brain, ClipboardList, FileText, MapPin } from 'lucide-react'
+import { ShieldAlert, Users, Brain, ClipboardList, FileText } from 'lucide-react'
 
 import MarketingNav from '../landing/MarketingNav'
 import MarketingFooter from '../landing/MarketingFooter'
@@ -44,13 +44,13 @@ const PILLARS: Pillar[] = [
     highlight: 'Every incident, a defensible record — no compliance team required.',
   },
   {
-    id: 'voice',
+    id: 'hris',
     number: '02',
-    title: 'Voice Intake',
-    tagline: 'Talk through what happened. We write the report.',
+    title: 'HRIS/CSV Import',
+    tagline: 'Your employee roster, already there.',
     description:
-      'Too busy to type? Your team just talks it through, and the report comes back ready to review before it’s filed.',
-    highlight: 'Hands-free reporting, reviewed before it submits.',
+      'Connect Gusto, Rippling, BambooHR, or ADP — or just drop in a CSV. Every incident and OSHA log pulls from the same roster, so no one re-types a name.',
+    highlight: 'One less spreadsheet to keep in sync.',
   },
   {
     id: 'ir_analysis',
@@ -86,7 +86,6 @@ export default function SimpleLitePage() {
       <main>
         <PillarsGrid />
         <CoverageGrid />
-        <ThePoint />
       </main>
 
       <CtaBand onContactClick={() => setIsPricingOpen(true)} />
@@ -133,7 +132,7 @@ function Hero({ onContactClick }: { onContactClick: () => void }) {
           </h1>
           <p
             className="mt-5 sm:mt-6 mx-auto max-w-xl text-base sm:text-lg px-2"
-            style={{ color: MUTED, lineHeight: 1.55 }}
+            style={{ color: '#4A463D', lineHeight: 1.55 }}
           >
             The everyday intake layer for your team — a magic link anyone can
             text, type into, or talk into. OSHA logs that fill themselves, risk
@@ -253,34 +252,32 @@ function IntakeInstrument() {
   )
 }
 
-// 02 — voice waveform + extracted fields.
-const WAVE = [0.3, 0.6, 0.85, 0.5, 0.95, 0.4, 0.7, 0.55, 0.9, 0.35, 0.65, 0.45, 0.8, 0.5]
-function VoiceInstrument() {
+// 02 — HRIS/CSV roster import, already synced. No import-flow detail.
+function RosterInstrument() {
+  const sources = ['Gusto', 'Rippling', 'BambooHR', 'ADP', 'CSV']
   return (
-    <InstrumentFrame caption="Voice · dictate" foot="Transcribed and filled — reviewed before submit">
-      <div className="flex flex-col items-center py-1">
-        <div className="flex items-end gap-[3px] h-8 mb-4">
-          {WAVE.map((v, i) => (
-            <motion.div
-              key={i}
-              className="w-[3px] rounded-full"
-              style={{ backgroundColor: i === 4 ? GREEN : MUTED, opacity: i === 4 ? 1 : 0.5 }}
-              animate={{ height: [`${v * 45}%`, `${v * 100}%`, `${v * 45}%`] }}
-              transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.05, ease: 'easeInOut' }}
-            />
-          ))}
-        </div>
-        <span className="text-[10px] font-mono" style={{ color: GREEN_600 }}>Report ready for review</span>
+    <InstrumentFrame caption="Roster · import" foot="Every report pre-fills the right employee">
+      <div className="flex flex-wrap justify-center gap-2 py-2">
+        {sources.map((s, i) => (
+          <span
+            key={s}
+            className="px-3 py-1.5 rounded-full text-[11px] font-mono uppercase tracking-wider"
+            style={{
+              color: i === 0 ? INK : MUTED,
+              border: `1px solid ${i === 0 ? GREEN : LINE}`,
+              fontWeight: i === 0 ? 600 : 400,
+            }}
+          >
+            {s}
+          </span>
+        ))}
       </div>
-      <div className="mt-5 pt-5 border-t grid grid-cols-2 gap-4" style={{ borderColor: LINE }}>
-        <div>
-          <div className="text-[8px] font-mono uppercase tracking-widest mb-1" style={{ color: MUTED }}>Category</div>
-          <div className="text-[12px]" style={{ color: INK }}>Customer escalation</div>
-        </div>
-        <div>
-          <div className="text-[8px] font-mono uppercase tracking-widest mb-1" style={{ color: MUTED }}>Severity</div>
-          <div className="text-[12px] font-medium" style={{ color: GREEN_600 }}>Medium</div>
-        </div>
+      <div className="mt-5 pt-5 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
+        <span className="flex items-center gap-2">
+          <PulseDot size={7} />
+          <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: MUTED }}>Synced</span>
+        </span>
+        <span className="text-[11px] font-mono" style={{ color: INK }}>312 employees</span>
       </div>
     </InstrumentFrame>
   )
@@ -346,7 +343,7 @@ function OshaInstrument() {
 
 const INSTRUMENTS: Record<string, () => React.ReactElement> = {
   incidents: IntakeInstrument,
-  voice: VoiceInstrument,
+  hris: RosterInstrument,
   ir_analysis: AnalysisInstrument,
   osha: OshaInstrument,
 }
@@ -439,8 +436,12 @@ function PillarsGrid() {
         </div>
       </section>
 
-      {PILLARS.map((pillar, i) => (
+      {PILLARS.slice(0, 2).map((pillar, i) => (
         <PillarRow key={pillar.id} pillar={pillar} index={i} />
+      ))}
+      <ThePoint />
+      {PILLARS.slice(2).map((pillar, i) => (
+        <PillarRow key={pillar.id} pillar={pillar} index={i + 2} />
       ))}
     </>
   )
@@ -457,11 +458,15 @@ function GlyphBars() {
     </div>
   )
 }
-function GlyphWave() {
+function GlyphPeople() {
   return (
-    <div className="flex items-end gap-[3px] h-6">
-      {[0.4, 0.8, 0.5, 1, 0.6, 0.85, 0.45].map((v, i) => (
-        <span key={i} className="w-[2.5px] rounded-full" style={{ height: `${v * 100}%`, backgroundColor: i === 3 ? GREEN : LINE }} />
+    <div className="flex -space-x-1.5">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="rounded-full border"
+          style={{ width: 10, height: 10, backgroundColor: i === 1 ? GREEN : BG, borderColor: i === 1 ? GREEN : LINE }}
+        />
       ))}
     </div>
   )
@@ -496,15 +501,6 @@ function GlyphStack() {
     </div>
   )
 }
-function GlyphDots() {
-  return (
-    <div className="grid grid-cols-3 gap-1">
-      {[0, 1, 2, 3, 4, 5].map((i) => (
-        <span key={i} className="rounded-full" style={{ width: 4, height: 4, backgroundColor: i === 4 ? GREEN : LINE }} />
-      ))}
-    </div>
-  )
-}
 
 const COVERAGE: { id: string; icon: typeof ShieldAlert; title: string; caption: string; glyph: () => React.ReactElement }[] = [
   {
@@ -515,11 +511,11 @@ const COVERAGE: { id: string; icon: typeof ShieldAlert; title: string; caption: 
     glyph: GlyphBars,
   },
   {
-    id: 'voice',
-    icon: Mic,
-    title: 'Voice intake',
-    caption: 'No time to type? Your team talks it through, and the report comes back ready to review.',
-    glyph: GlyphWave,
+    id: 'hris',
+    icon: Users,
+    title: 'HRIS/CSV import',
+    caption: 'Connect Gusto, Rippling, BambooHR, ADP — or drop in a CSV. One roster, everywhere it’s needed.',
+    glyph: GlyphPeople,
   },
   {
     id: 'analysis',
@@ -542,13 +538,6 @@ const COVERAGE: { id: string; icon: typeof ShieldAlert; title: string; caption: 
     caption: 'The everyday HR documents your team reaches for, ready to use — no starting from a blank page.',
     glyph: GlyphStack,
   },
-  {
-    id: 'states',
-    icon: MapPin,
-    title: 'State-by-state guides',
-    caption: 'The rules that change by state, kept current — so you’re never the last to know a law moved.',
-    glyph: GlyphDots,
-  },
 ]
 
 function CoverageGrid() {
@@ -566,7 +555,7 @@ function CoverageGrid() {
             Everyday HR risk, covered.
           </h2>
           <p className="mt-4 sm:mt-5 text-base sm:text-lg" style={{ color: MUTED, lineHeight: 1.6 }}>
-            Six tools, one bundle. Each stands on its own; together they cover
+            Five tools, one bundle. Each stands on its own; together they cover
             the everyday HR risk surface for a small team without a dedicated
             compliance function.
           </p>
