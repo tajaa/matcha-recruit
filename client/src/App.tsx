@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route } from 'react-router-dom'
 import { lazy, Suspense } from 'react'
 import Home from './pages/Home'
 import Login from './pages/Login'
@@ -26,6 +26,8 @@ const ServicesPage = lazy(() => import('./pages/landing/ServicesPage'))
 // own routes alongside the originals so either can be reverted to freely.
 const SimpleCompliancePage = lazy(() => import('./pages/simpler-pages/Compliance'))
 const SimplePlatformPage = lazy(() => import('./pages/simpler-pages/Platform'))
+const SimpleBrokersPage = lazy(() => import('./pages/simpler-pages/Brokers'))
+const SimpleLitePage = lazy(() => import('./pages/simpler-pages/Lite'))
 const Subscribe = lazy(() => import('./pages/landing/Subscribe'))
 const TermsPage = lazy(() => import('./pages/landing/TermsPage'))
 const PrivacyPage = lazy(() => import('./pages/landing/PrivacyPage'))
@@ -91,12 +93,13 @@ export default function App() {
         <Route path="/platform" element={<Landing />} />
         <Route path="/matcha-work" element={<MatchaWorkPage />} />
         <Route path="/matcha-daily" element={<MatchaLitePage />} />
-        <Route path="/matcha-lite" element={<Navigate to="/matcha-daily" replace />} />
+        <Route path="/matcha-lite" element={<SimpleLitePage />} />
         {/* Marketing page for the standalone Compliance product (distinct from
             /compliance/signup + /compliance/onboarding, which are exact paths). */}
         <Route path="/compliance" element={<CompliancePage />} />
         <Route path="/matcha-compliance" element={<SimpleCompliancePage />} />
         <Route path="/matcha-platform" element={<SimplePlatformPage />} />
+        <Route path="/matcha-brokers" element={<SimpleBrokersPage />} />
         <Route path="/services" element={<ServicesPage />} />
         <Route path="/subscribe" element={<Subscribe />} />
         <Route path="/terms" element={<TermsPage />} />

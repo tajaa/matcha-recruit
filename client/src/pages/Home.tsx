@@ -52,7 +52,7 @@ const PRODUCTS: Product[] = [
     subheader: "Full Risk and Employee Relations Suite",
     blurb:
       "Agentic risk management — safety, compliance, and employee relations on one brain.",
-    to: "/platform",
+    to: "/matcha-platform",
     accent: "#F5F2ED",
   },
   {
@@ -61,7 +61,7 @@ const PRODUCTS: Product[] = [
     subheader: "Incident Reporting and OSHA Logs",
     blurb:
       "Incident reporting, OSHA 300 logs, and a full HR library. Bundled for small teams.",
-    to: "/matcha-daily",
+    to: "/matcha-lite",
     accent: "#F2C14E",
   },
   {
@@ -70,7 +70,7 @@ const PRODUCTS: Product[] = [
     subheader: "Multi-State Jurisdictional Intelligence",
     blurb:
       "Multi-state regulatory tracking, jurisdiction-aware alerts, and audit-ready records.",
-    to: "/compliance",
+    to: "/matcha-compliance",
     accent: "#E2725B",
   },
   {
@@ -98,7 +98,7 @@ const CAROUSEL_PRODUCTS: Product[] = [
     name: "Matcha Lite: Incident Reporting Pro",
     blurb:
       "Incident reporting, OSHA 300 logs, and a full HR library. Bundled for small teams.",
-    to: "/matcha-daily",
+    to: "/matcha-lite",
     accent: "#F2C14E",
   },
   {
@@ -107,7 +107,7 @@ const CAROUSEL_PRODUCTS: Product[] = [
     nameSize: "clamp(1.35rem, 1.85vw, 2.1rem)",
     blurb:
       "Recordable incidents flow straight into your OSHA 300 log, 300A summary, and ITA export.",
-    to: "/matcha-daily",
+    to: "/matcha-lite",
     accent: "#F2C14E",
   },
   PRODUCTS[2], // 03 Compliance

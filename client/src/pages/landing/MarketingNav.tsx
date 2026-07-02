@@ -8,11 +8,11 @@ interface Props {
 
 // The four offerings — primary nav, in sales order.
 const PRODUCT_LINKS = [
-  { to: '/platform', label: 'Full Platform' },
+  { to: '/matcha-platform', label: 'Full Platform' },
   // { to: '/matcha-work', label: 'Matcha Work' }, // beta — hidden until launch
-  { to: '/matcha-daily', label: 'Matcha Lite' },
-  { to: '/compliance', label: 'Compliance', isNew: true },
-  { to: '/brokers', label: 'Brokers', isNew: true },
+  { to: '/matcha-lite', label: 'Matcha Lite' },
+  { to: '/matcha-compliance', label: 'Compliance', isNew: true },
+  { to: '/matcha-brokers', label: 'Brokers', isNew: true },
   { to: '/services', label: 'Consulting' },
 ]
 
