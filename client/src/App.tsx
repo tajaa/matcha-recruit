@@ -21,6 +21,10 @@ const MatchaWorkPage = lazy(() => import('./pages/landing/MatchaWorkPage'))
 const MatchaLitePage = lazy(() => import('./pages/landing/MatchaLitePage'))
 const CompliancePage = lazy(() => import('./pages/landing/CompliancePage'))
 const ServicesPage = lazy(() => import('./pages/landing/ServicesPage'))
+// Trial simpler marketing pages — copies of the /platform, /matcha-daily,
+// /brokers, /compliance pages restyled closer to /services. Live at their
+// own routes alongside the originals so either can be reverted to freely.
+const SimpleCompliancePage = lazy(() => import('./pages/simpler-pages/Compliance'))
 const Subscribe = lazy(() => import('./pages/landing/Subscribe'))
 const TermsPage = lazy(() => import('./pages/landing/TermsPage'))
 const PrivacyPage = lazy(() => import('./pages/landing/PrivacyPage'))
@@ -90,6 +94,7 @@ export default function App() {
         {/* Marketing page for the standalone Compliance product (distinct from
             /compliance/signup + /compliance/onboarding, which are exact paths). */}
         <Route path="/compliance" element={<CompliancePage />} />
+        <Route path="/matcha-compliance" element={<SimpleCompliancePage />} />
         <Route path="/services" element={<ServicesPage />} />
         <Route path="/subscribe" element={<Subscribe />} />
         <Route path="/terms" element={<TermsPage />} />
