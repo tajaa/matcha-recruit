@@ -37,7 +37,6 @@ type Pillar = {
   title: string
   tagline: string
   description: string
-  included: string[]
   highlight: string
 }
 
@@ -49,11 +48,6 @@ const PILLARS: Pillar[] = [
     tagline: 'Every rule that governs each location, resolved.',
     description:
       'See what applies where you operate, federal down to city — and know the moment it changes.',
-    included: [
-      'Federal, state, county, city — per location',
-      'Change alerts before it’s a problem',
-      'Every gap, tracked to an owner',
-    ],
     highlight: 'Every rule, every location, always current.',
   },
   {
@@ -61,8 +55,7 @@ const PILLARS: Pillar[] = [
     number: '02',
     title: 'Handbook Audit',
     tagline: 'Find the gaps before an auditor does.',
-    description: 'Upload your handbook. We grade it against what your state requires.',
-    included: ['Section-by-section grading', 'Gaps ranked by priority', 'Exportable report'],
+    description: 'Upload your handbook. We show you where it falls short of your state.',
     highlight: 'The gap analysis, without the consultant.',
   },
   {
@@ -70,8 +63,7 @@ const PILLARS: Pillar[] = [
     number: '03',
     title: 'Policy Management',
     tagline: 'Draft, store, and keep policies current.',
-    description: 'A living library — every policy tracked from draft to review.',
-    included: ['Draft new, or upload existing', 'Review dates, tracked', 'Gaps, suggested'],
+    description: 'A living library that keeps every policy current, so nothing quietly goes stale.',
     highlight: 'A policy library that never goes stale.',
   },
   {
@@ -79,12 +71,7 @@ const PILLARS: Pillar[] = [
     number: '04',
     title: 'Credentialing',
     tagline: 'The right credentials, tracked to the date.',
-    description: 'Define what each role needs. We track it for every employee.',
-    included: [
-      'Assigned automatically at hire',
-      'Verified from uploaded documents',
-      'Expiration alerts, before they lapse',
-    ],
+    description: 'Define what each role needs, and we keep watch on every employee’s dates for you.',
     highlight: 'No lapsed license discovered at audit time.',
   },
 ]
@@ -377,7 +364,7 @@ function InstrumentFrame({ caption, foot, children }: { caption: string; foot: s
   )
 }
 
-const INSTRUMENTS: Record<string, () => JSX.Element> = {
+const INSTRUMENTS: Record<string, () => React.ReactElement> = {
   jurisdiction: JurisdictionInstrument,
   'handbook-audit': HandbookInstrument,
   'policy-management': PolicyInstrument,
@@ -436,17 +423,9 @@ function PillarRow({ pillar, index }: { pillar: Pillar; index: number }) {
               {pillar.highlight}
               <span style={{ color: MUTED, opacity: 0.55 }}>”</span>
             </p>
-            <p className="mt-4 text-[15px] sm:text-base max-w-md" style={{ color: MUTED, lineHeight: 1.6 }}>
+            <p className="mt-5 text-[16px] sm:text-lg max-w-md" style={{ color: MUTED, lineHeight: 1.65 }}>
               {pillar.description}
             </p>
-            <ul className="mt-8 pt-7 border-t space-y-2.5 max-w-md" style={{ borderColor: LINE }}>
-              {pillar.included.map((d) => (
-                <li key={d} className="flex items-baseline gap-3 text-[14.5px]" style={{ color: INK }}>
-                  <span className="font-mono text-[11px]" style={{ color: MUTED }}>—</span>
-                  <span style={{ lineHeight: 1.5 }}>{d}</span>
-                </li>
-              ))}
-            </ul>
           </motion.div>
 
           {/* Instrument */}
@@ -553,47 +532,47 @@ function GlyphChecks() {
   )
 }
 
-const COVERAGE: { id: string; icon: typeof Scale; title: string; caption: string; glyph: () => JSX.Element }[] = [
+const COVERAGE: { id: string; icon: typeof Scale; title: string; caption: string; glyph: () => React.ReactElement }[] = [
   {
     id: 'jurisdiction',
     icon: Scale,
     title: 'Jurisdiction stack',
-    caption: 'Federal, state, county, and city requirements assembled for every location and kept current.',
+    caption: 'Everything that applies where you operate, in one place and always current.',
     glyph: GlyphStack,
   },
   {
     id: 'change',
     icon: Bell,
     title: 'Change alerts',
-    caption: 'New and amended law flagged before it takes effect — never caught off guard by a delta.',
+    caption: 'The law moves before you do — so you hear about it before it becomes a problem.',
     glyph: GlyphPulse,
   },
   {
     id: 'handbook',
     icon: FileText,
     title: 'Handbook audit',
-    caption: 'Your handbook graded section by section against your state, with an exportable gap report.',
+    caption: 'See exactly where your handbook falls short of your state, in a report you can hand to counsel.',
     glyph: GlyphDoc,
   },
   {
     id: 'policy',
     icon: Library,
     title: 'Policy library',
-    caption: 'Draft, store, and version every policy — draft to active to archived, review dates tracked.',
+    caption: 'Every policy kept current in one place, so nothing quietly goes out of date.',
     glyph: GlyphLifecycle,
   },
   {
     id: 'credential',
     icon: BadgeCheck,
     title: 'Credentialing',
-    caption: 'Required credentials mapped per role and tracked per employee, flagged long before they lapse.',
+    caption: 'The right credentials tracked to the date, flagged long before anything lapses.',
     glyph: GlyphCountdown,
   },
   {
     id: 'actions',
     icon: ListChecks,
     title: 'Owned actions',
-    caption: 'Every gap becomes an assignable task with an owner and a due date — nothing sits unresolved.',
+    caption: 'Every gap becomes someone’s job with a due date — nothing sits unresolved.',
     glyph: GlyphChecks,
   },
 ]

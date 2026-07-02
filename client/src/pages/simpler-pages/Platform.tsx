@@ -34,7 +34,6 @@ type Pillar = {
   title: string
   tagline: string
   description: string
-  included: string[]
   highlight: string
 }
 
@@ -45,12 +44,7 @@ const PILLARS: Pillar[] = [
     title: 'Safety & EHS',
     tagline: 'Every incident captured, categorized, and routed.',
     description:
-      'Frontline intake, OSHA logs, and pattern detection — so nothing slips and every record is defensible.',
-    included: [
-      'Magic-link incident intake, per location',
-      'OSHA 300 & 300A, audit-ready',
-      'Patterns surfaced across sites and shifts',
-    ],
+      'The safety work that usually slips through the cracks — captured the moment it happens, and defensible when it matters.',
     highlight: 'The safety layer that runs itself.',
   },
   {
@@ -59,12 +53,7 @@ const PILLARS: Pillar[] = [
     title: 'Governance & Compliance',
     tagline: 'The rules that govern you, always current.',
     description:
-      'Jurisdiction-aware monitoring across every location, with the deltas flagged before they land.',
-    included: [
-      'Federal → city requirements, per site',
-      'Change alerts before law takes effect',
-      'Every finding tracked to an owner',
-    ],
+      'Know what the law asks of you everywhere you operate — and hear about the changes before they land.',
     highlight: 'Audit-ready, without the fire drill.',
   },
   {
@@ -73,12 +62,7 @@ const PILLARS: Pillar[] = [
     title: 'Employee Relations',
     tagline: 'Cases handled before they become claims.',
     description:
-      'Investigations, progressive discipline, and separation risk — defensible from first note to final memo.',
-    included: [
-      'Investigations with counsel-ready records',
-      'Progressive discipline workflows',
-      'Separation risk mapped pre-decision',
-    ],
+      'The hard people problems, handled and documented right — so a difficult conversation never turns into a lawsuit.',
     highlight: 'The hard conversations, documented right.',
   },
   {
@@ -87,12 +71,7 @@ const PILLARS: Pillar[] = [
     title: 'One Brain',
     tagline: 'Three disciplines, one live record.',
     description:
-      'A safety incident, a compliance gap, and an ER case inform each other in real time — one composite view of your risk.',
-    included: [
-      'Shared data model across EHS, GRC, ER',
-      'Composite risk index, always live',
-      'Signals cross domains automatically',
-    ],
+      'Safety, compliance, and people problems inform each other in real time — one honest view of where your risk really sits.',
     highlight: 'Risk surfaces before it compounds.',
   },
 ]
@@ -267,8 +246,8 @@ function IntakeInstrument() {
         </div>
       </div>
       <div className="mt-6 pt-5 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
-        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: MUTED }}>IR-2041 · Atlanta</span>
-        <span className="text-[11px] font-mono" style={{ color: INK }}>Routed to manager</span>
+        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: MUTED }}>Atlanta — Store 7</span>
+        <span className="text-[11px] font-mono" style={{ color: INK }}>In the right hands</span>
       </div>
     </InstrumentFrame>
   )
@@ -324,7 +303,7 @@ function CaseInstrument() {
       </div>
       <div className="mt-5 pt-5 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
         <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: AMBER_600 }}>Pattern found</span>
-        <span className="text-[11px] font-mono" style={{ color: INK }}>3 cases · Store 7 · late shift</span>
+        <span className="text-[11px] font-mono" style={{ color: INK }}>A repeat, one location</span>
       </div>
     </InstrumentFrame>
   )
@@ -362,7 +341,7 @@ function ConvergenceInstrument() {
   )
 }
 
-const INSTRUMENTS: Record<string, () => JSX.Element> = {
+const INSTRUMENTS: Record<string, () => React.ReactElement> = {
   ehs: IntakeInstrument,
   grc: ComplianceInstrument,
   er: CaseInstrument,
@@ -419,17 +398,9 @@ function PillarRow({ pillar, index }: { pillar: Pillar; index: number }) {
               {pillar.highlight}
               <span style={{ color: MUTED, opacity: 0.55 }}>”</span>
             </p>
-            <p className="mt-4 text-[15px] sm:text-base max-w-md" style={{ color: MUTED, lineHeight: 1.6 }}>
+            <p className="mt-5 text-[16px] sm:text-lg max-w-md" style={{ color: MUTED, lineHeight: 1.65 }}>
               {pillar.description}
             </p>
-            <ul className="mt-8 pt-7 border-t space-y-2.5 max-w-md" style={{ borderColor: LINE }}>
-              {pillar.included.map((d) => (
-                <li key={d} className="flex items-baseline gap-3 text-[14.5px]" style={{ color: INK }}>
-                  <span className="font-mono text-[11px]" style={{ color: MUTED }}>—</span>
-                  <span style={{ lineHeight: 1.5 }}>{d}</span>
-                </li>
-              ))}
-            </ul>
           </motion.div>
 
           <motion.div
@@ -530,47 +501,47 @@ function GlyphCluster() {
   )
 }
 
-const COVERAGE: { id: string; icon: typeof ShieldAlert; title: string; caption: string; glyph: () => JSX.Element }[] = [
+const COVERAGE: { id: string; icon: typeof ShieldAlert; title: string; caption: string; glyph: () => React.ReactElement }[] = [
   {
     id: 'intake',
     icon: ShieldAlert,
     title: 'Incident intake',
-    caption: 'A magic link per location — photo evidence, witnesses, anonymous channel, and a defensible chain of custody.',
+    caption: 'A link anyone can file into in seconds, so nothing goes unreported — and every record holds up later.',
     glyph: GlyphBars,
   },
   {
     id: 'analysis',
     icon: Brain,
     title: 'IR analysis',
-    caption: 'Suggested categorization and severity on every incident, with cross-incident pattern detection for your team to review.',
+    caption: 'The repeat problems no single manager would catch, surfaced early enough to act on.',
     glyph: GlyphBrain,
   },
   {
     id: 'compliance',
     icon: Scale,
     title: 'Compliance',
-    caption: 'Jurisdiction-aware monitoring across every location, with new and amended law flagged before it takes effect.',
+    caption: 'What the law asks of you everywhere you operate, kept current as it changes.',
     glyph: GlyphScale,
   },
   {
     id: 'discipline',
     icon: Gavel,
     title: 'Discipline & ER',
-    caption: 'Progressive discipline, investigations, and separation risk — every case documented and defensible.',
+    caption: 'The hard people calls, handled and documented right — so they never become a lawsuit.',
     glyph: GlyphSteps,
   },
   {
     id: 'risk',
     icon: Activity,
     title: 'Composite risk',
-    caption: 'One live index rolling up safety, compliance, and employee-relations signals into a single view of exposure.',
+    caption: 'One honest number for where your risk really sits, moving in real time as things change.',
     glyph: GlyphGauge,
   },
   {
     id: 'relations',
     icon: Users,
-    title: 'People, connected',
-    caption: 'Every signal shares one record, so a safety incident, a compliance gap, and an ER case inform each other in real time.',
+    title: 'One record',
+    caption: 'Safety, compliance, and people all share one record — so nothing falls between the seams.',
     glyph: GlyphCluster,
   },
 ]

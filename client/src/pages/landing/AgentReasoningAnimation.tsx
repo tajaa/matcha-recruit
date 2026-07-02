@@ -703,17 +703,17 @@ function ParticleField({ p }: { p: Palette }) {
   }))
   return (
     <>
-      {particles.map((p) => (
+      {particles.map((particle) => (
         <motion.div
-          key={p.id}
+          key={particle.id}
           className="absolute rounded-full"
           style={{
             width: 2,
             height: 2,
             backgroundColor: p.emerald,
             opacity: 0.3,
-            left: `${p.x}%`,
-            top: `${p.y}%`,
+            left: `${particle.x}%`,
+            top: `${particle.y}%`,
           }}
           animate={{
             y: [0, -40, 0],
@@ -721,9 +721,9 @@ function ParticleField({ p }: { p: Palette }) {
             scale: [0.5, 1.2, 0.5],
           }}
           transition={{
-            duration: p.duration,
+            duration: particle.duration,
             repeat: Infinity,
-            delay: p.delay,
+            delay: particle.delay,
             ease: 'easeInOut',
           }}
         />

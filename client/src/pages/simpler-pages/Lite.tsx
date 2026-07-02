@@ -30,7 +30,6 @@ type Pillar = {
   title: string
   tagline: string
   description: string
-  included: string[]
   highlight: string
 }
 
@@ -41,12 +40,7 @@ const PILLARS: Pillar[] = [
     title: 'Incident Reporting',
     tagline: 'A magic link per location. No login, no app.',
     description:
-      'Texted, QR-coded, or bookmarked at the register — intake opens pre-filled with that site, ready for photos, witnesses, and an anonymous channel.',
-    included: [
-      'A magic link per location',
-      'Photo evidence + witness capture',
-      'Anonymous reporting channel',
-    ],
+      'A link anyone can open and file into in seconds — so incidents get reported when they happen, not weeks later in a binder no one reads.',
     highlight: 'Every incident, a defensible record — no compliance team required.',
   },
   {
@@ -55,40 +49,25 @@ const PILLARS: Pillar[] = [
     title: 'Voice Intake',
     tagline: 'Talk through what happened. We write the report.',
     description:
-      'Tap Dictate on any magic link — Matcha transcribes in real time and fills reporter, witnesses, location, date, and a suggested category, for them to review before it submits.',
-    included: [
-      'Real-time transcription',
-      'Fields filled automatically',
-      'Reviewed before it submits',
-    ],
+      'Too busy to type? Your team just talks it through, and the report comes back ready to review before it’s filed.',
     highlight: 'Hands-free reporting, reviewed before it submits.',
   },
   {
     id: 'ir_analysis',
     number: '03',
     title: 'IR Analysis',
-    tagline: 'Every incident categorized, scored, connected.',
+    tagline: 'The signal in the noise, surfaced early.',
     description:
-      'Suggested categorization and severity on every incident, with cross-incident pattern detection surfacing repeat behaviors and emerging risk clusters for your team to confirm.',
-    included: [
-      'Suggested category and severity',
-      'Cross-incident pattern detection',
-      'Your team confirms every call',
-    ],
+      'Repeat problems get flagged before they compound — so a small issue gets handled while it’s still small, not after it’s a claim.',
     highlight: 'The pattern no single manager would catch.',
   },
   {
     id: 'osha',
     number: '04',
-    title: 'OSHA 300 / 300A Logs',
-    tagline: 'OSHA logs that fill themselves.',
+    title: 'OSHA Logs',
+    tagline: 'The logs an audit asks for — always current.',
     description:
-      'Recordable tracking tied to your intake flow — tallies auto-populate, so you can print or export an audit-ready 300A summary any time.',
-    included: [
-      'Recordables auto-tallied',
-      '300, 300A, and ITA export',
-      'Audit-ready any time',
-    ],
+      'The recordkeeping that usually means a year-end scramble stays up to date on its own, a click from ready whenever you need it.',
     highlight: 'Audit-ready any time, no re-keying.',
   },
 ]
@@ -252,8 +231,8 @@ function IntakeInstrument() {
         </div>
       </div>
       <div className="mt-6 pt-5 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
-        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: MUTED }}>IR-2044 · Dallas</span>
-        <span className="text-[11px] font-mono" style={{ color: INK }}>Logged · chain of custody</span>
+        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: MUTED }}>Dallas — Store 3</span>
+        <span className="text-[11px] font-mono" style={{ color: INK }}>Reported in seconds</span>
       </div>
     </InstrumentFrame>
   )
@@ -315,7 +294,7 @@ function AnalysisInstrument() {
       </div>
       <div className="mt-5 pt-5 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
         <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: AMBER_600 }}>Pattern detected</span>
-        <span className="text-[11px] font-mono" style={{ color: INK }}>3rd escalation · Store 7 · 14 days</span>
+        <span className="text-[11px] font-mono" style={{ color: INK }}>A repeat, surfaced early</span>
       </div>
     </InstrumentFrame>
   )
@@ -342,16 +321,15 @@ function OshaInstrument() {
           </div>
         ))}
       </div>
-      <div className="mt-4 flex items-center gap-2 flex-wrap">
-        {['300 CSV', '300A CSV', '300A PDF', 'ITA export'].map((e) => (
-          <span key={e} className="text-[9px] font-mono uppercase tracking-wider px-2 py-1 rounded-full" style={{ color: MUTED, border: `1px solid ${LINE}` }}>{e}</span>
-        ))}
+      <div className="mt-4 flex items-center gap-2">
+        <PulseDot size={5} />
+        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: MUTED }}>Export-ready, any time</span>
       </div>
     </InstrumentFrame>
   )
 }
 
-const INSTRUMENTS: Record<string, () => JSX.Element> = {
+const INSTRUMENTS: Record<string, () => React.ReactElement> = {
   incidents: IntakeInstrument,
   voice: VoiceInstrument,
   ir_analysis: AnalysisInstrument,
@@ -408,17 +386,9 @@ function PillarRow({ pillar, index }: { pillar: Pillar; index: number }) {
               {pillar.highlight}
               <span style={{ color: MUTED, opacity: 0.55 }}>”</span>
             </p>
-            <p className="mt-4 text-[15px] sm:text-base max-w-md" style={{ color: MUTED, lineHeight: 1.6 }}>
+            <p className="mt-5 text-[16px] sm:text-lg max-w-md" style={{ color: MUTED, lineHeight: 1.65 }}>
               {pillar.description}
             </p>
-            <ul className="mt-8 pt-7 border-t space-y-2.5 max-w-md" style={{ borderColor: LINE }}>
-              {pillar.included.map((d) => (
-                <li key={d} className="flex items-baseline gap-3 text-[14.5px]" style={{ color: INK }}>
-                  <span className="font-mono text-[11px]" style={{ color: MUTED }}>—</span>
-                  <span style={{ lineHeight: 1.5 }}>{d}</span>
-                </li>
-              ))}
-            </ul>
           </motion.div>
 
           <motion.div
@@ -521,47 +491,47 @@ function GlyphDots() {
   )
 }
 
-const COVERAGE: { id: string; icon: typeof ShieldAlert; title: string; caption: string; glyph: () => JSX.Element }[] = [
+const COVERAGE: { id: string; icon: typeof ShieldAlert; title: string; caption: string; glyph: () => React.ReactElement }[] = [
   {
     id: 'incidents',
     icon: ShieldAlert,
     title: 'Incident reporting',
-    caption: 'A magic link per location — photo evidence, witness capture, an anonymous channel, and a defensible chain of custody.',
+    caption: 'A link anyone can file into in seconds, so nothing goes unreported — and every record holds up later.',
     glyph: GlyphBars,
   },
   {
     id: 'voice',
     icon: Mic,
     title: 'Voice intake',
-    caption: 'Tap Dictate and talk it through — transcribed in real time and filled for review before it submits.',
+    caption: 'No time to type? Your team talks it through, and the report comes back ready to review.',
     glyph: GlyphWave,
   },
   {
     id: 'analysis',
     icon: Brain,
     title: 'IR analysis',
-    caption: 'Suggested categorization and severity on every incident, with cross-incident pattern detection for your team.',
+    caption: 'The repeat problems no single manager would catch, surfaced early enough to act on.',
     glyph: GlyphBrain,
   },
   {
     id: 'osha',
     icon: ClipboardList,
-    title: 'OSHA 300 / 300A',
-    caption: 'Recordable tracking tied to intake — tallies auto-populate, print or export an audit-ready 300A any time.',
+    title: 'OSHA logs',
+    caption: 'The recordkeeping an audit asks for, kept current on its own and ready whenever you need it.',
     glyph: GlyphLog,
   },
   {
     id: 'resources',
     icon: FileText,
     title: 'HR resource hub',
-    caption: 'Editable templates — offer letters, PIPs, terminations, severance — and 50+ job descriptions across industries.',
+    caption: 'The everyday HR documents your team reaches for, ready to use — no starting from a blank page.',
     glyph: GlyphStack,
   },
   {
     id: 'states',
     icon: MapPin,
     title: 'State-by-state guides',
-    caption: 'Pay transparency, leave, sick time, and termination rules for all 50 states + DC, updated as legislation changes.',
+    caption: 'The rules that change by state, kept current — so you’re never the last to know a law moved.',
     glyph: GlyphDots,
   },
 ]

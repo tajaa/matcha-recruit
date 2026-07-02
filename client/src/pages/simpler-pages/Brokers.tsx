@@ -60,7 +60,6 @@ type Pillar = {
   title: string
   tagline: string
   description: string
-  included: string[]
   highlight: string
 }
 
@@ -71,26 +70,16 @@ const PILLARS: Pillar[] = [
     title: 'Risk Curve',
     tagline: 'See the renewal before it hits your desk.',
     description:
-      'Every client on Matcha feeds a live, exposure-weighted risk curve — so you walk into renewal prep already knowing which accounts are deteriorating, and why.',
-    included: [
-      'Exposure-weighted loss curve per account',
-      'Risk band — Strong to Exposed',
-      'Alerts with suggested actions',
-    ],
+      'Walk into renewal prep already knowing which accounts are deteriorating — months before the carrier re-rates them.',
     highlight: 'A loss curve you can act on beats a loss run you can only read.',
   },
   {
     id: 'wc',
     number: '02',
-    title: "Workers' Comp Portfolio",
-    tagline: 'Loss control across the whole book, sorted by risk.',
+    title: 'Loss Control',
+    tagline: 'The whole book, ranked by who needs you.',
     description:
-      'TRIR, DART, recordables, and lost days — every employer banded and sorted worst-first, so the loss-control call goes where it’s needed, not where it shouts loudest.',
-    included: [
-      'TRIR and DART, per client',
-      'Severity banding across the book',
-      'Net premium exposure per account',
-    ],
+      'Triage your book in seconds, so the loss-control call goes to the account that needs it — not the one that shouts loudest.',
     highlight: 'One screen ranks every client by safety deterioration.',
   },
   {
@@ -99,12 +88,7 @@ const PILLARS: Pillar[] = [
     title: 'Command Center',
     tagline: 'Every account, every signal, one queue.',
     description:
-      'Risk alerts ranked by severity, each with AI-drafted outreach — a flagged trend becomes a client conversation with the talking points already written.',
-    included: [
-      'Unified action queue, ranked',
-      'AI-drafted outreach, two tones',
-      'Handbook-coverage reporting',
-    ],
+      'A flagged trend becomes a client conversation with the talking points already written — so outreach starts before the renewal does.',
     highlight: 'Every alert is a client conversation waiting to happen.',
   },
 ]
@@ -433,25 +417,24 @@ function RiskCurveInstrument() {
 // 02 — WC portfolio rows, worst-first, top row flagged.
 function WcInstrument() {
   const rows = [
-    { client: 'Northgate Logistics', trir: '6.2', lit: true },
-    { client: 'Cedar Valley Mfg', trir: '3.1' },
-    { client: 'Harbor Foods Co', trir: '1.4' },
-    { client: 'Summit Builders', trir: '0.9' },
+    { client: 'Northgate Logistics', lit: true },
+    { client: 'Cedar Valley Mfg' },
+    { client: 'Harbor Foods Co' },
+    { client: 'Summit Builders' },
   ]
   return (
-    <InstrumentFrame caption="WC portfolio · sorted" foot="Loss control triaged worst-first">
+    <InstrumentFrame caption="The book · ranked" foot="The account that needs you, first">
       <div className="flex flex-col gap-3.5">
         {rows.map((r) => (
           <div key={r.client} className="flex items-center gap-3">
             <span className="flex-1 min-w-0 text-[12px] truncate" style={{ color: r.lit ? INK : MUTED, fontWeight: r.lit ? 600 : 400 }}>{r.client}</span>
-            <span className="text-[10px] font-mono tabular-nums shrink-0" style={{ color: MUTED }}>TRIR {r.trir}</span>
             {r.lit ? (
-              <span className="flex items-center gap-1.5 shrink-0 w-16 justify-end">
+              <span className="flex items-center gap-1.5 shrink-0 w-24 justify-end">
                 <PulseDot size={6} />
-                <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: AMBER_600 }}>Critical</span>
+                <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: AMBER_600 }}>Needs a call</span>
               </span>
             ) : (
-              <span className="text-[9px] font-mono uppercase tracking-wider shrink-0 w-16 text-right" style={{ color: MUTED }}>Stable</span>
+              <span className="text-[9px] font-mono uppercase tracking-wider shrink-0 w-24 text-right" style={{ color: MUTED }}>Stable</span>
             )}
           </div>
         ))}
@@ -463,9 +446,9 @@ function WcInstrument() {
 // 03 — action queue, top alert urgent.
 function CommandInstrument() {
   const alerts = [
-    { client: 'Northgate Logistics', issue: 'TRIR up 3 months straight', lit: true },
-    { client: 'Cedar Valley Mfg', issue: 'Lost-day count above book avg' },
-    { client: 'Atlas Care Group', issue: 'Near-miss reports up 40%' },
+    { client: 'Northgate Logistics', issue: 'Safety trend deteriorating', lit: true },
+    { client: 'Cedar Valley Mfg', issue: 'Running above the book' },
+    { client: 'Atlas Care Group', issue: 'Rising incident volume' },
   ]
   return (
     <InstrumentFrame caption="Action center · queue" foot="Each flagged trend, an outreach already drafted">
@@ -489,7 +472,7 @@ function CommandInstrument() {
   )
 }
 
-const INSTRUMENTS: Record<string, () => JSX.Element> = {
+const INSTRUMENTS: Record<string, () => React.ReactElement> = {
   'risk-curve': RiskCurveInstrument,
   wc: WcInstrument,
   command: CommandInstrument,
@@ -545,17 +528,9 @@ function PillarRow({ pillar, index }: { pillar: Pillar; index: number }) {
               {pillar.highlight}
               <span style={{ color: MUTED, opacity: 0.55 }}>”</span>
             </p>
-            <p className="mt-4 text-[15px] sm:text-base max-w-md" style={{ color: MUTED, lineHeight: 1.6 }}>
+            <p className="mt-5 text-[16px] sm:text-lg max-w-md" style={{ color: MUTED, lineHeight: 1.65 }}>
               {pillar.description}
             </p>
-            <ul className="mt-8 pt-7 border-t space-y-2.5 max-w-md" style={{ borderColor: LINE }}>
-              {pillar.included.map((d) => (
-                <li key={d} className="flex items-baseline gap-3 text-[14.5px]" style={{ color: INK }}>
-                  <span className="font-mono text-[11px]" style={{ color: MUTED }}>—</span>
-                  <span style={{ lineHeight: 1.5 }}>{d}</span>
-                </li>
-              ))}
-            </ul>
           </motion.div>
 
           <motion.div
@@ -659,47 +634,47 @@ function GlyphChecks() {
   )
 }
 
-const COVERAGE: { id: string; icon: typeof TrendingDown; title: string; caption: string; glyph: () => JSX.Element }[] = [
+const COVERAGE: { id: string; icon: typeof TrendingDown; title: string; caption: string; glyph: () => React.ReactElement }[] = [
   {
     id: 'curve',
     icon: TrendingDown,
     title: 'Book risk curve',
-    caption: 'An exposure-weighted loss curve for the whole book, banded per account, so deteriorating clients surface months ahead of the re-rate.',
+    caption: 'The whole book at a glance, so deteriorating accounts surface months ahead of the re-rate.',
     glyph: GlyphCurve,
   },
   {
     id: 'wc',
     icon: HardHat,
-    title: 'WC portfolio',
-    caption: 'TRIR, DART, recordables, and lost days across every employer, sorted worst-first with net premium exposure per account.',
+    title: 'Loss control',
+    caption: 'Every client ranked by who needs a conversation now — no more chasing loss runs one at a time.',
     glyph: GlyphBands,
   },
   {
     id: 'command',
     icon: Inbox,
     title: 'Action center',
-    caption: 'A unified queue of risk alerts ranked by severity, each with AI-drafted outreach in advisory or urgent tone.',
+    caption: 'A single queue of what needs attention, each one already drafted into client-ready outreach.',
     glyph: GlyphQueue,
   },
   {
     id: 'seats',
     icon: Layers,
-    title: 'Seat pools',
-    caption: 'Allocate Matcha Lite and Matcha-X seats across your book and provision clients without per-account billing admin.',
+    title: 'Flexible deployment',
+    caption: 'Roll Matcha out across your book your way — without per-account billing admin.',
     glyph: GlyphSeats,
   },
   {
     id: 'referral',
     icon: Link2,
-    title: 'Referral links',
-    caption: 'Branded, expiring referral tokens for self-serve — choose who covers the subscription and track every redemption.',
+    title: 'Branded referrals',
+    caption: 'Put clients on Matcha under your brand, and decide who covers the subscription.',
     glyph: GlyphLink,
   },
   {
     id: 'coverage',
     icon: ClipboardCheck,
-    title: 'Handbook coverage',
-    caption: 'Reporting that spots weak HR infrastructure across the book, so you know which clients are one incident from a claim.',
+    title: 'Weak-spot radar',
+    caption: 'See which clients are one incident from a claim — before they find out the hard way.',
     glyph: GlyphChecks,
   },
 ]
