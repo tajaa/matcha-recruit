@@ -1,8 +1,9 @@
-import { AlertTriangle, BadgeCheck, BookOpen, Building2, ClipboardList, FileText, Gavel, GraduationCap, Shield, ShieldAlert, TrendingUp, Users, Zap } from 'lucide-react'
+import { AlertTriangle, BadgeCheck, BookOpen, Building2, ClipboardList, FileText, Gavel, GraduationCap, Shield, ShieldAlert, Sparkles, TrendingUp, Users, Zap } from 'lucide-react'
 import SidebarShell from '../SidebarShell'
 import type { NavItem, NavGroup } from '../SidebarShell'
 import { useMe } from '../../hooks/useMe'
 import { useSidebarBadges } from '../../hooks/useSidebarBadges'
+import { useWhatsNewBadge } from '../../hooks/useWhatsNewBadge'
 
 // Matcha-X (mid tier) sidebar. Lite (IR + employees + handbook generation)
 // PLUS the mid-tier modules: handbook audit, training, progressive discipline,
@@ -19,6 +20,7 @@ const nav: (NavItem | NavGroup)[] = [
   { to: '/app/credential-templates', icon: BadgeCheck, label: 'Credentialing', feature: 'credential_templates' },
   { to: '/app/matcha-x/compliance', icon: Shield, label: 'Compliance', feature: 'compliance_lite', tag: 'Pro' },
   { to: '/app/resources', icon: BookOpen, label: 'Resources' },
+  { to: '/app/whats-new', icon: Sparkles, label: "What's New" },
   { to: '/app/company', icon: Building2, label: 'Company' },
   { to: '/app/employees', icon: Users, label: 'Employees', feature: 'employees' },
   { to: '/matcha-x/onboarding', icon: Zap, label: 'Compliance Setup' },
@@ -27,11 +29,15 @@ const nav: (NavItem | NavGroup)[] = [
 export default function MatchaXSidebar() {
   const { me, loading } = useMe()
   const { badges, markSeen } = useSidebarBadges()
+  const whatsNew = useWhatsNewBadge()
 
   const items: (NavItem | NavGroup)[] = nav.map((item) => {
     if ('items' in item) return item
     if (item.to === '/app/ir') {
       return { ...item, badge: badges.ir || undefined, onSeen: () => markSeen('ir') }
+    }
+    if (item.to === '/app/whats-new') {
+      return { ...item, badge: whatsNew.count || undefined, onSeen: whatsNew.markSeen }
     }
     return item
   })

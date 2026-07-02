@@ -6,6 +6,7 @@ import RequireBusinessAccount from '../components/auth/RequireBusinessAccount'
 import Dashboard from '../pages/app/Dashboard'
 import Employees from '../pages/app/Employees'
 import LiteUpgradeComplete from '../pages/app/LiteUpgradeComplete'
+import WhatsNew from '../pages/app/WhatsNew'
 import Onboarding from '../pages/app/Onboarding'
 import ERCopilot from '../pages/app/ERCopilot'
 import ERCaseDetail from '../pages/app/ERCaseDetail'
@@ -70,6 +71,7 @@ export default function AppRoutes() {
         <Route index element={<Dashboard />} />
         <Route path="company" element={<CompanySettings />} />
         <Route path="upgrade/complete" element={<LiteUpgradeComplete />} />
+        <Route path="whats-new" element={<WhatsNew />} />
         <Route path="employees" element={<FeatureGate feature="employees" label="Employees"><Employees /></FeatureGate>} />
         <Route path="employees/:employeeId" element={<FeatureGate feature="employees" label="Employees"><EmployeeDetail /></FeatureGate>} />
         <Route path="onboarding" element={<Onboarding />} />
