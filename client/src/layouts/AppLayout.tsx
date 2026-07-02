@@ -59,6 +59,11 @@ export default function AppLayout({ sidebar, logoLabel }: { sidebar: ReactNode; 
   )
 
   useEffect(() => {
+    document.documentElement.setAttribute('data-app-shell-bg', 'true')
+    return () => document.documentElement.removeAttribute('data-app-shell-bg')
+  }, [])
+
+  useEffect(() => {
     setMobileMenuOpen(false)
   }, [pathname])
 

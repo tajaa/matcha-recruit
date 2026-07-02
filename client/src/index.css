@@ -46,6 +46,13 @@ html, body {
   text-rendering: optimizeLegibility;
 }
 
+/* App shell (AppLayout, WorkLayout, CappeLayout) is dark by default; each sets
+   this on <html> while mounted so trackpad overscroll bounce past a
+   shorter-than-viewport page shows app chrome instead of a flash of white. */
+html[data-app-shell-bg] {
+  background-color: var(--color-vsc-bg);
+}
+
 @keyframes ticker {
   0%   { transform: translateX(0); }
   100% { transform: translateX(-50%); }
