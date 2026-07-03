@@ -476,6 +476,18 @@ def _pdf_title_from_markdown(content: str, fallback: str = "Deal Memo") -> str:
                 return title
     return fallback
 
+def _strip_leading_title_heading(content: str) -> str:
+    """Drop the first heading line (the one promoted to the document title via
+    _pdf_title_from_markdown) so it isn't rendered a second time in the body."""
+    lines = (content or "").splitlines()
+    for i, line in enumerate(lines):
+        if not line.strip():
+            continue
+        if line.strip().startswith("#"):
+            return "\n".join(lines[i + 1:]).lstrip("\n")
+        break
+    return content or ""
+
 async def _render_markdown_pdf(title: str, content_md: str) -> bytes:
     """Render a thread reply's markdown to PDF through the SAME document shell
     as the project export, so a single message exports with the project look.

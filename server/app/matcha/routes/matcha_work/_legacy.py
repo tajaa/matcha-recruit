@@ -5519,17 +5519,6 @@ async def delete_project_section(
 
 
 
-def _strip_leading_title_heading(content: str) -> str:
-    """Drop the first heading line (the one promoted to the document title via
-    _pdf_title_from_markdown) so it isn't rendered a second time in the body."""
-    lines = (content or "").splitlines()
-    for i, line in enumerate(lines):
-        if not line.strip():
-            continue
-        if line.strip().startswith("#"):
-            return "\n".join(lines[i + 1:]).lstrip("\n")
-        break
-    return content or ""
 
 
 
