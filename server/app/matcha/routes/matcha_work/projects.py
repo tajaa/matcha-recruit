@@ -19,6 +19,7 @@ from app.core.models.auth import CurrentUser
 from app.core.services.storage import get_storage
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, require_company_member, get_client_company_id
+from app.matcha.routes.matcha_work.pdf_export import _render_project_pdf
 from app.matcha.routes.matcha_work._shared import (
     _can_edit_project,
     _resolve_file_urls,
@@ -135,6 +136,7 @@ async def get_project_bundle_endpoint(
     from app.matcha.services import project_task_service as pt_svc
     from app.matcha.services import project_file_service
     from app.matcha.services import project_service as proj_svc
+    from app.matcha.routes.matcha_work._legacy import _list_project_elements  # moves to .elements in phase 11
 
     project, _role = await _verify_project_access(project_id, current_user)
 
