@@ -721,31 +721,6 @@ export interface CoverageGap {
   available: boolean
 }
 
-// --- Action Center: positive milestones ---
-
-export type MilestoneFamily = 'incident_free' | 'dart_free' | 'trir_below_benchmark'
-
-export interface BrokerMilestone {
-  id: string
-  company_id: string
-  company_name: string
-  milestone_key: string
-  milestone_family: MilestoneFamily
-  tier: number | null
-  title: string
-  detail: string | null
-  current_value: number | null
-  benchmark_value: number | null
-  is_read: boolean
-  achieved_at: string
-  superseded_at: string | null
-}
-
-export interface BrokerMilestonesResponse {
-  summary: { total: number; unread: number }
-  milestones: BrokerMilestone[]
-}
-
 // --- Action Center: AI consultative outreach ---
 
 export type OutreachTone = 'celebratory' | 'advisory' | 'urgent'

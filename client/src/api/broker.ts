@@ -26,7 +26,6 @@ import type {
   ExternalPropertyPayload,
   PropertyPortfolioResponse,
   CoverageGap,
-  BrokerMilestonesResponse,
   OutreachResponse,
   BrokerSeatsResponse,
   BrokerClientInvite,
@@ -291,17 +290,7 @@ export function recordExternalLossPremium(clientId: string, body: LossPremiumBod
   return api.put<LossRatioData>(`/broker/external-clients/${clientId}/loss-ratio/premium`, body)
 }
 
-// --- Action Center: milestones + outreach ---
-
-export function fetchActionCenterMilestones(includeSuperseded = false) {
-  return api.get<BrokerMilestonesResponse>(
-    `/broker/action-center/milestones${includeSuperseded ? '?include_superseded=true' : ''}`,
-  )
-}
-
-export function markMilestoneRead(milestoneId: string) {
-  return api.post<{ status: string }>(`/broker/action-center/milestones/${milestoneId}/read`, {})
-}
+// --- Action Center: outreach ---
 
 export function fetchActionCenterOutreach(companyId: string, refresh = false) {
   return api.get<OutreachResponse>(
