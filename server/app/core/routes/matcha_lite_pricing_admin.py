@@ -13,7 +13,12 @@ from pydantic import BaseModel, Field
 
 from ...database import get_connection
 from ..dependencies import require_admin
-from ..services.matcha_lite_pricing import PRODUCT_CODES, SELECT_COLUMNS, row_to_pricing
+from ..services.matcha_lite_pricing import (
+    PRODUCT_CODES,
+    SELECT_COLUMNS,
+    get_matcha_lite_pricing,
+    row_to_pricing,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -51,11 +56,12 @@ async def get_matcha_lite_pricing_admin(
     current_user=Depends(require_admin),
 ):
     product_code = _validate_product_code(product_code)
+    # No row yet (e.g. mlpricing04 hasn't seeded this add-on in this
+    # environment) is not an error — product_code is already validated
+    # against the known enum, so fall back to launch defaults rather than
+    # 404ing the admin out of a config that's about to be created on save.
     async with get_connection() as conn:
-        row = await conn.fetchrow(f"SELECT {SELECT_COLUMNS} FROM matcha_lite_pricing WHERE product_code = $1", product_code)
-    if not row:
-        raise HTTPException(status_code=404, detail="Pricing config not found")
-    pricing = row_to_pricing(row)
+        pricing = await get_matcha_lite_pricing(conn, product_code)
     return MatchaLitePricingConfig(**pricing.__dict__)
 
 
@@ -84,18 +90,30 @@ async def update_matcha_lite_pricing(
                 """,
                 product_code,
             )
-            if not old_row:
-                raise HTTPException(status_code=404, detail="Pricing config not found")
 
+            # Upsert rather than requiring a pre-existing row: product_code is
+            # already validated against the known PRODUCT_CODES enum, so a
+            # missing row just means this environment's seed migration
+            # (e.g. mlpricing04 for the add-ons) hasn't landed yet — the
+            # admin's first save should create it, not 404.
             new_row = await conn.fetchrow(
                 f"""
-                UPDATE matcha_lite_pricing
-                SET price_per_block_cents = $1, block_size = $2, sale_price_per_block_cents = $3,
-                    sale_active = $4, min_headcount = $5, max_headcount = $6,
-                    updated_at = now(), updated_by = $7
-                WHERE product_code = $8
+                INSERT INTO matcha_lite_pricing
+                    (product_code, price_per_block_cents, block_size, sale_price_per_block_cents,
+                     sale_active, min_headcount, max_headcount, updated_at, updated_by)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, now(), $8)
+                ON CONFLICT (product_code) DO UPDATE SET
+                    price_per_block_cents = EXCLUDED.price_per_block_cents,
+                    block_size = EXCLUDED.block_size,
+                    sale_price_per_block_cents = EXCLUDED.sale_price_per_block_cents,
+                    sale_active = EXCLUDED.sale_active,
+                    min_headcount = EXCLUDED.min_headcount,
+                    max_headcount = EXCLUDED.max_headcount,
+                    updated_at = now(),
+                    updated_by = EXCLUDED.updated_by
                 RETURNING {SELECT_COLUMNS}
                 """,
+                product_code,
                 body.price_per_block_cents,
                 body.block_size,
                 body.sale_price_per_block_cents,
@@ -103,7 +121,6 @@ async def update_matcha_lite_pricing(
                 body.min_headcount,
                 body.max_headcount,
                 updated_by,
-                product_code,
             )
             await conn.execute(
                 """
@@ -111,7 +128,7 @@ async def update_matcha_lite_pricing(
                 VALUES ($1, $2::jsonb, $3::jsonb)
                 """,
                 updated_by,
-                json.dumps(dict(old_row)),
+                json.dumps(dict(old_row)) if old_row else "null",
                 json.dumps({**body.model_dump(), "product_code": product_code}),
             )
 
