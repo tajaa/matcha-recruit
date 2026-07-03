@@ -43,6 +43,10 @@ from .github import router as _github_router, public_router as _github_public
 router.include_router(_github_router)
 public_router.include_router(_github_public)
 
+from .collaboration import router as _collaboration_router
+
+router.include_router(_collaboration_router)
+
 from . import _legacy
 
 router.include_router(_legacy.router)
