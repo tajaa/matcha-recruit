@@ -62,6 +62,22 @@ Sidebar dispatch in `client/src/components/TenantSidebar.tsx`. Tier-check helper
 - **Candidate / Employee portals** — public-token routes (`/candidate-interview/:token`, `/s/:token`); employee self-service through `employee_portal_router`.
 - **Public anonymous report** — `/report/:token` (`server/app/matcha/routes/inbound_email.py`); per-company token-gated single-use form.
 
+## Repo layout — products map
+
+Which frontend pairs with which backend package (don't re-derive this):
+
+| Product | Frontend | Backend | Identity / tables | Domain |
+|---|---|---|---|---|
+| **Matcha** (Free / Lite / Essentials / X / Compliance / Pro) | `client/` — main SPA (hey-matcha.com) | `server/app/core/` + `server/app/matcha/` at `/api` | `users` + `companies` (`signup_source`, `enabled_features`) | HR compliance, IR/OSHA, ER, employees, broker risk tooling |
+| **Matcha-work** (web) | `client/src/pages/work/*` at `/work/*` (+ `/werk`, `/werk-lite` route trees over the same pages) | `server/app/matcha/routes/matcha_work.py` | `mw_*` tables | Collaborative AI workspace |
+| **Werk** (macOS) | `desktop/Werk/` (SwiftUI; project still `Matcha.xcodeproj`) | same matcha-work backend | `mw_*` tables | Desktop surface of matcha-work — confirm which surface (web vs desktop) before editing |
+| **Cappe** | inside `client/` — host-routed on gummfit.com (`client/src/utils/cappeHost.ts`, pages in `client/src/pages/cappe/`) | `server/app/cappe/` at `/api/cappe` (+ unprefixed tenant renderer on `*.gummfit.com`) | `cappe_accounts`, JWT `scope=cappe`, `cappe_*` tables (no matcha tenant model) | Website builder + domain reselling |
+| **Tell-Us** | `client/tellus/` — separate Vite app (React 19), served by the same frontend nginx at `/tellus/` | `server/app/tellus/` at `/api/tellus` | `tellus_accounts` (consumer + brand), JWT `scope=tellus`, `tellus_*` tables | Rewards-for-feedback |
+| **MatchaTutor** (iOS) | `ios/` (SwiftUI, dormant) | matcha-work language-tutor endpoints | — | Language tutor |
+| **Ops agent** | `agent-ui/` (Preact; build copied into `server/agent/static/` by `build-and-push.sh`) | `server/agent/` — standalone service :9100 (not part of `app/`) | — | Internal leads/ops console |
+
+Cross-product import rule: `cappe/` and `tellus/` import only from `app/core/*` (shared db pool, email, storage, auth, redis). One documented exception: `tellus/services/geo.py` reuses `matcha.services.property_cat.geocode` (single US Census geocoder — keep its signature stable).
+
 ## Stack
 
 - **Framework**: FastAPI + uvicorn (async)
