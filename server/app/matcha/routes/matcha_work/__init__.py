@@ -17,6 +17,11 @@ from .thread_uploads import router as _thread_uploads_router
 
 router.include_router(_thread_uploads_router)
 
+from .projects import router as _projects_router, public_router as _projects_public
+
+router.include_router(_projects_router)
+public_router.include_router(_projects_public)
+
 from . import _legacy
 
 router.include_router(_legacy.router)
