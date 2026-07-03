@@ -5,11 +5,14 @@ router = APIRouter(dependencies=[Depends(require_feature("matcha_work"))])
 public_router = APIRouter()
 presence_router = APIRouter()
 
+from .presence import router as _presence_router
+
+presence_router.include_router(_presence_router)
+
 from . import _legacy
 
 router.include_router(_legacy.router)
 public_router.include_router(_legacy.public_router)
-presence_router.include_router(_legacy.presence_router)
 
 # Transitional re-export: test_language_tutor.py imports these constants
 # directly from the package at module level. Plain string constants, so a
