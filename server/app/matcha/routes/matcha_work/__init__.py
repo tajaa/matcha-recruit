@@ -55,6 +55,10 @@ from .tutor import router as _tutor_router
 
 router.include_router(_tutor_router)
 
+from .messaging import router as _messaging_router
+
+router.include_router(_messaging_router)
+
 from . import _legacy
 
 router.include_router(_legacy.router)
