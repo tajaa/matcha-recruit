@@ -16,14 +16,14 @@ from uuid import UUID
 from fastapi import APIRouter, Body, Depends, Form, HTTPException, Query, Request, Response, UploadFile, File, status
 from fastapi.responses import StreamingResponse
 
-from ...core.models.auth import CurrentUser
-from ...core.services.compliance_service import get_location_requirements, get_locations
-from ...core.services.storage import get_storage
-from ...database import get_connection
-from ..dependencies import require_admin_or_client, require_company_member, get_client_company_id, require_feature
-from ..services.escalation_service import should_escalate, create_escalation
-from ..services.model_pricing import calculate_call_cost
-from ..models.matcha_work import (
+from app.core.models.auth import CurrentUser
+from app.core.services.compliance_service import get_location_requirements, get_locations
+from app.core.services.storage import get_storage
+from app.database import get_connection
+from app.matcha.dependencies import require_admin_or_client, require_company_member, get_client_company_id, require_feature
+from app.matcha.services.escalation_service import should_escalate, create_escalation
+from app.matcha.services.model_pricing import calculate_call_cost
+from app.matcha.models.matcha_work import (
     CreateThreadRequest,
     CreateThreadResponse,
     DocumentVersionResponse,
@@ -64,11 +64,11 @@ from ..models.matcha_work import (
     RejectCandidateRequest,
     WorkbookDocument,
 )
-from ..services import matcha_work_document as doc_svc
-from ..services import billing_service
-from ..services import token_budget_service
-from ..services.er_document_parser import ERDocumentParser
-from ..services.matcha_work_handbook_upload import (
+from app.matcha.services import matcha_work_document as doc_svc
+from app.matcha.services import billing_service
+from app.matcha.services import token_budget_service
+from app.matcha.services.er_document_parser import ERDocumentParser
+from app.matcha.services.matcha_work_handbook_upload import (
     AuditedLocation,
     MAX_RED_FLAGS,
     MAX_SECTION_PREVIEWS,
@@ -80,17 +80,17 @@ from ..services.matcha_work_handbook_upload import (
     derive_handbook_title,
     parse_handbook_sections,
 )
-from ..services.matcha_work_ai import get_ai_provider, _infer_skill_from_state, _build_company_context, compact_conversation, needs_live_web_context, fetch_live_web_context
-from ..services.matcha_work_node import build_node_context, build_compliance_context, ComplianceContextResult
-from ..services.onboarding_orchestrator import (
+from app.matcha.services.matcha_work_ai import get_ai_provider, _infer_skill_from_state, _build_company_context, compact_conversation, needs_live_web_context, fetch_live_web_context
+from app.matcha.services.matcha_work_node import build_node_context, build_compliance_context, ComplianceContextResult
+from app.matcha.services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
     start_google_workspace_onboarding,
     start_slack_onboarding,
 )
-from ...core.services.email import get_email_service
-from ...core.services.handbook_service import HandbookService
-from ...config import get_settings
+from app.core.services.email import get_email_service
+from app.core.services.handbook_service import HandbookService
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -98,8 +98,8 @@ logger = logging.getLogger(__name__)
 async def _get_rag_context(content: str, company_id, max_tokens: int = 4000) -> str | None:
     """Fetch compliance RAG context for a user question. Returns None on failure."""
     try:
-        from ...core.services.embedding_service import EmbeddingService
-        from ...core.services.compliance_rag import ComplianceRAGService
+        from app.core.services.embedding_service import EmbeddingService
+        from app.core.services.compliance_rag import ComplianceRAGService
 
         api_key = os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key
         if not api_key or not content:
@@ -225,7 +225,7 @@ def _validate_updates_for_skill(skill: str, updates: dict) -> dict:
     elif skill == "project":
         valid_fields = VALID_PROJECT_FIELDS
     elif skill == "blog":
-        from ..services.matcha_work_ai import BLOG_FIELDS as _BLOG_FIELDS
+        from app.matcha.services.matcha_work_ai import BLOG_FIELDS as _BLOG_FIELDS
         valid_fields = set(_BLOG_FIELDS)
     else:
         return {}
@@ -1124,7 +1124,7 @@ async def _inject_recruiting_project_context(ctx: str, thread: dict, current_sta
     if not project_id:
         return ctx
 
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     async with get_connection() as conn:
         row = await conn.fetchrow(
             "SELECT title, project_type, sections, project_data FROM mw_projects WHERE id = $1",
@@ -1277,7 +1277,7 @@ async def _apply_ai_updates_and_operations(
         # _validate_updates_for_skill("blog", ...) already whitelists BLOG_FIELDS
         # only, so nothing else survives for blog chats.
         if skill == "blog":
-            from ..services.matcha_work_ai import BLOG_FIELDS as _BLOG_FIELDS
+            from app.matcha.services.matcha_work_ai import BLOG_FIELDS as _BLOG_FIELDS
             for _bk in _BLOG_FIELDS:
                 if _bk in safe_updates:
                     blog_directives[_bk] = safe_updates.pop(_bk)
@@ -1305,7 +1305,7 @@ async def _apply_ai_updates_and_operations(
             _skip_project_sections_sync = _project_type == "blog"
 
             if project_id and not _skip_project_sections_sync and "project_sections" in safe_updates:
-                from ..services import project_service as proj_svc
+                from app.matcha.services import project_service as proj_svc
                 new_sections = safe_updates.get("project_sections") or []
                 if new_sections:
                     try:
@@ -1418,7 +1418,7 @@ async def _apply_ai_updates_and_operations(
     # AI describes options in reply text, no persistence.
     blog_changes_applied = False
     if blog_directives and project_id:
-        from ..services import project_service as _blog_proj_svc
+        from app.matcha.services import project_service as _blog_proj_svc
         try:
             _, blog_secs_changed = await _blog_proj_svc.apply_blog_directives(
                 project_id,
@@ -1614,7 +1614,7 @@ async def _apply_ai_updates_and_operations(
                     else:
                         await doc_svc.apply_update(thread_id, {"handbook_status": "generating"})
 
-                        from ...core.models.handbook import (
+                        from app.core.models.handbook import (
                             HandbookCreateRequest, HandbookScopeInput,
                             CompanyHandbookProfileInput, HandbookSectionInput,
                         )
@@ -1737,7 +1737,7 @@ async def _apply_ai_updates_and_operations(
                                     if row:
                                         location_ids.append(str(row["id"]))
 
-                        from ...core.services.policy_draft_service import generate_policy_draft_stream, PolicyDraftRequest
+                        from app.core.services.policy_draft_service import generate_policy_draft_stream, PolicyDraftRequest
 
                         draft_request = PolicyDraftRequest(
                             policy_type=policy_type,
@@ -2377,7 +2377,7 @@ async def _build_thread_file_attachment_meta(attachments) -> list[dict]:
     still attaches, it just won't feed the AI."""
     if not attachments:
         return []
-    from ..services.er_document_parser import ERDocumentParser
+    from app.matcha.services.er_document_parser import ERDocumentParser
     storage = get_storage()
     parser = ERDocumentParser()
     out: list[dict] = []
@@ -2479,7 +2479,7 @@ async def upload_thread_resume(
 
     async def event_stream():
         try:
-            from ..services.resume_parser import (
+            from app.matcha.services.resume_parser import (
                 extract_resume_text,
                 parse_resume_text,
                 ResumeParseError,
@@ -2890,7 +2890,7 @@ def _guard_sensitive_project_type(project: dict, current_user: CurrentUser) -> N
 
 async def _verify_project_access(project_id: UUID, current_user: CurrentUser) -> tuple[dict, str]:
     """Check project access. For admins, uses collaborator table. Returns (project, role)."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     if current_user.role == "admin":
         result = await proj_svc.get_project_as_collaborator(project_id, current_user.id)
         if result:
@@ -2928,7 +2928,7 @@ async def list_projects_endpoint(
     current_user: CurrentUser = Depends(require_company_member),
 ):
     """List all projects for the current user."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     if current_user.role == "admin":
         # Include the admin's tenant-scoped company so they see projects
         # owned by that company even when they're not explicitly seeded
@@ -2955,8 +2955,8 @@ async def create_project_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Create a new project with an auto-created first chat."""
-    from ..services import project_service as proj_svc
-    from ..services import entitlements_service
+    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services import entitlements_service
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated")
@@ -3009,7 +3009,7 @@ async def list_recruiting_clients_endpoint(
     include_archived: bool = Query(False),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from ..services import recruiting_client_service as rc_svc
+    from app.matcha.services import recruiting_client_service as rc_svc
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return []
@@ -3021,7 +3021,7 @@ async def create_recruiting_client_endpoint(
     body: dict,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from ..services import recruiting_client_service as rc_svc
+    from app.matcha.services import recruiting_client_service as rc_svc
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated")
@@ -3043,7 +3043,7 @@ async def get_recruiting_client_endpoint(
     client_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from ..services import recruiting_client_service as rc_svc
+    from app.matcha.services import recruiting_client_service as rc_svc
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Not found")
@@ -3059,7 +3059,7 @@ async def update_recruiting_client_endpoint(
     body: dict,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from ..services import recruiting_client_service as rc_svc
+    from app.matcha.services import recruiting_client_service as rc_svc
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Not found")
@@ -3074,7 +3074,7 @@ async def archive_recruiting_client_endpoint(
     client_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from ..services import recruiting_client_service as rc_svc
+    from app.matcha.services import recruiting_client_service as rc_svc
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Not found")
@@ -3089,7 +3089,7 @@ async def unarchive_recruiting_client_endpoint(
     client_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from ..services import recruiting_client_service as rc_svc
+    from app.matcha.services import recruiting_client_service as rc_svc
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Not found")
@@ -3124,9 +3124,9 @@ async def get_project_bundle_endpoint(
     identically. Verifies access ONCE, then runs the six independent reads
     concurrently — replacing the ~6 sequential round-trips the client used to
     fire on every project open."""
-    from ..services import project_task_service as pt_svc
-    from ..services import project_file_service
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_task_service as pt_svc
+    from app.matcha.services import project_file_service
+    from app.matcha.services import project_service as proj_svc
 
     project, _role = await _verify_project_access(project_id, current_user)
 
@@ -3173,8 +3173,8 @@ async def update_project_endpoint(
     routed through the per-user pin store so existing clients keep
     working without flipping the global flag for everyone else.
     """
-    from ..services import project_service as proj_svc
-    from ..services import recruiting_client_service as rc_svc
+    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services import recruiting_client_service as rc_svc
     project, _role = await _verify_project_access(project_id, current_user)
 
     # Per-user pin handoff (legacy API compat). Don't write to the global
@@ -3211,7 +3211,7 @@ async def set_project_pin_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Set the per-user star/pin on a project. Body: `{is_pinned: bool}`."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     pinned = bool(body.get("is_pinned", True))
     await proj_svc.set_project_pin(current_user.id, project_id, pinned)
@@ -3224,7 +3224,7 @@ async def archive_project_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Archive a project."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     await proj_svc.archive_project(project_id)
     return {"status": "archived"}
@@ -3236,7 +3236,7 @@ async def delete_project_permanent_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Hard-delete a project along with all its threads and messages."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     await proj_svc.delete_project_permanent(project_id)
 
@@ -3247,7 +3247,7 @@ async def unarchive_project_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Restore an archived project to active status."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     await proj_svc.unarchive_project(project_id)
     return {"status": "active"}
@@ -3262,7 +3262,7 @@ async def patch_discipline_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Update discipline project_data (employee, infraction, level)."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     try:
         return await proj_svc.patch_discipline(project_id, body)
@@ -3276,7 +3276,7 @@ async def discipline_meeting_held_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Stamp meeting_held_at. Required gate before signature can be requested."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.mark_discipline_meeting_held(project_id)
 
@@ -3294,8 +3294,8 @@ async def discipline_request_signature_endpoint(
     requested_at on the project's signature blob. The webhook handler
     flips draft_status to 'signed' once the recipient signs.
     """
-    from ..services import project_service as proj_svc
-    from ..services.signature_provider import get_signature_provider
+    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.signature_provider import get_signature_provider
 
     project, _ = await _verify_project_access(project_id, current_user)
 
@@ -3337,7 +3337,7 @@ async def discipline_refuse_signature_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Mark the project as Employee Refused to Sign. Closes the workflow."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     notes = (body.get("notes") or "").strip()
     if len(notes) < 20:
@@ -3356,7 +3356,7 @@ async def discipline_upload_physical_endpoint(
     Stores the scan via the existing storage service and records the
     storage path on the project's signature blob. Closes the workflow.
     """
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     project_record, _ = await _verify_project_access(project_id, current_user)
     company_id = project_record.get("company_id") if isinstance(project_record, dict) else None
     if not company_id:
@@ -3379,7 +3379,7 @@ async def discipline_upload_physical_endpoint(
 
     # Surface in the project's Files panel so HR can find it the same
     # way they find any other project attachment.
-    from ..services import project_file_service as file_svc
+    from app.matcha.services import project_file_service as file_svc
     await file_svc.add_project_file(
         project_id=project_id,
         uploaded_by=current_user.id,
@@ -3407,8 +3407,8 @@ async def signature_webhook(request: Request):
     HMAC verification (X-Docuseal-Signature header) is required — see
     matcha/services/signature_provider.py:verify_webhook_signature.
     """
-    from ..services import project_service as proj_svc
-    from ..services.signature_provider import get_signature_provider, verify_webhook_signature
+    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services.signature_provider import get_signature_provider, verify_webhook_signature
 
     raw = await request.body()
     sig_header = (
@@ -3469,7 +3469,7 @@ async def signature_webhook(request: Request):
             # No authenticated user on a webhook — attribute to the
             # project creator so the file row has a valid uploaded_by.
             if uploaded_by:
-                from ..services import project_file_service as file_svc
+                from app.matcha.services import project_file_service as file_svc
                 await file_svc.add_project_file(
                     project_id=project_id,
                     uploaded_by=uploaded_by,
@@ -3495,7 +3495,7 @@ async def patch_blog_endpoint(
     body: dict,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     try:
         return await proj_svc.patch_blog(project_id, body)
@@ -3509,7 +3509,7 @@ async def transition_blog_status_endpoint(
     body: dict,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     to = (body or {}).get("to")
     if not to:
@@ -3527,7 +3527,7 @@ async def add_project_section_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Add a section to the project."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     company_id = await get_client_company_id(current_user)
     raw_content = body.get("content", "")
@@ -3548,7 +3548,7 @@ async def reorder_project_sections_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Reorder project sections."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.reorder_sections(project_id, body.get("section_ids", []))
 
@@ -3561,7 +3561,7 @@ async def update_project_section_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Update a project section."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     actor_name = await proj_svc._resolve_actor_name(current_user.id)
     return await proj_svc.update_section(
@@ -3577,7 +3577,7 @@ async def delete_project_section_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Delete a project section."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.delete_section(project_id, section_id)
 
@@ -3589,7 +3589,7 @@ async def accept_project_section_revision_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Promote a section's pending AI revision into its live content."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     actor_name = await proj_svc._resolve_actor_name(current_user.id)
     return await proj_svc.accept_section_revision(
@@ -3605,7 +3605,7 @@ async def reject_project_section_revision_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Discard a section's pending AI revision, leaving live content untouched."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.reject_section_revision(project_id, section_id)
 
@@ -3722,7 +3722,7 @@ async def email_project_section_endpoint(
 async def _resolve_actor_name_safe(user_id) -> str:
     """Best-effort display name for the current user; falls back to 'Someone'."""
     try:
-        from ..services import project_service as proj_svc
+        from app.matcha.services import project_service as proj_svc
         name = await proj_svc._resolve_actor_name(user_id)
         return name or "Someone"
     except Exception:
@@ -3740,7 +3740,7 @@ async def list_section_comments_endpoint(
 ):
     """Comments on a single note, oldest first."""
     await _verify_project_access(project_id, current_user)
-    from ..services import project_comment_service as cmt_svc
+    from app.matcha.services import project_comment_service as cmt_svc
     return await cmt_svc.list_section_comments(project_id, section_id)
 
 
@@ -3788,7 +3788,7 @@ async def create_section_comment_endpoint(
 
     company_id = await get_client_company_id(current_user)
 
-    from ..services import project_comment_service as cmt_svc
+    from app.matcha.services import project_comment_service as cmt_svc
     comment = await cmt_svc.create_section_comment(
         project_id=project_id,
         section_id=section_id,
@@ -3818,7 +3818,7 @@ async def create_section_comment_endpoint(
                 targets.add(str(parent_author))
         targets.discard(str(current_user.id))
         if targets and company_id:
-            from ..services import notification_service as notif_svc
+            from app.matcha.services import notification_service as notif_svc
             actor = await _resolve_actor_name_safe(current_user.id)
             for uid in targets:
                 await notif_svc.create_notification(
@@ -3845,7 +3845,7 @@ async def delete_section_comment_endpoint(
 ):
     """Delete one of your own comments."""
     await _verify_project_access(project_id, current_user)
-    from ..services import project_comment_service as cmt_svc
+    from app.matcha.services import project_comment_service as cmt_svc
     ok = await cmt_svc.delete_section_comment(comment_id, current_user.id)
     if not ok:
         raise HTTPException(status_code=404, detail="Comment not found")
@@ -3864,7 +3864,7 @@ async def resolve_section_comment_endpoint(
     with project access may resolve (mirrors doc-comment conventions)."""
     await _verify_project_access(project_id, current_user)
     resolved = bool(body.get("resolved", True))
-    from ..services import project_comment_service as cmt_svc
+    from app.matcha.services import project_comment_service as cmt_svc
     comment = await cmt_svc.set_section_comment_resolved(comment_id, project_id, resolved)
     if comment is None:
         raise HTTPException(status_code=404, detail="Comment not found")
@@ -3900,7 +3900,7 @@ async def upload_project_file(
     """Upload a file attachment to a project. Pass `element_id` to bucket it
     under an element's context repo (and optionally `folder_id` for a folder
     within that repo); omit both for the project's root Files tab."""
-    from ..services import project_file_service
+    from app.matcha.services import project_file_service
 
     project, _role = await _verify_project_access(project_id, current_user)
     company_id = project.get("company_id")
@@ -3957,7 +3957,7 @@ async def list_project_files_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """List file attachments for a project."""
-    from ..services import project_file_service
+    from app.matcha.services import project_file_service
 
     await _verify_project_access(project_id, current_user)
     return await project_file_service.list_project_files(project_id)
@@ -3970,7 +3970,7 @@ async def delete_project_file_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Delete a file attachment from a project."""
-    from ..services import project_file_service
+    from app.matcha.services import project_file_service
 
     await _verify_project_access(project_id, current_user)
 
@@ -3996,7 +3996,7 @@ async def list_project_folders_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """List folders for a project's Files tab."""
-    from ..services import project_file_service
+    from app.matcha.services import project_file_service
 
     await _verify_project_access(project_id, current_user)
     return await project_file_service.list_project_folders(project_id)
@@ -4010,7 +4010,7 @@ async def create_project_folder_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Create a folder (optionally nested under parent_id)."""
-    from ..services import project_file_service
+    from app.matcha.services import project_file_service
 
     await _verify_project_access(project_id, current_user)
     clean = (name or "").strip()
@@ -4032,7 +4032,7 @@ async def update_project_folder_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Rename and/or reparent a folder. move_to_root=true sends it to the root."""
-    from ..services import project_file_service
+    from app.matcha.services import project_file_service
 
     await _verify_project_access(project_id, current_user)
     rec = await project_file_service.update_project_folder(
@@ -4051,7 +4051,7 @@ async def delete_project_folder_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Delete a folder; its files fall back to the root."""
-    from ..services import project_file_service
+    from app.matcha.services import project_file_service
 
     await _verify_project_access(project_id, current_user)
     ok = await project_file_service.delete_project_folder(folder_id, project_id)
@@ -4068,7 +4068,7 @@ async def move_project_file_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Move a file into a folder (folder_id) or to the root (null)."""
-    from ..services import project_file_service
+    from app.matcha.services import project_file_service
 
     await _verify_project_access(project_id, current_user)
     rec = await project_file_service.move_file_to_folder(file_id, project_id, folder_id)
@@ -4085,7 +4085,7 @@ async def copy_project_file_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Copy a file into a folder, leaving the original (Media "Add to Files")."""
-    from ..services import project_file_service
+    from app.matcha.services import project_file_service
 
     await _verify_project_access(project_id, current_user)
     rec = await project_file_service.copy_file_to_folder(file_id, project_id, folder_id)
@@ -4102,7 +4102,7 @@ async def sync_chat_files_endpoint(
     """Backfill the project's Files/Media with all discussion-chat attachments.
     Idempotent — called when the Media tab opens so screenshots dropped in chat
     show up even if the per-message mirror didn't run."""
-    from ..services import project_file_service
+    from app.matcha.services import project_file_service
 
     await _verify_project_access(project_id, current_user)
     added = await project_file_service.backfill_project_chat_files(project_id)
@@ -4115,7 +4115,7 @@ async def list_project_links_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Links shared in the collab chat — http(s) URLs pulled from messages."""
-    from ..services import project_service
+    from app.matcha.services import project_service
 
     await _verify_project_access(project_id, current_user)
     return await project_service.list_project_links(project_id)
@@ -4266,8 +4266,8 @@ async def list_project_tasks_endpoint(
 ):
     """List all kanban tasks for a project. Embeds attachments per task so
     the kanban card can render thumbnails without N+1 follow-up requests."""
-    from ..services import project_task_service as pt_svc
-    from ..services import project_file_service
+    from app.matcha.services import project_task_service as pt_svc
+    from app.matcha.services import project_file_service
     await _verify_project_access(project_id, current_user)
     tasks = await pt_svc.list_project_tasks(project_id, viewer_id=current_user.id)
     if not tasks:
@@ -4500,7 +4500,7 @@ async def create_project_task_endpoint(
 ):
     """Create a kanban task in a project."""
     from datetime import date as _date
-    from ..services import project_task_service as pt_svc
+    from app.matcha.services import project_task_service as pt_svc
 
     project, _role = await _verify_project_access(project_id, current_user)
 
@@ -4562,7 +4562,7 @@ async def create_project_task_endpoint(
     # order; a bad item is skipped rather than failing the whole task create.
     raw_subtasks = body.get("subtasks")
     if isinstance(raw_subtasks, list) and result.get("id"):
-        from ..services import project_subtask_service as st_svc
+        from app.matcha.services import project_subtask_service as st_svc
         task_uuid = UUID(result["id"]) if isinstance(result["id"], str) else result["id"]
         created = 0
         for item in raw_subtasks[:50]:
@@ -4594,7 +4594,7 @@ async def update_project_task_endpoint(
 ):
     """Partial update. Drag-drop updates board_column; checkbox updates status."""
     from datetime import date as _date
-    from ..services import project_task_service as pt_svc
+    from app.matcha.services import project_task_service as pt_svc
 
     project, _role = await _verify_project_access(project_id, current_user)
 
@@ -4667,7 +4667,7 @@ async def reject_project_task_endpoint(
     store the reason, and email the assignee. Requires the task to be in the
     review column and a non-empty note explaining what's incomplete.
     """
-    from ..services import project_task_service as pt_svc
+    from app.matcha.services import project_task_service as pt_svc
 
     project, _role = await _verify_project_access(project_id, current_user)
 
@@ -4699,7 +4699,7 @@ async def approve_project_task_endpoint(
 ):
     """Reviewer approves a task out of review → done, recording a `review_approved`
     sign-off (approver + timestamp + optional note). Requires the task in review."""
-    from ..services import project_task_service as pt_svc
+    from app.matcha.services import project_task_service as pt_svc
 
     project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
@@ -4725,8 +4725,8 @@ async def ai_draft_task_endpoint(
 ):
     """Turn a natural-language request into a structured ticket draft (no DB
     write). The client reviews/edits, then creates via POST .../tasks."""
-    from ..services import project_service as proj_svc
-    from ..services import matcha_work_ai
+    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services import matcha_work_ai
 
     project, _role = await _verify_project_access(project_id, current_user)
 
@@ -4736,7 +4736,7 @@ async def ai_draft_task_endpoint(
 
     # Rate limit: 50 AI drafts per user per rolling 24h (Redis fixed-window from
     # first call). Best-effort — a Redis hiccup never blocks drafting.
-    from ...core.services.redis_cache import get_redis_cache
+    from app.core.services.redis_cache import get_redis_cache
     _redis = get_redis_cache()
     if _redis is not None:
         try:
@@ -4797,7 +4797,7 @@ async def ai_draft_task_endpoint(
     # Repo conventions (CLAUDE.md etc.) from the synced element snapshot — grounds
     # the model in this codebase so subtasks reference real files/migrations/tests.
     # "" when nothing is synced (graceful).
-    from ..services import element_repo_service as repo_svc
+    from app.matcha.services import element_repo_service as repo_svc
     try:
         conventions = await repo_svc.fetch_convention_docs(project_id)
     except Exception:  # noqa: BLE001 — advisory context, never block a draft
@@ -4870,7 +4870,7 @@ async def set_project_pipeline_mode_endpoint(
     mw_projects.project_data.pipeline_mode via a non-destructive merge so the
     board can render sales stages / deal fields. Other project_data keys are
     preserved."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
 
     await _verify_project_access(project_id, current_user)
     enabled = bool(body.get("enabled", False))
@@ -4883,7 +4883,7 @@ async def delete_project_task_endpoint(
     task_id: UUID,
     current_user: CurrentUser = Depends(require_company_member),
 ):
-    from ..services import project_task_service as pt_svc
+    from app.matcha.services import project_task_service as pt_svc
     await _verify_project_access(project_id, current_user)
     if not await pt_svc.delete_project_task(
         project_id, task_id, actor_user_id=current_user.id
@@ -4902,7 +4902,7 @@ async def list_task_subtasks_endpoint(
     task_id: UUID,
     current_user: CurrentUser = Depends(require_company_member),
 ):
-    from ..services import project_subtask_service as st_svc
+    from app.matcha.services import project_subtask_service as st_svc
     await _verify_project_access(project_id, current_user)
     rows = await st_svc.list_subtasks(project_id, task_id)
     if rows is None:
@@ -4917,7 +4917,7 @@ async def create_task_subtask_endpoint(
     body: dict = Body(...),
     current_user: CurrentUser = Depends(require_company_member),
 ):
-    from ..services import project_subtask_service as st_svc
+    from app.matcha.services import project_subtask_service as st_svc
     await _verify_project_access(project_id, current_user)
     assigned_raw = body.get("assigned_to")
     try:
@@ -4943,7 +4943,7 @@ async def update_task_subtask_endpoint(
     body: dict = Body(...),
     current_user: CurrentUser = Depends(require_company_member),
 ):
-    from ..services import project_subtask_service as st_svc
+    from app.matcha.services import project_subtask_service as st_svc
     await _verify_project_access(project_id, current_user)
 
     patch: dict = {}
@@ -4980,7 +4980,7 @@ async def update_task_subtask_endpoint(
     # for this subtask, so the card stops crediting that commit and the same
     # commit won't silently re-auto-check it.
     if reason and patch.get("is_done") is False:
-        from ..services import commit_scan_service as cs_svc
+        from app.matcha.services import commit_scan_service as cs_svc
         await cs_svc.dismiss_accepted_for_subtask(
             project_id, subtask_id, actor_user_id=current_user.id,
         )
@@ -4994,7 +4994,7 @@ async def delete_task_subtask_endpoint(
     subtask_id: UUID,
     current_user: CurrentUser = Depends(require_company_member),
 ):
-    from ..services import project_subtask_service as st_svc
+    from app.matcha.services import project_subtask_service as st_svc
     await _verify_project_access(project_id, current_user)
     if not await st_svc.delete_subtask(
         project_id, task_id, subtask_id,
@@ -5203,7 +5203,7 @@ async def commit_scan_endpoint(
     # Stamp branch onto each commit if the client sent it at the top level.
     for c in commits:
         c.setdefault("branch", branch)
-    from ..services import commit_scan_service as cs_svc
+    from app.matcha.services import commit_scan_service as cs_svc
     suggestions = await cs_svc.scan_commits(project_id, company_id, commits)
     return {"suggestions": suggestions}
 
@@ -5215,7 +5215,7 @@ async def list_commit_suggestions_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     await _verify_project_access(project_id, current_user)
-    from ..services import commit_scan_service as cs_svc
+    from app.matcha.services import commit_scan_service as cs_svc
     return await cs_svc.list_pending_suggestions(project_id, task_id)
 
 
@@ -5228,7 +5228,7 @@ async def list_commit_completions_endpoint(
     """Accepted commit→subtask completions for a task — which commit completed
     each done item, so an in-review reviewer can audit the AI auto-checks."""
     await _verify_project_access(project_id, current_user)
-    from ..services import commit_scan_service as cs_svc
+    from app.matcha.services import commit_scan_service as cs_svc
     return await cs_svc.list_accepted_completions(project_id, task_id)
 
 
@@ -5241,8 +5241,8 @@ async def accept_commit_suggestion_endpoint(
     _project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
         raise HTTPException(status_code=403, detail="You don't have edit access to this project")
-    from ..services import commit_scan_service as cs_svc
-    from ..services import project_subtask_service as st_svc
+    from app.matcha.services import commit_scan_service as cs_svc
+    from app.matcha.services import project_subtask_service as st_svc
     # Atomic claim: resolve_suggestion only flips a *pending* row, so a
     # double-accept (or racing client) no-ops on the second call.
     resolved = await cs_svc.resolve_suggestion(
@@ -5266,7 +5266,7 @@ async def dismiss_commit_suggestion_endpoint(
     _project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
         raise HTTPException(status_code=403, detail="You don't have edit access to this project")
-    from ..services import commit_scan_service as cs_svc
+    from app.matcha.services import commit_scan_service as cs_svc
     resolved = await cs_svc.resolve_suggestion(
         project_id, suggestion_id, status="dismissed", actor_user_id=current_user.id,
     )
@@ -5299,7 +5299,7 @@ async def put_element_repo_snapshot(
         raise HTTPException(status_code=403, detail="You don't have edit access to this project")
     async with get_connection() as conn:
         await _verify_element_in_project(conn, project_id, element_id)
-    from ..services import element_repo_service as repo_svc
+    from app.matcha.services import element_repo_service as repo_svc
     summary = await repo_svc.replace_element_snapshot(project_id, element_id, body.get("files") or [])
     return summary
 
@@ -5311,14 +5311,14 @@ async def get_element_repo_snapshot_stats(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     await _verify_project_access(project_id, current_user)
-    from ..services import element_repo_service as repo_svc
+    from app.matcha.services import element_repo_service as repo_svc
     return await repo_svc.get_snapshot_stats(element_id)
 
 
 def _resolve_github_repo(project: dict, body: dict):
     """The repo/branch a sync or scan should use: the project's connected repo,
     then a body override, then the server default. (branch may be None.)"""
-    from ..services import github_service as gh_svc
+    from app.matcha.services import github_service as gh_svc
     repo = (body or {}).get("repo") or project.get("github_repo") or gh_svc.default_repo()
     ref = (body or {}).get("ref") or project.get("github_branch")
     return repo, ref
@@ -5330,7 +5330,7 @@ async def get_github_connection(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     project, _role = await _verify_project_access(project_id, current_user)
-    from ..services import github_service as gh_svc
+    from app.matcha.services import github_service as gh_svc
     repo = project.get("github_repo")
     return {
         "repo": repo,
@@ -5352,7 +5352,7 @@ async def put_github_connection(
     _project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
         raise HTTPException(status_code=403, detail="You don't have edit access to this project")
-    from ..services import github_service as gh_svc
+    from app.matcha.services import github_service as gh_svc
     repo = ((body or {}).get("repo") or "").strip().strip("/")
     branch = ((body or {}).get("branch") or "").strip() or None
     if not repo:
@@ -5387,7 +5387,7 @@ async def github_sync_endpoint(
     project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
         raise HTTPException(status_code=403, detail="You don't have edit access to this project")
-    from ..services import github_service as gh_svc
+    from app.matcha.services import github_service as gh_svc
     repo, ref = _resolve_github_repo(project, body)
     if not repo:
         raise HTTPException(status_code=400, detail="No GitHub repo connected to this project.")
@@ -5429,8 +5429,8 @@ async def github_scan_commits_endpoint(
     company_id = _project_company_id(project) or await get_client_company_id(current_user)
     if not company_id:
         raise HTTPException(status_code=400, detail="No company context")
-    from ..services import github_service as gh_svc
-    from ..services import commit_scan_service as cs_svc
+    from app.matcha.services import github_service as gh_svc
+    from app.matcha.services import commit_scan_service as cs_svc
     repo, ref = _resolve_github_repo(project, body)
     if not repo:
         raise HTTPException(status_code=400, detail="No GitHub repo connected to this project.")
@@ -5466,7 +5466,7 @@ async def install_github_webhook_endpoint(
     project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
         raise HTTPException(status_code=403, detail="You don't have edit access to this project")
-    from ..services import github_service as gh_svc
+    from app.matcha.services import github_service as gh_svc
     repo, _ref = _resolve_github_repo(project, {})
     if not repo:
         raise HTTPException(status_code=400, detail="No GitHub repo connected to this project.")
@@ -5488,7 +5488,7 @@ async def github_push_webhook(request: Request):
     """GitHub push webhook → scan the pushed commits for every project connected
     to that repo+branch. Public (no JWT); authenticated by HMAC signature.
     URL: /api/matcha-work/public/github/webhook"""
-    from ..services import github_service as gh_svc
+    from app.matcha.services import github_service as gh_svc
     raw = await request.body()
     if not gh_svc.verify_webhook_signature(raw, request.headers.get("X-Hub-Signature-256")):
         raise HTTPException(status_code=401, detail="bad signature")
@@ -5521,7 +5521,7 @@ async def github_push_webhook(request: Request):
     if not rows:
         return {"ok": True, "projects": 0}
 
-    from ..services import commit_scan_service as cs_svc
+    from app.matcha.services import commit_scan_service as cs_svc
     commits = await gh_svc.fetch_commits_by_sha(repo, shas, branch)
     for r in rows:
         if not r["company_id"]:
@@ -5543,7 +5543,7 @@ async def list_ticket_drafts_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     await _verify_project_access(project_id, current_user)
-    from ..services import ticket_draft_service as td_svc
+    from app.matcha.services import ticket_draft_service as td_svc
     return await td_svc.list_drafts(project_id, status)
 
 
@@ -5557,7 +5557,7 @@ async def create_ticket_draft_endpoint(
     company_id = _project_company_id(project) or await get_client_company_id(current_user)
     if not company_id:
         raise HTTPException(status_code=400, detail="No company context")
-    from ..services import ticket_draft_service as td_svc
+    from app.matcha.services import ticket_draft_service as td_svc
     try:
         return await td_svc.create_draft(
             project_id, company_id, current_user.id,
@@ -5576,7 +5576,7 @@ async def get_ticket_draft_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     await _verify_project_access(project_id, current_user)
-    from ..services import ticket_draft_service as td_svc
+    from app.matcha.services import ticket_draft_service as td_svc
     draft = await td_svc.get_draft(project_id, draft_id)
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
@@ -5591,7 +5591,7 @@ async def update_ticket_draft_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     await _verify_project_access(project_id, current_user)
-    from ..services import ticket_draft_service as td_svc
+    from app.matcha.services import ticket_draft_service as td_svc
     draft = await td_svc.update_draft(project_id, draft_id, body)
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
@@ -5605,7 +5605,7 @@ async def delete_ticket_draft_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     await _verify_project_access(project_id, current_user)
-    from ..services import ticket_draft_service as td_svc
+    from app.matcha.services import ticket_draft_service as td_svc
     if not await td_svc.delete_draft(project_id, draft_id):
         raise HTTPException(status_code=404, detail="Draft not found")
     return {"deleted": True}
@@ -5618,7 +5618,7 @@ async def list_ticket_draft_messages_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     await _verify_project_access(project_id, current_user)
-    from ..services import ticket_draft_service as td_svc
+    from app.matcha.services import ticket_draft_service as td_svc
     return await td_svc.list_messages(project_id, draft_id)
 
 
@@ -5634,7 +5634,7 @@ async def post_ticket_draft_message_endpoint(
     content = (body.get("content") or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="content is required")
-    from ..services import ticket_draft_service as td_svc
+    from app.matcha.services import ticket_draft_service as td_svc
     result = await td_svc.chat(
         project_id, draft_id, company_id, user_content=content, actor_user_id=current_user.id,
     )
@@ -5651,7 +5651,7 @@ async def generate_ticket_draft_fields_endpoint(
 ):
     project, _role = await _verify_project_access(project_id, current_user)
     company_id = _project_company_id(project) or await get_client_company_id(current_user)
-    from ..services import ticket_draft_service as td_svc
+    from app.matcha.services import ticket_draft_service as td_svc
     draft = await td_svc.generate_fields(project_id, draft_id, company_id)
     if not draft:
         raise HTTPException(status_code=404, detail="Draft not found")
@@ -5669,7 +5669,7 @@ async def promote_ticket_draft_endpoint(
     if not _can_edit_project(role):
         raise HTTPException(status_code=403, detail="You don't have edit access to this project")
     company_id = _project_company_id(project) or await get_client_company_id(current_user)
-    from ..services import ticket_draft_service as td_svc
+    from app.matcha.services import ticket_draft_service as td_svc
     try:
         task = await td_svc.promote(
             project_id, draft_id, company_id,
@@ -5712,7 +5712,7 @@ async def list_element_files_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Files bucketed under one element's context repo."""
-    from ..services import project_file_service
+    from app.matcha.services import project_file_service
 
     await _verify_project_access(project_id, current_user)
     async with get_connection() as conn:
@@ -5727,7 +5727,7 @@ async def list_element_folders_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Folder tree scoped to one element."""
-    from ..services import project_file_service
+    from app.matcha.services import project_file_service
 
     await _verify_project_access(project_id, current_user)
     async with get_connection() as conn:
@@ -5744,7 +5744,7 @@ async def create_element_folder_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Create a folder inside an element's repo (optionally nested)."""
-    from ..services import project_file_service
+    from app.matcha.services import project_file_service
 
     _project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
@@ -5767,7 +5767,7 @@ async def list_element_notes_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Notes + links pinned to an element."""
-    from ..services import element_notes_service
+    from app.matcha.services import element_notes_service
 
     await _verify_project_access(project_id, current_user)
     async with get_connection() as conn:
@@ -5783,7 +5783,7 @@ async def add_element_note_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Pin a note ('note', free text) or a link ('link', url) to an element."""
-    from ..services import element_notes_service
+    from app.matcha.services import element_notes_service
 
     _project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
@@ -5813,7 +5813,7 @@ async def delete_element_note_endpoint(
     note_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from ..services import element_notes_service
+    from app.matcha.services import element_notes_service
 
     _project, role = await _verify_project_access(project_id, current_user)
     if not _can_edit_project(role):
@@ -5884,7 +5884,7 @@ async def summarize_task_endpoint(
     """1-click Gemini Flash Lite catch-up summary of a ticket — where the work
     stands + what's been done recently. Ephemeral (not persisted); read-only."""
     await _verify_project_access(project_id, current_user)
-    from ..services import task_summary_service
+    from app.matcha.services import task_summary_service
     summary = await task_summary_service.generate_task_summary(project_id, task_id)
     if summary is None:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -5918,8 +5918,8 @@ async def start_task_round_endpoint(
     Returns: {round_event, subtask, note}. The note is None if no body+no
     attachments were supplied.
     """
-    from ..services import project_subtask_service as st_svc
-    from ..services import project_task_service as pt_svc
+    from app.matcha.services import project_subtask_service as st_svc
+    from app.matcha.services import project_task_service as pt_svc
 
     await _verify_project_access(project_id, current_user)
     await _verify_task_belongs_to_project(project_id, task_id)
@@ -6036,7 +6036,7 @@ async def log_task_activity_endpoint(
     and own `task_id == task_id`). Stored in metadata JSONB; surfaced back
     out as a top-level field on history-row responses.
     """
-    from ..services import project_task_service as pt_svc
+    from app.matcha.services import project_task_service as pt_svc
 
     await _verify_project_access(project_id, current_user)
 
@@ -6186,7 +6186,7 @@ async def upload_task_file_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Upload an attachment scoped to a single kanban task."""
-    from ..services import project_file_service
+    from app.matcha.services import project_file_service
 
     project, _role = await _verify_project_access(project_id, current_user)
     await _verify_task_belongs_to_project(project_id, task_id)
@@ -6225,7 +6225,7 @@ async def list_task_files_endpoint(
     task_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from ..services import project_file_service
+    from app.matcha.services import project_file_service
     await _verify_project_access(project_id, current_user)
     await _verify_task_belongs_to_project(project_id, task_id)
     files = await project_file_service.list_task_files(project_id, task_id)
@@ -6239,7 +6239,7 @@ async def delete_task_file_endpoint(
     file_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    from ..services import project_file_service
+    from app.matcha.services import project_file_service
 
     await _verify_project_access(project_id, current_user)
     record = await project_file_service.get_task_file(file_id, project_id, task_id)
@@ -6261,7 +6261,7 @@ async def complete_project_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Mark project as completed. Owner-only."""
-    from ..services import project_task_service as pt_svc
+    from app.matcha.services import project_task_service as pt_svc
     _project, role = await _verify_project_access(project_id, current_user)
     if role != "owner":
         raise HTTPException(status_code=403, detail="Only the owner can mark a project complete")
@@ -6278,7 +6278,7 @@ async def create_research_task(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Create a new research task in a project."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     import uuid as _uuid
 
     await _verify_project_access(project_id, current_user)
@@ -6466,7 +6466,7 @@ async def run_research_task(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Run all pending research inputs sequentially with SSE status streaming."""
-    from ..services.research_browse_service import run_research_for_input
+    from app.matcha.services.research_browse_service import run_research_for_input
     from starlette.responses import StreamingResponse
 
     project, _role = await _verify_project_access(project_id, current_user)
@@ -6564,7 +6564,7 @@ async def follow_up_research_input(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Re-research a URL with additional instructions, building on previous findings."""
-    from ..services.research_browse_service import run_research_for_input
+    from app.matcha.services.research_browse_service import run_research_for_input
     from starlette.responses import StreamingResponse
 
     project, _role = await _verify_project_access(project_id, current_user)
@@ -6668,7 +6668,7 @@ async def retry_research_input(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Retry a failed research input with SSE streaming."""
-    from ..services.research_browse_service import run_research_for_input
+    from app.matcha.services.research_browse_service import run_research_for_input
     from starlette.responses import StreamingResponse
 
     await _verify_project_access(project_id, current_user)
@@ -6792,7 +6792,7 @@ async def edit_diagram_ai(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Use AI to modify a diagram based on a natural language instruction."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
 
     await _verify_project_access(project_id, current_user)
     company_id = await get_client_company_id(current_user)
@@ -6819,7 +6819,7 @@ async def edit_diagram_ai(
     # Call Gemini to modify the SVG
     import google.genai as genai
     import re as _re_vb
-    from ...config import get_settings
+    from app.config import get_settings
     settings = get_settings()
 
     client = genai.Client(api_key=settings.gemini_api_key)
@@ -6927,7 +6927,7 @@ async def edit_diagram_text(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Edit text labels in a diagram by direct string replacement."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
 
     await _verify_project_access(project_id, current_user)
     company_id = await get_client_company_id(current_user)
@@ -6975,7 +6975,7 @@ async def save_diagram(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Save a diagram from the visual editor (Excalidraw SVG export)."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
 
     await _verify_project_access(project_id, current_user)
     company_id = await get_client_company_id(current_user)
@@ -7024,7 +7024,7 @@ async def ensure_project_discussion_channel(
     company OR are an active collaborator. This mirrors the visibility
     rule used by list_projects.
     """
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
 
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
@@ -7062,7 +7062,7 @@ async def list_project_collaborators(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """List collaborators on a project."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.list_collaborators(project_id)
 
@@ -7074,7 +7074,7 @@ async def add_project_collaborator(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Add a user as a collaborator. Only the project owner can invite."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     _project, role = await _verify_project_access(project_id, current_user)
     if role != "owner":
         raise HTTPException(status_code=403, detail="Only the project owner can add collaborators")
@@ -7094,7 +7094,7 @@ async def remove_project_collaborator(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Remove a collaborator from a project. Only the owner can do this."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     try:
         return await proj_svc.remove_collaborator(project_id, user_id, current_user.id)
@@ -7111,7 +7111,7 @@ async def invite_to_project(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Invite a user to a project by email. Creates pending collaborator + inbox notification + email."""
-    from ...core.services.email import get_email_service
+    from app.core.services.email import get_email_service
 
     await _verify_project_access(project_id, current_user)
 
@@ -7205,7 +7205,7 @@ async def invite_to_project(
 
     # Create MW notification for the invitee
     try:
-        from ..services import notification_service as notif_svc
+        from app.matcha.services import notification_service as notif_svc
         company_id = await get_client_company_id(current_user)
         await notif_svc.create_notification(
             user_id=invitee_id,
@@ -7244,8 +7244,8 @@ async def accept_project_invite(
 ):
     """Accept a pending invite — join the project + its chat, and tell the
     creator/inviter you've joined (toast + inbox + bell)."""
-    from ..services import project_service as proj_svc
-    from ..services import notification_service as notif_svc
+    from app.matcha.services import project_service as proj_svc
+    from app.matcha.services import notification_service as notif_svc
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -7352,7 +7352,7 @@ async def search_admin_users_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Search admin users for the collaborator invite picker."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Only admins can search admin users")
     return await proj_svc.search_admin_users(q, current_user.id)
@@ -7369,7 +7369,7 @@ async def list_project_chats_endpoint(
     any project thread shared with them. Access to the project itself is
     verified first.
     """
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     project, _role = await _verify_project_access(project_id, current_user)
     company_id = project.get("company_id")
     if company_id is None:
@@ -7384,7 +7384,7 @@ async def create_project_chat_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Create a new chat within a project."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     project, _role = await _verify_project_access(project_id, current_user)
     company_id = project.get("company_id")
     if company_id is None:
@@ -7399,7 +7399,7 @@ async def populate_posting_from_chat(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Extract structured posting fields from a chat message using AI."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
 
     project, _role = await _verify_project_access(project_id, current_user)
 
@@ -7448,7 +7448,7 @@ async def update_project_posting(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Update the job posting data for a recruiting project."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.update_project_data(project_id, {"posting": body})
 
@@ -7460,7 +7460,7 @@ async def toggle_project_shortlist(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Toggle a candidate on/off the shortlist."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.toggle_shortlist(project_id, candidate_id)
 
@@ -7472,7 +7472,7 @@ async def toggle_project_dismiss(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Toggle a candidate on/off the dismissed list."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.toggle_dismiss(project_id, candidate_id)
 
@@ -7489,7 +7489,7 @@ async def reject_project_candidate(
     When `send_email=false` this is equivalent to dismissing the candidate
     with a `status='rejected'` marker — no email goes out.
     """
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     from app.core.services.email import EmailService
 
     project, _role = await _verify_project_access(project_id, current_user)
@@ -7569,7 +7569,7 @@ async def upload_project_resumes(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Upload resumes to a recruiting project — extract candidates into project_data."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
 
     project, _role = await _verify_project_access(project_id, current_user)
 
@@ -7757,7 +7757,7 @@ async def analyze_project_candidates(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Rank candidates against the job posting using AI."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
 
     project, _role = await _verify_project_access(project_id, current_user)
 
@@ -7874,7 +7874,7 @@ async def send_project_interviews(
 ):
     """Create screening interviews for selected project candidates and send invite emails."""
     import secrets as _secrets
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     from app.core.services.email import EmailService
 
     project, _role = await _verify_project_access(project_id, current_user)
@@ -7980,7 +7980,7 @@ async def sync_project_interviews(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Sync interview statuses back into project candidates."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
 
     project, _role = await _verify_project_access(project_id, current_user)
 
@@ -8147,7 +8147,7 @@ async def _render_project_pdf(project: dict) -> bytes:
 
     try:
         from weasyprint import HTML
-        from ...core.services.pdf import safe_url_fetcher
+        from app.core.services.pdf import safe_url_fetcher
     except ImportError as ie:
         # Surface the real installation hint instead of an opaque 500 so
         # the desktop alert tells the operator what to do.
@@ -8178,7 +8178,7 @@ async def export_project_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Export project as PDF, DOCX, or Markdown."""
-    from ..services import project_service as proj_svc
+    from app.matcha.services import project_service as proj_svc
     project, _role = await _verify_project_access(project_id, current_user)
     company_id = await get_client_company_id(current_user)
 
@@ -8281,7 +8281,7 @@ async def export_project_endpoint(
 
         try:
             from weasyprint import HTML
-            from ...core.services.pdf import safe_url_fetcher
+            from app.core.services.pdf import safe_url_fetcher
         except ImportError:
             raise HTTPException(status_code=500, detail="PDF generation not available")
 
@@ -8635,7 +8635,7 @@ async def _html_to_pdf_bytes(full_html: str) -> bytes:
     """
     try:
         from weasyprint import HTML
-        from ...core.services.pdf import safe_url_fetcher
+        from app.core.services.pdf import safe_url_fetcher
     except ImportError:
         raise HTTPException(status_code=501, detail="PDF generation not available — install weasyprint")
     full_html = await get_storage().inline_storage_images(full_html)
@@ -9062,7 +9062,7 @@ async def agent_email_status(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Check if the current user has Gmail connected."""
-    from ..services.gmail_service import GmailService
+    from app.matcha.services.gmail_service import GmailService
     gmail = GmailService(current_user.id)
     return await gmail.get_status()
 
@@ -9072,7 +9072,7 @@ async def agent_email_connect(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Start Google OAuth flow. Returns an auth_url to open in a popup."""
-    from ..services.gmail_service import get_oauth_credentials, GMAIL_SCOPES
+    from app.matcha.services.gmail_service import get_oauth_credentials, GMAIL_SCOPES
     import urllib.parse
 
     creds = get_oauth_credentials()
@@ -9083,7 +9083,7 @@ async def agent_email_connect(
     redirect_uri = f"{settings.app_base_url}/api/matcha-work/agent/email/callback"
 
     # Encode user ID in state so callback knows who to store the token for
-    from ...core.services.secret_crypto import encrypt_secret
+    from app.core.services.secret_crypto import encrypt_secret
     state = encrypt_secret(str(current_user.id))
 
     params = {
@@ -9105,8 +9105,8 @@ async def agent_email_callback(
     state: str = Query(...),
 ):
     """OAuth callback — exchange code for tokens, store encrypted in DB, close popup."""
-    from ..services.gmail_service import GmailService, get_oauth_credentials, GMAIL_SCOPES
-    from ...core.services.secret_crypto import decrypt_secret as _decrypt
+    from app.matcha.services.gmail_service import GmailService, get_oauth_credentials, GMAIL_SCOPES
+    from app.core.services.secret_crypto import decrypt_secret as _decrypt
 
     # Recover user ID from state
     try:
@@ -9176,7 +9176,7 @@ async def agent_email_fetch(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Fetch unread emails for the current user."""
-    from ..services.gmail_service import GmailService
+    from app.matcha.services.gmail_service import GmailService
     gmail = GmailService(current_user.id)
     await gmail.load_token()
     if not gmail.is_configured:
@@ -9191,8 +9191,8 @@ async def agent_email_draft(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Draft a reply to an email using AI."""
-    from ..services import entitlements_service
-    from ..services.gmail_service import GmailService
+    from app.matcha.services import entitlements_service
+    from app.matcha.services.gmail_service import GmailService
 
     # Email fetch/send stay free (non-AI); AI drafting is Lite+.
     await entitlements_service.require_plan(current_user.id, entitlements_service.PLAN_LITE, "email_ai")
@@ -9241,7 +9241,7 @@ async def agent_email_send(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Send an email via Gmail."""
-    from ..services.gmail_service import GmailService
+    from app.matcha.services.gmail_service import GmailService
     gmail = GmailService(current_user.id)
     await gmail.load_token()
     if not gmail.is_configured:
@@ -9392,7 +9392,7 @@ async def send_message(
 
     # Inject project file attachments metadata
     if thread.get("project_id"):
-        from ..services import project_file_service
+        from app.matcha.services import project_file_service
         pfiles = await project_file_service.list_project_files(thread["project_id"])
         if pfiles:
             listing = "\n".join(f"- {f['filename']} ({f['content_type']}, {f['file_size']:,} bytes)" for f in pfiles)
@@ -9422,7 +9422,7 @@ async def send_message(
     # (markets today, news, weather, scores, etc.) — fetches current facts via
     # Gemini Google Search grounding and injects them into the context.
     if needs_live_web_context(body.content):
-        from ...config import get_settings as _get_settings
+        from app.config import get_settings as _get_settings
         live_ctx = await fetch_live_web_context(body.content, _get_settings())
         if live_ctx:
             ctx += live_ctx
@@ -9446,10 +9446,10 @@ async def send_message(
     if thread.get("payer_mode"):
         try:
             import os as _os
-            from ...core.services.embedding_service import EmbeddingService
-            from ...core.services.payer_policy_rag import PayerPolicyRAGService
-            from ...config import get_settings as _get_settings
-            from ..services.matcha_work_ai import PAYER_MODE_SYSTEM_PROMPT
+            from app.core.services.embedding_service import EmbeddingService
+            from app.core.services.payer_policy_rag import PayerPolicyRAGService
+            from app.config import get_settings as _get_settings
+            from app.matcha.services.matcha_work_ai import PAYER_MODE_SYSTEM_PROMPT
             from datetime import date as _date
 
             user_msg = body.content or ""
@@ -9681,7 +9681,7 @@ async def send_message_stream(
     # free-taste exhaustion apart from a generic error and raise the paywall.
     quota = await doc_svc.check_token_quota(current_user.id, company_id)
     if not quota["allowed"]:
-        from ..services import entitlements_service
+        from app.matcha.services import entitlements_service
 
         plan = await entitlements_service.resolve_plan_for_user(current_user.id)
         raise HTTPException(
@@ -9771,7 +9771,7 @@ async def send_message_stream(
 
     # Pre-fetch any image attachment bytes concurrently off the event loop so
     # the prompt builder (which runs in a thread pool) doesn't block on I/O.
-    from ..services.matcha_work_ai import fetch_image_parts_for_messages
+    from app.matcha.services.matcha_work_ai import fetch_image_parts_for_messages
     await fetch_image_parts_for_messages(msg_dicts)
 
     ai_provider = get_ai_provider()
@@ -9779,7 +9779,7 @@ async def send_message_stream(
 
     # Inject project file attachments metadata
     if thread.get("project_id"):
-        from ..services import project_file_service
+        from app.matcha.services import project_file_service
         pfiles = await project_file_service.list_project_files(thread["project_id"])
         if pfiles:
             listing = "\n".join(f"- {f['filename']} ({f['content_type']}, {f['file_size']:,} bytes)" for f in pfiles)
@@ -9872,10 +9872,10 @@ async def send_message_stream(
                 yield _sse_data({"type": "status", "message": "Searching payer coverage data..."})
                 try:
                     import os as _os2
-                    from ...core.services.embedding_service import EmbeddingService as _ES2
-                    from ...core.services.payer_policy_rag import PayerPolicyRAGService as _PRAG2
-                    from ...config import get_settings as _gs2
-                    from ..services.matcha_work_ai import PAYER_MODE_SYSTEM_PROMPT as _PMSP
+                    from app.core.services.embedding_service import EmbeddingService as _ES2
+                    from app.core.services.payer_policy_rag import PayerPolicyRAGService as _PRAG2
+                    from app.config import get_settings as _gs2
+                    from app.matcha.services.matcha_work_ai import PAYER_MODE_SYSTEM_PROMPT as _PMSP
                     from datetime import date as _d2
 
                     _ak2 = _os2.getenv("GEMINI_API_KEY") or _gs2().gemini_api_key
@@ -10115,7 +10115,7 @@ async def get_entitlements(
     mw_subscriptions + beta flags (see entitlements_service). Replaces the
     client's separate isPlusActive / beta-flag reads.
     """
-    from ..services import entitlements_service
+    from app.matcha.services import entitlements_service
 
     response.headers["Cache-Control"] = "private, max-age=60"
     company_id = await get_client_company_id(current_user)
@@ -10375,7 +10375,7 @@ async def archive_thread(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Archive (soft-delete) a thread."""
-    from ...database import get_connection
+    from app.database import get_connection
 
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -10402,7 +10402,7 @@ async def unarchive_thread(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Restore an archived thread to active status."""
-    from ...database import get_connection
+    from app.database import get_connection
 
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -10604,7 +10604,7 @@ async def update_thread_title(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Update thread title."""
-    from ...database import get_connection
+    from app.database import get_connection
 
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -11038,7 +11038,7 @@ async def start_tutor_voice_session(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Start a Gemini Live language tutor voice session linked to a matcha-work thread."""
-    from ...core.services.auth import create_interview_ws_token
+    from app.core.services.auth import create_interview_ws_token
 
     language = body.get("language", "en")
     if language not in ("en", "es-mx", "fr"):
@@ -11149,7 +11149,7 @@ async def get_tutor_voice_status(
                 # Another request is already running analysis
                 return {"status": "analyzing", "tutor_analysis": None}
             try:
-                from ..services.conversation_analyzer import ConversationAnalyzer
+                from app.matcha.services.conversation_analyzer import ConversationAnalyzer
                 settings = get_settings()
                 analyzer = ConversationAnalyzer(
                     api_key=settings.gemini_api_key,
@@ -11463,7 +11463,7 @@ async def add_thread_collaborator(
 
         # Create MW notification
         try:
-            from ..services import notification_service as notif_svc
+            from app.matcha.services import notification_service as notif_svc
             inviter_client = await conn.fetchrow("SELECT name FROM clients WHERE user_id = $1", current_user.id)
             inviter_name = (inviter_client["name"] if inviter_client else None) or "Someone"
             await notif_svc.create_notification(
