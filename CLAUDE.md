@@ -424,7 +424,7 @@ Quick lookup for frequently-touched code. Saves grepping the same things repeate
 
 ## Claude Code Setup
 
-This repo is configured for Claude Code with subtree docs, hooks, and project slash commands. The setup is captured in `CLAUDE_CODE_PLAN.md` at the repo root.
+This repo is configured for Claude Code with subtree docs, hooks, and project slash commands. The setup is captured in `docs/plans/CLAUDE_CODE_PLAN.md`.
 
 ### Subtree CLAUDE.md files (auto-load by directory)
 

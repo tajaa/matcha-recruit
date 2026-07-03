@@ -67,7 +67,7 @@ Use the `ir_incidents/` package (see `ir_incidents/CLAUDE.md`) as the template. 
 - Owns 4+ unrelated concerns AND
 - Edits regularly require reading unrelated sections
 
-Current strong candidates (per `CLAUDE_CODE_PLAN.md`):
+Current strong candidates (per `docs/plans/CLAUDE_CODE_PLAN.md`):
 - `er_copilot.py` (4,111 lines) — CRUD + AI analysis + interviews + risk + reports
 
 Completed splits: `ir_incidents/` (2026-05-16), `employees/` (2026-05-16).
