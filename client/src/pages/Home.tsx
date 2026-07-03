@@ -270,28 +270,37 @@ function Hero() {
     <section className="relative w-full min-h-[100svh] flex flex-col">
       {/* Masthead row */}
       <div className="max-w-[1600px] mx-auto w-full px-6 sm:px-10 pt-[76px] sm:pt-[84px]">
-        <div
-          className="flex items-center justify-between border-b pb-3 home-fade"
-          style={{ borderColor: LINE_D, animationDelay: "0.05s" }}
-        >
-          <span
-            className="text-[11px] tracking-[0.3em] font-mono uppercase"
-            style={{ color: ASH }}
-          >
-            MANAGING YOUR RISK
-          </span>
-          <span
-            className="hidden sm:inline text-[11px] tracking-[0.3em] font-mono uppercase"
-            style={{ color: ASH }}
-          >
-            Software · Practitioners
-          </span>
-          <span
-            className="text-[11px] tracking-[0.3em] font-mono uppercase"
-            style={{ color: ASH }}
-          >
-            Vol. 01
-          </span>
+        <div className="home-fade" style={{ animationDelay: "0.05s" }}>
+          <div className="grid grid-cols-2 sm:grid-cols-3 items-center pb-3">
+            <span
+              className="flex items-center gap-2.5 text-[10.5px] tracking-[0.28em] font-mono uppercase"
+              style={{ color: ASH }}
+            >
+              <span
+                className="w-1 h-1 rounded-full shrink-0"
+                style={{ backgroundColor: "#A3C57D" }}
+              />
+              Managing your risk
+            </span>
+            <span
+              className="hidden sm:block justify-self-center text-[10.5px] tracking-[0.28em] font-mono uppercase"
+              style={{ color: ASH }}
+            >
+              Software · Practitioners
+            </span>
+            <span
+              className="justify-self-end text-[10.5px] tracking-[0.28em] font-mono uppercase tabular-nums"
+              style={{ color: ASH }}
+            >
+              Vol. 01
+            </span>
+          </div>
+          {/* magazine folio — double hairline under the masthead row */}
+          <div style={{ height: 1, backgroundColor: LINE_D }} />
+          <div
+            className="mt-[3px]"
+            style={{ height: 1, backgroundColor: LINE_D, opacity: 0.45 }}
+          />
         </div>
       </div>
 
@@ -307,8 +316,8 @@ function Hero() {
         <div>
           <div>
             <h1
-              className="home-rise tracking-[-0.02em] text-[clamp(1.9rem,6.5vw,6rem)] xl:text-[clamp(1.9rem,3vw,3.8rem)]"
-              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 0.98 }}
+              className="home-rise tracking-[-0.02em] text-[clamp(2.2rem,7vw,6.5rem)] xl:text-[clamp(2.4rem,4.7vw,4.7rem)]"
+              style={{ fontFamily: DISPLAY, fontWeight: 300, lineHeight: 1.02 }}
             >
               <span style={{ animationDelay: "0.16s" }}>We run the whole</span>{" "}
               <span
@@ -333,13 +342,15 @@ function Hero() {
               <span style={{ animationDelay: "0.62s" }}>&nbsp;function.</span>
             </h1>
 
+            {/* Deck row — editorial band under the headline: hairline rule,
+                tagline left, the starting-line cue right as a circled arrow. */}
             <div
-              className="mt-9 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-7 home-fade"
-              style={{ animationDelay: "0.66s" }}
+              className="mt-10 pt-7 border-t flex flex-col lg:flex-row lg:items-end lg:justify-between gap-8 home-fade"
+              style={{ borderColor: LINE_D, animationDelay: "0.66s" }}
             >
               <p
-                className="max-w-2xl text-lg sm:text-xl"
-                style={{ color: BONE, lineHeight: 1.45 }}
+                className="max-w-3xl text-xl sm:text-2xl"
+                style={{ color: BONE, lineHeight: 1.5 }}
               >
                 <span style={{ color: "#FFFFFF" }}>
                   Managing your risk before your risk manages you.
@@ -348,16 +359,24 @@ function Hero() {
                   Workplace safety, compliance, and risk analysis.
                 </span>
               </p>
-              <div className="flex items-center gap-5 shrink-0">
-                <a
-                  href="#index"
-                  className="inline-flex items-center gap-2 text-[15px] transition-opacity hover:opacity-60"
+              <a
+                href="#index"
+                className="group inline-flex items-center gap-3.5 shrink-0 pb-1"
+              >
+                <span
+                  className="text-[11px] font-mono uppercase tracking-[0.22em] transition-colors duration-200"
                   style={{ color: BONE }}
                 >
                   Find your starting line
-                  <span aria-hidden>↓</span>
-                </a>
-              </div>
+                </span>
+                <span
+                  aria-hidden
+                  className="flex items-center justify-center w-9 h-9 rounded-full border transition-colors duration-200 group-hover:bg-[#A3C57D] group-hover:border-[#A3C57D] group-hover:text-[#0E0E0C]"
+                  style={{ borderColor: LINE_D, color: ASH }}
+                >
+                  ↓
+                </span>
+              </a>
             </div>
           </div>
 
@@ -633,6 +652,10 @@ function PlatformInstrument() {
 
   return (
     <InstrumentFrame label="Composite Risk Index" accent={MATCHA}>
+      {/* Two-column: left = the index + its loss curve + the AI layer,
+          right = the per-domain breakdown, so the card fills its width. */}
+      <div className="grid grid-cols-2 items-stretch">
+      <div className="flex flex-col justify-between">
       <div className="px-5 pt-4 flex items-end justify-between">
         <span
           className="tabular-nums leading-none"
@@ -748,7 +771,7 @@ function PlatformInstrument() {
           <span>PML</span>
         </div>
       </div>
-      <div className="px-5 pt-3 pb-1">
+      <div className="px-5 pt-3 pb-4">
         <div
           className="rounded-lg px-3.5 py-2.5 flex items-start gap-2.5"
           style={{
@@ -789,10 +812,13 @@ function PlatformInstrument() {
           </div>
         </div>
       </div>
+      </div>
+      {/* Right column — the sub-scores + every domain on one brain. */}
       <div
-        className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-3 px-5 pb-4 pt-3 border-t"
+        className="flex flex-col justify-between border-l"
         style={{ borderColor: LINE_D }}
       >
+      <div className="grid grid-cols-2 gap-x-3 gap-y-3 px-5 pb-4 pt-4">
         {subMetrics.map((m) => (
           <div key={m.label}>
             <div className="flex items-baseline justify-between mb-1.5">
@@ -827,20 +853,6 @@ function PlatformInstrument() {
       {/* The breadth — every domain on one brain, not a single risk score.
           This is the platform's "much more than a number" story. */}
       <div className="px-5 pt-3 pb-4 border-t" style={{ borderColor: LINE_D }}>
-        <div className="flex items-center justify-between mb-2.5">
-          <span
-            className="text-[8px] font-mono uppercase tracking-[0.16em]"
-            style={{ color: ASH }}
-          >
-            One brain, every domain
-          </span>
-          <span
-            className="text-[8px] font-mono uppercase tracking-[0.16em]"
-            style={{ color: ASH }}
-          >
-            Unified
-          </span>
-        </div>
         <div
           className="grid grid-cols-3 rounded-lg overflow-hidden border"
           style={{
@@ -878,6 +890,25 @@ function PlatformInstrument() {
             );
           })}
         </div>
+      </div>
+      </div>
+      </div>
+      <div
+        className="flex items-center justify-between px-5 pb-4 pt-3 border-t"
+        style={{ borderColor: LINE_D }}
+      >
+        <span
+          className="text-[9px] font-mono uppercase tracking-[0.16em]"
+          style={{ color: ASH }}
+        >
+          One brain, every domain
+        </span>
+        <span
+          className="text-[9px] font-mono uppercase tracking-[0.16em] shrink-0 ml-2"
+          style={{ color: ASH }}
+        >
+          Unified
+        </span>
       </div>
     </InstrumentFrame>
   );
@@ -1420,6 +1451,10 @@ function OshaLogInstrument() {
   const reduce = useReducedMotion();
   return (
     <InstrumentFrame label="OSHA 300 Log" accent="#F2C14E">
+      {/* Two-column: left = headline + 300A roll-up + exports, right = the
+          Form 300 log itself. */}
+      <div className="grid grid-cols-2 items-stretch">
+      <div className="flex flex-col justify-between">
       {/* Recordables headline — the payoff of flipping "OSHA recordable" on an
           incident: it lands here, per establishment, per year. */}
       <div className="px-5 pt-4 flex items-end justify-between">
@@ -1456,7 +1491,7 @@ function OshaLogInstrument() {
       </div>
 
       {/* 300A summary tiles — the annual roll-up, auto-computed from the log. */}
-      <div className="px-5 pt-4 grid grid-cols-4 gap-2">
+      <div className="px-5 pt-4 grid grid-cols-2 gap-2">
         {OSHA_300A_TILES.map((t) => (
           <div
             key={t.label}
@@ -1488,9 +1523,26 @@ function OshaLogInstrument() {
         ))}
       </div>
 
+      {/* One-tap exports — the shipped file set (300 CSV / 300A CSV / 300A PDF
+          / ITA), each behind a reviewer attestation. */}
+      <div className="px-5 pt-4 pb-4 flex flex-wrap gap-1.5">
+        {OSHA_EXPORTS.map((e) => (
+          <span
+            key={e}
+            className="inline-flex items-center gap-1.5 text-[8px] font-mono uppercase tracking-wider px-2 py-1 rounded"
+            style={{ border: `1px solid ${LINE_D}`, color: ASH }}
+          >
+            <FileText className="w-2.5 h-2.5" style={{ color: "#F2C14E" }} />
+            {e}
+          </span>
+        ))}
+      </div>
+      </div>
+      {/* Right column — the Form 300 log itself. */}
+      <div className="flex flex-col border-l" style={{ borderColor: LINE_D }}>
       {/* Form 300 rows — real columns: Case # / Employee / Classification /
           Days. The privacy row prints the mask, never the name. */}
-      <div className="px-5 pt-4">
+      <div className="px-5 pt-4 pb-4">
         <div className="flex items-center justify-between mb-2">
           <span
             className="text-[8px] font-mono uppercase tracking-[0.16em]"
@@ -1567,23 +1619,11 @@ function OshaLogInstrument() {
         ))}
       </div>
 
-      {/* One-tap exports — the shipped file set (300 CSV / 300A CSV / 300A PDF
-          / ITA), each behind a reviewer attestation. */}
-      <div className="px-5 pt-4 pb-1 flex flex-wrap gap-1.5">
-        {OSHA_EXPORTS.map((e) => (
-          <span
-            key={e}
-            className="inline-flex items-center gap-1.5 text-[8px] font-mono uppercase tracking-wider px-2 py-1 rounded"
-            style={{ border: `1px solid ${LINE_D}`, color: ASH }}
-          >
-            <FileText className="w-2.5 h-2.5" style={{ color: "#F2C14E" }} />
-            {e}
-          </span>
-        ))}
+      </div>
       </div>
 
       <div
-        className="flex items-center justify-between px-5 pb-4 pt-3 mt-3 border-t"
+        className="flex items-center justify-between px-5 pb-4 pt-3 border-t"
         style={{ borderColor: LINE_D }}
       >
         <span
@@ -1737,6 +1777,10 @@ function ComplianceInstrument() {
 
   return (
     <InstrumentFrame label="Compliance Monitor" accent="#E2725B">
+      {/* Two-column: left = score + jurisdictions + the AI copilot, right =
+          the live findings cascade. Coverage grid spans full width below. */}
+      <div className="grid grid-cols-2 items-stretch">
+      <div className="flex flex-col justify-between">
       <div className="px-5 pt-4 flex items-end justify-between">
         <span
           className="tabular-nums leading-none"
@@ -1784,7 +1828,7 @@ function ComplianceInstrument() {
           </span>
         ))}
       </div>
-      <div className="px-5 pt-4 pb-1">
+      <div className="px-5 pt-4 pb-4">
         <div
           className="rounded-lg px-3.5 py-2.5 flex items-start gap-2.5"
           style={{
@@ -1825,10 +1869,10 @@ function ComplianceInstrument() {
           </div>
         </div>
       </div>
-      <div
-        className="px-5 pb-1 pt-4 border-t mt-4"
-        style={{ borderColor: LINE_D }}
-      >
+      </div>
+      {/* Right column — the flag → fixing → fixed cascade. */}
+      <div className="flex flex-col border-l" style={{ borderColor: LINE_D }}>
+      <div className="px-5 pb-3 pt-3">
         {COMPLIANCE_FINDINGS.map((f, i) => {
           const status = findingStatuses[i];
           const Icon = FINDING_ICON[status];
@@ -1860,10 +1904,13 @@ function ComplianceInstrument() {
           );
         })}
       </div>
+      </div>
+      </div>
       {/* Breadth — coverage across every compliance area, not just the open
-          findings. Mirrors Platform's domain grid. */}
+          findings. Mirrors Platform's domain grid. Spans full width below
+          the two columns. */}
       <div
-        className="px-5 pt-4 pb-4 border-t mt-4"
+        className="px-5 pt-4 pb-4 border-t"
         style={{ borderColor: LINE_D }}
       >
         <div className="flex items-center justify-between mb-2.5">

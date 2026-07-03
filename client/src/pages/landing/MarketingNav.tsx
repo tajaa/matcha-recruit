@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Menu, X, ChevronDown } from "lucide-react";
 
 interface Props {
@@ -19,7 +19,7 @@ const PRODUCT_LINKS = [
 function NewBadge() {
   return (
     <span
-      className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-1 rounded-sm text-[7px] font-semibold uppercase tracking-wider leading-[1.3] whitespace-nowrap animate-pulse"
+      className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-[5px] rounded-[2px] text-[7px] font-semibold uppercase tracking-[0.12em] leading-[1.4] whitespace-nowrap"
       style={{ backgroundColor: "#A3C57D", color: "#0F0F0F" }}
     >
       New
@@ -40,6 +40,7 @@ const PANEL_BG = "#161513";
 export default function MarketingNav({ onDemoClick }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [exploreOpen, setExploreOpen] = useState(false);
+  const { pathname } = useLocation();
 
   const closeAll = () => {
     setMenuOpen(false);
@@ -52,18 +53,34 @@ export default function MarketingNav({ onDemoClick }: Props) {
         className="fixed left-0 right-0 z-50 transition-colors duration-300"
         style={{
           top: 0,
-          backgroundColor: "#0F0F0F",
-          borderBottom: "1px solid rgba(245, 242, 237, 0.12)",
+          backgroundColor: "rgba(15, 15, 15, 0.88)",
+          backdropFilter: "blur(14px)",
+          WebkitBackdropFilter: "blur(14px)",
+          borderBottom: "1px solid rgba(245, 242, 237, 0.08)",
         }}
       >
         <div className="max-w-[1440px] mx-auto flex items-center justify-between px-6 sm:px-10 h-16">
-          <Link to="/" onClick={closeAll} className="flex items-center gap-2">
+          <Link
+            to="/"
+            onClick={closeAll}
+            className="group flex items-center gap-2.5"
+          >
+            {/* Leaf mark — pure CSS: one corner squared off turns the circle
+                into a matcha leaf. Green lives here; the wordmark stays bone. */}
             <span
-              className="text-2xl tracking-tight"
+              aria-hidden
+              className="block w-[15px] h-[15px] shrink-0 transition-transform duration-500 ease-out group-hover:rotate-[135deg]"
+              style={{
+                background: "linear-gradient(135deg, #BCD897 0%, #8FB763 100%)",
+                borderRadius: "50% 2px 50% 50%",
+              }}
+            />
+            <span
+              className="text-[18px] leading-none tracking-[0.18em]"
               style={{
                 fontFamily: "var(--font-display)",
                 fontWeight: 500,
-                color: "#A3C57D",
+                color: "#F5F2ED",
               }}
             >
               MATCHA
@@ -71,17 +88,33 @@ export default function MarketingNav({ onDemoClick }: Props) {
           </Link>
 
           <div className="hidden md:flex items-center gap-8">
-            {PRODUCT_LINKS.map((link) => (
-              <Link
-                key={link.to}
-                to={link.to}
-                className="relative text-sm transition-opacity hover:opacity-60"
-                style={{ color: TEXT_COLOR }}
-              >
-                {link.label}
-                {link.isNew && <NewBadge />}
-              </Link>
-            ))}
+            {PRODUCT_LINKS.map((link) => {
+              const active = pathname === link.to;
+              return (
+                <Link
+                  key={link.to}
+                  to={link.to}
+                  className={`group relative text-[13.5px] transition-colors duration-200 ${
+                    active
+                      ? "text-[#F5F2ED]"
+                      : "text-[#F5F2ED]/70 hover:text-[#F5F2ED]"
+                  }`}
+                >
+                  {link.label}
+                  {link.isNew && <NewBadge />}
+                  {/* hairline underline — grows in on hover, pinned on the
+                      active route */}
+                  <span
+                    className={`pointer-events-none absolute left-0 -bottom-1.5 h-px w-full origin-left transition-transform duration-300 ${
+                      active
+                        ? "scale-x-100"
+                        : "scale-x-0 group-hover:scale-x-100"
+                    }`}
+                    style={{ backgroundColor: "#A3C57D" }}
+                  />
+                </Link>
+              );
+            })}
 
             {/* Explore sub-nav — Blog / Resources / News split out from offerings */}
             <div
@@ -92,8 +125,7 @@ export default function MarketingNav({ onDemoClick }: Props) {
               <button
                 type="button"
                 onClick={() => setExploreOpen((v) => !v)}
-                className="inline-flex items-center gap-1 text-sm transition-opacity hover:opacity-60"
-                style={{ color: TEXT_COLOR }}
+                className="inline-flex items-center gap-1 text-[13.5px] transition-colors duration-200 text-[#F5F2ED]/70 hover:text-[#F5F2ED]"
                 aria-expanded={exploreOpen}
                 aria-haspopup="true"
               >
@@ -137,18 +169,13 @@ export default function MarketingNav({ onDemoClick }: Props) {
           <div className="flex items-center gap-4">
             <Link
               to="/login"
-              className="hidden md:inline text-sm transition-opacity hover:opacity-60"
-              style={{ color: TEXT_COLOR }}
+              className="hidden md:inline text-[13.5px] transition-colors duration-200 text-[#F5F2ED]/70 hover:text-[#F5F2ED]"
             >
               Login
             </Link>
             <button
               onClick={onDemoClick}
-              className="hidden sm:inline-flex items-center text-sm font-medium transition-opacity hover:opacity-70 cursor-pointer"
-              style={{
-                backgroundColor: "transparent",
-                color: "#A3C57D",
-              }}
+              className="hidden sm:inline-flex items-center h-9 px-5 rounded-full text-[13px] font-medium cursor-pointer transition-colors duration-200 text-[#A3C57D] border border-[#A3C57D]/40 hover:bg-[#A3C57D] hover:text-[#0F0F0F] hover:border-[#A3C57D]"
             >
               Request Demo
             </button>
