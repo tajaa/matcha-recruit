@@ -22,6 +22,10 @@ from .projects import router as _projects_router, public_router as _projects_pub
 router.include_router(_projects_router)
 public_router.include_router(_projects_public)
 
+from .sections import router as _sections_router
+
+router.include_router(_sections_router)
+
 from . import _legacy
 
 router.include_router(_legacy.router)
