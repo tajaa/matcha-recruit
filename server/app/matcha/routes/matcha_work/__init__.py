@@ -13,6 +13,10 @@ from .pdf_export import router as _pdf_export_router
 
 router.include_router(_pdf_export_router)
 
+from .thread_uploads import router as _thread_uploads_router
+
+router.include_router(_thread_uploads_router)
+
 from . import _legacy
 
 router.include_router(_legacy.router)
