@@ -713,11 +713,14 @@ async def _collect_source_files(conn, cited: list[str]) -> list[tuple[str, str]]
     return files
 
 
-def _build_zip(pdf: bytes, fetched: list[tuple[str, bytes]], skipped: list[str], matter: dict) -> bytes:
+def _build_zip(pdf: bytes, fetched: list[tuple[str, bytes]], skipped: list[str], matter: dict,
+               generated: list[tuple[str, bytes]] | None = None) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("defense-memo.pdf", pdf)
         for arc, data in fetched:
+            z.writestr(f"source-documents/{arc}", data)
+        for arc, data in generated or []:
             z.writestr(f"source-documents/{arc}", data)
         included = [f"  source-documents/{a}" for a, _ in fetched] or ["  (none)"]
         manifest = [
@@ -727,6 +730,12 @@ def _build_zip(pdf: bytes, fetched: list[tuple[str, bytes]], skipped: list[str],
             "INCLUDED SOURCE DOCUMENTS:",
             *included,
         ]
+        if generated:
+            manifest += [
+                "",
+                "GENERATED CASE-FILE SUMMARIES (rendered from system records, not uploaded documents):",
+                *[f"  source-documents/{a}" for a, _ in generated],
+            ]
         if skipped:
             manifest += ["", "COULD NOT BE INCLUDED (fetch failed / missing):", *[f"  {s}" for s in skipped]]
         z.writestr("manifest.txt", "\n".join(manifest))
@@ -886,6 +895,35 @@ _APPENDIX_SECTIONS = {
     "accommodation": _accommodation_section,
 }
 
+# ZIP folder per record kind — must match the arc-paths _collect_source_files
+# uses for uploads, so a record's generated case file and its uploaded
+# documents land in the same folder.
+_ZIP_DIRS = {"incident": "incidents", "er_case": "er-cases", "discipline": "discipline"}
+
+
+def _case_file_html(kind: str, cid: str, detail: dict, matter: dict,
+                    company_name: str | None = None) -> str:
+    """Standalone one-record case-file PDF (for the ZIP). Same deterministic
+    section markup as the memo appendix, without .appendix-section (its
+    page-break-before would emit a blank first page)."""
+    generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    section = _APPENDIX_SECTIONS[kind](cid, detail)
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+      <style>{_PDF_CSS}{_MEMO_CSS_EXTRA}</style></head><body>
+      <div class="letterhead">
+        <div>
+          <h1>Legal Pilot — Case file</h1>
+          <p class="sub">{_esc(matter.get('title'))} · {_esc(matter.get('matter_type') or 'matter')}</p>
+        </div>
+        <div class="meta">
+          {f"<div class='company'>{_esc(company_name)}</div>" if company_name else ""}
+          <div>Generated {generated}</div>
+        </div>
+      </div>
+      {section}
+      <div class="foot">{_esc(DISCLAIMER)}</div>
+    </body></html>"""
+
 
 async def build_defense_packet(conn, matter: dict, corpus: dict, memo: dict,
                                 company_name: str | None = None) -> dict:
@@ -951,8 +989,25 @@ async def build_defense_packet(conn, matter: dict, corpus: dict, memo: dict,
             logger.warning("legal_defense: skip source file %s: %s", arc, e)
             skipped.append(f"{arc} ({e})")
 
+    # A generated case-file PDF per in-scope incident / ER case / discipline
+    # record: without it, records with no uploaded documents (all 21 IRs for
+    # a company that never attaches files) leave no trace in the ZIP at all.
+    generated: list[tuple[str, bytes]] = []
+    for c in appendix_ids:
+        kind_detail = details.get(c)
+        if not kind_detail or kind_detail[0] not in _ZIP_DIRS:
+            continue
+        kind, d = kind_detail
+        rec_id = c.split(":", 1)[1]
+        try:
+            blob = await _render_pdf(_case_file_html(kind, c, d, matter, company_name))
+            generated.append((f"{_ZIP_DIRS[kind]}/{rec_id}/case-file.pdf", blob))
+        except Exception as e:  # noqa: BLE001 — one bad record never kills the packet
+            logger.warning("legal_defense: case-file render failed for %s: %s", c, e)
+            skipped.append(f"{_ZIP_DIRS[kind]}/{rec_id}/case-file.pdf ({e})")
+
     # Always build the ZIP (even with zero attachable source docs — the
     # manifest just says so) so requesting "zip"/"both" never silently comes
     # back with only a PDF and no explanation.
-    zip_bytes = await asyncio.to_thread(_build_zip, pdf, fetched, skipped, matter)
+    zip_bytes = await asyncio.to_thread(_build_zip, pdf, fetched, skipped, matter, generated)
     return {"pdf": pdf, "zip": zip_bytes, "citations": cited}
