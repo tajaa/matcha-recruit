@@ -1,0 +1,25 @@
+export function Sparkline({ points }: { points: number[] }) {
+  if (points.length === 0) return null
+  const max = Math.max(...points, 1)
+  const w = 240
+  const h = 32
+  const step = points.length > 1 ? w / (points.length - 1) : 0
+  const path = points
+    .map((v, i) => `${i === 0 ? 'M' : 'L'} ${(i * step).toFixed(1)} ${(h - (v / max) * h).toFixed(1)}`)
+    .join(' ')
+  return (
+    <svg width={w} height={h} className="block">
+      <path d={path} stroke="#34d399" strokeWidth={1.5} fill="none" />
+    </svg>
+  )
+}
+
+export function Stat({ label, value, sub }: { label: string; value: number | string; sub?: string }) {
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+      <p className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">{label}</p>
+      <p className="text-xl font-semibold text-zinc-100">{value}</p>
+      {sub && <p className="text-[10px] text-zinc-500 mt-0.5">{sub}</p>}
+    </div>
+  )
+}
