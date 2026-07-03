@@ -422,6 +422,68 @@ Open incident:
 
         return await self._send_with_fallback(to_email, to_name, subject, html_content, text_content)
 
+    async def send_ir_info_request_response_email(
+        self,
+        to_email: str,
+        to_name: Optional[str],
+        company_name: str,
+        incident_number: str,
+        respondent_name: str,
+        link: str,
+    ) -> bool:
+        """Notify a company admin that a "Request More Info" form was submitted."""
+        if not self.is_configured():
+            logger.warning("Gmail not configured, skipping email send")
+            return False
+
+        recipient_name = html.escape(to_name or to_email)
+        respondent_name_esc = html.escape(respondent_name)
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 14px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {recipient_name},</p>
+            <p><strong>{respondent_name_esc}</strong> submitted the information requested on incident <strong>{incident_number}</strong>.</p>
+            <p style="text-align: center; margin-top: 24px;">
+                <a href="{link}" class="btn">Review the answers</a>
+            </p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {to_name or to_email},
+
+{respondent_name} submitted the information requested on incident {incident_number}.
+
+Review the answers: {link}
+"""
+
+        subject = f"{company_name}: New info received for incident {incident_number}"
+        return await self._send_with_fallback(to_email, to_name, subject, html_content, text_content)
+
     async def send_leave_request_notification_email(
         self,
         to_email: str,

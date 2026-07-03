@@ -5,6 +5,7 @@ into `EmailService` (see `client.py`) via multiple inheritance. Method
 bodies call `self.send_email(...)` / `self.is_configured()` / etc. —
 `self` is the composed `EmailService` at runtime.
 """
+import html
 import logging
 from datetime import datetime
 from typing import Optional
@@ -307,6 +308,100 @@ Sent on behalf of {company_name} via Matcha
 
         _subject = f"Workplace Investigation Interview Request from {company_name}"
         return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
+
+    async def send_ir_info_request_email(
+        self,
+        to_email: str,
+        to_name: Optional[str],
+        company_name: str,
+        incident_number: str,
+        requested_by_name: str,
+        questions: list[str],
+        custom_message: Optional[str],
+        link: str,
+    ) -> bool:
+        """Send an IR Copilot "Request More Info" invite to an outside party.
+
+        Returns True if sent successfully, False otherwise.
+        """
+        if not self.is_configured():
+            logger.warning("Gmail not configured, skipping email send")
+            return False
+
+        to_name_esc = html.escape(to_name) if to_name else None
+        requested_by_name_esc = html.escape(requested_by_name)
+        company_name_esc = html.escape(company_name)
+        incident_number_esc = html.escape(incident_number)
+        custom_message_esc = html.escape(custom_message) if custom_message else None
+
+        custom_section = f"<p>{custom_message_esc}</p><br>" if custom_message_esc else ""
+        custom_text = f"{custom_message}\n\n" if custom_message else ""
+        questions_html = "".join(f"<li>{html.escape(q)}</li>" for q in questions)
+        questions_text = "\n".join(f"- {q}" for q in questions)
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 600; margin: 10px 5px 10px 0; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+        .highlight {{ background: #ecfdf5; border-left: 4px solid #22c55e; padding: 15px; margin: 20px 0; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi{' ' + to_name_esc if to_name_esc else ''},</p>
+
+            {custom_section}
+
+            <p>{requested_by_name_esc} at {company_name_esc} is asking for a bit more information about incident <strong>{incident_number_esc}</strong>:</p>
+
+            <div class="highlight">
+                <ul style="margin: 0; padding-left: 20px;">
+                    {questions_html}
+                </ul>
+            </div>
+
+            <p>
+                <a href="{link}" class="btn">Answer questions</a>
+            </p>
+
+            <p style="color: #6b7280; font-size: 14px;">This link is unique to you and expires after a single use. Do not share it with others.</p>
+        </div>
+        <div class="footer">
+            <p>Sent on behalf of {company_name_esc} via Matcha</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi{' ' + to_name if to_name else ''},
+
+{custom_text}{requested_by_name} at {company_name} is asking for a bit more information about incident {incident_number}:
+
+{questions_text}
+
+Answer here: {link}
+
+This link is unique to you and expires after a single use. Do not share it with others.
+
+Sent on behalf of {company_name} via Matcha
+"""
+
+        subject = f"{company_name} needs more info on incident {incident_number}"
+        return await self._send_with_fallback(to_email, to_name, subject, html_content, text_content)
 
     async def send_candidate_interview_invite_email(
         self,

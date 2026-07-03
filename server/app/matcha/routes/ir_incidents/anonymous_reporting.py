@@ -14,22 +14,10 @@ from pydantic import BaseModel, Field
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 
-from ._shared import _location_label
+from ._shared import _build_public_link, _location_label
 
 
 router = APIRouter()
-
-
-def _build_public_link(request: Request, token: str, segment: str) -> str:
-    """Build a public token URL under the given path ``segment``.
-
-    Honors the X-Forwarded-Proto / Host pair set by nginx so links work
-    behind the prod proxy as well as in local dev. Falls back to the
-    request's own scheme/host if those headers aren't present.
-    """
-    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
-    return f"{proto}://{host}/{segment}/{token}"
 
 
 def _public_report_link(request: Request, token: str) -> str:

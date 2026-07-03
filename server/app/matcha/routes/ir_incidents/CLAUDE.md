@@ -17,8 +17,9 @@ Backend routes for matcha-lite's Incident Reporting product. Package was split f
 | `osha.py` | 300/301/300A logs + CSV + **300A PDF + save** + recordability + AI determine + **ITA bulk export/validate** (per-establishment; `_osha_pdf.py` holds the WeasyPrint Form 300A template) | 11 |
 | `documents.py` | Upload, list, delete incident documents | 3 |
 | `anonymous_reporting.py` | Token mgmt: company-wide `/report/:token` + per-location `/intake/:token` magic links | 6 |
+| `info_requests.py` | IR Copilot "Request More Info": admin-side token create/list/resend for the public `/request-info/:token` form (public GET/POST live in `inbound_email.py`) | 3 |
 | `audit_log.py` | Get audit trail for an incident | 1 |
-| **Total** | | **57 routes** |
+| **Total** | | **60 routes** |
 
 **No-roster people index** (`people.py` + `ir_people` / `ir_incident_people` tables, migration `irp1a2b3c4d5e`): people named in incidents (reporter / involved / witness / interviewee) are auto-indexed for per-person history WITHOUT a managed employee roster. Identity = the typed name, normalized for dedup (`_normalize_person_name`, `_gather_incident_people`, `_sync_incident_people` in `_shared.py`). Wired into `crud.create_incident` / `update_incident` (roles reporter/involved/witness, re-synced on edit) and `investigation_interviews` (role interviewee, managed separately so an incident edit's re-sync won't drop it). Distinct from `involved_employee_ids`, which targets the real `employees` roster. The truly-anonymous `/report/:token` intake (`inbound_email.py`) intentionally does NOT auto-mint people; the attributed per-location `/intake/:token` magic link DOES, since it shares `create_incident_core` with the authed create. Endpoints use 2+ segment paths (`/people/search`, `/people/{id}/incidents`) to avoid the `/{incident_id}` shadow.
 
@@ -50,7 +51,7 @@ When the AI emits a new action card type (currently `run_analysis`, `set_field`,
 Other routers consume these via `from .ir_incidents import …`. Keep the re-exports working when moving things around:
 
 - `compute_wc_metrics` ← `analytics.py` (used by `broker_portfolio.py`)
-- `_parse_occurred_at`, `generate_incident_number`, `send_ir_notifications_task`, `create_incident_core`, `_location_label` ← `_shared.py` (used by `inbound_email.py` — public `/report` + `/intake` intake). `create_incident_core` is the shared INSERT→people-index→OSHA→bg-task tail used by both `crud.create_incident` and the public location magic-link submit; the caller owns the (tenant-scoped) connection and schedules the returned bg tasks.
+- `_parse_occurred_at`, `generate_incident_number`, `send_ir_notifications_task`, `send_ir_info_request_notification_task`, `create_incident_core`, `_location_label` ← `_shared.py` (used by `inbound_email.py` — public `/report` + `/intake` + `/request-info` intake). `create_incident_core` is the shared INSERT→people-index→OSHA→bg-task tail used by both `crud.create_incident` and the public location magic-link submit; the caller owns the (tenant-scoped) connection and schedules the returned bg tasks. `_build_public_link` also lives in `_shared.py` (moved there from `anonymous_reporting.py` when `info_requests.py` needed it too) — any submodule minting a public token URL should import it from there, not redefine it.
 - `_close_incident_via_copilot` ← `copilot.py` (future cross-router; currently only used internally)
 
 ## Mounting + feature gate
@@ -71,7 +72,7 @@ The collection root uses `@router.post("")` (empty string), NOT `@router.post("/
 
 In a single `APIRouter`, FastAPI matches routes in registration order. Today:
 1. CRUD routes register first (because `crud.router` is the package router).
-2. Submodules append via `include_router` in this order: anonymous_reporting → documents → osha → investigation_interviews → ai_analysis → analytics → copilot → audit_log.
+2. Submodules append via `include_router` in this order: anonymous_reporting → info_requests → documents → osha → investigation_interviews → people → ai_analysis → analytics → copilot → audit_log → claims_readiness → voice.
 
 Safe because `/{incident_id}` (1-segment) cannot match any 2+segment submodule path. The only 1-segment static route is `/export`, which lives in `crud.py` ordered BEFORE `/{incident_id}` (preserved from the original file order).
 

@@ -174,6 +174,8 @@ export default function IRDetail() {
               <IRCopilotPanel
                 incidentId={incidentId!}
                 incidentStatus={incident.status}
+                reportedByName={incident.reported_by_name}
+                reportedByEmail={incident.reported_by_email}
                 onIncidentChanged={refetch}
                 onOpenDocuments={() => setTab('documents')}
               />

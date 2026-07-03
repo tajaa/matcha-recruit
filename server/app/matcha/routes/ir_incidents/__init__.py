@@ -38,6 +38,9 @@ from .crud import router  # noqa: F401  (package public symbol)
 from .anonymous_reporting import router as _anonymous_reporting_router
 router.include_router(_anonymous_reporting_router)
 
+from .info_requests import router as _info_requests_router
+router.include_router(_info_requests_router)
+
 from .documents import router as _documents_router
 router.include_router(_documents_router)
 
@@ -78,8 +81,11 @@ from .analytics import compute_behavioral_friction  # noqa: F401  (used by broke
 from ._shared import (  # noqa: F401  (used by inbound_email.py)
     _location_label,
     _parse_occurred_at,
+    _safe_json_loads,
+    _info_request_effective_status,
     create_incident_core,
     generate_incident_number,
     send_ir_notifications_task,
+    send_ir_info_request_notification_task,
 )
 from .copilot import _close_incident_via_copilot  # noqa: F401  (future cross-router use)

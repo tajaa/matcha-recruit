@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Request, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ...database import get_connection
 from app.core.services.redis_cache import check_rate_limit, client_ip
@@ -21,9 +21,12 @@ from app.matcha.services.ir_voice_parser import parse_voice_incident
 from .ir_incidents import (
     _location_label,
     _parse_occurred_at,
+    _safe_json_loads,
+    _info_request_effective_status,
     create_incident_core,
     generate_incident_number,
     send_ir_notifications_task,
+    send_ir_info_request_notification_task,
 )
 
 logger = logging.getLogger(__name__)
@@ -578,3 +581,161 @@ async def parse_location_intake_voice(token: str, request: Request, file: Upload
     audio = await _read_audio_or_400(file)
     return await parse_voice_incident(audio, (file.content_type or "audio/wav").lower(),
                                       location_options=[])
+
+
+# ---------------------------------------------------------------------------
+# IR Copilot "Request More Info" — /request-info/{token}
+#
+# Single-use, 14-day-expiry link scoped to one incident. Unlike /report and
+# /intake this never creates an incident — it attaches an outside party's
+# answers to an EXISTING one, created via the admin-side info_requests.py
+# router. Answers land in the Copilot transcript as a system event; they are
+# never auto-written into ir_incidents columns (admin reviews and applies
+# them by hand).
+# ---------------------------------------------------------------------------
+
+class InfoRequestAnswers(BaseModel):
+    answers: list[str] = Field(..., min_length=1, max_length=20)
+    # Honeypot — must be empty
+    company_name: Optional[str] = Field(None, max_length=255)
+
+    @field_validator("answers")
+    @classmethod
+    def _answers_not_blank(cls, v: list[str]) -> list[str]:
+        if any(not a.strip() for a in v):
+            raise ValueError("Answers cannot be blank")
+        return v
+
+
+_INFO_REQUEST_USABLE_MESSAGES = {
+    "revoked": "This link has been revoked. Contact the sender for a new one.",
+    "submitted": "This link has already been used.",
+    "expired": "This link has expired. Contact the sender for a new one.",
+}
+
+
+def _check_info_request_usable(row) -> None:
+    """Raise 410 if an info-request link is submitted, revoked, or expired."""
+    status = _info_request_effective_status(row)
+    if status != "pending":
+        raise HTTPException(status_code=410, detail=_INFO_REQUEST_USABLE_MESSAGES[status])
+
+
+@router.get("/request-info/{token}")
+async def validate_info_request_token(token: str):
+    """Validate an info-request link and return the incident-safe context."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT ir.incident_id, ir.company_id, ir.status, ir.expires_at, ir.questions,
+                   c.name AS company_name
+            FROM ir_info_requests ir
+            JOIN companies c ON c.id = ir.company_id
+            WHERE ir.token = $1
+            """,
+            token,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Invalid link")
+    _check_info_request_usable(row)
+
+    # Read the incident under the tenant so ir_incidents RLS is satisfied
+    # even once the app stops connecting as a superuser (ir_info_requests +
+    # companies are RLS-free, mirroring the /intake pattern above).
+    async with get_connection(tenant_id=str(row["company_id"])) as conn:
+        incident = await conn.fetchrow(
+            "SELECT incident_number FROM ir_incidents WHERE id = $1", row["incident_id"],
+        )
+
+    questions = _safe_json_loads(row["questions"], [])
+    return {
+        "valid": True,
+        "company_name": row["company_name"],
+        "incident_number": incident["incident_number"] if incident else None,
+        "questions": [q.get("text") for q in questions],
+    }
+
+
+@router.post("/request-info/{token}")
+async def submit_info_request(
+    token: str, body: InfoRequestAnswers, request: Request, background_tasks: BackgroundTasks,
+):
+    """Submit answers to an info-request link. Single-use — burns the token."""
+    # Honeypot — bots fill this hidden field; silently accept so as not to tip them off.
+    if body.company_name:
+        return {"submitted": True}
+
+    client_ip = request.client.host if request.client else "unknown"
+    if _is_rate_limited(client_ip):
+        raise HTTPException(status_code=429, detail="Too many submissions. Please try again later.")
+
+    # 1. Resolve token -> company_id (ir_info_requests has no RLS).
+    async with get_connection() as conn:
+        pre = await conn.fetchrow(
+            "SELECT company_id FROM ir_info_requests WHERE token = $1", token,
+        )
+    if not pre:
+        raise HTTPException(status_code=404, detail="Invalid link")
+    company_id = str(pre["company_id"])
+
+    # 2. Tenant-scoped, transaction-wrapped re-check + write — same structure
+    #    as /report/{token}'s single-use burn (FOR UPDATE + write in one txn,
+    #    not a bare FOR UPDATE statement that would release its lock early).
+    async with get_connection(tenant_id=company_id) as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT * FROM ir_info_requests WHERE token = $1 FOR UPDATE", token,
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="Invalid link")
+            _check_info_request_usable(row)
+
+            questions = _safe_json_loads(row["questions"], [])
+            if len(body.answers) != len(questions):
+                raise HTTPException(status_code=422, detail="Answer count doesn't match question count")
+
+            responses = [
+                {"question": q.get("text"), "answer": a.strip()}
+                for q, a in zip(questions, body.answers)
+            ]
+
+            await conn.execute(
+                """
+                UPDATE ir_info_requests
+                SET responses = $1::jsonb, status = 'submitted', submitted_at = NOW()
+                WHERE token = $2
+                """,
+                json.dumps(responses),
+                token,
+            )
+
+            incident = await conn.fetchrow(
+                "SELECT incident_number FROM ir_incidents WHERE id = $1", row["incident_id"],
+            )
+
+            # No log_audit here — there is no user_id for an unauthenticated
+            # submitter, matching /report/{token} and /intake/{token}.
+            from app.matcha.services.ir_ai_orchestrator import append_message
+            await append_message(
+                conn,
+                incident_id=row["incident_id"],
+                role="system",
+                message_type="event",
+                content=f"{row['recipient_name']} submitted the requested information.",
+                metadata={"info_request_id": str(row["id"]), "responses": responses},
+            )
+
+    logger.info(
+        "[Info Request] %s submitted answers for incident %s",
+        row["recipient_name"], row["incident_id"],
+    )
+    # Backgrounded: the respondent doesn't wait on an admin-notification email.
+    background_tasks.add_task(
+        send_ir_info_request_notification_task,
+        company_id=company_id,
+        incident_id=str(row["incident_id"]),
+        incident_number=incident["incident_number"] if incident else "",
+        respondent_name=row["recipient_name"],
+    )
+
+    return {"submitted": True}

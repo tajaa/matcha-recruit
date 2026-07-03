@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Loader2, Send, Sparkles } from 'lucide-react'
-import { Button } from '../ui'
+import { Loader2, Mail, Send, Sparkles } from 'lucide-react'
+import { Badge, Button } from '../ui'
 import IRCopilotCard, { type CopilotCard, type AcceptPayload } from './IRCopilotCard'
+import { IRRequestInfoModal } from './IRRequestInfoModal'
 import { api, ensureFreshToken } from '../../api/client'
 import { reportApiError } from '../../api/errorReporter'
+import { useIRInfoRequests } from '../../hooks/ir/useIRInfoRequests'
 
 const BASE = (import.meta.env.VITE_API_URL ?? '/api').replace(/\/$/, '')
 
@@ -28,11 +30,15 @@ type Transcript = {
 interface Props {
   incidentId: string
   incidentStatus?: string
+  reportedByName?: string | null
+  reportedByEmail?: string | null
   onIncidentChanged?: () => void
   onOpenDocuments?: () => void
 }
 
-export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentChanged, onOpenDocuments }: Props) {
+export default function IRCopilotPanel({
+  incidentId, incidentStatus, reportedByName, reportedByEmail, onIncidentChanged, onOpenDocuments,
+}: Props) {
   const [messages, setMessages] = useState<CopilotMessage[]>([])
   const [currentCards, setCurrentCards] = useState<CopilotCard[]>([])
   const [openQuestions, setOpenQuestions] = useState<string[]>([])
@@ -43,8 +49,11 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [closingIncident, setClosingIncident] = useState(false)
+  const [requestInfoOpen, setRequestInfoOpen] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const incidentIsClosed = incidentStatus === 'closed' || incidentStatus === 'resolved'
+  const { requests: infoRequests, refresh: refreshInfoRequests, resend: resendInfoRequest, revoke: revokeInfoRequest } =
+    useIRInfoRequests(incidentId)
 
   const refresh = useCallback(async () => {
     try {
@@ -285,6 +294,25 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
     }
   }
 
+  async function handleResendInfoRequest(requestId: string) {
+    setError(null)
+    try {
+      await resendInfoRequest(requestId)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Resend failed')
+    }
+  }
+
+  async function handleRevokeInfoRequest(requestId: string) {
+    if (!window.confirm('Revoke this link? It will no longer be answerable.')) return
+    setError(null)
+    try {
+      await revokeInfoRequest(requestId)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Revoke failed')
+    }
+  }
+
   const cardsByMessageId = useMemo(() => {
     // Map the most recent message_type='card' rows (one per current_card by id).
     const map = new Map<string, string>() // card_id -> message_id
@@ -337,8 +365,18 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
             <Loader2 className="w-3 h-3 animate-spin" /> Thinking…
           </span>
         )}
-        {!incidentIsClosed && (
-          <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {!incidentIsClosed && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setRequestInfoOpen(true)}
+            >
+              <Mail className="w-3.5 h-3.5" />
+              <span className="ml-1.5">Request more info</span>
+            </Button>
+          )}
+          {!incidentIsClosed && (
             <Button
               variant="ghost"
               size="sm"
@@ -355,9 +393,62 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
                 'Close incident'
               )}
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
+
+      {infoRequests.length > 0 && (
+        <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900/60 divide-y divide-zinc-800">
+          {infoRequests.map((r) => (
+            <div key={r.id} className="px-3 py-2 text-sm">
+              <div className="flex items-center gap-2">
+                <Badge variant={r.status === 'submitted' ? 'success' : r.status === 'pending' ? 'warning' : 'neutral'}>
+                  {r.status}
+                </Badge>
+                <span className="flex-1 min-w-0 truncate text-zinc-300">
+                  {r.recipient_name} <span className="text-zinc-600">·</span> {r.recipient_email}
+                </span>
+                {(r.status === 'pending' || r.status === 'expired') && (
+                  <>
+                    <button
+                      onClick={() => { void handleResendInfoRequest(r.id) }}
+                      className="text-xs text-emerald-400 hover:text-emerald-300 shrink-0"
+                    >
+                      Resend
+                    </button>
+                    <button
+                      onClick={() => { void handleRevokeInfoRequest(r.id) }}
+                      className="text-xs text-zinc-500 hover:text-red-400 shrink-0"
+                    >
+                      Revoke
+                    </button>
+                  </>
+                )}
+              </div>
+              {r.status === 'submitted' && r.responses && r.responses.length > 0 && (
+                <div className="mt-2 space-y-1.5 border-l-2 border-zinc-700 pl-3">
+                  {r.responses.map((resp, i) => (
+                    <div key={i}>
+                      <div className="text-[11px] text-zinc-500">{resp.question}</div>
+                      <div className="text-zinc-200">{resp.answer}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <IRRequestInfoModal
+        open={requestInfoOpen}
+        onClose={() => setRequestInfoOpen(false)}
+        incidentId={incidentId}
+        openQuestions={openQuestions}
+        defaultRecipientName={reportedByName}
+        defaultRecipientEmail={reportedByEmail}
+        onSent={() => { void refreshInfoRequests() }}
+      />
 
       {busyStage && (
         <div className="mb-4 rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-sm text-emerald-200 flex items-center gap-2">
@@ -425,6 +516,30 @@ export default function IRCopilotPanel({ incidentId, incidentStatus, onIncidentC
                     <span className="text-emerald-300 font-medium">{fmt(newValue)}</span>
                   </div>
                   {note && <div className="text-[11px] text-zinc-500 mt-1.5">{note}</div>}
+                </div>
+              )
+            }
+            const infoRequestResponses = Array.isArray(md.responses)
+              ? (md.responses as { question: string; answer: string }[])
+              : null
+            if (infoRequestResponses) {
+              return (
+                <div
+                  key={m.id}
+                  className="rounded-lg border border-sky-500/30 bg-sky-500/5 px-3 py-2.5"
+                >
+                  <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-sky-400 mb-1.5">
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>{m.content}</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {infoRequestResponses.map((resp, i) => (
+                      <div key={i}>
+                        <div className="text-[11px] text-zinc-500">{resp.question}</div>
+                        <div className="text-sm text-zinc-200">{resp.answer}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )
             }

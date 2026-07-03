@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Literal, Optional
 from uuid import UUID
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from app.core.services.email import get_email_service
 from app.database import get_connection
@@ -88,6 +88,34 @@ def _detect_osha_reportable_keywords(text: Optional[str]) -> bool:
     if not text:
         return False
     return bool(_OSHA_REPORTABLE_KEYWORD_RE.search(text))
+
+
+def _build_public_link(request: Request, token: str, segment: str) -> str:
+    """Build a public token URL under the given path ``segment``.
+
+    Honors the X-Forwarded-Proto / Host pair set by nginx so links work
+    behind the prod proxy as well as in local dev. Falls back to the
+    request's own scheme/host if those headers aren't present.
+    """
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    return f"{proto}://{host}/{segment}/{token}"
+
+
+def _info_request_effective_status(row) -> str:
+    """pending | submitted | expired | revoked for an ir_info_requests row.
+
+    Expiry is derived at read time (mirrors ir_report_links' _link_status),
+    not stored — shared by the admin-side list/serialize (info_requests.py)
+    and the public-form usability gate (inbound_email.py) so the two never
+    drift on what counts as "still usable".
+    """
+    if row["status"] in ("submitted", "revoked"):
+        return row["status"]
+    expires_at = row["expires_at"]
+    if expires_at is not None and expires_at <= datetime.now(timezone.utc):
+        return "expired"
+    return "pending"
 
 
 def _sse(event: dict) -> str:
@@ -638,6 +666,46 @@ async def send_ir_notifications_task(
         logger.info(f"[IR] Sent {sent_count}/{len(contacts)} IR notification email(s)")
     else:
         logger.warning("[IR] IR notifications attempted but no emails were sent successfully")
+
+
+async def send_ir_info_request_notification_task(
+    *,
+    company_id: str,
+    incident_id: str,
+    incident_number: str,
+    respondent_name: str,
+):
+    """Notify company admins that a "Request More Info" form was submitted."""
+    email_service = get_email_service()
+    if not email_service.is_configured():
+        logger.info("[IR] Email service not configured - skipping info-request notification")
+        return
+
+    company_name, contacts = await _get_company_admin_contacts(company_id)
+    if not contacts:
+        logger.info(f"[IR] No admin/client contacts found for company {company_id}")
+        return
+
+    incident_url = f"{email_service.settings.app_base_url}/app/ir/incidents/{incident_id}"
+
+    tasks = [
+        email_service.send_ir_info_request_response_email(
+            to_email=contact["email"],
+            to_name=contact.get("name"),
+            company_name=company_name,
+            incident_number=incident_number,
+            respondent_name=respondent_name,
+            link=incident_url,
+        )
+        for contact in contacts
+    ]
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    sent_count = sum(1 for r in results if r and not isinstance(r, Exception))
+    if sent_count:
+        logger.info(f"[IR] Sent {sent_count}/{len(contacts)} info-request notification email(s)")
+    else:
+        logger.warning("[IR] Info-request notification attempted but no emails were sent successfully")
 
 
 async def _get_incident_with_company_check(conn, incident_id: UUID, current_user, columns: str = "*"):
