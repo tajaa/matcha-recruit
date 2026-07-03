@@ -30,6 +30,10 @@ from .tasks import router as _tasks_router
 
 router.include_router(_tasks_router)
 
+from .workspace import router as _workspace_router
+
+router.include_router(_workspace_router)
+
 from . import _legacy
 
 router.include_router(_legacy.router)

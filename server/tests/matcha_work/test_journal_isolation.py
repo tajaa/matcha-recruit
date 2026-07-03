@@ -230,7 +230,7 @@ async def test_create_journal_into_folder_validates_ownership(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_activity_feed_scopes_journals_by_user(monkeypatch):
-    from app.matcha.routes.matcha_work import _legacy as matcha_work
+    from app.matcha.routes.matcha_work import workspace as matcha_work
     company_id, user_id = uuid4(), uuid4()
     conn = _FakeConn(user_id)
 
