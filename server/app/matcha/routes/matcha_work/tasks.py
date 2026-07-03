@@ -30,6 +30,22 @@ from app.matcha.routes.matcha_work._shared import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+@router.patch("/projects/{project_id}/pipeline-mode")
+async def set_project_pipeline_mode_endpoint(
+    project_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Toggle sales-pipeline mode for a collab project. Stored in
+    mw_projects.project_data.pipeline_mode via a non-destructive merge so the
+    board can render sales stages / deal fields. Other project_data keys are
+    preserved."""
+    from app.matcha.services import project_service as proj_svc
+
+    await _verify_project_access(project_id, current_user)
+    enabled = bool(body.get("enabled", False))
+    return await proj_svc.update_project_data(project_id, {"pipeline_mode": enabled})
+
 @router.get("/projects/{project_id}/tasks")
 async def list_project_tasks_endpoint(
     project_id: UUID,
