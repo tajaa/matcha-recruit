@@ -653,8 +653,9 @@ function PlatformInstrument() {
   return (
     <InstrumentFrame label="Composite Risk Index" accent={MATCHA}>
       {/* Two-column: left = the index + its loss curve + the AI layer,
-          right = the per-domain breakdown, so the card fills its width. */}
-      <div className="grid grid-cols-2 items-stretch">
+          right = the per-domain breakdown, so the card fills its width.
+          Stacks to one column below sm so nothing gets crushed on phones. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 items-stretch">
       <div className="flex flex-col justify-between">
       <div className="px-5 pt-4 flex items-end justify-between">
         <span
@@ -813,9 +814,10 @@ function PlatformInstrument() {
         </div>
       </div>
       </div>
-      {/* Right column — the sub-scores + every domain on one brain. */}
+      {/* Right column — the sub-scores + every domain on one brain. Top
+          border on mobile (stacked), left border once side-by-side. */}
       <div
-        className="flex flex-col justify-between border-l"
+        className="flex flex-col justify-between border-t sm:border-t-0 sm:border-l"
         style={{ borderColor: LINE_D }}
       >
       <div className="grid grid-cols-2 gap-x-3 gap-y-3 px-5 pb-4 pt-4">
@@ -987,8 +989,9 @@ function DailyInstrument() {
   return (
     <InstrumentFrame label="Daily Intake" accent="#F2C14E">
       {/* Two-column layout so the card fills its width instead of stacking
-          tall. Left = intake + the log; right = the AI analysis + voice. */}
-      <div className="grid grid-cols-2 items-stretch">
+          tall. Left = intake + the log; right = the AI analysis + voice.
+          Stacks to one column below sm. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 items-stretch">
       <div className="flex flex-col justify-between">
       <div className="px-5 pt-3 flex items-end justify-between">
         <div className="flex items-baseline gap-2">
@@ -1138,7 +1141,10 @@ function DailyInstrument() {
       </div>
       </div>
       {/* Right column — the AI does the work: analysis + voice intake. */}
-      <div className="flex flex-col border-l" style={{ borderColor: LINE_D }}>
+      <div
+        className="flex flex-col border-t sm:border-t-0 sm:border-l"
+        style={{ borderColor: LINE_D }}
+      >
       {/* The report opened, with its analysis — pattern detection, policy
           mapping, recommended action. */}
       <div className="px-5 pt-3 pb-3" style={{ borderColor: LINE_D }}>
@@ -1452,8 +1458,8 @@ function OshaLogInstrument() {
   return (
     <InstrumentFrame label="OSHA 300 Log" accent="#F2C14E">
       {/* Two-column: left = headline + 300A roll-up + exports, right = the
-          Form 300 log itself. */}
-      <div className="grid grid-cols-2 items-stretch">
+          Form 300 log itself. Stacks to one column below sm. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 items-stretch">
       <div className="flex flex-col justify-between">
       {/* Recordables headline — the payoff of flipping "OSHA recordable" on an
           incident: it lands here, per establishment, per year. */}
@@ -1539,7 +1545,10 @@ function OshaLogInstrument() {
       </div>
       </div>
       {/* Right column — the Form 300 log itself. */}
-      <div className="flex flex-col border-l" style={{ borderColor: LINE_D }}>
+      <div
+        className="flex flex-col border-t sm:border-t-0 sm:border-l"
+        style={{ borderColor: LINE_D }}
+      >
       {/* Form 300 rows — real columns: Case # / Employee / Classification /
           Days. The privacy row prints the mask, never the name. */}
       <div className="px-5 pt-4 pb-4">
@@ -1778,8 +1787,9 @@ function ComplianceInstrument() {
   return (
     <InstrumentFrame label="Compliance Monitor" accent="#E2725B">
       {/* Two-column: left = score + jurisdictions + the AI copilot, right =
-          the live findings cascade. Coverage grid spans full width below. */}
-      <div className="grid grid-cols-2 items-stretch">
+          the live findings cascade. Coverage grid spans full width below.
+          Stacks to one column below sm. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 items-stretch">
       <div className="flex flex-col justify-between">
       <div className="px-5 pt-4 flex items-end justify-between">
         <span
@@ -1871,7 +1881,10 @@ function ComplianceInstrument() {
       </div>
       </div>
       {/* Right column — the flag → fixing → fixed cascade. */}
-      <div className="flex flex-col border-l" style={{ borderColor: LINE_D }}>
+      <div
+        className="flex flex-col border-t sm:border-t-0 sm:border-l"
+        style={{ borderColor: LINE_D }}
+      >
       <div className="px-5 pb-3 pt-3">
         {COMPLIANCE_FINDINGS.map((f, i) => {
           const status = findingStatuses[i];
