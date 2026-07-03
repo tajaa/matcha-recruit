@@ -1,4 +1,4 @@
-"""Legal Defense routes (`/legal-defense`, feature `legal_defense`).
+"""Legal Pilot routes (`/legal-pilot`, feature `legal_defense`).
 
 Litigation-readiness evidence assembly for full-platform (Pro) companies. An
 admin opens a legal matter, converses with a grounded AI that organizes the
@@ -14,6 +14,7 @@ chat turn, packet generation, download, and share is written to
 import json
 import logging
 import secrets
+import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
 
@@ -299,7 +300,18 @@ async def chat(matter_id: str, body: ChatIn, request: Request, current_user=Depe
 # --------------------------------------------------------------------------- #
 
 def _safe_name(s: str) -> str:
-    return (s or "matter").replace("/", "-").replace('"', "").replace(" ", "-")[:60]
+    """ASCII-only filename slug. Non-ASCII survives into Content-Disposition
+    otherwise, and Starlette encodes header values as latin-1 — a title with
+    an em dash or accent crashes every download of that packet with a 500."""
+    ascii_s = unicodedata.normalize("NFKD", s or "matter").encode("ascii", "ignore").decode("ascii")
+    return (ascii_s or "matter").replace("/", "-").replace('"', "").replace(" ", "-")[:60] or "matter"
+
+
+def _safe_filename(name: Optional[str]) -> str:
+    """Defensive re-sanitize for filenames already stored in the DB (packets
+    created before ``_safe_name`` was hardened to strip non-ASCII)."""
+    base, _, ext = (name or "packet").rpartition(".")
+    return f"{_safe_name(base or name)}.{ext or 'bin'}"
 
 
 @router.post("/matters/{matter_id}/packet")
@@ -314,7 +326,9 @@ async def generate_packet(matter_id: str, body: PacketIn, request: Request, curr
         corpus = await ld.gather_evidence(
             conn, company_id, matter["evidence_start"], matter["evidence_end"], features
         )
-        packet = await ld.build_defense_packet(conn, matter, corpus, memo)
+        company = await conn.fetchrow("SELECT name FROM companies WHERE id = $1", company_id)
+        packet = await ld.build_defense_packet(conn, matter, corpus, memo,
+                                                company_name=company["name"] if company else None)
 
         storage = get_storage()
         base = _safe_name(matter.get("title"))
@@ -365,7 +379,7 @@ async def download_packet(matter_id: str, packet_id: str, request: Request, curr
     mime = "application/zip" if pkt["kind"] == "zip" else "application/pdf"
     return Response(
         content=data, media_type=mime,
-        headers={"Content-Disposition": f'attachment; filename="{pkt["filename"]}"'},
+        headers={"Content-Disposition": f'attachment; filename="{_safe_filename(pkt["filename"])}"'},
     )
 
 
@@ -385,7 +399,7 @@ async def share_packet(matter_id: str, packet_id: str, body: ShareIn, request: R
         )
         await _audit(conn, matter_id, current_user, request, "share",
                      {"packet_id": packet_id, "recipient": body.recipient_email})
-    return {"token": token, "path": f"/legal-defense/share/{token}", "expires_at": expires}
+    return {"token": token, "path": f"/legal-pilot/share/{token}", "expires_at": expires}
 
 
 # --------------------------------------------------------------------------- #
@@ -393,7 +407,7 @@ async def share_packet(matter_id: str, packet_id: str, body: ShareIn, request: R
 # gate, like inbound_email's /report token routes.
 # --------------------------------------------------------------------------- #
 
-@public_router.get("/legal-defense/share/{token}")
+@public_router.get("/legal-pilot/share/{token}")
 async def download_shared_packet(token: str, request: Request):
     await check_rate_limit(client_ip(request), "legal_share_dl", 30, 3600)
     async with get_connection() as conn:
@@ -423,5 +437,5 @@ async def download_shared_packet(token: str, request: Request):
     mime = "application/zip" if row["kind"] == "zip" else "application/pdf"
     return Response(
         content=data, media_type=mime,
-        headers={"Content-Disposition": f'attachment; filename="{row["filename"]}"'},
+        headers={"Content-Disposition": f'attachment; filename="{_safe_filename(row["filename"])}"'},
     )

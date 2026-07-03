@@ -116,7 +116,7 @@ export default function AppRoutes() {
         <Route path="limit-adequacy" element={<FeatureGate feature="limit_adequacy" label="Limit Adequacy"><LimitAdequacy /></FeatureGate>} />
         <Route path="driver-risk" element={<FeatureGate feature="driver_risk" label="Driver Risk"><DriverRisk /></FeatureGate>} />
         <Route path="property" element={<FeatureGate feature="property" label="Commercial Property"><Property /></FeatureGate>} />
-        <Route path="legal-defense" element={<FeatureGate feature="legal_defense" label="Legal Defense"><LegalDefense /></FeatureGate>} />
+        <Route path="legal-pilot" element={<FeatureGate feature="legal_defense" label="Legal Pilot"><LegalDefense /></FeatureGate>} />
         <Route path="resources" element={<AppResources />} />
         <Route path="resources/templates" element={<RequireBusinessAccount><ResourcesTemplates embedded /></RequireBusinessAccount>} />
         <Route path="resources/templates/job-descriptions" element={<ResourcesJobDescriptions embedded />} />

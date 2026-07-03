@@ -57,7 +57,7 @@ export default function LegalDefense() {
       <div className="w-72 shrink-0 flex flex-col">
         <div className="flex items-center justify-between mb-3">
           <h1 className="flex items-center gap-2 text-lg font-semibold text-zinc-100">
-            <Scale className="h-5 w-5 text-emerald-400" /> Legal Defense
+            <Scale className="h-5 w-5 text-emerald-400" /> Legal Pilot
           </h1>
           <Button size="sm" onClick={() => setShowNew(true)}><Plus className="h-4 w-4" /></Button>
         </div>
@@ -244,7 +244,8 @@ function MatterDetail({ matter, evidence, onRefresh, toast }: {
                     <span className="ml-auto text-[11px] text-zinc-500">{new Date(p.generated_at).toLocaleDateString()}</span>
                   </div>
                   <div className="mt-1.5 flex gap-1.5">
-                    <Button size="sm" variant="secondary" onClick={() => void downloadPacket(matter.id, p)}>
+                    <Button size="sm" variant="secondary" onClick={() => void downloadPacket(matter.id, p).catch((e) =>
+                      toast(e instanceof Error ? e.message : 'Download failed', 'error'))}>
                       <Download className="h-3.5 w-3.5" /> Download
                     </Button>
                     <Button size="sm" variant="secondary" onClick={() => setShareFor(p)}>

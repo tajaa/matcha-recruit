@@ -26,6 +26,7 @@ import io
 import json
 import logging
 import zipfile
+from datetime import datetime, timezone
 from uuid import UUID
 
 from app.core.services.genai_client import get_genai_client
@@ -431,8 +432,29 @@ def _cited_ids(memo: dict) -> list[str]:
     return out
 
 
-def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: list[str]) -> str:
+# Style layered on top of the shared `_PDF_CSS` (claims_readiness): a letterhead
+# strip, footnote-style citation markers instead of raw record IDs, and explicit
+# page-break rules so a table row or appendix doesn't split across pages.
+_MEMO_CSS_EXTRA = """
+  .letterhead { display:flex; justify-content:space-between; align-items:flex-end;
+    border-bottom:2px solid #1f3a8a; padding-bottom:8px; margin-bottom:12px; }
+  .letterhead .company { font-size:13px; font-weight:600; color:#1a1a2e; }
+  .letterhead .meta { font-size:9px; color:#888; text-align:right; line-height:1.5; }
+  h1 { border:none; }
+  tr, .cell, .narr { page-break-inside: avoid; }
+  h2 { page-break-after: avoid; }
+  .appendix-section { page-break-before: always; }
+  sup.cite { color:#1f3a8a; font-weight:700; }
+"""
+
+
+def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: list[str],
+                company_name: str | None = None) -> str:
     index = corpus.get("index", {})
+    # Footnote-style numbering: attorneys see "[1]", "[2]" inline, not raw
+    # "incident:9c2a1e40-..." record IDs — the evidence index below maps
+    # each number back to its source/ref/date.
+    fn = {c: i + 1 for i, c in enumerate(cited)}
 
     counsel = ""
     if matter.get("counsel_directed"):
@@ -445,7 +467,7 @@ def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: lis
     points = ""
     for item in memo.get("evidence_map") or []:
         cites = "".join(
-            f"<li>[{_esc(c)}] {_esc(index.get(c, {}).get('summary', ''))} "
+            f"<li><sup class='cite'>[{fn.get(c, '?')}]</sup> {_esc(index.get(c, {}).get('summary', ''))} "
             f"<span style='color:#888'>({_esc(index.get(c, {}).get('when', ''))})</span></li>"
             for c in (item.get("cited_ids") or [])
         )
@@ -457,13 +479,15 @@ def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: lis
     oq_block = f"<ul>{oq}</ul>" if oq else "<p>None recorded.</p>"
 
     idx_rows = "".join(
-        f"<tr><td>{_esc(c)}</td><td>{_esc(index.get(c, {}).get('source_label', ''))}</td>"
+        f"<tr><td>[{fn[c]}]</td><td>{_esc(index.get(c, {}).get('source_label', ''))}</td>"
         f"<td>{_esc(index.get(c, {}).get('ref', ''))}</td>"
         f"<td>{_esc(index.get(c, {}).get('when', ''))}</td></tr>"
         for c in cited
     ) or "<tr><td colspan='4'>No records cited.</td></tr>"
 
     # Deterministic appendices for cited IR / ER records (rendered from DB rows).
+    # Each starts on its own page so a multi-page appendix never runs into the
+    # next record's heading.
     appendix = ""
     for c in cited:
         kind_detail = details.get(c)
@@ -471,21 +495,29 @@ def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: lis
             continue
         kind, d = kind_detail
         if kind == "incident":
-            appendix += _incident_section(c, d)
+            appendix += f"<div class='appendix-section'>{_incident_section(c, d)}</div>"
         elif kind == "er_case":
-            appendix += _er_section(c, d)
+            appendix += f"<div class='appendix-section'>{_er_section(c, d)}</div>"
 
     notes = "".join(f"<li>{_esc(n)}</li>" for n in corpus.get("notes") or [])
     notes_block = f"<h2>Scope notes</h2><ul>{notes}</ul>" if notes else ""
 
-    return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>{_PDF_CSS}</style></head><body>
-      <h1>Legal Defense — Evidence Assembly</h1>
-      <p class="sub">{_esc(matter.get('title'))} · {_esc(matter.get('matter_type') or 'matter')}</p>
+    generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+      <style>{_PDF_CSS}{_MEMO_CSS_EXTRA}</style></head><body>
+      <div class="letterhead">
+        <div>
+          <h1>Legal Pilot — Evidence Assembly</h1>
+          <p class="sub">{_esc(matter.get('title'))} · {_esc(matter.get('matter_type') or 'matter')}</p>
+        </div>
+        <div class="meta">
+          {f"<div class='company'>{_esc(company_name)}</div>" if company_name else ""}
+          <div>Generated {generated}</div>
+        </div>
+      </div>
       {counsel}
-      <div class="narr"><b>What this is.</b> An organized, sourced compilation of the
-      company's own system records relevant to the matter, prepared to assist counsel.
-      It states what the records show and flags open questions; it does not draw legal
-      conclusions. {_esc(DISCLAIMER)}</div>
+      <div class="narr"><b>What this is.</b> An organized, sourced compilation of the company's own system records relevant to the matter, prepared to assist counsel. It states what the records show and flags open questions; it does not draw legal conclusions. {_esc(DISCLAIMER)}</div>
 
       <h2>Matter</h2>
       <table>
@@ -504,7 +536,7 @@ def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: lis
       {oq_block}
 
       <h2>Evidence index (cited records)</h2>
-      <table><thead><tr><th>Record ID</th><th>Source</th><th>Ref</th><th>When</th></tr></thead>
+      <table><thead><tr><th>#</th><th>Source</th><th>Ref</th><th>When</th></tr></thead>
       <tbody>{idx_rows}</tbody></table>
 
       {notes_block}
@@ -608,7 +640,8 @@ async def _safe_detail(coro):
         return None
 
 
-async def build_defense_packet(conn, matter: dict, corpus: dict, memo: dict) -> dict:
+async def build_defense_packet(conn, matter: dict, corpus: dict, memo: dict,
+                                company_name: str | None = None) -> dict:
     """Render the memo PDF and (when source docs exist) the ZIP bundle.
 
     Returns ``{pdf: bytes, zip: bytes|None, citations: [cid]}``. The appendix +
@@ -627,7 +660,7 @@ async def build_defense_packet(conn, matter: dict, corpus: dict, memo: dict) -> 
             if d:
                 details[c] = ("er_case", d)
 
-    pdf = await _render_pdf(_memo_html(matter, corpus, memo, details, cited))
+    pdf = await _render_pdf(_memo_html(matter, corpus, memo, details, cited, company_name))
 
     files = await _collect_source_files(conn, cited)
     fetched, skipped = [], []

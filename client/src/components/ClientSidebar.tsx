@@ -59,7 +59,7 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/er-copilot', icon: Scale, label: 'ER Copilot' },
       { to: '/app/risk-assessment', icon: BarChart2, label: 'Risk Assessment' },
       { to: '/app/resident-care', icon: HeartPulse, label: 'Resident-Care Risk', feature: 'resident_care' },
-      { to: '/app/legal-defense', icon: Gavel, label: 'Legal Defense', feature: 'legal_defense' },
+      { to: '/app/legal-pilot', icon: Gavel, label: 'Legal Pilot', feature: 'legal_defense' },
     ],
   },
   {

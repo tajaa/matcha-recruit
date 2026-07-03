@@ -146,7 +146,7 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     # and exports an attorney-facing evidence packet (defense-memo PDF that cites
     # only real records + a ZIP bundle of the underlying source documents). Read-
     # only over evidence; every generation/download is audit-logged. Gates the
-    # /legal-defense router + the /app/legal-defense page. Default off; admin-
+    # /legal-pilot router + the /app/legal-pilot page. Default off; admin-
     # toggle; NOT bundled (paid full-platform asset).
     "legal_defense": False,
     # OSHA 300/301/300A logs within IR. Default True (existing behavior for

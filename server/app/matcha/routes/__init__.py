@@ -121,7 +121,7 @@ matcha_router.include_router(resident_care_router, prefix="/resident-care", tags
                              dependencies=[Depends(require_feature("resident_care"))])
 matcha_router.include_router(controls_evidence_router, prefix="/controls-evidence", tags=["controls-evidence"],
                              dependencies=[Depends(require_feature("controls_evidence"))])
-matcha_router.include_router(legal_defense_router, prefix="/legal-defense", tags=["legal-defense"],
+matcha_router.include_router(legal_defense_router, prefix="/legal-pilot", tags=["legal-pilot"],
                              dependencies=[Depends(require_feature("legal_defense"))])
 matcha_router.include_router(limit_adequacy_router, prefix="/limit-adequacy", tags=["limit-adequacy"],
                              dependencies=[Depends(require_feature("limit_adequacy"))])
@@ -235,7 +235,7 @@ matcha_router.include_router(
 )
 # Public anonymous incident reporting — no auth, no feature gate (token-validated internally)
 matcha_router.include_router(anonymous_report_router, tags=["anonymous-reporting"])
-matcha_router.include_router(legal_defense_public_router, tags=["legal-defense-public"])
+matcha_router.include_router(legal_defense_public_router, tags=["legal-pilot-public"])
 # Public off-platform client-intake — no auth, token-validated internally
 matcha_router.include_router(external_intake_router, prefix="/external-intake", tags=["external-intake-public"])
 # Admin WC rate-data import (require_admin per-endpoint)

@@ -1,4 +1,4 @@
-// Legal Defense API client. Matters CRUD + grounded chat (SSE) + packet
+// Legal Pilot API client. Matters CRUD + grounded chat (SSE) + packet
 // generation/download/share. The chat stream is a raw fetch (like
 // IRCopilotPanel) since api/client.ts doesn't stream; everything else goes
 // through the typed `api` helper.
@@ -69,23 +69,23 @@ export type MatterCreate = {
   counsel_email?: string | null
 }
 
-export const listMatters = () => api.get<Matter[]>('/legal-defense/matters')
-export const createMatter = (body: MatterCreate) => api.post<Matter>('/legal-defense/matters', body)
-export const getMatter = (id: string) => api.get<Matter>(`/legal-defense/matters/${id}`)
+export const listMatters = () => api.get<Matter[]>('/legal-pilot/matters')
+export const createMatter = (body: MatterCreate) => api.post<Matter>('/legal-pilot/matters', body)
+export const getMatter = (id: string) => api.get<Matter>(`/legal-pilot/matters/${id}`)
 export const updateMatter = (id: string, body: Partial<MatterCreate> & { status?: MatterStatus }) =>
-  api.patch<Matter>(`/legal-defense/matters/${id}`, body)
-export const getEvidence = (id: string) => api.get<EvidencePreview>(`/legal-defense/matters/${id}/evidence`)
+  api.patch<Matter>(`/legal-pilot/matters/${id}`, body)
+export const getEvidence = (id: string) => api.get<EvidencePreview>(`/legal-pilot/matters/${id}/evidence`)
 export const generatePacket = (id: string, kind: 'pdf' | 'zip' | 'both') =>
-  api.post<{ packets: Packet[] }>(`/legal-defense/matters/${id}/packet`, { kind })
+  api.post<{ packets: Packet[] }>(`/legal-pilot/matters/${id}/packet`, { kind })
 export const sharePacket = (matterId: string, packetId: string, body: { recipient_email?: string; expires_days?: number }) =>
   api.post<{ token: string; path: string; expires_at: string }>(
-    `/legal-defense/matters/${matterId}/packets/${packetId}/share`, body,
+    `/legal-pilot/matters/${matterId}/packets/${packetId}/share`, body,
   )
 
 // Authed blob download → browser save (keeps the server filename).
 export async function downloadPacket(matterId: string, packet: Packet): Promise<void> {
   const token = localStorage.getItem('matcha_access_token')
-  const res = await fetch(`${BASE}/legal-defense/matters/${matterId}/packets/${packet.id}/download`, {
+  const res = await fetch(`${BASE}/legal-pilot/matters/${matterId}/packets/${packet.id}/download`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   })
   if (!res.ok) throw new Error(`Download failed (${res.status})`)
@@ -116,7 +116,7 @@ export type ChatHandlers = {
 // stream). Mirrors the IRCopilotPanel consumption pattern.
 export async function streamChat(matterId: string, message: string, h: ChatHandlers): Promise<void> {
   const token = localStorage.getItem('matcha_access_token')
-  const res = await fetch(`${BASE}/legal-defense/matters/${matterId}/chat`, {
+  const res = await fetch(`${BASE}/legal-pilot/matters/${matterId}/chat`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
