@@ -34,6 +34,10 @@ from .workspace import router as _workspace_router
 
 router.include_router(_workspace_router)
 
+from .elements import router as _elements_router
+
+router.include_router(_elements_router)
+
 from . import _legacy
 
 router.include_router(_legacy.router)
