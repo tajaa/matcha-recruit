@@ -47,6 +47,10 @@ from .collaboration import router as _collaboration_router
 
 router.include_router(_collaboration_router)
 
+from .recruiting import router as _recruiting_router
+
+router.include_router(_recruiting_router)
+
 from . import _legacy
 
 router.include_router(_legacy.router)
