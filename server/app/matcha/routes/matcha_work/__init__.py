@@ -9,6 +9,10 @@ from .presence import router as _presence_router
 
 presence_router.include_router(_presence_router)
 
+from .pdf_export import router as _pdf_export_router
+
+router.include_router(_pdf_export_router)
+
 from . import _legacy
 
 router.include_router(_legacy.router)
