@@ -26,7 +26,6 @@ server/
     │   └── workers/             (rare — most worker tasks live in app/workers/)
     ├── workers/                 Celery app + scheduled / heavy tasks
     ├── orm/                     SQLAlchemy helpers (legacy reports only — avoid for new code)
-    ├── services/                (mostly empty — services live under core/ and matcha/)
     └── uploads/                 Local-only upload temp dir (S3 in prod)
 ```
 

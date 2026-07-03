@@ -8,7 +8,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.database import init_pool, get_connection, close_pool
-from app.services.auth import hash_password
+from app.core.services.auth import hash_password
 from app.config import load_settings
 
 

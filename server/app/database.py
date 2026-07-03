@@ -4782,7 +4782,7 @@ async def init_db():
         admin_exists = await conn.fetchval("SELECT COUNT(*) FROM users WHERE role = 'admin'")
         if admin_exists == 0:
             import os
-            from .services.auth import hash_password
+            from .core.services.auth import hash_password
             default_password = os.getenv("DEFAULT_ADMIN_PASSWORD", "changeme123")
             user_row = await conn.fetchrow(
                 """

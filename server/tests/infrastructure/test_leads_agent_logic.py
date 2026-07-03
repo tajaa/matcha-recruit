@@ -10,8 +10,8 @@ os.environ["JINA_API_KEY"] = "mock_key"
 os.environ["HUNTER_API_KEY"] = "mock_key"
 
 from app.config import load_settings
-from app.models.leads_agent import SearchRequest, SearchResultItem, GeminiAnalysis
-from app.services.leads_agent import LeadsAgentService
+from app.core.models.leads_agent import SearchRequest, SearchResultItem, GeminiAnalysis
+from app.core.services.leads_agent import LeadsAgentService
 
 async def test_lead_saving():
     """Test that search results are correctly processed and saved."""
