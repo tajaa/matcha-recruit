@@ -5,7 +5,6 @@ import { api } from '../../api/client'
 import { Badge, Button, PillTabs, Select } from '../../components/ui'
 import { IRCreateIncidentModal } from '../../components/ir/IRCreateIncidentModal'
 import { IRDashboardTab } from '../../components/ir/IRDashboardTab'
-import { IRAnonymousReportingPanel } from '../../components/ir/IRAnonymousReportingPanel'
 import { IRExportModal } from '../../components/ir/IRExportModal'
 import { IRStatHero } from '../../components/ir/IRStatHero'
 import { formatDate } from '../../utils/dateFormat'
@@ -211,8 +210,6 @@ export default function IRList() {
               </div>
             )}
           </div>
-
-          <IRAnonymousReportingPanel />
         </div>
       )}
     </div>

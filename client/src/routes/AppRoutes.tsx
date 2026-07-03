@@ -16,6 +16,7 @@ import EmployeeDetail from '../pages/app/EmployeeDetail'
 import IRList from '../pages/app/IRList'
 import IRDetail from '../pages/app/IRDetail'
 import IRRiskInsights from '../pages/app/IRRiskInsights'
+import IRAnonymousReporting from '../pages/app/IRAnonymousReporting'
 import IRPersonDetail from '../pages/app/IRPersonDetail'
 import OshaLogs from '../pages/app/OshaLogs'
 import Locations from '../pages/app/Locations'
@@ -84,6 +85,7 @@ export default function AppRoutes() {
         <Route path="compliance-calendar" element={<ComplianceCalendar />} />
         <Route path="ir" element={<FeatureGate feature="incidents" label="Incidents"><IRList /></FeatureGate>} />
         <Route path="ir/risk-insights" element={<FeatureGate feature="incidents" label="Risk Insights"><IRRiskInsights /></FeatureGate>} />
+        <Route path="ir/magic-links" element={<FeatureGate feature="incidents" label="Magic Links"><IRAnonymousReporting /></FeatureGate>} />
         <Route path="ir/osha" element={<FeatureGate feature="incidents" label="OSHA Logs"><FeatureGate feature="osha_logs" label="OSHA Logs"><OshaLogs /></FeatureGate></FeatureGate>} />
         <Route path="ir/people/:personId" element={<FeatureGate feature="incidents" label="Incidents"><IRPersonDetail /></FeatureGate>} />
         <Route path="ir/:incidentId" element={<FeatureGate feature="incidents" label="Incidents"><IRDetail /></FeatureGate>} />

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlertTriangle, BookOpen, Building2, ClipboardList, FileText, Sparkles, TrendingUp, Users } from 'lucide-react'
+import { AlertTriangle, BookOpen, Building2, ClipboardList, FileText, Link2, Sparkles, TrendingUp, Users } from 'lucide-react'
 import SidebarShell from '../SidebarShell'
 import type { NavItem, NavGroup } from '../SidebarShell'
 import { useMe } from '../../hooks/useMe'
@@ -10,6 +10,7 @@ import EssentialsUpgradePanel from './EssentialsUpgradePanel'
 const nav: (NavItem | NavGroup)[] = [
   { to: '/app/ir', icon: AlertTriangle, label: 'Incidents' },
   { to: '/app/ir/risk-insights', icon: TrendingUp, label: 'Risk Insights' },
+  { to: '/app/ir/magic-links', icon: Link2, label: 'Magic Links' },
   { to: '/app/ir/osha', icon: ClipboardList, label: 'OSHA Logs', feature: 'osha_logs' },
   { to: '/app/handbooks', icon: FileText, label: 'Handbooks' },
   { to: '/app/resources', icon: BookOpen, label: 'Resources' },
