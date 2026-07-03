@@ -499,7 +499,8 @@ def _describe_audit(row: dict) -> str:
 
 
 def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: list[str],
-                company_name: str | None = None, audit_log: list[dict] | None = None) -> str:
+                company_name: str | None = None, audit_log: list[dict] | None = None,
+                appendix_ids: list[str] | None = None) -> str:
     index = corpus.get("index", {})
     # Footnote-style numbering: attorneys see "[1]", "[2]" inline, not raw
     # "incident:9c2a1e40-..." record IDs — the evidence index below maps
@@ -536,18 +537,27 @@ def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: lis
         for c in cited
     ) or "<tr><td colspan='4'>No records cited.</td></tr>"
 
-    # Deterministic appendices for cited IR / ER records (rendered from DB rows).
-    # Each starts on its own page so a multi-page appendix never runs into the
-    # next record's heading.
+    # Deterministic appendices (rendered from DB rows). Covers every cited
+    # record plus the full case-file dump (all incidents/ER cases/discipline
+    # in scope, per build_defense_packet's appendix_ids) — each tagged with
+    # whether the narrative above actually references it, so nothing is
+    # silently present-but-unexplained or silently missing. Each starts on
+    # its own page so a multi-page appendix never runs into the next record's
+    # heading.
     appendix = ""
-    for c in cited:
+    for c in (appendix_ids if appendix_ids is not None else cited):
         kind_detail = details.get(c)
         if not kind_detail:
             continue
         kind, d = kind_detail
         section_fn = _APPENDIX_SECTIONS.get(kind)
-        if section_fn:
-            appendix += f"<div class='appendix-section'>{section_fn(c, d)}</div>"
+        if not section_fn:
+            continue
+        if c in fn:
+            tag = f"<p style='font-size:9px;color:#1f3a8a;margin:0 0 4px'>Referenced in narrative as [{fn[c]}]</p>"
+        else:
+            tag = "<p style='font-size:9px;color:#888;margin:0 0 4px'>Not referenced in narrative above — included for completeness</p>"
+        appendix += f"<div class='appendix-section'>{tag}{section_fn(c, d)}</div>"
 
     notes = "".join(f"<li>{_esc(n)}</li>" for n in corpus.get("notes") or [])
     notes_block = f"<h2>Scope notes</h2><ul>{notes}</ul>" if notes else ""
@@ -881,13 +891,27 @@ async def build_defense_packet(conn, matter: dict, corpus: dict, memo: dict,
                                 company_name: str | None = None) -> dict:
     """Render the memo PDF and (when source docs exist) the ZIP bundle.
 
-    Returns ``{pdf: bytes, zip: bytes|None, citations: [cid]}``. The appendix +
-    ZIP scope to the records the memo actually cites."""
+    Returns ``{pdf: bytes, zip: bytes|None, citations: [cid]}``. The narrative
+    and evidence index stay scoped to what the memo actually cites, but the
+    appendix + ZIP additionally include every incident / ER case / discipline
+    record in scope — whether cited or not. A packet that silently omits
+    whole categories of records (e.g. all safety incidents, because none
+    seemed relevant to a wage claim) looks selective to opposing counsel;
+    including everything and tagging what wasn't referenced is safer.
+    Compliance/training/accommodation stay cited-only — 100+ near-duplicate
+    regulation entries as full appendix pages would swamp the document."""
     company_id = matter["company_id"]
     cited = _cited_ids(memo)
+    cited_set = set(cited)
+
+    case_file_ids = [
+        cid for cid in corpus.get("index", {})
+        if cid.startswith("incident:") or cid.startswith("er_case:") or cid.startswith("discipline:")
+    ]
+    appendix_ids = cited + [c for c in case_file_ids if c not in cited_set]
 
     details: dict = {}
-    for c in cited:
+    for c in appendix_ids:
         if c.startswith("incident:"):
             d = await _safe_detail(build_incident_packet(conn, c.split(":", 1)[1], company_id))
             if d:
@@ -915,9 +939,9 @@ async def build_defense_packet(conn, matter: dict, corpus: dict, memo: dict,
 
     audit_log = await _safe_detail(_fetch_audit_log(conn, matter["id"])) or []
 
-    pdf = await _render_pdf(_memo_html(matter, corpus, memo, details, cited, company_name, audit_log))
+    pdf = await _render_pdf(_memo_html(matter, corpus, memo, details, cited, company_name, audit_log, appendix_ids))
 
-    files = await _collect_source_files(conn, cited)
+    files = await _collect_source_files(conn, appendix_ids)
     fetched, skipped = [], []
     storage = get_storage()
     for arc, path in files:
