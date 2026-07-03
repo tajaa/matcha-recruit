@@ -775,6 +775,27 @@ async def list_my_records(
         return out
 
 
+@router.get("/records/{record_id}")
+async def get_record(
+    record_id: UUID,
+    user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    """Get a single training record by id. Must be registered after
+    /records/me — a variable {record_id} segment would otherwise shadow
+    that literal path since both are single-segment GETs."""
+    if not company_id:
+        raise HTTPException(status_code=404, detail="Record not found")
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM training_records WHERE id = $1 AND company_id = $2",
+            record_id, company_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Record not found")
+        return _record_to_dict(row)
+
+
 @router.get("/records/{record_id}/lesson")
 async def get_lesson(
     record_id: UUID,

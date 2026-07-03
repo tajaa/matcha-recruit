@@ -115,6 +115,7 @@ export type AttestResult = {
 export const trainingApi = {
   listRequirements: () => api.get<TrainingRequirement[]>('/training/requirements'),
   getRequirement: (id: string) => api.get<TrainingRequirement>(`/training/requirements/${id}`),
+  getRecord: (id: string) => api.get<TrainingRecord>(`/training/records/${id}`),
   bulkAssign: (requirement_id: string) =>
     api.post<{ assigned_count: number; requirement_id: string; message?: string }>(
       '/training/records/bulk-assign',

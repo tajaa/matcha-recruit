@@ -10,7 +10,7 @@ type AuditEntry = {
 }
 type AuditLogResponse = { entries: AuditEntry[]; total: number }
 
-type AccommodationCase = {
+export type AccommodationCase = {
   id: string; case_number: string; org_id: string; employee_id: string
   title: string; description: string | null; disability_category: string | null
   status: string; requested_accommodation: string | null

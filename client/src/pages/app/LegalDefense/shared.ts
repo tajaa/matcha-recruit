@@ -48,6 +48,14 @@ export function fmtWhen(iso: string): string {
     : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${t}`
 }
 
+/** Humanize a raw db enum/snake_case value for display — 'in_review' ->
+ *  'In Review'. Mirrors legal_defense.py's `_hum()`. */
+export function hum(s: string | null | undefined): string {
+  if (!s) return ''
+  return String(s).replace(/_/g, ' ').replace(/-/g, ' ').trim()
+    .replace(/\w\S*/g, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase())
+}
+
 export function fmtSize(n: number | null | undefined): string | null {
   if (!n) return null
   if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`
