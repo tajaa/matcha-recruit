@@ -165,7 +165,7 @@ def test_parse_current_state_from_unexpected_type():
 # ═══════════════════════════════════════════════════════════════════════
 
 
-from app.matcha.routes.matcha_work import UTTERANCE_CHECK_PROMPT_EN, UTTERANCE_CHECK_PROMPT_ES
+from app.matcha.routes.matcha_work.tutor import UTTERANCE_CHECK_PROMPT_EN, UTTERANCE_CHECK_PROMPT_ES
 
 
 def test_utterance_prompt_en_contains_utterance():
