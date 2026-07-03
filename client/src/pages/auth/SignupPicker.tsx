@@ -5,7 +5,6 @@ import { useMatchaLitePricing } from '../../api/matchaLitePricing'
 const INK = 'var(--color-ivory-ink)'
 const BG = 'var(--color-ivory-bg)'
 const MUTED = 'var(--color-ivory-muted)'
-const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 
 const LITE_FEATURES = [

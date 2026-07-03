@@ -1,0 +1,74 @@
+import { ArrowLeft, Loader2, MousePointerClick, Pencil, Save } from 'lucide-react'
+import { PromosPanel } from './PromosPanel'
+import { ThemeMenu } from './ThemeMenu'
+import type { useThemeEditor } from './useThemeEditor'
+
+export function EditorToolbar({
+  title, setTitle, slug, notice, error,
+  meta, setMeta, promosDirty, setPromosDirty,
+  designerUnlocked, themeEditor,
+  canvasUnlocked, editMode, setEditMode,
+  status, setStatus, saving, onSave, onBack,
+}: {
+  title: string
+  setTitle: (v: string) => void
+  slug: string
+  notice: string | null
+  error: string | null
+  meta: Record<string, unknown>
+  setMeta: (m: Record<string, unknown>) => void
+  promosDirty: boolean
+  setPromosDirty: (v: boolean) => void
+  designerUnlocked: boolean
+  themeEditor: ReturnType<typeof useThemeEditor>
+  canvasUnlocked: boolean
+  editMode: 'form' | 'canvas'
+  setEditMode: (m: 'form' | 'canvas') => void
+  status: 'draft' | 'published'
+  setStatus: (s: 'draft' | 'published') => void
+  saving: boolean
+  onSave: () => void
+  onBack: () => void
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b border-zinc-800 bg-zinc-900 px-6 py-3">
+      <div className="flex min-w-0 items-center gap-3">
+        <button onClick={onBack} className="text-zinc-500 hover:text-zinc-200"><ArrowLeft className="h-5 w-5" /></button>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className="min-w-0 rounded-md border border-transparent bg-transparent px-2 py-1 text-lg font-semibold text-zinc-50 hover:border-zinc-700 focus:border-emerald-500 focus:outline-none"
+        />
+        <span className="shrink-0 text-xs text-zinc-500">/{slug}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        {notice && <span className="text-sm text-emerald-400">{notice}</span>}
+        {error && <span className="text-sm text-red-400">{error}</span>}
+
+        {/* Site-wide promos (announcement bar + pop-up) */}
+        <PromosPanel meta={meta} premium={designerUnlocked} dirty={promosDirty} onChange={(m) => { setMeta(m); setPromosDirty(true) }} />
+
+        {/* Live theme switcher + tweaks */}
+        <ThemeMenu themeEditor={themeEditor} designerUnlocked={designerUnlocked} />
+
+        {canvasUnlocked && (
+          <div className="flex rounded-lg border border-zinc-700 p-0.5">
+            {([['canvas', 'Canvas', MousePointerClick], ['form', 'Form', Pencil]] as const).map(([m, label, Icon]) => (
+              <button key={m} onClick={() => setEditMode(m)} className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium ${editMode === m ? 'bg-emerald-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'}`}>
+                <Icon className="h-3.5 w-3.5" /> {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <select value={status} onChange={(e) => setStatus(e.target.value as 'draft' | 'published')} className="rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-100">
+          <option value="draft">Draft</option>
+          <option value="published">Published</option>
+        </select>
+        <button onClick={onSave} disabled={saving} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-60">
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save
+        </button>
+      </div>
+    </div>
+  )
+}

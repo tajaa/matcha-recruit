@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { LayoutDashboard, Building2, Settings, Zap, Globe, Activity, Warehouse } from 'lucide-react'
 import SidebarShell, { type NavItem } from './SidebarShell'
 import BrokerThemeToggle from './BrokerThemeToggle'
-import { fetchBrokerRiskAlerts, fetchActionCenterMilestones } from '../api/broker'
+import { fetchBrokerRiskAlerts } from '../api/broker'
 import { useMe } from '../hooks/useMe'
 
 export default function BrokerSidebar() {
@@ -11,14 +11,7 @@ export default function BrokerSidebar() {
   const [actionCount, setActionCount] = useState(0)
 
   useEffect(() => {
-    Promise.allSettled([
-      fetchBrokerRiskAlerts(),
-      fetchActionCenterMilestones(),
-    ]).then(([alerts, milestones]) => {
-      const unreadAlerts = alerts.status === 'fulfilled' ? alerts.value.active_unread : 0
-      const unreadMilestones = milestones.status === 'fulfilled' ? milestones.value.summary.unread : 0
-      setActionCount(unreadAlerts + unreadMilestones)
-    })
+    fetchBrokerRiskAlerts().then((alerts) => setActionCount(alerts.active_unread))
   }, [])
 
   const nav: NavItem[] = [
