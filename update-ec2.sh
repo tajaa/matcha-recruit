@@ -10,7 +10,7 @@ set -e
 # Configuration
 EC2_HOST="54.177.107.107"
 EC2_USER="ec2-user"
-SSH_KEY="${SSH_KEY:-roonMT-arm.pem}"
+SSH_KEY="${SSH_KEY:-secrets/roonMT-arm.pem}"
 AWS_REGION="us-west-1"
 AWS_ACCOUNT_ID="010438494410"
 

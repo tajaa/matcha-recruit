@@ -111,10 +111,10 @@ def step2_exchange_code(code: str):
     print(f"Saved to: {output_path}")
     print()
     print("Now upload it to EC2:")
-    print("  scp -i roonMT-arm.pem gmail_token.json ec2-user@54.177.107.107:/home/ec2-user/matcha/credentials/gmail_token.json")
+    print("  scp -i secrets/roonMT-arm.pem gmail_token.json ec2-user@54.177.107.107:/home/ec2-user/matcha/credentials/gmail_token.json")
     print()
     print("Then restart the container:")
-    print("  ssh -i roonMT-arm.pem ec2-user@54.177.107.107 'cd /home/ec2-user/matcha && docker compose up -d'")
+    print("  ssh -i secrets/roonMT-arm.pem ec2-user@54.177.107.107 'cd /home/ec2-user/matcha && docker compose up -d'")
     print()
 
 

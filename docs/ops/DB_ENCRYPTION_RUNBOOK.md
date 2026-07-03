@@ -33,7 +33,7 @@
 | App host instance | `i-0efcd9641849c22cd` @ `54.177.107.107` (us-west-1b) — runs `matcha-backend`, `matcha-worker`, `matcha-frontend`, `matcha-redis`, `matcha-livekit` |
 | Region | `us-west-1` |
 | Security group (DB) | `sg-0a210f25d08040794` — 5432 ingress restricted to `54.177.107.107/32` + `52.9.117.137/32` |
-| SSH key | `roonMT-arm` (`./roonMT-arm.pem`) |
+| SSH key | `roonMT-arm` (`./secrets/roonMT-arm.pem`) |
 | KMS key | `alias/aws/ebs` (AWS-managed default) |
 | Existing PG | container `matcha-postgres`, image `pgvector/pgvector:pg15`, named vol `matcha_postgres_data` on the **unencrypted** 8 GB root. `ssl=on`. |
 | DBs in container | ⚠️ **9 apps**: `ahnimal, coronado, drooli, limited, macombe, matcha, mii, omw, otp` (+ `postgres`, `template0/1`) |
@@ -69,7 +69,7 @@ export PGDATA_HOST=$ENCMNT/pgdata    # bind-mounted as the new container's PGDAT
 
 Facts above are verified. Confirm nothing has drifted:
 ```
-ssh -i roonMT-arm.pem ec2-user@3.101.83.217 'docker ps --filter name=matcha-postgres --format "{{.Names}} {{.Image}} {{.Status}}"; free -m | head -2'
+ssh -i secrets/roonMT-arm.pem ec2-user@3.101.83.217 'docker ps --filter name=matcha-postgres --format "{{.Names}} {{.Image}} {{.Status}}"; free -m | head -2'
 ```
 
 ---
@@ -78,7 +78,7 @@ ssh -i roonMT-arm.pem ec2-user@3.101.83.217 'docker ps --filter name=matcha-post
 
 **B.1** Add swap first (no swap today; protects against OOM with 2 PG):
 ```
-ssh -i roonMT-arm.pem ec2-user@3.101.83.217 '
+ssh -i secrets/roonMT-arm.pem ec2-user@3.101.83.217 '
   test -f /swapfile || { sudo fallocate -l 1G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile; }
   sudo swapon /swapfile; grep -q /swapfile /etc/fstab || echo "/swapfile none swap sw 0 0" | sudo tee -a /etc/fstab
   free -m | head -2'
@@ -102,7 +102,7 @@ aws ec2 wait volume-in-use --region $R --volume-ids $ENCVOL
 
 **B.4** Format + mount on the host (new disk enumerates as `/dev/nvme1n1` on Nitro):
 ```
-ssh -i roonMT-arm.pem ec2-user@3.101.83.217 '
+ssh -i secrets/roonMT-arm.pem ec2-user@3.101.83.217 '
   lsblk    # confirm the new ~10G disk name (expect nvme1n1, empty)
   D=/dev/nvme1n1
   sudo file -s $D | grep -q ext4 || sudo mkfs.ext4 -L matchaenc $D
@@ -120,7 +120,7 @@ ssh -i roonMT-arm.pem ec2-user@3.101.83.217 '
 
 **C.1** Run the sidecar on port 5433, data on the encrypted mount, capped memory:
 ```
-ssh -i roonMT-arm.pem ec2-user@3.101.83.217 '
+ssh -i secrets/roonMT-arm.pem ec2-user@3.101.83.217 '
   docker run -d --name matcha-postgres-prod --restart unless-stopped \
     -p 5433:5432 \
     -e POSTGRES_USER=matcha -e POSTGRES_PASSWORD=matcha_dev -e POSTGRES_DB=matcha \
@@ -134,7 +134,7 @@ ssh -i roonMT-arm.pem ec2-user@3.101.83.217 '
 
 **C.2** Generate a self-signed TLS cert in the new data dir + reload (matches the old container's `ssl=on` + `hostssl` posture):
 ```
-ssh -i roonMT-arm.pem ec2-user@3.101.83.217 '
+ssh -i secrets/roonMT-arm.pem ec2-user@3.101.83.217 '
   docker exec matcha-postgres-prod bash -c "
     cd /var/lib/postgresql/data &&
     test -f server.crt || openssl req -new -x509 -days 3650 -nodes -text \
@@ -158,7 +158,7 @@ This restores a copy now to prove roles/extensions/data carry over. The **author
 
 **D.1** Recreate the two non-superuser roles (roles are global — NOT in a per-DB dump; `matcha` already exists via `POSTGRES_USER`):
 ```
-ssh -i roonMT-arm.pem ec2-user@3.101.83.217 '
+ssh -i secrets/roonMT-arm.pem ec2-user@3.101.83.217 '
   docker exec matcha-postgres-prod psql -U matcha -c "
     DO \$\$ BEGIN
       CREATE ROLE matcha_app NOLOGIN;            EXCEPTION WHEN duplicate_object THEN NULL; END \$\$;
@@ -169,7 +169,7 @@ ssh -i roonMT-arm.pem ec2-user@3.101.83.217 '
 
 **D.2** Dump matcha from old → restore into new (container-to-container via host):
 ```
-ssh -i roonMT-arm.pem ec2-user@3.101.83.217 '
+ssh -i secrets/roonMT-arm.pem ec2-user@3.101.83.217 '
   TS=$(date +%Y%m%d_%H%M)
   docker exec matcha-postgres pg_dump -U matcha -Fc -d matcha -f /tmp/m_$TS.dump
   docker cp matcha-postgres:/tmp/m_$TS.dump /tmp/m_$TS.dump
@@ -182,7 +182,7 @@ ssh -i roonMT-arm.pem ec2-user@3.101.83.217 '
 
 **D.3** Verify parity:
 ```
-ssh -i roonMT-arm.pem ec2-user@3.101.83.217 '
+ssh -i secrets/roonMT-arm.pem ec2-user@3.101.83.217 '
   echo "--- extensions (expect vector, pgcrypto, plpgsql) ---"
   docker exec matcha-postgres-prod psql -U matcha -d matcha -c "\dx"
   echo "--- companies (expect 46) ---"
@@ -201,19 +201,19 @@ ssh -i roonMT-arm.pem ec2-user@3.101.83.217 '
 
 **E.1** First, locate the matcha `DATABASE_URL` so the edit in E.4 is instant (recon, do before stopping anything):
 ```
-ssh -i roonMT-arm.pem ec2-user@54.177.107.107 '
+ssh -i secrets/roonMT-arm.pem ec2-user@54.177.107.107 '
   docker inspect matcha-backend --format "{{range .Config.Env}}{{println .}}{{end}}" | grep -i DATABASE_URL
   # note the env-file / compose path that supplies it; that file is what you edit in E.4'
 ```
 
 **E.2** 🔴 Stop matcha writes (app host — other apps untouched):
 ```
-ssh -i roonMT-arm.pem ec2-user@54.177.107.107 'docker stop matcha-backend matcha-worker && docker ps --format "{{.Names}}" | grep matcha'
+ssh -i secrets/roonMT-arm.pem ec2-user@54.177.107.107 'docker stop matcha-backend matcha-worker && docker ps --format "{{.Names}}" | grep matcha'
 ```
 
 **E.3** 🔴 Final dump/restore (captures everything written since the dry run):
 ```
-ssh -i roonMT-arm.pem ec2-user@3.101.83.217 '
+ssh -i secrets/roonMT-arm.pem ec2-user@3.101.83.217 '
   TS=$(date +%Y%m%d_%H%M)
   docker exec matcha-postgres pg_dump -U matcha -Fc -d matcha -f /tmp/cut_$TS.dump
   docker cp matcha-postgres:/tmp/cut_$TS.dump /tmp/cut_$TS.dump
@@ -228,7 +228,7 @@ ssh -i roonMT-arm.pem ec2-user@3.101.83.217 '
 
 **E.5** 🔴 Restart matcha:
 ```
-ssh -i roonMT-arm.pem ec2-user@54.177.107.107 'docker start matcha-backend matcha-worker && sleep 5 && docker logs --tail 30 matcha-backend'
+ssh -i secrets/roonMT-arm.pem ec2-user@54.177.107.107 'docker start matcha-backend matcha-worker && sleep 5 && docker logs --tail 30 matcha-backend'
 ```
 
 **E.6** Verify cutover:
@@ -245,7 +245,7 @@ ssh -i roonMT-arm.pem ec2-user@54.177.107.107 'docker start matcha-backend match
 The old container is untouched and still holds live matcha on 5432.
 ```
 # revert DATABASE_URL port 5433 -> 5432 in the app env-file, then:
-ssh -i roonMT-arm.pem ec2-user@54.177.107.107 'docker restart matcha-backend matcha-worker'
+ssh -i secrets/roonMT-arm.pem ec2-user@54.177.107.107 'docker restart matcha-backend matcha-worker'
 ```
 The new container/volume can be left in place or torn down later. (Note: any writes made to the new container after cutover are lost on rollback — roll back fast if E.6 fails, before users transact.)
 
@@ -255,7 +255,7 @@ The new container/volume can be left in place or torn down later. (Note: any wri
 
 The cron dumps DBs on the **old** container; after cutover that matcha is the **stale test copy**. Update `/home/ec2-user/backup-to-s3.sh` so production matcha is dumped from the **new** container (port 5433 / `matcha-postgres-prod`), e.g. add a `docker exec matcha-postgres-prod pg_dump …` line and drop matcha from the old container's loop (or rename its key to `matcha_test`).
 ```
-ssh -i roonMT-arm.pem ec2-user@3.101.83.217 'cat /home/ec2-user/backup-to-s3.sh'   # read first, then edit
+ssh -i secrets/roonMT-arm.pem ec2-user@3.101.83.217 'cat /home/ec2-user/backup-to-s3.sh'   # read first, then edit
 ```
 > Verify the next scheduled run lands a fresh `postgres/matcha_*.sql.gz` sourced from the new container.
 

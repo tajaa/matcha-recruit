@@ -20,7 +20,7 @@ python -m uvicorn agent.api:app --host 127.0.0.1 --port 9100 --reload &
 API_PID=$!
 
 # Start Vite dev server
-cd "$PROJECT_ROOT/agent-ui"
+cd "$PROJECT_ROOT/server/agent-ui"
 echo -e "${GREEN}Starting agent UI on http://localhost:5176${NC}"
 npx vite &
 UI_PID=$!

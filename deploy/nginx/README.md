@@ -26,8 +26,8 @@ page after the 2026-07-01 swap to 8083/8003 (fixed 2026-07-02).
 ## Apply a change
 
 ```bash
-scp -i roonMT-arm.pem deploy/nginx/cappe.conf deploy/nginx/matcha.conf ec2-user@54.177.107.107:/tmp/
-ssh -i roonMT-arm.pem ec2-user@54.177.107.107
+scp -i secrets/roonMT-arm.pem deploy/nginx/cappe.conf deploy/nginx/matcha.conf ec2-user@54.177.107.107:/tmp/
+ssh -i secrets/roonMT-arm.pem ec2-user@54.177.107.107
   TS=$(date +%Y%m%d-%H%M%S)
   cd /etc/nginx/conf.d
   sudo cp cappe.conf cappe.conf.bak-$TS && sudo cp matcha.conf matcha.conf.bak-$TS

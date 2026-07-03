@@ -52,7 +52,7 @@ CREATE DATABASE matcha;
 ### 2. Add Gemini API Key
 SSH into EC2 and edit the environment file:
 ```bash
-ssh -i "roonMT-arm.pem" ec2-user@54.177.107.107
+ssh -i "secrets/roonMT-arm.pem" ec2-user@54.177.107.107
 nano /opt/matcha/.env.backend
 ```
 Replace `REPLACE_WITH_YOUR_GEMINI_API_KEY` with your actual Gemini API key.

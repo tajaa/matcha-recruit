@@ -11,7 +11,7 @@
 #   ./run-prod.sh stop         tear down tunnels
 #
 # Requirements:
-#   - SSH key: roonMT-arm.pem in the repo root
+#   - SSH key: secrets/roonMT-arm.pem
 #   - EC2 hosts reachable
 
 set -euo pipefail
@@ -22,7 +22,7 @@ PROJECT="$PROJECT_DIR/Matcha.xcodeproj"
 SCHEME="Matcha"
 CONFIG="Debug"
 DEST="platform=macOS"
-KEY_FILE="$REPO_ROOT/roonMT-arm.pem"
+KEY_FILE="$REPO_ROOT/secrets/roonMT-arm.pem"
 
 # EC2 hosts
 DB_HOST="ec2-user@3.101.83.217"       # PostgreSQL

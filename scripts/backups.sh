@@ -10,7 +10,7 @@
 set -euo pipefail
 
 S3_BUCKET="s3://matcha-recruit-backups/postgres"
-SSH_KEY="${SSH_KEY:-roonMT-arm.pem}"
+SSH_KEY="${SSH_KEY:-secrets/roonMT-arm.pem}"
 EC2_HOST="${EC2_HOST:-ec2-user@3.101.83.217}"   # DB host (was app host pre-split)
 PROD_CONTAINER="matcha-postgres-prod"
 DEV_CONTAINER="matcha-postgres"

@@ -119,7 +119,7 @@ Schema is managed via Alembic migrations in `server/alembic/versions/`; `server/
 - **Anonymization gate — currently OFF (pre-customer).** `SKIP_ANONYMIZE=1` in `server/.env` makes the refresh clone prod → dev **verbatim** (real emails + passwords, every account logs in) — fine while there's no customer PII. **Turn it back ON the moment real customers exist:** delete/unset `SKIP_ANONYMIZE` in `server/.env` (default = on/scrubbed), then re-run `./scripts/refresh-dev-from-prod.sh` — dev re-anonymizes. To keep *your own* logins working after re-enabling, list them in `DEV_PRESERVE_EMAILS` (comma-sep, env or `server/.env`) — those keep real email + password while everyone else is scrubbed. Details in `docs/ops/DB_WORKFLOW.md`.
 - **Backups:** host cron `~/backup-to-s3.sh` (every 12h) → `s3://matcha-recruit-backups/postgres/` (SSE-AES256); inspect/restore via `./scripts/backups.sh`.
 
-**SSH:** `ssh -i roonMT-arm.pem ec2-user@3.101.83.217` (DB host) · `ssh -i roonMT-arm.pem ec2-user@54.177.107.107` (app host).
+**SSH:** `ssh -i secrets/roonMT-arm.pem ec2-user@3.101.83.217` (DB host) · `ssh -i secrets/roonMT-arm.pem ec2-user@54.177.107.107` (app host).
 
 ## Directory Structure
 
@@ -314,7 +314,7 @@ Host-level nginx server blocks on the app EC2 (`/etc/nginx/conf.d/`) are hand-ma
 
 Retired/backup configs go to `/etc/nginx/conf.d/archive/` (nginx only globs `*.conf`). Legacy `oceaneca.conf` was retired there 2026-07-01 — `gummfit.com` belongs to `cappe.conf` (Cappe); if oceaneca.com ever revives, restore from archive minus its gummfit.com server blocks.
 
-**Primary script**: `./scripts/dev-remote.sh` — SSH-tunnels the **dev** Postgres container from EC2 (`3.101.83.217:5432` → `matcha-postgres`, not prod), starts Redis tunnel, backend on `:8001`, frontend on `:5174`, local chat model on `:8080`. Requires `roonMT-arm.pem` at repo root. To sync dev/prod see the Database section + `docs/ops/DB_WORKFLOW.md`.
+**Primary script**: `./scripts/dev-remote.sh` — SSH-tunnels the **dev** Postgres container from EC2 (`3.101.83.217:5432` → `matcha-postgres`, not prod), starts Redis tunnel, backend on `:8001`, frontend on `:5174`, local chat model on `:8080`. Requires `secrets/roonMT-arm.pem`. To sync dev/prod see the Database section + `docs/ops/DB_WORKFLOW.md`.
 
 **Alternative**: `./scripts/dev.sh` — references a discontinued sister product; do not use.
 

@@ -557,7 +557,7 @@ build_gummlocal_frontend() {
 # Build agent sandbox (includes Preact UI)
 build_agent() {
     log_info "Building agent UI..."
-    local ui_dir="${SCRIPT_DIR}/agent-ui"
+    local ui_dir="${SCRIPT_DIR}/server/agent-ui"
     if [ -d "$ui_dir" ]; then
         (cd "$ui_dir" && npm ci --silent && npm run build)
         rm -rf "${AGENT_DIR}/static"

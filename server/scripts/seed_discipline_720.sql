@@ -5,7 +5,7 @@
 -- want that.
 --
 -- Run from the EC2 host:
---   ssh -i roonMT-arm.pem ec2-user@3.101.83.217 \
+--   ssh -i secrets/roonMT-arm.pem ec2-user@3.101.83.217 \
 --     "sudo docker exec -i matcha-postgres psql -U matcha -d matcha" \
 --     < server/scripts/seed_discipline_720.sql
 

@@ -16,7 +16,7 @@ set -e
 
 EC2_HOST="54.177.107.107"
 EC2_USER="ec2-user"
-SSH_KEY="${SSH_KEY:-roonMT-arm.pem}"
+SSH_KEY="${SSH_KEY:-secrets/roonMT-arm.pem}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

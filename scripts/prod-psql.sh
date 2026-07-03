@@ -21,7 +21,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PEM="$REPO_ROOT/roonMT-arm.pem"
+PEM="$REPO_ROOT/secrets/roonMT-arm.pem"
 ENV_FILE="$REPO_ROOT/server/.env"
 
 APP_EC2="ec2-user@54.177.107.107"

@@ -69,7 +69,7 @@ server/
 
 ## Local dev
 
-Use `./scripts/dev-remote.sh` from repo root. It SSH-tunnels Postgres from EC2 (treat as production — see root CLAUDE.md), starts Redis tunnel, backend on :8001, frontend on :5174, local chat model on :8080. Requires `roonMT-arm.pem` at repo root.
+Use `./scripts/dev-remote.sh` from repo root. It SSH-tunnels Postgres from EC2 (treat as production — see root CLAUDE.md), starts Redis tunnel, backend on :8001, frontend on :5174, local chat model on :8080. Requires `secrets/roonMT-arm.pem`.
 
 To run the backend alone (assumes tunnels are up):
 ```bash

@@ -49,7 +49,7 @@ Wildcards require a **DNS-01** challenge (Hostinger has no certbot plugin, so
 this is a one-time manual TXT, renewed by hand ~every 90 days):
 
 ```bash
-ssh -i roonMT-arm.pem ec2-user@54.177.107.107
+ssh -i secrets/roonMT-arm.pem ec2-user@54.177.107.107
 sudo certbot certonly --manual --preferred-challenges dns \
      -d '*.hey-matcha.com' --agree-tos -m aaron@hey-matcha.com
 # certbot prints a TXT record: _acme-challenge.hey-matcha.com = <value>

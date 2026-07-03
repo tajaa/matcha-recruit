@@ -19,7 +19,7 @@ from datetime import datetime
 
 # --- Config ---
 # We'll shell out to psql via docker on the DB server
-SSH_KEY = "roonMT-arm.pem"
+SSH_KEY = "secrets/roonMT-arm.pem"
 DB_HOST = "3.101.83.217"
 DB_CMD_PREFIX = (
     f'ssh -i {SSH_KEY} ec2-user@{DB_HOST} '

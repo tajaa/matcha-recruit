@@ -155,3 +155,8 @@ docs/SECURITY_AUDIT_2026-06-10.md
 # Going forward: throwaway working notes go in scratch/ (never tracked)
 # instead of new per-filename entries above.
 /scratch/
+
+# Secrets bucket — everything inside stays untracked (secrets/.gitignore is authoritative)
+secrets/*
+!secrets/.gitignore
+!secrets/.gitkeep

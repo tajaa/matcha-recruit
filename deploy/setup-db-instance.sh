@@ -2,7 +2,7 @@
 set -e
 
 INSTANCE_IP="3.101.83.217"
-KEY_FILE="roonMT-arm.pem"
+KEY_FILE="secrets/roonMT-arm.pem"
 BACKUP_SCRIPT="deploy/backup-to-s3.sh"
 REMOTE_SCRIPT="/home/ec2-user/backup-to-s3.sh"
 

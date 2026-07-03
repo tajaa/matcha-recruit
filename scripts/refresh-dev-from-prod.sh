@@ -23,7 +23,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PEM="${PEM:-$REPO_ROOT/roonMT-arm.pem}"
+PEM="${PEM:-$REPO_ROOT/secrets/roonMT-arm.pem}"
 APP_EC2="${APP_EC2:-ec2-user@54.177.107.107}"
 RDS_HOST="${RDS_HOST:-matcha-prod.cbego6cwwdqy.us-west-1.rds.amazonaws.com}"
 

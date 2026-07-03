@@ -8,7 +8,7 @@ set -e
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SESSION_NAME="matcha-dev-remote"
-KEY_FILE="$PROJECT_ROOT/roonMT-arm.pem"
+KEY_FILE="$PROJECT_ROOT/secrets/roonMT-arm.pem"
 REMOTE_HOST="ec2-user@3.101.83.217"
 REMOTE_PORT="5432"
 DEFAULT_LOCAL_PORT="5432"
