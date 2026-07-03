@@ -52,45 +52,45 @@ class TestRenderInlineMd:
     """
 
     def test_bold_double_asterisk(self):
-        from app.matcha.routes.matcha_work import _render_inline_md
+        from app.matcha.routes.matcha_work._legacy import _render_inline_md
         assert _render_inline_md("hello **world**") == "hello <strong>world</strong>"
 
     def test_bold_double_underscore(self):
-        from app.matcha.routes.matcha_work import _render_inline_md
+        from app.matcha.routes.matcha_work._legacy import _render_inline_md
         assert _render_inline_md("hello __world__") == "hello <strong>world</strong>"
 
     def test_italic_single_asterisk(self):
-        from app.matcha.routes.matcha_work import _render_inline_md
+        from app.matcha.routes.matcha_work._legacy import _render_inline_md
         assert _render_inline_md("ok *fine* yes") == "ok <em>fine</em> yes"
 
     def test_italic_underscore_word_boundary(self):
-        from app.matcha.routes.matcha_work import _render_inline_md
+        from app.matcha.routes.matcha_work._legacy import _render_inline_md
         # underscores inside identifiers should NOT trigger italics
         assert _render_inline_md("snake_case_var") == "snake_case_var"
         # but flanked by spaces should
         assert _render_inline_md("ok _fine_ yes") == "ok <em>fine</em> yes"
 
     def test_inline_code(self):
-        from app.matcha.routes.matcha_work import _render_inline_md
+        from app.matcha.routes.matcha_work._legacy import _render_inline_md
         assert _render_inline_md("use `npm` here") == "use <code>npm</code> here"
 
     def test_html_special_chars_escaped(self):
         """User-provided angle brackets must escape so they don't open
         unintended HTML tags inside the WeasyPrint document."""
-        from app.matcha.routes.matcha_work import _render_inline_md
+        from app.matcha.routes.matcha_work._legacy import _render_inline_md
         out = _render_inline_md("<script>alert(1)</script>")
         assert "<script>" not in out
         assert "&lt;script&gt;" in out
 
     def test_multi_line_uses_br(self):
-        from app.matcha.routes.matcha_work import _render_inline_md
+        from app.matcha.routes.matcha_work._legacy import _render_inline_md
         out = _render_inline_md("line one\nline two")
         assert out == "line one<br>line two"
 
     def test_block_constructs_pass_through_literally(self):
         """The whole point of inline-only — block markdown stays as text
         so the PDF matches the desktop preview."""
-        from app.matcha.routes.matcha_work import _render_inline_md
+        from app.matcha.routes.matcha_work._legacy import _render_inline_md
         # bullet
         assert _render_inline_md("- item one") == "- item one"
         # heading
@@ -101,11 +101,11 @@ class TestRenderInlineMd:
         assert _render_inline_md("- [ ] todo") == "- [ ] todo"
 
     def test_empty_string(self):
-        from app.matcha.routes.matcha_work import _render_inline_md
+        from app.matcha.routes.matcha_work._legacy import _render_inline_md
         assert _render_inline_md("") == ""
 
     def test_combined_formatting_in_one_line(self):
-        from app.matcha.routes.matcha_work import _render_inline_md
+        from app.matcha.routes.matcha_work._legacy import _render_inline_md
         out = _render_inline_md("**bold** and *italic* and `code`")
         assert out == "<strong>bold</strong> and <em>italic</em> and <code>code</code>"
 
@@ -130,7 +130,7 @@ class TestRenderProjectPdf:
     @pytest.mark.asyncio
     async def test_render_returns_pdf_bytes(self, mock_storage):
         pytest.importorskip("weasyprint")
-        from app.matcha.routes import matcha_work as mw
+        from app.matcha.routes.matcha_work import _legacy as mw
         with patch.object(mw, "get_storage", return_value=mock_storage):
             project = {
                 "title": "My First Blog Post",
@@ -149,7 +149,7 @@ class TestRenderProjectPdf:
         """Sections whose content already starts with `<` (rich HTML from
         the editor) must NOT be re-rendered through _render_inline_md."""
         pytest.importorskip("weasyprint")
-        from app.matcha.routes import matcha_work as mw
+        from app.matcha.routes.matcha_work import _legacy as mw
         with patch.object(mw, "get_storage", return_value=mock_storage):
             project = {
                 "title": "Mixed Content",
@@ -166,7 +166,7 @@ class TestRenderProjectPdf:
         """Sections list can be empty; export must still produce a PDF
         with just the title (don't crash on empty body)."""
         pytest.importorskip("weasyprint")
-        from app.matcha.routes import matcha_work as mw
+        from app.matcha.routes.matcha_work import _legacy as mw
         with patch.object(mw, "get_storage", return_value=mock_storage):
             project = {"title": "Empty Doc", "sections": []}
             pdf_bytes = await mw._render_project_pdf(project)
@@ -177,7 +177,7 @@ class TestRenderProjectPdf:
         """A section with no `title` field must not emit an `<h2>` heading
         (would produce a stray bare numbered prefix)."""
         pytest.importorskip("weasyprint")
-        from app.matcha.routes import matcha_work as mw
+        from app.matcha.routes.matcha_work import _legacy as mw
         with patch.object(mw, "get_storage", return_value=mock_storage):
             project = {
                 "title": "Untitled-Sections",
@@ -194,7 +194,7 @@ class TestRenderProjectPdf:
         """A title with `<` should not produce malformed HTML that
         WeasyPrint rejects or that opens an unintended tag."""
         pytest.importorskip("weasyprint")
-        from app.matcha.routes import matcha_work as mw
+        from app.matcha.routes.matcha_work import _legacy as mw
         with patch.object(mw, "get_storage", return_value=mock_storage):
             project = {
                 "title": "How to use <script> tags safely",
@@ -207,7 +207,7 @@ class TestRenderProjectPdf:
     async def test_render_handles_missing_optional_fields(self, mock_storage):
         """`project.get("title") or "Document"` and sections=[] fallbacks."""
         pytest.importorskip("weasyprint")
-        from app.matcha.routes import matcha_work as mw
+        from app.matcha.routes.matcha_work import _legacy as mw
         with patch.object(mw, "get_storage", return_value=mock_storage):
             pdf_bytes = await mw._render_project_pdf({})
         assert pdf_bytes.startswith(b"%PDF")
@@ -218,7 +218,7 @@ class TestRenderProjectPdf:
         render them without making a network call. Unsupported paths
         (external URLs) pass through untouched."""
         pytest.importorskip("weasyprint")
-        from app.matcha.routes import matcha_work as mw
+        from app.matcha.routes.matcha_work import _legacy as mw
 
         storage = MagicMock()
         # Treat /uploads/foo.png as a supported storage path; pretend
@@ -257,7 +257,7 @@ class TestRenderProjectPdf:
         text. This test ensures the storage download is invoked for markdown
         image syntax (not just inline-HTML <img>)."""
         pytest.importorskip("weasyprint")
-        from app.matcha.routes import matcha_work as mw
+        from app.matcha.routes.matcha_work import _legacy as mw
 
         storage = MagicMock()
         storage.is_supported_storage_path = MagicMock(
@@ -297,7 +297,7 @@ class TestExportFormatValidation:
         # strings: pdf / docx / md / md_frontmatter).
         SUPPORTED = {"pdf", "md", "docx", "md_frontmatter"}
         # Double-check the route source still matches by reading the file.
-        import app.matcha.routes.matcha_work as mw
+        from app.matcha.routes.matcha_work import _legacy as mw
         import inspect
         src = inspect.getsource(mw.export_project_endpoint)
         for fmt in SUPPORTED:
