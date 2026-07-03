@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
-import { ChevronRight, Loader2 } from 'lucide-react'
+import { ChevronRight, Loader2, X } from 'lucide-react'
 import { api } from '../../../api/client'
 import type { EvidencePreview, EvidenceRecord } from '../../../api/legalDefense'
-import type { IRIncident } from '../../../types/ir'
+import { severityLabel, statusLabel, SEVERITY_BADGE, STATUS_BADGE, type IRIncident } from '../../../types/ir'
 import type { ERCase } from '../../../types/er'
 import { disciplineApi, type DisciplineRecord } from '../../../api/discipline'
 import { trainingApi, type TrainingRecord } from '../../../api/training'
 import type { AccommodationCase } from '../AccommodationDetail'
-import { Button, Modal } from '../../../components/ui'
+import { Badge, Modal, type BadgeVariant } from '../../../components/ui'
 import { LABEL, SOURCE_META, hum } from './shared'
 
 /** cid is "<kind>:<id>" (see legal_defense.py _src_* builders). Kinds with a
@@ -24,22 +24,44 @@ const FETCHERS: Record<string, (id: string) => Promise<unknown>> = {
 }
 
 type Field = { label: string; value: string }
+type Doc = { title: string; badges: { label: string; variant: BadgeVariant }[]; fields: Field[]; narrative: Field[] }
 
 function fmtDate(iso: string | null | undefined): string {
   return iso ? new Date(iso).toLocaleDateString() : ''
 }
 
-/** Builds the field grid + narrative blocks for the fetched record. Kept as
- *  one switch (rather than per-kind components) since each case is a
- *  handful of label/value lines, not real markup. */
-function buildDetail(kind: string, data: unknown): { fields: Field[]; narrative: Field[] } {
+const ER_STATUS_BADGE: Record<string, BadgeVariant> = {
+  open: 'warning', in_review: 'warning', pending_determination: 'warning', closed: 'success',
+}
+const DISCIPLINE_STATUS_BADGE: Record<string, BadgeVariant> = {
+  draft: 'neutral', pending_meeting: 'warning', pending_signature: 'warning',
+  active: 'warning', completed: 'success', expired: 'danger', escalated: 'danger',
+}
+const DISCIPLINE_SEVERITY_BADGE: Record<string, BadgeVariant> = {
+  minor: 'neutral', moderate: 'warning', severe: 'danger', immediate_written: 'danger',
+}
+const TRAINING_STATUS_BADGE: Record<string, BadgeVariant> = {
+  assigned: 'neutral', in_progress: 'warning', completed: 'success', expired: 'danger', waived: 'neutral',
+}
+const ACCOMMODATION_STATUS_BADGE: Record<string, BadgeVariant> = {
+  approved: 'success', denied: 'danger', closed: 'neutral',
+}
+
+/** Builds the doc-viewer header (title + status pills) and body (field grid
+ *  + narrative) for a fetched record. One switch — each case is a handful
+ *  of label/value lines, not real markup, so a per-kind component would
+ *  just be indirection. */
+function buildDoc(kind: string, data: unknown): Doc {
   switch (kind) {
     case 'incident': {
       const r = data as IRIncident
       return {
+        title: r.title,
+        badges: [
+          { label: severityLabel(r.severity), variant: SEVERITY_BADGE[r.severity] ?? 'neutral' },
+          { label: statusLabel(r.status), variant: STATUS_BADGE[r.status] ?? 'neutral' },
+        ],
         fields: [
-          { label: 'Status', value: hum(r.status) },
-          { label: 'Severity', value: hum(r.severity) },
           { label: 'Type', value: hum(r.incident_type) },
           { label: 'Location', value: r.location ?? '' },
           { label: 'Reported by', value: r.reported_by_name },
@@ -55,8 +77,9 @@ function buildDetail(kind: string, data: unknown): { fields: Field[]; narrative:
     case 'er_case': {
       const r = data as ERCase
       return {
+        title: r.title,
+        badges: [{ label: hum(r.status), variant: ER_STATUS_BADGE[r.status] ?? 'neutral' }],
         fields: [
-          { label: 'Status', value: hum(r.status) },
           { label: 'Category', value: hum(r.category ?? '') },
           { label: 'Outcome', value: hum(r.outcome ?? '') },
           { label: 'Involved employees', value: r.involved_employees?.length ? String(r.involved_employees.length) : '' },
@@ -67,11 +90,12 @@ function buildDetail(kind: string, data: unknown): { fields: Field[]; narrative:
     case 'discipline': {
       const r = data as DisciplineRecord
       return {
+        title: hum(r.discipline_type) + (r.infraction_type ? ` — ${hum(r.infraction_type)}` : ''),
+        badges: [
+          { label: hum(r.severity), variant: DISCIPLINE_SEVERITY_BADGE[r.severity] ?? 'neutral' },
+          { label: hum(r.status), variant: DISCIPLINE_STATUS_BADGE[r.status] ?? 'neutral' },
+        ],
         fields: [
-          { label: 'Type', value: hum(r.discipline_type) },
-          { label: 'Status', value: hum(r.status) },
-          { label: 'Severity', value: hum(r.severity) },
-          { label: 'Infraction', value: hum(r.infraction_type) },
           { label: 'Issued', value: fmtDate(r.issued_date) },
           { label: 'Review date', value: fmtDate(r.review_date) },
           { label: 'Signature', value: hum(r.signature_status) },
@@ -85,8 +109,9 @@ function buildDetail(kind: string, data: unknown): { fields: Field[]; narrative:
     case 'training': {
       const r = data as TrainingRecord
       return {
+        title: r.title,
+        badges: [{ label: hum(r.status), variant: TRAINING_STATUS_BADGE[r.status] ?? 'neutral' }],
         fields: [
-          { label: 'Status', value: hum(r.status) },
           { label: 'Type', value: hum(r.training_type) },
           { label: 'Provider', value: r.provider ?? '' },
           { label: 'Score', value: r.score != null ? String(r.score) : '' },
@@ -101,10 +126,9 @@ function buildDetail(kind: string, data: unknown): { fields: Field[]; narrative:
     case 'accommodation': {
       const r = data as AccommodationCase
       return {
-        fields: [
-          { label: 'Status', value: hum(r.status) },
-          { label: 'Disability category', value: hum(r.disability_category ?? '') },
-        ],
+        title: r.title,
+        badges: [{ label: hum(r.status), variant: ACCOMMODATION_STATUS_BADGE[r.status] ?? 'warning' }],
+        fields: [{ label: 'Disability category', value: hum(r.disability_category ?? '') }],
         narrative: [
           { label: 'Description', value: r.description ?? '' },
           { label: 'Requested accommodation', value: r.requested_accommodation ?? '' },
@@ -115,7 +139,7 @@ function buildDetail(kind: string, data: unknown): { fields: Field[]; narrative:
       }
     }
     default:
-      return { fields: [], narrative: [] }
+      return { title: '', badges: [], fields: [], narrative: [] }
   }
 }
 
@@ -124,7 +148,7 @@ type Detail = { loading: boolean; data: unknown; error: string | null }
 
 /** Evidence browser: every in-scope source expands to its record list —
  *  ref, one-line summary, date. Data is the already-fetched preview corpus.
- *  Clicking a record opens it as a doc-viewer modal in place — it never
+ *  Clicking a record opens it as a doc-viewer panel in place — it never
  *  navigates away from the matter workbench. */
 export function EvidencePanel({ evidence }: { evidence: EvidencePreview | null }) {
   const [open, setOpen] = useState<Record<string, boolean>>({})
@@ -212,39 +236,61 @@ export function EvidencePanel({ evidence }: { evidence: EvidencePreview | null }
           </>
         )}
       </div>
-      {selected && (
-        <Modal open onClose={() => setSelected(null)} title={selected.sourceLabel} width="lg">
-          <div className="space-y-3">
-            <div className="flex items-baseline justify-between gap-2 font-mono text-xs tabular-nums text-zinc-400">
-              <span>{selected.record.ref || '—'}</span>
-              <span className="text-zinc-500">{selected.record.when || ''}</span>
+      {selected && (() => {
+        const doc = !detail.loading && !detail.error && detail.data
+          ? buildDoc(selected.record.cid.split(':')[0], detail.data)
+          : null
+        const shownFields = doc?.fields.filter((f) => f.value) ?? []
+        const shownNarrative = doc?.narrative.filter((n) => n.value) ?? []
+        return (
+        <Modal open onClose={() => setSelected(null)} bare>
+          <div className="flex max-h-[85vh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-white/[0.08] bg-zinc-950 shadow-xl">
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-white/[0.06] px-5 py-4">
+              <div className="min-w-0">
+                <div className={LABEL}>{selected.sourceLabel}</div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <span className="font-mono text-xs text-zinc-500">{selected.record.ref || '—'}</span>
+                  {doc?.badges.map((b) => (
+                    <Badge key={b.label} variant={b.variant}>{b.label}</Badge>
+                  ))}
+                </div>
+                <h3 className="mt-1 truncate text-base font-semibold text-zinc-100">
+                  {doc?.title || selected.record.summary}
+                </h3>
+              </div>
+              <button
+                onClick={() => setSelected(null)}
+                aria-label="Close"
+                className="shrink-0 rounded p-1 text-zinc-500 transition-colors hover:bg-white/[0.06] hover:text-zinc-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
 
-            {detail.loading && (
-              <div className="flex items-center gap-2 py-2 text-xs text-zinc-500">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading the full record…
-              </div>
-            )}
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              <div className="mb-3 font-mono text-[10px] uppercase tracking-wide text-zinc-600">{selected.record.when}</div>
 
-            {!detail.loading && detail.error && (
-              <div className="space-y-2">
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-200">{selected.record.summary}</p>
-                <p className="text-[11px] text-amber-500/80">Couldn't load the full record — showing the evidence summary.</p>
-              </div>
-            )}
+              {detail.loading && (
+                <div className="flex items-center gap-2 py-2 text-xs text-zinc-500">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading the full record…
+                </div>
+              )}
 
-            {!detail.loading && !detail.error && detail.data && (() => {
-              const { fields, narrative } = buildDetail(selected.record.cid.split(':')[0], detail.data)
-              const shownFields = fields.filter((f) => f.value)
-              const shownNarrative = narrative.filter((n) => n.value)
-              return (
-                <>
+              {!detail.loading && detail.error && (
+                <div className="space-y-2">
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-300">{selected.record.summary}</p>
+                  <p className="text-[11px] text-amber-500/80">Couldn't load the full record — showing the evidence summary.</p>
+                </div>
+              )}
+
+              {doc && (
+                <div className="space-y-4">
                   {shownFields.length > 0 && (
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg border border-white/[0.06] p-3">
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 rounded-lg border border-white/[0.06] p-3">
                       {shownFields.map((f) => (
                         <div key={f.label}>
                           <div className="text-[10px] uppercase tracking-wide text-zinc-500">{f.label}</div>
-                          <div className="text-sm text-zinc-200">{f.value}</div>
+                          <div className="font-mono text-xs text-zinc-200">{f.value}</div>
                         </div>
                       ))}
                     </div>
@@ -252,23 +298,20 @@ export function EvidencePanel({ evidence }: { evidence: EvidencePreview | null }
                   {shownNarrative.map((n) => (
                     <div key={n.label}>
                       <div className="mb-1 text-[10px] uppercase tracking-wide text-zinc-500">{n.label}</div>
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-200">{n.value}</p>
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-300">{n.value}</p>
                     </div>
                   ))}
-                </>
-              )
-            })()}
+                </div>
+              )}
 
-            {!detail.loading && !detail.error && !detail.data && (
-              <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-200">{selected.record.summary}</p>
-            )}
-
-            <div className="flex justify-end pt-1">
-              <Button variant="secondary" onClick={() => setSelected(null)}>Close</Button>
+              {!detail.loading && !detail.error && !detail.data && (
+                <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-300">{selected.record.summary}</p>
+              )}
             </div>
           </div>
         </Modal>
-      )}
+        )
+      })()}
     </div>
   )
 }

@@ -3,9 +3,13 @@ import { useEffect, type ReactNode } from 'react'
 type ModalProps = {
   open: boolean
   onClose: () => void
-  title: string
+  title?: string
   children: ReactNode
   width?: 'sm' | 'md' | 'lg' | 'xl'
+  /** Skip the default zinc-900/rounded-2xl chrome + title — children own the
+   *  entire panel (their own bg/border/header). Still gets the shared
+   *  backdrop + Escape-to-close + click-outside-to-close behavior below. */
+  bare?: boolean
 }
 
 const widthClass = {
@@ -15,7 +19,7 @@ const widthClass = {
   xl: 'max-w-4xl',
 } as const
 
-export function Modal({ open, onClose, title, children, width = 'md' }: ModalProps) {
+export function Modal({ open, onClose, title, children, width = 'md', bare = false }: ModalProps) {
   useEffect(() => {
     if (!open) return
     const handler = (e: KeyboardEvent) => {
@@ -32,10 +36,12 @@ export function Modal({ open, onClose, title, children, width = 'md' }: ModalPro
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className={`bg-zinc-900 border border-zinc-800 rounded-2xl p-6 w-full ${widthClass[width]} shadow-xl`}>
-        <h2 className="text-lg font-semibold text-zinc-100 mb-4">{title}</h2>
-        {children}
-      </div>
+      {bare ? children : (
+        <div className={`bg-zinc-900 border border-zinc-800 rounded-2xl p-6 w-full ${widthClass[width]} shadow-xl`}>
+          <h2 className="text-lg font-semibold text-zinc-100 mb-4">{title}</h2>
+          {children}
+        </div>
+      )}
     </div>
   )
 }
