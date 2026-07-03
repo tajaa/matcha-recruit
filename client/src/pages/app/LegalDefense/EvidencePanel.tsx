@@ -3,7 +3,7 @@ import { ChevronRight, Loader2, X } from 'lucide-react'
 import { api } from '../../../api/client'
 import type { EvidencePreview, EvidenceRecord } from '../../../api/legalDefense'
 import { severityLabel, statusLabel, SEVERITY_BADGE, STATUS_BADGE, type IRIncident } from '../../../types/ir'
-import type { ERCase } from '../../../types/er'
+import type { ERCase, ERNote } from '../../../types/er'
 import { disciplineApi, type DisciplineRecord } from '../../../api/discipline'
 import { trainingApi, type TrainingRecord } from '../../../api/training'
 import type { AccommodationCase } from '../AccommodationDetail'
@@ -15,9 +15,14 @@ import { LABEL, SOURCE_META, hum } from './shared'
  *  (compliance_req, policy_ack) have no detail beyond the evidence-corpus
  *  summary, which is already the full text (built server-side, not
  *  truncated) — so they just render that. */
+type ERCaseWithNotes = { case: ERCase; notes: ERNote[] }
+
 const FETCHERS: Record<string, (id: string) => Promise<unknown>> = {
   incident: (id) => api.get<IRIncident>(`/ir/incidents/${id}`),
-  er_case: (id) => api.get<ERCase>(`/er/cases/${id}`),
+  er_case: (id) => Promise.all([
+    api.get<ERCase>(`/er/cases/${id}`),
+    api.get<ERNote[]>(`/er/cases/${id}/notes`),
+  ]).then(([caseData, notes]): ERCaseWithNotes => ({ case: caseData, notes })),
   discipline: (id) => disciplineApi.get(id),
   training: (id) => trainingApi.getRecord(id),
   accommodation: (id) => api.get<AccommodationCase>(`/accommodations/${id}`),
@@ -55,6 +60,13 @@ function buildDoc(kind: string, data: unknown): Doc {
   switch (kind) {
     case 'incident': {
       const r = data as IRIncident
+      const witnessText = (r.witnesses ?? [])
+        .map((w) => `${w.name}: ${w.statement || '(no statement on file)'}`)
+        .join('\n\n')
+      const involvedNames = [
+        ...(r.involved_employees ?? []).map((e) => [e.first_name, e.last_name].filter(Boolean).join(' ') || 'Unnamed employee'),
+        ...(r.involved_people ?? []).map((p) => p.display_name),
+      ].join(', ')
       return {
         title: r.title,
         badges: [
@@ -65,17 +77,26 @@ function buildDoc(kind: string, data: unknown): Doc {
           { label: 'Type', value: hum(r.incident_type) },
           { label: 'Location', value: r.location ?? '' },
           { label: 'Reported by', value: r.reported_by_name },
-          { label: 'Witnesses', value: r.witnesses?.length ? String(r.witnesses.length) : '' },
+          { label: 'Reported at', value: r.reported_at ? new Date(r.reported_at).toLocaleString() : '' },
+          { label: 'Documents', value: r.document_count ? String(r.document_count) : '' },
+          { label: 'OSHA recordable', value: r.osha_recordable == null ? '' : (r.osha_recordable ? 'Yes' : 'No') },
         ],
         narrative: [
           { label: 'Description', value: r.description ?? '' },
+          { label: 'Involved employees', value: involvedNames },
+          { label: 'Witness statements', value: witnessText },
           { label: 'Root cause', value: r.root_cause ?? '' },
           { label: 'Corrective actions', value: r.corrective_actions ?? '' },
         ],
       }
     }
     case 'er_case': {
-      const r = data as ERCase
+      const { case: r, notes } = data as ERCaseWithNotes
+      const roles = [...new Set((r.involved_employees ?? []).map((e) => hum(e.role)))].join(', ')
+      const notesText = notes
+        .filter((n) => n.note_type !== 'system')
+        .map((n) => `[${hum(n.note_type)} · ${new Date(n.created_at).toLocaleString()}] ${n.content}`)
+        .join('\n\n')
       return {
         title: r.title,
         badges: [{ label: hum(r.status), variant: ER_STATUS_BADGE[r.status] ?? 'neutral' }],
@@ -83,8 +104,14 @@ function buildDoc(kind: string, data: unknown): Doc {
           { label: 'Category', value: hum(r.category ?? '') },
           { label: 'Outcome', value: hum(r.outcome ?? '') },
           { label: 'Involved employees', value: r.involved_employees?.length ? String(r.involved_employees.length) : '' },
+          { label: 'Roles', value: roles },
+          { label: 'Documents', value: r.document_count ? String(r.document_count) : '' },
+          { label: 'Closed', value: fmtDate(r.closed_at) },
         ],
-        narrative: [{ label: 'Description', value: r.description ?? '' }],
+        narrative: [
+          { label: 'Description', value: r.description ?? '' },
+          { label: 'Case notes', value: notesText },
+        ],
       }
     }
     case 'discipline': {
