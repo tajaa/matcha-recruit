@@ -26,6 +26,10 @@ from .sections import router as _sections_router
 
 router.include_router(_sections_router)
 
+from .tasks import router as _tasks_router
+
+router.include_router(_tasks_router)
+
 from . import _legacy
 
 router.include_router(_legacy.router)
