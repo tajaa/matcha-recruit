@@ -8,11 +8,9 @@ Extracted from the original flat matcha_work.py during the package split
 import asyncio
 import logging
 import re
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from fastapi.responses import StreamingResponse
 
 from app.core.models.auth import CurrentUser
 from app.core.services.storage import get_storage

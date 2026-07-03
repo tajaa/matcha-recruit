@@ -11,78 +11,37 @@ aggregator router, not here (previously double-applied during the split's
 transitional phase).
 """
 
-import asyncio
-import json
 import logging
 import math
 import os
-import urllib.parse
-
-import httpx
 import re
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, Form, HTTPException, Query, Request, Response, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 
 from app.core.models.auth import CurrentUser
 from app.core.services.compliance_service import get_location_requirements, get_locations
-from app.matcha.routes.matcha_work.ai_turn import (
-    _apply_ai_updates_and_operations,
-    _blog_mode_state_from_meta,
-    _fetch_project_meta,
-    _inject_recruiting_project_context,
-    _inject_slide_context,
-    _scope_slide_update,
-)
-from app.matcha.routes.matcha_work.pdf_export import (
-    _pdf_title_from_markdown,
-    _render_project_pdf,
-)
-from app.matcha.routes.matcha_work.projects import (
-    ALLOWED_PROJECT_FILE_EXTENSIONS,
-    PROJECT_FILE_MAX_BYTES,
-)
-from app.matcha.routes.matcha_work.elements import _list_project_elements
+from app.matcha.routes.matcha_work.ai_turn import _apply_ai_updates_and_operations
 from app.matcha.routes.matcha_work._shared import (
-    RESUME_UPLOAD_EXTENSIONS,
-    RESUME_UPLOAD_MAX_BYTES,
-    THREAD_FILE_EXTENSIONS,
-    THREAD_FILE_MAX_BYTES,
-    THREAD_FILE_TEXT_CAP,
     _build_thread_detail_response,
-    _can_edit_project,
     _json_object,
-    _project_company_id,
-    _resolve_file_urls,
     _row_to_message,
     _sse_data,
-    _strip_markdown,
-    _verify_element_in_project,
-    _verify_project_access,
 )
 from app.core.services.storage import get_storage
 from app.database import get_connection
-from app.matcha.dependencies import require_admin_or_client, require_company_member, get_client_company_id
-from app.matcha.services.escalation_service import should_escalate, create_escalation
-from app.matcha.services.model_pricing import calculate_call_cost
+from app.matcha.dependencies import require_admin_or_client, get_client_company_id
 from app.matcha.models.matcha_work import (
     CreateThreadRequest,
     CreateThreadResponse,
     DocumentVersionResponse,
     ElementListItem,
     FinalizeResponse,
-    HandbookDocument,
-    MWMessageOut,
-    OnboardingDocument,
-    PolicyDocument,
-    PresentationDocument,
-    ReviewDocument,
     RevertRequest,
     SaveDraftResponse,
-    SendMessageRequest,
     SendMessageResponse,
     PinThreadRequest,
     NodeModeRequest,
@@ -90,8 +49,6 @@ from app.matcha.models.matcha_work import (
     PayerModeRequest,
     ThreadDetailResponse,
     ThreadListItem,
-    OfferLetterDocument,
-    UsageSummaryResponse,
     UpdateTitleRequest,
     SendReviewRequestsRequest,
     SendReviewRequestsResponse,
@@ -102,16 +59,8 @@ from app.matcha.models.matcha_work import (
     SendHandbookSignaturesRequest,
     SendHandbookSignaturesResponse,
     GeneratePresentationResponse,
-    ResumeBatchDocument,
-    InventoryDocument,
-    ProjectDocument,
-    SendInterviewsRequest,
-    RejectCandidateRequest,
-    WorkbookDocument,
 )
 from app.matcha.services import matcha_work_document as doc_svc
-from app.matcha.services import billing_service
-from app.matcha.services import token_budget_service
 from app.matcha.services.er_document_parser import ERDocumentParser
 from app.matcha.services.matcha_work_handbook_upload import (
     AuditedLocation,
@@ -119,23 +68,13 @@ from app.matcha.services.matcha_work_handbook_upload import (
     MAX_SECTION_PREVIEWS,
     _audit_location_group,
     _severity_rank,
-    audit_uploaded_handbook,
     check_handbook_relevance,
     compute_coverage_summaries,
     derive_handbook_title,
     parse_handbook_sections,
 )
-from app.matcha.services.matcha_work_ai import get_ai_provider, _infer_skill_from_state, _build_company_context, compact_conversation, needs_live_web_context, fetch_live_web_context
-from app.matcha.services.matcha_work_node import build_node_context, build_compliance_context, ComplianceContextResult
-from app.matcha.services.onboarding_orchestrator import (
-    PROVIDER_GOOGLE_WORKSPACE,
-    PROVIDER_SLACK,
-    start_google_workspace_onboarding,
-    start_slack_onboarding,
-)
-from app.core.services.email import get_email_service
+from app.matcha.services.matcha_work_ai import get_ai_provider, _infer_skill_from_state, _build_company_context
 from app.core.services.handbook_service import HandbookService
-from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 

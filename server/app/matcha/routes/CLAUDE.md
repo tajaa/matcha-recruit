@@ -32,7 +32,7 @@
 | `broker_portfolio.py` | `/broker-portfolio` | Per-broker client roster + cross-client metrics |
 | `fractional_hr.py` | `/fractional-hr` | Fractional HR engagement tooling — internal master-admin only (`require_admin` at mount, **not** feature-gated). Clients/scope/tasks/time + aggregate book-of-business overview. `fractional_*` tables; `company_id` nullable (client may have no tenant) |
 | `provisioning.py` | `/provisioning` | Google Workspace + Slack auto-provision (1,606 lines) |
-| `matcha_work.py` | (multiple) | Matcha-work projects/threads/channels/inbox (8,902 lines — biggest, but cohesive websocket+AI surface) |
+| `matcha_work/` | (multiple: `/matcha-work`, `/matcha-work/public`, `/matcha-work/presence`) | Matcha-work projects/threads/tasks/recruiting/AI turns — **package** (split 2026-07-03, 204 routes; see `matcha_work/CLAUDE.md`) |
 | `journals.py` | `/journals` | Matcha-work journals |
 | `billing.py` | (multiple) | Stripe billing + token packs |
 | `notifications.py` | `/notifications` | Matcha-work notifications |
@@ -70,9 +70,9 @@ Use the `ir_incidents/` package (see `ir_incidents/CLAUDE.md`) as the template. 
 Current strong candidates (per `docs/plans/CLAUDE_CODE_PLAN.md`):
 - `er_copilot.py` (4,111 lines) — CRUD + AI analysis + interviews + risk + reports
 
-Completed splits: `ir_incidents/` (2026-05-16), `employees/` (2026-05-16).
+Completed splits: `ir_incidents/` (2026-05-16), `employees/` (2026-05-16), `matcha_work/` (2026-07-03).
 
-Reuse the IR pattern: `git mv` to `_legacy.py`, split into per-domain submodules, flip package router to the one owning empty-path collection routes, delete `_legacy.py`.
+Reuse the IR pattern: `git mv` to `_legacy.py`, split into per-domain submodules, flip package router to the one owning empty-path collection routes, delete `_legacy.py`. **Variant used by `matcha_work/`**: if no submodule declares an empty-path route (check first — grep `@router\.\w+\("")`), skip the crud-owns-router step and just use a fresh `APIRouter()` aggregator in `__init__.py` instead; `_legacy.py` becomes the last remaining domain submodule (renamed to its real name, e.g. `threads.py`) rather than being deleted.
 
 ## Test layout
 
