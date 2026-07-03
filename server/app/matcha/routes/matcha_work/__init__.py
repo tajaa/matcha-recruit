@@ -38,6 +38,11 @@ from .elements import router as _elements_router
 
 router.include_router(_elements_router)
 
+from .github import router as _github_router, public_router as _github_public
+
+router.include_router(_github_router)
+public_router.include_router(_github_public)
+
 from . import _legacy
 
 router.include_router(_legacy.router)
