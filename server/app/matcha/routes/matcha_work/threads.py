@@ -1,4 +1,15 @@
-"""Matcha Work — chat-driven AI workspace for HR document elements."""
+"""Thread lifecycle: create/logo/handbook-upload, list/get, versions/revert/
+finalize/save-draft, PDF export + proxy, archive/unarchive, review-requests
++ handbook-signatures + presentation, title/pin/node-mode/compliance-mode/
+payer-mode, and the public review-request routes (own public_router).
+
+This is the remainder of the original flat matcha_work.py after the rest
+was extracted into sibling submodules during the package split
+(2026-07-03) -- see matcha_work/CLAUDE.md for the module map. Feature-gate
+(require_feature("matcha_work")) now lives solely on the __init__.py
+aggregator router, not here (previously double-applied during the split's
+transitional phase).
+"""
 
 import asyncio
 import json
@@ -54,7 +65,7 @@ from app.matcha.routes.matcha_work._shared import (
 )
 from app.core.services.storage import get_storage
 from app.database import get_connection
-from app.matcha.dependencies import require_admin_or_client, require_company_member, get_client_company_id, require_feature
+from app.matcha.dependencies import require_admin_or_client, require_company_member, get_client_company_id
 from app.matcha.services.escalation_service import should_escalate, create_escalation
 from app.matcha.services.model_pricing import calculate_call_cost
 from app.matcha.models.matcha_work import (
@@ -130,7 +141,7 @@ logger = logging.getLogger(__name__)
 
 
 
-router = APIRouter(dependencies=[Depends(require_feature("matcha_work"))])
+router = APIRouter()
 public_router = APIRouter()
 
 

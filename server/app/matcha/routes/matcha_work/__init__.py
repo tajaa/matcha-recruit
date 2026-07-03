@@ -1,3 +1,18 @@
+"""Matcha Work router package. Split from an 11,572-line flat matcha_work.py
+on 2026-07-03 -- see matcha_work/CLAUDE.md for the module map.
+
+Three routers are exported, mounted separately in routes/__init__.py:
+  router          -> /matcha-work            (feature-gated here)
+  public_router   -> /matcha-work/public      (unauthenticated webhooks + public review)
+  presence_router -> /matcha-work/presence
+
+No submodule declares empty-path routes, so `router` is a fresh aggregator
+rather than the crud-owns-router pattern used by ir_incidents/employees.
+
+Include order between submodules is behaviorally free: the three
+same-method overlapping route pairs in the original file each ended up
+inside a single submodule in original registration order (see CLAUDE.md).
+"""
 from fastapi import APIRouter, Depends
 from app.matcha.dependencies import require_feature
 
@@ -59,9 +74,9 @@ from .messaging import router as _messaging_router
 
 router.include_router(_messaging_router)
 
-from . import _legacy
+from .threads import router as _threads_router, public_router as _threads_public
 
-router.include_router(_legacy.router)
-public_router.include_router(_legacy.public_router)
+router.include_router(_threads_router)
+public_router.include_router(_threads_public)
 
 __all__ = ["router", "public_router", "presence_router"]
