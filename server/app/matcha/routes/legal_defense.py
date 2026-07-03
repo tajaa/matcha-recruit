@@ -194,7 +194,22 @@ async def get_matter(matter_id: str, current_user=Depends(require_admin_or_clien
             "FROM legal_matter_packets WHERE matter_id = $1 ORDER BY generated_at DESC",
             matter_id,
         )
-        matter["packets"] = [dict(p) for p in packets]
+        share_rows = await conn.fetch(
+            """SELECT packet_id, recipient_email, download_count, last_downloaded_at,
+                      expires_at, revoked, created_at
+                 FROM legal_matter_share_links
+                WHERE matter_id = $1 ORDER BY created_at DESC""",
+            matter_id,
+        )
+        # Most recent share link per packet — a packet can be re-shared, we
+        # only need the latest to answer "has counsel opened this".
+        shares_by_packet: dict = {}
+        for s in share_rows:
+            pid = str(s["packet_id"])
+            shares_by_packet.setdefault(pid, dict(s))
+        matter["packets"] = [
+            {**dict(p), "share": shares_by_packet.get(str(p["id"]))} for p in packets
+        ]
     return matter
 
 

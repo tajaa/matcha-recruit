@@ -27,6 +27,15 @@ export type MatterMessage = {
   created_at: string
 }
 
+export type PacketShareStatus = {
+  recipient_email: string | null
+  download_count: number
+  last_downloaded_at: string | null
+  expires_at: string | null
+  revoked: boolean
+  created_at: string
+}
+
 export type Packet = {
   id: string
   kind: 'pdf' | 'zip'
@@ -34,6 +43,7 @@ export type Packet = {
   citations?: string[]
   file_size: number | null
   generated_at: string
+  share?: PacketShareStatus | null
 }
 
 export type Matter = {

@@ -461,11 +461,45 @@ _MEMO_CSS_EXTRA = """
     display:flex; align-items:center; justify-content:center; }
   .obs-point { font-weight:600; margin-bottom:2px; }
   .obs ul { margin:2px 0 0; }
+  body::before {
+    content: 'CONFIDENTIAL — ATTORNEY WORK PRODUCT';
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%) rotate(-45deg);
+    font-size: 32pt; color: rgba(31, 58, 138, 0.08); font-weight: 800;
+    z-index: -1; pointer-events: none; white-space: nowrap;
+  }
 """
 
 
+_AUDIT_ACTION_LABELS = {
+    "create": "Matter created",
+    "update": "Matter updated",
+    "message": "Chat message ({role})",
+    "generate_packet": "Packet generated ({kind})",
+    "export": "Packet downloaded",
+    "share": "Share link created",
+    "shared_download": "Downloaded via share link",
+}
+
+
+def _describe_audit(row: dict) -> str:
+    action = row.get("action") or ""
+    details = row.get("details") or {}
+    if isinstance(details, str):
+        try:
+            details = json.loads(details)
+        except Exception:
+            details = {}
+    label = _AUDIT_ACTION_LABELS.get(action, _hum(action))
+    if action == "message":
+        return label.format(role=_hum(details.get("role", "")) or "—")
+    if action == "generate_packet":
+        return label.format(kind=(details.get("kind") or "").upper() or "—")
+    return label
+
+
 def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: list[str],
-                company_name: str | None = None) -> str:
+                company_name: str | None = None, audit_log: list[dict] | None = None) -> str:
     index = corpus.get("index", {})
     # Footnote-style numbering: attorneys see "[1]", "[2]" inline, not raw
     # "incident:9c2a1e40-..." record IDs — the evidence index below maps
@@ -518,6 +552,19 @@ def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: lis
     notes = "".join(f"<li>{_esc(n)}</li>" for n in corpus.get("notes") or [])
     notes_block = f"<h2>Scope notes</h2><ul>{notes}</ul>" if notes else ""
 
+    custody_rows = "".join(
+        f"<tr><td>{_fmt_dt(r.get('created_at'))}</td><td>{_esc(r.get('user_email') or 'System')}</td>"
+        f"<td>{_esc(_describe_audit(r))}</td></tr>"
+        for r in (audit_log or [])
+    ) or "<tr><td colspan='3'>No prior activity recorded.</td></tr>"
+    custody_block = f"""
+      <h2>Chain of custody</h2>
+      <p style="font-size:9px;color:#888;margin:0 0 4px">Activity on this matter through the
+      time of this export. Every packet generation, download, and share is logged.</p>
+      <table><thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead>
+      <tbody>{custody_rows}</tbody></table>
+    """
+
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     start_s, end_s = _esc(matter.get("evidence_start")), _esc(matter.get("evidence_end"))
@@ -567,6 +614,8 @@ def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: lis
 
       {notes_block}
       {appendix}
+
+      {custody_block}
 
       <div class="foot">{_esc(DISCLAIMER)}</div>
     </body></html>"""
@@ -622,9 +671,10 @@ async def _render_pdf(html_str: str) -> bytes:
 
 
 async def _collect_source_files(conn, cited: list[str]) -> list[tuple[str, str]]:
-    """(zip_arcname, storage_path) for the uploaded documents behind cited IR/ER records."""
+    """(zip_arcname, storage_path) for the uploaded documents behind cited records."""
     inc_ids = [c.split(":", 1)[1] for c in cited if c.startswith("incident:")]
     er_ids = [c.split(":", 1)[1] for c in cited if c.startswith("er_case:")]
+    disc_ids = [c.split(":", 1)[1] for c in cited if c.startswith("discipline:")]
     files: list[tuple[str, str]] = []
     if inc_ids:
         rows = await conn.fetch(
@@ -640,6 +690,16 @@ async def _collect_source_files(conn, cited: list[str]) -> list[tuple[str, str]]
             er_ids,
         )
         files += [(f"er-cases/{r['case_id']}/{r['filename']}", r["file_path"]) for r in rows]
+    if disc_ids:
+        # The signed warning itself — strongest documentary evidence behind a
+        # discipline citation. Only present for physical_uploaded / e-signed
+        # outcomes; NULL for the rest, which is fine — this just adds nothing.
+        rows = await conn.fetch(
+            "SELECT id, signed_pdf_storage_path FROM progressive_discipline "
+            "WHERE id = ANY($1::uuid[]) AND signed_pdf_storage_path IS NOT NULL",
+            disc_ids,
+        )
+        files += [(f"discipline/{r['id']}/signed-document.pdf", r["signed_pdf_storage_path"]) for r in rows]
     return files
 
 
@@ -669,6 +729,21 @@ async def _safe_detail(coro):
     except Exception as e:  # noqa: BLE001
         logger.warning("legal_defense: appendix detail failed: %s", e)
         return None
+
+
+async def _fetch_audit_log(conn, matter_id) -> list[dict]:
+    """Chain-of-custody rows through generation time — the current
+    generate_packet audit row is written by the route *after* this build
+    returns, so it won't include itself; the next regeneration shows it."""
+    rows = await conn.fetch(
+        """SELECT al.action, al.details, al.created_at, u.email AS user_email
+             FROM legal_matter_audit_log al
+             LEFT JOIN users u ON u.id = al.user_id
+            WHERE al.matter_id = $1
+            ORDER BY al.created_at""",
+        matter_id,
+    )
+    return [dict(r) for r in rows]
 
 
 # --------------------------------------------------------------------------- #
@@ -838,7 +913,9 @@ async def build_defense_packet(conn, matter: dict, corpus: dict, memo: dict,
             if d:
                 details[c] = ("accommodation", d)
 
-    pdf = await _render_pdf(_memo_html(matter, corpus, memo, details, cited, company_name))
+    audit_log = await _safe_detail(_fetch_audit_log(conn, matter["id"])) or []
+
+    pdf = await _render_pdf(_memo_html(matter, corpus, memo, details, cited, company_name, audit_log))
 
     files = await _collect_source_files(conn, cited)
     fetched, skipped = [], []

@@ -288,10 +288,21 @@ function MatterDetail({ matter, evidence, onRefresh, toast }: {
   )
 }
 
+function shareStatusText(share: Packet['share']): string | null {
+  if (!share) return null
+  if (share.revoked) return 'Link revoked'
+  if (share.expires_at && new Date(share.expires_at) < new Date()) return 'Link expired'
+  const who = share.recipient_email ? ` with ${share.recipient_email}` : ''
+  if (share.download_count === 0) return `Shared${who} — not yet opened`
+  const last = share.last_downloaded_at ? new Date(share.last_downloaded_at).toLocaleDateString() : null
+  return `Shared${who} — opened ${share.download_count}×${last ? ` (last ${last})` : ''}`
+}
+
 function PacketRow({ matterId, packet, toast, onShare }: {
   matterId: string; packet: Packet; onShare: () => void
   toast: ReturnType<typeof useToast>['toast']
 }) {
+  const shareText = shareStatusText(packet.share)
   return (
     <div className="rounded-lg border border-white/[0.06] px-2.5 py-2">
       <div className="flex items-center gap-2 text-sm text-zinc-200">
@@ -308,6 +319,7 @@ function PacketRow({ matterId, packet, toast, onShare }: {
           <Share2 className="h-3.5 w-3.5" /> Send to counsel
         </Button>
       </div>
+      {shareText && <div className="mt-1.5 text-[11px] text-zinc-500">{shareText}</div>}
     </div>
   )
 }
