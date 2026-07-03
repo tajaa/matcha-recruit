@@ -4054,7 +4054,7 @@ async def send_message_stream(
                 canned = "Are you looking for analysis or something else?"
                 assistant_msg = await doc_svc.add_message(thread_id, "assistant", canned)
                 try:
-                    from .thread_ws import thread_manager
+                    from app.matcha.routes.thread_ws import thread_manager
                     asyncio.create_task(
                         thread_manager.broadcast_new_message(
                             str(thread_id),
@@ -4243,7 +4243,7 @@ async def send_message_stream(
             # a CancelledError inside the lock doesn't kill the SSE generator before
             # the complete event is sent.
             try:
-                from .thread_ws import thread_manager
+                from app.matcha.routes.thread_ws import thread_manager
                 user_msg_dict = _row_to_message(user_msg).model_dump(mode="json")
                 assistant_msg_dict = _row_to_message(assistant_msg).model_dump(mode="json")
                 asyncio.create_task(
@@ -5013,7 +5013,7 @@ async def list_tasks(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Combined task board: auto-populated items + manual tasks + dismissals."""
-    from .dashboard import _UPCOMING_SOURCES, _apply_company_filter, _severity_from_days, UpcomingItem
+    from app.matcha.routes.dashboard import _UPCOMING_SOURCES, _apply_company_filter, _severity_from_days, UpcomingItem
     from datetime import date as _date, timedelta as _td
 
     company_id = await get_client_company_id(current_user)
