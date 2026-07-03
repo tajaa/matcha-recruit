@@ -96,6 +96,15 @@ def _dt(v) -> str:
     return _fmt_dt(v)
 
 
+def _hum(s) -> str:
+    """Humanize a raw db enum/snake_case value for display — 'in_review' ->
+    'In Review'. Feeds both the AI corpus text and the PDF, so the model's
+    own summaries read cleanly too, not just the deterministic rendering."""
+    if not s:
+        return ""
+    return str(s).replace("_", " ").replace("-", " ").strip().title()
+
+
 async def _src_incidents(conn, company_id, start, end) -> list[dict]:
     rows = await conn.fetch(
         """
@@ -111,7 +120,7 @@ async def _src_incidents(conn, company_id, start, end) -> list[dict]:
     return [{
         "cid": f"incident:{r['id']}",
         "ref": r["incident_number"],
-        "summary": f"{r['title']} — type {r['incident_type']}, severity {r['severity']}, status {r['status']}",
+        "summary": f"{r['title']} — type {_hum(r['incident_type'])}, severity {_hum(r['severity'])}, status {_hum(r['status'])}",
         "when": _dt(r["occurred_at"]),
     } for r in rows]
 
@@ -131,8 +140,8 @@ async def _src_er_cases(conn, company_id, start, end) -> list[dict]:
     return [{
         "cid": f"er_case:{r['id']}",
         "ref": r["case_number"],
-        "summary": f"{r['title']} — {r['category']}, status {r['status']}"
-                   + (f", outcome {r['outcome']}" if r["outcome"] else ""),
+        "summary": f"{r['title']} — {_hum(r['category'])}, status {_hum(r['status'])}"
+                   + (f", outcome {_hum(r['outcome'])}" if r["outcome"] else ""),
         "when": _dt(r["created_at"]),
     } for r in rows]
 
@@ -154,7 +163,7 @@ async def _src_compliance(conn, company_id, start, end) -> list[dict]:
     )
     return [{
         "cid": f"compliance_req:{r['id']}",
-        "ref": r["category"],
+        "ref": _hum(r["category"]),
         "summary": f"{r['title']}"
                    + (f" = {r['current_value']}" if r["current_value"] else "")
                    + (f" ({r['jurisdiction_name']})" if r["jurisdiction_name"] else "")
@@ -177,11 +186,11 @@ async def _src_discipline(conn, company_id, start, end) -> list[dict]:
     )
     return [{
         "cid": f"discipline:{r['id']}",
-        "ref": r["discipline_type"],
-        "summary": f"{r['discipline_type']}"
-                   + (f" for {r['infraction_type']}" if r["infraction_type"] else "")
-                   + (f", severity {r['severity']}" if r["severity"] else "")
-                   + f", status {r['status']}",
+        "ref": _hum(r["discipline_type"]),
+        "summary": f"{_hum(r['discipline_type'])}"
+                   + (f" for {_hum(r['infraction_type'])}" if r["infraction_type"] else "")
+                   + (f", severity {_hum(r['severity'])}" if r["severity"] else "")
+                   + f", status {_hum(r['status'])}",
         "when": _dt(r["issued_date"]),
     } for r in rows]
 
@@ -200,8 +209,8 @@ async def _src_training(conn, company_id, start, end) -> list[dict]:
     )
     return [{
         "cid": f"training:{r['id']}",
-        "ref": r["training_type"] or "training",
-        "summary": f"{r['title']} — status {r['status']}"
+        "ref": _hum(r["training_type"]) or "Training",
+        "summary": f"{r['title']} — status {_hum(r['status'])}"
                    + (f", expires {_dt(r['expiration_date'])}" if r["expiration_date"] else ""),
         "when": _dt(r["completed_date"]),
     } for r in rows]
@@ -243,7 +252,7 @@ async def _src_accommodations(conn, company_id, start, end) -> list[dict]:
     return [{
         "cid": f"accommodation:{r['id']}",
         "ref": r["case_number"],
-        "summary": f"{r['title']} — {r['disability_category']}, status {r['status']}",
+        "summary": f"{r['title']} — {_hum(r['disability_category'])}, status {_hum(r['status'])}",
         "when": _dt(r["created_at"]),
     } for r in rows]
 
@@ -441,10 +450,17 @@ _MEMO_CSS_EXTRA = """
   .letterhead .company { font-size:13px; font-weight:600; color:#1a1a2e; }
   .letterhead .meta { font-size:9px; color:#888; text-align:right; line-height:1.5; }
   h1 { border:none; }
-  tr, .cell, .narr { page-break-inside: avoid; }
+  tr, .cell, .narr, .obs { page-break-inside: avoid; }
   h2 { page-break-after: avoid; }
   .appendix-section { page-break-before: always; }
   sup.cite { color:#1f3a8a; font-weight:700; }
+  .obs { display:flex; gap:10px; margin:8px 0; padding:8px 10px;
+    border:1px solid #e5e7eb; border-radius:8px; }
+  .obs-n { flex-shrink:0; width:18px; height:18px; border-radius:50%;
+    background:#1f3a8a; color:#fff; font-size:9px; font-weight:700;
+    display:flex; align-items:center; justify-content:center; }
+  .obs-point { font-weight:600; margin-bottom:2px; }
+  .obs ul { margin:2px 0 0; }
 """
 
 
@@ -465,14 +481,15 @@ def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: lis
     narrative = _esc(memo.get("assistant_text") or "") or "—"
 
     points = ""
-    for item in memo.get("evidence_map") or []:
+    for n, item in enumerate(memo.get("evidence_map") or [], start=1):
         cites = "".join(
             f"<li><sup class='cite'>[{fn.get(c, '?')}]</sup> {_esc(index.get(c, {}).get('summary', ''))} "
             f"<span style='color:#888'>({_esc(index.get(c, {}).get('when', ''))})</span></li>"
             for c in (item.get("cited_ids") or [])
         )
-        points += (f"<div style='margin:6px 0'><div>{_esc(item.get('point'))}</div>"
-                   f"<ul>{cites or '<li>—</li>'}</ul></div>")
+        points += (f"<div class='obs'><div class='obs-n'>{n}</div>"
+                   f"<div class='obs-body'><div class='obs-point'>{_esc(item.get('point'))}</div>"
+                   f"<ul>{cites or '<li>—</li>'}</ul></div></div>")
     points = points or "<p>No grounded observations were recorded.</p>"
 
     oq = "".join(f"<li>{_esc(q)}</li>" for q in (memo.get("open_questions") or []))
@@ -494,15 +511,24 @@ def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: lis
         if not kind_detail:
             continue
         kind, d = kind_detail
-        if kind == "incident":
-            appendix += f"<div class='appendix-section'>{_incident_section(c, d)}</div>"
-        elif kind == "er_case":
-            appendix += f"<div class='appendix-section'>{_er_section(c, d)}</div>"
+        section_fn = _APPENDIX_SECTIONS.get(kind)
+        if section_fn:
+            appendix += f"<div class='appendix-section'>{section_fn(c, d)}</div>"
 
     notes = "".join(f"<li>{_esc(n)}</li>" for n in corpus.get("notes") or [])
     notes_block = f"<h2>Scope notes</h2><ul>{notes}</ul>" if notes else ""
 
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    start_s, end_s = _esc(matter.get("evidence_start")), _esc(matter.get("evidence_end"))
+    if start_s == "—" and end_s == "—":
+        window = "Not specified — all records in scope"
+    elif start_s == "—":
+        window = f"Through {end_s}"
+    elif end_s == "—":
+        window = f"From {start_s}"
+    else:
+        window = f"{start_s} – {end_s}"
 
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8">
       <style>{_PDF_CSS}{_MEMO_CSS_EXTRA}</style></head><body>
@@ -523,7 +549,7 @@ def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: lis
       <table>
         <tr><th>Allegation / claim</th><td>{_esc(matter.get('allegation'))}</td></tr>
         <tr><th>Factual context provided</th><td>{_esc(matter.get('defense_theory'))}</td></tr>
-        <tr><th>Evidence window</th><td>{_esc(matter.get('evidence_start'))} – {_esc(matter.get('evidence_end'))}</td></tr>
+        <tr><th>Evidence window</th><td>{window}</td></tr>
       </table>
 
       <h2>Summary of the record</h2>
@@ -546,18 +572,23 @@ def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: lis
     </body></html>"""
 
 
+def _hd(v) -> str:
+    """Humanized-or-dash: same "—" convention as ``_esc`` for empty values."""
+    return _esc(_hum(v)) if v else "—"
+
+
 def _incident_section(cid: str, data: dict) -> str:
     inc = data.get("incident", {})
     tl = "".join(
-        f"<tr><td>{_fmt_dt(t['created_at'])}</td><td>{_esc(t['action'])}</td></tr>"
+        f"<tr><td>{_fmt_dt(t['created_at'])}</td><td>{_hd(t['action'])}</td></tr>"
         for t in data.get("timeline", [])
     ) or "<tr><td colspan='2'>No audit-trail entries.</td></tr>"
     return f"""
       <h2>Appendix — Incident {_esc(inc.get('incident_number'))}</h2>
       <div class="grid">
-        <div class="cell"><div class="l">Type</div><div class="v">{_esc(inc.get('incident_type'))}</div></div>
-        <div class="cell"><div class="l">Severity</div><div class="v">{_esc(inc.get('severity'))}</div></div>
-        <div class="cell"><div class="l">Status</div><div class="v">{_esc(inc.get('status'))}</div></div>
+        <div class="cell"><div class="l">Type</div><div class="v">{_hd(inc.get('incident_type'))}</div></div>
+        <div class="cell"><div class="l">Severity</div><div class="v">{_hd(inc.get('severity'))}</div></div>
+        <div class="cell"><div class="l">Status</div><div class="v">{_hd(inc.get('status'))}</div></div>
         <div class="cell"><div class="l">Occurred</div><div class="v">{_fmt_dt(inc.get('occurred_at'))}</div></div>
       </div>
       <div class="narr">{_esc(inc.get('description'))}</div>
@@ -568,15 +599,15 @@ def _incident_section(cid: str, data: dict) -> str:
 def _er_section(cid: str, data: dict) -> str:
     case = data.get("case", {})
     notes = "".join(
-        f"<tr><td>{_fmt_dt(n['created_at'])}</td><td>{_esc(n['note_type'])}</td><td>{_esc(n['content'])}</td></tr>"
+        f"<tr><td>{_fmt_dt(n['created_at'])}</td><td>{_hd(n['note_type'])}</td><td>{_esc(n['content'])}</td></tr>"
         for n in data.get("notes", [])
     ) or "<tr><td colspan='3'>No case notes on file.</td></tr>"
     return f"""
       <h2>Appendix — ER case {_esc(case.get('case_number'))}</h2>
       <div class="grid">
-        <div class="cell"><div class="l">Category</div><div class="v">{_esc(case.get('category'))}</div></div>
-        <div class="cell"><div class="l">Status</div><div class="v">{_esc(case.get('status'))}</div></div>
-        <div class="cell"><div class="l">Outcome</div><div class="v">{_esc(case.get('outcome'))}</div></div>
+        <div class="cell"><div class="l">Category</div><div class="v">{_hd(case.get('category'))}</div></div>
+        <div class="cell"><div class="l">Status</div><div class="v">{_hd(case.get('status'))}</div></div>
+        <div class="cell"><div class="l">Outcome</div><div class="v">{_hd(case.get('outcome'))}</div></div>
       </div>
       <div class="narr">{_esc(case.get('description'))}</div>
       <table><thead><tr><th>When</th><th>Type</th><th>Entry</th></tr></thead><tbody>{notes}</tbody></table>
@@ -640,6 +671,137 @@ async def _safe_detail(coro):
         return None
 
 
+# --------------------------------------------------------------------------- #
+# Full-detail fetchers for the appendix — one query per cited record, run only
+# for records the memo actually cites (never the whole corpus). Mirrors the
+# incident/ER-case pattern (claims_readiness.build_incident_packet /
+# build_er_packet) for the source types owned directly by this module.
+# --------------------------------------------------------------------------- #
+
+async def _detail_discipline(conn, disc_id: str, company_id) -> dict | None:
+    row = await conn.fetchrow(
+        """SELECT pd.*, e.first_name, e.last_name
+             FROM progressive_discipline pd
+             LEFT JOIN employees e ON e.id = pd.employee_id
+            WHERE pd.id = $1 AND pd.company_id = $2""",
+        disc_id, company_id,
+    )
+    return dict(row) if row else None
+
+
+async def _detail_compliance(conn, req_id: str, company_id) -> dict | None:
+    row = await conn.fetchrow(
+        """SELECT cr.*, bl.name AS location_name
+             FROM compliance_requirements cr
+             JOIN business_locations bl ON bl.id = cr.location_id
+            WHERE cr.id = $1 AND bl.company_id = $2""",
+        req_id, company_id,
+    )
+    return dict(row) if row else None
+
+
+async def _detail_training(conn, tr_id: str, company_id) -> dict | None:
+    row = await conn.fetchrow(
+        """SELECT tr.*, e.first_name, e.last_name
+             FROM training_records tr
+             LEFT JOIN employees e ON e.id = tr.employee_id
+            WHERE tr.id = $1 AND tr.company_id = $2""",
+        tr_id, company_id,
+    )
+    return dict(row) if row else None
+
+
+async def _detail_accommodation(conn, acc_id: str, company_id) -> dict | None:
+    row = await conn.fetchrow(
+        """SELECT ac.*, e.first_name, e.last_name
+             FROM accommodation_cases ac
+             LEFT JOIN employees e ON e.id = ac.employee_id
+            WHERE ac.id = $1 AND ac.org_id = $2""",
+        acc_id, company_id,
+    )
+    return dict(row) if row else None
+
+
+def _emp_name(d: dict) -> str:
+    name = f"{d.get('first_name') or ''} {d.get('last_name') or ''}".strip()
+    return name or "—"
+
+
+def _discipline_section(cid: str, d: dict) -> str:
+    return f"""
+      <h2>Appendix — Discipline record ({_hd(d.get('discipline_type'))})</h2>
+      <div class="grid">
+        <div class="cell"><div class="l">Employee</div><div class="v">{_esc(_emp_name(d))}</div></div>
+        <div class="cell"><div class="l">Infraction</div><div class="v">{_hd(d.get('infraction_type'))}</div></div>
+        <div class="cell"><div class="l">Severity</div><div class="v">{_hd(d.get('severity'))}</div></div>
+        <div class="cell"><div class="l">Status</div><div class="v">{_hd(d.get('status'))}</div></div>
+        <div class="cell"><div class="l">Issued</div><div class="v">{_fmt_dt(d.get('issued_date'))}</div></div>
+        <div class="cell"><div class="l">Review date</div><div class="v">{_fmt_dt(d.get('review_date'))}</div></div>
+      </div>
+      <div class="narr">{_esc(d.get('description'))}</div>
+      {f"<div class='narr'><b>Expected improvement.</b> {_esc(d.get('expected_improvement'))}</div>" if d.get('expected_improvement') else ""}
+      {f"<div class='narr'><b>Outcome.</b> {_esc(d.get('outcome_notes'))}</div>" if d.get('outcome_notes') else ""}
+    """
+
+
+def _compliance_section(cid: str, d: dict) -> str:
+    return f"""
+      <h2>Appendix — Compliance requirement ({_esc(d.get('title'))})</h2>
+      <div class="grid">
+        <div class="cell"><div class="l">Category</div><div class="v">{_hd(d.get('category'))}</div></div>
+        <div class="cell"><div class="l">Jurisdiction</div><div class="v">{_esc(d.get('jurisdiction_name'))}</div></div>
+        <div class="cell"><div class="l">Location</div><div class="v">{_esc(d.get('location_name'))}</div></div>
+        <div class="cell"><div class="l">Current value</div><div class="v">{_esc(d.get('current_value'))}</div></div>
+        <div class="cell"><div class="l">Effective</div><div class="v">{_fmt_dt(d.get('effective_date'))}</div></div>
+        <div class="cell"><div class="l">Source</div><div class="v">{_esc(d.get('source_name'))}</div></div>
+      </div>
+      {f"<div class='narr'>{_esc(d.get('description'))}</div>" if d.get('description') else ""}
+    """
+
+
+def _training_section(cid: str, d: dict) -> str:
+    return f"""
+      <h2>Appendix — Training ({_esc(d.get('title'))})</h2>
+      <div class="grid">
+        <div class="cell"><div class="l">Employee</div><div class="v">{_esc(_emp_name(d))}</div></div>
+        <div class="cell"><div class="l">Type</div><div class="v">{_hd(d.get('training_type'))}</div></div>
+        <div class="cell"><div class="l">Status</div><div class="v">{_hd(d.get('status'))}</div></div>
+        <div class="cell"><div class="l">Assigned</div><div class="v">{_fmt_dt(d.get('assigned_date'))}</div></div>
+        <div class="cell"><div class="l">Due</div><div class="v">{_fmt_dt(d.get('due_date'))}</div></div>
+        <div class="cell"><div class="l">Completed</div><div class="v">{_fmt_dt(d.get('completed_date'))}</div></div>
+        <div class="cell"><div class="l">Expires</div><div class="v">{_fmt_dt(d.get('expiration_date'))}</div></div>
+        <div class="cell"><div class="l">Score</div><div class="v">{_esc(d.get('score'))}</div></div>
+      </div>
+      {f"<div class='narr'>{_esc(d.get('notes'))}</div>" if d.get('notes') else ""}
+    """
+
+
+def _accommodation_section(cid: str, d: dict) -> str:
+    return f"""
+      <h2>Appendix — Accommodation case ({_esc(d.get('case_number'))})</h2>
+      <div class="grid">
+        <div class="cell"><div class="l">Employee</div><div class="v">{_esc(_emp_name(d))}</div></div>
+        <div class="cell"><div class="l">Category</div><div class="v">{_hd(d.get('disability_category'))}</div></div>
+        <div class="cell"><div class="l">Status</div><div class="v">{_hd(d.get('status'))}</div></div>
+        <div class="cell"><div class="l">Closed</div><div class="v">{_fmt_dt(d.get('closed_at'))}</div></div>
+      </div>
+      <div class="narr">{_esc(d.get('description'))}</div>
+      {f"<div class='narr'><b>Requested accommodation.</b> {_esc(d.get('requested_accommodation'))}</div>" if d.get('requested_accommodation') else ""}
+      {f"<div class='narr'><b>Approved accommodation.</b> {_esc(d.get('approved_accommodation'))}</div>" if d.get('approved_accommodation') else ""}
+      {f"<div class='narr'><b>Denial reason.</b> {_esc(d.get('denial_reason'))}</div>" if d.get('denial_reason') else ""}
+    """
+
+
+_APPENDIX_SECTIONS = {
+    "incident": lambda c, d: _incident_section(c, d),
+    "er_case": lambda c, d: _er_section(c, d),
+    "discipline": _discipline_section,
+    "compliance_req": _compliance_section,
+    "training": _training_section,
+    "accommodation": _accommodation_section,
+}
+
+
 async def build_defense_packet(conn, matter: dict, corpus: dict, memo: dict,
                                 company_name: str | None = None) -> dict:
     """Render the memo PDF and (when source docs exist) the ZIP bundle.
@@ -659,6 +821,22 @@ async def build_defense_packet(conn, matter: dict, corpus: dict, memo: dict,
             d = await _safe_detail(build_er_packet(conn, UUID(c.split(":", 1)[1]), company_id))
             if d:
                 details[c] = ("er_case", d)
+        elif c.startswith("discipline:"):
+            d = await _safe_detail(_detail_discipline(conn, c.split(":", 1)[1], company_id))
+            if d:
+                details[c] = ("discipline", d)
+        elif c.startswith("compliance_req:"):
+            d = await _safe_detail(_detail_compliance(conn, c.split(":", 1)[1], company_id))
+            if d:
+                details[c] = ("compliance_req", d)
+        elif c.startswith("training:"):
+            d = await _safe_detail(_detail_training(conn, c.split(":", 1)[1], company_id))
+            if d:
+                details[c] = ("training", d)
+        elif c.startswith("accommodation:"):
+            d = await _safe_detail(_detail_accommodation(conn, c.split(":", 1)[1], company_id))
+            if d:
+                details[c] = ("accommodation", d)
 
     pdf = await _render_pdf(_memo_html(matter, corpus, memo, details, cited, company_name))
 
@@ -672,5 +850,8 @@ async def build_defense_packet(conn, matter: dict, corpus: dict, memo: dict,
             logger.warning("legal_defense: skip source file %s: %s", arc, e)
             skipped.append(f"{arc} ({e})")
 
-    zip_bytes = await asyncio.to_thread(_build_zip, pdf, fetched, skipped, matter) if (fetched or skipped) else None
+    # Always build the ZIP (even with zero attachable source docs — the
+    # manifest just says so) so requesting "zip"/"both" never silently comes
+    # back with only a PDF and no explanation.
+    zip_bytes = await asyncio.to_thread(_build_zip, pdf, fetched, skipped, matter)
     return {"pdf": pdf, "zip": zip_bytes, "citations": cited}

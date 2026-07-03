@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  Scale, Plus, Send, FileText, FileArchive, Share2, Loader2, ShieldAlert, X, Download,
+  Scale, Plus, Send, FileText, FileArchive, Share2, Loader2, ShieldAlert, X, Download, ChevronDown,
 } from 'lucide-react'
 import { Card, Button, Input, Textarea, Select, Toggle, Badge, Modal, useToast } from '../../components/ui'
 import {
@@ -110,6 +110,7 @@ function MatterDetail({ matter, evidence, onRefresh, toast }: {
   const [sending, setSending] = useState(false)
   const [genKind, setGenKind] = useState<'pdf' | 'zip' | 'both' | null>(null)
   const [shareFor, setShareFor] = useState<Packet | null>(null)
+  const [showOlderPackets, setShowOlderPackets] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { setMessages(matter.messages ?? []) }, [matter.id, matter.messages])
@@ -141,8 +142,14 @@ function MatterDetail({ matter, evidence, onRefresh, toast }: {
     setGenKind(kind)
     try {
       const { packets } = await generatePacket(matter.id, kind)
-      toast(`Generated ${packets.length} file(s).`, 'success')
+      toast(`Generated ${packets.length} file(s) — downloading…`, 'success')
       onRefresh()
+      // Generating doesn't imply the user will hunt for the new row in the
+      // side panel — deliver what they asked for immediately.
+      for (const p of packets) {
+        await downloadPacket(matter.id, p).catch((e) =>
+          toast(e instanceof Error ? e.message : `Download failed for ${p.filename}`, 'error'))
+      }
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Generation failed', 'error')
     } finally {
@@ -151,6 +158,20 @@ function MatterDetail({ matter, evidence, onRefresh, toast }: {
   }
 
   const hasAssistant = messages.some((m) => m.role === 'assistant')
+
+  // Packets are already ordered newest-first by the backend. Regenerating
+  // creates a new row each time (old share links must keep working — see
+  // downloadPacket/sharePacket), so a matter worked on over several sessions
+  // accumulates a long tail. Surface only the latest PDF/ZIP; older ones are
+  // one click away instead of cluttering the panel by default.
+  const packets = matter.packets ?? []
+  const latestPackets: Packet[] = []
+  const seenKinds = new Set<string>()
+  for (const p of packets) {
+    if (!seenKinds.has(p.kind)) { seenKinds.add(p.kind); latestPackets.push(p) }
+  }
+  const latestIds = new Set(latestPackets.map((p) => p.id))
+  const olderPackets = packets.filter((p) => !latestIds.has(p.id))
 
   return (
     <div className="flex h-full gap-4">
@@ -232,34 +253,61 @@ function MatterDetail({ matter, evidence, onRefresh, toast }: {
           )}
         </Card>
 
-        {(matter.packets?.length ?? 0) > 0 && (
+        {packets.length > 0 && (
           <Card>
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Packets</div>
             <div className="space-y-2">
-              {matter.packets!.map((p) => (
-                <div key={p.id} className="rounded-lg border border-white/[0.06] px-2.5 py-2">
-                  <div className="flex items-center gap-2 text-sm text-zinc-200">
-                    {p.kind === 'zip' ? <FileArchive className="h-4 w-4 text-zinc-400" /> : <FileText className="h-4 w-4 text-zinc-400" />}
-                    <span className="uppercase">{p.kind}</span>
-                    <span className="ml-auto text-[11px] text-zinc-500">{new Date(p.generated_at).toLocaleDateString()}</span>
-                  </div>
-                  <div className="mt-1.5 flex gap-1.5">
-                    <Button size="sm" variant="secondary" onClick={() => void downloadPacket(matter.id, p).catch((e) =>
-                      toast(e instanceof Error ? e.message : 'Download failed', 'error'))}>
-                      <Download className="h-3.5 w-3.5" /> Download
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => setShareFor(p)}>
-                      <Share2 className="h-3.5 w-3.5" /> Send to counsel
-                    </Button>
-                  </div>
-                </div>
+              {latestPackets.map((p) => (
+                <PacketRow key={p.id} matterId={matter.id} packet={p} toast={toast} onShare={() => setShareFor(p)} />
               ))}
             </div>
+            {olderPackets.length > 0 && (
+              <div className="mt-2">
+                <button
+                  className="flex w-full items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-300"
+                  onClick={() => setShowOlderPackets((v) => !v)}
+                >
+                  <ChevronDown className={`h-3 w-3 transition-transform ${showOlderPackets ? 'rotate-180' : ''}`} />
+                  {showOlderPackets ? 'Hide' : `${olderPackets.length} earlier version${olderPackets.length === 1 ? '' : 's'}`}
+                </button>
+                {showOlderPackets && (
+                  <div className="mt-2 space-y-2 opacity-70">
+                    {olderPackets.map((p) => (
+                      <PacketRow key={p.id} matterId={matter.id} packet={p} toast={toast} onShare={() => setShareFor(p)} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </Card>
         )}
       </div>
 
       {shareFor && <ShareModal matterId={matter.id} packet={shareFor} onClose={() => setShareFor(null)} toast={toast} />}
+    </div>
+  )
+}
+
+function PacketRow({ matterId, packet, toast, onShare }: {
+  matterId: string; packet: Packet; onShare: () => void
+  toast: ReturnType<typeof useToast>['toast']
+}) {
+  return (
+    <div className="rounded-lg border border-white/[0.06] px-2.5 py-2">
+      <div className="flex items-center gap-2 text-sm text-zinc-200">
+        {packet.kind === 'zip' ? <FileArchive className="h-4 w-4 text-zinc-400" /> : <FileText className="h-4 w-4 text-zinc-400" />}
+        <span className="uppercase">{packet.kind}</span>
+        <span className="ml-auto text-[11px] text-zinc-500">{new Date(packet.generated_at).toLocaleDateString()}</span>
+      </div>
+      <div className="mt-1.5 flex gap-1.5">
+        <Button size="sm" variant="secondary" onClick={() => void downloadPacket(matterId, packet).catch((e) =>
+          toast(e instanceof Error ? e.message : 'Download failed', 'error'))}>
+          <Download className="h-3.5 w-3.5" /> Download
+        </Button>
+        <Button size="sm" variant="secondary" onClick={onShare}>
+          <Share2 className="h-3.5 w-3.5" /> Send to counsel
+        </Button>
+      </div>
     </div>
   )
 }
