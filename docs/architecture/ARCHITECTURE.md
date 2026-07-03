@@ -123,17 +123,17 @@ docker compose up gummfit-backend gummfit-frontend redis
 
 ```bash
 # Matcha only (default)
-./build-and-push.sh
+./scripts/build-and-push.sh
 
 # Gummfit only
-./build-and-push.sh --gummfit
+./scripts/build-and-push.sh --gummfit
 
 # Everything
-./build-and-push.sh --all
+./scripts/build-and-push.sh --all
 
 # Individual services
-./build-and-push.sh --gummfit-backend
-./build-and-push.sh --gummfit-frontend
+./scripts/build-and-push.sh --gummfit-backend
+./scripts/build-and-push.sh --gummfit-frontend
 ```
 
 ECR repositories: `matcha-backend`, `matcha-frontend`, `gummfit-backend`, `gummfit-frontend`.

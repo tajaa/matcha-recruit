@@ -46,11 +46,11 @@ Sidebar dispatch in `client/src/components/TenantSidebar.tsx`. Tier-check helper
 - Per-company access via `companies.enabled_features` JSONB. When a user URL-hops to a feature they don't have, `<FeatureGate>` (`client/src/components/FeatureGate.tsx`) renders `<UpgradeUpsellCard>` instead of a 403.
 
 ### Matcha-work — collaborative AI workspace
-**Naming convention**: the **web** workspace surface (this section) is referred to as **matcha-work**; the **macOS desktop** workspace is referred to as **werk** (`desktop/Werk/`). Both share the same backend (`server/app/matcha/routes/matcha_work.py`) and `mw_*` tables — only the client differs. When asked to ship a feature, confirm which surface is meant before editing files.
+**Naming convention**: the **web** workspace surface (this section) is referred to as **matcha-work**; the **macOS desktop** workspace is referred to as **werk** (`platforms/desktop/Werk/`). Both share the same backend (`server/app/matcha/routes/matcha_work.py`) and `mw_*` tables — only the client differs. When asked to ship a feature, confirm which surface is meant before editing files.
 
 - Surface: `client/src/pages/work/*` + `client/src/layouts/WorkLayout.tsx`. Mounted at `/work/*` in `App.tsx`.
 - Backend: `server/app/matcha/routes/matcha_work.py`, `server/app/matcha/services/project_service.py`. Tables prefixed `mw_*`.
-- macOS desktop client (**werk**): `desktop/Werk/` (SwiftUI). Xcode project name is still `Matcha.xcodeproj` and bundle ID `com.ahnimal.matcha` — App Store identity is unchanged; only the working directory and conceptual product name differ. `AppState.isPlusActive` from `Subscription.isPersonalPlus` controls Plus features.
+- macOS desktop client (**werk**): `platforms/desktop/Werk/` (SwiftUI). Xcode project name is still `Matcha.xcodeproj` and bundle ID `com.ahnimal.matcha` — App Store identity is unchanged; only the working directory and conceptual product name differ. `AppState.isPlusActive` from `Subscription.isPersonalPlus` controls Plus features.
 - **Personal mode**: user `role='individual'`. Signup via `BetaRegister.tsx` (`/auth/beta?token=…`) → redirected to `/work`. Stripe sub `matcha_work_personal` ($20/mo) via `POST /api/checkout/personal` (`server/app/matcha/routes/billing.py`).
 - **Business mode**: user `role='client'` inside a Matcha company. Token packs purchased via `POST /api/checkout`. Sidebar entry in `ClientSidebar.tsx` AI group → `/work`.
 - Surfaces inside: projects, threads, channels (real-time WebSocket), inbox (DMs), people/connections, anonymous incident report intake.
@@ -70,10 +70,10 @@ Which frontend pairs with which backend package (don't re-derive this):
 |---|---|---|---|---|
 | **Matcha** (Free / Lite / Essentials / X / Compliance / Pro) | `client/` — main SPA (hey-matcha.com) | `server/app/core/` + `server/app/matcha/` at `/api` | `users` + `companies` (`signup_source`, `enabled_features`) | HR compliance, IR/OSHA, ER, employees, broker risk tooling |
 | **Matcha-work** (web) | `client/src/pages/work/*` at `/work/*` (+ `/werk`, `/werk-lite` route trees over the same pages) | `server/app/matcha/routes/matcha_work.py` | `mw_*` tables | Collaborative AI workspace |
-| **Werk** (macOS) | `desktop/Werk/` (SwiftUI; project still `Matcha.xcodeproj`) | same matcha-work backend | `mw_*` tables | Desktop surface of matcha-work — confirm which surface (web vs desktop) before editing |
+| **Werk** (macOS) | `platforms/desktop/Werk/` (SwiftUI; project still `Matcha.xcodeproj`) | same matcha-work backend | `mw_*` tables | Desktop surface of matcha-work — confirm which surface (web vs desktop) before editing |
 | **Cappe** | inside `client/` — host-routed on gummfit.com (`client/src/utils/cappeHost.ts`, pages in `client/src/pages/cappe/`) | `server/app/cappe/` at `/api/cappe` (+ unprefixed tenant renderer on `*.gummfit.com`) | `cappe_accounts`, JWT `scope=cappe`, `cappe_*` tables (no matcha tenant model) | Website builder + domain reselling |
 | **Tell-Us** | `client/tellus/` — separate Vite app (React 19), served by the same frontend nginx at `/tellus/` | `server/app/tellus/` at `/api/tellus` | `tellus_accounts` (consumer + brand), JWT `scope=tellus`, `tellus_*` tables | Rewards-for-feedback |
-| **MatchaTutor** (iOS) | `ios/` (SwiftUI, dormant) | matcha-work language-tutor endpoints | — | Language tutor |
+| **MatchaTutor** (iOS) | `platforms/ios/` (SwiftUI, dormant) | matcha-work language-tutor endpoints | — | Language tutor |
 | **Ops agent** | `agent-ui/` (Preact; build copied into `server/agent/static/` by `build-and-push.sh`) | `server/agent/` — standalone service :9100 (not part of `app/`) | — | Internal leads/ops console |
 
 Cross-product import rule: `cappe/` and `tellus/` import only from `app/core/*` (shared db pool, email, storage, auth, redis). One documented exception: `tellus/services/geo.py` reuses `matcha.services.property_cat.geocode` (single US Census geocoder — keep its signature stable).
@@ -420,7 +420,7 @@ Quick lookup for frequently-touched code. Saves grepping the same things repeate
 ### Matcha-work (collaborative AI workspace)
 
 - Web surface → `client/src/pages/work/*` + `client/src/layouts/WorkLayout.tsx`
-- macOS desktop client → `desktop/Werk/` (SwiftUI, bundle `com.ahnimal.matcha`)
+- macOS desktop client → `platforms/desktop/Werk/` (SwiftUI, bundle `com.ahnimal.matcha`)
 - Backend routes → `server/app/matcha/routes/matcha_work.py` (8,902 lines — cohesive WS/AI surface, not a split candidate)
 - Project service → `server/app/matcha/services/project_service.py`
 - AI directives → `server/app/matcha/services/matcha_work_ai.py`
@@ -478,6 +478,6 @@ Explore/Grep agents skip generated/built/binary artifacts: `node_modules/`, `cli
 These are legacy artifacts from a discontinued sister product. Do **not** propose changes, cleanup, or modifications to them unless explicitly asked:
 
 - `scripts/dev.sh` — references a `gummfit-agency/` directory that no longer exists. Use `scripts/dev-remote.sh` instead.
-- `build-and-push.sh` — **still in active daily use** by the user for ECR pushes. The gumfit/gumm-local optional targets in it are dead, but the matcha backend/frontend/agent paths are live. Don't propose deleting it.
+- `scripts/build-and-push.sh` — **still in active daily use** by the user for ECR pushes. The gumfit/gumm-local optional targets in it are dead, but the matcha backend/frontend/agent paths are live. Don't propose deleting it.
 - `gumfit_admin` role in `server/app/core/models/auth.py` `UserRole` literal — kept for historical type safety; no live users.
 - Any `Gummfit` / `gumfit` string in scripts, docs, or config.

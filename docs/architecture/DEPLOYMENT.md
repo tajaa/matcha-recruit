@@ -79,7 +79,7 @@ Go to GitHub repo → Settings → Secrets → Actions, add:
 ### 5. Deploy
 Push to `main` branch to trigger GitHub Actions, or manually:
 ```bash
-./build-and-push.sh --deploy
+./scripts/build-and-push.sh --deploy
 ```
 
 ---

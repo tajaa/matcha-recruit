@@ -1,0 +1,762 @@
+#!/bin/bash
+
+################################################################################
+# Matcha-Recruit Build and Push Script
+# Builds and pushes Docker images for backend and frontend to AWS ECR
+# Supports ARM64 architecture for AWS Graviton instances
+################################################################################
+
+set -e  # Exit on error
+set -u  # Exit on undefined variable
+set -o pipefail  # Exit on pipe failure
+
+# Color codes for output
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly MAGENTA='\033[0;35m'
+readonly NC='\033[0m' # No Color
+
+# Script configuration
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+readonly BACKEND_DIR="${REPO_ROOT}/server"
+readonly FRONTEND_DIR="${REPO_ROOT}/client"
+readonly GUMMFIT_BACKEND_DIR="${REPO_ROOT}/gummfit-agency/server"
+readonly GUMMFIT_FRONTEND_DIR="${REPO_ROOT}/gummfit-agency/client"
+readonly GUMMLOCAL_BACKEND_DIR="${REPO_ROOT}/gumm-local/server"
+readonly GUMMLOCAL_FRONTEND_DIR="${REPO_ROOT}/gumm-local/client"
+readonly AGENT_DIR="${REPO_ROOT}/server/agent"
+readonly LANDING_BUILD_VERSION_FILE="${SCRIPT_DIR}/.landing-build-version"
+
+# Default values
+PUSH_TO_ECR=true
+TRIGGER_DEPLOY=false
+PLATFORM="linux/arm64"
+NO_CACHE=false
+BUILD_BACKEND=true
+BUILD_FRONTEND=true
+BUILD_GUMMFIT_BACKEND=false
+BUILD_GUMMFIT_FRONTEND=false
+BUILD_GUMMLOCAL_BACKEND=false
+BUILD_GUMMLOCAL_FRONTEND=false
+BUILD_AGENT=false
+LANDING_BUILD_VERSION="0"
+# Captured once in main() before any build runs. Both build_image and
+# push_image reference this so a commit that lands mid-run (e.g. user
+# bumps a file + commits while the parallel docker builds are still
+# going) cannot cause the push step to look for a tag that was never
+# built. Previously each step called `git rev-parse --short HEAD`
+# independently, which raced when HEAD moved between build and push.
+GIT_SHA=""
+
+################################################################################
+# Helper Functions
+################################################################################
+
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+log_section() {
+    echo -e "\n${MAGENTA}========================================${NC}"
+    echo -e "${MAGENTA}$1${NC}"
+    echo -e "${MAGENTA}========================================${NC}\n"
+}
+
+bump_landing_build_version() {
+    log_section "Bumping Landing Build Version"
+
+    local current_version="0"
+    if [ -f "$LANDING_BUILD_VERSION_FILE" ]; then
+        current_version=$(tr -d '[:space:]' < "$LANDING_BUILD_VERSION_FILE")
+        if [[ ! "$current_version" =~ ^[0-9]+$ ]]; then
+            log_warning "Invalid version value in ${LANDING_BUILD_VERSION_FILE}; resetting to 0"
+            current_version="0"
+        fi
+    fi
+
+    LANDING_BUILD_VERSION=$((current_version + 1))
+    printf "%s\n" "$LANDING_BUILD_VERSION" > "$LANDING_BUILD_VERSION_FILE"
+    log_success "Landing build version set to v${LANDING_BUILD_VERSION}"
+}
+
+# Print usage information
+usage() {
+    cat << EOF
+Usage: $0 [OPTIONS]
+
+Build and push Docker images for Matcha-Recruit backend and frontend.
+
+OPTIONS:
+    --no-push              Build images locally without pushing to ECR
+    --no-cache             Do not use cache when building the image
+    --deploy               Trigger deployment after pushing (sets deploy flag)
+    --platform ARCH        Target platform (default: linux/arm64)
+    --backend-only         Build only the matcha backend image
+    --frontend-only        Build only the matcha frontend image
+    --gummfit-backend      Also build the gummfit backend image
+    --gummfit-frontend     Also build the gummfit frontend image
+    --gummfit              Build both gummfit images (backend + frontend)
+    --gumm-local-backend   Also build the gumm-local backend image
+    --gumm-local-frontend  Also build the gumm-local frontend image
+    --gumm-local           Build both gumm-local images (backend + frontend)
+    --agent                Build the matcha-agent sandbox image
+    --all                  Build all images (matcha + gummfit + gumm-local + agent)
+    -h, --help             Show this help message
+
+ENVIRONMENT VARIABLES (required):
+    AWS_ACCOUNT_ID             AWS account ID for ECR (auto-detected if not set)
+    AWS_REGION                 AWS region (default: us-west-1)
+    ECR_BACKEND_REPO           ECR repository name for matcha backend (default: matcha-backend)
+    ECR_FRONTEND_REPO          ECR repository name for matcha frontend (default: matcha-frontend)
+    ECR_GUMMFIT_BACKEND_REPO   ECR repository name for gummfit backend (default: gummfit-backend)
+    ECR_GUMMFIT_FRONTEND_REPO  ECR repository name for gummfit frontend (default: gummfit-frontend)
+    ECR_GUMMLOCAL_BACKEND_REPO ECR repository name for gumm-local backend (default: gumm-local-backend)
+    ECR_GUMMLOCAL_FRONTEND_REPO ECR repository name for gumm-local frontend (default: gumm-local-frontend)
+    ECR_AGENT_REPO             ECR repository name for matcha-agent (default: matcha-agent)
+
+EXAMPLES:
+    # Build and push matcha to ECR (default)
+    $0
+
+    # Build locally without pushing
+    $0 --no-push
+
+    # Build, push, and trigger deployment
+    $0 --deploy
+
+    # Build only the matcha backend
+    $0 --backend-only
+
+    # Build all services (matcha + gummfit + gumm-local)
+    $0 --all
+
+    # Build only gummfit services
+    $0 --gummfit
+
+    # Build gummfit backend alongside matcha
+    $0 --gummfit-backend
+
+    # Build only gumm-local services
+    $0 --gumm-local
+
+    # Build the agent sandbox image
+    $0 --agent
+EOF
+}
+
+# Parse command line arguments
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --no-push)
+                PUSH_TO_ECR=false
+                shift
+                ;;
+            --no-cache)
+                NO_CACHE=true
+                shift
+                ;;
+            --deploy)
+                TRIGGER_DEPLOY=true
+                shift
+                ;;
+            --backend-only)
+                BUILD_BACKEND=true
+                BUILD_FRONTEND=false
+                shift
+                ;;
+            --frontend-only)
+                BUILD_FRONTEND=true
+                BUILD_BACKEND=false
+                shift
+                ;;
+            --gummfit-backend)
+                BUILD_GUMMFIT_BACKEND=true
+                shift
+                ;;
+            --gummfit-frontend)
+                BUILD_GUMMFIT_FRONTEND=true
+                shift
+                ;;
+            --gummfit)
+                BUILD_BACKEND=false
+                BUILD_FRONTEND=false
+                BUILD_GUMMFIT_BACKEND=true
+                BUILD_GUMMFIT_FRONTEND=true
+                shift
+                ;;
+            --gumm-local-backend)
+                BUILD_GUMMLOCAL_BACKEND=true
+                shift
+                ;;
+            --gumm-local-frontend)
+                BUILD_GUMMLOCAL_FRONTEND=true
+                shift
+                ;;
+            --gumm-local)
+                BUILD_BACKEND=false
+                BUILD_FRONTEND=false
+                BUILD_GUMMLOCAL_BACKEND=true
+                BUILD_GUMMLOCAL_FRONTEND=true
+                shift
+                ;;
+            --agent)
+                BUILD_AGENT=true
+                shift
+                ;;
+            --all)
+                BUILD_BACKEND=true
+                BUILD_FRONTEND=true
+                BUILD_GUMMFIT_BACKEND=true
+                BUILD_GUMMFIT_FRONTEND=true
+                BUILD_GUMMLOCAL_BACKEND=true
+                BUILD_GUMMLOCAL_FRONTEND=true
+                BUILD_AGENT=true
+                shift
+                ;;
+            --platform)
+                PLATFORM="$2"
+                shift 2
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                usage
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# Validate required tools
+validate_tools() {
+    log_section "Validating Required Tools"
+
+    local required_tools=("docker" "aws" "git")
+    local missing_tools=()
+
+    for tool in "${required_tools[@]}"; do
+        if ! command -v "$tool" &> /dev/null; then
+            missing_tools+=("$tool")
+            log_error "$tool is not installed"
+        else
+            log_info "$tool is installed: $(command -v $tool)"
+        fi
+    done
+
+    if [ ${#missing_tools[@]} -ne 0 ]; then
+        log_error "Missing required tools: ${missing_tools[*]}"
+        exit 1
+    fi
+
+    # Check Docker daemon
+    if ! docker info &> /dev/null; then
+        log_error "Docker daemon is not running"
+        exit 1
+    fi
+
+    log_success "All required tools are available"
+}
+
+# Validate environment variables
+validate_env() {
+    log_section "Validating Environment Variables"
+
+    # Set defaults
+    export AWS_REGION="${AWS_REGION:-us-west-1}"
+    export ECR_BACKEND_REPO="${ECR_BACKEND_REPO:-matcha-backend}"
+    export ECR_FRONTEND_REPO="${ECR_FRONTEND_REPO:-matcha-frontend}"
+    export ECR_GUMMFIT_BACKEND_REPO="${ECR_GUMMFIT_BACKEND_REPO:-gummfit-backend}"
+    export ECR_GUMMFIT_FRONTEND_REPO="${ECR_GUMMFIT_FRONTEND_REPO:-gummfit-frontend}"
+    export ECR_GUMMLOCAL_BACKEND_REPO="${ECR_GUMMLOCAL_BACKEND_REPO:-gumm-local-backend}"
+    export ECR_GUMMLOCAL_FRONTEND_REPO="${ECR_GUMMLOCAL_FRONTEND_REPO:-gumm-local-frontend}"
+    export ECR_AGENT_REPO="${ECR_AGENT_REPO:-matcha-agent}"
+
+    # Auto-fetch AWS Account ID if not set
+    if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
+        log_info "AWS_ACCOUNT_ID not set, fetching from AWS CLI..."
+        AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
+        if [ -z "${AWS_ACCOUNT_ID}" ]; then
+            log_error "Failed to fetch AWS_ACCOUNT_ID automatically. Please set it manually or configure AWS CLI."
+            exit 1
+        fi
+        export AWS_ACCOUNT_ID
+        log_success "Auto-detected AWS_ACCOUNT_ID: ${AWS_ACCOUNT_ID}"
+    else
+        log_info "AWS_ACCOUNT_ID is set: ${AWS_ACCOUNT_ID}"
+    fi
+
+    # Construct ECR URIs
+    export BACKEND_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_BACKEND_REPO}"
+    export FRONTEND_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_FRONTEND_REPO}"
+    export GUMMFIT_BACKEND_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_GUMMFIT_BACKEND_REPO}"
+    export GUMMFIT_FRONTEND_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_GUMMFIT_FRONTEND_REPO}"
+    export GUMMLOCAL_BACKEND_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_GUMMLOCAL_BACKEND_REPO}"
+    export GUMMLOCAL_FRONTEND_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_GUMMLOCAL_FRONTEND_REPO}"
+    export AGENT_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_AGENT_REPO}"
+
+    log_info "Backend ECR URI: ${BACKEND_ECR_URI}"
+    log_info "Frontend ECR URI: ${FRONTEND_ECR_URI}"
+    if [ "$BUILD_GUMMFIT_BACKEND" = true ]; then
+        log_info "GumFit Backend ECR URI: ${GUMMFIT_BACKEND_ECR_URI}"
+    fi
+    if [ "$BUILD_GUMMFIT_FRONTEND" = true ]; then
+        log_info "GumFit Frontend ECR URI: ${GUMMFIT_FRONTEND_ECR_URI}"
+    fi
+    if [ "$BUILD_GUMMLOCAL_BACKEND" = true ]; then
+        log_info "gumm-local Backend ECR URI: ${GUMMLOCAL_BACKEND_ECR_URI}"
+    fi
+    if [ "$BUILD_GUMMLOCAL_FRONTEND" = true ]; then
+        log_info "gumm-local Frontend ECR URI: ${GUMMLOCAL_FRONTEND_ECR_URI}"
+    fi
+    if [ "$BUILD_AGENT" = true ]; then
+        log_info "Agent ECR URI: ${AGENT_ECR_URI}"
+    fi
+
+    log_success "Environment validation complete"
+}
+
+# Login to ECR
+ecr_login() {
+    log_section "Authenticating with ECR"
+
+    if [ "$PUSH_TO_ECR" = false ]; then
+        log_warning "Skipping ECR login (--no-push flag set)"
+        return 0
+    fi
+
+    log_info "Logging in to ECR in region: ${AWS_REGION}"
+
+    if aws ecr get-login-password --region "${AWS_REGION}" | \
+        docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"; then
+        log_success "Successfully authenticated with ECR"
+    else
+        log_error "Failed to authenticate with ECR"
+        exit 1
+    fi
+}
+
+# Build Docker image
+build_image() {
+    local name=$1
+    local dockerfile_path=$2
+    local context_dir=$3
+    local image_uri=$4
+    local extra_build_args=("${@:5}")
+
+    log_section "Building $name Image"
+
+    log_info "Context: $context_dir"
+    log_info "Dockerfile: $dockerfile_path"
+    log_info "Platform: $PLATFORM"
+
+    # Use the SHA captured at script start so build + push tag with the
+    # same value even if HEAD moves mid-run.
+    local git_sha="${GIT_SHA:-unknown}"
+
+    local tags=(
+        "${image_uri}:latest"
+        "${image_uri}:${git_sha}"
+    )
+
+    # Build tag arguments
+    local tag_args=()
+    for tag in "${tags[@]}"; do
+        tag_args+=(-t "$tag")
+        log_info "Tag: $tag"
+    done
+
+    # Build the image
+    log_info "Starting Docker build..."
+
+    local build_args=(
+        --platform "$PLATFORM"
+        --load
+        "${tag_args[@]}"
+        --build-arg "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+        --build-arg "GIT_SHA=${git_sha}"
+        --build-arg "BUILDKIT_INLINE_CACHE=1"
+        -f "$dockerfile_path"
+    )
+
+    if [ ${#extra_build_args[@]} -gt 0 ]; then
+        build_args+=("${extra_build_args[@]}")
+    fi
+
+    # Add cache flags unless --no-cache is set
+    if [ "$NO_CACHE" = true ]; then
+        build_args+=("--no-cache")
+        log_info "Building with --no-cache"
+    elif [ "$PUSH_TO_ECR" = true ]; then
+        local current_branch
+        current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+        # Sanitize branch name for Docker tag (slashes, etc → '-').
+        # printf, not echo: echo appends a newline that `tr -c` would turn
+        # into a trailing '-' (e.g. buildcache-mybranch-).
+        local branch_tag
+        branch_tag=$(printf '%s' "$current_branch" | tr '/' '-' | tr -c 'A-Za-z0-9._-' '-')
+
+        # Read the shared base cache first (every branch's warm start) plus
+        # the legacy branch-scoped tag (back-compat for tags already in ECR;
+        # cheap parallel read).
+        build_args+=(--cache-from "type=registry,ref=${image_uri}:buildcache")
+        build_args+=(--cache-from "type=registry,ref=${image_uri}:buildcache-${branch_tag}")
+        log_info "Cache reads: buildcache, buildcache-${branch_tag}"
+
+        # Write the shared :buildcache that EVERY branch reads as its base
+        # on first build. This used to be gated to main/master, but the
+        # workflow rarely builds main, so the shared tag never existed and
+        # every fresh branch cold-started (full pip install / npm ci).
+        # Writing it on every build keeps it warm with the latest layers —
+        # the ideal base for the next branch cut. zstd compresses the
+        # mode=max upload faster than the default gzip. One cache-to target
+        # = same upload count as the old single branch target, not double.
+        local cache_to="type=registry,ref=${image_uri}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,compression=zstd,compression-level=3"
+        build_args+=(--cache-to "$cache_to")
+        log_info "Cache write: buildcache (shared, zstd mode=max)"
+    else
+        log_info "Local build - using default Docker cache"
+    fi
+
+    if docker buildx build \
+        "${build_args[@]}" \
+        "$context_dir"; then
+        log_success "$name image built successfully"
+    else
+        log_error "Failed to build $name image"
+        exit 1
+    fi
+}
+
+# Push Docker image
+push_image() {
+    local name=$1
+    local image_uri=$2
+
+    if [ "$PUSH_TO_ECR" = false ]; then
+        log_warning "Skipping push for $name (--no-push flag set)"
+        return 0
+    fi
+
+    log_section "Pushing $name Image to ECR"
+
+    # Same SHA as the build step — captured once at script start so a
+    # mid-run commit can't desync build and push tags.
+    local git_sha="${GIT_SHA:-unknown}"
+
+    local tags=(
+        "${image_uri}:latest"
+        "${image_uri}:${git_sha}"
+    )
+
+    # Sanity-check every tag exists locally BEFORE attempting any push.
+    # Without this, a silent build failure (e.g. parallel buildx --load
+    # race, docker prune between build and push, manual interruption)
+    # surfaces as the cryptic "tag does not exist" docker error in the
+    # middle of the push phase. With this, we fail early with a clear
+    # message pointing to the build phase as the culprit.
+    local missing_tags=()
+    for tag in "${tags[@]}"; do
+        if ! docker image inspect "$tag" >/dev/null 2>&1; then
+            missing_tags+=("$tag")
+        fi
+    done
+    if [ ${#missing_tags[@]} -gt 0 ]; then
+        log_error "Build phase did not produce expected local tag(s) for $name:"
+        for tag in "${missing_tags[@]}"; do
+            log_error "  missing: $tag"
+        done
+        log_error "Re-run the script — see the build phase output above for the underlying error."
+        log_error "(Common cause: a HEAD-moving commit landed mid-run, or a parallel buildx --load race on Docker Desktop.)"
+        exit 1
+    fi
+
+    for tag in "${tags[@]}"; do
+        log_info "Pushing: $tag"
+        if docker push "$tag"; then
+            log_success "Pushed: $tag"
+        else
+            log_error "Failed to push: $tag"
+            exit 1
+        fi
+    done
+}
+
+# Build backend
+build_backend() {
+    build_image \
+        "Backend" \
+        "${BACKEND_DIR}/Dockerfile" \
+        "${BACKEND_DIR}" \
+        "${BACKEND_ECR_URI}"
+}
+
+# Build frontend
+build_frontend() {
+    build_image \
+        "Frontend" \
+        "${FRONTEND_DIR}/Dockerfile" \
+        "${FRONTEND_DIR}" \
+        "${FRONTEND_ECR_URI}" \
+        --build-arg "VITE_LANDING_BUILD_VERSION=${LANDING_BUILD_VERSION}"
+}
+
+# Build gummfit backend
+build_gummfit_backend() {
+    build_image \
+        "GumFit Backend" \
+        "${GUMMFIT_BACKEND_DIR}/Dockerfile" \
+        "${GUMMFIT_BACKEND_DIR}" \
+        "${GUMMFIT_BACKEND_ECR_URI}"
+}
+
+# Build gummfit frontend
+build_gummfit_frontend() {
+    build_image \
+        "GumFit Frontend" \
+        "${GUMMFIT_FRONTEND_DIR}/Dockerfile" \
+        "${GUMMFIT_FRONTEND_DIR}" \
+        "${GUMMFIT_FRONTEND_ECR_URI}"
+}
+
+# Build gumm-local backend
+build_gummlocal_backend() {
+    build_image \
+        "gumm-local Backend" \
+        "${GUMMLOCAL_BACKEND_DIR}/Dockerfile" \
+        "${GUMMLOCAL_BACKEND_DIR}" \
+        "${GUMMLOCAL_BACKEND_ECR_URI}"
+}
+
+# Build gumm-local frontend
+build_gummlocal_frontend() {
+    build_image \
+        "gumm-local Frontend" \
+        "${GUMMLOCAL_FRONTEND_DIR}/Dockerfile" \
+        "${GUMMLOCAL_FRONTEND_DIR}" \
+        "${GUMMLOCAL_FRONTEND_ECR_URI}"
+}
+
+# Build agent sandbox (includes Preact UI)
+build_agent() {
+    log_info "Building agent UI..."
+    local ui_dir="${REPO_ROOT}/server/agent-ui"
+    if [ -d "$ui_dir" ]; then
+        (cd "$ui_dir" && npm ci --silent && npm run build)
+        rm -rf "${AGENT_DIR}/static"
+        cp -r "$ui_dir/dist" "${AGENT_DIR}/static"
+        log_success "Agent UI built and copied to static/"
+    else
+        log_warning "agent-ui/ not found, skipping UI build"
+    fi
+
+    build_image \
+        "Agent" \
+        "${AGENT_DIR}/Dockerfile" \
+        "${AGENT_DIR}" \
+        "${AGENT_ECR_URI}"
+}
+
+
+# Main execution
+main() {
+    log_section "Matcha-Recruit Build & Push Script"
+    log_info "Platform: $PLATFORM"
+    log_info "Push to ECR: $PUSH_TO_ECR"
+    log_info "Trigger Deploy: $TRIGGER_DEPLOY"
+
+    # Capture the commit SHA ONCE up front. Build + push both reference
+    # this through the GIT_SHA global so a mid-run commit cannot tag the
+    # build with one SHA and push under another.
+    GIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    log_info "Git SHA: ${GIT_SHA}"
+
+    # Warn (don't block) if the working tree has uncommitted changes —
+    # the build runs against the working tree (Dockerfile COPYs from
+    # the filesystem, not from git), but the tag is the committed SHA.
+    # An image labeled ${GIT_SHA} can therefore contain code that isn't
+    # in that commit. Surface that loudly so a re-run with uncommitted
+    # fixes doesn't quietly produce a misleading tag.
+    if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+        log_warning "Working tree has uncommitted changes."
+        log_warning "Image will be tagged ${GIT_SHA} but contents include uncommitted edits."
+        log_warning "Commit first if you want the tag to actually match what's deployed."
+    fi
+
+    # Validate environment
+    validate_tools
+    validate_env
+
+    # Authenticate with ECR
+    ecr_login
+
+    if [ "$BUILD_FRONTEND" = true ]; then
+        bump_landing_build_version
+    fi
+
+    # Build images in parallel
+    local pids=()
+    local services=()
+
+    if [ "$BUILD_BACKEND" = true ]; then
+        build_backend &
+        pids+=($!)
+        services+=("Backend")
+    else
+        log_warning "Skipping backend build (--frontend-only)"
+    fi
+
+    if [ "$BUILD_FRONTEND" = true ]; then
+        build_frontend &
+        pids+=($!)
+        services+=("Frontend")
+    else
+        log_warning "Skipping frontend build (--backend-only)"
+    fi
+
+    if [ "$BUILD_GUMMFIT_BACKEND" = true ]; then
+        build_gummfit_backend &
+        pids+=($!)
+        services+=("GumFit Backend")
+    fi
+
+    if [ "$BUILD_GUMMFIT_FRONTEND" = true ]; then
+        build_gummfit_frontend &
+        pids+=($!)
+        services+=("GumFit Frontend")
+    fi
+
+    if [ "$BUILD_GUMMLOCAL_BACKEND" = true ]; then
+        build_gummlocal_backend &
+        pids+=($!)
+        services+=("gumm-local Backend")
+    fi
+
+    if [ "$BUILD_GUMMLOCAL_FRONTEND" = true ]; then
+        build_gummlocal_frontend &
+        pids+=($!)
+        services+=("gumm-local Frontend")
+    fi
+
+    if [ "$BUILD_AGENT" = true ]; then
+        build_agent &
+        pids+=($!)
+        services+=("Agent")
+    fi
+
+    # Wait for all builds to complete
+    local failed=false
+    for i in "${!pids[@]}"; do
+        if ! wait "${pids[$i]}"; then
+            log_error "${services[$i]} build failed"
+            failed=true
+        fi
+    done
+
+    if [ "$failed" = true ]; then
+        log_error "One or more builds failed"
+        exit 1
+    fi
+
+    # Drift check: if HEAD moved between start and now, the build tags
+    # are still pinned to the captured GIT_SHA (which is what we want)
+    # but the user should know so they can re-run for the new commit.
+    local head_now
+    head_now=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    if [ "$head_now" != "${GIT_SHA}" ]; then
+        log_warning "HEAD moved during build: started ${GIT_SHA}, now ${head_now}."
+        log_warning "Images will be pushed tagged ${GIT_SHA} (the SHA they were built from)."
+        log_warning "Re-run the script if you want ${head_now} on ECR."
+    fi
+
+    # Push images (only after all builds succeed to preserve atomicity)
+    if [ "$BUILD_BACKEND" = true ]; then
+        push_image "Backend" "${BACKEND_ECR_URI}"
+    fi
+    if [ "$BUILD_FRONTEND" = true ]; then
+        push_image "Frontend" "${FRONTEND_ECR_URI}"
+    fi
+    if [ "$BUILD_GUMMFIT_BACKEND" = true ]; then
+        push_image "GumFit Backend" "${GUMMFIT_BACKEND_ECR_URI}"
+    fi
+    if [ "$BUILD_GUMMFIT_FRONTEND" = true ]; then
+        push_image "GumFit Frontend" "${GUMMFIT_FRONTEND_ECR_URI}"
+    fi
+    if [ "$BUILD_GUMMLOCAL_BACKEND" = true ]; then
+        push_image "gumm-local Backend" "${GUMMLOCAL_BACKEND_ECR_URI}"
+    fi
+    if [ "$BUILD_GUMMLOCAL_FRONTEND" = true ]; then
+        push_image "gumm-local Frontend" "${GUMMLOCAL_FRONTEND_ECR_URI}"
+    fi
+    if [ "$BUILD_AGENT" = true ]; then
+        push_image "Agent" "${AGENT_ECR_URI}"
+    fi
+
+    # Deployment trigger
+    if [ "$TRIGGER_DEPLOY" = true ]; then
+        log_section "Deployment Trigger"
+        log_info "Deploy flag set - GitHub Actions will handle EC2 deployment"
+        echo "DEPLOY=true" >> "${GITHUB_OUTPUT:-/dev/null}" 2>/dev/null || true
+    fi
+
+    log_section "Build Complete"
+    log_success "All operations completed successfully!"
+    if [ "$BUILD_BACKEND" = true ]; then
+        log_info "Backend: ${BACKEND_ECR_URI}:latest"
+    fi
+    if [ "$BUILD_FRONTEND" = true ]; then
+        log_info "Frontend: ${FRONTEND_ECR_URI}:latest"
+    fi
+    if [ "$BUILD_GUMMFIT_BACKEND" = true ]; then
+        log_info "GumFit Backend: ${GUMMFIT_BACKEND_ECR_URI}:latest"
+    fi
+    if [ "$BUILD_GUMMFIT_FRONTEND" = true ]; then
+        log_info "GumFit Frontend: ${GUMMFIT_FRONTEND_ECR_URI}:latest"
+    fi
+    if [ "$BUILD_GUMMLOCAL_BACKEND" = true ]; then
+        log_info "gumm-local Backend: ${GUMMLOCAL_BACKEND_ECR_URI}:latest"
+    fi
+    if [ "$BUILD_GUMMLOCAL_FRONTEND" = true ]; then
+        log_info "gumm-local Frontend: ${GUMMLOCAL_FRONTEND_ECR_URI}:latest"
+    fi
+    if [ "$BUILD_AGENT" = true ]; then
+        log_info "Agent: ${AGENT_ECR_URI}:latest"
+    fi
+}
+
+################################################################################
+# Script Entry Point
+################################################################################
+
+parse_args "$@"
+
+if [ "$BUILD_BACKEND" = false ] && \
+   [ "$BUILD_FRONTEND" = false ] && \
+   [ "$BUILD_GUMMFIT_BACKEND" = false ] && \
+   [ "$BUILD_GUMMFIT_FRONTEND" = false ] && \
+   [ "$BUILD_GUMMLOCAL_BACKEND" = false ] && \
+   [ "$BUILD_GUMMLOCAL_FRONTEND" = false ] && \
+   [ "$BUILD_AGENT" = false ]; then
+    log_error "No build targets selected"
+    exit 1
+fi
+
+main

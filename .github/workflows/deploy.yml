@@ -44,8 +44,8 @@ jobs:
           ECR_BACKEND_REPO: matcha-backend
           ECR_FRONTEND_REPO: matcha-frontend
         run: |
-          chmod +x ./build-and-push.sh
-          ./build-and-push.sh --deploy
+          chmod +x ./scripts/build-and-push.sh
+          ./scripts/build-and-push.sh --deploy
 
       - name: Output image tags
         run: |

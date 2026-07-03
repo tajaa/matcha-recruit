@@ -114,8 +114,8 @@ The 2GB instance has limited memory. Both apps must stay within budget:
 From local machine:
 ```bash
 cd /path/to/matcha-recruit
-./update-ec2.sh --matcha      # Update only matcha
-./update-ec2.sh --status      # Check all container status
+./scripts/update-ec2.sh --matcha      # Update only matcha
+./scripts/update-ec2.sh --status      # Check all container status
 ```
 
 ### Drooli
@@ -123,14 +123,14 @@ cd /path/to/matcha-recruit
 From local machine:
 ```bash
 cd /path/to/drooli
-./update-ec2.sh --oceaneca    # Update only drooli
-./update-ec2.sh --status      # Check all container status
+./scripts/update-ec2.sh --oceaneca    # Update only drooli
+./scripts/update-ec2.sh --status      # Check all container status
 ```
 
 ### Update Both (carefully)
 
 ```bash
-./update-ec2.sh --all         # Updates both apps
+./scripts/update-ec2.sh --all         # Updates both apps
 ```
 
 ## Shared Database (PostgreSQL)

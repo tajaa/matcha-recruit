@@ -122,7 +122,7 @@ desktop/Werk/build/
 /soc/
 
 # Scratch / working files
-resumes/
+samples/resumes/
 CODE_REVIEW.md
 COMPETITIVE_ANALYSIS.md
 ESCALATED_QUERIES_PLAN.md
@@ -140,7 +140,7 @@ scripts/grab-ss.sh
 scripts/set-master-admin-password.py
 
 # Deal proposals (confidential, not tracked)
-deals/
+samples/deals/
 
 server/db.sqlite
 
