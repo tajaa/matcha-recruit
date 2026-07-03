@@ -50,6 +50,7 @@ git mv HRIS_VENDOR_RECOMMENDATION.md finch_hris.md hris_connection.md docs/hris/
 git mv MID_TIER_PROPOSAL.md LITE_BROKER_PRICING_BANDS.md LITE_BROKER_PRICING_BANDS.html docs/sales/
 mv LITE_BROKER_PRICING_BANDS.pdf docs/sales/     # untracked pdf, keep set together
 git mv WC_STATE_RATES_2026_RESEARCH.md docs/references/
+git mv REPO_TIDY_PLAN.md docs/plans/             # this plan itself, once executed
 ```
 Edits: `CLAUDE.md:427` "at the repo root" → `docs/plans/CLAUDE_CODE_PLAN.md`; same rename in `server/app/matcha/routes/CLAUDE.md:70`.
 
@@ -69,8 +70,57 @@ Plus: remove stale `services/` line from `server/CLAUDE.md` layout tree.
 - `.gitignore`: append `/scratch/` + comment ("throwaway notes go in scratch/, not new per-filename entries"). Existing entries untouched.
 - `CLAUDE.md`: new **"Repo layout — products map"** section (the assessment table above, plus cross-product import rule: cappe/tellus import only `app/core/*`; documented exception `tellus/services/geo.py` → `matcha.services.property_cat.geocode`). Insert after "### Auxiliary surfaces".
 
-## Verification
+---
+
+# Part 2 — Root reorganization (navigable across products)
+
+Extends the tidy into the layout the user already approved in `docs/plans/ROOT_CLEANUP_PLAN.md` (decisions captured there via Q&A: `platforms/` grouping, scripts into `scripts/`, `agent-ui` → `server/agent-ui`, gitignored `secrets/`, `samples/` bucket). Phases ordered least→most risky; stop after any phase and the repo stays coherent.
+
+**Target root (~12 visible entries):**
+```
+client/  server/  scripts/  platforms/  deploy/  docs/  samples/  secrets/
+CLAUDE.md  README.md  docker-compose.yml  skills-lock.json  (+ dotfiles)
+```
+
+### 5. Root README.md — human-facing navigation
+Rewrite/extend root `README.md`: one-screen products map (same table as the assessment above, reader-oriented), where each product's FE/BE lives, how each is served (hey-matcha.com / gummfit.com host-routed / `/tellus/` path / desktop app), pointers to `docs/`, `deploy/nginx/README.md`, `docs/ops/DB_WORKFLOW.md`. Read existing README first; keep anything still true.
+
+### 6. secrets/ + agent-ui nesting (touches scripts, not platforms)
+```bash
+mkdir -p secrets && echo "*" > secrets/.gitignore && touch secrets/.gitkeep
+# .gitignore: add secrets/*  +  !secrets/.gitkeep  !secrets/.gitignore
+mv client_secret_2_*.json secrets/    # untracked (gitignored) — plain mv
+mv roonMT-arm.pem secrets/            # untracked — plain mv
+git mv agent-ui server/agent-ui
+```
+- Update pem path in all referencing files — authoritative list via `grep -rln "roonMT-arm.pem" --exclude-dir=node_modules .` (~15: `scripts/{agent,agent-dev,backups,dev-remote,seed_prod}.sh`, `deploy/setup-db-instance.sh`, `desktop/Werk/run-prod.sh`, `update-ec2.sh`, `CLAUDE.md`, `server/CLAUDE.md`, `docs/soc/*`, deployment docs). Pattern: `PEM="$(git rev-parse --show-toplevel)/secrets/roonMT-arm.pem"`.
+- `build-and-push.sh:560` `ui_dir="${SCRIPT_DIR}/agent-ui"` → `"${SCRIPT_DIR}/server/agent-ui"`; `scripts/agent-dev.sh:23` same.
+- CLAUDE.md "Requires `roonMT-arm.pem` at repo root" → new path.
+
+### 7. platforms/ + samples/ + daily-driver scripts (riskiest — Xcode gate)
+**Gate:** `xcodebuild` BOTH projects from new paths BEFORE committing; if either fails, restore the platforms move and ship the rest.
+```bash
+mkdir -p platforms samples
+git mv desktop platforms/desktop
+git mv ios platforms/ios
+mv deals samples/deals && mv resumes samples/resumes   # untracked — plain mv; update .gitignore entries
+git mv build-and-push.sh scripts/build-and-push.sh
+git mv update-ec2.sh scripts/update-ec2.sh
+[ -f .landing-build-version ] && git mv .landing-build-version scripts/ || true
+```
+- Both moved scripts: introduce `REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"`, repoint `BACKEND_DIR`/`FRONTEND_DIR`/`AGENT_DIR`/ui_dir/version-file (exact old→new block in `docs/plans/ROOT_CLEANUP_PLAN.md` lines ~287–304).
+- Grep `.github/workflows/` for `build-and-push.sh|update-ec2.sh` → update hits.
+- Path sweep `desktop/Werk` → `platforms/desktop/Werk` in CLAUDE.md + docs/.
+- Xcode verify: `xcodebuild -project platforms/desktop/Werk/Matcha.xcodeproj -scheme Werk -configuration Debug clean build` + `platforms/ios/MatchaTutor.xcodeproj -scheme MatchaTutor`.
+- New daily invocation: `./scripts/build-and-push.sh --frontend-only && ./scripts/update-ec2.sh --matcha`.
+
+## Verification (cumulative)
 - `cd server && python3 -c "from app.main import app; print(len(app.routes))"` — app boots post-shim-removal
 - `python3 -m pytest tests/infrastructure -q` — leads-agent test passes with new imports
 - re-grep `from app.models|from app.routes|from app.services|\.services\.auth` under server/ → zero hits
-- `git status` clean root: only expected dirs + CLAUDE.md/README/compose/build scripts remain at top level
+- `for s in scripts/*.sh deploy/*.sh; do bash -n "$s" || echo "BROKEN: $s"; done`
+- `./scripts/build-and-push.sh --no-push --frontend-only` — build dry-run from new path
+- `cd client && npx tsc --noEmit --incremental false`
+- Xcode: both projects build from `platforms/` paths
+- `ls -1 | wc -l` at root → ~12
+- Post-completion: update session memory files (deploy-ops, cappe) with new script paths
