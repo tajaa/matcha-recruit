@@ -46,9 +46,9 @@ struct KanbanCardView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header band — checkbox + title. Tints orange after 6h / red after
-            // 12h of inactivity (anchor = lastMovedAt ?? createdAt); never for
-            // done/completed cards. See MWProjectTask.aging.
+            // Header — checkbox + title. Staleness no longer tints the whole
+            // band (the 18% red/orange wash read as mud on dark surfaces);
+            // the aging signal lives in the footer's clock + tinted time.
             HStack(alignment: .top, spacing: 8) {
                 // Pipeline deals use the Won/Lost outcome, not task completion —
                 // the checkbox would shove the card into 'done' (an orphan stage
@@ -56,8 +56,8 @@ struct KanbanCardView: View {
                 if !pipelineMode {
                     Button(action: onToggle) {
                         Image(systemName: task.status == "completed" ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 13))
-                            .foregroundColor(task.status == "completed" ? .matcha500 : .secondary)
+                            .font(.system(size: 12, weight: .light))
+                            .foregroundColor(task.status == "completed" ? .matcha500 : .secondary.opacity(0.55))
                     }
                     .buttonStyle(.plain)
                 }
@@ -74,8 +74,8 @@ struct KanbanCardView: View {
                     .padding(.trailing, task.createdByName != nil ? 16 : 0)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(headerTint)
+            .padding(.top, 11)
+            .padding(.bottom, 9)
 
             VStack(alignment: .leading, spacing: 9) {
                 if let note = task.progressNote, !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -202,14 +202,20 @@ struct KanbanCardView: View {
                             }
                         }
                     } label: {
-                        Text(currentColumnLabel)
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(appState.themeText.opacity(0.8))
-                            .tracking(0.3)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(appState.themeText.opacity(0.08))
-                            .cornerRadius(8)
+                        // Capsule with a hairline edge + chevron so the move
+                        // control reads as a control, not stray bold text.
+                        HStack(spacing: 3) {
+                            Text(currentColumnLabel)
+                                .font(.system(size: 9, weight: .medium))
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.system(size: 6, weight: .semibold))
+                                .opacity(0.6)
+                        }
+                        .foregroundColor(appState.themeText.opacity(0.7))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2.5)
+                        .background(Capsule().fill(appState.themeText.opacity(0.05)))
+                        .overlay(Capsule().strokeBorder(appState.themeText.opacity(0.13), lineWidth: 1))
                     }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
@@ -323,8 +329,26 @@ struct KanbanCardView: View {
                     .padding(.leading, 1.5)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .elevatedCard(cornerRadius: 8)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .elevatedCard(cornerRadius: 10)
+        // Glass edge — a faint highlight along the top rim, fading out by
+        // mid-card. The one-pixel bevel is what separates "flat dark rect"
+        // from a surface that catches light. Dark themes only; light mode
+        // already gets depth from elevatedCard's layered shadows.
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(appState.isLightFamily ? 0 : 0.09),
+                            .clear,
+                        ],
+                        startPoint: .top, endPoint: .center
+                    ),
+                    lineWidth: 1
+                )
+                .allowsHitTesting(false)
+        )
         // Creator badge — floats over the top-right corner, so "who filed
         // this" reads at a glance without a labeled row. Sits after the clip
         // so the corner never crops it.
@@ -357,12 +381,12 @@ struct KanbanCardView: View {
         task.priority == "critical" || task.priority == "high"
     }
 
-    /// Header background tint by inactivity age. Clear when fresh / done.
-    private var headerTint: Color {
+    /// Inactivity-age accent for the footer clock/time. Nil when fresh/done.
+    private var agingColor: Color? {
         switch task.aging {
-        case .none: return .clear
-        case .warn: return .orange.opacity(0.18)
-        case .overdue: return .red.opacity(0.18)
+        case .none: return nil
+        case .warn: return .orange
+        case .overdue: return .red
         }
     }
 
@@ -375,12 +399,36 @@ struct KanbanCardView: View {
         if let added = PacificDateFormatter.shortDate(task.createdAt) {
             HStack(spacing: 3) {
                 Text(added)
+                    .foregroundColor(.secondary.opacity(0.85))
                 if let moved = PacificDateFormatter.relative(task.lastMovedAt) {
-                    Text("· moved \(moved)")
+                    // Staleness signal (replaces the old full-header tint):
+                    // once a card sits untouched past the warn/overdue
+                    // thresholds, the clock + elapsed time pick up the aging
+                    // color — a whisper where the band was a shout.
+                    if let aging = agingColor {
+                        HStack(spacing: 2) {
+                            Image(systemName: "clock")
+                                .font(.system(size: 8))
+                            Text("moved \(moved)")
+                        }
+                        .foregroundColor(aging.opacity(0.9))
+                    } else {
+                        Text("· moved \(moved)")
+                            .foregroundColor(.secondary.opacity(0.85))
+                    }
+                } else if let aging = agingColor {
+                    // Never moved but already stale — age off creation time.
+                    HStack(spacing: 2) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 8))
+                        if let rel = PacificDateFormatter.relative(task.createdAt) {
+                            Text(rel)
+                        }
+                    }
+                    .foregroundColor(aging.opacity(0.9))
                 }
             }
             .font(.system(size: 9))
-            .foregroundColor(.secondary.opacity(0.85))
             .help("Added \(PacificDateFormatter.dateTime(task.createdAt) ?? added)")
         }
     }

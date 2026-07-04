@@ -782,12 +782,17 @@ struct KanbanBoardView: View {
                 // or lands live after the board mounted, so also key off the
                 // per-user unviewed-updates count. Persists until the card is
                 // opened (acknowledge + the viewer mark everything viewed).
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(Color.yellow,
-                                lineWidth: (changedIds.contains(task.id)
-                                    || TicketUpdatesStore.shared.unviewedCount(task) > 0) ? 2 : 0)
-                )
+                .overlay {
+                    let ringed = changedIds.contains(task.id)
+                        || TicketUpdatesStore.shared.unviewedCount(task) > 0
+                    // Hairline ring + soft outer glow instead of the old 2pt
+                    // full-saturation stroke — still unmissable in a column
+                    // scan, no longer shouting over the card content.
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color.yellow.opacity(ringed ? 0.75 : 0), lineWidth: 1.5)
+                        .shadow(color: .yellow.opacity(ringed ? 0.35 : 0), radius: 5)
+                        .allowsHitTesting(false)
+                }
                 .draggable(task.id)
                 .contextMenu {
                     Button {
