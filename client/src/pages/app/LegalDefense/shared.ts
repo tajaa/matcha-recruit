@@ -26,7 +26,19 @@ export const STARTERS = [
 /** Label voice — docket micro-caption. */
 export { LABEL } from '../../../components/ui'
 
-export type CidInfo = { ref: string | null; label: string; summary: string }
+export type CidInfo = { ref: string | null; label: string; summary: string; when?: string }
+
+/** Fallback display names for a cid's "<kind>:" prefix, used when a cited
+ *  record isn't in the evidence preview (e.g. it fell outside a source cap). */
+export const CID_KIND_LABEL: Record<string, string> = {
+  incident: 'Incident',
+  er_case: 'ER case',
+  compliance_req: 'Compliance',
+  discipline: 'Discipline',
+  training: 'Training',
+  policy_ack: 'Policy ack',
+  accommodation: 'Accommodation',
+}
 
 /** The 7 evidence subsystems the backend can gather from
  *  (server/app/matcha/services/legal_defense.py:_SOURCES) — strip order. */

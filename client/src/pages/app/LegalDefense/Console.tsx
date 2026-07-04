@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Loader2, Scale, Send, ShieldAlert } from 'lucide-react'
 import type { EvidencePreview, MatterMessage } from '../../../api/legalDefense'
-import { DISCLAIMER, LABEL, STARTERS, fmtWhen, type CidInfo } from './shared'
+import { CID_KIND_LABEL, DISCLAIMER, LABEL, STARTERS, fmtWhen, type CidInfo } from './shared'
+import { RecordViewer, type ViewerTarget } from './RecordViewer'
 
 /** Analyst console: full-width transcript rows (no chat bubbles), bottom-
  *  anchored so a short exchange sits next to the composer instead of leaving
@@ -14,6 +15,7 @@ export function Console({ messages, status, sending, evidence, onSend }: {
   onSend: (text: string) => void
 }) {
   const [input, setInput] = useState('')
+  const [view, setView] = useState<ViewerTarget | null>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -24,7 +26,7 @@ export function Console({ messages, status, sending, evidence, onSend }: {
     const idx: Record<string, CidInfo> = {}
     if (evidence) {
       for (const s of Object.values(evidence.sources)) {
-        for (const r of s.records) idx[r.cid] = { ref: r.ref, label: s.label, summary: r.summary }
+        for (const r of s.records) idx[r.cid] = { ref: r.ref, label: s.label, summary: r.summary, when: r.when }
       }
     }
     return idx
@@ -74,7 +76,7 @@ export function Console({ messages, status, sending, evidence, onSend }: {
             </div>
           )}
 
-          {messages.map((m, i) => <Entry key={i} m={m} cidIndex={cidIndex} />)}
+          {messages.map((m, i) => <Entry key={i} m={m} cidIndex={cidIndex} onView={setView} />)}
 
           {status && (
             <div className="border-t border-white/[0.06] bg-white/[0.015] px-5 py-4">
@@ -116,8 +118,69 @@ export function Console({ messages, status, sending, evidence, onSend }: {
         <ShieldAlert className="h-3 w-3 shrink-0 text-amber-400/70" />
         <p className="text-[10px] leading-snug text-amber-200/60">{DISCLAIMER}</p>
       </div>
+      {view && <RecordViewer target={view} onClose={() => setView(null)} />}
     </div>
   )
+}
+
+// --- citation chips + inline record tokens ----------------------------------
+
+/** Resolve a cid into a RecordViewer target, falling back to the kind label
+ *  when the record isn't in the evidence preview (e.g. beyond a source cap). */
+function targetFor(cid: string, cidIndex: Record<string, CidInfo>): ViewerTarget {
+  const e = cidIndex[cid]
+  const [kind, id] = cid.split(':')
+  const kindLabel = CID_KIND_LABEL[kind] ?? kind
+  return {
+    cid,
+    ref: e?.ref ?? null,
+    sourceLabel: e?.label ?? kindLabel,
+    summary: e?.summary ?? `${kindLabel} ${id ?? ''}`,
+    when: e?.when,
+  }
+}
+
+function CitationChip({ cid, cidIndex, onView }: {
+  cid: string
+  cidIndex: Record<string, CidInfo>
+  onView: (t: ViewerTarget) => void
+}) {
+  const e = cidIndex[cid]
+  const [kind, id] = cid.split(':')
+  const label = e?.ref || e?.label || `${CID_KIND_LABEL[kind] ?? kind} ${(id ?? '').slice(0, 8)}…`
+  return (
+    <button
+      onClick={() => onView(targetFor(cid, cidIndex))}
+      title={e?.summary || 'View this record'}
+      className="rounded-sm bg-zinc-800/80 px-1.5 py-px align-baseline font-mono text-[10px] text-zinc-300 underline decoration-zinc-600 decoration-dotted underline-offset-2 transition-colors hover:bg-zinc-700/80 hover:text-emerald-300"
+    >
+      {label}
+    </button>
+  )
+}
+
+/** The AI sometimes leaks raw record IDs ("[incident:<uuid>]", "er_case:<uuid>")
+ *  into its prose and open questions. Render them as the same clickable chips
+ *  as the grounded citations instead of unreadable UUIDs. */
+const CID_TOKEN_RE = /\[?(incident|er_case|compliance_req|discipline|training|policy_ack|accommodation):([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\]?/g
+
+function CitedText({ text, cidIndex, onView }: {
+  text: string
+  cidIndex: Record<string, CidInfo>
+  onView: (t: ViewerTarget) => void
+}) {
+  const parts: ReactNode[] = []
+  let last = 0
+  const re = new RegExp(CID_TOKEN_RE)
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index))
+    const cid = `${m[1]}:${m[2]}`
+    parts.push(<CitationChip key={`${cid}-${m.index}`} cid={cid} cidIndex={cidIndex} onView={onView} />)
+    last = m.index + m[0].length
+  }
+  if (last < text.length) parts.push(text.slice(last))
+  return <>{parts}</>
 }
 
 function RoleMarker({ role, when }: { role: 'user' | 'assistant' | 'system'; when?: string }) {
@@ -135,14 +198,18 @@ function RoleMarker({ role, when }: { role: 'user' | 'assistant' | 'system'; whe
   )
 }
 
-function Entry({ m, cidIndex }: { m: MatterMessage; cidIndex: Record<string, CidInfo> }) {
+function Entry({ m, cidIndex, onView }: {
+  m: MatterMessage
+  cidIndex: Record<string, CidInfo>
+  onView: (t: ViewerTarget) => void
+}) {
   const isUser = m.role === 'user'
   const meta = m.metadata
   return (
     <div className={`border-t border-white/[0.06] px-5 py-4 first:border-t-0 ${isUser ? '' : 'bg-white/[0.015]'}`}>
       <RoleMarker role={m.role} when={m.created_at} />
       <p className={`mt-1.5 max-w-[65ch] whitespace-pre-wrap text-sm leading-relaxed ${isUser ? 'text-zinc-300' : 'text-zinc-200'}`}>
-        {m.content}
+        {isUser ? m.content : <CitedText text={m.content} cidIndex={cidIndex} onView={onView} />}
       </p>
 
       {!isUser && meta?.evidence_map && meta.evidence_map.length > 0 && (
@@ -150,18 +217,14 @@ function Entry({ m, cidIndex }: { m: MatterMessage; cidIndex: Record<string, Cid
           <div className={LABEL}>Grounded observations</div>
           {meta.evidence_map.map((it, i) => (
             <div key={i} className="text-[13px] leading-relaxed">
-              <span className="text-zinc-300">{it.point}</span>
+              <span className="text-zinc-300">
+                <CitedText text={it.point} cidIndex={cidIndex} onView={onView} />
+              </span>
               {it.cited_ids.length > 0 && (
                 <span className="ml-1.5 inline-flex flex-wrap gap-1 align-middle">
-                  {it.cited_ids.map((cid) => {
-                    const e = cidIndex[cid]
-                    return (
-                      <span key={cid} title={e?.summary}
-                        className="rounded-sm bg-zinc-800/80 px-1.5 py-px font-mono text-[10px] text-zinc-400">
-                        {e?.ref || e?.label || `${cid.slice(0, 15)}…`}
-                      </span>
-                    )
-                  })}
+                  {it.cited_ids.map((cid) => (
+                    <CitationChip key={cid} cid={cid} cidIndex={cidIndex} onView={onView} />
+                  ))}
                 </span>
               )}
             </div>
@@ -175,7 +238,9 @@ function Entry({ m, cidIndex }: { m: MatterMessage; cidIndex: Record<string, Cid
             Open questions for counsel
           </div>
           <ul className="mt-1 list-disc pl-4 text-[13px] leading-relaxed text-zinc-400">
-            {meta.open_questions.map((q, i) => <li key={i}>{q}</li>)}
+            {meta.open_questions.map((q, i) => (
+              <li key={i}><CitedText text={q} cidIndex={cidIndex} onView={onView} /></li>
+            ))}
           </ul>
         </div>
       )}
