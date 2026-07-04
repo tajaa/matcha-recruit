@@ -596,14 +596,18 @@ async def parse_location_intake_voice(token: str, request: Request, file: Upload
 
 class InfoRequestAnswers(BaseModel):
     answers: list[str] = Field(..., min_length=1, max_length=20)
-    # Honeypot — must be empty
-    company_name: Optional[str] = Field(None, max_length=255)
+    # Honeypot — must be empty. Deliberately not a plausible field name
+    # (e.g. "company_name"/"email") so browser autofill/password managers
+    # don't populate it for a real respondent.
+    internal_ref: Optional[str] = Field(None, max_length=255)
 
     @field_validator("answers")
     @classmethod
     def _answers_not_blank(cls, v: list[str]) -> list[str]:
         if any(not a.strip() for a in v):
             raise ValueError("Answers cannot be blank")
+        if any(len(a) > 4000 for a in v):
+            raise ValueError("Answers must be 4000 characters or fewer")
         return v
 
 
@@ -628,14 +632,14 @@ async def validate_info_request_token(token: str):
         row = await conn.fetchrow(
             """
             SELECT ir.incident_id, ir.company_id, ir.status, ir.expires_at, ir.questions,
-                   c.name AS company_name
+                   c.name AS company_name, c.enabled_features
             FROM ir_info_requests ir
             JOIN companies c ON c.id = ir.company_id
             WHERE ir.token = $1
             """,
             token,
         )
-    if not row:
+    if not row or not _features_dict(row["enabled_features"]).get("incidents", False):
         raise HTTPException(status_code=404, detail="Invalid link")
     _check_info_request_usable(row)
 
@@ -662,19 +666,28 @@ async def submit_info_request(
 ):
     """Submit answers to an info-request link. Single-use — burns the token."""
     # Honeypot — bots fill this hidden field; silently accept so as not to tip them off.
-    if body.company_name:
+    if body.internal_ref:
         return {"submitted": True}
 
-    client_ip = request.client.host if request.client else "unknown"
-    if _is_rate_limited(client_ip):
+    # Proxy-aware IP (nginx sits in front in prod) + a bucket key distinct
+    # from /report and /intake so the three public forms don't share one
+    # 5-per-hour quota.
+    ip = client_ip(request)
+    if _is_rate_limited(f"info:{ip}"):
         raise HTTPException(status_code=429, detail="Too many submissions. Please try again later.")
 
     # 1. Resolve token -> company_id (ir_info_requests has no RLS).
     async with get_connection() as conn:
         pre = await conn.fetchrow(
-            "SELECT company_id FROM ir_info_requests WHERE token = $1", token,
+            """
+            SELECT ir.company_id, c.enabled_features
+            FROM ir_info_requests ir
+            JOIN companies c ON c.id = ir.company_id
+            WHERE ir.token = $1
+            """,
+            token,
         )
-    if not pre:
+    if not pre or not _features_dict(pre["enabled_features"]).get("incidents", False):
         raise HTTPException(status_code=404, detail="Invalid link")
     company_id = str(pre["company_id"])
 

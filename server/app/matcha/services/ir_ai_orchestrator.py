@@ -413,7 +413,16 @@ def _serialize_conversation(messages: list[dict[str, Any]], limit: int = 12) -> 
             tag = "ACCEPTED" if accepted else "OFFERED"
             lines.append(f"[{role}/card/{tag}] {content}")
         elif message_type == "event":
-            lines.append(f"[system/event] {content}")
+            md = _coerce_metadata(m.get("metadata")) or {}
+            responses = md.get("responses")
+            if isinstance(responses, list) and responses:
+                qa = " | ".join(
+                    f"Q: {r.get('question', '')} A: {r.get('answer', '')}"
+                    for r in responses if isinstance(r, dict)
+                )
+                lines.append(f"[system/event] {content} {qa}")
+            else:
+                lines.append(f"[system/event] {content}")
         else:
             lines.append(f"[{role}] {content}")
 

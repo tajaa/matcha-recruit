@@ -83,7 +83,9 @@ async def create_info_request(
 
     The send is awaited (not backgrounded) — the response's `email_sent` flag
     is the admin's only signal that the invite actually went out, so we need
-    the result before replying.
+    the result before replying. The DB connection is released before the
+    send, though — an external email round-trip has no business pinning a
+    pool slot.
     """
     async with get_connection() as conn:
         incident = await _get_incident_with_company_check(
@@ -118,34 +120,35 @@ async def create_info_request(
             expires_at,
         )
 
-        link = _build_public_link(request, token, "request-info")
-        sent = False
-        try:
-            email_service = get_email_service()
-            sent = await email_service.send_ir_info_request_email(
-                to_email=body.recipient_email,
-                to_name=body.recipient_name,
-                company_name=company_name,
-                incident_number=incident["incident_number"],
-                requested_by_name=requested_by_name,
-                questions=[q.text for q in body.questions],
-                custom_message=(body.custom_message.strip() if body.custom_message else None),
-                link=link,
-            )
-            if not sent:
-                logger.warning("[IR] info-request email to %s did not send", body.recipient_email)
-        except Exception as e:
-            logger.warning("[IR] Failed to send info-request email: %s", e)
+    link = _build_public_link(request, token, "request-info")
+    sent = False
+    try:
+        email_service = get_email_service()
+        sent = await email_service.send_ir_info_request_email(
+            to_email=body.recipient_email,
+            to_name=body.recipient_name,
+            company_name=company_name,
+            incident_number=incident["incident_number"],
+            requested_by_name=requested_by_name,
+            questions=[q.text for q in body.questions],
+            custom_message=(body.custom_message.strip() if body.custom_message else None),
+            link=link,
+        )
+        if not sent:
+            logger.warning("[IR] info-request email to %s did not send", body.recipient_email)
+    except Exception as e:
+        logger.warning("[IR] Failed to send info-request email: %s", e)
 
+    async with get_connection() as conn:
         await log_audit(
             conn, str(incident_id), str(current_user.id), "info_request_created",
             "info_request", str(row["id"]),
             {"recipient_email": body.recipient_email, "email_sent": sent},
         )
 
-        result = _serialize_info_request(request, row)
-        result["email_sent"] = sent
-        return result
+    result = _serialize_info_request(request, row)
+    result["email_sent"] = sent
+    return result
 
 
 @router.get("/{incident_id}/info-requests")
@@ -173,7 +176,8 @@ async def resend_info_request(
 ):
     """Send a fresh token + expiry and only persist it once the email is
     confirmed sent — the old link keeps working if the send fails, rather
-    than being burned for nothing."""
+    than being burned for nothing. The DB connection is released before the
+    send so a slow email provider can't pin a pool slot."""
     async with get_connection() as conn:
         incident = await _get_incident_with_company_check(
             conn, incident_id, current_user, columns="id, company_id, incident_number",
@@ -194,48 +198,57 @@ async def resend_info_request(
         )
         company_name = (company["name"] if company else None) or "Your company"
         requested_by_name = await _requester_display_name(conn, current_user)
-
-        new_token = secrets.token_urlsafe(24)
-        new_expires_at = datetime.now(timezone.utc) + timedelta(days=_EXPIRY_DAYS)
         questions = _safe_json_loads(row["questions"], [])
-        link = _build_public_link(request, new_token, "request-info")
 
-        try:
-            email_service = get_email_service()
-            sent = await email_service.send_ir_info_request_email(
-                to_email=row["recipient_email"],
-                to_name=row["recipient_name"],
-                company_name=company_name,
-                incident_number=incident["incident_number"],
-                requested_by_name=requested_by_name,
-                questions=[q["text"] for q in questions],
-                custom_message=row["custom_message"],
-                link=link,
-            )
-        except Exception as e:
-            logger.warning("[IR] Failed to resend info-request email: %s", e)
-            sent = False
+    new_token = secrets.token_urlsafe(24)
+    new_expires_at = datetime.now(timezone.utc) + timedelta(days=_EXPIRY_DAYS)
+    link = _build_public_link(request, new_token, "request-info")
 
-        if not sent:
-            # Don't burn the old (still-valid) token/link on a failed resend.
-            raise HTTPException(status_code=502, detail="Failed to send invite email")
+    try:
+        email_service = get_email_service()
+        sent = await email_service.send_ir_info_request_email(
+            to_email=row["recipient_email"],
+            to_name=row["recipient_name"],
+            company_name=company_name,
+            incident_number=incident["incident_number"],
+            requested_by_name=requested_by_name,
+            questions=[q["text"] for q in questions],
+            custom_message=row["custom_message"],
+            link=link,
+        )
+    except Exception as e:
+        logger.warning("[IR] Failed to resend info-request email: %s", e)
+        sent = False
 
+    if not sent:
+        # Don't burn the old (still-valid) token/link on a failed resend.
+        raise HTTPException(status_code=502, detail="Failed to send invite email")
+
+    async with get_connection() as conn:
+        # Guard against a concurrent submit/revoke landing between our
+        # read above and this write (same race class as revoke below) —
+        # only rotate the token if the request is still pending.
         updated = await conn.fetchrow(
             """
             UPDATE ir_info_requests
             SET token = $1, expires_at = $2
-            WHERE id = $3
+            WHERE id = $3 AND status NOT IN ('submitted', 'revoked')
             RETURNING *
             """,
             new_token, new_expires_at, request_id,
         )
+        if not updated:
+            raise HTTPException(
+                status_code=409,
+                detail="This request was answered or revoked before the resend completed",
+            )
 
         await log_audit(
             conn, str(incident_id), str(current_user.id), "info_request_resent",
             "info_request", str(request_id), {"recipient_email": updated["recipient_email"]},
         )
 
-        return _serialize_info_request(request, updated)
+    return _serialize_info_request(request, updated)
 
 
 @router.delete("/{incident_id}/info-requests/{request_id}")
@@ -248,19 +261,23 @@ async def revoke_info_request(
     """Invalidate an unanswered info-request link (e.g. sent to the wrong address)."""
     async with get_connection() as conn:
         await _get_incident_with_company_check(conn, incident_id, current_user, columns="id")
-        row = await conn.fetchrow(
-            "SELECT status FROM ir_info_requests WHERE id = $1 AND incident_id = $2",
+        exists = await conn.fetchval(
+            "SELECT 1 FROM ir_info_requests WHERE id = $1 AND incident_id = $2",
             request_id, incident_id,
         )
-        if not row:
+        if not exists:
             raise HTTPException(status_code=404, detail="Info request not found")
-        if row["status"] == "submitted":
-            raise HTTPException(status_code=400, detail="This request has already been answered")
 
+        # Conditional UPDATE (not SELECT-then-UPDATE) so a concurrent public
+        # submission landing between our check and write can't be silently
+        # overwritten to 'revoked' with its answers still attached.
         updated = await conn.fetchrow(
-            "UPDATE ir_info_requests SET status = 'revoked' WHERE id = $1 RETURNING *",
+            "UPDATE ir_info_requests SET status = 'revoked' "
+            "WHERE id = $1 AND status <> 'submitted' RETURNING *",
             request_id,
         )
+        if not updated:
+            raise HTTPException(status_code=400, detail="This request has already been answered")
 
         await log_audit(
             conn, str(incident_id), str(current_user.id), "info_request_revoked",

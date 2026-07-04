@@ -17,9 +17,9 @@ Backend routes for matcha-lite's Incident Reporting product. Package was split f
 | `osha.py` | 300/301/300A logs + CSV + **300A PDF + save** + recordability + AI determine + **ITA bulk export/validate** (per-establishment; `_osha_pdf.py` holds the WeasyPrint Form 300A template) | 11 |
 | `documents.py` | Upload, list, delete incident documents | 3 |
 | `anonymous_reporting.py` | Token mgmt: company-wide `/report/:token` + per-location `/intake/:token` magic links | 6 |
-| `info_requests.py` | IR Copilot "Request More Info": admin-side token create/list/resend for the public `/request-info/:token` form (public GET/POST live in `inbound_email.py`) | 3 |
+| `info_requests.py` | IR Copilot "Request More Info": admin-side token create/list/resend/revoke for the public `/request-info/:token` form (public GET/POST live in `inbound_email.py`) | 4 |
 | `audit_log.py` | Get audit trail for an incident | 1 |
-| **Total** | | **60 routes** |
+| **Total** | | **61 routes** |
 
 **No-roster people index** (`people.py` + `ir_people` / `ir_incident_people` tables, migration `irp1a2b3c4d5e`): people named in incidents (reporter / involved / witness / interviewee) are auto-indexed for per-person history WITHOUT a managed employee roster. Identity = the typed name, normalized for dedup (`_normalize_person_name`, `_gather_incident_people`, `_sync_incident_people` in `_shared.py`). Wired into `crud.create_incident` / `update_incident` (roles reporter/involved/witness, re-synced on edit) and `investigation_interviews` (role interviewee, managed separately so an incident edit's re-sync won't drop it). Distinct from `involved_employee_ids`, which targets the real `employees` roster. The truly-anonymous `/report/:token` intake (`inbound_email.py`) intentionally does NOT auto-mint people; the attributed per-location `/intake/:token` magic link DOES, since it shares `create_incident_core` with the authed create. Endpoints use 2+ segment paths (`/people/search`, `/people/{id}/incidents`) to avoid the `/{incident_id}` shadow.
 

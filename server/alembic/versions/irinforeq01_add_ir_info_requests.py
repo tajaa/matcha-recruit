@@ -43,9 +43,8 @@ def upgrade() -> None:
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_ir_info_requests_incident ON ir_info_requests(incident_id)"
     )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_ir_info_requests_token ON ir_info_requests(token)"
-    )
+    # No separate index on `token` — the UNIQUE constraint above already
+    # maintains one and serves every `WHERE token = $1` lookup.
 
 
 def downgrade() -> None:

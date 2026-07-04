@@ -61,7 +61,7 @@ export default function RequestInfoForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           answers: answers.map((a) => a.trim()),
-          company_name: honeypot,
+          internal_ref: honeypot,
         }),
       })
       if (!res.ok) {
@@ -141,10 +141,13 @@ export default function RequestInfoForm() {
           </label>
         ))}
 
-        {/* Honeypot — hidden from real users; bots fill this */}
+        {/* Honeypot — hidden from real users; bots fill this. Named away
+            from any recognizable autofill field (email/name/company) so
+            browser autofill/password managers don't populate it for a
+            real respondent. */}
         <input
           type="text"
-          name="company_name"
+          name="internal_ref"
           tabIndex={-1}
           autoComplete="off"
           value={honeypot}

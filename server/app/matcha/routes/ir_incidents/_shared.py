@@ -686,7 +686,7 @@ async def send_ir_info_request_notification_task(
         logger.info(f"[IR] No admin/client contacts found for company {company_id}")
         return
 
-    incident_url = f"{email_service.settings.app_base_url}/app/ir/incidents/{incident_id}"
+    incident_url = f"{email_service.settings.app_base_url}/app/ir/{incident_id}"
 
     tasks = [
         email_service.send_ir_info_request_response_email(
