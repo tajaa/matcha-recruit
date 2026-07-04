@@ -9,6 +9,13 @@ import { useIRInfoRequests } from '../../hooks/ir/useIRInfoRequests'
 
 const BASE = (import.meta.env.VITE_API_URL ?? '/api').replace(/\/$/, '')
 
+function fmtWhen(iso: string): string {
+  const d = new Date(iso)
+  const t = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  return d.toDateString() === new Date().toDateString() ? t
+    : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${t}`
+}
+
 type CopilotMessage = {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -398,7 +405,7 @@ export default function IRCopilotPanel({
       </div>
 
       {infoRequests.length > 0 && (
-        <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900/60 divide-y divide-zinc-800">
+        <div className="mb-4 rounded-lg border border-white/[0.08] bg-zinc-900/60 divide-y divide-white/[0.06]">
           {infoRequests.map((r) => (
             <div key={r.id} className="px-3 py-2 text-sm">
               <div className="flex items-center gap-2">
@@ -426,7 +433,7 @@ export default function IRCopilotPanel({
                 )}
               </div>
               {r.status === 'submitted' && r.responses && r.responses.length > 0 && (
-                <div className="mt-2 space-y-1.5 border-l-2 border-zinc-700 pl-3">
+                <div className="mt-2 space-y-1.5 border-l-2 border-sky-500/30 pl-3">
                   {r.responses.map((resp, i) => (
                     <div key={i}>
                       <div className="text-[11px] text-zinc-500">{resp.question}</div>
@@ -468,15 +475,22 @@ export default function IRCopilotPanel({
         {messages.map((m) => {
           if (m.message_type === 'text') {
             return (
-              <div
-                key={m.id}
-                className={`rounded-lg p-3 text-sm ${
-                  m.role === 'user'
-                    ? 'bg-zinc-800/60 text-zinc-100 ml-12'
-                    : 'bg-zinc-900 border border-zinc-800 text-zinc-200'
-                }`}
-              >
-                {m.content}
+              <div key={m.id}>
+                <div className="flex items-baseline gap-3">
+                  {m.role === 'user' ? (
+                    <span className="text-[10px] font-medium uppercase tracking-[0.15em] text-zinc-500">You</span>
+                  ) : (
+                    <span className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.15em] text-emerald-400/90">
+                      <Sparkles className="h-3 w-3" /> Copilot
+                    </span>
+                  )}
+                  <span className="font-mono text-[10px] tabular-nums text-zinc-600">{fmtWhen(m.created_at)}</span>
+                </div>
+                <p className={`mt-1.5 max-w-[65ch] whitespace-pre-wrap text-sm leading-relaxed ${
+                  m.role === 'user' ? 'text-zinc-300' : 'text-zinc-200'
+                }`}>
+                  {m.content}
+                </p>
               </div>
             )
           }
@@ -506,7 +520,7 @@ export default function IRCopilotPanel({
                   key={m.id}
                   className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5"
                 >
-                  <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-emerald-400 mb-1">
+                  <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.15em] text-emerald-400 mb-1">
                     <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.704 5.29a1 1 0 010 1.42l-8 8a1 1 0 01-1.42 0l-4-4a1 1 0 011.42-1.42L8 12.585l7.29-7.295a1 1 0 011.414 0z" clipRule="evenodd"/></svg>
                     <span>Updated {fieldLabel}</span>
                   </div>
@@ -528,7 +542,7 @@ export default function IRCopilotPanel({
                   key={m.id}
                   className="rounded-lg border border-sky-500/30 bg-sky-500/5 px-3 py-2.5"
                 >
-                  <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-sky-400 mb-1.5">
+                  <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.15em] text-sky-400 mb-1.5">
                     <Mail className="w-3.5 h-3.5" />
                     <span>{m.content}</span>
                   </div>
@@ -577,7 +591,7 @@ export default function IRCopilotPanel({
 
         {openQuestions.length > 0 && (
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
-            <div className="text-xs uppercase tracking-wider text-amber-400 mb-1.5">
+            <div className="text-[10px] font-medium uppercase tracking-[0.15em] text-amber-400/80 mb-1.5">
               Open questions
             </div>
             <ul className="text-zinc-200 space-y-1 list-disc pl-5">
@@ -592,8 +606,9 @@ export default function IRCopilotPanel({
       </div>
 
       {/* Input */}
-      <div className="mt-6 sticky bottom-0 bg-zinc-950 pt-3 pb-2 -mx-6 px-6 border-t border-zinc-800">
-        <div className="flex gap-2">
+      <div className="mt-6 sticky bottom-0 bg-zinc-950 pt-3 pb-2 -mx-6 px-6 border-t border-white/[0.06]">
+        <div className="flex items-end gap-2 rounded-md border border-white/[0.08] bg-zinc-900/60 px-3 transition-colors focus-within:border-emerald-500/50">
+          <span className="select-none pb-[9px] font-mono text-sm text-emerald-500/80">›</span>
           <input
             type="text"
             value={input}
@@ -608,15 +623,17 @@ export default function IRCopilotPanel({
                 void handleSubmitInput()
               }
             }}
-            className="flex-1 rounded-md bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500 disabled:opacity-60"
+            className="flex-1 bg-transparent py-2 text-sm text-zinc-100 placeholder-zinc-600 outline-none disabled:opacity-60"
           />
-          <Button
-            variant="primary"
+          <button
+            type="button"
+            aria-label="Send"
             disabled={streaming || !input.trim() || emergencyAlertActive}
             onClick={() => { void handleSubmitInput() }}
+            className="mb-1.5 rounded p-1.5 text-emerald-400 transition-colors hover:bg-emerald-500/10 disabled:text-zinc-700 disabled:hover:bg-transparent"
           >
-            <Send className="w-4 h-4" />
-          </Button>
+            {streaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          </button>
         </div>
         <div className="text-[10px] text-zinc-600 mt-1.5">
           Copilot uses incident details + cached AI analyses. Accept a card to act; type to clarify or ask a follow-up.

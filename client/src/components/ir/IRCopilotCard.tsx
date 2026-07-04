@@ -106,7 +106,7 @@ export default function IRCopilotCard({ messageId, card, accepted, busy, onAccep
     return (
       <div
         className={`rounded-lg border p-4 ${
-          accepted ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-zinc-700 bg-zinc-900'
+          accepted ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/[0.08] bg-zinc-900'
         }`}
       >
         <div className="flex items-start gap-3">
@@ -127,14 +127,10 @@ export default function IRCopilotCard({ messageId, card, accepted, busy, onAccep
                     Open Documents tab
                   </Button>
                 )}
-                <button
-                  onClick={() => onAccept(messageId, card.id)}
-                  disabled={busy}
-                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-zinc-800 text-zinc-100 hover:bg-zinc-700 border border-zinc-700 disabled:opacity-50 inline-flex items-center gap-1"
-                >
+                <Button size="sm" variant="secondary" disabled={busy} onClick={() => onAccept(messageId, card.id)}>
                   {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                   I&apos;m done
-                </button>
+                </Button>
                 <button
                   onClick={() => onSkip(messageId)}
                   disabled={busy}
@@ -157,7 +153,7 @@ export default function IRCopilotCard({ messageId, card, accepted, busy, onAccep
   return (
     <div
       className={`rounded-lg border p-4 ${
-        accepted ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-zinc-700 bg-zinc-900'
+        accepted ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/[0.08] bg-zinc-900'
       }`}
     >
       <div className="flex items-start gap-3">
@@ -176,8 +172,8 @@ export default function IRCopilotCard({ messageId, card, accepted, busy, onAccep
           )}
 
           {card.interview_questions && card.interview_questions.length > 0 && (
-            <div className="mt-3 border-l-2 border-zinc-700 pl-3">
-              <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">
+            <div className="mt-3 border-l-2 border-amber-500/30 pl-3">
+              <div className="text-[10px] font-medium uppercase tracking-[0.15em] text-amber-400/80 mb-1">
                 Suggested questions
               </div>
               <ul className="text-xs text-zinc-300 space-y-0.5 list-disc pl-4">
@@ -305,7 +301,7 @@ function NumericInputControl({
         value={value}
         disabled={busy}
         onChange={(e) => setValue(e.target.value)}
-        className="w-24 rounded-md bg-zinc-950 border border-zinc-700 px-2 py-1 text-sm text-zinc-100 outline-none focus:border-emerald-500"
+        className="w-24 rounded-md bg-zinc-950 border border-white/[0.08] px-2 py-1 text-sm text-zinc-100 outline-none focus:border-emerald-500/50"
       />
       <Button
         size="sm"
@@ -363,7 +359,7 @@ function TextInputControl({
             onAccept(messageId, card.id, { text_value: value.trim() })
           }
         }}
-        className="w-full rounded-md bg-zinc-950 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500 resize-y"
+        className="w-full rounded-md bg-zinc-950 border border-white/[0.08] px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500/50 resize-y"
       />
       <div className="flex items-center gap-2">
         <Button
