@@ -43,7 +43,16 @@ _MATTER_TYPES = ("subpoena", "class_action", "eeoc_charge", "single_plaintiff", 
 # Models
 # --------------------------------------------------------------------------- #
 
-class MatterCreate(BaseModel):
+class _JurisdictionStateMixin(BaseModel):
+    # check_fields=False: the field lives on the concrete models below, not
+    # on this mixin — without it Pydantic v2 rejects the class at definition.
+    @field_validator("jurisdiction_state", check_fields=False)
+    @classmethod
+    def _upper_state(cls, v):
+        return v.upper() if v else v
+
+
+class MatterCreate(_JurisdictionStateMixin):
     title: str = Field(..., min_length=1, max_length=300)
     matter_type: Literal["subpoena", "class_action", "eeoc_charge", "single_plaintiff", "audit", "other"] = "other"
     allegation: Optional[str] = Field(None, max_length=20_000)
@@ -56,13 +65,8 @@ class MatterCreate(BaseModel):
     location_id: Optional[UUID] = None
     jurisdiction_state: Optional[str] = Field(None, min_length=2, max_length=2)
 
-    @field_validator("jurisdiction_state")
-    @classmethod
-    def _upper_state(cls, v):
-        return v.upper() if v else v
 
-
-class MatterUpdate(BaseModel):
+class MatterUpdate(_JurisdictionStateMixin):
     title: Optional[str] = Field(None, min_length=1, max_length=300)
     allegation: Optional[str] = Field(None, max_length=20_000)
     defense_theory: Optional[str] = Field(None, max_length=20_000)
@@ -74,11 +78,6 @@ class MatterUpdate(BaseModel):
     counsel_email: Optional[str] = Field(None, max_length=320)
     location_id: Optional[UUID] = None
     jurisdiction_state: Optional[str] = Field(None, min_length=2, max_length=2)
-
-    @field_validator("jurisdiction_state")
-    @classmethod
-    def _upper_state(cls, v):
-        return v.upper() if v else v
 
 
 class ChatIn(BaseModel):
@@ -352,10 +351,16 @@ async def chat(matter_id: str, body: ChatIn, request: Request, current_user=Depe
 @router.post("/matters/{matter_id}/research")
 async def run_matter_research(matter_id: str, request: Request, current_user=Depends(require_admin_or_client)):
     company_id = await get_client_company_id(current_user)
-    await check_rate_limit(str(company_id), "legal_research", 10, 3600)
+    # Load (and 404) BEFORE consuming the rate budget — a typo'd matter id
+    # must not burn the company's 10/hour research allowance.
     async with get_connection() as conn:
         matter = await _load_matter(conn, matter_id, company_id)
-        row = await legal_research.run_research(conn, matter, getattr(current_user, "id", None))
+    await check_rate_limit(str(company_id), "legal_research", 10, 3600)
+    # run_research manages its own short-lived connections so no pooled
+    # connection is held across the ~110s of external CourtListener + Gemini
+    # calls (same discipline as chat()'s pre-work/release pattern).
+    row = await legal_research.run_research(matter, getattr(current_user, "id", None))
+    async with get_connection() as conn:
         await _audit(conn, matter_id, current_user, request, "research",
                      {"cases": len(row.get("cases") or []), "status": row.get("status")})
     return row
@@ -408,10 +413,15 @@ async def generate_packet(matter_id: str, body: PacketIn, request: Request, curr
 
         research_row = None
         if body.include_research:
+            # Same jurisdiction guard as _gather_case_law: a run grounded in a
+            # different state than the matter's CURRENT jurisdiction is stale
+            # and must not ride along in the packet.
+            current_state = (corpus.get("legal_context") or {}).get("state")
             research_row = await conn.fetchrow(
                 "SELECT * FROM legal_matter_research WHERE matter_id = $1 AND status = 'complete' "
+                "AND ($2::varchar IS NULL OR jurisdiction_state IS NULL OR jurisdiction_state = $2) "
                 "ORDER BY created_at DESC LIMIT 1",
-                matter_id,
+                matter_id, current_state,
             )
             research_row = legal_research.parse_research_row(dict(research_row)) if research_row else None
 

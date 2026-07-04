@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Loader2, Plus, Scale } from 'lucide-react'
 import { Button, useToast } from '../../../components/ui'
 import {
@@ -24,34 +24,43 @@ export default function LegalDefense() {
   const [researching, setResearching] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
+  // Which matter the async state below belongs to. Fetches and the ~2-minute
+  // research call resolve long after the user may have switched matters —
+  // every awaited setState checks this ref so a slow response for matter A
+  // can never clobber matter B's view.
+  const activeIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     listMatters().then((m) => { setMatters(m); setLoading(false) }).catch(() => setLoading(false))
   }, [])
 
   async function openMatter(id: string) {
+    activeIdRef.current = id
     setSelectedId(id)
     setMatter(null)
     setEvidence(null)
     setResearch(null)
+    setResearching(false)
     const [m, ev, researchRows] = await Promise.all([
       getMatter(id), getEvidence(id).catch(() => null), listResearch(id).catch(() => []),
     ])
+    if (activeIdRef.current !== id) return
     setMatter(m)
     setEvidence(ev)
     setResearch(researchRows[0] ?? null)
   }
 
   async function handleRunResearch() {
-    if (!selectedId || researching) return
+    const id = selectedId
+    if (!id || researching) return
     setResearching(true)
     try {
-      const row = await runResearch(selectedId)
-      setResearch(row)
+      const row = await runResearch(id)
+      if (activeIdRef.current === id) setResearch(row)
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Research failed', 'error')
+      if (activeIdRef.current === id) toast(e instanceof Error ? e.message : 'Research failed', 'error')
     } finally {
-      setResearching(false)
+      if (activeIdRef.current === id) setResearching(false)
     }
   }
 

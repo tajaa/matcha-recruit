@@ -25,12 +25,12 @@ import asyncio
 import io
 import json
 import logging
+import time
 import zipfile
 from datetime import datetime, timezone
 from uuid import UUID
 
 from app.config import get_settings
-from app.core.compliance_registry import CATEGORY_KEYS
 from app.core.services.genai_client import get_genai_client
 from app.core.services.pdf import safe_url_fetcher
 from app.core.services.storage import get_storage
@@ -108,9 +108,15 @@ def _hum(s) -> str:
 
 
 async def resolve_matter_jurisdiction(conn, matter: dict) -> dict | None:
-    """Resolve a matter's governing jurisdiction chain (federal → state → …)
-    from its location or state override. Returns None when neither is set —
-    callers treat that as "no jurisdiction grounding available", not an error.
+    """Resolve a matter's governing jurisdiction chain (ordered narrowest →
+    broadest, e.g. state then federal) from its location or state override.
+    Returns None when neither is set — callers treat that as "no jurisdiction
+    grounding available", not an error.
+
+    Precedence: the location governs when set — both the chain AND the state
+    come from it, and any ``jurisdiction_state`` override is ignored (the
+    same rule ``legal_research.run_research`` applies, so the governing-law
+    chain and the case-law search can never silently diverge).
 
     Deliberately NOT ``compliance_service.resolve_jurisdiction_stack`` — that
     CTE drags every requirement row along; this only needs the chain."""
@@ -125,7 +131,7 @@ async def resolve_matter_jurisdiction(conn, matter: dict) -> dict | None:
         )
         if loc:
             jid = loc["jurisdiction_id"]
-            state = state or ((loc["state"] or "").upper() or None)
+            state = ((loc["state"] or "").upper() or None) or state
     if jid is None and state:
         row = await conn.fetchrow(
             "SELECT id FROM jurisdictions WHERE state = $1 AND level = 'state' "
@@ -322,6 +328,7 @@ async def _src_compliance_alerts(conn, company_id, start, end) -> list[dict]:
           AND ($2::date IS NULL OR ca.created_at >= $2)
           AND ($3::date IS NULL OR ca.created_at < ($3::date + 1))
         ORDER BY ca.created_at DESC
+        LIMIT 100
         """,
         company_id, start, end,
     )
@@ -357,9 +364,26 @@ _MATTER_TYPE_CATEGORIES: dict[str, list[str] | None] = {
     "audit": None,
     "other": None,
 }
-assert all(
-    k in CATEGORY_KEYS for ks in _MATTER_TYPE_CATEGORIES.values() if ks for k in ks
-), "legal_defense._MATTER_TYPE_CATEGORIES references a category not in the compliance registry"
+# Registry-membership of these slugs is enforced by
+# tests/legal_defense/test_legal_defense.py::test_matter_type_categories_are_registry_keys
+# — NOT by a module-level assert: this module is imported unconditionally at
+# app boot via routes/__init__.py, so an import-time assert would take down
+# the entire backend on a registry rename, not just Legal Pilot.
+
+
+def _dt_date(v) -> str:
+    """Date-only render for law/bill records. The two retrieval paths hand
+    back different types for the same field (RAG pre-isoformats to str, the
+    SQL fallback returns date objects) — normalize so one exhibit never shows
+    the same date in two formats."""
+    if v is None:
+        return "—"
+    if isinstance(v, str):
+        return v[:10] or "—"
+    try:
+        return v.strftime("%Y-%m-%d")
+    except Exception:  # noqa: BLE001
+        return str(v)
 
 
 async def _gather_law(conn, matter: dict, juris: dict) -> tuple[dict | None, dict | None]:
@@ -382,6 +406,7 @@ async def _gather_law(conn, matter: dict, juris: dict) -> tuple[dict | None, dic
             hits = await rag.search_requirements(
                 query=query, conn=conn, jurisdiction_ids=jurisdiction_ids,
                 categories=categories, top_k=30, min_similarity=0.25,
+                statuses=["active"],  # repealed/superseded law must not read as current
             )
             if hits:
                 rows = [{
@@ -396,30 +421,24 @@ async def _gather_law(conn, matter: dict, juris: dict) -> tuple[dict | None, dic
             logger.warning("legal_defense: RAG law retrieval unavailable: %s", e)
 
     if rows is None:
-        rows = await conn.fetch(
-            """
-            SELECT id, title, category, current_value, statute_citation, effective_date,
-                   jurisdiction_level, jurisdiction_name
-            FROM jurisdiction_requirements
-            WHERE jurisdiction_id = ANY($1::uuid[]) AND status = 'active'
-              AND ($2::text[] IS NULL OR category = ANY($2))
-            ORDER BY effective_date DESC NULLS LAST LIMIT 40
-            """,
-            jurisdiction_ids, categories,
-        )
-        if not rows and categories is not None:
-            # A wage-hour category map on a non-wage class action must not
-            # blank the source entirely — widen to the full jurisdiction.
-            rows = await conn.fetch(
+        async def _fetch(cats):
+            return await conn.fetch(
                 """
                 SELECT id, title, category, current_value, statute_citation, effective_date,
                        jurisdiction_level, jurisdiction_name
                 FROM jurisdiction_requirements
                 WHERE jurisdiction_id = ANY($1::uuid[]) AND status = 'active'
+                  AND ($2::text[] IS NULL OR category = ANY($2))
                 ORDER BY effective_date DESC NULLS LAST LIMIT 40
                 """,
-                jurisdiction_ids,
+                jurisdiction_ids, cats,
             )
+
+        rows = await _fetch(categories)
+        if not rows and categories is not None:
+            # A wage-hour category map on a non-wage class action must not
+            # blank the source entirely — widen to the full jurisdiction.
+            rows = await _fetch(None)
         rows = [dict(r) for r in rows]
 
     law_records = [{
@@ -428,7 +447,7 @@ async def _gather_law(conn, matter: dict, juris: dict) -> tuple[dict | None, dic
         "summary": f"{r['title']}"
                    + (f" = {r['current_value']}" if r.get("current_value") else "")
                    + f" ({r.get('jurisdiction_name') or ''}, {_hum(r.get('jurisdiction_level'))})",
-        "when": _dt(r.get("effective_date")),
+        "when": _dt_date(r.get("effective_date")),
     } for r in rows]
     law_source = {"label": "Governing requirements (jurisdiction)", "records": law_records} if law_records else None
 
@@ -446,32 +465,64 @@ async def _gather_law(conn, matter: dict, juris: dict) -> tuple[dict | None, dic
         "ref": _hum(r["category"]) or "Legislation",
         "summary": f"{r['title']} — {_hum(r['current_status'])}"
                    + (f": {r['impact_summary'][:160]}" if r["impact_summary"] else ""),
-        "when": _dt(r["expected_effective_date"]),
+        "when": _dt_date(r["expected_effective_date"]),
     } for r in bill_rows]
     bill_source = {"label": "Pending legislation (jurisdiction)", "records": bill_records} if bill_records else None
 
     return law_source, bill_source
 
 
-async def _gather_case_law(conn, matter_id) -> dict | None:
+# The law/legislation lookup costs a Gemini embedding round-trip (RAG path)
+# plus several queries, and gather_evidence runs on EVERY chat turn while the
+# route holds a pooled connection. A matter's governing law doesn't change
+# turn-to-turn, so cache per (matter, jurisdiction, type, allegation) with a
+# short TTL. Bounded; whole-cache clear on overflow is fine at this size.
+_LAW_CACHE: dict = {}
+_LAW_CACHE_TTL = 300.0
+_LAW_CACHE_MAX = 256
+
+
+async def _gather_law_cached(conn, matter: dict, juris: dict) -> tuple[dict | None, dict | None]:
+    key = (
+        str(matter.get("id")),
+        str(juris.get("jurisdiction_id")),
+        matter.get("matter_type"),
+        matter.get("allegation") or "",
+    )
+    hit = _LAW_CACHE.get(key)
+    if hit and time.monotonic() - hit[0] < _LAW_CACHE_TTL:
+        return hit[1], hit[2]
+    law_src, bill_src = await _gather_law(conn, matter, juris)
+    if len(_LAW_CACHE) >= _LAW_CACHE_MAX:
+        _LAW_CACHE.clear()
+    _LAW_CACHE[key] = (time.monotonic(), law_src, bill_src)
+    return law_src, bill_src
+
+
+async def _gather_case_law(conn, matter_id, state: str | None = None) -> dict | None:
     """Externally-researched case law from the most recent completed
     ``legal_matter_research`` run (see ``services/legal_research.py``).
     ``case:`` cids are minted only from these persisted CourtListener API
-    rows — never from model text."""
+    rows — never from model text.
+
+    When ``state`` is given (the matter's currently-resolved jurisdiction
+    state), research runs recorded under a *different* state are skipped —
+    a matter whose location was corrected after research ran must not pair
+    the new jurisdiction's governing law with the old state's case law."""
+    from .legal_research import parse_research_row  # lazy: legal_research imports from this module
+
     row = await conn.fetchrow(
-        """SELECT cases FROM legal_matter_research
+        """SELECT cases, guidance, jurisdiction_state FROM legal_matter_research
              WHERE matter_id = $1 AND status = 'complete' AND cases IS NOT NULL
+               AND ($2::varchar IS NULL OR jurisdiction_state IS NULL OR jurisdiction_state = $2)
              ORDER BY created_at DESC LIMIT 1""",
-        matter_id,
+        matter_id, state,
     )
     if not row or not row["cases"]:
         return None
-    cases = row["cases"]
-    if isinstance(cases, str):
-        try:
-            cases = json.loads(cases)
-        except Exception:
-            return None
+    cases = parse_research_row(dict(row)).get("cases")
+    if not isinstance(cases, list):
+        return None
     records = [{
         "cid": f"case:{c['id']}",
         "ref": c.get("citation") or c.get("court") or "opinion",
@@ -545,7 +596,7 @@ async def gather_evidence(conn, company_id, start, end, features: dict, matter: 
             notes.append("Jurisdiction: unavailable")
         if legal_context:
             try:
-                law_src, bill_src = await _gather_law(conn, matter, legal_context)
+                law_src, bill_src = await _gather_law_cached(conn, matter, legal_context)
                 if law_src and law_src["records"]:
                     sources["law"] = law_src
                 if bill_src and bill_src["records"]:
@@ -554,7 +605,8 @@ async def gather_evidence(conn, company_id, start, end, features: dict, matter: 
                 logger.warning("legal_defense: law source unavailable: %s", e)
                 notes.append("Governing requirements (jurisdiction): unavailable")
         try:
-            case_src = await _gather_case_law(conn, matter.get("id"))
+            case_src = await _gather_case_law(
+                conn, matter.get("id"), (legal_context or {}).get("state"))
             if case_src and case_src["records"]:
                 sources["case_law"] = case_src
         except Exception as e:  # noqa: BLE001
@@ -767,6 +819,17 @@ def _research_html(research: dict | None) -> str:
     cases = research.get("cases") or []
     guidance = research.get("guidance") or {}
 
+    # A partial failure (e.g. CourtListener down) persists status='complete'
+    # with an error note — surface it, or an empty cases table is
+    # indistinguishable from a genuine zero-result search.
+    error_note = ""
+    if research.get("error"):
+        error_note = (
+            "<p style='font-weight:600;color:#b45309'>Partial run: "
+            f"{_esc(research['error'])}. Sections below may be incomplete "
+            "for that reason rather than because nothing was found.</p>"
+        )
+
     case_rows = "".join(
         f"<tr><td>{_esc(c.get('case_name'))}</td><td>{_esc(c.get('citation'))}</td>"
         f"<td>{_esc(c.get('court'))}</td><td>{_fmt_dt(c.get('date_filed'))}</td>"
@@ -789,6 +852,7 @@ def _research_html(research: dict | None) -> str:
         <p style="font-weight:600">External research compiled from public sources. It is
         informational only, is not legal advice, has not been verified by an attorney,
         and must be independently evaluated by counsel.</p>
+        {error_note}
         <h2>Cases located</h2>
         <table><thead><tr><th>Name</th><th>Citation</th><th>Court</th><th>Filed</th><th>URL</th></tr></thead>
         <tbody>{case_rows}</tbody></table>
@@ -817,10 +881,17 @@ def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: lis
 
     narrative = _esc(memo.get("assistant_text") or "") or "—"
 
+    # A cid validated at chat time can be absent from the packet-time
+    # re-gather (RAG top-K drift, changed evidence window, retrieval-path
+    # fallback). Render an explicit marker instead of silently-blank cells —
+    # blanks in a legal exhibit read as corruption, not scope drift.
+    _GONE = "(no longer in evidence scope at generation time)"
+
     points = ""
     for n, item in enumerate(memo.get("evidence_map") or [], start=1):
         cites = "".join(
-            f"<li><sup class='cite'>[{fn.get(c, '?')}]</sup> {_esc(index.get(c, {}).get('summary', ''))} "
+            f"<li><sup class='cite'>[{fn.get(c, '?')}]</sup> "
+            f"{_esc(index[c].get('summary', '')) if c in index else _GONE} "
             f"<span style='color:#888'>({_esc(index.get(c, {}).get('when', ''))})</span></li>"
             for c in (item.get("cited_ids") or [])
         )
@@ -833,9 +904,11 @@ def _memo_html(matter: dict, corpus: dict, memo: dict, details: dict, cited: lis
     oq_block = f"<ul>{oq}</ul>" if oq else "<p>None recorded.</p>"
 
     idx_rows = "".join(
-        f"<tr><td>[{fn[c]}]</td><td>{_esc(index.get(c, {}).get('source_label', ''))}</td>"
-        f"<td>{_esc(index.get(c, {}).get('ref', ''))}</td>"
-        f"<td>{_esc(index.get(c, {}).get('when', ''))}</td></tr>"
+        f"<tr><td>[{fn[c]}]</td><td>{_esc(index[c].get('source_label', ''))}</td>"
+        f"<td>{_esc(index[c].get('ref', ''))}</td>"
+        f"<td>{_esc(index[c].get('when', ''))}</td></tr>"
+        if c in index else
+        f"<tr><td>[{fn[c]}]</td><td colspan='3'>{_GONE}</td></tr>"
         for c in cited
     ) or "<tr><td colspan='4'>No records cited.</td></tr>"
 

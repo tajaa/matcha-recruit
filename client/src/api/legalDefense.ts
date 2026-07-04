@@ -143,6 +143,7 @@ export type ResearchRow = {
   id: string
   status: 'running' | 'complete' | 'failed'
   query: string | null
+  jurisdiction_state: string | null
   cases: ResearchCase[] | null
   guidance: ResearchGuidance | null
   error: string | null

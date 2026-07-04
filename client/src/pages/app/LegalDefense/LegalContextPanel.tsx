@@ -49,6 +49,15 @@ export function LegalContextPanel({ legalContext, research, onRunResearch, resea
         <p className="mt-2 text-[11px] text-red-400/90">Research failed: {research.error || 'unknown error'}</p>
       )}
 
+      {/* A persisted 'running' row with no local spinner means the run was
+          interrupted (page reload mid-run, backend restart) — say so instead
+          of rendering nothing, and leave the button enabled to re-run. */}
+      {research?.status === 'running' && !researching && (
+        <p className="mt-2 text-[11px] text-amber-500/90">
+          A research run was started but never finished (likely interrupted). Run it again.
+        </p>
+      )}
+
       {research && research.status === 'complete' && (
         <div className="mt-3 max-h-64 space-y-3 overflow-y-auto">
           {research.error && (

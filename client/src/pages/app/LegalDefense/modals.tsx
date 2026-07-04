@@ -59,7 +59,7 @@ export function NewMatterModal({ onClose, onCreated }: { onClose: () => void; on
           <Input label="Evidence from" type="date" value={start} onChange={(e) => setStart(e.target.value)} />
           <Input label="Evidence to" type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
         </div>
-        {locations.length > 0 ? (
+        {locations.length > 0 && (
           <Select
             label="Location (governing jurisdiction)"
             value={locationId}
@@ -67,12 +67,11 @@ export function NewMatterModal({ onClose, onCreated }: { onClose: () => void; on
             options={locations.map((l) => ({ value: l.id, label: `${l.name || 'Location'} — ${l.city}, ${l.state}` }))}
             onChange={(e) => setLocationId(e.target.value)}
           />
-        ) : (
-          <Input label="Jurisdiction state (optional, e.g. CA)" value={stateOverride}
-            maxLength={2} onChange={(e) => setStateOverride(e.target.value.toUpperCase())} />
         )}
-        {locations.length > 0 && !locationId && (
-          <Input label="Or jurisdiction state (optional, e.g. CA)" value={stateOverride}
+        {!locationId && (
+          <Input
+            label={`${locations.length > 0 ? 'Or jurisdiction' : 'Jurisdiction'} state (optional, e.g. CA)`}
+            value={stateOverride}
             maxLength={2} onChange={(e) => setStateOverride(e.target.value.toUpperCase())} />
         )}
         <div className="flex items-center justify-between rounded-lg border border-white/[0.06] px-3 py-2">

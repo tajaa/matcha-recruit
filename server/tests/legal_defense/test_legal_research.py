@@ -3,6 +3,7 @@ run_research orchestration. Fast, no network / no DB (fake conn + monkeypatched
 network calls)."""
 import asyncio
 import json
+from contextlib import asynccontextmanager
 
 from app.matcha.services import legal_research as lr
 
@@ -43,20 +44,25 @@ def test_parse_search_results_tolerates_missing_keys():
 # --- run_research orchestration ---------------------------------------------
 
 class _FakeResearchConn:
-    """Captures UPDATE args and round-trips them through json like asyncpg's
-    jsonb columns actually do (str in, str back out) — proves run_research's
-    final read matches what real persistence would return."""
+    """Captures the INSERT/UPDATE args and round-trips jsonb the way asyncpg
+    actually does (str in, str back out) — proves run_research's final read
+    matches what real persistence would return."""
     def __init__(self):
         self.updates = []
+        self.insert_args = None
 
     async def fetchrow(self, sql, *args):
         if "INSERT INTO legal_matter_research" in sql:
+            self.insert_args = args
             return {"id": "r1"}
+        if "SELECT state FROM business_locations" in sql:
+            return None
         if "SELECT * FROM legal_matter_research WHERE id" in sql:
             last = self.updates[-1]
             return {
                 "id": "r1", "matter_id": "m1", "company_id": "cid",
                 "status": last["status"], "query": "q",
+                "jurisdiction_state": self.insert_args[4] if self.insert_args else None,
                 "cases": last.get("cases"), "guidance": last.get("guidance"),
                 "error": last.get("error"), "created_by": None,
                 "created_at": None, "completed_at": None,
@@ -70,6 +76,17 @@ class _FakeResearchConn:
             self.updates.append({
                 "status": "complete", "cases": args[0], "guidance": args[1], "error": args[2],
             })
+
+
+def _patch_conn(monkeypatch, conn):
+    """run_research acquires its own short-lived connections (so the pool is
+    never held across the external calls) — route both acquisitions to the
+    same fake."""
+    @asynccontextmanager
+    async def fake_get_connection(tenant_id=None):
+        yield conn
+
+    monkeypatch.setattr(lr, "get_connection", fake_get_connection)
 
 
 _MATTER = {
@@ -95,11 +112,14 @@ def test_run_research_persists_only_api_rows(monkeypatch):
     monkeypatch.setattr(lr, "synthesize_guidance", fake_guidance)
 
     conn = _FakeResearchConn()
-    result = asyncio.run(lr.run_research(conn, _MATTER, created_by=None))
+    _patch_conn(monkeypatch, conn)
+    result = asyncio.run(lr.run_research(_MATTER, created_by=None))
 
     assert result["status"] == "complete"
     assert result["cases"] == _CASES
     assert result["guidance"] == _GUIDANCE
+    # the state the run was grounded in is persisted with the row
+    assert conn.insert_args[4] == "CA"
     # persisted cases are exactly the API rows — no fabricated entries mixed in
     complete_update = conn.updates[-1]
     assert json.loads(complete_update["cases"]) == _CASES
@@ -116,7 +136,8 @@ def test_run_research_partial_failure_completes(monkeypatch):
     monkeypatch.setattr(lr, "synthesize_guidance", fake_guidance)
 
     conn = _FakeResearchConn()
-    result = asyncio.run(lr.run_research(conn, _MATTER, created_by=None))
+    _patch_conn(monkeypatch, conn)
+    result = asyncio.run(lr.run_research(_MATTER, created_by=None))
 
     assert result["status"] == "complete"
     assert result["cases"] == []
@@ -135,7 +156,38 @@ def test_run_research_total_failure_marks_failed(monkeypatch):
     monkeypatch.setattr(lr, "synthesize_guidance", failing_guidance)
 
     conn = _FakeResearchConn()
-    result = asyncio.run(lr.run_research(conn, _MATTER, created_by=None))
+    _patch_conn(monkeypatch, conn)
+    result = asyncio.run(lr.run_research(_MATTER, created_by=None))
 
     assert result["status"] == "failed"
     assert result["error"]
+
+
+# --- state precedence --------------------------------------------------------
+
+class _LocStateConn:
+    """Location lookup returns a state — and the SQL must be company-scoped."""
+    def __init__(self, state):
+        self.state = state
+        self.seen_sql = None
+
+    async def fetchrow(self, sql, *args):
+        self.seen_sql = sql
+        return {"state": self.state}
+
+
+def test_resolve_state_location_wins_over_override():
+    # Same precedence as legal_defense.resolve_matter_jurisdiction: the
+    # location governs when set, so the CourtListener search can never target
+    # a different state than the governing-law chain.
+    conn = _LocStateConn("ny")
+    matter = {**_MATTER, "location_id": "loc1", "jurisdiction_state": "CA"}
+    state = asyncio.run(lr._resolve_state(conn, matter))
+    assert state == "NY"
+    assert "company_id" in conn.seen_sql  # tenant-scoped lookup
+
+
+def test_resolve_state_falls_back_to_override():
+    conn = _FakeResearchConn()  # business_locations lookup returns None
+    matter = {**_MATTER, "location_id": "loc1", "jurisdiction_state": "CA"}
+    assert asyncio.run(lr._resolve_state(conn, matter)) == "CA"

@@ -19,6 +19,7 @@ from google.genai import types
 from app.config import get_settings
 from app.core.services.genai_client import get_genai_client
 from app.core.services.rate_limiter import get_rate_limiter
+from app.database import get_connection
 
 from .legal_defense import MODEL as _GEMINI_MODEL
 from .legal_defense import _hum, _parse_json
@@ -169,28 +170,42 @@ def parse_research_row(row: dict) -> dict:
     return row
 
 
-async def run_research(conn, matter: dict, created_by) -> dict:
+async def _resolve_state(conn, matter: dict) -> str | None:
+    """Location-first (company-scoped), then the explicit state override —
+    the SAME precedence ``legal_defense.resolve_matter_jurisdiction`` applies,
+    so the CourtListener search can never target a different state than the
+    governing-law chain shown alongside it."""
+    if matter.get("location_id"):
+        loc = await conn.fetchrow(
+            "SELECT state FROM business_locations WHERE id = $1 AND company_id = $2",
+            matter["location_id"], matter["company_id"],
+        )
+        if loc and loc["state"]:
+            return loc["state"].upper()
+    return (matter.get("jurisdiction_state") or "").upper() or None
+
+
+async def run_research(matter: dict, created_by) -> dict:
     """Orchestrate one research run: persist a row, gather cases + guidance
     (each isolated), finalize status. Never raises on partial failure —
     only a total failure (both case search and guidance synthesis) marks
-    the row ``failed``."""
-    state = (matter.get("jurisdiction_state") or "").upper() or None
-    if not state and matter.get("location_id"):
-        loc = await conn.fetchrow(
-            "SELECT state FROM business_locations WHERE id = $1", matter["location_id"]
+    the row ``failed``.
+
+    Acquires its own short-lived pool connections around the DB phases so
+    that NO pooled connection is held across the external CourtListener +
+    Gemini calls (~110s worst case) — the same discipline the chat endpoint
+    applies before its long Gemini call."""
+    async with get_connection() as conn:
+        state = await _resolve_state(conn, matter)
+        allegation = (matter.get("allegation") or "")[:300]
+        query = f"{_hum(matter.get('matter_type'))} {allegation}".strip()
+        row = await conn.fetchrow(
+            """INSERT INTO legal_matter_research
+                   (matter_id, company_id, query, created_by, jurisdiction_state)
+               VALUES ($1, $2, $3, $4, $5) RETURNING id""",
+            matter["id"], matter["company_id"], query, created_by, state,
         )
-        if loc and loc["state"]:
-            state = loc["state"].upper()
-
-    allegation = (matter.get("allegation") or "")[:300]
-    query = f"{_hum(matter.get('matter_type'))} {allegation}".strip()
-
-    row = await conn.fetchrow(
-        """INSERT INTO legal_matter_research (matter_id, company_id, query, created_by)
-           VALUES ($1, $2, $3, $4) RETURNING id""",
-        matter["id"], matter["company_id"], query, created_by,
-    )
-    research_id = row["id"]
+        research_id = row["id"]
 
     cases: list[dict] = []
     case_err: str | None = None
@@ -209,24 +224,25 @@ async def run_research(conn, matter: dict, created_by) -> dict:
         logger.warning("legal_research: guidance synthesis failed: %s", e)
         guid_err = str(e)
 
-    if case_err and guid_err:
-        await conn.execute(
-            "UPDATE legal_matter_research SET status='failed', error=$1, completed_at=NOW() WHERE id=$2",
-            f"Case search failed: {case_err}; guidance synthesis failed: {guid_err}", research_id,
-        )
-    else:
-        error = None
-        if case_err:
-            error = f"Case search unavailable: {case_err}"
-        elif guid_err:
-            error = f"Guidance synthesis unavailable: {guid_err}"
-        await conn.execute(
-            """UPDATE legal_matter_research
-                   SET status='complete', cases=$1::jsonb, guidance=$2::jsonb,
-                       error=$3, completed_at=NOW()
-                 WHERE id=$4""",
-            json.dumps(cases), json.dumps(guidance) if guidance else None, error, research_id,
-        )
+    async with get_connection() as conn:
+        if case_err and guid_err:
+            await conn.execute(
+                "UPDATE legal_matter_research SET status='failed', error=$1, completed_at=NOW() WHERE id=$2",
+                f"Case search failed: {case_err}; guidance synthesis failed: {guid_err}", research_id,
+            )
+        else:
+            error = None
+            if case_err:
+                error = f"Case search unavailable: {case_err}"
+            elif guid_err:
+                error = f"Guidance synthesis unavailable: {guid_err}"
+            await conn.execute(
+                """UPDATE legal_matter_research
+                       SET status='complete', cases=$1::jsonb, guidance=$2::jsonb,
+                           error=$3, completed_at=NOW()
+                     WHERE id=$4""",
+                json.dumps(cases), json.dumps(guidance) if guidance else None, error, research_id,
+            )
 
-    result = await conn.fetchrow("SELECT * FROM legal_matter_research WHERE id = $1", research_id)
+        result = await conn.fetchrow("SELECT * FROM legal_matter_research WHERE id = $1", research_id)
     return parse_research_row(dict(result))

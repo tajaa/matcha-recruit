@@ -28,6 +28,7 @@ class ComplianceRAGService:
         industry_tags: Optional[list[str]] = None,
         top_k: int = 10,
         min_similarity: float = 0.3,
+        statuses: Optional[list[str]] = None,
     ) -> list[dict]:
         """Vector similarity search over compliance embeddings.
 
@@ -46,6 +47,11 @@ class ComplianceRAGService:
             Max results to return.
         min_similarity : float
             Minimum cosine similarity threshold.
+        statuses : list[str], optional
+            Filter to jurisdiction_requirements.status values (e.g. ["active"]).
+            None keeps the historical behavior of returning every status —
+            repealed/superseded rows are embedded too, so callers surfacing
+            "current law" should pass ["active"].
 
         Returns
         -------
@@ -96,6 +102,11 @@ class ComplianceRAGService:
         if industry_tags:
             sql += f" AND ce.applicable_industries && ${idx}::text[]"
             params.append(industry_tags)
+            idx += 1
+
+        if statuses:
+            sql += f" AND jr.status = ANY(${idx}::requirement_status_enum[])"
+            params.append(statuses)
             idx += 1
 
         if min_similarity > 0:

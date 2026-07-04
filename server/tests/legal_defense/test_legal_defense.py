@@ -169,3 +169,39 @@ def test_matter_type_categories_are_registry_keys():
             continue
         for c in cats:
             assert c in CATEGORY_KEYS
+
+
+# --- packet rendering guards -------------------------------------------------
+
+def test_research_html_surfaces_partial_error():
+    # A partial run (CourtListener down) persists status='complete' with an
+    # error note and cases=[] — the PDF must not render that as a genuine
+    # zero-result search.
+    html = ld._research_html({
+        "cases": [], "guidance": {"summary": "s", "key_authorities": []},
+        "error": "Case search unavailable: courtlistener down",
+    })
+    assert "Partial run" in html
+    assert "courtlistener down" in html
+    # clean run renders no partial-run banner
+    clean = ld._research_html({"cases": [], "guidance": {}, "error": None})
+    assert "Partial run" not in clean
+
+
+def test_memo_html_marks_out_of_scope_citations():
+    # A cid validated at chat time but absent from the packet-time re-gather
+    # must render an explicit marker, not silently-blank index cells.
+    memo = {"assistant_text": "x", "open_questions": [],
+            "evidence_map": [{"point": "p", "cited_ids": ["law:gone"]}]}
+    corpus = {"index": {}, "sources": {}, "notes": []}
+    html = ld._memo_html({}, corpus, memo, details={}, cited=["law:gone"])
+    assert "no longer in evidence scope" in html
+
+
+def test_dt_date_normalizes_str_and_date():
+    # The RAG path pre-isoformats dates to str; the SQL path returns date
+    # objects — both must render identically, date-only.
+    import datetime
+    assert ld._dt_date("2024-01-15") == "2024-01-15"
+    assert ld._dt_date(datetime.date(2024, 1, 15)) == "2024-01-15"
+    assert ld._dt_date(None) == "—"

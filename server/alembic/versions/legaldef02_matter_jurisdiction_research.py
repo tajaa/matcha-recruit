@@ -43,6 +43,11 @@ def upgrade():
             status        VARCHAR(16) NOT NULL DEFAULT 'running'
                             CHECK (status IN ('running','complete','failed')),
             query         TEXT,
+            -- State the run was grounded in (resolved at run time). Read-time
+            -- filters skip runs whose state no longer matches the matter's
+            -- current jurisdiction, so a post-research location correction
+            -- can't pair new-state governing law with old-state case law.
+            jurisdiction_state VARCHAR(2),
             cases         JSONB,
             guidance      JSONB,
             error         TEXT,
