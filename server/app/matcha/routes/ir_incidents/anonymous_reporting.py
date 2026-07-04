@@ -8,11 +8,12 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from app.database import get_connection
 from app.matcha.dependencies import require_admin_or_client, get_client_company_id
+from app.matcha.services.ir_report_poster import build_report_poster_pdf
 
 from ._shared import _build_public_link, _location_label
 
@@ -95,6 +96,31 @@ async def disable_anonymous_reporting(
             company_id,
         )
     return {"token": None, "enabled": False}
+
+
+@router.get("/anonymous-reporting/poster.pdf")
+async def get_anonymous_reporting_poster(
+    request: Request,
+    current_user=Depends(require_admin_or_client),
+):
+    """Branded, print-ready PDF poster for the company-wide /report link."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Company not found")
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT report_email_token FROM companies WHERE id = $1",
+            company_id,
+        )
+    if not row or not row["report_email_token"]:
+        raise HTTPException(status_code=404, detail="Anonymous reporting is not enabled")
+    link = _public_report_link(request, row["report_email_token"])
+    pdf = build_report_poster_pdf(link)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=incident-qr-poster.pdf"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -374,3 +400,40 @@ async def location_link_history(
             "retired_at": h["retired_at"].isoformat() if h["retired_at"] else None,
         })
     return entries
+
+
+@router.get("/anonymous-reporting/location-links/{link_id}/poster.pdf")
+async def get_location_link_poster(
+    request: Request,
+    link_id: str,
+    current_user=Depends(require_admin_or_client),
+):
+    """Branded, print-ready PDF poster for one location's /intake link."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Company not found")
+    try:
+        UUID(link_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=404, detail="Link not found")
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT rl.token, bl.name AS location_name, bl.city, bl.state
+            FROM ir_report_links rl
+            JOIN business_locations bl ON bl.id = rl.location_id
+            WHERE rl.id = $1 AND rl.company_id = $2
+            """,
+            link_id,
+            company_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Link not found")
+    link = _build_public_link(request, row["token"], "intake")
+    subtitle = _location_label(row["location_name"], row["city"], row["state"])
+    pdf = build_report_poster_pdf(link, subtitle=subtitle)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=incident-qr-poster.pdf"},
+    )

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { Copy, QrCode, RefreshCw, X, History } from 'lucide-react'
+import { Copy, QrCode, RefreshCw, X, History, Download } from 'lucide-react'
 import { api } from '../../api/client'
 import { Button, Input, Select } from '../ui'
 
@@ -151,6 +151,14 @@ export function IRAnonymousReportingPanel() {
     }
   }
 
+  // Download a branded QR poster PDF. Swallows errors (consistent with the rest of
+  // this panel) so a transient failure doesn't surface an unhandled rejection.
+  async function downloadPoster(path: string, filename: string) {
+    try {
+      await api.download(path, filename.replace(/[^\w.-]+/g, '-'))
+    } catch { /* ignore */ }
+  }
+
   const linkedIds = new Set(links.map((l) => l.location_id))
   const pickable = locations.filter((l) => !linkedIds.has(l.id))
 
@@ -183,6 +191,16 @@ export function IRAnonymousReportingPanel() {
                   </Button>
                   {status.enabled && (
                     <Button size="sm" variant="ghost" disabled={loading} onClick={disable}>Disable</Button>
+                  )}
+                  {status.link && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => downloadPoster('/ir/incidents/anonymous-reporting/poster.pdf', 'incident-qr-poster.pdf')}
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      Download QR poster
+                    </Button>
                   )}
                 </div>
                 <p className="text-[11px] text-zinc-500">Anonymous — no name collected, single-use.</p>
@@ -306,10 +324,21 @@ export function IRAnonymousReportingPanel() {
                       </button>
                     </div>
                     {qrOpen === l.id && (
-                      <div className="flex justify-center pt-1">
+                      <div className="flex flex-col items-center gap-2 pt-1">
                         <div className="bg-white p-3 rounded-lg inline-block">
                           <QRCodeSVG value={l.link} size={140} />
                         </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => downloadPoster(
+                            `/ir/incidents/anonymous-reporting/location-links/${l.id}/poster.pdf`,
+                            `incident-qr-${l.location_label}.pdf`,
+                          )}
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          Download PDF
+                        </Button>
                       </div>
                     )}
                     {histOpen === l.id && (
