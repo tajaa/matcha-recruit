@@ -99,15 +99,17 @@ export function ComplianceTicker() {
       className="fixed left-0 right-0 z-40 w-full overflow-hidden"
       style={{
         top: "64px",
-        borderBottom: "1px solid rgba(255,255,255,0.06)",
+        backgroundColor: "#0F0F0F",
+        borderBottom: "1px solid rgba(255,255,255,0.08)",
         height: "40px",
       }}
     >
       <div className="flex items-center h-full">
         <div
-          className="shrink-0 flex items-center gap-2 px-5 h-full border-r text-[11px] font-medium uppercase tracking-[0.18em] text-gray-600"
+          className="shrink-0 flex items-center gap-2 px-5 h-full border-r text-[11px] font-medium uppercase tracking-[0.18em]"
           style={{
             borderColor: "rgba(255,255,255,0.08)",
+            color: "rgba(245,242,237,0.55)",
           }}
         >
           <span className="relative inline-flex w-1 h-1">
@@ -133,13 +135,13 @@ export function ComplianceTicker() {
                 <span
                   className="text-[10.5px] font-medium uppercase tracking-wider px-2 py-[2px] rounded-sm"
                   style={{
-                    color: "#374151",
-                    border: "1px solid #374151",
+                    color: "rgba(245,242,237,0.7)",
+                    border: "1px solid rgba(245,242,237,0.3)",
                   }}
                 >
                   {item.tag}
                 </span>
-                <span className="text-[13px]" style={{ color: "#374151" }}>
+                <span className="text-[13px]" style={{ color: "rgba(245,242,237,0.7)" }}>
                   {item.text}
                 </span>
               </span>

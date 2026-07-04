@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { motion } from 'framer-motion'
+import { motion, useInView, useReducedMotion } from 'framer-motion'
 import { Scale, Bell, FileText, Library, BadgeCheck, ListChecks } from 'lucide-react'
 
 import MarketingNav from '../landing/MarketingNav'
@@ -16,6 +16,26 @@ const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 const GREEN = '#A3C57D' // the one emphasis color — everything else stays grayscale
 const GREEN_600 = '#5B7F3E' // eyebrow labels specifically
+
+// Instrument cards run dark (black bg / cream text) inside the otherwise ivory page.
+const CARD_BG = INK
+const CARD_TEXT = BG
+const CARD_MUTED = 'rgba(245,242,237,0.5)'
+const CARD_LINE = 'rgba(245,242,237,0.14)'
+
+// Ticks up once every `intervalMs` while `active` (the instrument is in
+// view), so a `key={cycle}` on the animated content replays its entrance.
+const CARD_LOOP_MS = 4000
+function useLoopCycle(active: boolean, intervalMs = CARD_LOOP_MS) {
+  const reduce = useReducedMotion()
+  const [cycle, setCycle] = useState(0)
+  useEffect(() => {
+    if (!active || reduce) return
+    const id = setInterval(() => setCycle((c) => c + 1), intervalMs)
+    return () => clearInterval(id)
+  }, [active, reduce, intervalMs])
+  return cycle
+}
 
 // ---------------------------------------------------------------------------
 // Simplified /compliance — same four-pillar product (jurisdictional
@@ -196,6 +216,9 @@ function PulseDot({ size = 8 }: { size?: number }) {
 // 01 — a nested stack that narrows federal → city, resolving to the one
 // governing rule (lit).
 function JurisdictionInstrument() {
+  const ref = useRef(null)
+  const inView = useInView(ref, { margin: '-40px' })
+  const cycle = useLoopCycle(inView)
   const rows = [
     { label: 'Federal', w: 100, note: 'Baseline' },
     { label: 'State', w: 78, note: 'Overlay' },
@@ -204,36 +227,49 @@ function JurisdictionInstrument() {
   ]
   return (
     <InstrumentFrame caption="Requirement stack" foot="Resolves to the one rule that governs">
-      <div className="flex flex-col gap-3">
-        {rows.map((r) => (
-          <div key={r.label} className="flex items-center gap-4">
-            <div className="w-16 shrink-0 text-[10px] font-mono uppercase tracking-wider text-right" style={{ color: r.lit ? INK : MUTED, fontWeight: r.lit ? 600 : 400 }}>
-              {r.label}
-            </div>
-            <div className="relative flex-1 h-7">
-              <div
-                className="absolute inset-y-0 left-0 rounded-sm flex items-center px-2.5"
-                style={{
-                  width: `${r.w}%`,
-                  border: `1px solid ${r.lit ? 'transparent' : LINE}`,
-                  backgroundColor: r.lit ? GREEN : 'transparent',
-                }}
-              >
-                <span
-                  className="text-[9px] font-mono uppercase tracking-wider"
-                  style={{ color: r.lit ? '#1a1408' : MUTED }}
-                >
-                  {r.note}
-                </span>
+      <div ref={ref}>
+        <div key={cycle} className="flex flex-col gap-3">
+          {rows.map((r, i) => (
+            <div key={r.label} className="flex items-center gap-4">
+              <div className="w-16 shrink-0 text-[10px] font-mono uppercase tracking-wider text-right" style={{ color: r.lit ? CARD_TEXT : CARD_MUTED, fontWeight: r.lit ? 600 : 400 }}>
+                {r.label}
               </div>
-              {r.lit && (
-                <span className="absolute -right-1 top-1/2 -translate-y-1/2" style={{ left: `${r.w}%` }}>
-                  <PulseDot />
-                </span>
-              )}
+              <div className="relative flex-1 h-7">
+                <motion.div
+                  className="absolute inset-y-0 left-0 rounded-sm flex items-center px-2.5 overflow-hidden"
+                  style={{
+                    border: `1px solid ${r.lit ? 'transparent' : CARD_LINE}`,
+                    backgroundColor: r.lit ? GREEN : 'transparent',
+                  }}
+                  initial={{ width: 0 }}
+                  animate={inView ? { width: `${r.w}%` } : {}}
+                  transition={{ duration: 0.6, delay: i * 0.18, ease: [0.16, 1, 0.3, 1] }}
+                >
+                  <motion.span
+                    className="text-[9px] font-mono uppercase tracking-wider whitespace-nowrap"
+                    style={{ color: r.lit ? '#1a1408' : CARD_MUTED }}
+                    initial={{ opacity: 0 }}
+                    animate={inView ? { opacity: 1 } : {}}
+                    transition={{ duration: 0.3, delay: i * 0.18 + 0.35 }}
+                  >
+                    {r.note}
+                  </motion.span>
+                </motion.div>
+                {r.lit && (
+                  <motion.span
+                    className="absolute top-1/2 -translate-y-1/2"
+                    style={{ left: `${r.w}%` }}
+                    initial={{ opacity: 0, scale: 0.5 }}
+                    animate={inView ? { opacity: 1, scale: 1 } : {}}
+                    transition={{ duration: 0.3, delay: i * 0.18 + 0.5 }}
+                  >
+                    <PulseDot />
+                  </motion.span>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </InstrumentFrame>
   )
@@ -241,6 +277,9 @@ function JurisdictionInstrument() {
 
 // 02 — a graded handbook: section rows with grade marks, one flagged.
 function HandbookInstrument() {
+  const ref = useRef(null)
+  const inView = useInView(ref, { margin: '-40px' })
+  const cycle = useLoopCycle(inView)
   const sections = [
     { label: 'At-will & EEO', w: 82, grade: 'ok' },
     { label: 'Meal & rest breaks', w: 64, grade: 'flag' },
@@ -249,35 +288,51 @@ function HandbookInstrument() {
     { label: 'Pay & overtime', w: 70, grade: 'ok' },
   ]
   const mark: Record<string, { t: string; c: string }> = {
-    ok: { t: '✓', c: MUTED },
-    weak: { t: '~', c: MUTED },
+    ok: { t: '✓', c: CARD_MUTED },
+    weak: { t: '~', c: CARD_MUTED },
     flag: { t: 'CRITICAL', c: GREEN },
   }
   return (
     <InstrumentFrame caption="Handbook · graded" foot="Every section scored against your state">
-      <div className="flex flex-col gap-3.5">
-        {sections.map((s) => {
-          const m = mark[s.grade]
-          const lit = s.grade === 'flag'
-          return (
-            <div key={s.label} className="flex items-center gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="text-[11px] mb-1.5" style={{ color: lit ? INK : MUTED, fontWeight: lit ? 600 : 400 }}>
-                  {s.label}
+      <div ref={ref}>
+        <div key={cycle} className="flex flex-col gap-3.5">
+          {sections.map((s, i) => {
+            const m = mark[s.grade]
+            const lit = s.grade === 'flag'
+            return (
+              <motion.div
+                key={s.label}
+                className="flex items-center gap-3"
+                initial={{ opacity: 0, x: -8 }}
+                animate={inView ? { opacity: 1, x: 0 } : {}}
+                transition={{ duration: 0.4, delay: i * 0.1, ease: 'easeOut' }}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] mb-1.5" style={{ color: lit ? CARD_TEXT : CARD_MUTED, fontWeight: lit ? 600 : 400 }}>
+                    {s.label}
+                  </div>
+                  <div className="h-1 rounded-full overflow-hidden" style={{ backgroundColor: CARD_LINE }}>
+                    <motion.div
+                      className="h-full rounded-full"
+                      style={{ backgroundColor: lit ? GREEN : CARD_LINE }}
+                      initial={{ width: 0 }}
+                      animate={inView ? { width: `${s.w}%` } : {}}
+                      transition={{ duration: 0.6, delay: i * 0.1 + 0.1, ease: [0.16, 1, 0.3, 1] }}
+                    />
+                  </div>
                 </div>
-                <div className="h-1 rounded-full" style={{ width: `${s.w}%`, backgroundColor: lit ? GREEN : LINE }} />
-              </div>
-              {lit ? (
-                <span className="flex items-center gap-1.5 shrink-0">
-                  <PulseDot size={6} />
-                  <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: m.c }}>{m.t}</span>
-                </span>
-              ) : (
-                <span className="text-[11px] font-mono w-14 text-right shrink-0" style={{ color: m.c }}>{m.t}</span>
-              )}
-            </div>
-          )
-        })}
+                {lit ? (
+                  <span className="flex items-center gap-1.5 shrink-0">
+                    <PulseDot size={6} />
+                    <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: m.c }}>{m.t}</span>
+                  </span>
+                ) : (
+                  <span className="text-[11px] font-mono w-14 text-right shrink-0" style={{ color: m.c }}>{m.t}</span>
+                )}
+              </motion.div>
+            )
+          })}
+        </div>
       </div>
     </InstrumentFrame>
   )
@@ -285,17 +340,31 @@ function HandbookInstrument() {
 
 // 03 — a policy kept current, with a live review date. No lifecycle detail.
 function PolicyInstrument() {
+  const ref = useRef(null)
+  const inView = useInView(ref, { margin: '-40px' })
+  const cycle = useLoopCycle(inView)
+  const words = ['Always current.', 'Never stale.']
   return (
     <InstrumentFrame caption="Policy · lifecycle" foot="Next review tracked — never slips">
-      <div className="flex flex-col items-center text-center gap-4 py-3">
+      <div ref={ref} className="flex flex-col items-center text-center gap-4 py-3">
         <PulseDot size={10} />
-        <p style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '1.6rem', color: INK, lineHeight: 1.2 }}>
-          Always current. Never stale.
+        <p key={cycle} style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '1.6rem', color: CARD_TEXT, lineHeight: 1.2 }}>
+          {words.map((w, i) => (
+            <motion.span
+              key={w}
+              className="inline-block mr-2"
+              initial={{ opacity: 0, y: 8 }}
+              animate={inView ? { opacity: 1, y: 0 } : {}}
+              transition={{ duration: 0.4, delay: 0.15 + i * 0.3, ease: 'easeOut' }}
+            >
+              {w}
+            </motion.span>
+          ))}
         </p>
       </div>
-      <div className="mt-6 pt-5 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
-        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: MUTED }}>Next review</span>
-        <span className="text-[12px] font-mono" style={{ color: INK }}>Mar 14 · 42 days</span>
+      <div className="mt-6 pt-5 border-t flex items-center justify-between" style={{ borderColor: CARD_LINE }}>
+        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: CARD_MUTED }}>Next review</span>
+        <span className="text-[12px] font-mono" style={{ color: CARD_TEXT }}>Mar 14 · 42 days</span>
       </div>
     </InstrumentFrame>
   )
@@ -303,6 +372,9 @@ function PolicyInstrument() {
 
 // 04 — a credential countdown, expiry node lit.
 function CredentialInstrument() {
+  const ref = useRef(null)
+  const inView = useInView(ref, { margin: '-40px' })
+  const cycle = useLoopCycle(inView)
   const marks = [
     { label: '90d', note: 'Reminder' },
     { label: '30d', note: 'Nudge' },
@@ -310,19 +382,27 @@ function CredentialInstrument() {
   ]
   return (
     <InstrumentFrame caption="Credential · countdown" foot="Flagged long before it lapses">
-      <div className="flex flex-col gap-4">
-        {marks.map((m) => (
-          <div key={m.label} className="flex items-center gap-4">
-            <div className="w-10 shrink-0 text-[13px] font-mono tabular-nums text-right" style={{ color: m.lit ? INK : MUTED, fontWeight: m.lit ? 600 : 400 }}>
-              {m.label}
-            </div>
-            <div className="flex items-center gap-2.5 flex-1">
-              {m.lit ? <PulseDot size={7} /> : <span className="block rounded-full" style={{ width: 6, height: 6, border: `1px solid ${LINE}` }} />}
-              <div className="flex-1 h-px" style={{ backgroundColor: m.lit ? GREEN : LINE }} />
-              <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: m.lit ? GREEN_600 : MUTED }}>{m.note}</span>
-            </div>
-          </div>
-        ))}
+      <div ref={ref}>
+        <div key={cycle} className="flex flex-col gap-4">
+          {marks.map((m, i) => (
+            <motion.div
+              key={m.label}
+              className="flex items-center gap-4"
+              initial={{ opacity: 0, y: 6 }}
+              animate={inView ? { opacity: 1, y: 0 } : {}}
+              transition={{ duration: 0.4, delay: i * 0.3, ease: 'easeOut' }}
+            >
+              <div className="w-10 shrink-0 text-[13px] font-mono tabular-nums text-right" style={{ color: m.lit ? CARD_TEXT : CARD_MUTED, fontWeight: m.lit ? 600 : 400 }}>
+                {m.label}
+              </div>
+              <div className="flex items-center gap-2.5 flex-1">
+                {m.lit ? <PulseDot size={7} /> : <span className="block rounded-full" style={{ width: 6, height: 6, border: `1px solid ${CARD_LINE}` }} />}
+                <div className="flex-1 h-px" style={{ backgroundColor: m.lit ? GREEN : CARD_LINE }} />
+                <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: m.lit ? GREEN : CARD_MUTED }}>{m.note}</span>
+              </div>
+            </motion.div>
+          ))}
+        </div>
       </div>
     </InstrumentFrame>
   )
@@ -332,16 +412,16 @@ function CredentialInstrument() {
 // warranted, since it reads as a device, not a feature box.
 function InstrumentFrame({ caption, foot, children }: { caption: string; foot: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border overflow-hidden" style={{ borderColor: LINE, backgroundColor: 'rgba(31,29,26,0.015)' }}>
-      <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: LINE }}>
-        <span className="text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: MUTED }}>{caption}</span>
-        <span className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: MUTED }}>
+    <div className="rounded-xl border overflow-hidden" style={{ borderColor: CARD_LINE, backgroundColor: CARD_BG }}>
+      <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: CARD_LINE }}>
+        <span className="text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: CARD_MUTED }}>{caption}</span>
+        <span className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: CARD_MUTED }}>
           <PulseDot size={5} />
           Live
         </span>
       </div>
       <div className="px-5 py-6">{children}</div>
-      <div className="px-5 py-3 border-t text-[10px] font-mono uppercase tracking-[0.12em]" style={{ borderColor: LINE, color: MUTED }}>
+      <div className="px-5 py-3 border-t text-[10px] font-mono uppercase tracking-[0.12em]" style={{ borderColor: CARD_LINE, color: CARD_MUTED }}>
         {foot}
       </div>
     </div>

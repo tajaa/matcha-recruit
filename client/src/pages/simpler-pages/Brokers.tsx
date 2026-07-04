@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { motion, useInView } from 'framer-motion'
+import { useEffect, useRef, useState } from 'react'
+import { motion, useInView, useReducedMotion } from 'framer-motion'
 import { TrendingDown, HardHat, Inbox, Layers, Link2, ClipboardCheck } from 'lucide-react'
 
 import { useSEO } from '../../hooks/useSEO'
@@ -15,6 +15,28 @@ const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 const GREEN = '#A3C57D' // the one emphasis color — everything else grayscale
 const GREEN_600 = '#5B7F3E' // eyebrow labels
+
+// Pillar instrument cards run dark (black bg / cream text) inside the otherwise
+// ivory page. The hero's Book-Risk-Curve card is already its own dark design
+// and is left untouched.
+const CARD_BG = INK
+const CARD_TEXT = BG
+const CARD_MUTED = 'rgba(245,242,237,0.5)'
+const CARD_LINE = 'rgba(245,242,237,0.14)'
+
+// Ticks up once every `intervalMs` while `active` (the instrument is in
+// view), so a `key={cycle}` on the animated content replays its entrance.
+const CARD_LOOP_MS = 4000
+function useLoopCycle(active: boolean, intervalMs = CARD_LOOP_MS) {
+  const reduce = useReducedMotion()
+  const [cycle, setCycle] = useState(0)
+  useEffect(() => {
+    if (!active || reduce) return
+    const id = setInterval(() => setCycle((c) => c + 1), intervalMs)
+    return () => clearInterval(id)
+  }, [active, reduce, intervalMs])
+  return cycle
+}
 
 // ---------------------------------------------------------------------------
 // Simplified /brokers. Keeps the original colorful Book-Risk-Curve hero card
@@ -367,16 +389,16 @@ function PulseDot({ size = 8 }: { size?: number }) {
 
 function InstrumentFrame({ caption, foot, children }: { caption: string; foot: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border overflow-hidden" style={{ borderColor: LINE, backgroundColor: 'rgba(31,29,26,0.015)' }}>
-      <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: LINE }}>
-        <span className="text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: MUTED }}>{caption}</span>
-        <span className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: MUTED }}>
+    <div className="rounded-xl border overflow-hidden" style={{ borderColor: CARD_LINE, backgroundColor: CARD_BG }}>
+      <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: CARD_LINE }}>
+        <span className="text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: CARD_MUTED }}>{caption}</span>
+        <span className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: CARD_MUTED }}>
           <PulseDot size={5} />
           Live
         </span>
       </div>
       <div className="px-5 py-6">{children}</div>
-      <div className="px-5 py-3 border-t text-[10px] font-mono uppercase tracking-[0.12em]" style={{ borderColor: LINE, color: MUTED }}>
+      <div className="px-5 py-3 border-t text-[10px] font-mono uppercase tracking-[0.12em]" style={{ borderColor: CARD_LINE, color: CARD_MUTED }}>
         {foot}
       </div>
     </div>
@@ -385,6 +407,9 @@ function InstrumentFrame({ caption, foot, children }: { caption: string; foot: s
 
 // 01 — risk-band ladder, resolving to the exposed account.
 function RiskCurveInstrument() {
+  const ref = useRef(null)
+  const inView = useInView(ref, { margin: '-40px' })
+  const cycle = useLoopCycle(inView)
   const bands = [
     { label: 'Strong', w: 30 },
     { label: 'Adequate', w: 52 },
@@ -393,22 +418,36 @@ function RiskCurveInstrument() {
   ]
   return (
     <InstrumentFrame caption="Book · risk curve" foot="The account deteriorating before its re-rate">
-      <div className="flex flex-col gap-3">
-        {bands.map((b) => (
-          <div key={b.label} className="flex items-center gap-4">
-            <div className="w-20 shrink-0 text-[10px] font-mono uppercase tracking-wider text-right" style={{ color: b.lit ? INK : MUTED, fontWeight: b.lit ? 600 : 400 }}>
-              {b.label}
+      <div ref={ref}>
+        <div key={cycle} className="flex flex-col gap-3">
+          {bands.map((b, i) => (
+            <div key={b.label} className="flex items-center gap-4">
+              <div className="w-20 shrink-0 text-[10px] font-mono uppercase tracking-wider text-right" style={{ color: b.lit ? CARD_TEXT : CARD_MUTED, fontWeight: b.lit ? 600 : 400 }}>
+                {b.label}
+              </div>
+              <div className="relative flex-1 h-2">
+                <motion.div
+                  className="absolute inset-y-0 left-0 rounded-full"
+                  style={{ backgroundColor: b.lit ? GREEN : CARD_LINE }}
+                  initial={{ width: 0 }}
+                  animate={inView ? { width: `${b.w}%` } : {}}
+                  transition={{ duration: 0.6, delay: i * 0.15, ease: [0.16, 1, 0.3, 1] }}
+                />
+                {b.lit && (
+                  <motion.span
+                    className="absolute top-1/2 -translate-y-1/2"
+                    style={{ left: `${b.w}%` }}
+                    initial={{ opacity: 0, scale: 0.5 }}
+                    animate={inView ? { opacity: 1, scale: 1 } : {}}
+                    transition={{ duration: 0.3, delay: i * 0.15 + 0.5 }}
+                  >
+                    <PulseDot size={7} />
+                  </motion.span>
+                )}
+              </div>
             </div>
-            <div className="relative flex-1 h-2">
-              <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${b.w}%`, backgroundColor: b.lit ? GREEN : LINE }} />
-              {b.lit && (
-                <span className="absolute top-1/2 -translate-y-1/2" style={{ left: `${b.w}%` }}>
-                  <PulseDot size={7} />
-                </span>
-              )}
-            </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </InstrumentFrame>
   )
@@ -416,6 +455,9 @@ function RiskCurveInstrument() {
 
 // 02 — WC portfolio rows, worst-first, top row flagged.
 function WcInstrument() {
+  const ref = useRef(null)
+  const inView = useInView(ref, { margin: '-40px' })
+  const cycle = useLoopCycle(inView)
   const rows = [
     { client: 'Northgate Logistics', lit: true },
     { client: 'Cedar Valley Mfg' },
@@ -424,20 +466,28 @@ function WcInstrument() {
   ]
   return (
     <InstrumentFrame caption="The book · ranked" foot="The account that needs you, first">
-      <div className="flex flex-col gap-3.5">
-        {rows.map((r) => (
-          <div key={r.client} className="flex items-center gap-3">
-            <span className="flex-1 min-w-0 text-[12px] truncate" style={{ color: r.lit ? INK : MUTED, fontWeight: r.lit ? 600 : 400 }}>{r.client}</span>
-            {r.lit ? (
-              <span className="flex items-center gap-1.5 shrink-0 w-24 justify-end">
-                <PulseDot size={6} />
-                <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: GREEN_600 }}>Needs a call</span>
-              </span>
-            ) : (
-              <span className="text-[9px] font-mono uppercase tracking-wider shrink-0 w-24 text-right" style={{ color: MUTED }}>Stable</span>
-            )}
-          </div>
-        ))}
+      <div ref={ref}>
+        <div key={cycle} className="flex flex-col gap-3.5">
+          {rows.map((r, i) => (
+            <motion.div
+              key={r.client}
+              className="flex items-center gap-3"
+              initial={{ opacity: 0, x: -8 }}
+              animate={inView ? { opacity: 1, x: 0 } : {}}
+              transition={{ duration: 0.4, delay: i * 0.12, ease: 'easeOut' }}
+            >
+              <span className="flex-1 min-w-0 text-[12px] truncate" style={{ color: r.lit ? CARD_TEXT : CARD_MUTED, fontWeight: r.lit ? 600 : 400 }}>{r.client}</span>
+              {r.lit ? (
+                <span className="flex items-center gap-1.5 shrink-0 w-24 justify-end">
+                  <PulseDot size={6} />
+                  <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: GREEN }}>Needs a call</span>
+                </span>
+              ) : (
+                <span className="text-[9px] font-mono uppercase tracking-wider shrink-0 w-24 text-right" style={{ color: CARD_MUTED }}>Stable</span>
+              )}
+            </motion.div>
+          ))}
+        </div>
       </div>
     </InstrumentFrame>
   )
@@ -445,6 +495,9 @@ function WcInstrument() {
 
 // 03 — action queue, top alert urgent.
 function CommandInstrument() {
+  const ref = useRef(null)
+  const inView = useInView(ref, { margin: '-40px' })
+  const cycle = useLoopCycle(inView)
   const alerts = [
     { client: 'Northgate Logistics', issue: 'Safety trend deteriorating', lit: true },
     { client: 'Cedar Valley Mfg', issue: 'Running above the book' },
@@ -452,21 +505,29 @@ function CommandInstrument() {
   ]
   return (
     <InstrumentFrame caption="Action center · queue" foot="Each flagged trend, an outreach already drafted">
-      <div className="flex flex-col gap-3.5">
-        {alerts.map((a) => (
-          <div key={a.client} className="flex items-start gap-3">
-            <span className="mt-1 shrink-0">
-              {a.lit ? <PulseDot size={6} /> : <span className="block rounded-full" style={{ width: 6, height: 6, border: `1px solid ${LINE}` }} />}
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="text-[12px]" style={{ color: a.lit ? INK : MUTED, fontWeight: a.lit ? 600 : 400 }}>{a.client}</div>
-              <div className="text-[10.5px] mt-0.5" style={{ color: MUTED }}>{a.issue}</div>
-            </div>
-            <span className="text-[9px] font-mono uppercase tracking-wider shrink-0" style={{ color: a.lit ? GREEN_600 : MUTED }}>
-              {a.lit ? 'Urgent' : 'Advisory'}
-            </span>
-          </div>
-        ))}
+      <div ref={ref}>
+        <div key={cycle} className="flex flex-col gap-3.5">
+          {alerts.map((a, i) => (
+            <motion.div
+              key={a.client}
+              className="flex items-start gap-3"
+              initial={{ opacity: 0, y: 6 }}
+              animate={inView ? { opacity: 1, y: 0 } : {}}
+              transition={{ duration: 0.4, delay: i * 0.15, ease: 'easeOut' }}
+            >
+              <span className="mt-1 shrink-0">
+                {a.lit ? <PulseDot size={6} /> : <span className="block rounded-full" style={{ width: 6, height: 6, border: `1px solid ${CARD_LINE}` }} />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[12px]" style={{ color: a.lit ? CARD_TEXT : CARD_MUTED, fontWeight: a.lit ? 600 : 400 }}>{a.client}</div>
+                <div className="text-[10.5px] mt-0.5" style={{ color: CARD_MUTED }}>{a.issue}</div>
+              </div>
+              <span className="text-[9px] font-mono uppercase tracking-wider shrink-0" style={{ color: a.lit ? GREEN : CARD_MUTED }}>
+                {a.lit ? 'Urgent' : 'Advisory'}
+              </span>
+            </motion.div>
+          ))}
+        </div>
       </div>
     </InstrumentFrame>
   )

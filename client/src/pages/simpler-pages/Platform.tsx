@@ -1,6 +1,6 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { motion } from 'framer-motion'
+import { motion, useInView, useReducedMotion } from 'framer-motion'
 import { ShieldAlert, Scale, Users, Gavel, Activity, Brain } from 'lucide-react'
 
 import MarketingNav from '../landing/MarketingNav'
@@ -18,6 +18,47 @@ const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 const GREEN = '#A3C57D' // the one emphasis color — everything else stays grayscale
 const GREEN_600 = '#5B7F3E' // eyebrow labels specifically
+
+// Instrument cards run dark (black bg / cream text) inside the otherwise ivory page.
+const CARD_BG = INK
+const CARD_TEXT = BG
+const CARD_MUTED = 'rgba(245,242,237,0.5)'
+const CARD_LINE = 'rgba(245,242,237,0.14)'
+
+// Counts a number up from 0 once its instrument scrolls into view, and again
+// every time `trigger` changes (drives the looping replay).
+function useCountUp(target: number, active: boolean, duration = 900, trigger = 0) {
+  const [value, setValue] = useState(0)
+  useEffect(() => {
+    if (!active) return
+    let raf: number
+    const start = performance.now()
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration)
+      const eased = 1 - Math.pow(1 - t, 3)
+      setValue(Math.round(target * eased))
+      if (t < 1) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [active, target, duration, trigger])
+  return value
+}
+
+// Ticks up once every `intervalMs` while `active` (the instrument is in
+// view), so a `key={cycle}` on the animated content replays its entrance.
+// Off-screen or reduced-motion, it stays put — no wasted cycles.
+const CARD_LOOP_MS = 4000
+function useLoopCycle(active: boolean, intervalMs = CARD_LOOP_MS) {
+  const reduce = useReducedMotion()
+  const [cycle, setCycle] = useState(0)
+  useEffect(() => {
+    if (!active || reduce) return
+    const id = setInterval(() => setCycle((c) => c + 1), intervalMs)
+    return () => clearInterval(id)
+  }, [active, reduce, intervalMs])
+  return cycle
+}
 
 // ---------------------------------------------------------------------------
 // Simplified /platform — the full Matcha platform (EHS + GRC + ER unified on
@@ -203,16 +244,16 @@ function PulseDot({ size = 8 }: { size?: number }) {
 
 function InstrumentFrame({ caption, foot, children }: { caption: string; foot: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border overflow-hidden" style={{ borderColor: LINE, backgroundColor: 'rgba(31,29,26,0.015)' }}>
-      <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: LINE }}>
-        <span className="text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: MUTED }}>{caption}</span>
-        <span className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: MUTED }}>
+    <div className="rounded-xl border overflow-hidden" style={{ borderColor: CARD_LINE, backgroundColor: CARD_BG }}>
+      <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: CARD_LINE }}>
+        <span className="text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: CARD_MUTED }}>{caption}</span>
+        <span className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: CARD_MUTED }}>
           <PulseDot size={5} />
           Live
         </span>
       </div>
       <div className="px-5 py-6">{children}</div>
-      <div className="px-5 py-3 border-t text-[10px] font-mono uppercase tracking-[0.12em]" style={{ borderColor: LINE, color: MUTED }}>
+      <div className="px-5 py-3 border-t text-[10px] font-mono uppercase tracking-[0.12em]" style={{ borderColor: CARD_LINE, color: CARD_MUTED }}>
         {foot}
       </div>
     </div>
@@ -221,17 +262,31 @@ function InstrumentFrame({ caption, foot, children }: { caption: string; foot: s
 
 // 01 — incident intake, resolved to routed. No pipeline detail.
 function IntakeInstrument() {
+  const ref = useRef(null)
+  const inView = useInView(ref, { margin: '-40px' })
+  const cycle = useLoopCycle(inView)
+  const words = ['Reported.', 'Scored.', 'Routed.']
   return (
     <InstrumentFrame caption="Incident · intake" foot="Every report categorized, scored, and routed">
-      <div className="flex flex-col items-center text-center gap-4 py-3">
+      <div ref={ref} className="flex flex-col items-center text-center gap-4 py-3">
         <PulseDot size={10} />
-        <p style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '1.6rem', color: INK, lineHeight: 1.2 }}>
-          Reported. Scored. Routed.
+        <p key={cycle} style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '1.6rem', color: CARD_TEXT, lineHeight: 1.2 }}>
+          {words.map((w, i) => (
+            <motion.span
+              key={w}
+              className="inline-block mr-2"
+              initial={{ opacity: 0, y: 8 }}
+              animate={inView ? { opacity: 1, y: 0 } : {}}
+              transition={{ duration: 0.4, delay: 0.15 + i * 0.22, ease: 'easeOut' }}
+            >
+              {w}
+            </motion.span>
+          ))}
         </p>
       </div>
-      <div className="mt-6 pt-5 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
-        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: MUTED }}>Atlanta — Store 7</span>
-        <span className="text-[11px] font-mono" style={{ color: INK }}>In the right hands</span>
+      <div className="mt-6 pt-5 border-t flex items-center justify-between" style={{ borderColor: CARD_LINE }}>
+        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: CARD_MUTED }}>Atlanta — Store 7</span>
+        <span className="text-[11px] font-mono" style={{ color: CARD_TEXT }}>In the right hands</span>
       </div>
     </InstrumentFrame>
   )
@@ -239,6 +294,9 @@ function IntakeInstrument() {
 
 // 02 — compliance monitor rows, one flagged.
 function ComplianceInstrument() {
+  const ref = useRef(null)
+  const inView = useInView(ref, { margin: '-40px' })
+  const cycle = useLoopCycle(inView)
   const rows = [
     { j: 'FED', label: 'FLSA overtime threshold', status: 'clear' },
     { j: 'CA', label: 'Meal-period waivers', status: 'flag' },
@@ -247,24 +305,37 @@ function ComplianceInstrument() {
   ]
   return (
     <InstrumentFrame caption="Compliance · monitor" foot="Deltas flagged before they take effect">
-      <div className="flex flex-col gap-3.5">
-        {rows.map((r) => {
-          const lit = r.status === 'flag'
-          return (
-            <div key={r.label} className="flex items-center gap-3">
-              <span className="w-9 shrink-0 text-[9px] font-mono uppercase tracking-wider" style={{ color: MUTED }}>{r.j}</span>
-              <span className="flex-1 min-w-0 text-[12px] truncate" style={{ color: lit ? INK : MUTED, fontWeight: lit ? 600 : 400 }}>{r.label}</span>
-              {lit ? (
-                <span className="flex items-center gap-1.5 shrink-0">
-                  <PulseDot size={6} />
-                  <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: GREEN_600 }}>Flagged</span>
-                </span>
-              ) : (
-                <span className="text-[9px] font-mono uppercase tracking-wider shrink-0" style={{ color: MUTED }}>Clear</span>
-              )}
-            </div>
-          )
-        })}
+      <div ref={ref}>
+        <div key={cycle} className="flex flex-col gap-3.5">
+          {rows.map((r, i) => {
+            const lit = r.status === 'flag'
+            return (
+              <motion.div
+                key={r.label}
+                className="flex items-center gap-3"
+                initial={{ opacity: 0, x: -8 }}
+                animate={inView ? { opacity: 1, x: 0 } : {}}
+                transition={{ duration: 0.4, delay: i * 0.12, ease: 'easeOut' }}
+              >
+                <span className="w-9 shrink-0 text-[9px] font-mono uppercase tracking-wider" style={{ color: CARD_MUTED }}>{r.j}</span>
+                <span className="flex-1 min-w-0 text-[12px] truncate" style={{ color: lit ? CARD_TEXT : CARD_MUTED, fontWeight: lit ? 600 : 400 }}>{r.label}</span>
+                {lit ? (
+                  <motion.span
+                    className="flex items-center gap-1.5 shrink-0"
+                    initial={{ opacity: 0 }}
+                    animate={inView ? { opacity: 1 } : {}}
+                    transition={{ duration: 0.3, delay: i * 0.12 + 0.35 }}
+                  >
+                    <PulseDot size={6} />
+                    <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: GREEN }}>Flagged</span>
+                  </motion.span>
+                ) : (
+                  <span className="text-[9px] font-mono uppercase tracking-wider shrink-0" style={{ color: CARD_MUTED }}>Clear</span>
+                )}
+              </motion.div>
+            )
+          })}
+        </div>
       </div>
     </InstrumentFrame>
   )
@@ -272,22 +343,51 @@ function ComplianceInstrument() {
 
 // 03 — case cluster: pattern detection surfaces a repeat.
 function CaseInstrument() {
-  // 5×3 scatter; the lit cells trace a repeat cluster.
-  const litCells = new Set([2, 7, 12])
+  const ref = useRef(null)
+  const inView = useInView(ref, { margin: '-40px' })
+  const cycle = useLoopCycle(inView)
+  // 5×3 scatter; the lit cells trace a repeat cluster, in scan order.
+  const litOrder = [2, 7, 12]
+  const litRank = new Map(litOrder.map((cell, i) => [cell, i]))
   return (
     <InstrumentFrame caption="Cases · pattern" foot="Repeat behavior surfaced across the record">
-      <div className="grid grid-cols-5 gap-y-4 gap-x-3 place-items-center py-1">
-        {Array.from({ length: 15 }).map((_, i) =>
-          litCells.has(i) ? (
-            <PulseDot key={i} size={8} />
-          ) : (
-            <span key={i} className="block rounded-full" style={{ width: 6, height: 6, backgroundColor: LINE }} />
-          ),
-        )}
-      </div>
-      <div className="mt-5 pt-5 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
-        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: GREEN_600 }}>Pattern found</span>
-        <span className="text-[11px] font-mono" style={{ color: INK }}>A repeat, one location</span>
+      <div ref={ref}>
+        <div key={cycle}>
+          <div className="grid grid-cols-5 gap-y-4 gap-x-3 place-items-center py-1">
+            {Array.from({ length: 15 }).map((_, i) => {
+              const rank = litRank.get(i)
+              return rank === undefined ? (
+                <motion.span
+                  key={i}
+                  className="block rounded-full"
+                  style={{ width: 6, height: 6, backgroundColor: CARD_LINE }}
+                  initial={{ opacity: 0 }}
+                  animate={inView ? { opacity: 1 } : {}}
+                  transition={{ duration: 0.4, delay: 0.02 * i }}
+                />
+              ) : (
+                <motion.span
+                  key={i}
+                  initial={{ opacity: 0, scale: 0.4 }}
+                  animate={inView ? { opacity: 1, scale: 1 } : {}}
+                  transition={{ duration: 0.35, delay: 0.5 + rank * 0.3, ease: 'backOut' }}
+                >
+                  <PulseDot size={8} />
+                </motion.span>
+              )
+            })}
+          </div>
+          <motion.div
+            className="mt-5 pt-5 border-t flex items-center justify-between"
+            style={{ borderColor: CARD_LINE }}
+            initial={{ opacity: 0 }}
+            animate={inView ? { opacity: 1 } : {}}
+            transition={{ duration: 0.4, delay: 0.5 + litOrder.length * 0.3 }}
+          >
+            <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: GREEN }}>Pattern found</span>
+            <span className="text-[11px] font-mono" style={{ color: CARD_TEXT }}>A repeat, one location</span>
+          </motion.div>
+        </div>
       </div>
     </InstrumentFrame>
   )
@@ -295,6 +395,10 @@ function CaseInstrument() {
 
 // 04 — domains feeding a single composite risk index.
 function ConvergenceInstrument() {
+  const ref = useRef(null)
+  const inView = useInView(ref, { margin: '-40px' })
+  const cycle = useLoopCycle(inView)
+  const riskIndex = useCountUp(72, inView, 1100, cycle)
   const domains = [
     { label: 'EHS', w: 70 },
     { label: 'GRC', w: 54 },
@@ -302,23 +406,31 @@ function ConvergenceInstrument() {
   ]
   return (
     <InstrumentFrame caption="Risk · composite" foot="Every domain rolled into one live index">
-      <div className="flex items-center gap-6">
-        <div className="flex-1 flex flex-col gap-3">
-          {domains.map((d) => (
-            <div key={d.label} className="flex items-center gap-3">
-              <span className="w-9 shrink-0 text-[9px] font-mono uppercase tracking-wider text-right" style={{ color: MUTED }}>{d.label}</span>
-              <div className="flex-1 h-1.5 rounded-full" style={{ backgroundColor: LINE }}>
-                <div className="h-full rounded-full" style={{ width: `${d.w}%`, backgroundColor: MUTED }} />
+      <div ref={ref}>
+        <div key={cycle} className="flex items-center gap-6">
+          <div className="flex-1 flex flex-col gap-3">
+            {domains.map((d, i) => (
+              <div key={d.label} className="flex items-center gap-3">
+                <span className="w-9 shrink-0 text-[9px] font-mono uppercase tracking-wider text-right" style={{ color: CARD_MUTED }}>{d.label}</span>
+                <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: CARD_LINE }}>
+                  <motion.div
+                    className="h-full rounded-full"
+                    style={{ backgroundColor: CARD_MUTED }}
+                    initial={{ width: 0 }}
+                    animate={inView ? { width: `${d.w}%` } : {}}
+                    transition={{ duration: 0.8, delay: i * 0.15, ease: [0.16, 1, 0.3, 1] }}
+                  />
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-        <span className="text-[11px] font-mono" style={{ color: MUTED }}>→</span>
-        <div className="flex flex-col items-center gap-1 shrink-0">
-          <div className="flex items-baseline gap-1">
-            <span className="tabular-nums leading-none" style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '2.75rem', color: GREEN }}>72</span>
+            ))}
           </div>
-          <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: MUTED }}>Risk index</span>
+          <span className="text-[11px] font-mono" style={{ color: CARD_MUTED }}>→</span>
+          <div className="flex flex-col items-center gap-1 shrink-0">
+            <div className="flex items-baseline gap-1">
+              <span className="tabular-nums leading-none" style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '2.75rem', color: GREEN }}>{riskIndex}</span>
+            </div>
+            <span className="text-[9px] font-mono uppercase tracking-wider" style={{ color: CARD_MUTED }}>Risk index</span>
+          </div>
         </div>
       </div>
     </InstrumentFrame>

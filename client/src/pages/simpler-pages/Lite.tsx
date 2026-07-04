@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion, useInView, useReducedMotion } from 'framer-motion'
 import { ShieldAlert, Users, Brain, ClipboardList, FileText } from 'lucide-react'
 
 import MarketingNav from '../landing/MarketingNav'
@@ -16,6 +16,45 @@ const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 const GREEN = '#A3C57D'
 const GREEN_600 = '#5B7F3E'
+
+// Instrument cards run dark (black bg / cream text) inside the otherwise ivory page.
+const CARD_BG = INK
+const CARD_TEXT = BG
+const CARD_MUTED = 'rgba(245,242,237,0.5)'
+const CARD_LINE = 'rgba(245,242,237,0.14)'
+
+// Counts a number up from 0 once in view, and again every time `trigger` changes.
+function useCountUp(target: number, active: boolean, duration = 900, trigger = 0) {
+  const [value, setValue] = useState(0)
+  useEffect(() => {
+    if (!active) return
+    let raf: number
+    const start = performance.now()
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration)
+      const eased = 1 - Math.pow(1 - t, 3)
+      setValue(Math.round(target * eased))
+      if (t < 1) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [active, target, duration, trigger])
+  return value
+}
+
+// Ticks up once every `intervalMs` while `active` (the instrument is in
+// view), so a `key={cycle}` on the animated content replays its entrance.
+const CARD_LOOP_MS = 4000
+function useLoopCycle(active: boolean, intervalMs = CARD_LOOP_MS) {
+  const reduce = useReducedMotion()
+  const [cycle, setCycle] = useState(0)
+  useEffect(() => {
+    if (!active || reduce) return
+    const id = setInterval(() => setCycle((c) => c + 1), intervalMs)
+    return () => clearInterval(id)
+  }, [active, reduce, intervalMs])
+  return cycle
+}
 
 // ---------------------------------------------------------------------------
 // Simplified /matcha-daily (Matcha Lite). Outcome-level marketing copy, the
@@ -124,7 +163,7 @@ function Hero({ onContactClick }: { onContactClick: () => void }) {
               fontFamily: DISPLAY,
               fontWeight: 400,
               color: GREEN,
-              WebkitTextStroke: `1.5px ${INK}`,
+              WebkitTextStroke: '1.5px #57534a',
               fontSize: 'clamp(2.25rem, 7vw, 5.25rem)',
             }}
           >
@@ -188,16 +227,16 @@ function PulseDot({ size = 8 }: { size?: number }) {
 
 function InstrumentFrame({ caption, foot, children }: { caption: string; foot: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border overflow-hidden" style={{ borderColor: LINE, backgroundColor: 'rgba(31,29,26,0.015)' }}>
-      <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: LINE }}>
-        <span className="text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: MUTED }}>{caption}</span>
-        <span className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: MUTED }}>
+    <div className="rounded-xl border overflow-hidden" style={{ borderColor: CARD_LINE, backgroundColor: CARD_BG }}>
+      <div className="flex items-center justify-between px-5 py-3 border-b" style={{ borderColor: CARD_LINE }}>
+        <span className="text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: CARD_MUTED }}>{caption}</span>
+        <span className="inline-flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.16em]" style={{ color: CARD_MUTED }}>
           <PulseDot size={5} />
           Live
         </span>
       </div>
       <div className="px-5 py-6">{children}</div>
-      <div className="px-5 py-3 border-t text-[10px] font-mono uppercase tracking-[0.12em]" style={{ borderColor: LINE, color: MUTED }}>
+      <div className="px-5 py-3 border-t text-[10px] font-mono uppercase tracking-[0.12em]" style={{ borderColor: CARD_LINE, color: CARD_MUTED }}>
         {foot}
       </div>
     </div>
@@ -223,7 +262,7 @@ function IntakeInstrument() {
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.35 }}
               className="max-w-[280px] rounded-2xl rounded-bl-sm px-4 py-3 text-[13px] border"
-              style={{ backgroundColor: BG, borderColor: LINE, color: INK, lineHeight: 1.4 }}
+              style={{ backgroundColor: CARD_TEXT, borderColor: CARD_LINE, color: CARD_BG, lineHeight: 1.4 }}
             >
               "Wet floor by the loading dock, no injury, cleaned up"
             </motion.div>
@@ -236,17 +275,17 @@ function IntakeInstrument() {
               transition={{ duration: 0.35 }}
               className="flex items-center gap-2.5"
             >
-              <span style={{ color: INK, fontSize: '1.1rem' }}>✓</span>
-              <span style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '1.4rem', color: INK }}>
+              <span style={{ color: GREEN, fontSize: '1.1rem' }}>✓</span>
+              <span style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '1.4rem', color: CARD_TEXT }}>
                 Logged.
               </span>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
-      <div className="mt-2 pt-5 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
-        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: MUTED }}>Dallas — Store 3</span>
-        <span className="text-[11px] font-mono" style={{ color: INK }}>Reported in seconds</span>
+      <div className="mt-2 pt-5 border-t flex items-center justify-between" style={{ borderColor: CARD_LINE }}>
+        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: CARD_MUTED }}>Dallas — Store 3</span>
+        <span className="text-[11px] font-mono" style={{ color: CARD_TEXT }}>Reported in seconds</span>
       </div>
     </InstrumentFrame>
   )
@@ -255,29 +294,36 @@ function IntakeInstrument() {
 // 02 — HRIS/CSV roster import, already synced. No import-flow detail.
 function RosterInstrument() {
   const sources = ['Gusto', 'Rippling', 'BambooHR', 'ADP', 'CSV']
+  const [active, setActive] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setActive((v) => (v + 1) % sources.length), 1400)
+    return () => clearInterval(t)
+  }, [sources.length])
   return (
     <InstrumentFrame caption="Roster · import" foot="Every report pre-fills the right employee">
       <div className="flex flex-wrap justify-center gap-2 py-2">
         {sources.map((s, i) => (
-          <span
+          <motion.span
             key={s}
             className="px-3 py-1.5 rounded-full text-[11px] font-mono uppercase tracking-wider"
-            style={{
-              color: i === 0 ? INK : MUTED,
-              border: `1px solid ${i === 0 ? GREEN : LINE}`,
-              fontWeight: i === 0 ? 600 : 400,
+            animate={{
+              color: i === active ? CARD_TEXT : CARD_MUTED,
+              borderColor: i === active ? GREEN : CARD_LINE,
+              fontWeight: i === active ? 600 : 400,
             }}
+            transition={{ duration: 0.3 }}
+            style={{ border: '1px solid' }}
           >
             {s}
-          </span>
+          </motion.span>
         ))}
       </div>
-      <div className="mt-5 pt-5 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
+      <div className="mt-5 pt-5 border-t flex items-center justify-between" style={{ borderColor: CARD_LINE }}>
         <span className="flex items-center gap-2">
           <PulseDot size={7} />
-          <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: MUTED }}>Synced</span>
+          <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: CARD_MUTED }}>Synced</span>
         </span>
-        <span className="text-[11px] font-mono" style={{ color: INK }}>312 employees</span>
+        <span className="text-[11px] font-mono" style={{ color: CARD_TEXT }}>312 employees</span>
       </div>
     </InstrumentFrame>
   )
@@ -285,6 +331,9 @@ function RosterInstrument() {
 
 // 03 — recent incidents with severity, one High flagged + a pattern note.
 function AnalysisInstrument() {
+  const ref = useRef(null)
+  const inView = useInView(ref, { margin: '-40px' })
+  const cycle = useLoopCycle(inView)
   const rows = [
     { loc: 'Atlanta — Store 7', type: 'Customer escalation', sev: 'High', lit: true },
     { loc: 'Phoenix — Warehouse', type: 'Slip / fall', sev: 'Med' },
@@ -292,21 +341,35 @@ function AnalysisInstrument() {
   ]
   return (
     <InstrumentFrame caption="Incidents · analysis" foot="Auto-categorized — your team confirms">
-      <div className="flex flex-col gap-3">
-        {rows.map((r) => (
-          <div key={r.loc} className="flex items-center gap-3">
-            <span className="shrink-0">
-              {r.lit ? <PulseDot size={6} /> : <span className="block rounded-full" style={{ width: 6, height: 6, backgroundColor: LINE }} />}
-            </span>
-            <span className="flex-1 min-w-0 text-[12px] truncate" style={{ color: r.lit ? INK : MUTED, fontWeight: r.lit ? 600 : 400 }}>{r.loc}</span>
-            <span className="text-[10px] font-mono truncate hidden sm:inline shrink-0" style={{ color: MUTED }}>{r.type}</span>
-            <span className="text-[9px] font-mono uppercase tracking-wider shrink-0 w-10 text-right" style={{ color: r.lit ? GREEN_600 : MUTED }}>{r.sev}</span>
-          </div>
-        ))}
-      </div>
-      <div className="mt-5 pt-5 border-t flex items-center justify-between" style={{ borderColor: LINE }}>
-        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: GREEN_600 }}>Pattern detected</span>
-        <span className="text-[11px] font-mono" style={{ color: INK }}>A repeat, surfaced early</span>
+      <div ref={ref}>
+        <div key={cycle} className="flex flex-col gap-3">
+          {rows.map((r, i) => (
+            <motion.div
+              key={r.loc}
+              className="flex items-center gap-3"
+              initial={{ opacity: 0, x: -8 }}
+              animate={inView ? { opacity: 1, x: 0 } : {}}
+              transition={{ duration: 0.4, delay: i * 0.14, ease: 'easeOut' }}
+            >
+              <span className="shrink-0">
+                {r.lit ? <PulseDot size={6} /> : <span className="block rounded-full" style={{ width: 6, height: 6, backgroundColor: CARD_LINE }} />}
+              </span>
+              <span className="flex-1 min-w-0 text-[12px] truncate" style={{ color: r.lit ? CARD_TEXT : CARD_MUTED, fontWeight: r.lit ? 600 : 400 }}>{r.loc}</span>
+              <span className="text-[10px] font-mono truncate hidden sm:inline shrink-0" style={{ color: CARD_MUTED }}>{r.type}</span>
+              <span className="text-[9px] font-mono uppercase tracking-wider shrink-0 w-10 text-right" style={{ color: r.lit ? GREEN : CARD_MUTED }}>{r.sev}</span>
+            </motion.div>
+          ))}
+        </div>
+        <motion.div
+          className="mt-5 pt-5 border-t flex items-center justify-between"
+          style={{ borderColor: CARD_LINE }}
+          initial={{ opacity: 0 }}
+          animate={inView ? { opacity: 1 } : {}}
+          transition={{ duration: 0.4, delay: rows.length * 0.14 + 0.2 }}
+        >
+          <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: GREEN }}>Pattern detected</span>
+          <span className="text-[11px] font-mono" style={{ color: CARD_TEXT }}>A repeat, surfaced early</span>
+        </motion.div>
       </div>
     </InstrumentFrame>
   )
@@ -314,30 +377,38 @@ function AnalysisInstrument() {
 
 // 04 — OSHA 300A tally tiles.
 function OshaInstrument() {
+  const ref = useRef(null)
+  const inView = useInView(ref, { margin: '-40px' })
+  const cycle = useLoopCycle(inView)
   const tiles = [
-    { label: 'Recordables', value: '7', lit: true },
-    { label: 'Lost days', value: '18' },
-    { label: 'Cases', value: '5' },
+    { label: 'Recordables', target: 7, lit: true },
+    { label: 'Lost days', target: 18 },
+    { label: 'Cases', target: 5 },
   ]
   return (
     <InstrumentFrame caption="OSHA 300A · summary" foot="Tallies auto-populate — export any time">
-      <div className="grid grid-cols-3 rounded-lg overflow-hidden border" style={{ borderColor: LINE }}>
-        {tiles.map((t, i) => (
-          <div
-            key={t.label}
-            className="px-3 py-4"
-            style={{ borderRight: i < tiles.length - 1 ? `1px solid ${LINE}` : undefined }}
-          >
-            <div className="text-[8px] font-mono uppercase tracking-widest mb-1.5" style={{ color: MUTED }}>{t.label}</div>
-            <div className="tabular-nums leading-none" style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '1.75rem', color: t.lit ? GREEN : INK }}>{t.value}</div>
-          </div>
-        ))}
-      </div>
-      <div className="mt-4 flex items-center gap-2">
-        <PulseDot size={5} />
-        <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: MUTED }}>Export-ready, any time</span>
+      <div ref={ref}>
+        <div key={cycle} className="grid grid-cols-3 rounded-lg overflow-hidden border" style={{ borderColor: CARD_LINE }}>
+          {tiles.map((t, i) => (
+            <OshaTile key={t.label} label={t.label} target={t.target} lit={t.lit} active={inView} last={i === tiles.length - 1} />
+          ))}
+        </div>
+        <div className="mt-4 flex items-center gap-2">
+          <PulseDot size={5} />
+          <span className="text-[10px] font-mono uppercase tracking-wider" style={{ color: CARD_MUTED }}>Export-ready, any time</span>
+        </div>
       </div>
     </InstrumentFrame>
+  )
+}
+
+function OshaTile({ label, target, lit, active, last }: { label: string; target: number; lit?: boolean; active: boolean; last: boolean }) {
+  const value = useCountUp(target, active, 900)
+  return (
+    <div className="px-3 py-4" style={{ borderRight: last ? undefined : `1px solid ${CARD_LINE}` }}>
+      <div className="text-[8px] font-mono uppercase tracking-widest mb-1.5" style={{ color: CARD_MUTED }}>{label}</div>
+      <div className="tabular-nums leading-none" style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: '1.75rem', color: lit ? GREEN : CARD_TEXT }}>{value}</div>
+    </div>
   )
 }
 
