@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Loader2, Plus, X, Trash2, ListChecks } from 'lucide-react'
+import { Loader2, Plus, X, Trash2, ListChecks, Undo2, CheckCircle2 } from 'lucide-react'
 import {
   listProjectTasks,
   createProjectTask,
   updateProjectTask,
   deleteProjectTask,
+  rejectProjectTask,
+  approveProjectTask,
   listSubtasks,
   createSubtask,
   updateSubtask,
@@ -16,6 +18,8 @@ import type {
   BoardColumn,
   TaskPriority,
 } from '../../types/matcha-work'
+import { ProjectSocket } from '../../api/projectSocket'
+import { useMe } from '../../hooks/useMe'
 import KanbanCard from './KanbanCard'
 
 interface ProjectKanbanBoardProps {
@@ -67,6 +71,37 @@ export default function ProjectKanbanBoard({ projectId }: ProjectKanbanBoardProp
   useEffect(() => {
     load()
   }, [load])
+
+  // ── Realtime: another collaborator's create/move/delete shows up live ──
+  // Mirrors useProjectPresence.ts's subscribe-on-mount pattern. A ref for the
+  // current user id (not a plain closure var) so the socket callbacks — bound
+  // once at connect time — always read the latest value instead of whatever
+  // `me` was on first render.
+  const { me } = useMe()
+  const meIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    meIdRef.current = me?.user.id ?? null
+  }, [me])
+
+  useEffect(() => {
+    const socket = new ProjectSocket()
+    socket.onTaskCreated = (raw) => {
+      if (raw.actor_id && raw.actor_id === meIdRef.current) return
+      const task = raw as unknown as MWProjectTask
+      setTasks((prev) => (prev.some((t) => t.id === task.id) ? prev : [...prev, task]))
+    }
+    socket.onTaskUpdated = (raw) => {
+      const task = raw as unknown as MWProjectTask
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? mergeTask(t, task) : t)))
+    }
+    socket.onTaskDeleted = (taskId) => {
+      setTasks((prev) => prev.filter((t) => t.id !== taskId))
+      setSelectedId((id) => (id === taskId ? null : id))
+    }
+    socket.connect()
+    socket.joinProject(projectId, 'board')
+    return () => socket.disconnect()
+  }, [projectId])
 
   const selectedTask = selectedId ? tasks.find((t) => t.id === selectedId) ?? null : null
 
@@ -363,6 +398,39 @@ function TaskDetailPanel({
   const [newSubtask, setNewSubtask] = useState('')
   const [savingField, setSavingField] = useState(false)
 
+  // Review send-back / approve — only surfaced while the card sits in Review.
+  const [showRejectNote, setShowRejectNote] = useState(false)
+  const [rejectNote, setRejectNote] = useState('')
+  const [reviewBusy, setReviewBusy] = useState(false)
+
+  async function handleApprove() {
+    setReviewBusy(true)
+    try {
+      const updated = await approveProjectTask(projectId, task.id)
+      onPatched(updated)
+    } catch {
+      /* surfaced via the board's own error path */
+    } finally {
+      setReviewBusy(false)
+    }
+  }
+
+  async function handleReject() {
+    const note = rejectNote.trim()
+    if (!note || reviewBusy) return
+    setReviewBusy(true)
+    try {
+      const updated = await rejectProjectTask(projectId, task.id, note)
+      onPatched(updated)
+      setShowRejectNote(false)
+      setRejectNote('')
+    } catch {
+      /* surfaced via the board's own error path */
+    } finally {
+      setReviewBusy(false)
+    }
+  }
+
   // Local editable copies of the inline fields.
   const [description, setDescription] = useState(task.description ?? '')
 
@@ -489,6 +557,66 @@ function TaskDetailPanel({
               </select>
             </label>
           </div>
+
+          {/* Review send-back / approve — only while sitting in Review */}
+          {task.board_column === 'review' && (
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
+              {!showRejectNote ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleApprove}
+                    disabled={reviewBusy}
+                    className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:opacity-50"
+                  >
+                    {reviewBusy ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                    )}
+                    Approve
+                  </button>
+                  <button
+                    onClick={() => setShowRejectNote(true)}
+                    disabled={reviewBusy}
+                    className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-800 disabled:opacity-50"
+                  >
+                    <Undo2 className="h-3.5 w-3.5" />
+                    Send back
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <textarea
+                    value={rejectNote}
+                    onChange={(e) => setRejectNote(e.target.value)}
+                    autoFocus
+                    rows={2}
+                    placeholder="What needs to change?"
+                    className="w-full resize-none rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-700"
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleReject}
+                      disabled={reviewBusy || !rejectNote.trim()}
+                      className="flex items-center gap-1.5 rounded-lg bg-orange-600 px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-orange-500 disabled:opacity-50"
+                    >
+                      {reviewBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      Send back
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowRejectNote(false)
+                        setRejectNote('')
+                      }}
+                      className="rounded-lg px-2.5 py-1.5 text-xs text-zinc-400 transition-colors hover:text-zinc-200"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Assignee (read-only — no people-picker on the lite surface yet) */}
           {(task.assigned_name || task.assigned_email) && (

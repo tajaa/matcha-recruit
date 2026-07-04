@@ -39,6 +39,13 @@ type PresenceUpdateHandler = (user_id: string, page_key: string | null) => void
 type CursorHandler = (payload: CursorPayload) => void
 type CaretHandler = (payload: CaretPayload) => void
 type UserEventHandler = (member: Partial<PresenceMember> & { id: string }) => void
+// `task` is the raw row dict from `broadcast_task_event` (server/app/matcha/
+// routes/project_ws.py) — same shape `listProjectTasks`/`updateProjectTask`
+// return, plus `actor_id` for self-echo suppression. Untyped here (consumers
+// cast to MWProjectTask) to avoid this socket module depending on matcha-work
+// domain types.
+type TaskEventHandler = (task: Record<string, unknown>) => void
+type TaskDeletedHandler = (taskId: string, actorId: string | null) => void
 
 function getWsBase(): string {
   const base = import.meta.env.VITE_API_URL ?? '/api'
@@ -68,6 +75,9 @@ export class ProjectSocket {
   onUserLeft: UserEventHandler | null = null
   onConnected: (() => void) | null = null
   onDisconnected: (() => void) | null = null
+  onTaskCreated: TaskEventHandler | null = null
+  onTaskUpdated: TaskEventHandler | null = null
+  onTaskDeleted: TaskDeletedHandler | null = null
 
   connect() {
     this._closed = false
@@ -125,6 +135,15 @@ export class ProjectSocket {
             break
           case 'user_left_project':
             this.onUserLeft?.({ id: data.user_id })
+            break
+          case 'task.created':
+            this.onTaskCreated?.(data.task)
+            break
+          case 'task.updated':
+            this.onTaskUpdated?.(data.task)
+            break
+          case 'task.deleted':
+            this.onTaskDeleted?.(data.task?.id, data.task?.actor_id ?? null)
             break
         }
       } catch { /* malformed — ignore */ }

@@ -115,6 +115,11 @@ export interface MWProjectTask {
   assigned_to: string | null
   assigned_name?: string | null
   assigned_email?: string | null
+  /** List-query-only (like the aggregates below): assignee's profile photo. */
+  assigned_avatar_url?: string | null
+  /** List-query-only: ticket creator identity for the card-face badge. */
+  created_by_name?: string | null
+  created_by_avatar_url?: string | null
   due_date: string | null
   completed_at: string | null
   created_at: string

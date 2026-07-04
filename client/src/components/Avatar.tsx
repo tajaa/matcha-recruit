@@ -1,11 +1,12 @@
 type AvatarProps = {
   name: string
   avatarUrl?: string | null
-  size?: 'sm' | 'md' | 'lg'
+  size?: 'xs' | 'sm' | 'md' | 'lg'
   className?: string
 }
 
 const sizes = {
+  xs: 'w-4 h-4 text-[8px]',
   sm: 'w-7 h-7 text-[10px]',
   md: 'w-9 h-9 text-xs',
   lg: 'w-14 h-14 text-lg',

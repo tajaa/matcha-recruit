@@ -1,5 +1,6 @@
-import { Paperclip, RefreshCw, Calendar, ListChecks, CheckCircle2 } from 'lucide-react'
-import type { MWProjectTask, TaskPriority } from '../../types/matcha-work'
+import { Paperclip, RefreshCw, Calendar, ListChecks, CheckCircle2, Clock } from 'lucide-react'
+import type { MWProjectTask } from '../../types/matcha-work'
+import Avatar from '../Avatar'
 
 interface KanbanCardProps {
   task: MWProjectTask
@@ -8,20 +9,6 @@ interface KanbanCardProps {
   onDragStart: (e: React.DragEvent) => void
   onDragEnd: () => void
   dragging?: boolean
-}
-
-const PRIORITY_DOT: Record<TaskPriority, string> = {
-  critical: 'bg-red-500',
-  high: 'bg-orange-500',
-  medium: 'bg-yellow-500',
-  low: 'bg-zinc-500',
-}
-
-const PRIORITY_LABEL: Record<TaskPriority, string> = {
-  critical: 'Critical',
-  high: 'High',
-  medium: 'Medium',
-  low: 'Low',
 }
 
 /** Human-readable assignee, mirroring the desktop `displayAssignee`: prefer a
@@ -38,9 +25,34 @@ function displayAssignee(task: MWProjectTask): string | null {
     .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+/** "Jun 15" — no time, matches the desktop card's compact footer. */
+function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+/** "2h ago" / "3d ago", falling back to a short date past 7 days. */
+function relative(iso: string): string {
+  const secs = (Date.now() - new Date(iso).getTime()) / 1000
+  if (secs < 60) return 'just now'
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`
+  if (secs < 7 * 86400) return `${Math.floor(secs / 86400)}d ago`
+  return shortDate(iso)
+}
+
+/** Staleness bucket — mirrors the desktop `MWProjectTask.aging`: anchor is
+ *  last_moved_at ?? created_at so a move resets the clock; done cards never age. */
+function aging(task: MWProjectTask): 'none' | 'warn' | 'overdue' {
+  if (task.board_column === 'done' || task.status === 'completed') return 'none'
+  const anchor = task.last_moved_at ?? task.created_at
+  const hours = (Date.now() - new Date(anchor).getTime()) / 3_600_000
+  if (hours >= 12) return 'overdue'
+  if (hours >= 6) return 'warn'
+  return 'none'
+}
+
 export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, dragging }: KanbanCardProps) {
   const assignee = displayAssignee(task)
-  const assigneeInitial = assignee ? assignee.charAt(0).toUpperCase() : null
   const completed = task.status === 'completed'
 
   const subtaskTotal = task.subtask_total ?? 0
@@ -52,21 +64,35 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
   const attachmentCount = task.attachments?.length ?? 0
   const reviewNote = task.review_note?.trim()
 
+  // Left-edge accent — critical/high only. Medium is the default priority, so
+  // marking it would put an accent on nearly every card; absence = normal.
+  const edgeColor = task.priority === 'critical' ? 'bg-red-500' : task.priority === 'high' ? 'bg-orange-500' : null
+  const ageState = aging(task)
+  const ageColor = ageState === 'overdue' ? 'text-red-400' : ageState === 'warn' ? 'text-orange-400' : 'text-zinc-500'
+
   return (
     <div
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={onClick}
-      className={`group cursor-pointer rounded-lg border border-zinc-800 bg-zinc-900 p-3 transition-colors hover:border-zinc-700 ${
+      className={`group relative cursor-pointer overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900 p-3 transition-all hover:scale-[1.01] hover:border-zinc-700 ${
         dragging ? 'opacity-40' : ''
       }`}
     >
+      {edgeColor && <span className={`absolute inset-y-1.5 left-0 w-[3px] rounded-full ${edgeColor}`} />}
+
+      {task.created_by_name && (
+        <div className="absolute right-1.5 top-1.5" title={`Created by ${task.created_by_name}`}>
+          <Avatar name={task.created_by_name} avatarUrl={task.created_by_avatar_url} size="xs" />
+        </div>
+      )}
+
       {/* Title */}
       <p
         className={`text-sm leading-snug text-zinc-100 ${
           completed ? 'line-through text-zinc-500' : ''
-        }`}
+        } ${task.created_by_name ? 'pr-5' : ''}`}
       >
         {task.title}
       </p>
@@ -84,34 +110,33 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
         </div>
       )}
 
-      {/* Meta row: priority, churn, column tags */}
-      <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5">
-        <span className="flex items-center gap-1 text-xs text-zinc-400">
-          <span className={`h-1.5 w-1.5 rounded-full ${PRIORITY_DOT[task.priority]}`} />
-          {PRIORITY_LABEL[task.priority]}
-        </span>
+      {/* Meta row: churn, column tags. Priority is the left-edge accent above
+          (critical/high only) — no dot/label here, it read as noise on every
+          card since medium (the default) would otherwise tag along too. */}
+      {(cycles > 0 || (task.category && task.category !== 'manual') || task.element_name) && (
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+          {cycles > 0 && (
+            <span
+              className="flex items-center gap-0.5 rounded bg-orange-500/15 px-1.5 py-0.5 text-[10px] font-bold text-orange-400"
+              title={`Sent back from review ${cycles} time${cycles === 1 ? '' : 's'}`}
+            >
+              <RefreshCw className="h-2.5 w-2.5" />×{cycles}
+            </span>
+          )}
 
-        {cycles > 0 && (
-          <span
-            className="flex items-center gap-0.5 rounded bg-orange-500/15 px-1.5 py-0.5 text-[10px] font-bold text-orange-400"
-            title={`Sent back from review ${cycles} time${cycles === 1 ? '' : 's'}`}
-          >
-            <RefreshCw className="h-2.5 w-2.5" />×{cycles}
-          </span>
-        )}
+          {task.category && task.category !== 'manual' && (
+            <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
+              {task.category}
+            </span>
+          )}
 
-        {task.category && task.category !== 'manual' && (
-          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
-            {task.category}
-          </span>
-        )}
-
-        {task.element_name && (
-          <span className="rounded bg-emerald-500/12 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
-            {task.element_name}
-          </span>
-        )}
-      </div>
+          {task.element_name && (
+            <span className="rounded bg-emerald-500/12 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
+              {task.element_name}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Subtask progress bar */}
       {subtaskTotal > 0 && (
@@ -136,11 +161,9 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
       {/* Footer: assignee, due date, attachments */}
       {(assignee || task.due_date || attachmentCount > 0) && (
         <div className="mt-2.5 flex items-center gap-2.5 text-xs text-zinc-400">
-          {assignee && assigneeInitial && (
+          {assignee && (
             <span className="flex items-center gap-1 truncate">
-              <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-[9px] font-semibold text-emerald-400">
-                {assigneeInitial}
-              </span>
+              <Avatar name={assignee} avatarUrl={task.assigned_avatar_url} size="xs" />
               <span className="truncate">{assignee}</span>
             </span>
           )}
@@ -158,6 +181,28 @@ export default function KanbanCard({ task, onClick, onDragStart, onDragEnd, drag
           )}
         </div>
       )}
+
+      {/* Timestamps — compact date + aging-tinted elapsed time, full detail
+          in the title attr (matches the desktop card's tooltip convention). */}
+      <div
+        className="mt-2 flex items-center gap-1 text-[10px] text-zinc-600"
+        title={`Added ${new Date(task.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`}
+      >
+        <span>{shortDate(task.created_at)}</span>
+        {task.last_moved_at ? (
+          <span className={`flex items-center gap-0.5 ${ageColor}`}>
+            {ageState !== 'none' && <Clock className="h-2.5 w-2.5" />}
+            <span>· moved {relative(task.last_moved_at)}</span>
+          </span>
+        ) : (
+          ageState !== 'none' && (
+            <span className={`flex items-center gap-0.5 ${ageColor}`}>
+              <Clock className="h-2.5 w-2.5" />
+              <span>{relative(task.created_at)}</span>
+            </span>
+          )
+        )}
+      </div>
     </div>
   )
 }
