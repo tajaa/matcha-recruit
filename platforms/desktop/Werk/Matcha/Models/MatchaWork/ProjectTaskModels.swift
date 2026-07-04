@@ -154,6 +154,15 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
     var assignedTo: String?
     var assignedName: String?
     var assignedEmail: String?
+    /// Assignee's profile photo (users.avatar_url), list-query only — nil on
+    /// single-task responses/WS payloads, preserved in the VM like the other
+    /// list-only aggregates.
+    var assignedAvatarUrl: String? = nil
+    /// Ticket creator identity for the card-face "created by" avatar badge.
+    /// Same list-query-only caveat as assignedAvatarUrl.
+    var createdBy: String? = nil
+    var createdByName: String? = nil
+    var createdByAvatarUrl: String? = nil
     var dueDate: String?
     var completedAt: String?
     var createdAt: String?
@@ -221,6 +230,10 @@ struct MWProjectTask: Codable, Identifiable, Hashable {
         case assignedTo = "assigned_to"
         case assignedName = "assigned_name"
         case assignedEmail = "assigned_email"
+        case assignedAvatarUrl = "assigned_avatar_url"
+        case createdBy = "created_by"
+        case createdByName = "created_by_name"
+        case createdByAvatarUrl = "created_by_avatar_url"
         case dueDate = "due_date"
         case completedAt = "completed_at"
         case createdAt = "created_at"

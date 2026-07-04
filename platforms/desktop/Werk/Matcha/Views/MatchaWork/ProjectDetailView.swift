@@ -103,7 +103,9 @@ struct ProjectDetailView: View {
             // first task.updated event into a window where callbacks
             // weren't attached yet. SwiftUI auto-cancels this block when
             // projectId changes.
-            viewModel.attachTaskRealtime(currentUserId: appState.currentUser?.id)
+            viewModel.attachTaskRealtime(currentUserId: appState.currentUser?.id,
+                                         projectId: projectId,
+                                         showToasts: !isEmbedded)
             // Deep-link from a notification tap: open the requested panel
             // (e.g. kanban for a task notification), then clear the hint.
             if !isEmbedded, let panel = appState.pendingProjectPanel {

@@ -16,6 +16,8 @@ struct KanbanCardView: View {
     let onToggle: () -> Void
     let onMoveColumn: (String) -> Void
 
+    @State private var hovering = false
+
     /// "Company · Contact" for the card face (pipeline mode); nil when neither set.
     private var contactDisplay: String? {
         let parts = [task.contactCompany, task.contactName]
@@ -42,11 +44,6 @@ struct KanbanCardView: View {
 
     private var assigneeDisplay: String? { task.displayAssignee }
 
-    private var assigneeInitial: String? {
-        guard let name = assigneeDisplay, !name.isEmpty else { return nil }
-        return String(name.prefix(1)).uppercased()
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header band — checkbox + title. Tints orange after 6h / red after
@@ -66,12 +63,15 @@ struct KanbanCardView: View {
                 }
 
                 Text(task.title)
-                    .font(.system(size: 12))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundColor(appState.themeText)
                     .strikethrough(task.status == "completed")
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    // Clearance for the floating creator badge so a full-width
+                    // title never runs underneath it.
+                    .padding(.trailing, task.createdByName != nil ? 16 : 0)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -120,8 +120,6 @@ struct KanbanCardView: View {
                 }
 
                 HStack(spacing: 5) {
-                    Circle().fill(priorityColor).frame(width: 5, height: 5)
-
                     // Review churn — how many times this card has been kicked
                     // back. Only shows once it's bounced at least once.
                     if let cycles = task.reviewCycleCount, cycles > 0 {
@@ -217,15 +215,15 @@ struct KanbanCardView: View {
                     .menuIndicator(.hidden)
                     .fixedSize()
 
-                    if let initial = assigneeInitial, let name = assigneeDisplay {
-                        Circle()
-                            .fill(appState.themeAccent.opacity(0.18))
-                            .frame(width: 14, height: 14)
-                            .overlay(
-                                Text(initial)
-                                    .font(.system(size: 8, weight: .semibold))
-                                    .foregroundColor(appState.themeAccent)
-                            )
+                    if let name = assigneeDisplay {
+                        // Real profile photo with hashed-color initials
+                        // fallback — same component the chat rows use.
+                        ChannelAvatarView(
+                            senderId: task.assignedTo ?? task.id,
+                            payloadURL: task.assignedAvatarUrl,
+                            name: name,
+                            size: 15
+                        )
                         Text(name)
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
@@ -286,12 +284,16 @@ struct KanbanCardView: View {
                         Image(systemName: complete ? "checkmark.circle.fill" : "checklist")
                             .font(.system(size: 8))
                             .foregroundColor(complete ? .matcha500 : .secondary)
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(appState.themeText.opacity(0.12))
-                                .frame(width: 54, height: 3)
-                            Capsule().fill(complete ? Color.matcha500 : appState.themeAccent)
-                                .frame(width: 54 * frac, height: 3)
+                        // Full-width track so progress reads as a real meter,
+                        // not a fixed-width decoration.
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(appState.themeText.opacity(0.12))
+                                Capsule().fill(complete ? Color.matcha500 : appState.themeAccent)
+                                    .frame(width: geo.size.width * frac)
+                            }
                         }
+                        .frame(height: 3)
                         Text("\(done)/\(total)")
                             .font(.system(size: 9, weight: .medium))
                             .foregroundColor(.secondary)
@@ -309,9 +311,50 @@ struct KanbanCardView: View {
             .padding(.bottom, 12)
             .padding(.top, 8)
         }
+        // Priority edge — the card's one loud element. A 3pt capsule down the
+        // left edge, colored by priority; low/none stays clean (absence is the
+        // signal). Replaces the old 5pt dot nobody could see at board glance.
+        .overlay(alignment: .leading) {
+            if priorityEdgeVisible {
+                Capsule()
+                    .fill(priorityColor)
+                    .frame(width: 3)
+                    .padding(.vertical, 7)
+                    .padding(.leading, 1.5)
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .elevatedCard(cornerRadius: 8)
+        // Creator badge — floats over the top-right corner, so "who filed
+        // this" reads at a glance without a labeled row. Sits after the clip
+        // so the corner never crops it.
+        .overlay(alignment: .topTrailing) {
+            if let creatorName = task.createdByName {
+                ChannelAvatarView(
+                    senderId: task.createdBy ?? task.id,
+                    payloadURL: task.createdByAvatarUrl,
+                    name: creatorName,
+                    size: 18
+                )
+                .overlay(
+                    Circle().strokeBorder(Color.cardBackground, lineWidth: 1.5)
+                )
+                .padding(6)
+                .help("Created by \(creatorName)")
+            }
+        }
+        // Hover lift — a whisper, not a bounce. Signals draggable/clickable.
+        .scaleEffect(hovering ? 1.012 : 1.0)
+        .animation(.easeOut(duration: 0.12), value: hovering)
+        .onHover { hovering = $0 }
         .onTapGesture(perform: onTap)
+    }
+
+    /// Only critical/high get the edge — medium is the default priority, so
+    /// marking it would put an accent on nearly every card and the signal
+    /// would drown. Absence = normal.
+    private var priorityEdgeVisible: Bool {
+        task.priority == "critical" || task.priority == "high"
     }
 
     /// Header background tint by inactivity age. Clear when fresh / done.
@@ -323,20 +366,22 @@ struct KanbanCardView: View {
         }
     }
 
-    /// "Added <date> at <time> · Moved <relative>" in Pacific time. The exact
-    /// creation time makes wait-duration legible. Moved only shows once the
-    /// card has crossed columns at least once (lastMovedAt != nil).
+    /// Compact "Jun 15 · moved 9m ago" footer in Pacific time; the full
+    /// "Added <date> at <time>" detail lives in the tooltip so the card face
+    /// stays quiet. Moved only shows once the card has crossed columns at
+    /// least once (lastMovedAt != nil).
     @ViewBuilder
     private var timestampLine: some View {
-        if let added = PacificDateFormatter.dateTime(task.createdAt) {
+        if let added = PacificDateFormatter.shortDate(task.createdAt) {
             HStack(spacing: 3) {
-                Text("Added \(added)")
+                Text(added)
                 if let moved = PacificDateFormatter.relative(task.lastMovedAt) {
-                    Text("· Moved \(moved)")
+                    Text("· moved \(moved)")
                 }
             }
             .font(.system(size: 9))
-            .foregroundColor(.secondary)
+            .foregroundColor(.secondary.opacity(0.85))
+            .help("Added \(PacificDateFormatter.dateTime(task.createdAt) ?? added)")
         }
     }
 

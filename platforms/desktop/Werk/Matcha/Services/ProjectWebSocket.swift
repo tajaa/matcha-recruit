@@ -47,12 +47,59 @@ final class ProjectWebSocket: NSObject {
     var onSectionUnlocked: ((_ sectionId: String) -> Void)?
     var onSectionLockDenied: ((_ sectionId: String, _ holderId: String?, _ holderName: String?) -> Void)?
     var onSectionContent: ((_ sectionId: String, _ title: String?, _ content: String) -> Void)?
-    /// task.created / task.updated server events. Payload dict is the raw
-    /// task row plus `actor_id` for self-echo suppression.
-    var onTaskCreated: (([String: Any]) -> Void)?
-    var onTaskUpdated: (([String: Any]) -> Void)?
-    /// task.deleted payload — only `{"id": ..., "actor_id": ...}` shape.
-    var onTaskDeleted: ((_ taskId: String, _ actorId: String?) -> Void)?
+    /// task.created / task.updated / task.deleted fan-out. Unlike the other
+    /// callbacks (single-closure, owned by whichever view is frontmost), task
+    /// events use a per-owner REGISTRY keyed by the event's project_id: the
+    /// old single closures were silently stolen by the last view to attach
+    /// (embedded panes, cached VMs, aux windows) and nuked wholesale by
+    /// `clearCallbacks()` on ANY project view teardown — SwiftUI's
+    /// disappear-after-appear ordering meant switching projects could clear
+    /// the new board's just-attached callbacks, killing realtime until the
+    /// next reattach. Every registered VM whose projectId matches the event
+    /// gets the payload; entries auto-prune when their owner deallocates.
+    struct TaskEventHandlers {
+        /// Payload dict is the raw task row plus `actor_id` for self-echo
+        /// suppression.
+        let onCreated: ([String: Any]) -> Void
+        let onUpdated: ([String: Any]) -> Void
+        /// task.deleted payload — only `{"id": ..., "actor_id": ...}` shape.
+        let onDeleted: (_ taskId: String, _ actorId: String?) -> Void
+    }
+
+    private struct TaskHandlerEntry {
+        weak var owner: AnyObject?
+        let projectId: String
+        let handlers: TaskEventHandlers
+    }
+
+    private var taskHandlers: [ObjectIdentifier: TaskHandlerEntry] = [:]
+
+    /// Register (or replace) the task-event handlers owned by `owner` for one
+    /// project. Idempotent per owner — re-attaching on view re-task just
+    /// replaces the entry.
+    func registerTaskHandlers(owner: AnyObject, projectId: String, handlers: TaskEventHandlers) {
+        taskHandlers[ObjectIdentifier(owner)] = TaskHandlerEntry(
+            owner: owner, projectId: projectId, handlers: handlers,
+        )
+    }
+
+    func unregisterTaskHandlers(owner: AnyObject) {
+        taskHandlers.removeValue(forKey: ObjectIdentifier(owner))
+    }
+
+    /// Fan a task event out to every live registered owner for that project;
+    /// prunes entries whose owner has deallocated along the way.
+    private func dispatchTaskEvent(projectId: String?, _ call: (TaskEventHandlers) -> Void) {
+        for (key, entry) in taskHandlers {
+            guard entry.owner != nil else {
+                taskHandlers.removeValue(forKey: key)
+                continue
+            }
+            if projectId == nil || entry.projectId == projectId {
+                call(entry.handlers)
+            }
+        }
+    }
 
     struct PresenceMember: Identifiable, Equatable {
         let id: String
@@ -212,9 +259,10 @@ final class ProjectWebSocket: NSObject {
         onSectionUnlocked = nil
         onSectionLockDenied = nil
         onSectionContent = nil
-        onTaskCreated = nil
-        onTaskUpdated = nil
-        onTaskDeleted = nil
+        // Task handlers deliberately NOT cleared here: they live in the
+        // per-owner registry and survive project-view teardown so cached /
+        // background VMs keep receiving realtime board updates. Entries
+        // self-prune when their owning VM deallocates.
     }
 
     private func send(_ payload: [String: Any]) {
@@ -307,13 +355,19 @@ final class ProjectWebSocket: NSObject {
                 onSectionContent?(sectionId, obj["title"] as? String, content)
             }
         case "task.created":
-            if let task = obj["task"] as? [String: Any] { onTaskCreated?(task) }
+            if let task = obj["task"] as? [String: Any] {
+                dispatchTaskEvent(projectId: obj["project_id"] as? String) { $0.onCreated(task) }
+            }
         case "task.updated":
-            if let task = obj["task"] as? [String: Any] { onTaskUpdated?(task) }
+            if let task = obj["task"] as? [String: Any] {
+                dispatchTaskEvent(projectId: obj["project_id"] as? String) { $0.onUpdated(task) }
+            }
         case "task.deleted":
             if let task = obj["task"] as? [String: Any],
                let taskId = task["id"] as? String {
-                onTaskDeleted?(taskId, task["actor_id"] as? String)
+                dispatchTaskEvent(projectId: obj["project_id"] as? String) {
+                    $0.onDeleted(taskId, task["actor_id"] as? String)
+                }
             }
         case "error":
             // Server sent {"type":"error","message":"..."}.

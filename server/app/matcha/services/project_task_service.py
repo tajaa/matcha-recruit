@@ -301,12 +301,22 @@ async def list_project_tasks(project_id: UUID, viewer_id: Optional[UUID] = None)
                    -- behavior moves to the client via AssigneeDisplay.
                    COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name) AS assigned_name,
                    u.email AS assigned_email,
+                   u.avatar_url AS assigned_avatar_url,
+                   -- Creator identity for the card-face "created by" avatar
+                   -- badge. Mirrors the assignee join above, aliased to avoid
+                   -- collision.
+                   COALESCE(c2.name, CONCAT(e2.first_name, ' ', e2.last_name), a2.name, u2.email) AS created_by_name,
+                   u2.avatar_url AS created_by_avatar_url,
                    el.name AS element_name
             FROM mw_tasks t
             LEFT JOIN users u ON u.id = t.assigned_to
             LEFT JOIN clients c ON c.user_id = t.assigned_to
             LEFT JOIN employees e ON e.user_id = t.assigned_to
             LEFT JOIN admins a ON a.user_id = t.assigned_to
+            LEFT JOIN users u2 ON u2.id = t.created_by
+            LEFT JOIN clients c2 ON c2.user_id = t.created_by
+            LEFT JOIN employees e2 ON e2.user_id = t.created_by
+            LEFT JOIN admins a2 ON a2.user_id = t.created_by
             LEFT JOIN mw_project_elements el ON el.id = t.element_id
             WHERE t.project_id = $1 AND t.status != 'cancelled'
             ORDER BY
@@ -490,6 +500,107 @@ async def _notify_task_assigned(
         logger.warning("Failed to notify task assignment %s -> %s: %s", task_id, assigned_to, e)
 
 
+async def _lookup_actor_identity(actor_user_id: Optional[UUID]) -> tuple[str, Optional[str]]:
+    """Resolve a user's display name + avatar_url for notification/chat copy.
+    Shared by the task_progress notification and the kanban-move chat post so
+    both agree on the same actor identity from one query. Falls back to
+    ("Someone", None) when unresolvable.
+    """
+    if actor_user_id is None:
+        return "Someone", None
+    try:
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name,
+                       u.avatar_url AS avatar_url
+                FROM users u
+                LEFT JOIN clients c ON c.user_id = u.id
+                LEFT JOIN employees e ON e.user_id = u.id
+                LEFT JOIN admins a ON a.user_id = u.id
+                WHERE u.id = $1
+                """, actor_user_id
+            )
+        if row and row["name"]:
+            return row["name"], row["avatar_url"]
+    except Exception as e:
+        logger.warning("Failed to look up actor %s identity: %s", actor_user_id, e)
+    return "Someone", None
+
+
+async def _post_kanban_move_to_chat(
+    *,
+    project_id: UUID,
+    task_id: UUID,
+    task_title: str,
+    new_column: str,
+    actor_user_id: Optional[UUID],
+    actor_name: str,
+    actor_avatar_url: Optional[str],
+) -> None:
+    """Auto-posts a plain chat message into the project's discussion channel
+    on every board-column move, reusing the same per-column verb copy as the
+    task_progress notification (_TRANSITION_TEMPLATES) so the banner and chat
+    always say the same thing. Posted as a normal channel_messages row under
+    the mover's own identity — not a system/bot event — so it renders through
+    the existing chat pipeline with zero client changes. Deliberately skips
+    channel/member activity bumps, mention parsing, and the channel_message
+    in-app notification: this is an automated echo of the task_progress
+    notification, not a real contribution, and double-notifying would be noise.
+    """
+    if actor_user_id is None:
+        return
+    tpl = _TRANSITION_TEMPLATES.get(new_column)
+    if tpl is None:
+        return
+
+    from .project_service import ensure_discussion_channel
+
+    try:
+        channel_id = await ensure_discussion_channel(project_id, actor_user_id)
+    except Exception as e:
+        logger.warning("Failed to resolve discussion channel for project %s: %s", project_id, e)
+        return
+    if channel_id is None:
+        return
+
+    content = f'{tpl["verb"]} "{task_title}"'
+    try:
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO channel_messages (channel_id, sender_id, content)
+                VALUES ($1, $2, $3)
+                RETURNING id, created_at
+                """,
+                channel_id, actor_user_id, content,
+            )
+    except Exception as e:
+        logger.warning("Failed to insert kanban-move chat message task=%s: %s", task_id, e)
+        return
+
+    try:
+        from app.core.routes.channels_ws import manager as _ch_manager
+        await _ch_manager.broadcast_message(str(channel_id), {
+            "id": str(row["id"]),
+            "channel_id": str(channel_id),
+            "sender_id": str(actor_user_id),
+            "sender_name": actor_name,
+            "sender_avatar_url": actor_avatar_url,
+            "content": content,
+            "attachments": [],
+            "reply_to_id": None,
+            "reply_preview": None,
+            "reactions": [],
+            "created_at": row["created_at"].isoformat(),
+            "edited_at": None,
+            "mentioned_user_ids": [],
+            "client_message_id": None,
+        })
+    except Exception as e:
+        logger.warning("Failed to broadcast kanban-move chat message task=%s: %s", task_id, e)
+
+
 async def _notify_task_column_transition(
     *,
     project_id: UUID,
@@ -512,24 +623,7 @@ async def _notify_task_column_transition(
     from .project_service import list_collaborators
     from . import notification_service as notif_svc
 
-    actor_name = "Someone"
-    if actor_user_id is not None:
-        try:
-            async with get_connection() as conn:
-                row = await conn.fetchrow(
-                    """
-                    SELECT COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
-                    FROM users u
-                    LEFT JOIN clients c ON c.user_id = u.id
-                    LEFT JOIN employees e ON e.user_id = u.id
-                    LEFT JOIN admins a ON a.user_id = u.id
-                    WHERE u.id = $1
-                    """, actor_user_id
-                )
-            if row and row["name"]:
-                actor_name = row["name"]
-        except Exception as e:
-            logger.warning("Failed to look up actor %s name: %s", actor_user_id, e)
+    actor_name, _actor_avatar_url = await _lookup_actor_identity(actor_user_id)
 
     try:
         collaborators = await list_collaborators(project_id)
@@ -1180,6 +1274,20 @@ async def update_project_task(
             task_title=row["title"],
             new_column=new_column,
             project_title=project_title,
+        )
+        # Echo the move into the project's discussion channel as a plain chat
+        # bubble ("<verb> \"<title>\"" from the mover). Same guard as the
+        # notification so chat + banner always agree on which moves are worth
+        # announcing.
+        _move_actor_name, _move_actor_avatar = await _lookup_actor_identity(actor_user_id)
+        await _post_kanban_move_to_chat(
+            project_id=project_id,
+            task_id=task_id,
+            task_title=row["title"],
+            new_column=new_column,
+            actor_user_id=actor_user_id,
+            actor_name=_move_actor_name,
+            actor_avatar_url=_move_actor_avatar,
         )
 
     result = _row_to_task(dict(row)) if row else None

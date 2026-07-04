@@ -106,64 +106,81 @@ extension ProjectDetailViewModel {
 
     // MARK: - Collab: realtime task fan-out (project WS task.created/updated/deleted)
 
-    /// Wire the project WS task event callbacks to apply* methods. Call once
-    /// per loadProject. `currentUserId` (from AppState) is captured so self-
-    /// echoes from our own create / update / delete don't double-apply.
+    /// Register this VM's task-event handlers in the project WS per-owner
+    /// registry (keyed by projectId — see ProjectWebSocket.TaskEventHandlers
+    /// for why it's a registry, not single closures). Call once per
+    /// loadProject; re-calling just replaces this VM's entry. `currentUserId`
+    /// (from AppState) is captured so self-echoes from our own create /
+    /// update / delete don't double-apply. `showToasts: false` for embedded /
+    /// aux instances so a project open in two panes doesn't double-toast.
     @MainActor
-    func attachTaskRealtime(currentUserId: String?) {
-        print("[ProjectVM] attachTaskRealtime user=\(currentUserId ?? "nil")")
+    func attachTaskRealtime(currentUserId: String?, projectId: String, showToasts: Bool = true) {
+        print("[ProjectVM] attachTaskRealtime user=\(currentUserId ?? "nil") project=\(projectId) toasts=\(showToasts)")
         self.currentUserId = currentUserId
-        let ws = ProjectWebSocket.shared
-        ws.onTaskCreated = { [weak self] dict in
-            print("[ProjectVM] onTaskCreated task=\(dict["id"] ?? "?") actor=\(dict["actor_id"] ?? "?")")
-            guard let self else { return }
-            let actorId = dict["actor_id"] as? String
-            if let actorId, actorId == self.currentUserId {
-                print("[ProjectVM] onTaskCreated suppressed — self-echo")
-                return
-            }
-            if let task = Self.decodeTask(dict) {
-                Task { @MainActor in
-                    self.applyTaskCreated(task)
-                    self.pushTaskToast(actorId: actorId, action: "added", title: task.title,
-                                       systemImage: "plus.rectangle.on.rectangle")
+        let handlers = ProjectWebSocket.TaskEventHandlers(
+            onCreated: { [weak self] dict in
+                print("[ProjectVM] onTaskCreated task=\(dict["id"] ?? "?") actor=\(dict["actor_id"] ?? "?")")
+                guard let self else { return }
+                let actorId = dict["actor_id"] as? String
+                if let actorId, actorId == self.currentUserId {
+                    print("[ProjectVM] onTaskCreated suppressed — self-echo")
+                    return
                 }
-            }
-        }
-        ws.onTaskUpdated = { [weak self] dict in
-            print("[ProjectVM] onTaskUpdated task=\(dict["id"] ?? "?") actor=\(dict["actor_id"] ?? "?") column=\(dict["board_column"] ?? "?")")
-            guard let self else { return }
-            let actorId = dict["actor_id"] as? String
-            if let task = Self.decodeTask(dict) {
-                Task { @MainActor in
-                    // Capture the prior column before applying so we can tell a
-                    // lane move from an in-place edit for the toast copy.
-                    let prevColumn = self.tasks.first(where: { $0.id == task.id })?.boardColumn
-                    self.applyTaskUpdated(task)
-                    if actorId != self.currentUserId {
-                        if let prevColumn, prevColumn != task.boardColumn {
-                            let label = kanbanColumns.first(where: { $0.key == task.boardColumn })?.label ?? task.boardColumn
-                            self.pushTaskToast(actorId: actorId, action: "moved", title: task.title,
-                                               suffix: "to \(label)", systemImage: "arrow.left.arrow.right")
-                        } else {
-                            self.pushTaskToast(actorId: actorId, action: "updated", title: task.title,
-                                               systemImage: "pencil")
+                if let task = Self.decodeTask(dict) {
+                    Task { @MainActor in
+                        self.applyTaskCreated(task)
+                        if showToasts {
+                            self.pushTaskToast(actorId: actorId, action: "added", title: task.title,
+                                               systemImage: "plus.rectangle.on.rectangle")
                         }
                     }
+                } else {
+                    // Payload didn't decode (schema drift / partial row) —
+                    // fall back to a full list refetch so the board still
+                    // converges instead of silently dropping the event.
+                    Task { await self.loadTasks() }
                 }
-            }
-        }
-        ws.onTaskDeleted = { [weak self] taskId, actorId in
-            print("[ProjectVM] onTaskDeleted task=\(taskId) actor=\(actorId ?? "?")")
-            guard let self else { return }
-            if let actorId, actorId == self.currentUserId { return }
-            Task { @MainActor in
-                let title = self.tasks.first(where: { $0.id == taskId })?.title
-                self.applyTaskDeleted(taskId)
-                self.pushTaskToast(actorId: actorId, action: "removed", title: title,
-                                   systemImage: "trash")
-            }
-        }
+            },
+            onUpdated: { [weak self] dict in
+                print("[ProjectVM] onTaskUpdated task=\(dict["id"] ?? "?") actor=\(dict["actor_id"] ?? "?") column=\(dict["board_column"] ?? "?")")
+                guard let self else { return }
+                let actorId = dict["actor_id"] as? String
+                if let task = Self.decodeTask(dict) {
+                    Task { @MainActor in
+                        // Capture the prior column before applying so we can tell a
+                        // lane move from an in-place edit for the toast copy.
+                        let prevColumn = self.tasks.first(where: { $0.id == task.id })?.boardColumn
+                        self.applyTaskUpdated(task)
+                        if showToasts, actorId != self.currentUserId {
+                            if let prevColumn, prevColumn != task.boardColumn {
+                                let label = kanbanColumns.first(where: { $0.key == task.boardColumn })?.label ?? task.boardColumn
+                                self.pushTaskToast(actorId: actorId, action: "moved", title: task.title,
+                                                   suffix: "to \(label)", systemImage: "arrow.left.arrow.right")
+                            } else {
+                                self.pushTaskToast(actorId: actorId, action: "updated", title: task.title,
+                                                   systemImage: "pencil")
+                            }
+                        }
+                    }
+                } else {
+                    Task { await self.loadTasks() }
+                }
+            },
+            onDeleted: { [weak self] taskId, actorId in
+                print("[ProjectVM] onTaskDeleted task=\(taskId) actor=\(actorId ?? "?")")
+                guard let self else { return }
+                if let actorId, actorId == self.currentUserId { return }
+                Task { @MainActor in
+                    let title = self.tasks.first(where: { $0.id == taskId })?.title
+                    self.applyTaskDeleted(taskId)
+                    if showToasts {
+                        self.pushTaskToast(actorId: actorId, action: "removed", title: title,
+                                           systemImage: "trash")
+                    }
+                }
+            },
+        )
+        ProjectWebSocket.shared.registerTaskHandlers(owner: self, projectId: projectId, handlers: handlers)
     }
 
     /// Resolve a collaborator's display name from the loaded project roster.
@@ -237,6 +254,10 @@ extension ProjectDetailViewModel {
         if merged.subtaskDone == nil { merged.subtaskDone = tasks[i].subtaskDone }
         if merged.updateCount == nil { merged.updateCount = tasks[i].updateCount }
         if merged.recentEventIds == nil { merged.recentEventIds = tasks[i].recentEventIds }
+        if merged.assignedAvatarUrl == nil { merged.assignedAvatarUrl = tasks[i].assignedAvatarUrl }
+        if merged.createdBy == nil { merged.createdBy = tasks[i].createdBy }
+        if merged.createdByName == nil { merged.createdByName = tasks[i].createdByName }
+        if merged.createdByAvatarUrl == nil { merged.createdByAvatarUrl = tasks[i].createdByAvatarUrl }
         tasks[i] = merged
     }
 
