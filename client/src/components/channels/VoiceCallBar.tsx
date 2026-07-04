@@ -136,7 +136,7 @@ export default function VoiceCallBar({
     return (
       <div className="border-b border-emerald-900/40 bg-zinc-900/95 shrink-0">
         {/* Video grid */}
-        <div className={`grid ${gridCols} gap-1 p-2 max-h-[50vh] overflow-hidden`}>
+        <div className={`grid ${gridCols} gap-1 p-2 max-h-[50vh] overflow-y-auto`}>
           {/* Remote participants */}
           {participants.map((p) => (
             <VideoTile

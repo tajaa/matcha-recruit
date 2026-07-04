@@ -60,6 +60,12 @@ export interface ChannelAttachment {
   size: number
 }
 
+export interface ChannelReaction {
+  emoji: string
+  user_ids: string[]
+  count: number
+}
+
 export interface ChannelMessage {
   id: string
   channel_id: string
@@ -68,6 +74,7 @@ export interface ChannelMessage {
   sender_avatar_url: string | null
   content: string
   attachments?: ChannelAttachment[]
+  reactions?: ChannelReaction[]
   created_at: string
   edited_at: string | null
   deleted_at?: string | null

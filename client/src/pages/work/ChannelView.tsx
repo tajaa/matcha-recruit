@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield, Settings, Heart, Phone, BarChart2, Briefcase, Trash2 } from 'lucide-react'
-import { getChannel, joinChannel, leaveChannel, uploadChannelFiles, kickMember, setMemberRole, getChannelPaymentInfo, createChannelCheckout, deleteChannelMessage } from '../../api/channels'
+import { getChannel, getChannelMessages, joinChannel, leaveChannel, uploadChannelFiles, kickMember, setMemberRole, getChannelPaymentInfo, createChannelCheckout, deleteChannelMessage } from '../../api/channels'
 import type { ChannelDetail, ChannelMessage, ChannelMember, ChannelAttachment, ChannelPaymentInfo } from '../../api/channels'
 import { ChannelSocket, getSharedChannelSocket } from '../../api/channelSocket'
 import { useMe } from '../../hooks/useMe'
@@ -18,9 +18,8 @@ import ChannelOpenRoleBanner from '../../components/channels/ChannelOpenRoleBann
 import { listOpenPostings } from '../../api/channelJobPostings'
 import type { OpenPostingSummary } from '../../api/channelJobPostings'
 import VoiceCallBar from '../../components/channels/VoiceCallBar'
-import { useVoiceCall } from '../../hooks/useVoiceCall'
 import { useLiveKitCall } from '../../hooks/useLiveKitCall'
-import { useWorkBase, useWorkBrand, useWorkSurface } from '../../routes/WorkSurfaceContext'
+import { useWorkBase, useWorkBrand } from '../../routes/WorkSurfaceContext'
 
 // @-mention rendering — splits message content into plain-text + mention-chip
 // nodes. Server stamps `mentioned_user_ids` on the broadcast payload so we can
@@ -117,24 +116,15 @@ export default function ChannelView() {
   const socketRef = useRef<ChannelSocket | null>(null)
   const lastTypingSentRef = useRef(0)
 
-  // Calls: werk-lite uses the LiveKit SFU (reliable group A/V); /work + /werk
-  // keep the homegrown WebRTC P2P bar. Both hooks are called unconditionally
-  // (hooks rule) but the inactive one stays inert — useLiveKitCall is gated by
-  // `enabled`, and useVoiceCall does nothing until joinCall fires.
-  const surface = useWorkSurface()
-  const useLiveKit = surface === 'werk-lite'
-  const p2pVoice = useVoiceCall({
-    socket: socketRef.current,
+  // Calls: unified on the LiveKit SFU across every surface (/work, /werk,
+  // /werk-lite) — the homegrown WebRTC P2P mesh (useVoiceCall) is retired,
+  // it silently failed cross-worker under uvicorn --workers 2.
+  const voice = useLiveKitCall({
     channelId: channelId || null,
-    myUserId: me?.user?.id || '',
-  })
-  const liveKitVoice = useLiveKitCall({
-    channelId: channelId || null,
-    enabled: useLiveKit,
+    enabled: true,
     members: channel?.members?.map((m) => ({ user_id: m.user_id, name: m.name })),
     onError: (m) => alert(m),
   })
-  const voice = useLiveKit ? liveKitVoice : p2pVoice
 
   const postingParam = new URLSearchParams(window.location.search).get('posting')
 
@@ -265,6 +255,38 @@ export default function ChannelView() {
       )
     }
 
+    socket.onMessageEdited = (data) => {
+      if (data.channel_id !== channelId) return
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === data.message_id ? { ...m, content: data.content, edited_at: data.edited_at } : m
+        )
+      )
+    }
+
+    socket.onReactionUpdate = (data) => {
+      if (data.channel_id !== channelId) return
+      setMessages((prev) =>
+        prev.map((m) => (m.id === data.message_id ? { ...m, reactions: data.reactions } : m))
+      )
+    }
+
+    // Reconnect catch-up: onopen only fires on a genuine reconnect (not on
+    // this effect's initial mount, since the shared socket is usually already
+    // open) — refetch and merge by id so messages missed during the drop
+    // aren't silently gone. Optimistic-pending sends not yet echoed are kept.
+    socket.onConnected = () => {
+      getChannelMessages(channelId)
+        .then((fetched) => {
+          setMessages((prev) => {
+            const fetchedIds = new Set(fetched.map((m) => m.id))
+            const stillPending = prev.filter((m) => m.pending && !fetchedIds.has(m.id))
+            return [...fetched, ...stillPending]
+          })
+        })
+        .catch(() => {})
+    }
+
     // Global hook should already have joined this room, but joinRoom is
     // idempotent on the client and the server allows duplicate joins.
     socket.joinRoom(channelId)
@@ -278,6 +300,9 @@ export default function ChannelView() {
       socket.onUserJoined = null
       socket.onUserLeft = null
       socket.onMessageDeleted = null
+      socket.onMessageEdited = null
+      socket.onReactionUpdate = null
+      socket.onConnected = null
       socketRef.current = null
       // Do NOT call disconnect() or leaveRoom() — the shared socket persists.
     }
@@ -737,6 +762,7 @@ export default function ChannelView() {
                         </span>
                         <span className="text-[10px] text-zinc-600">
                           {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {msg.edited_at && !isDeleted ? ' (edited)' : ''}
                         </span>
                       </div>
                     )}
@@ -779,6 +805,20 @@ export default function ChannelView() {
                           </a>
                         )
                       )}
+                    </div>
+                  )}
+                  {!isDeleted && msg.reactions && msg.reactions.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {msg.reactions.map((r) => (
+                        <span
+                          key={r.emoji}
+                          className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-zinc-800 border border-zinc-700 text-xs"
+                          title={r.user_ids.length === 1 ? '1 reaction' : `${r.user_ids.length} reactions`}
+                        >
+                          <span>{r.emoji}</span>
+                          <span className="text-zinc-400">{r.count}</span>
+                        </span>
+                      ))}
                     </div>
                   )}
                   </div>

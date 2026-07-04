@@ -3,15 +3,15 @@ import { Room, RoomEvent, Track } from 'livekit-client'
 import { getSharedChannelSocket } from '../api/channelSocket'
 import { startCall, getCallToken, getCallStatus, stopCall } from '../api/channelCalls'
 
-// LiveKit SFU call hook for the werk-lite surface. Deliberately exposes the
-// SAME shape as useVoiceCall (the homegrown WebRTC P2P hook) so ChannelView can
-// swap between them with a one-line surface conditional and feed either into
-// the shared <VoiceCallBar>.
+// LiveKit SFU call hook — the sole call implementation across /work, /werk,
+// and /werk-lite (the homegrown WebRTC P2P mesh, useVoiceCall, was retired:
+// its in-memory per-process state silently broke calls whenever the two
+// participants' WebSockets landed on different uvicorn workers).
 //
-// Unlike the P2P hook there's a real server-side room with an owner: joinCall
-// transparently starts a call if none is active, else joins the existing one.
-// Symmetric small-group video uses the 4-person /call room (everyone publishes
-// mic + camera — the server grant was widened to allow camera).
+// There's a real server-side room with an owner: joinCall transparently
+// starts a call if none is active, else joins the existing one. Symmetric
+// small-group video uses the 4-person /call room (everyone publishes mic +
+// camera — the server grant was widened to allow camera).
 
 export interface CallParticipant {
   userId: string
@@ -69,9 +69,11 @@ export function useLiveKitCall({ channelId, enabled, members, onError }: UseLive
   onErrorRef.current = onError
 
   // ── Timers ───────────────────────────────────────────────────────────
-  const startElapsed = useCallback(() => {
+  // `initial` seeds the counter for a late joiner (server-reported
+  // elapsed_seconds on an already-running call) instead of restarting at 0.
+  const startElapsed = useCallback((initial = 0) => {
     if (elapsedInterval.current) return
-    setElapsedSeconds(0)
+    setElapsedSeconds(initial)
     elapsedInterval.current = setInterval(() => setElapsedSeconds((p) => p + 1), 1000)
   }, [])
   const stopElapsed = useCallback(() => {
@@ -173,8 +175,13 @@ export function useLiveKitCall({ channelId, enabled, members, onError }: UseLive
   }, [setRosterFromIds])
 
   // ── Connect to a LiveKit room with a server-minted token ─────────────
-  const connectRoom = useCallback(async (url: string, token: string) => {
-    const room = new Room()
+  const connectRoom = useCallback(async (url: string, token: string, initialElapsed = 0) => {
+    // dynacast only — NOT adaptiveStream. VoiceCallBar renders remote video
+    // by grabbing raw MediaStreamTracks and assigning them to <video>.srcObject
+    // (never RemoteVideoTrack.attach()); adaptiveStream pauses any remote
+    // track with no attached element, which would black out every tile here.
+    // dynacast (publisher-side simulcast-layer pausing) is safe either way.
+    const room = new Room({ dynacast: true })
     roomRef.current = room
     room.on(RoomEvent.TrackSubscribed, rebuild)
     room.on(RoomEvent.TrackUnsubscribed, rebuild)
@@ -187,15 +194,22 @@ export function useLiveKitCall({ channelId, enabled, members, onError }: UseLive
 
     await room.connect(url, token)
     await room.localParticipant.setMicrophoneEnabled(true)
-    await room.localParticipant.setCameraEnabled(true)
+    // Camera is best-effort: denied/absent camera must not block the call,
+    // it should just join audio-only (mirrors the old P2P hook's fallback).
+    let cameraOn = true
+    try {
+      await room.localParticipant.setCameraEnabled(true)
+    } catch {
+      cameraOn = false
+    }
     setIsMuted(false)
-    setIsVideoEnabled(true)
+    setIsVideoEnabled(cameraOn)
     setCallState('active')
-    startElapsed()
+    startElapsed(initialElapsed)
     rebuild()
   }, [rebuild, updateSpeaking, cleanup, startElapsed])
 
-  // ── Public actions (names mirror useVoiceCall) ───────────────────────
+  // ── Public actions ────────────────────────────────────────────────────
   const joinCall = useCallback(async () => {
     const cid = channelIdRef.current
     if (!cid || callStateRef.current !== 'idle') return
@@ -204,10 +218,12 @@ export function useLiveKitCall({ channelId, enabled, members, onError }: UseLive
       const status = await getCallStatus(cid)
       let url: string
       let token: string
+      let initialElapsed = 0
       if (status.active) {
         const t = await getCallToken(cid)
         url = t.livekit_url
         token = t.token
+        initialElapsed = t.elapsed_seconds
       } else {
         try {
           const s = await startCall(cid, { mode: 'members' })
@@ -220,9 +236,10 @@ export function useLiveKitCall({ channelId, enabled, members, onError }: UseLive
           const t = await getCallToken(cid)
           url = t.livekit_url
           token = t.token
+          initialElapsed = t.elapsed_seconds
         }
       }
-      await connectRoom(url, token)
+      await connectRoom(url, token, initialElapsed)
     } catch (err) {
       console.error('[useLiveKitCall] join failed', err)
       cleanup()

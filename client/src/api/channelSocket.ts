@@ -1,4 +1,4 @@
-import type { ChannelMessage } from './channels'
+import type { ChannelMessage, ChannelReaction } from './channels'
 
 type MessageHandler = (msg: ChannelMessage) => void
 type TypingHandler = (user: { id: string; name: string }) => void
@@ -54,16 +54,10 @@ export class ChannelSocket {
   onUserJoined: UserEventHandler | null = null
   onUserLeft: UserEventHandler | null = null
   onMessageDeleted: ((data: { channel_id: string; message_id: string; deleted_by: string }) => void) | null = null
+  onMessageEdited: ((data: { channel_id: string; message_id: string; content: string; edited_at: string | null }) => void) | null = null
+  onReactionUpdate: ((data: { channel_id: string; message_id: string; reactions: ChannelReaction[] }) => void) | null = null
   onConnected: (() => void) | null = null
   onDisconnected: (() => void) | null = null
-
-  // Voice call signaling callbacks
-  onVoiceUserJoined: ((user: { user_id: string; name: string }) => void) | null = null
-  onVoiceUserLeft: ((user: { user_id: string }) => void) | null = null
-  onVoiceParticipants: ((participants: { user_id: string; name: string }[]) => void) | null = null
-  onVoiceOffer: ((data: { from_user_id: string; sdp: RTCSessionDescriptionInit }) => void) | null = null
-  onVoiceAnswer: ((data: { from_user_id: string; sdp: RTCSessionDescriptionInit }) => void) | null = null
-  onVoiceIceCandidate: ((data: { from_user_id: string; candidate: RTCIceCandidateInit }) => void) | null = null
 
   // LiveKit SFU call lifecycle callbacks (werk-lite). The server fans these out
   // over the same /ws/channels socket as the call's roster changes; the
@@ -122,6 +116,21 @@ export class ChannelSocket {
               deleted_by: data.deleted_by,
             })
             break
+          case 'message_edited':
+            this.onMessageEdited?.({
+              channel_id: data.room,
+              message_id: data.message_id,
+              content: data.content,
+              edited_at: data.edited_at ?? null,
+            })
+            break
+          case 'reaction_update':
+            this.onReactionUpdate?.({
+              channel_id: data.room,
+              message_id: data.message_id,
+              reactions: data.reactions,
+            })
+            break
           case 'typing':
             this.onTyping?.(data.user)
             break
@@ -133,27 +142,6 @@ export class ChannelSocket {
             break
           case 'user_left':
             this.onUserLeft?.(data.user)
-            break
-          case 'voice_user_joined':
-            this.onVoiceUserJoined?.({ user_id: data.user_id, name: data.user_name })
-            break
-          case 'voice_user_left':
-            this.onVoiceUserLeft?.({ user_id: data.user_id })
-            break
-          case 'voice_error':
-            console.warn('[VoiceCall]', data.message)
-            break
-          case 'voice_participants':
-            this.onVoiceParticipants?.(data.participants)
-            break
-          case 'voice_offer':
-            this.onVoiceOffer?.({ from_user_id: data.from_user_id, sdp: data.sdp })
-            break
-          case 'voice_answer':
-            this.onVoiceAnswer?.({ from_user_id: data.from_user_id, sdp: data.sdp })
-            break
-          case 'voice_ice':
-            this.onVoiceIceCandidate?.({ from_user_id: data.from_user_id, candidate: data.candidate })
             break
           case 'call.started':
             this.onCallStarted?.(data)
@@ -230,27 +218,6 @@ export class ChannelSocket {
 
   sendTyping(channelId: string) {
     this._send({ type: 'typing', channel_id: channelId })
-  }
-
-  // Voice call signaling methods
-  voiceJoin(channelId: string) {
-    this._send({ type: 'voice_join', channel_id: channelId })
-  }
-
-  voiceLeave(channelId: string) {
-    this._send({ type: 'voice_leave', channel_id: channelId })
-  }
-
-  sendVoiceOffer(targetUserId: string, sdp: RTCSessionDescriptionInit) {
-    this._send({ type: 'voice_offer', target_user_id: targetUserId, sdp })
-  }
-
-  sendVoiceAnswer(targetUserId: string, sdp: RTCSessionDescriptionInit) {
-    this._send({ type: 'voice_answer', target_user_id: targetUserId, sdp })
-  }
-
-  sendVoiceIceCandidate(targetUserId: string, candidate: RTCIceCandidateInit) {
-    this._send({ type: 'voice_ice', target_user_id: targetUserId, candidate })
   }
 
   private _send(data: Record<string, unknown>) {

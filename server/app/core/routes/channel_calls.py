@@ -3,7 +3,7 @@
 Mounted via core_router under the /channels prefix:
   /api/channels/{channel_id}/call/*
 
-A call is a small-group audio room (everyone publishes mic, nothing else —
+A call is a small-group audio/video room (everyone publishes mic + camera —
 enforced server-side via the canPublishSources grant). The channel owner
 starts it and picks the join policy:
   - invite_only: only users with a channel_call_invites row may join
@@ -82,9 +82,11 @@ async def _display_name(conn, user_id: UUID) -> str:
 async def _push_call_event(channel_id: str, event: dict) -> None:
     """Fan out a call event to every channel_member with an active WS.
 
-    Same per-user fan-out rationale as _push_broadcast_event: room_members is
-    only populated on join_room, so members who haven't opened the channel
-    would miss room-targeted events.
+    Per-user sends only — room_members is only populated on join_room, so
+    members who haven't opened the channel would miss a room-targeted
+    broadcast; per-user send_to_user already reaches every member regardless
+    of room-join state, so a room broadcast on top would just double-deliver
+    to anyone with the channel open.
     """
     try:
         from .channels_ws import manager
@@ -113,11 +115,6 @@ async def _push_call_event(channel_id: str, event: dict) -> None:
                 await manager.send_to_user(uid, event)
             except Exception:
                 logger.warning("send_to_user failed for %s", uid, exc_info=True)
-
-        try:
-            await manager._broadcast_to_room(str(channel_id), event)
-        except Exception:
-            pass
     except Exception:
         logger.warning("Failed to push call WS event", exc_info=True)
 

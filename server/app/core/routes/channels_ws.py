@@ -12,16 +12,33 @@ from pydantic import BaseModel
 from ...database import get_connection
 from ..services.auth import decode_token
 from ..services.redis_cache import get_redis_cache
-from .voice_signaling import (
-    handle_voice_join,
-    handle_voice_leave,
-    handle_voice_offer,
-    handle_voice_answer,
-    handle_voice_ice,
-    cleanup_user_from_calls,
-)
 
 logger = logging.getLogger(__name__)
+
+# Cap on a single WS send so one slow/half-dead socket can't stall an entire
+# room's fan-out (the Redis subscriber loop processes envelopes serially).
+_WS_SEND_TIMEOUT_SECONDS = 5.0
+
+
+async def _safe_send_text(ws: WebSocket, data: str) -> bool:
+    """Send with a timeout. Returns False (caller treats the socket as dead)
+    on any failure, including timeout.
+
+    A failed/timed-out send only gets the socket discarded from
+    active_connections by the caller — its receive loop stays alive, so the
+    client's own ping/pong still succeeds and it never learns it's missing
+    broadcasts. Close it here so the receive loop raises WebSocketDisconnect
+    and the client's reconnect/backoff path actually kicks in.
+    """
+    try:
+        await asyncio.wait_for(ws.send_text(data), timeout=_WS_SEND_TIMEOUT_SECONDS)
+        return True
+    except Exception:
+        try:
+            await asyncio.wait_for(ws.close(), timeout=2)
+        except Exception:
+            pass
+        return False
 
 
 # Background tasks spawned fire-and-forget from the WS handler. Held in a set so
@@ -54,6 +71,31 @@ async def _bg_sync_channel_attachments(channel_id_str: str, user_id, attachments
                 )
     except Exception:
         logger.warning("channel->project Files sync failed", exc_info=True)
+
+
+async def _notify_channel_members(
+    members: list, ch_name: Optional[str], sender_name: str, preview: str, channel_id_str: str,
+) -> None:
+    """In-app notification fan-out for a new channel message, as a single
+    background task instead of one bare `create_task` per member — avoids
+    N members opening N concurrent pool connections off one message send,
+    and keeps a live reference so the tasks can't be GC'd mid-flight."""
+    from app.matcha.services import notification_service as notif_svc
+    for m in members:
+        if not m["company_id"]:
+            continue
+        try:
+            await notif_svc.create_notification(
+                user_id=m["user_id"],
+                company_id=m["company_id"],
+                type="channel_message",
+                title=f"#{ch_name}",
+                body=f"{sender_name}: {preview}",
+                link="/work",
+                metadata={"channel_id": channel_id_str},
+            )
+        except Exception:
+            logger.warning("channel_message notification failed for %s", m["user_id"], exc_info=True)
 
 # Online presence — written on every WS receive (heartbeat), read by the
 # mention_email Celery worker to skip emails for users who are still active.
@@ -152,17 +194,6 @@ class ChannelConnectionManager:
                                         "user": user.model_dump(mode='json'),
                                     }, exclude_user=user_id)
 
-                        # Clean up voice calls and notify participants
-                        user_name = user.name if user else "Unknown"
-                        affected_channels = await cleanup_user_from_calls(user_id)
-                        for channel_id in affected_channels:
-                            await self._broadcast_to_room(channel_id, {
-                                "type": "voice_user_left",
-                                "channel_id": channel_id,
-                                "user_id": str(user_id),
-                                "user_name": user_name,
-                            }, exclude_user=user_id)
-
     async def join_room(self, user_id: UUID, room_key: str):
         async with self.lock:
             if room_key not in self.room_members:
@@ -244,12 +275,10 @@ class ChannelConnectionManager:
         if not conns:
             return
         data = json.dumps(message, default=str)
-        dead = []
-        for ws in conns:
-            try:
-                await ws.send_text(data)
-            except Exception:
-                dead.append(ws)
+        # Fan out to this user's connections (usually one, but multi-tab/
+        # multi-device is possible) concurrently instead of one at a time.
+        results = await asyncio.gather(*(_safe_send_text(ws, data) for ws in conns))
+        dead = [ws for ws, ok in zip(conns, results) if not ok]
         if dead:
             async with self.lock:
                 for ws in dead:
@@ -284,18 +313,23 @@ class ChannelConnectionManager:
         if room_key not in self.room_members:
             return
         data = json.dumps(message, default=str)
+        targets: list[tuple[UUID, WebSocket]] = []
         for user_id in self.room_members[room_key]:
             if exclude_user and user_id == exclude_user:
                 continue
-            if user_id in self.active_connections:
-                dead = []
-                for ws in self.active_connections[user_id]:
-                    try:
-                        await ws.send_text(data)
-                    except Exception:
-                        dead.append(ws)
-                for ws in dead:
-                    self.active_connections[user_id].discard(ws)
+            for ws in self.active_connections.get(user_id, set()):
+                targets.append((user_id, ws))
+        if not targets:
+            return
+        # Every socket in the room sent to concurrently — previously this
+        # awaited sends one at a time, so a single slow/half-dead socket
+        # delayed delivery to the rest of the room.
+        results = await asyncio.gather(*(_safe_send_text(ws, data) for _, ws in targets))
+        dead = [(uid, ws) for (uid, ws), ok in zip(targets, results) if not ok]
+        if dead:
+            async with self.lock:
+                for uid, ws in dead:
+                    self.active_connections.get(uid, set()).discard(ws)
 
 
 manager = ChannelConnectionManager()
@@ -394,18 +428,22 @@ async def _server_ping_loop() -> None:
                     (uid, list(conns)) for uid, conns in manager.active_connections.items()
                 ]
             ping_payload = json.dumps({"type": "server_ping"})
-            for user_id, conns in snapshot:
-                dead: list[WebSocket] = []
-                for ws in conns:
-                    try:
-                        await ws.send_text(ping_payload)
-                    except Exception:
-                        dead.append(ws)
+            # Ping every socket on this worker concurrently rather than one at
+            # a time — sequential sends here would delay the next room's
+            # pings behind a single slow/half-dead connection.
+            targets: list[tuple[UUID, WebSocket]] = [
+                (uid, ws) for uid, conns in snapshot for ws in conns
+            ]
+            if targets:
+                results = await asyncio.gather(
+                    *(_safe_send_text(ws, ping_payload) for _, ws in targets)
+                )
+                dead = [(uid, ws) for (uid, ws), ok in zip(targets, results) if not ok]
                 if dead:
                     async with manager.lock:
-                        bucket = manager.active_connections.get(user_id)
-                        if bucket is not None:
-                            for ws in dead:
+                        for uid, ws in dead:
+                            bucket = manager.active_connections.get(uid)
+                            if bucket is not None:
                                 bucket.discard(ws)
         except asyncio.CancelledError:
             break
@@ -849,7 +887,6 @@ async def channel_websocket(
                             # Skip on duplicate retry to avoid double-notify.
                             if is_new_message:
                                 try:
-                                    from ...matcha.services import notification_service as _notif_svc
                                     _ch_name = await conn.fetchval(
                                         "SELECT name FROM channels WHERE id = $1", ch_uuid
                                     )
@@ -866,18 +903,9 @@ async def channel_websocket(
                                         ch_uuid, user.id,
                                     )
                                     _preview = (row["content"] or "")[:80]
-                                    import asyncio as _aio
-                                    for _m in _members:
-                                        if _m["company_id"]:
-                                            _aio.create_task(_notif_svc.create_notification(
-                                                user_id=_m["user_id"],
-                                                company_id=_m["company_id"],
-                                                type="channel_message",
-                                                title=f"#{_ch_name}",
-                                                body=f"{user.name}: {_preview}",
-                                                link="/work",
-                                                metadata={"channel_id": str(ch_uuid)},
-                                            ))
+                                    _spawn_bg(_notify_channel_members(
+                                        list(_members), _ch_name, user.name, _preview, str(ch_uuid),
+                                    ))
                                 except Exception:
                                     pass
                         else:
@@ -889,26 +917,11 @@ async def channel_websocket(
             elif msg_type == "typing":
                 channel_id = data.get("channel_id")
                 if channel_id:
-                    await manager.broadcast_typing(str(channel_id), user)
-
-            elif msg_type == "voice_join":
-                channel_id = data.get("channel_id")
-                if channel_id:
-                    await handle_voice_join(manager, user.id, user.name, str(channel_id), str(channel_id))
-
-            elif msg_type == "voice_leave":
-                channel_id = data.get("channel_id")
-                if channel_id:
-                    await handle_voice_leave(manager, user.id, user.name, str(channel_id), str(channel_id))
-
-            elif msg_type == "voice_offer":
-                await handle_voice_offer(manager, user.id, data)
-
-            elif msg_type == "voice_answer":
-                await handle_voice_answer(manager, user.id, data)
-
-            elif msg_type == "voice_ice":
-                await handle_voice_ice(manager, user.id, data)
+                    room_key = str(channel_id)
+                    async with manager.lock:
+                        is_room_member = user.id in manager.room_members.get(room_key, set())
+                    if is_room_member:
+                        await manager.broadcast_typing(room_key, user)
 
     except WebSocketDisconnect:
         pass
