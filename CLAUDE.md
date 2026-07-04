@@ -405,10 +405,17 @@ Quick lookup for frequently-touched code. Saves grepping the same things repeate
 
 ### Billing + Stripe
 
-- Stripe checkout endpoints → `server/app/core/routes/resources.py` (matcha-lite) + `server/app/matcha/routes/billing.py` (matcha-work)
-- Stripe webhook handler → `server/app/matcha/routes/billing.py` (look for `checkout.session.completed`)
+- Stripe checkout endpoints → `server/app/core/routes/resources.py` (matcha-lite: `POST /resources/checkout/lite` + `/compliance` + `/lite-addon` + `/lite-upgrade`) + `server/app/matcha/routes/billing.py` (matcha-work)
+- Stripe webhook handler → `server/app/core/routes/stripe_webhook.py:stripe_webhook` mounted at `POST /api/webhooks/stripe` (NOT billing.py). Routes on `event_type` + `metadata.type`; `checkout.session.completed` w/ `type='matcha_lite'` flips `enabled_features.incidents=true`; `customer.subscription.deleted` flips it back. Top-level dedupe via `stripe_webhook_events` (fail-closed).
 - Personal Matcha-work checkout → `server/app/matcha/routes/billing.py:POST /api/checkout/personal`
 - Token packs → `server/app/matcha/routes/billing.py:POST /api/checkout`
+- Lite checkout redirect is **URL-based** — backend returns `checkout_url`, FE does `window.location.href = checkout_url` (`TenantSidebar.tsx`); **no `loadStripe`/publishable key/`redirectToCheckout` anywhere**, so swapping Stripe keys needs no frontend rebuild. Lite pricing = DB table `matcha_lite_pricing` (`services/matcha_lite_pricing.py`, admin-configurable; code fallback `$50/block-of-10`, min 1/max 300).
+
+**Prod Stripe config (keys, accounts, mode) — non-obvious:**
+- Prod Stripe keys live in **`~/matcha/.env.backend` on the app EC2** (`54.177.107.107`), read at container start via `docker run --env-file .env.backend`. NOT in the repo, NOT in AWS Secrets Manager (the `AWS_SECRETS_MANAGER_SECRET_ID` path in `config.py:load_settings` exists but is unused — prod uses the plain `.env.backend`). Local dev keys are in `server/.env`.
+- **No deploy script overwrites `.env.backend`** — `update-ec2.sh` only scps `docker-compose.yml` + runs `deploy-backend-bluegreen.sh` (which pulls `:latest` and `--env-file`s the host `.env.backend`). So a host-side key edit **persists across `build-and-push.sh` + `update-ec2.sh`**. To reload env without shipping new code, recreate the backend container pinned to its current image id (skip `docker pull`) — the bluegreen script always pulls `:latest`.
+- **Two Stripe accounts** (keys are per-account): dev/local = **Matcha Technologies LLC** (`acct_1S2GdG…`), prod historically = **Ahnimal** (`acct_1QcZE2…`, the legacy/discontinued sister product). As of 2026-07-04 prod `.env.backend` was switched to **Matcha Technologies LLC test-mode** keys (backup of the old Ahnimal keys at `~/matcha/.env.backend.bak.ahnimal-*`). Test webhook endpoint in the Matcha-Tech account → `https://hey-matcha.com/api/webhooks/stripe` (events: `checkout.session.completed`, `customer.subscription.deleted`, `invoice.paid`, `checkout.session.expired`).
+- **Prod is in Stripe TEST mode** (pre-customer) — real cards are rejected. **Before go-live:** put Matcha-Tech **live** keys in `.env.backend` + register a **live** webhook endpoint (different `whsec_`) in the Matcha-Tech live dashboard, then recreate the backend. Test/live keys + webhook endpoints are per-mode and must be swapped as a matched pair (secret key + webhook secret + endpoint) or activation webhooks fail signature.
 
 ### Compliance + jurisdictions
 
