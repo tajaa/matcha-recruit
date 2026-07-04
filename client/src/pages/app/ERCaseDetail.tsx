@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Copy, Check } from 'lucide-react'
-import { Badge, Button, Card, Select, type BadgeVariant } from '../../components/ui'
+import { Badge, Button, Select, LABEL, PillTabs, type BadgeVariant } from '../../components/ui'
 import { NoteThread } from '../../components/NoteThread'
 import { ERDocumentList } from '../../components/er/ERDocumentList'
 import { ERGuidancePanel } from '../../components/er/ERGuidancePanel'
@@ -61,6 +61,7 @@ const TAB_LABELS: Record<Tab, string> = {
 }
 
 const ALL_TABS: Tab[] = ['notes', 'documents', 'guidance', 'discrepancies', 'similar', 'evidence', 'outcome', 'policy', 'timeline']
+const TAB_OPTIONS = ALL_TABS.map((t) => ({ value: t, label: TAB_LABELS[t] }))
 
 const EXPIRY_OPTIONS = [
   { value: '7', label: '7 days' },
@@ -186,44 +187,33 @@ export default function ERCaseDetail() {
   }
 
   return (
-    <div>
+    <div className="flex h-[calc(100vh-4rem)] flex-col overflow-hidden rounded-xl border border-white/[0.06] bg-zinc-950">
       {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <Link to="/app/er-copilot" className="text-zinc-500 hover:text-zinc-300 transition-colors">
-          &larr;
-        </Link>
-        <span className="text-xs text-zinc-500 font-mono">{case_.case_number}</span>
-        <h1 className="text-xl font-semibold text-zinc-100">
-          {case_.title}
-        </h1>
-        <Badge variant={statusVariant[case_.status] ?? 'neutral'}>
-          {statusLabel[case_.status] ?? case_.status}
-        </Badge>
-        <Badge variant="neutral">
-          {categoryLabel[case_.category ?? ''] ?? case_.category ?? '—'}
-        </Badge>
+      <div className="shrink-0 border-b border-white/[0.06] px-5 pt-4 pb-3">
+        <div className="flex items-center gap-3">
+          <Link to="/app/er-copilot" className="text-zinc-500 hover:text-zinc-300 transition-colors">
+            &larr;
+          </Link>
+          <span className="text-xs text-zinc-500 font-mono">{case_.case_number}</span>
+          <h1 className="text-xl font-semibold text-zinc-100">
+            {case_.title}
+          </h1>
+          <Badge variant={statusVariant[case_.status] ?? 'neutral'}>
+            {statusLabel[case_.status] ?? case_.status}
+          </Badge>
+          <Badge variant="neutral">
+            {categoryLabel[case_.category ?? ''] ?? case_.category ?? '—'}
+          </Badge>
+        </div>
+        <div className="mt-3 overflow-x-auto">
+          <PillTabs options={TAB_OPTIONS} value={tab} onChange={setTab} />
+        </div>
       </div>
 
-      {/* Layout: 2/3 main + 1/3 sidebar */}
-      <div className="grid grid-cols-3 gap-6">
+      <div className="flex min-h-0 flex-1">
         {/* Main column */}
-        <div className="col-span-2">
-          {/* Tabs */}
-          <div className="flex gap-1 mb-4 overflow-x-auto">
-            {ALL_TABS.map((t) => (
-              <Button
-                key={t}
-                variant={tab === t ? 'primary' : 'ghost'}
-                size="sm"
-                className="whitespace-nowrap"
-                onClick={() => setTab(t)}
-              >
-                {TAB_LABELS[t]}
-              </Button>
-            ))}
-          </div>
-
-          <Card className="p-5">
+        <div className="min-w-0 flex-1">
+          <div className="h-full overflow-y-auto px-5 py-4">
             {tab === 'notes' && (
               <NoteThread
                 endpoint={`/er/cases/${caseId}/notes`}
@@ -303,19 +293,19 @@ export default function ERCaseDetail() {
             {tab === 'timeline' && (
               <ERTimelinePanel caseId={caseId!} timeline={timeline} onTimelineChange={setTimeline} />
             )}
-          </Card>
+          </div>
         </div>
 
         {/* Sidebar */}
-        <div className="space-y-4">
+        <div className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-white/[0.06]">
           {/* Status & Classification */}
-          <Card className="p-0 overflow-hidden">
-            <div className="px-5 py-3 border-b border-zinc-800/60 bg-zinc-900/40">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Case Details</h3>
+          <div>
+            <div className="px-5 py-3 border-b border-white/[0.06] bg-white/[0.02]">
+              <h3 className={LABEL}>Case Details</h3>
             </div>
             <div className="px-5 py-4 space-y-4">
               <div>
-                <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 mb-1.5">Status</dt>
+                <dt className={`${LABEL} mb-1.5`}>Status</dt>
                 <dd>
                   <Select
                     label=""
@@ -327,104 +317,102 @@ export default function ERCaseDetail() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 mb-1">Category</dt>
+                  <dt className={`${LABEL} mb-1`}>Category</dt>
                   <dd className="text-sm text-zinc-200">{categoryLabel[case_.category ?? ''] ?? '—'}</dd>
                 </div>
                 <div>
-                  <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 mb-1">Outcome</dt>
+                  <dt className={`${LABEL} mb-1`}>Outcome</dt>
                   <dd className="text-sm text-zinc-200">{case_.outcome ? (outcomeLabel[case_.outcome] ?? case_.outcome) : '—'}</dd>
                 </div>
               </div>
             </div>
-          </Card>
+          </div>
 
           {/* Dates & Metadata */}
-          <Card className="p-0 overflow-hidden">
-            <div className="px-5 py-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 mb-1">Created</dt>
-                  <dd className="text-sm text-zinc-200">{new Date(case_.created_at).toLocaleDateString()}</dd>
-                </div>
-                <div>
-                  <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 mb-1">Updated</dt>
-                  <dd className="text-sm text-zinc-200">{new Date(case_.updated_at).toLocaleDateString()}</dd>
-                </div>
+          <div className="border-t border-white/[0.06] px-5 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <dt className={`${LABEL} mb-1`}>Created</dt>
+                <dd className="text-sm text-zinc-200">{new Date(case_.created_at).toLocaleDateString()}</dd>
               </div>
-              <div className="mt-4 flex items-center justify-between">
-                <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Documents</dt>
-                <dd className="text-sm font-medium text-zinc-200">{case_.document_count}</dd>
+              <div>
+                <dt className={`${LABEL} mb-1`}>Updated</dt>
+                <dd className="text-sm text-zinc-200">{new Date(case_.updated_at).toLocaleDateString()}</dd>
               </div>
             </div>
-          </Card>
+            <div className="mt-4 flex items-center justify-between">
+              <dt className={LABEL}>Documents</dt>
+              <dd className="text-sm font-medium text-zinc-200">{case_.document_count}</dd>
+            </div>
+          </div>
 
           {/* Description */}
           {case_.description && (
-            <Card className="p-0 overflow-hidden">
-              <div className="px-5 py-3 border-b border-zinc-800/60 bg-zinc-900/40">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Description</h3>
+            <div className="border-t border-white/[0.06]">
+              <div className="px-5 py-3 border-b border-white/[0.06] bg-white/[0.02]">
+                <h3 className={LABEL}>Description</h3>
               </div>
               <div className="px-5 py-4">
                 <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">{case_.description}</p>
               </div>
-            </Card>
+            </div>
           )}
 
           {/* Export Case */}
-          <Card className="p-0 overflow-hidden">
+          <div className="border-t border-white/[0.06]">
             <button
               type="button"
-              className="w-full px-5 py-3 flex items-center justify-between border-b border-zinc-800/60 bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors"
+              className="w-full px-5 py-3 flex items-center justify-between border-b border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.03] transition-colors"
               onClick={() => { setExportOpen(!exportOpen); if (!exportOpen) loadShareLinks() }}
             >
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Export Case</h3>
+              <h3 className={LABEL}>Export Case</h3>
               <span className="text-zinc-500 text-xs">{exportOpen ? '▾' : '▸'}</span>
             </button>
             {exportOpen && (
               <div className="px-5 py-4 space-y-4">
                 {/* Direct download */}
                 <div className="space-y-2">
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Download PDF</p>
+                  <p className={LABEL}>Download PDF</p>
                   <input
                     type="password"
                     value={exportPassword}
                     onChange={(e) => setExportPassword(e.target.value)}
                     placeholder="Password"
-                    className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+                    className="w-full bg-zinc-900 border border-white/[0.08] rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50"
                   />
                   <Button size="sm" disabled={exporting || !exportPassword.trim()} onClick={handleDownloadPdf}>
                     {exporting ? 'Downloading...' : 'Download PDF'}
                   </Button>
                 </div>
 
-                <div className="border-t border-zinc-800" />
+                <div className="border-t border-white/[0.06]" />
 
                 {/* Claims-readiness / defense packet (no password) */}
                 <div className="space-y-2">
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Claims-readiness packet</p>
+                  <p className={LABEL}>Claims-readiness packet</p>
                   <Button size="sm" variant="secondary"
                     onClick={() => api.download(`/er/cases/${caseId}/claims-readiness.pdf`, `claims-readiness-${case_?.case_number ?? 'case'}.pdf`)}>
                     Download defense file
                   </Button>
                 </div>
 
-                <div className="border-t border-zinc-800" />
+                <div className="border-t border-white/[0.06]" />
 
                 {/* Share link */}
                 <div className="space-y-2">
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Create Share Link</p>
+                  <p className={LABEL}>Create Share Link</p>
                   <input
                     type="password"
                     value={sharePassword}
                     onChange={(e) => setSharePassword(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleCreateShareLink()}
                     placeholder="Password"
-                    className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+                    className="w-full bg-zinc-900 border border-white/[0.08] rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50"
                   />
                   <select
                     value={shareExpiry}
                     onChange={(e) => setShareExpiry(e.target.value)}
-                    className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500"
+                    className="w-full bg-zinc-900 border border-white/[0.08] rounded-lg px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-emerald-500/50"
                   >
                     {EXPIRY_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>{o.label}</option>
@@ -435,7 +423,7 @@ export default function ERCaseDetail() {
                   </Button>
                   {shareLinkError && <p className="text-xs text-red-400">{shareLinkError}</p>}
                   {newShareUrl && (
-                    <div className="rounded-lg bg-zinc-900 border border-zinc-700 p-2">
+                    <div className="rounded-lg bg-zinc-900 border border-white/[0.08] p-2">
                       <div className="flex items-center justify-between mb-1">
                         <p className="text-[11px] text-zinc-500">Share URL</p>
                         <button
@@ -459,11 +447,11 @@ export default function ERCaseDetail() {
                 {/* Existing links */}
                 {shareLinks.length > 0 && (
                   <>
-                    <div className="border-t border-zinc-800" />
+                    <div className="border-t border-white/[0.06]" />
                     <div className="space-y-2">
-                      <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Active Links</p>
+                      <p className={LABEL}>Active Links</p>
                       {shareLinks.filter((l) => !l.revoked_at).map((link) => (
-                        <div key={link.id} className="flex items-center justify-between text-xs border border-zinc-800 rounded-lg px-3 py-2">
+                        <div key={link.id} className="flex items-center justify-between text-xs border border-white/[0.08] rounded-lg px-3 py-2">
                           <div className="min-w-0">
                             <p className="text-zinc-300 truncate">{link.filename}</p>
                             <p className="text-zinc-600">
@@ -485,10 +473,10 @@ export default function ERCaseDetail() {
                 )}
               </div>
             )}
-          </Card>
+          </div>
 
           {/* Actions */}
-          <div className="pt-2">
+          <div className="border-t border-white/[0.06] px-5 py-4">
             <button
               type="button"
               className="text-xs text-zinc-600 hover:text-red-400 transition-colors"

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { api, authStreamHeaders } from '../../api/client'
-import { Badge, Button, Card, type BadgeVariant } from '../ui'
+import { Badge, Button, LABEL, type BadgeVariant } from '../ui'
 import type { SuggestedGuidanceResponse, SuggestedGuidanceCard, ERCaseOutcome, OutcomeOption, OutcomeAnalysisResponse, ERDocument } from '../../types/er'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
@@ -114,9 +114,14 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
     }
   }
 
-  // Decide whether to fetch cached guidance / generate fresh. Waits for the
-  // first document fetch (docStats) and for any in-flight parsing to finish so
-  // guidance reflects the uploaded complaint instead of nagging to upload one.
+  // Only ever auto-fetch EXISTING cached guidance (a cheap DB lookup) —
+  // never call generate() just because the case was opened. Generating is a
+  // real Gemini call and should only ever happen from an explicit "Get
+  // Guidance" click, so simply viewing a case (open or closed) never kicks
+  // off AI work on its own. The one exception is skipCache: the parent sets
+  // it after a document upload, which is a genuine user action asking for
+  // fresh guidance on the new evidence — but even then, never on a closed
+  // case.
   useEffect(() => {
     if (guidance !== null) return
     if (docStats === null) return // wait for first document fetch
@@ -124,24 +129,18 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
     if (isProcessing) return // show "processing" state; poll re-triggers this effect
     if (!hasReadyContent) return // genuine no-content → empty state in render
 
-    if (skipCache || hasFetchedCache.current) {
-      // Parent cleared guidance (e.g. after document upload) — regenerate
-      if (skipCache) onCacheSkipped?.()
-      generate()
+    if (skipCache) {
+      onCacheSkipped?.()
+      if (!isClosed) generate()
       return
     }
 
+    if (hasFetchedCache.current) return // only ever check cache once per mount
     hasFetchedCache.current = true
     api.get<SuggestedGuidanceResponse>(`/er/cases/${caseId}/guidance/suggested`)
-      .then((cached) => {
-        if (cached) {
-          onGuidanceChange(cached)
-        } else {
-          generate() // 204 empty response → generate fresh
-        }
-      })
-      .catch(() => generate()) // error → generate fresh
-  }, [guidance, caseId, docStats, isProcessing, hasReadyContent, skipCache]) // eslint-disable-line react-hooks/exhaustive-deps
+      .then((cached) => { if (cached) onGuidanceChange(cached) })
+      .catch(() => { /* no cached guidance yet — user can click Get Guidance */ })
+  }, [guidance, caseId, docStats, isProcessing, hasReadyContent, skipCache, isClosed]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function streamOutcomes() {
     setOutcomeLoading(true)
@@ -267,13 +266,13 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg bg-zinc-900/50 border border-zinc-800 px-4 py-3">
+      <div className="rounded-lg bg-zinc-900/50 border border-white/[0.08] px-4 py-3">
         <p className="text-sm text-zinc-300">{guidance.summary}</p>
       </div>
 
       {/* Preponderance of evidence threshold banner */}
       {guidance.determination_suggested && !determinationDismissed && !showDetermination && !isClosed && (
-        <div className="rounded-lg border border-emerald-800/60 bg-emerald-950/30 px-4 py-4">
+        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-4 py-4">
           <div className="flex items-start gap-3">
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-emerald-300">Sufficient Evidence to Determine</p>
@@ -304,7 +303,7 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
 
       {/* Inline AI-powered determination */}
       {showDetermination && !isClosed && (
-        <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 px-4 py-4 space-y-4">
+        <div className="rounded-lg border border-white/[0.08] bg-zinc-900/60 px-4 py-4 space-y-4">
           <div>
             <p className="text-sm font-medium text-zinc-200 mb-1">Case Determination</p>
             <p className="text-xs text-zinc-500">AI-ranked outcome recommendations based on evidence, policy, and precedent.</p>
@@ -326,7 +325,7 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
           )}
 
           {outcomeData && (outcomeData.outcomes ?? []).map((opt: OutcomeOption, i: number) => (
-            <div key={i} className="border border-zinc-800 rounded-lg p-3 space-y-2">
+            <div key={i} className="border border-white/[0.08] rounded-lg p-3 space-y-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <Badge variant={determinationVariant[opt.determination] ?? 'neutral'}>
                   {opt.determination}
@@ -339,29 +338,29 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
 
               <button
                 type="button"
-                className="text-xs px-2 py-1 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors"
+                className="text-xs px-2 py-1 rounded border border-white/[0.08] text-zinc-400 hover:text-zinc-200 hover:border-emerald-500/40 transition-colors"
                 onClick={() => toggleOutcomeExpand(i)}
               >
                 {expandedOutcomes.has(i) ? '▾ Hide details' : '▸ Show details'}
               </button>
 
               {expandedOutcomes.has(i) && (
-                <div className="space-y-2 border-l-2 border-zinc-700 pl-3">
+                <div className="space-y-2 border-l-2 border-emerald-500/30 pl-3">
                   <div>
-                    <p className="text-[11px] text-zinc-500 uppercase tracking-wide mb-0.5">Reasoning</p>
+                    <p className={`${LABEL} mb-0.5`}>Reasoning</p>
                     <p className="text-sm text-zinc-300 leading-relaxed">{opt.reasoning}</p>
                   </div>
                   <div>
-                    <p className="text-[11px] text-zinc-500 uppercase tracking-wide mb-0.5">Policy Basis</p>
+                    <p className={`${LABEL} mb-0.5`}>Policy Basis</p>
                     <p className="text-sm text-zinc-300 leading-relaxed">{opt.policy_basis}</p>
                   </div>
                   <div>
-                    <p className="text-[11px] text-zinc-500 uppercase tracking-wide mb-0.5">HR Considerations</p>
+                    <p className={`${LABEL} mb-0.5`}>HR Considerations</p>
                     <p className="text-sm text-zinc-300 leading-relaxed">{opt.hr_considerations}</p>
                   </div>
                   {opt.party_actions && opt.party_actions.length > 0 && (
                     <div>
-                      <p className="text-[11px] text-zinc-500 uppercase tracking-wide mb-1">Actions by Party</p>
+                      <p className={`${LABEL} mb-1`}>Actions by Party</p>
                       <div className="space-y-1.5">
                         {opt.party_actions.map((pa, j) => (
                           <div key={j} className="text-sm">
@@ -382,13 +381,13 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
               )}
 
               <div className="space-y-1.5 pt-1">
-                <p className="text-[11px] text-zinc-500 uppercase tracking-wide">Admin Notes</p>
+                <p className={LABEL}>Admin Notes</p>
                 <textarea
                   value={adminNotes[i] ?? ''}
                   onChange={(e) => setAdminNotes((prev) => ({ ...prev, [i]: e.target.value }))}
                   placeholder="Add notes before closing this case..."
                   rows={2}
-                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 resize-none"
+                  className="w-full bg-zinc-900 border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500/50 resize-none"
                 />
               </div>
 
@@ -415,17 +414,17 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
 
       {/* Closed case banner */}
       {isClosed && (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-4 py-3">
+        <div className="rounded-lg border border-white/[0.08] bg-zinc-900/30 px-4 py-3">
           <p className="text-sm text-zinc-400">This case has been closed. Review the Notes tab for determination details.</p>
         </div>
       )}
 
       {/* Confidence meter (when below threshold) */}
       {!isClosed && !guidance.determination_suggested && guidance.determination_confidence > 0 && (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-4 py-3">
+        <div className="rounded-lg border border-white/[0.08] bg-zinc-900/30 px-4 py-3">
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[11px] text-zinc-500 uppercase tracking-wide">Evidence Confidence</span>
-            <span className="text-[11px] font-mono text-zinc-400">{Math.round(guidance.determination_confidence * 100)}%</span>
+            <span className={LABEL}>Evidence Confidence</span>
+            <span className="font-mono text-[11px] tabular-nums text-zinc-400">{Math.round(guidance.determination_confidence * 100)}%</span>
           </div>
           <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
             <div
@@ -440,7 +439,7 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
       {guidance.cards.length > 0 && (
         <div className="space-y-3">
           {guidance.cards.map((card: SuggestedGuidanceCard) => (
-            <Card key={card.id} className="p-4">
+            <div key={card.id} className="rounded-lg border border-white/[0.08] bg-zinc-900 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 mb-1">
@@ -470,8 +469,8 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
               </div>
 
               {card.interview_questions && card.interview_questions.length > 0 && (
-                <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-900/40 px-3 py-2">
-                  <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500 mb-1.5">
+                <div className="mt-3 border-l-2 border-amber-500/30 pl-3">
+                  <p className="text-[10px] font-medium uppercase tracking-[0.15em] text-amber-400/80 mb-1.5">
                     Suggested questions
                   </p>
                   <ol className="list-decimal pl-4 space-y-1 text-xs text-zinc-300">
@@ -481,7 +480,7 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
                   </ol>
                 </div>
               )}
-            </Card>
+            </div>
           ))}
         </div>
       )}
