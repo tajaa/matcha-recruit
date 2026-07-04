@@ -51,6 +51,9 @@ def _serialize_info_request(request: Request, row) -> dict:
         "id": str(row["id"]),
         "recipient_name": row["recipient_name"],
         "recipient_email": row["recipient_email"],
+        # Self-typed attestation name of whoever actually responded (None until
+        # submitted, or if the column predates migration irinforesp01).
+        "respondent_name": row.get("respondent_name"),
         "questions": _safe_json_loads(row["questions"], []),
         "custom_message": row["custom_message"],
         "responses": _safe_json_loads(row["responses"], None) if row["responses"] else None,

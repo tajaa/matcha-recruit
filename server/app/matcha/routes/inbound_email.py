@@ -596,6 +596,10 @@ async def parse_location_intake_voice(token: str, request: Request, file: Upload
 
 class InfoRequestAnswers(BaseModel):
     answers: list[str] = Field(..., min_length=1, max_length=20)
+    # The responder's self-typed name — their attestation signature (the
+    # submit-time disclaimer stands in for a signed paper form). Distinct from
+    # the admin-addressed ``recipient_name``.
+    respondent_name: str = Field(..., min_length=1, max_length=255)
     # Honeypot — must be empty. Deliberately not a plausible field name
     # (e.g. "company_name"/"email") so browser autofill/password managers
     # don't populate it for a real respondent.
@@ -608,6 +612,14 @@ class InfoRequestAnswers(BaseModel):
             raise ValueError("Answers cannot be blank")
         if any(len(a) > 4000 for a in v):
             raise ValueError("Answers must be 4000 characters or fewer")
+        return v
+
+    @field_validator("respondent_name")
+    @classmethod
+    def _name_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Name is required")
         return v
 
 
@@ -712,13 +724,17 @@ async def submit_info_request(
                 for q, a in zip(questions, body.answers)
             ]
 
+            respondent_name = body.respondent_name  # validator-stripped, non-blank
+
             await conn.execute(
                 """
                 UPDATE ir_info_requests
-                SET responses = $1::jsonb, status = 'submitted', submitted_at = NOW()
-                WHERE token = $2
+                SET responses = $1::jsonb, respondent_name = $2,
+                    status = 'submitted', submitted_at = NOW()
+                WHERE token = $3
                 """,
                 json.dumps(responses),
+                respondent_name,
                 token,
             )
 
@@ -734,13 +750,18 @@ async def submit_info_request(
                 incident_id=row["incident_id"],
                 role="system",
                 message_type="event",
-                content=f"{row['recipient_name']} submitted the requested information.",
-                metadata={"info_request_id": str(row["id"]), "responses": responses},
+                content=f"{respondent_name} submitted the requested information.",
+                metadata={
+                    "info_request_id": str(row["id"]),
+                    "responses": responses,
+                    "respondent_name": respondent_name,
+                    "addressed_to": row["recipient_name"],
+                },
             )
 
     logger.info(
         "[Info Request] %s submitted answers for incident %s",
-        row["recipient_name"], row["incident_id"],
+        respondent_name, row["incident_id"],
     )
     # Backgrounded: the respondent doesn't wait on an admin-notification email.
     background_tasks.add_task(
@@ -748,7 +769,7 @@ async def submit_info_request(
         company_id=company_id,
         incident_id=str(row["incident_id"]),
         incident_number=incident["incident_number"] if incident else "",
-        respondent_name=row["recipient_name"],
+        respondent_name=respondent_name,
     )
 
     return {"submitted": True}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Loader2, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react'
+import { SubmissionDisclaimer } from '../../components/ir/SubmissionDisclaimer'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -24,6 +25,7 @@ export default function RequestInfoForm() {
   const [stage, setStage] = useState<Stage>('validating')
   const [info, setInfo] = useState<InfoRequestInfo | null>(null)
   const [answers, setAnswers] = useState<string[]>([])
+  const [name, setName] = useState('')
   const [honeypot, setHoneypot] = useState('')
   const [error, setError] = useState<string | null>(null)
 
@@ -52,7 +54,7 @@ export default function RequestInfoForm() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (answers.some((a) => a.trim().length === 0)) return
+    if (answers.some((a) => a.trim().length === 0) || name.trim().length === 0) return
     setStage('submitting')
     setError(null)
     try {
@@ -61,6 +63,7 @@ export default function RequestInfoForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           answers: answers.map((a) => a.trim()),
+          respondent_name: name.trim(),
           internal_ref: honeypot,
         }),
       })
@@ -115,7 +118,8 @@ export default function RequestInfoForm() {
     )
   }
 
-  const canSubmit = answers.length > 0 && answers.every((a) => a.trim().length > 0)
+  const canSubmit =
+    answers.length > 0 && answers.every((a) => a.trim().length > 0) && name.trim().length > 0
 
   return (
     <Shell wide>
@@ -155,6 +159,21 @@ export default function RequestInfoForm() {
           className="hidden"
           aria-hidden="true"
         />
+
+        <label className="block">
+          <span className="text-xs text-zinc-400 uppercase tracking-wide">Your name</span>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={255}
+            autoComplete="name"
+            placeholder="First and last name"
+            className={textareaCls}
+          />
+        </label>
+
+        <SubmissionDisclaimer />
 
         {error && <p className="text-sm text-red-400">{error}</p>}
 
