@@ -5,6 +5,7 @@ from a client's WC + EPL posture, plus an AI coverage-gap read. Works for both
 on-platform (tenant) clients and off-platform Broker Pro clients.
 """
 
+import json
 import logging
 from typing import Optional
 from uuid import UUID
@@ -44,6 +45,120 @@ async def _safe(coro, default, label: str):
 
 class CoverageGapBody(BaseModel):
     current_coverage: Optional[dict] = None
+
+
+class SubmissionAnnotation(BaseModel):
+    label: str = ""
+    note: str = ""
+
+
+class SubmissionNotesBody(BaseModel):
+    cover_note: str = ""
+    annotations: list[SubmissionAnnotation] = []
+
+
+_MAX_ANNOTATIONS = 24
+_MAX_COVER = 8000
+_MAX_FIELD = 2000
+
+
+def _clean_notes(body: SubmissionNotesBody) -> tuple[str, list[dict]]:
+    """Trim/cap broker-authored text before persisting. Drops fully-empty
+    annotation rows (the editor leaves trailing blanks)."""
+    cover = (body.cover_note or "").strip()[:_MAX_COVER]
+    annotations: list[dict] = []
+    for a in (body.annotations or [])[:_MAX_ANNOTATIONS]:
+        label = (a.label or "").strip()[:_MAX_FIELD]
+        note = (a.note or "").strip()[:_MAX_FIELD]
+        if label or note:
+            annotations.append({"label": label, "note": note})
+    return cover, annotations
+
+
+def _notes_row(row) -> dict:
+    ann = row["annotations"] if row else None
+    if isinstance(ann, str):
+        ann = json.loads(ann)
+    return {
+        "cover_note": (row["cover_note"] if row else "") or "",
+        "annotations": ann or [],
+        "updated_at": row["updated_at"].isoformat() if row and row["updated_at"] else None,
+    }
+
+
+async def _load_notes(conn, broker_id: UUID, subject_type: str, subject_id: UUID) -> dict:
+    row = await conn.fetchrow(
+        "SELECT cover_note, annotations, updated_at FROM broker_submission_notes "
+        "WHERE broker_id = $1 AND subject_type = $2 AND subject_id = $3",
+        broker_id, subject_type, subject_id,
+    )
+    return _notes_row(row)
+
+
+async def _save_notes(conn, broker_id: UUID, subject_type: str, subject_id: UUID,
+                      cover: str, annotations: list[dict], updated_by) -> dict:
+    row = await conn.fetchrow(
+        """
+        INSERT INTO broker_submission_notes
+            (broker_id, subject_type, subject_id, cover_note, annotations, updated_by, updated_at)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, now())
+        ON CONFLICT (broker_id, subject_type, subject_id) DO UPDATE
+        SET cover_note = EXCLUDED.cover_note,
+            annotations = EXCLUDED.annotations,
+            updated_by = EXCLUDED.updated_by,
+            updated_at = now()
+        RETURNING cover_note, annotations, updated_at
+        """,
+        broker_id, subject_type, subject_id, cover, json.dumps(annotations), updated_by,
+    )
+    return _notes_row(row)
+
+
+async def _assert_external_owned(conn, broker_id: UUID, client_id: UUID) -> None:
+    owns = await conn.fetchval(
+        "SELECT 1 FROM broker_external_clients WHERE id = $1 AND broker_id = $2",
+        client_id, broker_id,
+    )
+    if not owns:
+        raise HTTPException(status_code=404, detail="External client not found")
+
+
+def _submission_preview(ctx: dict) -> dict:
+    """Compact, read-only summary of what the submission PDF will contain — lets the
+    broker eyeball the packet (headline scores + which sections carry data) before
+    downloading. Mirrors the section gating in ``submission_packet._packet_html``."""
+    wc = ctx.get("wc") or {}
+    epl = ctx.get("epl") or {}
+    readiness = ctx.get("readiness") or {}
+    sections: list[str] = []
+    if readiness:
+        sections.append("Submission readiness")
+    sections.append("Workers' Compensation")
+    sections.append("EPL Readiness")
+    if (ctx.get("controls") or {}).get("controls"):
+        sections.append("Proof of Controls")
+    if (ctx.get("venue") or {}).get("locations"):
+        sections.append("Venue Exposure")
+    if (ctx.get("exclusions") or {}).get("exclusions"):
+        sections.append("Coverage Exclusions")
+    if any((l.get("carried") or l.get("contract_required"))
+           for l in ((ctx.get("limits") or {}).get("lines") or [])):
+        sections.append("Limit Adequacy")
+    prop = ctx.get("property") or {}
+    if prop and ((prop.get("rollup") or {}).get("building_count") or prop.get("building_count")):
+        sections.append("Commercial Property")
+    if any(ln.get("periods") for ln in ((ctx.get("loss_development") or {}).get("lines") or [])):
+        sections.append("Loss Development")
+    return {
+        "name": ctx.get("name"),
+        "industry": ctx.get("industry"),
+        "headcount": ctx.get("headcount"),
+        "state": ctx.get("state"),
+        "wc": {"trir": wc.get("trir"), "dart_rate": wc.get("dart_rate"), "current_emr": wc.get("current_emr")},
+        "epl": {"score": epl.get("score"), "band": epl.get("band")},
+        "readiness": {"score": readiness.get("score"), "band": readiness.get("band")} if readiness else None,
+        "sections": sections,
+    }
 
 
 async def _tenant_context(conn, user_id, company_id: UUID) -> dict:
@@ -142,6 +257,8 @@ def _pdf_response(context: dict, pdf: bytes) -> Response:
 async def tenant_submission_pdf(company_id: UUID, current_user=Depends(require_broker)):
     async with get_connection() as conn:
         ctx = await _tenant_context(conn, current_user.id, company_id)
+        broker_id = await _broker_id(conn, current_user.id)
+        ctx["broker_notes"] = await _load_notes(conn, broker_id, "company", company_id)
     pdf = await sp.render_submission_pdf(ctx)
     return _pdf_response(ctx, pdf)
 
@@ -160,6 +277,8 @@ async def tenant_coverage_gap(company_id: UUID, body: Optional[CoverageGapBody] 
 async def external_submission_pdf(client_id: UUID, current_user=Depends(require_broker_pro)):
     async with get_connection() as conn:
         ctx = await _external_context(conn, current_user.id, client_id)
+        broker_id = await _broker_id(conn, current_user.id)
+        ctx["broker_notes"] = await _load_notes(conn, broker_id, "external", client_id)
     pdf = await sp.render_submission_pdf(ctx)
     return _pdf_response(ctx, pdf)
 
@@ -170,6 +289,60 @@ async def external_coverage_gap(client_id: UUID, body: Optional[CoverageGapBody]
     async with get_connection() as conn:
         ctx = await _external_context(conn, current_user.id, client_id)
     return await sp.generate_coverage_gap(context=ctx, current_coverage=body.current_coverage if body else None)
+
+
+# --- broker commentary notes + preview (see & edit before download) ---------
+# A compact preview (headline scores + sections) and a persisted "Broker
+# Commentary" (cover memo + labeled annotations) that leads the submission PDF.
+
+@router.get("/clients/{company_id}/submission")
+async def tenant_submission_preview(company_id: UUID, current_user=Depends(require_broker)):
+    async with get_connection() as conn:
+        ctx = await _tenant_context(conn, current_user.id, company_id)
+    return _submission_preview(ctx)
+
+
+@router.get("/clients/{company_id}/submission-notes")
+async def tenant_submission_notes(company_id: UUID, current_user=Depends(require_broker)):
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        broker_id = await _broker_id(conn, current_user.id)
+        return await _load_notes(conn, broker_id, "company", company_id)
+
+
+@router.put("/clients/{company_id}/submission-notes")
+async def save_tenant_submission_notes(company_id: UUID, body: SubmissionNotesBody,
+                                       current_user=Depends(require_broker)):
+    cover, annotations = _clean_notes(body)
+    async with get_connection() as conn:
+        await _assert_broker_owns_company(conn, current_user.id, company_id)
+        broker_id = await _broker_id(conn, current_user.id)
+        return await _save_notes(conn, broker_id, "company", company_id, cover, annotations, current_user.id)
+
+
+@router.get("/external-clients/{client_id}/submission")
+async def external_submission_preview(client_id: UUID, current_user=Depends(require_broker_pro)):
+    async with get_connection() as conn:
+        ctx = await _external_context(conn, current_user.id, client_id)
+    return _submission_preview(ctx)
+
+
+@router.get("/external-clients/{client_id}/submission-notes")
+async def external_submission_notes(client_id: UUID, current_user=Depends(require_broker_pro)):
+    async with get_connection() as conn:
+        broker_id = await _broker_id(conn, current_user.id)
+        await _assert_external_owned(conn, broker_id, client_id)
+        return await _load_notes(conn, broker_id, "external", client_id)
+
+
+@router.put("/external-clients/{client_id}/submission-notes")
+async def save_external_submission_notes(client_id: UUID, body: SubmissionNotesBody,
+                                         current_user=Depends(require_broker_pro)):
+    cover, annotations = _clean_notes(body)
+    async with get_connection() as conn:
+        broker_id = await _broker_id(conn, current_user.id)
+        await _assert_external_owned(conn, broker_id, client_id)
+        return await _save_notes(conn, broker_id, "external", client_id, cover, annotations, current_user.id)
 
 
 # --- controls-evidence (proof-of-controls) for an on-platform client --------

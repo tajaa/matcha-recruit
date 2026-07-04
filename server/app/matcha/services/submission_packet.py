@@ -366,6 +366,35 @@ def _property_section_html(prop: Optional[dict]) -> str:
     )
 
 
+def _broker_commentary_html(notes: Optional[dict]) -> str:
+    """Broker-authored commentary — a free-text cover memo plus labeled
+    annotations (explaining specific scores / steps the client took to improve).
+    Leads the packet so the underwriter reads the broker's framing first.
+    Renders nothing when the broker hasn't written anything."""
+    if not notes:
+        return ""
+    cover = (notes.get("cover_note") or "").strip()
+    annotations = [
+        a for a in (notes.get("annotations") or [])
+        if isinstance(a, dict) and ((a.get("label") or "").strip() or (a.get("note") or "").strip())
+    ]
+    if not cover and not annotations:
+        return ""
+    cover_html = (
+        f"<p class='bcom-cover'>{_esc(cover).replace(chr(10), '<br>')}</p>" if cover else ""
+    )
+    rows = "".join(
+        f"<div class='bcom-item'><span class='bcom-label'>{_esc((a.get('label') or '').strip())}</span>"
+        f"<span class='bcom-note'>{_esc((a.get('note') or '').strip()).replace(chr(10), '<br>')}</span></div>"
+        for a in annotations
+    )
+    items_html = f"<div class='bcom-list'>{rows}</div>" if rows else ""
+    return (
+        f"<div class='bcom'><div class='bcom-h'>Broker Commentary</div>"
+        f"{cover_html}{items_html}</div>"
+    )
+
+
 def _packet_html(ctx: dict) -> str:
     wc = ctx.get("wc") or {}
     epl = ctx.get("epl") or {}
@@ -399,10 +428,19 @@ def _packet_html(ctx: dict) -> str:
       .ex-exposed{{color:#b23b3b;font-weight:700}} .ex-monitor{{color:#b8902f;font-weight:700}} .ex-mitigated{{color:#1f8a5b;font-weight:700}}
       .lim-good{{color:#1f8a5b;font-weight:700;font-size:8px}} .lim-warn{{color:#b8902f;font-weight:700;font-size:8px}} .lim-bad{{color:#b23b3b;font-weight:700;font-size:8px}} .lim-muted{{color:#999;font-weight:700;font-size:8px}}
       tr.note td {{ font-size:9px; color:#666; background:#fafafa; }}
+      .bcom {{ border:1px solid #cfe3d8; background:#f6fbf8; border-radius:8px; padding:12px 14px; margin:12px 0; }}
+      .bcom-h {{ font-size:9px; text-transform:uppercase; letter-spacing:.6px; color:#1f8a5b; font-weight:700; margin-bottom:6px; }}
+      .bcom-cover {{ margin:0 0 8px; font-size:11px; line-height:1.5; color:#1a1a2e; white-space:normal; }}
+      .bcom-list {{ display:flex; flex-direction:column; gap:6px; }}
+      .bcom-item {{ border-left:3px solid #1f8a5b; padding-left:8px; }}
+      .bcom-label {{ display:block; font-size:9px; font-weight:700; color:#1f8a5b; }}
+      .bcom-note {{ display:block; font-size:10px; line-height:1.45; color:#333; }}
       .foot {{ margin-top:24px; color:#999; font-size:8px; border-top:1px solid #eee; padding-top:6px; }}
     </style></head><body>
       <h1>Underwriting Submission</h1>
       <p class="sub">{_esc(ctx.get('name'))} — {_esc(ctx.get('industry'))} · {_esc(ctx.get('headcount'))} employees · {_esc(ctx.get('state'))}</p>
+
+      {_broker_commentary_html(ctx.get('broker_notes'))}
 
       {_readiness_section_html(ctx.get('readiness'))}
 

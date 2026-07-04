@@ -26,6 +26,8 @@ import type {
   ExternalPropertyPayload,
   PropertyPortfolioResponse,
   CoverageGap,
+  SubmissionNotes,
+  SubmissionPreview,
   OutreachResponse,
   BrokerSeatsResponse,
   BrokerClientInvite,
@@ -212,6 +214,32 @@ export function downloadExternalSubmission(clientId: string) {
 
 export function fetchExternalCoverageGap(clientId: string, currentCoverage?: Record<string, unknown>) {
   return api.post<CoverageGap>(`/broker/external-clients/${clientId}/coverage-gap`, { current_coverage: currentCoverage ?? null })
+}
+
+// --- Broker commentary notes + submission preview (edit before download) ---
+
+export function fetchTenantSubmissionPreview(companyId: string) {
+  return api.get<SubmissionPreview>(`/broker/clients/${companyId}/submission`)
+}
+export function fetchTenantSubmissionNotes(companyId: string) {
+  return api.get<SubmissionNotes>(`/broker/clients/${companyId}/submission-notes`)
+}
+export function saveTenantSubmissionNotes(companyId: string, notes: SubmissionNotes) {
+  return api.put<SubmissionNotes>(`/broker/clients/${companyId}/submission-notes`, {
+    cover_note: notes.cover_note, annotations: notes.annotations,
+  })
+}
+
+export function fetchExternalSubmissionPreview(clientId: string) {
+  return api.get<SubmissionPreview>(`/broker/external-clients/${clientId}/submission`)
+}
+export function fetchExternalSubmissionNotes(clientId: string) {
+  return api.get<SubmissionNotes>(`/broker/external-clients/${clientId}/submission-notes`)
+}
+export function saveExternalSubmissionNotes(clientId: string, notes: SubmissionNotes) {
+  return api.put<SubmissionNotes>(`/broker/external-clients/${clientId}/submission-notes`, {
+    cover_note: notes.cover_note, annotations: notes.annotations,
+  })
 }
 
 // --- controls-evidence (proof-of-controls) + claims-readiness for a client --

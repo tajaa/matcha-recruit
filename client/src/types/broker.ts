@@ -721,6 +721,30 @@ export interface CoverageGap {
   available: boolean
 }
 
+// Broker-authored commentary injected into the submission PDF.
+export interface SubmissionAnnotation {
+  label: string
+  note: string
+}
+
+export interface SubmissionNotes {
+  cover_note: string
+  annotations: SubmissionAnnotation[]
+  updated_at: string | null
+}
+
+// Read-only preview of what the submission packet will contain.
+export interface SubmissionPreview {
+  name: string | null
+  industry: string | null
+  headcount: number | null
+  state: string | null
+  wc: { trir: number | null; dart_rate: number | null; current_emr: number | null }
+  epl: { score: number | null; band: string | null }
+  readiness: { score: number | null; band: string | null } | null
+  sections: string[]
+}
+
 // --- Action Center: AI consultative outreach ---
 
 export type OutreachTone = 'celebratory' | 'advisory' | 'urgent'

@@ -7,6 +7,7 @@ import { SubmissionPanel } from '../../components/broker/SubmissionPanel'
 import {
   fetchExternalClientDetail, saveExternalWc, saveExternalEplAttestation,
   downloadExternalSubmission, fetchExternalCoverageGap, parseExternalLossRun,
+  fetchExternalSubmissionPreview, fetchExternalSubmissionNotes, saveExternalSubmissionNotes,
   createExternalIntakeLink, saveExternalProperty,
   fetchExternalLossRatio, recordExternalLossPremium,
 } from '../../api/broker'
@@ -331,6 +332,9 @@ export default function BrokerExternalClientDetail() {
       <SubmissionPanel
         onDownload={() => downloadExternalSubmission(clientId!)}
         onAnalyze={() => fetchExternalCoverageGap(clientId!)}
+        loadPreview={() => fetchExternalSubmissionPreview(clientId!)}
+        loadNotes={() => fetchExternalSubmissionNotes(clientId!)}
+        saveNotes={(n) => saveExternalSubmissionNotes(clientId!, n)}
       />
     </div>
   )

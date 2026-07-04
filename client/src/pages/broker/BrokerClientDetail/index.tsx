@@ -4,6 +4,7 @@ import { ArrowLeft, FileText, Shield, AlertTriangle, Users, Loader2, AlertCircle
 import { StatCard } from '../../../components/dashboard'
 import {
   fetchBrokerClientDetail, downloadTenantSubmission, fetchTenantCoverageGap,
+  fetchTenantSubmissionPreview, fetchTenantSubmissionNotes, saveTenantSubmissionNotes,
   fetchClientLossRatio, recordClientLossPremium,
 } from '../../../api/broker'
 import { SubmissionPanel } from '../../../components/broker/SubmissionPanel'
@@ -162,6 +163,9 @@ export default function BrokerClientDetail() {
         <SubmissionPanel
           onDownload={() => downloadTenantSubmission(companyId)}
           onAnalyze={() => fetchTenantCoverageGap(companyId)}
+          loadPreview={() => fetchTenantSubmissionPreview(companyId)}
+          loadNotes={() => fetchTenantSubmissionNotes(companyId)}
+          saveNotes={(n) => saveTenantSubmissionNotes(companyId, n)}
         />
       )}
       {activeTab === 'activity' && <ActivityTab activity={recent_activity} />}
